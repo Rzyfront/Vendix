@@ -20,6 +20,7 @@ import {
 } from '../../../../../../shared/components/index';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 import { DianConfigWizardComponent } from './dian-config-wizard.component';
 import { DianSetupGuideComponent } from './dian-setup-guide.component';
@@ -136,7 +137,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
               <button
                 type="button"
                 class="px-2 py-0.5 rounded-full border"
-                [ngClass]="envFilter() === 'all' ? 'bg-primary text-white border-primary' : 'bg-white text-text-secondary border-border'"
+                [ngClass]="envFilter() === 'all' ? 'bg-primary text-[var(--color-text-on-primary)] border-primary' : 'bg-[var(--color-surface)] text-text-secondary border-border'"
                 (click)="envFilter.set('all')"
               >
                 Todos
@@ -144,7 +145,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
               <button
                 type="button"
                 class="px-2 py-0.5 rounded-full border"
-                [ngClass]="envFilter() === 'test' ? 'bg-primary text-white border-primary' : 'bg-white text-text-secondary border-border'"
+                [ngClass]="envFilter() === 'test' ? 'bg-primary text-[var(--color-text-on-primary)] border-primary' : 'bg-[var(--color-surface)] text-text-secondary border-border'"
                 (click)="envFilter.set('test')"
               >
                 Pruebas
@@ -152,7 +153,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
               <button
                 type="button"
                 class="px-2 py-0.5 rounded-full border"
-                [ngClass]="envFilter() === 'production' ? 'bg-primary text-white border-primary' : 'bg-white text-text-secondary border-border'"
+                [ngClass]="envFilter() === 'production' ? 'bg-primary text-[var(--color-text-on-primary)] border-primary' : 'bg-[var(--color-surface)] text-text-secondary border-border'"
                 (click)="envFilter.set('production')"
               >
                 Produccion
@@ -335,7 +336,7 @@ export class DianConfigComponent {
         const exp = new Date(item.certificate_expiry).getTime();
         if (isNaN(exp)) return 'Cargado';
         if (exp < Date.now()) return 'Vencido';
-        return `Expira ${new Date(exp).toLocaleDateString('es-CO')}`;
+        return `Expira ${formatDateOnlyUTC(item.certificate_expiry)}`;
       },
     },
   ];
@@ -403,7 +404,7 @@ export class DianConfigComponent {
           const exp = new Date(item.certificate_expiry).getTime();
           if (isNaN(exp)) return 'Cargado';
           if (exp < Date.now()) return 'Vencido';
-          return new Date(exp).toLocaleDateString('es-CO');
+          return formatDateOnlyUTC(item.certificate_expiry);
         },
       },
     ],

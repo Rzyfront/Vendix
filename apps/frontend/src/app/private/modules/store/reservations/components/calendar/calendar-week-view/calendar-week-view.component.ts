@@ -39,6 +39,16 @@ export class CalendarWeekViewComponent {
   readonly freeSlotsByDate = input<Record<string, FreeSlot[]>>({});
   readonly currentDate = input.required<Date>();
 
+  /**
+   * Duration of one slot in minutes. Drives the grid's time-divider lines
+   * and the click-to-pick snap. Defaults to 30 (the previous hardcoded
+   * behavior) so any caller that doesn't pass it keeps working unchanged.
+   * Callers should pass the active product's `service_duration_minutes`
+   * (or a sensible fallback) so a 45-min service snaps to :00/:15/:30/:45
+   * and a 20-min service snaps to :00/:20/:40 instead of forcing :00/:30.
+   */
+  readonly slotMinutes = input<number>(30);
+
   readonly slotClicked = output<{ date: string; time: string }>();
   readonly bookingClicked = output<Booking>();
   readonly bookingDropped = output<{ bookingId: number; newDate: string; newStartTime: string; newEndTime: string }>();
@@ -49,7 +59,7 @@ export class CalendarWeekViewComponent {
 
   private currentTimeSignal = signal(new Date());
 
-  readonly timeSlots: string[] = this.generateTimeSlots();
+  readonly timeSlots = computed<string[]>(() => this.generateTimeSlots(this.slotMinutes()));
 
   constructor() {
     const interval = setInterval(() => {
@@ -144,7 +154,8 @@ export class CalendarWeekViewComponent {
     const rect = target.getBoundingClientRect();
     const y = event.clientY - rect.top;
     const percent = y / rect.height;
-    const minutes = Math.round((percent * this.TOTAL_MINUTES + this.DAY_START) / 30) * 30;
+    const step = this.slotMinutes();
+    const minutes = Math.round((percent * this.TOTAL_MINUTES + this.DAY_START) / step) * step;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     const time = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
@@ -163,10 +174,10 @@ export class CalendarWeekViewComponent {
     return h * 60 + m;
   }
 
-  private generateTimeSlots(): string[] {
+  private generateTimeSlots(stepMinutes: number): string[] {
     const slots: string[] = [];
     for (let h = 7; h <= 22; h++) {
-      for (let m = 0; m < 60; m += 30) {
+      for (let m = 0; m < 60; m += stepMinutes) {
         if (h === 22 && m > 0) break;
         slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
       }

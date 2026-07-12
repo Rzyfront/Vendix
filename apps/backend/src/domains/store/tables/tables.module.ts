@@ -3,6 +3,7 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
+import { QrService } from '@common/services/qr.service';
 import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 import { TableSessionsController } from './table-sessions.controller';
@@ -41,6 +42,7 @@ import { SplitOrderService } from './split-order.service';
     TablesService,
     TableSessionsService,
     SplitOrderService,
+    QrService,
   ],
   exports: [
     TablesService,

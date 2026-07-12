@@ -1,6 +1,6 @@
 @if (loading() && !budget()) {
   <div class="flex items-center justify-center min-h-[400px]">
-    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
   </div>
 } @else if (budget(); as b) {
   <div class="w-full">
@@ -10,7 +10,7 @@
       <div class="flex items-center gap-2">
         <button
           (click)="goBack()"
-          class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors"
+          class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-[var(--color-surface-secondary)] transition-colors"
         >
           <app-icon name="arrow-left" [size]="18"></app-icon>
         </button>
@@ -46,16 +46,16 @@
     <!-- Alerts -->
     @if (alerts().length > 0) {
       <div class="mb-4 px-2 md:px-0">
-        <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+        <div class="bg-error-light border border-error rounded-lg p-3">
           <div class="flex items-center gap-2 mb-2">
-            <app-icon name="alert-triangle" [size]="16" class="text-red-600"></app-icon>
-            <span class="text-sm font-semibold text-red-800">
+            <app-icon name="alert-triangle" [size]="16" class="text-error"></app-icon>
+            <span class="text-sm font-semibold text-error">
               {{ alerts().length }} alerta{{ alerts().length > 1 ? 's' : '' }} de varianza
             </span>
           </div>
           <div class="space-y-1">
             @for (alert of alerts(); track alert.account_id) {
-              <p class="text-xs text-red-700">
+              <p class="text-xs text-error">
                 <span class="font-medium">{{ alert.account_code }} {{ alert.account_name }}</span>:
                 varianza de {{ formatPct(alert.variance_pct) }}
                 ({{ formatCurrency(alert.budgeted) }} presup. vs {{ formatCurrency(alert.actual) }} real)
@@ -67,18 +67,18 @@
     }
 
     <!-- Variance Table -->
-    <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+    <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
       <div class="overflow-x-auto relative">
         @if (loading()) {
-          <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+          <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center">
+            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-primary)]"></div>
           </div>
         }
 
         <table class="w-full min-w-[600px] text-sm">
           <thead>
-            <tr class="bg-gray-50 border-b border-border">
-              <th class="sticky left-0 z-10 bg-gray-50 text-left px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[200px]">
+            <tr class="bg-[var(--color-surface-secondary)] border-b border-border">
+              <th class="sticky left-0 z-10 bg-[var(--color-surface-secondary)] text-left px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[200px]">
                 Cuenta
               </th>
               <th class="text-right px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[120px]">
@@ -99,13 +99,15 @@
             @for (row of variance_rows(); track row.account_id) {
               <tr
                 class="border-b border-border/50 transition-colors"
-                [class.bg-red-50]="isOverThreshold(row)"
-                [class.hover:bg-red-100]="isOverThreshold(row)"
-                [class.hover:bg-gray-50/50]="!isOverThreshold(row)"
+                [ngClass]="
+                  isOverThreshold(row)
+                    ? 'bg-error-light'
+                    : 'hover:bg-[var(--color-surface-secondary)]'
+                "
               >
                 <td class="sticky left-0 z-10 px-3 py-2.5 font-medium"
-                    [class.bg-red-50]="isOverThreshold(row)"
-                    [class.bg-surface]="!isOverThreshold(row)">
+                    [class.bg-error-light]="isOverThreshold(row)"
+                    [class.bg-[var(--color-surface)]]="!isOverThreshold(row)">
                   <span class="text-text-secondary text-xs">{{ row.account_code }}</span>
                   <span class="ml-1 text-text-primary">{{ row.account_name }}</span>
                 </td>
@@ -116,13 +118,13 @@
                   {{ formatCurrency(row.actual) }}
                 </td>
                 <td class="px-3 py-2.5 text-right font-medium"
-                    [class.text-red-600]="row.variance < 0"
-                    [class.text-emerald-600]="row.variance >= 0">
+                    [class.text-error]="row.variance < 0"
+                    [class.text-success]="row.variance >= 0">
                   {{ formatCurrency(row.variance) }}
                 </td>
                 <td class="px-3 py-2.5 text-right font-semibold"
-                    [class.text-red-600]="isOverThreshold(row)"
-                    [class.text-emerald-600]="!isOverThreshold(row) && row.variance_pct >= 0"
+                    [class.text-error]="isOverThreshold(row)"
+                    [class.text-success]="!isOverThreshold(row) && row.variance_pct >= 0"
                     [class.text-text-primary]="!isOverThreshold(row) && row.variance_pct < 0">
                   {{ formatPct(row.variance_pct) }}
                 </td>
@@ -142,8 +144,8 @@
 
           @if (variance_rows().length > 0) {
             <tfoot>
-              <tr class="bg-gray-100 border-t-2 border-border font-semibold">
-                <td class="sticky left-0 z-10 bg-gray-100 px-3 py-2.5 text-text-primary text-sm">
+              <tr class="bg-[var(--color-surface-secondary)] border-t-2 border-border font-semibold">
+                <td class="sticky left-0 z-10 bg-[var(--color-surface-secondary)] px-3 py-2.5 text-text-primary text-sm">
                   Totales
                 </td>
                 <td class="px-3 py-2.5 text-right text-sm text-text-primary">
@@ -153,8 +155,8 @@
                   {{ formatCurrency(totals().actual) }}
                 </td>
                 <td class="px-3 py-2.5 text-right text-sm font-bold"
-                    [class.text-red-600]="totals().variance < 0"
-                    [class.text-emerald-600]="totals().variance >= 0">
+                    [class.text-error]="totals().variance < 0"
+                    [class.text-success]="totals().variance >= 0">
                   {{ formatCurrency(totals().variance) }}
                 </td>
                 <td class="px-3 py-2.5 text-right text-sm">

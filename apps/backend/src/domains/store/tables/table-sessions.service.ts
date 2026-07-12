@@ -15,7 +15,7 @@ export interface TableSessionView {
   store_id: number;
   table_id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
   opened_at: Date;
   closed_at: Date | null;
   guest_count: number | null;
@@ -128,6 +128,97 @@ export class TableSessionsService {
     return { storeId, userId };
   }
 
+  /**
+   * Variant of `requireContext` for anonymous (QR-initiated) flows.
+   * Only requires a `store_id` in the request context — `user_id` is
+   * optional because the actor is an unauthenticated diner scanning a
+   * QR code at the table. Used by `openTableSessionPublic`.
+   */
+  private requireStoreContext(): { storeId: number } {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    return { storeId };
+  }
+
+  /**
+   * Shared atomic block for opening a table session. Both
+   * `openSession` (POS, authenticated) and `openTableSessionPublic`
+   * (QR, anonymous) delegate here so the draft-order + session +
+   * table-status-flip invariants live in one place.
+   *
+   * Parameters are the only things that differ between the two entry
+   * points:
+   *   - `openedBy`     null for anonymous QR sessions, userId for POS.
+   *   - `customerId`   null for anonymous, userId fallback for POS.
+   *   - `channel`      'pos' for POS, 'ecommerce' for QR.
+   *   - `deliveryType` 'direct_delivery' for POS, 'dine_in' for QR.
+   */
+  private async createOpenSession(args: {
+    tableId: number;
+    storeId: number;
+    openedBy: number | null;
+    customerId: number | null;
+    channel: 'pos' | 'ecommerce';
+    deliveryType: 'direct_delivery' | 'dine_in';
+    guestCount: number | null;
+    internalNotes: string;
+  }): Promise<{ id: number; order_id: number; table_id: number }> {
+    const currency = await this.settingsService.getStoreCurrency();
+    const safeCurrency = currency || 'COP';
+
+    const orderNumber = `T-${Date.now()}-${Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, '0')}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.orders.create({
+        data: {
+          store_id: args.storeId,
+          customer_id: args.customerId,
+          order_number: orderNumber,
+          state: 'draft',
+          channel: args.channel,
+          delivery_type: args.deliveryType,
+          currency: safeCurrency,
+          subtotal_amount: 0,
+          tax_amount: 0,
+          shipping_cost: 0,
+          discount_amount: 0,
+          grand_total: 0,
+          total_paid: 0,
+          remaining_balance: 0,
+          internal_notes: args.internalNotes,
+          updated_at: new Date(),
+        },
+      });
+
+      const newSession = await tx.table_sessions.create({
+        data: {
+          store_id: args.storeId,
+          table_id: args.tableId,
+          order_id: order.id,
+          opened_by: args.openedBy,
+          guest_count: args.guestCount,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.tables.update({
+        where: { id: args.tableId },
+        data: { status: 'occupied', updated_at: new Date() },
+      });
+
+      return {
+        id: newSession.id,
+        order_id: newSession.order_id,
+        table_id: newSession.table_id,
+      };
+    });
+  }
+
   // ---------------------------------------------------------------- open
   /**
    * Open a new table session. Creates a draft order (via a minimal
@@ -159,66 +250,19 @@ export class TableSessionsService {
     //    later via the normal order update path.
     const customerId = dto.customer_id ?? userId;
 
-    // 3. Resolve currency via the shared SettingsService. The
-    //    `store_settings` table does not have a top-level `currency`
-    //    column — it lives inside the `settings` JSON blob under
-    //    `general.currency`. Falling back to 'COP' to match the rest
-    //    of the project.
-    const currency = await this.settingsService.getStoreCurrency();
-    const safeCurrency = currency || 'COP';
-
-    // 4. Generate an order number. We use the same numeric pattern
-    //    as `OrdersService.generateOrderNumber` (T- + ts) to avoid
-    //    colliding with retail orders. Avoid reusing `generateOrderNumber`
-    //    to keep the table-session flow independent of the retail
-    //    order_number sequence.
-    const orderNumber = `T-${Date.now()}-${Math.floor(
-      Math.random() * 1000,
-    )
-      .toString()
-      .padStart(3, '0')}`;
-
-    // 5. ATOMIC: create order (empty items) + table_session + flip
-    //    table status to 'occupied'.
-    const session = await this.prisma.$transaction(async (tx) => {
-      const order = await tx.orders.create({
-        data: {
-          store_id: storeId,
-          customer_id: customerId,
-          order_number: orderNumber,
-          state: 'draft',
-          channel: 'pos',
-          delivery_type: 'direct_delivery',
-          currency: safeCurrency,
-          subtotal_amount: 0,
-          tax_amount: 0,
-          shipping_cost: 0,
-          discount_amount: 0,
-          grand_total: 0,
-          total_paid: 0,
-          remaining_balance: 0,
-          internal_notes: 'Mesa abierta — cuenta editable',
-          updated_at: new Date(),
-        },
-      });
-
-      const newSession = await tx.table_sessions.create({
-        data: {
-          store_id: storeId,
-          table_id: dto.table_id,
-          order_id: order.id,
-          opened_by: userId,
-          guest_count: dto.guest_count ?? null,
-          updated_at: new Date(),
-        },
-      });
-
-      await tx.tables.update({
-        where: { id: dto.table_id },
-        data: { status: 'occupied', updated_at: new Date() },
-      });
-
-      return newSession;
+    // 3. ATOMIC: create order (empty items) + table_session + flip
+    //    table status to 'occupied'. Delegates to the shared
+    //    `createOpenSession` helper so the QR-anonymous variant reuses
+    //    the exact same invariants.
+    const session = await this.createOpenSession({
+      tableId: dto.table_id,
+      storeId,
+      openedBy: userId,
+      customerId,
+      channel: 'pos',
+      deliveryType: 'direct_delivery',
+      guestCount: dto.guest_count ?? null,
+      internalNotes: 'Mesa abierta — cuenta editable',
     });
 
     this.logger.log(
@@ -226,6 +270,108 @@ export class TableSessionsService {
     );
 
     return this.findOne(session.id);
+  }
+
+  /**
+   * Open a table session for an anonymous diner scanning a QR code at
+   * the table (Restaurant Suite — QR-por-mesa, Fase 7).
+   *
+   * Differences from `openSession`:
+   *   - `user_id` is NOT required in the request context. Only `store_id`
+   *     is needed (the store is encoded in the QR payload / route).
+   *   - `opened_by` is null (no authenticated opener).
+   *   - `customer_id` is null (anonymous check; a real customer can be
+   *     attached later via `assignCustomer`).
+   *   - The draft order is created with `channel: 'ecommerce'` and
+   *     `delivery_type: 'dine_in'` so downstream reporting/filters can
+   *     distinguish QR-initiated checks from POS-initiated ones.
+   *   - Idempotent: if the table already has an active (non-closed)
+   *     session, that session is returned as-is instead of throwing
+   *     `TABLE_SESSION_ALREADY_OPEN`. This matches the diner mental
+   *     model — scanning the same QR twice must not error.
+   */
+  async openTableSessionPublic(
+    tableId: number,
+    openedByUserId?: number | null,
+    guestCount?: number | null,
+  ): Promise<TableSessionView> {
+    const { storeId } = this.requireStoreContext();
+
+    // 1. Idempotency: if there is already an active session for this
+    //    table, return it. A diner re-scanning the QR should never see
+    //    an "already open" error — they should land on the live check.
+    const existing = await this.tablesService.getActiveSession(tableId);
+    if (existing) {
+      return this.findOne(existing.id);
+    }
+
+    // 2. ATOMIC: create draft order (anonymous, ecommerce/dine_in) +
+    //    table_session (opened_by null) + flip table to 'occupied'.
+    //    `guestCount` is optional (GAP-10): the QR scan may not know the
+    //    party size yet — the diner can set it later via `setGuestCount`.
+    const session = await this.createOpenSession({
+      tableId,
+      storeId,
+      openedBy: openedByUserId ?? null,
+      customerId: null,
+      channel: 'ecommerce',
+      deliveryType: 'dine_in',
+      guestCount: guestCount ?? null,
+      internalNotes: 'Mesa abierta vía QR — cuenta anónima',
+    });
+
+    this.logger.log(
+      `Public table session opened: session=${session.id} table=${tableId} order=${session.order_id}`,
+    );
+
+    return this.findOne(session.id);
+  }
+
+  // ---------------------------------------------------------- guest count
+  /**
+   * Set the party size on an open table session (Restaurant Suite —
+   * QR-por-mesa, GAP-10).
+   *
+   * Anonymous-safe: uses `requireStoreContext()` (only `store_id`, no
+   * `user_id`) so an unauthenticated QR diner can declare how many guests
+   * are seated. Capacity validation (against `tables.capacity`) lives in
+   * `EcommerceTablesService.setGuests` — here we only enforce the numeric
+   * floor and the store-scoped write.
+   *
+   * The write goes through `updateMany` with an explicit `store_id`
+   * filter (same tenant-guard pattern as `assignCustomer`) so a session
+   * from another store can never be mutated even if the id is guessed.
+   */
+  async setGuestCount(
+    sessionId: number,
+    guestCount: number,
+  ): Promise<TableSessionView> {
+    const { storeId } = this.requireStoreContext();
+
+    if (!Number.isInteger(guestCount) || guestCount < 1) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'El número de comensales debe ser un entero mayor o igual a 1',
+      );
+    }
+
+    // findOne is store-scoped (StorePrismaService): a session from another
+    // store surfaces as TABLE_SESSION_NOT_FOUND before we ever write.
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    await this.prisma.table_sessions.updateMany({
+      where: { id: sessionId, store_id: storeId },
+      data: { guest_count: guestCount, updated_at: new Date() },
+    });
+
+    this.logger.log(
+      `Table session guest_count set: session=${sessionId} guests=${guestCount}`,
+    );
+
+    return this.findOne(sessionId);
   }
 
   // ----------------------------------------------------------------- add
@@ -242,7 +388,11 @@ export class TableSessionsService {
     sessionId: number,
     dto: AddItemsToTableSessionDto,
   ): Promise<TableSessionView> {
-    const { storeId } = this.requireContext();
+    // requireStoreContext (not requireContext) so anonymous QR diners
+    // (@OptionalAuth, no user_id) can self-order via EcommerceTablesService.
+    // userId is not consumed in this method, and the POS controller path is
+    // already gated by @Permissions('store:table_sessions:update') (auth).
+    const { storeId } = this.requireStoreContext();
 
     const session = await this.findOne(sessionId);
     if (session.closed_at) {

@@ -18,6 +18,7 @@ import {
   TableSessionAddItem,
   PayTableSessionDto,
   PayTableSessionResult,
+  TableQrResponse,
 } from '../interfaces';
 
 interface ApiResponse<T> {
@@ -111,6 +112,21 @@ export class TablesService {
     return this.http
       .delete<void>(`${this.apiUrl}/store/tables/${id}`)
       .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * Obtiene el código QR de una mesa (`GET /store/tables/:id/qr`).
+   * El backend devuelve `{ public_url, qr_data_url }` donde
+   * `qr_data_url` es un PNG base64 data URL listo para `<img [src]>`.
+   * Requiere el permiso `store:tables:read`.
+   */
+  getQr(id: number): Observable<TableQrResponse> {
+    return this.http
+      .get<ApiResponse<TableQrResponse>>(`${this.apiUrl}/store/tables/${id}/qr`)
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
   }
 
   // ─── Table sessions ────────────────────────────────────────────────
@@ -211,6 +227,9 @@ export class TablesService {
         : {}),
       ...(payload.payment_reference
         ? { payment_reference: payload.payment_reference }
+        : {}),
+      ...(payload.tip_amount != null && payload.tip_amount > 0
+        ? { tip_amount: payload.tip_amount }
         : {}),
     };
     return this.http

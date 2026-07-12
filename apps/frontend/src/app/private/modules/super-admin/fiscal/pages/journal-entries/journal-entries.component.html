@@ -262,9 +262,8 @@
     <div
       class="flex items-center justify-between rounded-lg border p-3"
       [class.border-border]="balanced()"
-      [class.bg-surface]="balanced()"
-      [class.border-red-300]="!balanced()"
-      [class.bg-red-50]="!balanced()"
+      [class.border-error]="!balanced()"
+      [class.bg-error-light]="!balanced()"
     >
       <div class="text-sm">
         <span class="text-text-secondary">DR </span>
@@ -274,8 +273,8 @@
       </div>
       <div
         class="text-sm font-semibold"
-        [class.text-emerald-600]="balanced()"
-        [class.text-red-600]="!balanced()"
+        [class.text-success]="balanced()"
+        [class.text-error]="!balanced()"
       >
         @if (balanced()) {
           Balanceado

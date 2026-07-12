@@ -653,6 +653,29 @@ export class OperationsSettingsDto {
   ticket_closing_hour?: number;
 }
 
+export class AvailabilitySettingsDto {
+  /**
+   * Days of the week (0=Sunday … 6=Saturday) on which the store wants
+   * generic slot generation to produce slots. Mirrors
+   * `AvailabilitySettings.working_days` in the store-settings interface.
+   */
+  @ApiProperty({
+    type: [Number],
+    example: [1, 2, 3, 4, 5],
+    required: true,
+    description:
+      'Days of the week (0=Sun, 1=Mon, …, 6=Sat) the store is open. ' +
+      'Used by AvailabilityService.generateGenericSlots as a fallback when ' +
+      'no provider_schedules row covers the date. Default: Mon-Fri.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  working_days: number[];
+}
+
 export class DispatchSettingsDto {
   @ApiProperty({
     enum: ['live', 'on_close'],
@@ -676,6 +699,27 @@ export class RestaurantSettingsDto {
   @IsOptional()
   @IsBoolean()
   enable_table_checkout?: boolean;
+
+  @ApiProperty({
+    enum: ['menu_only', 'mark_occupied', 'open_tab', 'require_staff'],
+    example: 'menu_only',
+    required: false,
+    description:
+      'Behavior when a customer scans a table QR code. `menu_only` (default) shows the digital menu without changing table state; `mark_occupied` marks the table occupied; `open_tab` also opens a tab (draft order); `require_staff` requires staff confirmation first.',
+  })
+  @IsOptional()
+  @IsIn(['menu_only', 'mark_occupied', 'open_tab', 'require_staff'])
+  qr_scan_behavior?: 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'When true, scanning the QR auto-fires order items to KDS/kitchen (same as the POS "fire" action). Default false — items stay as a draft until staff fires them.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  qr_auto_fire?: boolean;
 }
 
 export class FingerprintDeviceConfigDto {

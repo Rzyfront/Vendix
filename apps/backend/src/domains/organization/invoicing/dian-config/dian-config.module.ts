@@ -8,6 +8,7 @@ import { EncryptionService } from '../../../../common/services/encryption.servic
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
+import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 
 @Module({
   imports: [ResponseModule, PrismaModule, S3Module, DianDirectModule],
@@ -17,6 +18,7 @@ import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-co
     EncryptionService,
     FiscalScopeService,
     ManualCertificateIssuerAdapter,
+    DianTestService,
   ],
   exports: [OrgDianConfigService],
 })

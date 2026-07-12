@@ -7,6 +7,374 @@
   background: var(--color-background);
 }
 
+// QR Table Banner
+// ── Banner de mesa (dine-in QR) — mobile-first ───────────────────────────────
+.table-banner {
+  background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.18);
+  padding: 0.4rem 0.9rem;
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-sm);
+  color: var(--color-primary);
+
+  &--open-tab {
+    background: rgba(34, 197, 94, 0.08);
+    border-bottom-color: rgba(34, 197, 94, 0.18);
+    color: var(--color-success);
+  }
+
+  &--require-staff {
+    background: rgba(245, 158, 11, 0.08);
+    border-bottom-color: rgba(245, 158, 11, 0.18);
+    color: var(--color-warning, rgb(245, 158, 11));
+  }
+
+  .table-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+    // Móvil: una sola línea (info flexible + disparador a la derecha).
+    flex-wrap: nowrap;
+  }
+
+  // Línea slim: se encoge y trunca antes de empujar el disparador.
+  .table-banner-info {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .table-banner-name {
+    font-weight: var(--fw-bold);
+    flex-shrink: 0;
+  }
+
+  .table-banner-status {
+    font-weight: var(--fw-medium);
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .table-banner-order-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--color-primary);
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+
+    span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    &[data-status='listo'] {
+      background: rgba(34, 197, 94, 0.16);
+      color: var(--color-success);
+    }
+
+    &[data-status='en-preparación'] {
+      background: rgba(245, 158, 11, 0.16);
+      color: var(--color-warning, rgb(217, 119, 6));
+    }
+  }
+
+  // Disparador del sheet — sólo móvil.
+  .table-banner-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0.32rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: inherit;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+    transition: background-color 0.18s ease;
+
+    &:active {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.14);
+    }
+  }
+
+  // Acciones inline — sólo desktop.
+  .table-banner-actions {
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-left: auto;
+  }
+
+  .table-banner-guests {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  // ≥ md: fila inline pulida; el disparador móvil desaparece.
+  @media (min-width: 768px) {
+    padding: 0.42rem 1.5rem;
+
+    .table-banner-content {
+      flex-wrap: wrap;
+    }
+
+    .table-banner-info {
+      flex: 0 1 auto;
+      white-space: normal;
+      overflow: visible;
+    }
+
+    .table-banner-status {
+      overflow: visible;
+    }
+
+    .table-banner-order-status {
+      max-width: none;
+    }
+
+    .table-banner-trigger {
+      display: none;
+    }
+
+    .table-banner-actions {
+      display: flex;
+    }
+  }
+}
+
+// ── Bottom-sheet de acciones (móvil < md; solo dine-in QR) ────────────────────
+.table-action-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: block;
+
+  .table-action-sheet__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    animation: table-sheet-fade 0.28s ease-out;
+  }
+
+  .table-action-sheet__panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-height: 85vh;
+    padding: 0.5rem 1rem calc(1rem + env(safe-area-inset-bottom, 0px));
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    border-top-left-radius: var(--radius-xl, 1rem);
+    border-top-right-radius: var(--radius-xl, 1rem);
+    border-top: 1px solid var(--color-border);
+    box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.2);
+    animation: table-sheet-up 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .table-action-sheet__grip {
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--color-border);
+    align-self: center;
+    margin: 0.25rem 0 0.1rem;
+  }
+
+  .table-action-sheet__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .table-action-sheet__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-weight: var(--fw-bold);
+    font-size: var(--fs-base);
+    color: var(--color-text-primary);
+  }
+
+  .table-action-sheet__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+
+    &:active {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
+    }
+  }
+
+  .table-action-sheet__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    overflow-y: auto;
+  }
+
+  .table-action-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 48px;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg, 0.75rem);
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.18s ease;
+
+    app-icon {
+      color: var(--color-primary);
+      flex-shrink: 0;
+    }
+
+    span {
+      flex: 1 1 auto;
+    }
+
+    &:active {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    &--guests {
+      cursor: default;
+
+      &:active {
+        background: var(--color-surface);
+      }
+    }
+  }
+
+  // El sheet es exclusivo de móvil; en desktop nunca se muestra.
+  @media (min-width: 768px) {
+    display: none;
+  }
+}
+
+@keyframes table-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes table-sheet-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-action-sheet .table-action-sheet__panel,
+  .table-action-sheet .table-action-sheet__backdrop {
+    animation: none;
+  }
+}
+
+// QR dine-in — "Mi cuenta" modal body (projected into app-modal)
+.bill-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bill-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: var(--fs-sm);
+
+  .bill-item-name {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text-primary);
+  }
+
+  .bill-item-qty {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bill-item-total {
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.bill-empty {
+  color: var(--color-text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.bill-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-weight: var(--fw-bold);
+  color: var(--color-text-primary);
+
+  .bill-footer-total {
+    font-size: var(--fs-lg);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
 // Header
 .ecommerce-header {
   background: var(--color-surface);

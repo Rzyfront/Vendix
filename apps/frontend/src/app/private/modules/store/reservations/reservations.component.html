@@ -47,6 +47,22 @@
           customContainerClass="!h-9 !rounded-lg"
         ></app-input-buttons>
 
+        <!-- Provider Availability Dashboard Button -->
+        <app-tooltip
+          content="Ver disponibilidad por proveedor"
+          position="bottom"
+          size="sm"
+        >
+          <a
+            routerLink="/admin/reservations/availability"
+            class="flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px] border border-[var(--color-border)] bg-white hover:bg-[var(--color-background)]"
+            style="color: var(--color-text-primary);"
+          >
+            <app-icon name="calendar-clock" [size]="14"></app-icon>
+            <span class="hidden sm:inline">Disponibilidad</span>
+          </a>
+        </app-tooltip>
+
         <!-- New Reservation Button -->
         <app-tooltip
           content="Crear una nueva reserva para un cliente"

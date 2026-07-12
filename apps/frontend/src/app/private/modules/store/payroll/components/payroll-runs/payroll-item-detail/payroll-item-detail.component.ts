@@ -116,21 +116,21 @@ const EMPTY_DERIVED: DerivedEntries = {
 
         <!-- 2. Resumen (4 mini-cards con tokens semanticos dark-safe) -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <div class="p-3 rounded-lg text-center bg-[var(--color-info-bg)] border border-[var(--color-border)]">
-            <p class="text-[10px] uppercase tracking-wide text-[var(--color-info-text)]">Devengado</p>
-            <p class="text-sm font-bold text-[var(--color-info-text)]">{{ formatCurrency(item()!.total_earnings) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-info-light)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-info)]">Devengado</p>
+            <p class="text-sm font-bold text-[var(--color-info)]">{{ formatCurrency(item()!.total_earnings) }}</p>
           </div>
-          <div class="p-3 rounded-lg text-center bg-[var(--color-error-bg)] border border-[var(--color-border)]">
-            <p class="text-[10px] uppercase tracking-wide text-[var(--color-error-text)]">Deducciones</p>
-            <p class="text-sm font-bold text-[var(--color-error-text)]">{{ formatCurrency(item()!.total_deductions) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-error-light)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-error)]">Deducciones</p>
+            <p class="text-sm font-bold text-[var(--color-error)]">{{ formatCurrency(item()!.total_deductions) }}</p>
           </div>
-          <div class="p-3 rounded-lg text-center bg-[var(--color-warning-bg)] border border-[var(--color-border)]">
-            <p class="text-[10px] uppercase tracking-wide text-[var(--color-warning-text)]">Costos Emp.</p>
-            <p class="text-sm font-bold text-[var(--color-warning-text)]">{{ formatCurrency(item()!.total_employer_costs) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-warning-light)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-warning)]">Costos Emp.</p>
+            <p class="text-sm font-bold text-[var(--color-warning)]">{{ formatCurrency(item()!.total_employer_costs) }}</p>
           </div>
-          <div class="p-3 rounded-lg text-center bg-[var(--color-success-bg)] border border-[var(--color-border)]">
-            <p class="text-[10px] uppercase tracking-wide text-[var(--color-success-text)]">Neto a Pagar</p>
-            <p class="text-sm font-bold text-[var(--color-success-text)]">{{ formatCurrency(item()!.net_pay) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-success-light)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-success)]">Neto a Pagar</p>
+            <p class="text-sm font-bold text-[var(--color-success)]">{{ formatCurrency(item()!.net_pay) }}</p>
           </div>
         </div>
 
@@ -215,11 +215,11 @@ const EMPTY_DERIVED: DerivedEntries = {
           <!-- Devengados -->
           <app-expandable-card [expanded]="true">
             <div slot="header" class="flex items-center gap-2 flex-1 min-w-0">
-              <div class="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <app-icon name="trending-up" [size]="14" class="text-blue-600"></app-icon>
+              <div class="w-7 h-7 rounded-lg bg-[var(--color-info-light)] flex items-center justify-center flex-shrink-0">
+                <app-icon name="trending-up" [size]="14" class="text-[var(--color-info)]"></app-icon>
               </div>
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Devengados</span>
-              <span class="ml-auto text-sm font-bold text-blue-700">{{ formatCurrency(item()!.total_earnings) }}</span>
+              <span class="ml-auto text-sm font-bold text-[var(--color-info)]">{{ formatCurrency(item()!.total_earnings) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
               @for (entry of earningsEntries(); track entry.key) {
@@ -314,11 +314,11 @@ const EMPTY_DERIVED: DerivedEntries = {
           <!-- Deducciones -->
           <app-expandable-card [expanded]="true">
             <div slot="header" class="flex items-center gap-2 flex-1 min-w-0">
-              <div class="w-7 h-7 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
-                <app-icon name="trending-down" [size]="14" class="text-red-600"></app-icon>
+              <div class="w-7 h-7 rounded-lg bg-error-light flex items-center justify-center flex-shrink-0">
+                <app-icon name="trending-down" [size]="14" class="text-error"></app-icon>
               </div>
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Deducciones</span>
-              <span class="ml-auto text-sm font-bold text-red-700">{{ formatCurrency(item()!.total_deductions) }}</span>
+              <span class="ml-auto text-sm font-bold text-error">{{ formatCurrency(item()!.total_deductions) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
               @for (entry of deductionsEntries(); track entry.key) {
@@ -384,11 +384,11 @@ const EMPTY_DERIVED: DerivedEntries = {
           <!-- Costos Empleador -->
           <app-expandable-card>
             <div slot="header" class="flex items-center gap-2 flex-1 min-w-0">
-              <div class="w-7 h-7 rounded-lg bg-yellow-100 flex items-center justify-center flex-shrink-0">
-                <app-icon name="building" [size]="14" class="text-yellow-600"></app-icon>
+              <div class="w-7 h-7 rounded-lg bg-warning-light flex items-center justify-center flex-shrink-0">
+                <app-icon name="building" [size]="14" class="text-warning"></app-icon>
               </div>
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Costos Empleador</span>
-              <span class="ml-auto text-sm font-bold text-yellow-700">{{ formatCurrency(item()!.total_employer_costs) }}</span>
+              <span class="ml-auto text-sm font-bold text-warning">{{ formatCurrency(item()!.total_employer_costs) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
               @for (entry of employerCostsEntries(); track entry.key) {

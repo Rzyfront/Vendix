@@ -176,19 +176,19 @@ const NIT_TYPES: StoreFiscalNitType[] = [
         place-items: center;
         flex: 0 0 auto;
         border-radius: 0.5rem;
-        background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent);
-        color: var(--primary-color, #2563eb);
+        background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+        color: var(--color-primary);
       }
 
       h3 {
         margin: 0;
-        color: var(--text-primary, #111827);
+        color: var(--color-text-primary);
         font-size: 1rem;
       }
 
       p {
         margin: 0.2rem 0 0;
-        color: var(--text-secondary, #4b5563);
+        color: var(--color-text-secondary);
         font-size: 0.86rem;
         line-height: 1.3rem;
       }

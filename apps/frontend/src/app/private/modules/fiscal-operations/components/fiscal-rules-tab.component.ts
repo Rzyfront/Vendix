@@ -604,7 +604,7 @@ type RuleEditorMode = 'income_tax' | 'vat' | 'calendar' | 'json';
           <div>
             <p class="mb-1 text-sm text-text-secondary">Parámetros (JSON)</p>
             <pre
-              class="max-h-72 overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-text-primary"
+              class="max-h-72 overflow-auto rounded-md border border-border bg-[var(--color-surface)] p-3 text-xs text-text-primary"
               >{{ prettyRules(rule) }}</pre
             >
           </div>

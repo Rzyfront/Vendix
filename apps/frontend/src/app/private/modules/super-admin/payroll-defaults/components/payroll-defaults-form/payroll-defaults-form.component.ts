@@ -72,16 +72,16 @@ import {
             formControlName="notes"
             rows="2"
             [disabled]="isReadonly()"
-            class="w-full rounded-md border border-[var(--color-border)] bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder="Observaciones adicionales..."
           ></textarea>
         </div>
 
         <!-- Sección 1: Valores Base -->
         <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-          <div class="px-4 py-3 bg-blue-50 border-b border-[var(--color-border)]">
-            <h4 class="text-sm font-semibold text-blue-800">Valores Base</h4>
-            <p class="text-xs text-blue-600 mt-0.5">Salarios y subsidios en pesos colombianos (COP)</p>
+          <div class="px-4 py-3 bg-[var(--color-info-light)] border-b border-[var(--color-border)]">
+            <h4 class="text-sm font-semibold text-[var(--color-info)]">Valores Base</h4>
+            <p class="text-xs text-[var(--color-info)] mt-0.5">Salarios y subsidios en pesos colombianos (COP)</p>
           </div>
           <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4" formGroupName="rules">
             <app-input
@@ -125,9 +125,9 @@ import {
 
         <!-- Sección 2: Seguridad Social -->
         <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-          <div class="px-4 py-3 bg-green-50 border-b border-[var(--color-border)]">
-            <h4 class="text-sm font-semibold text-green-800">Seguridad Social</h4>
-            <p class="text-xs text-green-600 mt-0.5">Porcentajes sobre el salario base de cotización (ingrese como decimal: 0.04 = 4%)</p>
+          <div class="px-4 py-3 bg-success-light border-b border-[var(--color-border)]">
+            <h4 class="text-sm font-semibold text-success">Seguridad Social</h4>
+            <p class="text-xs text-success mt-0.5">Porcentajes sobre el salario base de cotización (ingrese como decimal: 0.04 = 4%)</p>
           </div>
           <div class="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4" formGroupName="rules">
             <app-input
@@ -171,9 +171,9 @@ import {
 
         <!-- Sección 3: Parafiscales y Provisiones -->
         <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-          <div class="px-4 py-3 bg-yellow-50 border-b border-[var(--color-border)]">
-            <h4 class="text-sm font-semibold text-yellow-800">Parafiscales y Provisiones</h4>
-            <p class="text-xs text-yellow-600 mt-0.5">Porcentajes sobre el salario (ingrese como decimal)</p>
+          <div class="px-4 py-3 bg-warning-light border-b border-[var(--color-border)]">
+            <h4 class="text-sm font-semibold text-warning">Parafiscales y Provisiones</h4>
+            <p class="text-xs text-warning mt-0.5">Porcentajes sobre el salario (ingrese como decimal)</p>
           </div>
           <div class="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" formGroupName="rules">
             <app-input
@@ -244,9 +244,9 @@ import {
 
         <!-- Sección 4: ARL por nivel de riesgo -->
         <div class="rounded-lg border border-[var(--color-border)] overflow-hidden">
-          <div class="px-4 py-3 bg-red-50 border-b border-[var(--color-border)]">
-            <h4 class="text-sm font-semibold text-red-800">ARL — Niveles de riesgo</h4>
-            <p class="text-xs text-red-600 mt-0.5">Porcentajes por nivel de riesgo laboral (ingrese como decimal)</p>
+          <div class="px-4 py-3 bg-error-light border-b border-[var(--color-border)]">
+            <h4 class="text-sm font-semibold text-error">ARL — Niveles de riesgo</h4>
+            <p class="text-xs text-error mt-0.5">Porcentajes por nivel de riesgo laboral (ingrese como decimal)</p>
           </div>
           <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4" formGroupName="arl_rates">
             @for (level of arlLevels; track level) {

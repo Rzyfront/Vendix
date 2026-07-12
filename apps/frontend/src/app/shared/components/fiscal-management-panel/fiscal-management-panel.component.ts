@@ -105,7 +105,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
               </label>
               <select
                 id="fiscal-store-select"
-                class="min-h-[2.5rem] w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                class="min-h-[2.5rem] w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 [ngModel]="service.targetStoreId()"
                 (ngModelChange)="selectStore($event)"
                 aria-label="Tienda fiscal"
@@ -129,7 +129,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
           <section class="flex flex-col gap-3" aria-labelledby="fiscal-step-identity-title">
             <header class="flex items-start gap-3">
               <span
-                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white"
+                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary text-sm font-bold text-[var(--color-text-on-primary)]"
               >
                 1
               </span>
@@ -172,7 +172,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
         <section class="flex flex-col gap-3" aria-labelledby="fiscal-step-areas-title">
           <header class="flex items-start gap-3">
             <span
-              class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white"
+              class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary text-sm font-bold text-[var(--color-text-on-primary)]"
             >
               {{ showFiscalIdentitySection() ? '2' : '1' }}
             </span>
@@ -192,7 +192,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                 <div class="flex h-full flex-col gap-3">
                   <div class="flex items-center justify-between gap-3">
                     <span
-                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600/10 text-primary-600"
+                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-primary-light)] text-[var(--color-primary)]"
                     >
                       <app-icon [name]="iconFor(area)" [size]="19" />
                     </span>
@@ -224,7 +224,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                   <div class="mt-auto flex items-center justify-between gap-3">
                     @if (stateFor(area) === 'INACTIVE') {
                       <a
-                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-primary-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary-700"
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-bold text-[var(--color-text-on-primary)] transition-colors hover:opacity-90"
                         [routerLink]="['/admin/fiscal/wizard']"
                         [queryParams]="{ areas: area, store_id: service.targetStoreId() }"
                       >
@@ -232,7 +232,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                       </a>
                     } @else if (stateFor(area) === 'WIP') {
                       <a
-                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-primary-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary-700"
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-bold text-[var(--color-text-on-primary)] transition-colors hover:opacity-90"
                         [routerLink]="['/admin/fiscal/wizard']"
                         [queryParams]="{ areas: wizardAreasFor(area).join(','), store_id: service.targetStoreId() }"
                       >
@@ -240,7 +240,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                       </a>
                     } @else if (stateFor(area) === 'ACTIVE') {
                       <button
-                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-surface px-3 py-2 text-sm font-bold text-primary-600 transition-colors hover:bg-primary-600/5"
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary bg-[var(--color-surface)] px-3 py-2 text-sm font-bold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary-light)]"
                         type="button"
                         (click)="deactivate(area)"
                       >

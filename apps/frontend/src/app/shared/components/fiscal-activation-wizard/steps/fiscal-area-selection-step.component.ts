@@ -61,9 +61,9 @@ const AREA_DESCRIPTIONS: Record<FiscalArea, string> = {
         align-items: flex-start;
         gap: 0.7rem;
         padding: 0.85rem;
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
+        background: var(--color-surface);
       }
       .area-option input {
         margin-top: 0.2rem;
@@ -74,13 +74,13 @@ const AREA_DESCRIPTIONS: Record<FiscalArea, string> = {
         gap: 0.2rem;
       }
       .area-option small {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         line-height: 1.25rem;
       }
       .step-error {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--color-destructive, #b91c1c);
+        color: var(--color-destructive);
       }
     `,
   ],

@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OrgDianConfigService } from './dian-config.service';
+import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
@@ -30,6 +31,7 @@ import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-co
 export class OrgDianConfigController {
   constructor(
     private readonly dian_config_service: OrgDianConfigService,
+    private readonly dian_test_service: DianTestService,
     private readonly certificate_adapter: ManualCertificateIssuerAdapter,
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
@@ -160,5 +162,34 @@ export class OrgDianConfigController {
         tax_id: validation.tax_id,
       },
     });
+  }
+
+  /**
+   * Tests connectivity to DIAN web services for an org-scoped configuration.
+   * Delegates to the shared DianTestService, which resolves the config by id
+   * regardless of scope.
+   */
+  @Post(':id/test-connection')
+  @Permissions('organization:invoicing:dian:write')
+  @HttpCode(HttpStatus.OK)
+  async testConnection(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.testConnection(id);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Runs the DIAN enablement test set for an org-scoped configuration.
+   * Delegates to the shared DianTestService, which resolves the config by id
+   * regardless of scope.
+   */
+  @Post(':id/run-test-set')
+  @Permissions('organization:invoicing:dian:write')
+  @HttpCode(HttpStatus.OK)
+  async runTestSet(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('resolution_id', ParseIntPipe) resolution_id: number,
+  ) {
+    const result = await this.dian_test_service.runTestSet(id, resolution_id);
+    return this.response_service.success(result);
   }
 }

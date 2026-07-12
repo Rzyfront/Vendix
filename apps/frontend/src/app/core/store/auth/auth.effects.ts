@@ -184,7 +184,20 @@ export class AuthEffects {
       mergeMap(({ type, ...registerData }) =>
         this.authService.registerCustomer(registerData).pipe(
           map((response) => {
-            if (!response.data) throw new Error('Invalid response data');
+            // Handle the API envelope first. The backend returns
+            // { success: false, message, statusCode, ... } on error
+            // (no `data` field). Treat that as a failure so the
+            // downstream message reaches the modal's error mapper
+            // instead of being shadowed by a generic "Invalid response
+            // data" fallback.
+            if (response?.success === false) {
+              throw new Error(
+                response?.message ?? 'Error al registrar el cliente',
+              );
+            }
+            if (!response?.data) {
+              throw new Error('Invalid response data');
+            }
             return AuthActions.registerCustomerSuccess({
               user: response.data.user,
               user_settings: response.data.user_settings,
@@ -438,6 +451,58 @@ export class AuthEffects {
       ),
     ),
   );
+  forgotCustomerPassword$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.forgotCustomerPassword),
+      mergeMap(({ email, store_id }) =>
+        this.authService.forgotCustomerPassword(email, store_id).pipe(
+          map((res) =>
+            AuthActions.forgotCustomerPasswordSuccess({
+              message: res?.message,
+            }),
+          ),
+          catchError((error) =>
+            of(
+              AuthActions.forgotCustomerPasswordFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  resetCustomerPassword$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resetCustomerPassword),
+      mergeMap(({ token, new_password, store_id }) =>
+        this.authService
+          .resetCustomerPassword(token, new_password, store_id)
+          .pipe(
+          map((response: any) => {
+            // Backend returns HTTP 200 with { success: false, message, ... }
+            // on business errors (invalid/expired token) because the handler
+            // uses @HttpCode(OK) + ResponseService.error. Treat that as a
+            // failure so the page shows the error and does NOT navigate away
+            // (mirrors registerCustomer$ above).
+            if (response?.success === false) {
+              throw new Error(
+                response?.message ?? 'No se pudo restablecer la contraseña',
+              );
+            }
+            return AuthActions.resetCustomerPasswordSuccess();
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.resetCustomerPasswordFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
   verifyEmail$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.verifyEmail),
@@ -514,12 +579,25 @@ export class AuthEffects {
       ),
     { dispatch: false },
   );
+  resetCustomerPasswordSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.resetCustomerPasswordSuccess),
+        tap(() => {
+          this.toast.success('Contraseña restablecida con éxito.');
+          this.router.navigateByUrl('/');
+        }),
+      ),
+    { dispatch: false },
+  );
   failureToast$ = createEffect(
     () =>
       this.actions$.pipe(
         ofType(
           AuthActions.forgotOwnerPasswordFailure,
           AuthActions.resetOwnerPasswordFailure,
+          AuthActions.forgotCustomerPasswordFailure,
+          AuthActions.resetCustomerPasswordFailure,
           AuthActions.verifyEmailFailure,
           AuthActions.resendVerificationEmailFailure,
         ),

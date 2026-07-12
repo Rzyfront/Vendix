@@ -71,10 +71,10 @@ import {
         <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
@@ -82,7 +82,7 @@ import {
           @if (report(); as report) {
             @if (report.accounts.length === 0) {
               <div
-                class="flex flex-col items-center justify-center py-16 text-gray-400"
+                class="flex flex-col items-center justify-center py-16 text-text-secondary"
               >
                 <app-icon name="book" [size]="48"></app-icon>
                 <p class="mt-4">No hay movimientos para este periodo</p>
@@ -91,12 +91,12 @@ import {
               <div class="space-y-4">
                 @for (account of report.accounts; track account.account_id) {
                   <div
-                    class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]
+                    class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]
                               border border-border overflow-hidden"
                   >
                     <!-- Account Header -->
                     <div
-                      class="px-4 py-3 bg-gray-50 border-b border-border cursor-pointer"
+                      class="px-4 py-3 bg-[var(--color-surface-secondary)] border-b border-border cursor-pointer"
                       (click)="toggleAccount(account.account_id)"
                     >
                       <div class="flex items-center justify-between">
@@ -109,7 +109,7 @@ import {
                             "
                             [size]="16"
                           ></app-icon>
-                          <span class="text-sm font-mono text-gray-500">{{
+                          <span class="text-sm font-mono text-text-secondary">{{
                             account.account_code
                           }}</span>
                           <span class="text-sm font-bold text-text-primary">{{
@@ -117,7 +117,7 @@ import {
                           }}</span>
                         </div>
                         <div
-                          class="flex items-center gap-4 text-xs text-gray-500"
+                          class="flex items-center gap-4 text-xs text-text-secondary"
                         >
                           <span
                             >Saldo Inicial:
@@ -137,8 +137,8 @@ import {
                     @if (isAccountExpanded(account.account_id)) {
                       <!-- Table Header -->
                       <div
-                        class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 bg-gray-50/50
-                                  text-xs font-semibold text-gray-500 uppercase border-b border-border"
+                        class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 bg-[var(--color-surface-secondary)]
+                                  text-xs font-semibold text-text-secondary uppercase border-b border-border"
                       >
                         <div class="col-span-2">Fecha</div>
                         <div class="col-span-2">Asiento #</div>
@@ -154,21 +154,21 @@ import {
                           <div class="md:hidden p-3">
                             <div class="flex justify-between items-start">
                               <div>
-                                <p class="text-xs text-gray-500">
-                                  {{ entry.entry_date | date: 'shortDate' }} -
+                                <p class="text-xs text-text-secondary">
+                                  {{ entry.entry_date | date: 'shortDate':'UTC' }} -
                                   {{ entry.entry_number }}
                                 </p>
                                 <p class="text-sm">{{ entry.description }}</p>
                               </div>
                               <div class="text-right">
                                 @if (entry.debit_amount > 0) {
-                                  <p class="text-xs text-blue-600">
+                                  <p class="text-xs text-[var(--color-info)]">
                                     D:
                                     {{ entry.debit_amount | number: '1.2-2' }}
                                   </p>
                                 }
                                 @if (entry.credit_amount > 0) {
-                                  <p class="text-xs text-green-600">
+                                  <p class="text-xs text-success">
                                     C:
                                     {{ entry.credit_amount | number: '1.2-2' }}
                                   </p>
@@ -181,13 +181,13 @@ import {
                           </div>
                           <!-- Desktop -->
                           <div
-                            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 items-center hover:bg-gray-50 transition-colors"
+                            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 items-center hover:bg-[var(--color-surface-secondary)] transition-colors"
                           >
                             <div class="col-span-2 text-sm text-gray-600">
-                              {{ entry.entry_date | date: 'shortDate' }}
+                              {{ entry.entry_date | date: 'shortDate':'UTC' }}
                             </div>
                             <div
-                              class="col-span-2 text-sm font-mono text-gray-500"
+                              class="col-span-2 text-sm font-mono text-text-secondary"
                             >
                               {{ entry.entry_number }}
                             </div>
@@ -227,7 +227,7 @@ import {
             }
           } @else {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="book" [size]="48"></app-icon>
               <p class="mt-4">Selecciona un periodo para generar el reporte</p>

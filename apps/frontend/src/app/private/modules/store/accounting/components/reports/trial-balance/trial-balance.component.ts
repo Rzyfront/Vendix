@@ -71,10 +71,10 @@ import {
         <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
@@ -82,8 +82,8 @@ import {
           @if (report(); as report) {
             <!-- Table Header (desktop) -->
             <div
-              class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
-                        text-xs font-semibold text-gray-500 uppercase mb-1"
+              class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-[var(--color-surface-secondary)] rounded-lg
+                        text-xs font-semibold text-text-secondary uppercase mb-1"
             >
               <div class="col-span-2">Código</div>
               <div class="col-span-4">Cuenta</div>
@@ -95,7 +95,7 @@ import {
 
             @if (report.rows.length === 0) {
               <div
-                class="flex flex-col items-center justify-center py-16 text-gray-400"
+                class="flex flex-col items-center justify-center py-16 text-text-secondary"
               >
                 <app-icon name="file-text" [size]="48"></app-icon>
                 <p class="mt-4">No hay datos para este periodo</p>
@@ -105,11 +105,11 @@ import {
                 @for (row of report.rows; track row.account_id) {
                   <!-- Mobile -->
                   <div
-                    class="md:hidden p-3 mx-0.5 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+                    class="md:hidden p-3 mx-0.5 my-1 bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
                   >
                     <div class="flex justify-between items-start">
                       <div>
-                        <p class="text-xs font-mono text-gray-500">
+                        <p class="text-xs font-mono text-text-secondary">
                           {{ row.account_code }}
                         </p>
                         <p class="text-[15px] font-bold text-text-primary">
@@ -118,19 +118,19 @@ import {
                       </div>
                       <div class="text-right">
                         <p
-                          class="text-[10px] font-bold uppercase text-gray-500"
+                          class="text-[10px] font-bold uppercase text-text-secondary"
                         >
                           D: {{ row.debit_total | number: '1.2-2' }}
                         </p>
                         <p
-                          class="text-[10px] font-bold uppercase text-gray-500"
+                          class="text-[10px] font-bold uppercase text-text-secondary"
                         >
                           C: {{ row.credit_total | number: '1.2-2' }}
                         </p>
                         <p
                           class="text-sm font-bold font-mono"
                           [class]="
-                            row.balance >= 0 ? 'text-blue-600' : 'text-red-600'
+                            row.balance >= 0 ? 'text-[var(--color-info)]' : 'text-error'
                           "
                         >
                           {{ row.balance | number: '1.2-2' }}
@@ -140,13 +140,13 @@ import {
                   </div>
                   <!-- Desktop -->
                   <div
-                    class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 items-center hover:bg-gray-50 transition-colors"
+                    class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 items-center hover:bg-[var(--color-surface-secondary)] transition-colors"
                   >
                     <div class="col-span-2 text-sm font-mono text-gray-600">
                       {{ row.account_code }}
                     </div>
                     <div class="col-span-4 text-sm">{{ row.account_name }}</div>
-                    <div class="col-span-1 text-xs text-gray-500 capitalize">
+                    <div class="col-span-1 text-xs text-text-secondary capitalize">
                       {{ row.account_type }}
                     </div>
                     <div class="col-span-2 text-right text-sm font-mono">
@@ -158,7 +158,7 @@ import {
                     <div
                       class="col-span-1 text-right text-sm font-mono font-bold"
                       [class]="
-                        row.balance >= 0 ? 'text-blue-600' : 'text-red-600'
+                        row.balance >= 0 ? 'text-[var(--color-info)]' : 'text-error'
                       "
                     >
                       {{ row.balance | number: '1.2-2' }}
@@ -169,7 +169,7 @@ import {
 
               <!-- Totals -->
               <div
-                class="grid grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg mt-2"
+                class="grid grid-cols-12 gap-2 px-4 py-3 bg-[var(--color-surface-secondary)] rounded-lg mt-2"
               >
                 <div class="col-span-7 text-sm font-bold text-text-primary">
                   TOTALES
@@ -185,7 +185,7 @@ import {
             }
           } @else {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="bar-chart-2" [size]="48"></app-icon>
               <p class="mt-4">Selecciona un periodo para generar el reporte</p>

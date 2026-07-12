@@ -4,32 +4,69 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { formatCurrency } from '@/shared/utils/currency';
+import type { PosMode } from '@/features/store/types';
 
 interface PosMobileFooterProps {
   itemCount: number;
   total: number;
   taxAmount: number;
+  mode: PosMode;
   onViewCart: () => void;
   onCustomItem: () => void;
-  onSaveDraft: () => void;
+  /** "Crear" — abre `pos-order-create-modal` (fulfillment + KDS guard). */
+  onCreate: () => void;
   onShipping: () => void;
-  onCheckout: () => void;
+  /** Handler del CTA primario. Varía por modo: Cobrar / Crear cotización / Crear plan separé. */
+  onPrimaryCta: () => void;
   canCreateCustomItems?: boolean;
 }
+
+// ── Mode-aware primary CTA metadata (paridad con `pos.component.ts` web) ──
+
+interface PrimaryCtaMeta {
+  label: string;
+  icon: string;
+  bg: string;
+  shadow: string;
+}
+
+const PRIMARY_CTA_META: Record<PosMode, PrimaryCtaMeta> = {
+  sale: {
+    label: 'Cobrar',
+    icon: 'credit-card',
+    bg: colors.primary,
+    shadow: colors.primary,
+  },
+  quotation: {
+    label: 'Crear cotización',
+    icon: 'file-text',
+    bg: colors.primary,
+    shadow: colors.primary,
+  },
+  layaway: {
+    label: 'Crear plan separé',
+    icon: 'calendar-clock',
+    bg: colorScales.amber[600],
+    shadow: colorScales.amber[600],
+  },
+};
 
 export function PosMobileFooter({
   itemCount,
   total,
   taxAmount,
+  mode,
   onViewCart,
   onCustomItem,
-  onSaveDraft,
+  onCreate,
   onShipping,
-  onCheckout,
+  onPrimaryCta,
   canCreateCustomItems = false,
 }: PosMobileFooterProps) {
   const insets = useSafeAreaInsets();
   if (itemCount === 0) return null;
+
+  const cta = PRIMARY_CTA_META[mode];
 
   return (
     <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
@@ -62,7 +99,7 @@ export function PosMobileFooter({
         </Pressable>
       </View>
 
-      {/* Row 2: Secondary Action Buttons */}
+      {/* Row 2: Secondary Action Buttons — paridad web: Ítem / Crear / Envío */}
       <View style={styles.actionsRow}>
         <Pressable
           style={[styles.actionBtn, styles.customItemBtn]}
@@ -74,11 +111,11 @@ export function PosMobileFooter({
         </Pressable>
 
         <Pressable
-          style={[styles.actionBtn, styles.saveBtn]}
-          onPress={onSaveDraft}
+          style={[styles.actionBtn, styles.createBtn]}
+          onPress={onCreate}
         >
-          <Icon name="save" size={16} color={colorScales.gray[700]} />
-          <Text style={styles.actionText}>Guardar</Text>
+          <Icon name="plus-circle" size={16} color={colorScales.gray[700]} />
+          <Text style={styles.actionText}>Crear</Text>
         </Pressable>
 
         <Pressable
@@ -90,13 +127,13 @@ export function PosMobileFooter({
         </Pressable>
       </View>
 
-      {/* Row 3: Primary CTA */}
+      {/* Row 3: Primary CTA — varía por modo */}
       <Pressable
-        style={styles.checkoutBtn}
-        onPress={onCheckout}
+        style={[styles.checkoutBtn, { backgroundColor: cta.bg, shadowColor: cta.shadow }]}
+        onPress={onPrimaryCta}
       >
-        <Icon name="credit-card" size={18} color="#FFFFFF" />
-        <Text style={styles.checkoutText}>Cobrar</Text>
+        <Icon name={cta.icon} size={18} color="#FFFFFF" />
+        <Text style={styles.checkoutText}>{cta.label}</Text>
       </Pressable>
     </View>
   );
@@ -217,7 +254,7 @@ const styles = StyleSheet.create({
   customItemText: {
     color: colorScales.green[700],
   },
-  saveBtn: {
+  createBtn: {
     backgroundColor: colors.background,
     borderColor: colorScales.gray[200],
   },

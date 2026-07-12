@@ -21,7 +21,7 @@ import { DianGateReason } from '../../state/selectors/invoicing.selectors';
       <div class="p-4 md:p-6 space-y-4">
         <div class="flex items-start gap-3">
           <div
-            class="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0"
+            class="w-10 h-10 rounded-full bg-warning-light flex items-center justify-center text-warning flex-shrink-0"
           >
             <app-icon name="alert-triangle" [size]="20"></app-icon>
           </div>

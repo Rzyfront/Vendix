@@ -1,6 +1,6 @@
 import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CurrencyPipe, DatePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
@@ -16,6 +16,7 @@ import {
   ToastService,
 } from '../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../shared/components';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { BankReconciliationService } from '../../services/bank-reconciliation.service';
 import {
   BankAccount,
@@ -91,7 +92,7 @@ import {
             <div class="flex items-center gap-2">
               <button
                 (click)="goBack()"
-                class="p-1.5 hover:bg-gray-100 rounded text-gray-500"
+                class="p-1.5 hover:bg-[var(--color-surface-secondary)] rounded text-text-secondary"
               >
                 <app-icon name="arrow-left" [size]="18"></app-icon>
               </button>
@@ -126,18 +127,18 @@ import {
         <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
 
           <!-- Table Header (desktop) -->
           <div
-            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
-                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1"
+            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-[var(--color-surface-secondary)] rounded-lg
+                      text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1"
           >
             <div class="col-span-2">Cuenta</div>
             <div class="col-span-2">Periodo</div>
@@ -150,7 +151,7 @@ import {
 
           @if (filteredReconciliations().length === 0) {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="git-merge" [size]="48"></app-icon>
               <p class="mt-4 text-base">No se encontraron conciliaciones</p>
@@ -161,7 +162,7 @@ import {
               @for (rec of filteredReconciliations(); track rec.id) {
                 <!-- Mobile Card -->
                 <div
-                  class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] cursor-pointer"
+                  class="md:hidden p-3 mx-2 my-1 bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] cursor-pointer"
                   (click)="openWorkspace(rec)"
                 >
                   <div class="flex items-center justify-between">
@@ -182,45 +183,41 @@ import {
                           {{ getStatusLabel(rec.status) }}
                         </span>
                       </div>
-                      <div class="text-xs text-gray-500 mt-1">
-                        {{ rec.period_start | date: 'dd/MM/yyyy' }} -
-                        {{ rec.period_end | date: 'dd/MM/yyyy' }}
+                      <div class="text-xs text-text-secondary mt-1">
+                        {{ rec.period_start | date: 'dd/MM/yyyy' : 'UTC' }} -
+                        {{ rec.period_end | date: 'dd/MM/yyyy' : 'UTC' }}
                       </div>
                       <div class="flex items-center gap-3 mt-1">
-                        <span class="text-xs text-gray-500"
+                        <span class="text-xs text-text-secondary"
                           >Extracto:
                           <span class="font-semibold text-text-primary">{{
-                            rec.statement_balance
-                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                            rec.statement_balance | currency: 0
                           }}</span>
                         </span>
                         <span
                           class="text-xs"
                           [class]="
                             rec.difference === 0
-                              ? 'text-emerald-600'
-                              : 'text-red-500'
+                              ? 'text-success'
+                              : 'text-error'
                           "
                         >
                           Dif:
-                          {{
-                            rec.difference
-                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                          }}
+                          {{ rec.difference | currency: 0 }}
                         </span>
                       </div>
                     </div>
                     <app-icon
                       name="chevron-right"
                       [size]="18"
-                      class="text-gray-400 ml-2"
+                      class="text-text-secondary ml-2"
                     ></app-icon>
                   </div>
                 </div>
 
                 <!-- Desktop Row -->
                 <div
-                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors cursor-pointer"
+                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[var(--color-surface-secondary)] transition-colors cursor-pointer"
                   (click)="openWorkspace(rec)"
                 >
                   <div
@@ -231,35 +228,26 @@ import {
                     }}
                   </div>
                   <div class="col-span-2 text-sm text-gray-600">
-                    {{ rec.period_start | date: 'dd/MM/yyyy' }} -
-                    {{ rec.period_end | date: 'dd/MM/yyyy' }}
+                    {{ rec.period_start | date: 'dd/MM/yyyy' : 'UTC' }} -
+                    {{ rec.period_end | date: 'dd/MM/yyyy' : 'UTC' }}
                   </div>
                   <div
-                    class="col-span-2 text-sm text-right font-mono text-gray-700"
+                    class="col-span-2 text-sm text-right font-mono text-text-primary"
                   >
-                    {{
-                      rec.statement_balance
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                    }}
+                    {{ rec.statement_balance | currency: 0 }}
                   </div>
                   <div
-                    class="col-span-2 text-sm text-right font-mono text-gray-700"
+                    class="col-span-2 text-sm text-right font-mono text-text-primary"
                   >
-                    {{
-                      rec.reconciled_balance
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                    }}
+                    {{ rec.reconciled_balance | currency: 0 }}
                   </div>
                   <div
                     class="col-span-1 text-sm text-right font-semibold"
                     [class]="
-                      rec.difference === 0 ? 'text-emerald-600' : 'text-red-500'
+                      rec.difference === 0 ? 'text-success' : 'text-error'
                     "
                   >
-                    {{
-                      rec.difference
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                    }}
+                    {{ rec.difference | currency: 0 }}
                   </div>
                   <div class="col-span-1 text-center">
                     <span
@@ -272,7 +260,7 @@ import {
                   <div class="col-span-2 flex items-center justify-end gap-1">
                     <button
                       (click)="onDelete(rec, $event)"
-                      class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"
+                      class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error"
                     >
                       <app-icon name="trash-2" [size]="14"></app-icon>
                     </button>
@@ -312,7 +300,7 @@ import {
         </div>
         <div
           slot="footer"
-          class="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-4"
+          class="flex justify-end gap-3 pt-4 border-t border-border mt-4"
         >
           <app-button variant="outline" (clicked)="isCreateModalOpen.set(false)"
             >Cancelar</app-button
@@ -493,10 +481,10 @@ export class ReconciliationListComponent {
 
   getStatusClasses(status: string): string {
     const classes: Record<string, string> = {
-      draft: 'bg-gray-100 text-gray-500',
-      in_progress: 'bg-amber-50 text-amber-600',
-      completed: 'bg-emerald-50 text-emerald-600',
+      draft: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      in_progress: 'bg-warning-light text-warning',
+      completed: 'bg-success-light text-success',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }

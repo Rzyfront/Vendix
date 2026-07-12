@@ -76,13 +76,13 @@ import {
             <div class="flex items-center gap-4 pt-6">
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" formControlName="is_active"
-                       class="rounded border-gray-300 text-primary-600 focus:ring-primary-600" />
+                       class="rounded border-border text-[var(--color-primary)] focus:ring-[var(--color-primary)]" />
                 <span class="text-sm text-text-primary">Activo</span>
               </label>
 
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" formControlName="accepts_entries"
-                       class="rounded border-gray-300 text-primary-600 focus:ring-primary-600" />
+                       class="rounded border-border text-[var(--color-primary)] focus:ring-[var(--color-primary)]" />
                 <span class="text-sm text-text-primary">Acepta Asientos</span>
               </label>
             </div>
@@ -91,7 +91,7 @@ import {
       </div>
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           <app-button variant="outline" (clicked)="onClose()">Cancelar</app-button>
           <app-button
             variant="primary"

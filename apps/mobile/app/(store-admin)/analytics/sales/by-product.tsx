@@ -39,7 +39,7 @@ const styles = StyleSheet.create({
   },
   headerBreadcrumb: {
     fontSize: 10,
-    fontWeight: typography.fontWeight.semibold,
+    fontWeight: typography.fontWeight.semibold as any,
     color: colorScales.gray[400],
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -141,7 +141,7 @@ const SalesByProductScreen = () => {
     const top = sorted[0];
     if (!top) return '-';
     return top.product_name.length > 15
-      ? top.product_name.substring(0, 15) + '…'
+      ? top.product_name.substring(0, 15) + '...'
       : top.product_name;
   }, [productsData]);
 
@@ -208,7 +208,7 @@ const SalesByProductScreen = () => {
                   },
                   {
                     label: 'Ingresos Totales',
-                    value: formatCurrency(totalRevenue),
+                    value: formatCurrency(totalRevenue).replace('$ ', '$'),
                     icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
                     iconBg: colorScales.green[100],
                     iconColor: colorScales.green[600],

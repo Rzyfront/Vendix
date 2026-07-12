@@ -1,4 +1,5 @@
 import { Component, inject, input, output, signal } from '@angular/core';
+import { NgClass } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
@@ -33,6 +34,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   selector: 'vendix-invoice-create',
   standalone: true,
   imports: [
+    NgClass,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -55,12 +57,11 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           <button
             type="button"
             class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
-            [class.bg-primary]="mode() === 'manual'"
-            [class.text-white]="mode() === 'manual'"
-            [class.border-primary]="mode() === 'manual'"
-            [class.bg-surface]="mode() !== 'manual'"
-            [class.text-text-primary]="mode() !== 'manual'"
-            [class.border-border]="mode() !== 'manual'"
+            [ngClass]="
+              mode() === 'manual'
+                ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
+                : 'bg-[var(--color-surface)] text-text-primary border-border'
+            "
             (click)="mode.set('manual')"
           >
             Factura Manual
@@ -68,12 +69,11 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           <button
             type="button"
             class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
-            [class.bg-primary]="mode() === 'from_order'"
-            [class.text-white]="mode() === 'from_order'"
-            [class.border-primary]="mode() === 'from_order'"
-            [class.bg-surface]="mode() !== 'from_order'"
-            [class.text-text-primary]="mode() !== 'from_order'"
-            [class.border-border]="mode() !== 'from_order'"
+            [ngClass]="
+              mode() === 'from_order'
+                ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
+                : 'bg-[var(--color-surface)] text-text-primary border-border'
+            "
             (click)="mode.set('from_order')"
           >
             Desde Pedido
@@ -194,12 +194,12 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
                 @for (item of itemsArray.controls; track item; let i = $index) {
                   <div
                     [formGroupName]="i"
-                    class="border border-gray-200 rounded-lg p-3 space-y-2 relative"
+                    class="border border-border rounded-lg p-3 space-y-2 relative"
                   >
                     <button
                       type="button"
                       (click)="removeItem(i)"
-                      class="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors"
+                      class="absolute top-2 right-2 text-text-secondary hover:text-error transition-colors"
                     >
                       <app-icon name="x" [size]="16"></app-icon>
                     </button>
@@ -265,7 +265,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
       <!-- Footer -->
       <div slot="footer">
         <div
-          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+          class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
         >
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar

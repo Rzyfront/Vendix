@@ -93,7 +93,7 @@ interface CertificateForm {
 
       <!-- ═══ Step 1: Credentials ═══ -->
       @if (activeStep() === 0) {
-        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="key" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Credenciales DIAN</h2>
@@ -172,7 +172,7 @@ interface CertificateForm {
 
       <!-- ═══ Step 2: Certificate ═══ -->
       @if (activeStep() === 1) {
-        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="upload" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Certificado Digital</h2>
@@ -181,7 +181,7 @@ interface CertificateForm {
             Suba su certificado digital (.p12) para firmar las facturas electronicas.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe guardar las credenciales en el Paso 1.
@@ -191,19 +191,19 @@ interface CertificateForm {
           @if (selectedConfig()) {
             <div class="space-y-4">
               @if (selectedConfig()!.certificate_s3_key) {
-                <div class="p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
+                <div class="p-3 rounded-lg bg-success-light border border-success text-success text-sm">
                   <div class="flex items-center gap-2">
                     <app-icon name="check-circle" [size]="16"></app-icon>
                     <span>Certificado cargado</span>
                   </div>
                   @if (selectedConfig()!.certificate_expiry) {
                     @if (isCertExpired()) {
-                      <div class="mt-1 text-xs text-red-600 font-medium">
-                        Vencido el {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy' }}
+                      <div class="mt-1 text-xs text-error font-medium">
+                        Vencido el {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy':'UTC' }}
                       </div>
                     } @else {
                       <div class="mt-1 text-xs">
-                        Expira: {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy' }}
+                        Expira: {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy':'UTC' }}
                       </div>
                     }
                   }
@@ -212,17 +212,17 @@ interface CertificateForm {
               <div class="space-y-3">
                 <label class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
                 <div
-                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary transition-colors"
                   (click)="fileInput.click()"
                   (dragover)="onDragOver($event)"
                   (drop)="onDrop($event)"
                 >
-                  <app-icon name="upload-cloud" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
+                  <app-icon name="upload-cloud" [size]="32" class="text-text-secondary mx-auto mb-2"></app-icon>
                   <p class="text-sm text-text-secondary">
                     {{ selectedFile() ? selectedFile()!.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
                   </p>
                   @if (!selectedFile()) {
-                    <p class="text-xs text-gray-400 mt-1">Solo archivos .p12</p>
+                    <p class="text-xs text-text-secondary mt-1">Solo archivos .p12</p>
                   }
                 </div>
                 <input
@@ -260,7 +260,7 @@ interface CertificateForm {
 
       <!-- ═══ Step 3: Environment ═══ -->
       @if (activeStep() === 2) {
-        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="globe" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Ambiente</h2>
@@ -269,7 +269,7 @@ interface CertificateForm {
             Seleccione el ambiente de facturacion electronica.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe guardar las credenciales en el Paso 1.
@@ -283,15 +283,15 @@ interface CertificateForm {
                   (click)="setEnvironment('test')"
                   class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
-                    'border-primary bg-primary/5': selectedEnvironment() === 'test',
-                    'border-border hover:border-primary/30': selectedEnvironment() !== 'test'
+                    'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'test',
+                    'border-border hover:border-primary': selectedEnvironment() !== 'test'
                   }"
                 >
                   <div class="flex items-center gap-2 mb-2">
                     <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
                       [ngClass]="{
                         'border-primary': selectedEnvironment() === 'test',
-                        'border-gray-300': selectedEnvironment() !== 'test'
+                        'border-border': selectedEnvironment() !== 'test'
                       }"
                     >
                       @if (selectedEnvironment() === 'test') {
@@ -308,15 +308,15 @@ interface CertificateForm {
                   (click)="setEnvironment('production')"
                   class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
-                    'border-primary bg-primary/5': selectedEnvironment() === 'production',
-                    'border-border hover:border-primary/30': selectedEnvironment() !== 'production'
+                    'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'production',
+                    'border-border hover:border-primary': selectedEnvironment() !== 'production'
                   }"
                 >
                   <div class="flex items-center gap-2 mb-2">
                     <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
                       [ngClass]="{
                         'border-primary': selectedEnvironment() === 'production',
-                        'border-gray-300': selectedEnvironment() !== 'production'
+                        'border-border': selectedEnvironment() !== 'production'
                       }"
                     >
                       @if (selectedEnvironment() === 'production') {
@@ -330,7 +330,7 @@ interface CertificateForm {
                   </p>
                 </button>
               </div>
-              <div class="p-3 rounded-lg bg-gray-50 border border-border text-sm">
+              <div class="p-3 rounded-lg bg-[var(--color-surface-secondary)] border border-border text-sm">
                 <div class="flex items-center justify-between">
                   <span class="text-text-secondary">Estado de habilitacion:</span>
                   <span class="px-2 py-0.5 rounded-full text-xs font-medium"
@@ -361,7 +361,7 @@ interface CertificateForm {
 
       <!-- ═══ Step 4: Test Connection ═══ -->
       @if (activeStep() === 3) {
-        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="zap" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Probar Conexion</h2>
@@ -370,7 +370,7 @@ interface CertificateForm {
             Verifique la conexion con la DIAN y ejecute el set de pruebas de habilitacion.
           </p>
           @if (!selectedConfig()) {
-            <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+            <div class="p-3 rounded-lg bg-warning-light border border-warning text-warning text-sm">
               <div class="flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="16"></app-icon>
                 Primero debe completar los pasos anteriores.
@@ -382,7 +382,7 @@ interface CertificateForm {
               <div class="space-y-3 mb-4">
                 <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
                 <select
-                  class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                  class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-[var(--color-surface)] focus:border-primary focus:ring-1 focus:ring-primary outline-none"
                   [ngModel]="selectedResolutionId()"
                   (ngModelChange)="selectedResolutionId.set($event)"
                 >
@@ -417,21 +417,21 @@ interface CertificateForm {
               @if (testResult()) {
                 <div class="p-4 rounded-lg border"
                   [ngClass]="{
-                    'bg-green-50 border-green-200': testResult()!.success,
-                    'bg-red-50 border-red-200': !testResult()!.success
+                    'bg-success-light border-success': testResult()!.success,
+                    'bg-error-light border-error': !testResult()!.success
                   }"
                 >
                   <div class="flex items-center gap-2 mb-2">
                     <app-icon
                       [name]="testResult()!.success ? 'check-circle' : 'x-circle'"
                       [size]="18"
-                      [class]="testResult()!.success ? 'text-green-600' : 'text-red-600'"
+                      [class]="testResult()!.success ? 'text-success' : 'text-error'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testResult()!.success ? 'text-green-700' : 'text-red-700'">
+                    <span class="text-sm font-medium" [class]="testResult()!.success ? 'text-success' : 'text-error'">
                       {{ testResult()!.success ? 'Conexion exitosa' : 'Error de conexion' }}
                     </span>
                   </div>
-                  <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-green-600' : 'text-red-600'">
+                  <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-success' : 'text-error'">
                     <div>{{ testResult()!.message }}</div>
                     <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
                     <div>Tiempo de respuesta: {{ testResult()!.response_time_ms }}ms</div>
@@ -444,34 +444,34 @@ interface CertificateForm {
               @if (testSetResult()) {
                 <div class="p-4 rounded-lg border"
                   [ngClass]="{
-                    'bg-green-50 border-green-200': testSetResult()!.success,
-                    'bg-blue-50 border-blue-200': !testSetResult()!.success
+                    'bg-success-light border-success': testSetResult()!.success,
+                    'bg-[var(--color-info-light)] border-[var(--color-info)]': !testSetResult()!.success
                   }"
                 >
                   <div class="flex items-center gap-2 mb-3">
                     <app-icon
                       [name]="testSetResult()!.success ? 'check-circle' : 'info'"
                       [size]="18"
-                      [class]="testSetResult()!.success ? 'text-green-600' : 'text-blue-600'"
+                      [class]="testSetResult()!.success ? 'text-success' : 'text-[var(--color-info)]'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testSetResult()!.success ? 'text-green-700' : 'text-blue-700'">
+                    <span class="text-sm font-medium" [class]="testSetResult()!.success ? 'text-success' : 'text-[var(--color-info)]'">
                       {{ testSetResult()!.message }}
                     </span>
                   </div>
                   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                    <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
                       <div class="text-text-secondary">Total</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.total_documents }}</div>
                     </div>
-                    <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
                       <div class="text-text-secondary">Facturas</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.invoices_count }}</div>
                     </div>
-                    <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
                       <div class="text-text-secondary">Notas Debito</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.debit_notes_count }}</div>
                     </div>
-                    <div class="p-2 bg-white rounded border border-border text-center">
+                    <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
                       <div class="text-text-secondary">Notas Credito</div>
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.credit_notes_count }}</div>
                     </div>
@@ -482,7 +482,7 @@ interface CertificateForm {
                     </div>
                   }
                   @if (testSetResult()!.dian_status === 's:Sender') {
-                    <div class="mt-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                    <div class="mt-3 p-2 rounded bg-warning-light border border-warning text-xs text-warning">
                       <strong>Nota:</strong> Los 50 documentos se generaron y firmaron correctamente. La DIAN requiere WS-Security en el envelope SOAP para procesar el set. Esta funcionalidad esta en desarrollo.
                     </div>
                   }
@@ -505,7 +505,7 @@ interface CertificateForm {
 
       <!-- ═══ Step 5: Audit Logs ═══ -->
       @if (activeStep() === 4) {
-        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+        <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-[var(--color-surface)]">
           <div class="flex items-center gap-2 mb-2">
             <app-icon name="file-text" [size]="18" class="text-primary"></app-icon>
             <h2 class="text-base font-semibold text-text-primary">Registro de Operaciones</h2>
@@ -544,11 +544,11 @@ interface CertificateForm {
                   </thead>
                   <tbody>
                     @for (log of auditLogs(); track log.id) {
-                      <tr class="border-b border-border/50 hover:bg-gray-50">
+                      <tr class="border-b border-border/50 hover:bg-[var(--color-surface-secondary)]">
                         <td class="py-2 px-3">
                           <div class="text-text-primary">{{ log.action }}</div>
                           @if (log.error_message) {
-                            <div class="text-xs text-red-500 mt-0.5 max-w-[200px] truncate">
+                            <div class="text-xs text-error mt-0.5 max-w-[200px] truncate">
                               {{ log.error_message }}
                             </div>
                           }
@@ -563,10 +563,10 @@ interface CertificateForm {
                         <td class="py-2 px-3 text-center">
                           <span class="px-1.5 py-0.5 text-xs rounded-full"
                             [ngClass]="{
-                              'bg-green-100 text-green-700': log.status === 'success',
-                              'bg-red-100 text-red-700': log.status === 'error',
-                              'bg-yellow-100 text-yellow-700': log.status === 'pending',
-                              'bg-gray-100 text-gray-600': log.status !== 'success' && log.status !== 'error' && log.status !== 'pending'
+                              'bg-success-light text-success': log.status === 'success',
+                              'bg-error-light text-error': log.status === 'error',
+                              'bg-warning-light text-warning': log.status === 'pending',
+                              'bg-[var(--color-surface-secondary)] text-text-secondary': log.status !== 'success' && log.status !== 'error' && log.status !== 'pending'
                             }"
                           >
                             {{ log.status }}
@@ -584,7 +584,7 @@ interface CertificateForm {
                 </table>
               } @else {
                 <div class="py-8 text-center">
-                  <app-icon name="file-text" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
+                  <app-icon name="file-text" [size]="32" class="text-text-secondary mx-auto mb-2"></app-icon>
                   <p class="text-text-secondary text-sm">No hay registros de operaciones</p>
                 </div>
               }
@@ -738,12 +738,12 @@ export class DianConfigWizardComponent {
 
   getEnablementStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      not_started: 'bg-gray-100 text-gray-600',
-      testing: 'bg-yellow-100 text-yellow-700',
-      enabled: 'bg-green-100 text-green-700',
-      suspended: 'bg-red-100 text-red-700',
+      not_started: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      testing: 'bg-warning-light text-warning',
+      enabled: 'bg-success-light text-success',
+      suspended: 'bg-error-light text-error',
     };
-    return classes[status] || 'bg-gray-100 text-gray-600';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   private resetForms(): void {

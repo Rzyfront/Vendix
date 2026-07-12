@@ -192,7 +192,7 @@ interface PageMeta {
           <select
             id="cons-period"
             formControlName="fiscal_period_id"
-            class="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none"
+            class="h-10 w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 text-sm text-text-primary focus:border-primary focus:outline-none"
           >
             <option [ngValue]="null" disabled>Selecciona un período…</option>
             @for (period of periods(); track period.id) {
@@ -212,7 +212,7 @@ interface PageMeta {
             id="cons-notes"
             formControlName="notes"
             rows="3"
-            class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none"
+            class="w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none"
             placeholder="Observaciones internas…"
           ></textarea>
         </div>

@@ -95,17 +95,17 @@ type AgingBreakdownRow = AgingReport['breakdown'][number];
             </div>
 
             <div class="flex w-full items-center gap-2 md:w-auto">
-              <div class="flex flex-1 rounded-lg bg-gray-100 p-0.5 md:flex-none">
+              <div class="flex flex-1 rounded-lg bg-[var(--color-surface-secondary)] p-0.5 md:flex-none">
                 <button
                   class="flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:flex-none"
-                  [ngClass]="active_tab() === 'ar' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                  [ngClass]="active_tab() === 'ar' ? 'bg-[var(--color-surface)] text-success shadow-sm' : 'text-text-secondary hover:text-text-primary'"
                   (click)="switchTab('ar')"
                 >
                   Por cobrar
                 </button>
                 <button
                   class="flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:flex-none"
-                  [ngClass]="active_tab() === 'ap' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+                  [ngClass]="active_tab() === 'ap' ? 'bg-[var(--color-surface)] text-[var(--color-info)] shadow-sm' : 'text-text-secondary hover:text-text-primary'"
                   (click)="switchTab('ap')"
                 >
                   Por pagar

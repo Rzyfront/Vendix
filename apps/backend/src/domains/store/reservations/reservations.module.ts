@@ -6,6 +6,7 @@ import { ReservationsController } from './reservations.controller';
 import { ProvidersService } from './providers/providers.service';
 import { ProvidersController } from './providers/providers.controller';
 import { ProviderScheduleService } from './providers/provider-schedule.service';
+import { ProviderAvailabilityService } from './providers/provider-availability.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -22,12 +23,14 @@ import { TablesModule } from '../tables/tables.module';
     BookingConfirmationService,
     ProvidersService,
     ProviderScheduleService,
+    ProviderAvailabilityService,
   ],
   exports: [
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
     ProvidersService,
+    ProviderAvailabilityService,
   ],
 })
 export class ReservationsModule {}

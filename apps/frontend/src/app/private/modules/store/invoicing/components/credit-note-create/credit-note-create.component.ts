@@ -1,4 +1,5 @@
 import { Component, inject, input, output, signal } from '@angular/core';
+import { NgClass } from '@angular/common';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -7,11 +8,13 @@ import { createCreditNote, createDebitNote } from '../../state/actions/invoicing
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'vendix-credit-note-create',
   standalone: true,
   imports: [
+    NgClass,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -31,12 +34,11 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
           <button
             type="button"
             class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
-            [class.bg-primary]="noteType() === 'credit'"
-            [class.text-white]="noteType() === 'credit'"
-            [class.border-primary]="noteType() === 'credit'"
-            [class.bg-surface]="noteType() !== 'credit'"
-            [class.text-text-primary]="noteType() !== 'credit'"
-            [class.border-border]="noteType() !== 'credit'"
+            [ngClass]="
+              noteType() === 'credit'
+                ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
+                : 'bg-[var(--color-surface)] text-text-primary border-border'
+            "
             (click)="noteType.set('credit')"
             >
             Nota Crédito
@@ -44,12 +46,11 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
           <button
             type="button"
             class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
-            [class.bg-primary]="noteType() === 'debit'"
-            [class.text-white]="noteType() === 'debit'"
-            [class.border-primary]="noteType() === 'debit'"
-            [class.bg-surface]="noteType() !== 'debit'"
-            [class.text-text-primary]="noteType() !== 'debit'"
-            [class.border-border]="noteType() !== 'debit'"
+            [ngClass]="
+              noteType() === 'debit'
+                ? 'bg-primary text-[var(--color-text-on-primary)] border-primary'
+                : 'bg-[var(--color-surface)] text-text-primary border-border'
+            "
             (click)="noteType.set('debit')"
             >
             Nota Débito
@@ -58,9 +59,9 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
     
         <!-- Source Invoice Info -->
         @if (sourceInvoice()) {
-          <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 text-sm">
-            <div class="font-medium text-blue-700 mb-1">Factura de referencia</div>
-            <div class="text-blue-600">
+          <div class="mb-4 p-3 bg-[var(--color-info-light)] rounded-lg border border-border text-sm">
+            <div class="font-medium text-[var(--color-info)] mb-1">Factura de referencia</div>
+            <div class="text-[var(--color-info)]">
               {{ sourceInvoice()!.invoice_number }} - {{ sourceInvoice()!.customer_name || 'Sin cliente' }}
               ({{ formatAmount(sourceInvoice()!.total_amount) }})
             </div>
@@ -81,7 +82,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
     
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           <app-button
             variant="outline"
             (clicked)="onClose()">
@@ -112,8 +113,10 @@ export class CreditNoteCreateComponent {
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
 
   constructor() {
+    this.currencyService.loadCurrency();
     this.noteForm = this.fb.group({
       reason: ['', [Validators.required, Validators.minLength(5)]],
     });
@@ -146,7 +149,7 @@ export class CreditNoteCreateComponent {
   }
 
   formatAmount(value: number): string {
-    return `$${Number(value).toFixed(2)}`;
+    return this.currencyService.format(Number(value) || 0);
   }
 
   private resetForm(): void {

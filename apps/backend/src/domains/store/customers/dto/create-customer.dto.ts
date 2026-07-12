@@ -8,6 +8,7 @@ import {
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { DOCUMENT_TYPE_CODES } from '../../../../common/constants/document-types';
 import { DocumentNumberMatchesType } from '../../../../common/validators/document-number.validator';
 
@@ -16,6 +17,9 @@ export class CreateCustomerDto {
     example: 'juan.perez@example.com',
     description: 'Correo del cliente. Opcional; si se omite, el sistema genera uno interno único.',
   })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
   @IsOptional()
   @IsEmail({}, { message: 'Ingresa un correo válido' })
   email?: string | null;

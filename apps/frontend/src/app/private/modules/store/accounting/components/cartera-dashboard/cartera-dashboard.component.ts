@@ -119,13 +119,13 @@ private carteraService = inject(CarteraService);
 
   getAgingBarColor(index: number): string {
     const colors = [
-      'bg-emerald-400',
-      'bg-blue-400',
-      'bg-amber-400',
-      'bg-orange-400',
-      'bg-red-400',
-      'bg-red-600',
+      'bg-success',
+      'bg-[var(--color-info)]',
+      'bg-warning',
+      'bg-[color-mix(in_srgb,var(--color-warning),var(--color-error))]',
+      'bg-error',
+      'bg-[color-mix(in_srgb,var(--color-error),var(--color-text-primary)_35%)]',
     ];
-    return colors[index] || 'bg-gray-400';
+    return colors[index] || 'bg-[var(--color-text-secondary)]';
   }
 }

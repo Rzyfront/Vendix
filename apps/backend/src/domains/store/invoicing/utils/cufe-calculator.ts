@@ -1,12 +1,16 @@
 import { createHash } from 'crypto';
 
 /**
- * CUFE (Codigo Unico de Facturacion Electronica) calculator.
- * This is a structural implementation that generates a hash following
- * the Colombian DIAN specification format.
+ * CUFE / CUDE / CUDS calculator (Codigo Unico de Facturacion / Documento
+ * Electronico). Computes the SHA-384 document key defined by the Colombian
+ * DIAN specification — the mandated fields concatenated in order and hashed.
+ * This is the REAL production CUFE/CUDE/CUDS: it is consumed both by the mock
+ * provider and by the live DIAN provider (dian-direct.provider.ts).
  *
- * NOTE: This does NOT perform real digital signing. For production use,
- * a certified provider must handle real CUFE generation with PKI signatures.
+ * NOTE: The CUFE is a document HASH, not a digital signature. The XAdES
+ * digital signature of the UBL XML (PKI, .p12 certificate) is a separate step
+ * handled by dian-direct/dian-xml-signer.service.ts. This util only derives
+ * the document key; it does not sign anything.
  */
 export class CufeCalculator {
   /**

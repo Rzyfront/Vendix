@@ -52,25 +52,34 @@ describe('UblCommonBuilder.buildSupplierParty', () => {
     return root.end({ prettyPrint: true });
   }
 
-  it('serializes issuer tax_regime in AdditionalAccountID and tax_scheme in TaxLevelCode', () => {
+  it('puts the person type in AdditionalAccountID and the fiscal responsibilities in TaxLevelCode', () => {
+    // No person_type set → default '1' (Persona Jurídica). The regime code
+    // ('49') must NOT appear in AdditionalAccountID; the fiscal responsibility
+    // ('R-99-PN') goes in TaxLevelCode with @listName='No aplica' (DIAN annex).
     const issuer = buildIssuer({ tax_regime: '49', tax_scheme: 'R-99-PN' });
 
     const xml = serializeSupplierParty(issuer);
 
     expect(xml).toContain('AdditionalAccountID');
-    expect(xml).toMatch(/AdditionalAccountID>49</);
-    expect(xml).toContain('TaxLevelCode');
-    expect(xml).toContain('R-99-PN');
+    expect(xml).toMatch(/AdditionalAccountID>1</);
+    // The regime is no longer misplaced in AdditionalAccountID.
+    expect(xml).not.toMatch(/AdditionalAccountID>49</);
+    // Responsibility → TaxLevelCode value; @listName is the literal 'No aplica'.
+    expect(xml).toMatch(/TaxLevelCode listName="No aplica"/);
     expect(xml).toMatch(/TaxLevelCode[^>]*>R-99-PN</);
   });
 
-  it('serializes a different issuer regime/scheme, proving values come from the issuer (not hardcoded)', () => {
-    const issuer = buildIssuer({ tax_regime: '48', tax_scheme: 'O-15' });
+  it('honors an explicit person_type and carries a different responsibility', () => {
+    const issuer = buildIssuer({
+      person_type: '2',
+      tax_regime: '48',
+      tax_scheme: 'O-15',
+    });
 
     const xml = serializeSupplierParty(issuer);
 
-    expect(xml).toMatch(/AdditionalAccountID>48</);
-    expect(xml).toContain('O-15');
+    expect(xml).toMatch(/AdditionalAccountID>2</);
+    expect(xml).toMatch(/TaxLevelCode listName="No aplica"/);
     expect(xml).toMatch(/TaxLevelCode[^>]*>O-15</);
 
     // Ensure the alternate-case values from the other test are NOT present,

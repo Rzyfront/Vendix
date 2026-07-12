@@ -29,7 +29,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       @if (invoice()) {
         <div class="p-4">
           <!-- Status & Type Banner -->
-          <div class="flex items-center justify-between mb-4 p-3 rounded-lg bg-gray-50 border border-border">
+          <div class="flex items-center justify-between mb-4 p-3 rounded-lg bg-[var(--color-surface-secondary)] border border-border">
             <div class="flex items-center gap-2">
               <span class="text-sm text-text-secondary">Tipo:</span>
               <span class="text-sm font-medium text-text-primary">{{ getTypeLabel(invoice()!.invoice_type) }}</span>
@@ -67,18 +67,18 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           <div class="mb-4 grid grid-cols-2 gap-2 text-sm">
             <div>
               <span class="text-text-secondary">Fecha Emisión:</span>
-              <span class="ml-1 text-text-primary">{{ invoice()!.issue_date | date:'dd/MM/yyyy' }}</span>
+              <span class="ml-1 text-text-primary">{{ invoice()!.issue_date | date:'dd/MM/yyyy':'UTC' }}</span>
             </div>
             <div>
               <span class="text-text-secondary">Fecha Vencimiento:</span>
-              <span class="ml-1 text-text-primary">{{ invoice()!.due_date ? (invoice()!.due_date | date:'dd/MM/yyyy') : '-' }}</span>
+              <span class="ml-1 text-text-primary">{{ invoice()!.due_date ? (invoice()!.due_date | date:'dd/MM/yyyy':'UTC') : '-' }}</span>
             </div>
           </div>
           <!-- Resolution -->
           @if (invoice()!.resolution) {
-            <div class="mb-4 text-sm p-2 bg-blue-50 rounded-lg">
-              <span class="text-blue-700 font-medium">Resolución:</span>
-              <span class="ml-1 text-blue-600">
+            <div class="mb-4 text-sm p-2 bg-[var(--color-info-light)] rounded-lg">
+              <span class="text-[var(--color-info)] font-medium">Resolución:</span>
+              <span class="ml-1 text-[var(--color-info)]">
                 {{ invoice()!.resolution?.prefix }} {{ invoice()!.resolution?.resolution_number }}
                 ({{ invoice()!.resolution?.range_from }} - {{ invoice()!.resolution?.range_to }})
               </span>
@@ -101,7 +101,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 </thead>
                 <tbody>
                   @for (item of invoice()!.items; track item) {
-                    <tr class="border-b border-gray-100">
+                    <tr class="border-b border-border">
                       <td class="py-2 px-2 text-text-primary">
                         <span>{{ item.product_name || item.description }}</span>
                         @if (item.applied_price_tier_name) {
@@ -152,7 +152,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             @if (invoice()!.discount_amount > 0) {
               <div class="flex justify-between text-sm">
                 <span class="text-text-secondary">Descuentos</span>
-                <span class="text-red-500">-{{ formatCurrency(invoice()!.discount_amount) }}</span>
+                <span class="text-error">-{{ formatCurrency(invoice()!.discount_amount) }}</span>
               </div>
             }
             <div class="flex justify-between text-sm">
@@ -162,7 +162,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             @if (invoice()!.withholding_amount > 0) {
               <div class="flex justify-between text-sm">
                 <span class="text-text-secondary">Retenciones</span>
-                <span class="text-red-500">-{{ formatCurrency(invoice()!.withholding_amount) }}</span>
+                <span class="text-error">-{{ formatCurrency(invoice()!.withholding_amount) }}</span>
               </div>
             }
             <div class="flex justify-between text-base font-semibold pt-2 border-t border-border">
@@ -172,26 +172,26 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           </div>
           <!-- Notes -->
           @if (invoice()!.notes) {
-            <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+            <div class="mt-4 p-3 bg-[var(--color-surface-secondary)] rounded-lg">
               <h4 class="text-sm font-semibold text-text-primary mb-1">Notas</h4>
               <p class="text-sm text-text-secondary">{{ invoice()!.notes }}</p>
             </div>
           }
           <!-- DIAN Status -->
           @if (invoice()!.send_status) {
-            <div class="mt-4 p-3 bg-gray-50 rounded-lg">
+            <div class="mt-4 p-3 bg-[var(--color-surface-secondary)] rounded-lg">
               <h4 class="text-sm font-semibold text-text-primary mb-1">Estado DIAN</h4>
               <p class="text-sm text-text-secondary">{{ invoice()!.send_status }}</p>
             </div>
           }
           <!-- DIAN Details (CUFE/QR/PDF) -->
           @if (invoice()!.cufe || invoice()!.qr_code || invoice()!.pdf_url) {
-            <div class="mt-4 p-3 bg-green-50 rounded-lg space-y-3">
-              <h4 class="text-sm font-semibold text-green-800">Información DIAN</h4>
+            <div class="mt-4 p-3 bg-success-light rounded-lg space-y-3">
+              <h4 class="text-sm font-semibold text-success">Información DIAN</h4>
               @if (invoice()!.cufe) {
                 <div class="flex items-center gap-2">
-                  <span class="text-xs text-green-700 font-medium">CUFE:</span>
-                  <code class="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded break-all flex-1">{{ invoice()!.cufe }}</code>
+                  <span class="text-xs text-success font-medium">CUFE:</span>
+                  <code class="text-xs text-success bg-success-light px-2 py-0.5 rounded break-all flex-1">{{ invoice()!.cufe }}</code>
                   <app-button variant="ghost" size="sm" (clicked)="copyCufe()">
                     <app-icon slot="icon" name="copy" [size]="12"></app-icon>
                   </app-button>
@@ -199,7 +199,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               }
               @if (invoice()!.qr_code) {
                 <div class="text-center">
-                  <img [src]="invoice()!.qr_code" alt="QR Code DIAN" class="w-32 h-32 mx-auto border border-green-200 rounded" />
+                  <img [src]="invoice()!.qr_code" alt="QR Code DIAN" class="w-32 h-32 mx-auto border border-success rounded" />
                 </div>
               }
               @if (invoice()!.pdf_url) {
@@ -226,7 +226,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     
       <!-- Footer with actions -->
       <div slot="footer">
-        <div class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-between gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           <div class="flex items-center gap-2">
             @if (canValidate) {
               <app-button
@@ -451,15 +451,15 @@ export class InvoiceDetailComponent {
 
   getStatusClasses(status: string): Record<string, boolean> {
     const map: Record<string, string> = {
-      draft: 'bg-gray-100 text-gray-700',
-      validated: 'bg-blue-100 text-blue-700',
-      sent: 'bg-blue-100 text-blue-700',
-      accepted: 'bg-green-100 text-green-700',
-      rejected: 'bg-red-100 text-red-700',
-      cancelled: 'bg-yellow-100 text-yellow-700',
-      voided: 'bg-gray-100 text-gray-500',
+      draft: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      validated: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      sent: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      accepted: 'bg-success-light text-success',
+      rejected: 'bg-error-light text-error',
+      cancelled: 'bg-warning-light text-warning',
+      voided: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    const classes = (map[status] || 'bg-gray-100 text-gray-700').split(' ');
+    const classes = (map[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary').split(' ');
     return classes.reduce((acc, cls) => ({ ...acc, [cls]: true }), {} as Record<string, boolean>);
   }
 }

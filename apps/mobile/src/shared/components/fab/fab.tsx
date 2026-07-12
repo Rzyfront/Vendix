@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, shadows, spacing, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
@@ -21,8 +22,18 @@ export function Fab({
   style,
   disabled = false,
 }: FabProps) {
+  // Safe area bottom: en dispositivos con gesture bar / home indicator
+  // (Android 10+ con navegación por gestos, iPhones X+ con home indicator)
+  // el FAB debe quedar por encima de la barra para que el icono no quede
+  // cortado y los toques del usuario no caigan sobre el sistema.
+  const insets = useSafeAreaInsets();
+  const fabBottom = insets.bottom + spacing[5];
+
   return (
-    <View pointerEvents="box-none" style={[styles.wrapper, positionStyles[position]]}>
+    <View
+      pointerEvents="box-none"
+      style={[styles.wrapper, positionStyles[position], { bottom: fabBottom }]}
+    >
       <Pressable
         onPress={onPress}
         disabled={disabled}
@@ -67,11 +78,9 @@ const styles = StyleSheet.create({
 const positionStyles = StyleSheet.create({
   'bottom-right': {
     right: spacing[5],
-    bottom: spacing[5],
   },
   'bottom-center': {
     alignSelf: 'center',
-    bottom: spacing[5],
   },
 });
 

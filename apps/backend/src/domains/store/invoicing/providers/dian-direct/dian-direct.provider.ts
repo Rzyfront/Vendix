@@ -26,6 +26,7 @@ import {
   DianIssuerData,
   DianCustomerData,
 } from './interfaces/dian-config.interface';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 type DianConfigurationType = 'invoicing' | 'support_document' | 'payroll';
 
@@ -108,6 +109,30 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
         .toFixed(2);
 
+      // La clave técnica (ClTec) entregada por la DIAN con la resolución de
+      // numeración de habilitación alimenta el CUFE de la factura electrónica de
+      // venta. Firmar con el software PIN produce un CUFE inválido que la DIAN
+      // rechaza (y transmite un documento mal formado); por eso fallamos rápido y
+      // explícito en lugar de caer al PIN.
+      //
+      // Alcance del assert: este método `sendInvoice` es la ÚNICA ruta que calcula
+      // CUFE (factura de venta / exportación). Las notas crédito/débito (CUDE) y el
+      // documento soporte / nota de ajuste (CUDS) viven en métodos separados y usan
+      // `config.software_pin` por diseño del esquema DIAN (el CUDE/CUDS NO usan la
+      // ClTec), por lo que este assert NO aplica a esos flujos y no los rompe.
+      const technical_key = invoice_data.technical_key?.trim();
+      if (!technical_key) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_PROVIDER_003,
+          'La factura electrónica de venta requiere technical_key (ClTec) de la ' +
+            'resolución de numeración; no se puede firmar con el software PIN.',
+          {
+            document_number: invoice_data.invoice_number,
+            invoice_type: invoice_data.invoice_type,
+          },
+        );
+      }
+
       // Calculate CUFE
       const cufe = CufeCalculator.generate({
         invoice_number: invoice_data.invoice_number,
@@ -120,7 +145,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         total_amount: invoice_data.total_amount,
         issuer_nit: config.nit,
         customer_nit: invoice_data.customer_tax_id || '222222222222',
-        technical_key: invoice_data.technical_key || config.software_pin,
+        technical_key,
         environment: config.environment === 'production' ? '1' : '2',
       });
 

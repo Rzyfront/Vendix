@@ -195,101 +195,229 @@ export class IcaService {
 
   /**
    * Generates an ICA tax report for a given period.
-   * Period format: 'YYYY-QN' (quarterly) or 'YYYY-MM' (monthly)
+   * Period format: 'YYYY-QN' (quarterly), 'YYYY-MM' (monthly) or 'YYYY' (yearly)
+   *
+   * FUENTE AUTORITATIVA: replica la MISMA lógica que la declaración oficial
+   * `TaxDeclarationDraftService.calculateIca`. El ICA es un impuesto
+   * AUTOLIQUIDADO que NO se persiste como `invoice_taxes` en ventas B2C, por lo
+   * que la implementación anterior (agrupar `invoice_taxes` con tax_name ~ 'ICA'
+   * por municipio de la dirección del CLIENTE) devolvía un reporte vacío en
+   * producción y, cuando había filas, no cuadraba con la declaración. Ahora:
+   *
+   *  - Base = suma de `invoices.subtotal_amount` de la TIENDA (municipio donde
+   *    se ejerce la actividad), NO de la dirección del cliente. Las notas
+   *    crédito restan; se excluyen facturas canceladas/anuladas/rechazadas.
+   *  - Tarifa recalculada desde `ica_municipal_rates` con cascada CIIU
+   *    store→org→null (match municipio+CIIU → municipio+NULL genérica →
+   *    reintento con los primeros 5 dígitos DANE/Divipola del municipio).
+   *  - Si no hay municipio configurado o no hay tarifa NO se inventa tarifa: se
+   *    emite warning `ICA_RATE_NOT_CONFIGURED` y el municipio no aporta base.
+   *
+   * Alcance: reporte por-tienda (rama STORE de `calculateIca`). La
+   * consolidación multi-municipio a nivel organización la construye
+   * `OrgIcaService.getIcaReport` iterando este reporte por cada tienda activa,
+   * por lo que aquí basta con un único renglón por el municipio de la tienda.
    */
   async getIcaReport(period: string) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
     const date_range = this.parsePeriod(period);
 
-    // Query invoice_taxes where tax_name contains 'ICA'
-    const invoice_taxes = await this.store_prisma.invoice_taxes.findMany({
-      where: {
-        tax_name: { contains: 'ICA', mode: 'insensitive' },
-        invoice: {
-          invoice_date: {
-            gte: date_range.start,
-            lt: date_range.end,
-          },
-        },
-      },
-      include: {
-        invoice: {
-          select: {
-            id: true,
-            invoice_number: true,
-            invoice_date: true,
-            customer_address: true,
-            subtotal: true,
-          },
-        },
+    const warnings: Array<{
+      code: string;
+      store_id?: number | null;
+      municipality_code?: string | null;
+    }> = [];
+
+    // 1. Municipio + CIIU de la TIENDA (cascada store→org→null).
+    const store = await this.global_prisma.stores.findUnique({
+      where: { id: store_id },
+      select: {
+        id: true,
+        organization_id: true,
+        municipality_code: true,
+        ciiu_code: true,
       },
     });
 
-    // Group by municipality
-    const municipality_map = new Map<
-      string,
-      {
-        municipality: string;
-        municipality_code: string;
-        base: number;
-        ica_amount: number;
-        rate_per_mil: number;
-        invoice_count: number;
-      }
-    >();
+    const organization = store
+      ? await this.global_prisma.organizations.findUnique({
+          where: { id: store.organization_id },
+          select: { ciiu_code: true },
+        })
+      : null;
+    const org_ciiu = organization?.ciiu_code ?? null;
+    const store_ciiu = store?.ciiu_code ?? org_ciiu ?? null;
 
-    for (const tax of invoice_taxes) {
-      const customer_address = tax.invoice?.customer_address as Record<
-        string,
-        any
-      > | null;
-      const municipality_code =
-        customer_address?.municipality_code || 'unknown';
-      const municipality_name =
-        customer_address?.municipality_name ||
-        customer_address?.city ||
-        'Desconocido';
+    const municipality_code = store?.municipality_code
+      ? String(store.municipality_code).trim()
+      : null;
+    const municipality_normalized =
+      municipality_code && municipality_code.length >= 5
+        ? municipality_code.slice(0, 5)
+        : municipality_code;
 
-      const existing = municipality_map.get(municipality_code);
-      const taxable_amount = Number(tax.taxable_amount || 0);
-      const tax_amount = Number(tax.tax_amount || 0);
-      const rate = Number(tax.tax_rate || 0);
-
-      if (existing) {
-        existing.base += taxable_amount;
-        existing.ica_amount += tax_amount;
-        existing.invoice_count += 1;
-      } else {
-        municipality_map.set(municipality_code, {
-          municipality: municipality_name,
+    // 2. Tarifa vigente (cascada CIIU) SIN inventar tarifa.
+    const rate = municipality_code
+      ? await this.resolveIcaRateForMunicipality(
           municipality_code,
-          base: taxable_amount,
-          ica_amount: tax_amount,
-          rate_per_mil: rate * 1000,
-          invoice_count: 1,
+          municipality_normalized,
+          store_ciiu,
+        )
+      : null;
+
+    const date_range_out = {
+      start: date_range.start.toISOString(),
+      end: date_range.end.toISOString(),
+    };
+
+    // Sin municipio o sin tarifa configurada → warning, sin base ni renglón.
+    if (!municipality_code || !rate) {
+      warnings.push({
+        code: 'ICA_RATE_NOT_CONFIGURED',
+        store_id,
+        municipality_code: municipality_code ?? null,
+      });
+      return {
+        period,
+        date_range: date_range_out,
+        total_base: 0,
+        total_ica: 0,
+        invoice_count: 0,
+        breakdown: [] as Array<{
+          municipality: string;
+          municipality_code: string;
+          base: number;
+          ica_amount: number;
+          rate_per_mil: number;
+          invoice_count: number;
+        }>,
+        warnings,
+      };
+    }
+
+    // 3. Facturas de la tienda en el periodo (auto-scoped por store_id).
+    const invoices = await this.store_prisma.invoices.findMany({
+      where: {
+        invoice_type: { in: ['sales_invoice', 'debit_note', 'credit_note'] },
+        status: { notIn: ['cancelled', 'voided', 'rejected'] },
+        issue_date: {
+          gte: date_range.start,
+          lt: date_range.end,
+        },
+      },
+      select: {
+        id: true,
+        invoice_type: true,
+        subtotal_amount: true,
+      },
+    });
+
+    // 4. Base por municipio de la tienda (notas crédito restan).
+    const rate_per_mil = Number(rate.rate_per_mil || 0);
+    const base = invoices.reduce((sum, invoice) => {
+      const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
+      return sum + Number(invoice.subtotal_amount || 0) * sign;
+    }, 0);
+    const ica_amount = (base * rate_per_mil) / 1000;
+
+    const base_rounded = Math.round(base * 100) / 100;
+    const ica_rounded = Math.round(ica_amount * 100) / 100;
+
+    const breakdown = [
+      {
+        municipality: rate.municipality_name,
+        municipality_code,
+        base: base_rounded,
+        ica_amount: ica_rounded,
+        rate_per_mil,
+        invoice_count: invoices.length,
+      },
+    ];
+
+    return {
+      period,
+      date_range: date_range_out,
+      total_base: base_rounded,
+      total_ica: ica_rounded,
+      invoice_count: invoices.length,
+      breakdown,
+      warnings,
+    };
+  }
+
+  /**
+   * Resolves the applicable ICA rate for a municipality using the SAME cascade
+   * as the official declaration (`calculateIca`): (municipality+CIIU) →
+   * (municipality+NULL generic) → retry with the first 5 DANE/Divipola digits.
+   * Returns `null` when no rate is configured — never invents one.
+   */
+  private async resolveIcaRateForMunicipality(
+    municipality_code: string,
+    municipality_normalized: string | null,
+    ciiu_code: string | null,
+  ) {
+    const select = {
+      rate_per_mil: true,
+      municipality_code: true,
+      municipality_name: true,
+      ciiu_code: true,
+      ciiu_description: true,
+    };
+
+    // 1) Match exacto (municipio + CIIU).
+    let rate = ciiu_code
+      ? await this.global_prisma.ica_municipal_rates.findFirst({
+          where: { municipality_code, ciiu_code, is_active: true },
+          orderBy: { effective_date: 'desc' },
+          select,
+        })
+      : null;
+
+    // 2) Fallback: tarifa genérica municipal (ciiu_code IS NULL).
+    if (!rate) {
+      rate = await this.global_prisma.ica_municipal_rates.findFirst({
+        where: { municipality_code, ciiu_code: null, is_active: true },
+        orderBy: { effective_date: 'desc' },
+        select,
+      });
+    }
+
+    // 3) Reintento con los primeros 5 dígitos DANE (Divipola) si difiere.
+    if (
+      !rate &&
+      municipality_normalized &&
+      municipality_normalized !== municipality_code
+    ) {
+      if (ciiu_code) {
+        rate = await this.global_prisma.ica_municipal_rates.findFirst({
+          where: {
+            municipality_code: municipality_normalized,
+            ciiu_code,
+            is_active: true,
+          },
+          orderBy: { effective_date: 'desc' },
+          select,
+        });
+      }
+      if (!rate) {
+        rate = await this.global_prisma.ica_municipal_rates.findFirst({
+          where: {
+            municipality_code: municipality_normalized,
+            ciiu_code: null,
+            is_active: true,
+          },
+          orderBy: { effective_date: 'desc' },
+          select,
         });
       }
     }
 
-    const breakdown = Array.from(municipality_map.values()).map((entry) => ({
-      ...entry,
-      base: Math.round(entry.base * 100) / 100,
-      ica_amount: Math.round(entry.ica_amount * 100) / 100,
-    }));
-
-    const total_base = breakdown.reduce((sum, b) => sum + b.base, 0);
-    const total_ica = breakdown.reduce((sum, b) => sum + b.ica_amount, 0);
-
-    return {
-      period,
-      date_range: {
-        start: date_range.start.toISOString(),
-        end: date_range.end.toISOString(),
-      },
-      total_base: Math.round(total_base * 100) / 100,
-      total_ica: Math.round(total_ica * 100) / 100,
-      invoice_count: invoice_taxes.length,
-      breakdown,
-    };
+    return rate;
   }
 
   /**

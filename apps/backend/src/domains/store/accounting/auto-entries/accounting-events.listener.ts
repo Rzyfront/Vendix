@@ -193,6 +193,8 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /** GAP-6 — propina (sin IVA): pasivo custodio, línea CR en el asiento. */
+    tip_amount?: number;
     currency: string;
     payment_method: string;
     user_id?: number;
@@ -221,6 +223,8 @@ export class AccountingEventsListener {
           event.discount_amount != null
             ? Number(event.discount_amount)
             : undefined,
+        tip_amount:
+          event.tip_amount != null ? Number(event.tip_amount) : undefined,
         user_id: event.user_id,
         customer: event.customer,
       });
@@ -344,35 +348,14 @@ export class AccountingEventsListener {
     }
   }
 
-  @OnEvent('payroll.approved')
-  async handlePayrollApproved(event: {
-    payroll_run_id: number;
-    organization_id: number;
-    store_id?: number;
-    accounting_entity_id?: number;
-    total_earnings: number;
-    total_employer_costs: number;
-    total_deductions: number;
-    total_net_pay: number;
-    health_deduction: number;
-    pension_deduction: number;
-    approved_by: number;
-    dian_accepted?: boolean;
-    cost_center_breakdown?: Record<
-      string,
-      { earnings: number; employer_costs: number }
-    >;
-  }) {
-    if (!event.dian_accepted) {
-      this.logger.warn(
-        `Skipping fiscal payroll auto-entry for payroll.approved #${event.payroll_run_id}: DIAN acceptance is required`,
-      );
-      return;
-    }
-
-    await this.createPayrollAcceptedEntry(event);
-  }
-
+  // NOTA: no existe un handler @OnEvent('payroll.approved'). El evento
+  // EventEmitter2 `payroll.approved` NUNCA se emite — `PayrollFlowService.approve()`
+  // solo estampa `approved_by`/`approved_at` sin emitir (ver payroll-flow.service.spec).
+  // La causación fiscal entra por `payroll.dian_accepted` (ruta electrónica) y el
+  // pago por `payroll.paid`. Ojo: el string `payroll.approved` SÍ sigue vivo como
+  // `source_type` persistido y prefijo de mapping keys en auto-entry.service.ts /
+  // account-mapping.service.ts (naming histórico, igual que invoice.accepted vs
+  // source_type 'invoice.validated'); no confundir el nombre del evento con esos.
   @OnEvent('payroll.dian_accepted')
   async handlePayrollDianAccepted(event: {
     payroll_run_id: number;

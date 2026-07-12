@@ -342,6 +342,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    // Availability - Generic-slot fallback. Mon-Fri matches the historic
+    // hardcoded skip-weekend behavior in `AvailabilityService.generateGenericSlots`;
+    // stores that open on weekends override via this setting.
+    availability: {
+      working_days: [1, 2, 3, 4, 5],
+    },
+
     // Operations - Preparation and delivery defaults
     operations: {
       default_preparation_time_minutes: 15,
@@ -357,8 +364,12 @@ export function getDefaultStoreSettings(): StoreSettings {
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is
     // opt-in (false by default) so existing stores keep paying via POS.
+    // QR scan defaults to `menu_only` (show menu, no table state change)
+    // and `qr_auto_fire` off so staff explicitly fires items to kitchen.
     restaurant: {
       enable_table_checkout: false,
+      qr_scan_behavior: 'menu_only',
+      qr_auto_fire: false,
     },
 
     // Membership - gym/membership suite behavior toggles. Ambient access

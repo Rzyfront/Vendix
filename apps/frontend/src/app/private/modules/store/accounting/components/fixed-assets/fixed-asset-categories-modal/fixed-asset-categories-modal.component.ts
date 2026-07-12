@@ -37,22 +37,22 @@ import {
 
         <!-- Category List -->
         @if (categories().length === 0 && !show_form) {
-          <div class="flex flex-col items-center justify-center py-8 text-gray-400">
+          <div class="flex flex-col items-center justify-center py-8 text-text-secondary">
             <app-icon name="tag" [size]="40"></app-icon>
             <p class="mt-3 text-sm">No hay categorias creadas</p>
           </div>
         } @else {
           <div class="divide-y divide-border">
             @for (cat of categories(); track cat.id) {
-              <div class="flex items-center justify-between py-3 px-2 hover:bg-gray-50 rounded-lg">
+              <div class="flex items-center justify-between py-3 px-2 hover:bg-[var(--color-surface-secondary)] rounded-lg">
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-medium text-text-primary">{{ cat.name }}</span>
                     @if (!cat.is_active) {
-                      <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">Inactivo</span>
+                      <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-[var(--color-surface-secondary)] text-text-secondary">Inactivo</span>
                     }
                   </div>
-                  <div class="flex items-center gap-3 mt-0.5 text-xs text-gray-500">
+                  <div class="flex items-center gap-3 mt-0.5 text-xs text-text-secondary">
                     <span>{{ cat.default_useful_life_months }} meses</span>
                     <span>{{ cat.default_depreciation_method === 'straight_line' ? 'Linea Recta' : 'Saldo Decreciente' }}</span>
                     <span>Residual: {{ cat.default_salvage_percentage }}%</span>
@@ -60,11 +60,11 @@ import {
                 </div>
                 <div class="flex items-center gap-1 ml-2">
                   <button (click)="editCategory(cat)"
-                          class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600">
+                          class="p-1.5 hover:bg-[var(--color-surface-secondary)] rounded text-text-secondary hover:text-[var(--color-primary)]">
                     <app-icon name="edit" [size]="14"></app-icon>
                   </button>
                   <button (click)="deleteCategory(cat)"
-                          class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500">
+                          class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error">
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
                 </div>
@@ -75,8 +75,8 @@ import {
 
         <!-- Create/Edit Form -->
         @if (show_form) {
-          <div class="p-4 bg-gray-50 rounded-lg space-y-3 border border-border">
-            <h4 class="text-sm font-semibold text-gray-700">
+          <div class="p-4 bg-[var(--color-surface-secondary)] rounded-lg space-y-3 border border-border">
+            <h4 class="text-sm font-semibold text-text-primary">
               {{ editing_category ? 'Editar Categoria' : 'Nueva Categoria' }}
             </h4>
             <form [formGroup]="form">
@@ -129,7 +129,7 @@ import {
       </div>
 
       <div slot="footer">
-        <div class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-between gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           @if (!show_form) {
             <app-button variant="primary" size="sm" (clicked)="showCreateForm()">
               <app-icon name="plus" [size]="14" slot="icon" ></app-icon>

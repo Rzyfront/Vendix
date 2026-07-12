@@ -67,7 +67,14 @@ export class FiscalProductionReadinessService {
 
     if (requireProduction) {
       this.assertProductionReady(config);
-      await this.assertResolutionReady(params);
+      // La DIAN no emite resolución de numeración para la nómina electrónica
+      // (el DSPNE numera con su propio consecutivo NumNE, no con una
+      // invoice_resolutions), por lo que exigir una resolución activa bloquearía
+      // el corte a producción de nómina de forma permanente. Facturación de venta
+      // y documento soporte sí requieren resolución vigente.
+      if (params.configuration_type !== 'payroll') {
+        await this.assertResolutionReady(params);
+      }
     }
 
     return config;

@@ -950,6 +950,7 @@ export class TableSessionPageComponent implements OnInit {
         total_amount: this.orderTotal(),
         amount_received: payload.amount_received,
         payment_reference: payload.payment_reference,
+        tip_amount: payload.tip_amount,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

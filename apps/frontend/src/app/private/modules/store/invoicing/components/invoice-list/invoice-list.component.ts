@@ -344,9 +344,9 @@ export class InvoiceListComponent {
 
   getRetryChipClass(retry: InvoiceRetryStatus | null | undefined): string {
     if (retry?.status === 'failed') {
-      return 'bg-red-100 text-red-700';
+      return 'bg-error-light text-error';
     }
-    return 'bg-amber-100 text-amber-700';
+    return 'bg-warning-light text-warning';
   }
 
   getRetryChipIcon(

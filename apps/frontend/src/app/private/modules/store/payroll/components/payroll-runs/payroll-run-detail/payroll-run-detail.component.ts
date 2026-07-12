@@ -106,7 +106,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
       <!-- Header slot: icono de nómina -->
       @if (payrollRun()) {
         <div slot="header"
-             class="flex items-center justify-center w-9 h-9 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex-shrink-0">
+             class="flex items-center justify-center w-9 h-9 rounded-lg bg-[var(--color-primary-light)] text-[var(--color-primary)] flex-shrink-0">
           <app-icon name="banknote" [size]="18"></app-icon>
         </div>
       }
@@ -153,21 +153,21 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
 
           <!-- 4. RESUMEN TOTALES -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
-              <span class="text-xs text-blue-600 block">Total Devengado</span>
-              <span class="text-lg font-bold text-blue-800">{{ formatNumber(payrollRun()!.total_earnings) }}</span>
+            <div class="p-3 bg-[var(--color-info-light)] rounded-lg border border-[var(--color-info)]">
+              <span class="text-xs text-[var(--color-info)] block">Total Devengado</span>
+              <span class="text-lg font-bold text-[var(--color-info)]">{{ formatNumber(payrollRun()!.total_earnings) }}</span>
             </div>
-            <div class="p-3 bg-red-50 rounded-lg border border-red-100">
-              <span class="text-xs text-red-600 block">Total Deducciones</span>
-              <span class="text-lg font-bold text-red-800">{{ formatNumber(payrollRun()!.total_deductions) }}</span>
+            <div class="p-3 bg-error-light rounded-lg border border-error">
+              <span class="text-xs text-error block">Total Deducciones</span>
+              <span class="text-lg font-bold text-error">{{ formatNumber(payrollRun()!.total_deductions) }}</span>
             </div>
-            <div class="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-              <span class="text-xs text-yellow-600 block">Costo Empleador</span>
-              <span class="text-lg font-bold text-yellow-800">{{ formatNumber(payrollRun()!.total_employer_costs) }}</span>
+            <div class="p-3 bg-warning-light rounded-lg border border-warning">
+              <span class="text-xs text-warning block">Costo Empleador</span>
+              <span class="text-lg font-bold text-warning">{{ formatNumber(payrollRun()!.total_employer_costs) }}</span>
             </div>
-            <div class="p-3 bg-green-50 rounded-lg border border-green-100">
-              <span class="text-xs text-green-600 block">Neto a Pagar</span>
-              <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun()!.total_net_pay) }}</span>
+            <div class="p-3 bg-success-light rounded-lg border border-success">
+              <span class="text-xs text-success block">Neto a Pagar</span>
+              <span class="text-lg font-bold text-success">{{ formatNumber(payrollRun()!.total_net_pay) }}</span>
             </div>
           </div>
 
@@ -222,15 +222,15 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
                   @if (bankValidationResult(); as bv) {
                     <div class="text-xs rounded-md p-2 bg-[var(--color-surface)]">
                       <div class="flex items-center gap-3">
-                        <span class="text-[var(--color-success-text)] font-medium">{{ bv.valid.length }} validos</span>
-                        <span class="text-[var(--color-error-text)] font-medium">{{ bv.invalid.length }} con errores</span>
+                        <span class="text-[var(--color-success)] font-medium">{{ bv.valid.length }} validos</span>
+                        <span class="text-[var(--color-error)] font-medium">{{ bv.invalid.length }} con errores</span>
                       </div>
                       @if (bv.invalid.length > 0) {
                         <div class="mt-1 space-y-0.5">
                           @for (inv of bv.invalid; track inv.employee_id) {
                             <div class="flex items-start justify-between gap-2">
                               <span class="text-[var(--color-text-secondary)]">{{ inv.name }}</span>
-                              <span class="text-[var(--color-error-text)] text-[10px] text-right">{{ inv.errors.join(', ') }}</span>
+                              <span class="text-[var(--color-error)] text-[10px] text-right">{{ inv.errors.join(', ') }}</span>
                             </div>
                           }
                         </div>
@@ -342,7 +342,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
             <div class="mt-6 pt-4 border-t border-[var(--color-border)]">
               <label class="flex items-start gap-3 p-3 rounded-xl cursor-pointer select-none transition-all"
                      [class]="quickProcessEnabled()
-                        ? 'bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)]/30'
+                        ? 'bg-[var(--color-primary-light)] border-2 border-[var(--color-primary)]/30'
                         : 'bg-[var(--color-background)] border border-[var(--color-border)] hover:border-[var(--color-primary)]/20'">
                 <input type="checkbox"
                        [checked]="quickProcessEnabled()"
@@ -369,13 +369,13 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
             <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
               @if (!cancelConfirmStep()) {
                 <button (click)="cancelConfirmStep.set(1)"
-                        class="text-xs text-red-400 hover:text-red-600 underline underline-offset-2 transition-colors">
+                        class="text-xs text-error hover:text-error underline underline-offset-2 transition-colors">
                   Cancelar esta nomina
                 </button>
               } @else if (cancelConfirmStep() === 1) {
-                <div class="p-3 bg-red-50 rounded-xl border border-red-200">
-                  <p class="text-sm font-semibold text-red-700">Cancelar nomina {{ payrollRun()!.payroll_number }}</p>
-                  <p class="text-xs text-red-600 mt-1">
+                <div class="p-3 bg-error-light rounded-xl border border-error">
+                  <p class="text-sm font-semibold text-error">Cancelar nomina {{ payrollRun()!.payroll_number }}</p>
+                  <p class="text-xs text-error mt-1">
                     Esta accion no se puede deshacer. Todos los asientos contables asociados permaneceran registrados.
                   </p>
                   <div class="flex items-center gap-2 mt-3">
@@ -388,9 +388,9 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
                   </div>
                 </div>
               } @else if (cancelConfirmStep() === 2) {
-                <div class="p-3 bg-red-100 rounded-xl border-2 border-red-300">
-                  <p class="text-sm font-bold text-red-800">Confirmacion final</p>
-                  <p class="text-xs text-red-700 mt-1">
+                <div class="p-3 bg-error-light rounded-xl border-2 border-error">
+                  <p class="text-sm font-bold text-error">Confirmacion final</p>
+                  <p class="text-xs text-error mt-1">
                     Presione "Confirmar cancelacion" para cancelar definitivamente la nomina {{ payrollRun()!.payroll_number }}.
                   </p>
                   <div class="flex items-center gap-2 mt-3">
@@ -570,19 +570,19 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
       key: 'total_earnings_fmt',
       label: 'Devengado',
       align: 'right',
-      cellClass: () => 'text-blue-600',
+      cellClass: () => 'text-[var(--color-info)]',
     },
     {
       key: 'total_deductions_fmt',
       label: 'Deducciones',
       align: 'right',
-      cellClass: () => 'text-red-600',
+      cellClass: () => 'text-error',
     },
     {
       key: 'net_pay_fmt',
       label: 'Neto',
       align: 'right',
-      cellClass: () => 'font-semibold text-green-600',
+      cellClass: () => 'font-semibold text-success',
     },
   ];
 
@@ -1058,17 +1058,18 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
   }
 
   getStatusBadgeClass(status: string): string {
+    const neutral = 'bg-[var(--color-surface-secondary)] text-text-primary';
     const classes: Record<string, string> = {
-      draft: 'bg-gray-100 text-gray-800',
-      calculated: 'bg-blue-100 text-blue-800',
-      approved: 'bg-green-100 text-green-800',
-      sent: 'bg-blue-100 text-blue-800',
-      accepted: 'bg-green-100 text-green-800',
-      rejected: 'bg-red-100 text-red-800',
-      paid: 'bg-emerald-100 text-emerald-800',
-      cancelled: 'bg-gray-100 text-gray-800',
+      draft: neutral,
+      calculated: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      approved: 'bg-success-light text-success',
+      sent: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      accepted: 'bg-success-light text-success',
+      rejected: 'bg-error-light text-error',
+      paid: 'bg-success-light text-success',
+      cancelled: neutral,
     };
-    return classes[status] || 'bg-gray-100 text-gray-800';
+    return classes[status] || neutral;
   }
 
   getFrequencyLabel(frequency: string): string {

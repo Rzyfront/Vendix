@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import {
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import {
@@ -77,6 +80,10 @@ interface CategoryFormProps {
  *   - app/(store-admin)/products/categories/[id].tsx  (mode="edit")
  */
 export function CategoryForm({ mode, categoryId, onClose }: CategoryFormProps) {
+  // Safe area bottom: en dispositivos con gesture bar / home indicator,
+  // el paddingBottom del ScrollView debe sumar el inset para que el último
+  // campo del form no quede tapado al hacer scroll hasta el final.
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const isEdit = mode === 'edit';
@@ -207,8 +214,16 @@ export function CategoryForm({ mode, categoryId, onClose }: CategoryFormProps) {
         ]}
       />
 
+      {/* KeyboardAvoidingView envuelve el ScrollView: cuando el usuario
+          toca un Input y se abre el teclado, la vista se ajusta para que
+          el campo activo quede visible (iOS usa 'padding', Android ajusta
+          el layout nativo via windowSoftInputMode en el manifest). */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.kav}
+      >
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing[8] }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -326,6 +341,7 @@ export function CategoryForm({ mode, categoryId, onClose }: CategoryFormProps) {
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Modal reutilizable para tomar/elegir imagen. Mismo componente
           usado en product-upsert-form; aquí sólo necesitamos el URI
@@ -363,6 +379,9 @@ export function CategoryForm({ mode, categoryId, onClose }: CategoryFormProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  // KeyboardAvoidingView wrapper: full-flex para que el ScrollView ocupe
+  // todo el espacio disponible debajo del StickyHeader.
+  kav: { flex: 1 },
   content: {
     padding: spacing[4],
     gap: spacing[3],

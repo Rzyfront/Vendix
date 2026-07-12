@@ -28,6 +28,18 @@ export interface SalesAnalytics {
     revenue: number;
     count: number;
   }>;
+  /**
+   * Campos opcionales — los consume `sales.tsx` (sub-PR #4) para mostrar
+   * growth % y AOV en las StatCards. El backend `/store/analytics/sales`
+   * NO los devuelve hoy (404 — ver JSDoc en `analytics.service.ts`).
+   * Mientras tanto, el screen cae en empty state porque el query falla.
+   * Marcar como opcionales deja el shape `SalesAnalytics` compatible con
+   * el consumer nuevo sin perder el contrato con el shape original.
+   */
+  revenue_growth?: number;
+  orders_growth?: number;
+  average_order_value?: number;
+  total_units_sold?: number;
 }
 
 export interface InventoryAnalytics {

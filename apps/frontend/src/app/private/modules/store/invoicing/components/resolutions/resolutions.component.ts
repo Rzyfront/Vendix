@@ -1,5 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
-import { NgClass, DatePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -11,6 +11,7 @@ import {
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { ResolutionCreateComponent } from './resolution-create/resolution-create.component';
 
 /**
@@ -26,10 +27,10 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
   selector: 'vendix-resolutions',
   standalone: true,
   imports: [
-    NgClass,
     DatePipe,
     ButtonComponent,
     IconComponent,
+    BadgeComponent,
     ResolutionCreateComponent,
   ],
   template: `
@@ -68,16 +69,12 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
                     {{ resolution.prefix }} -
                     {{ resolution.resolution_number }}
                   </span>
-                  <span
-                    class="px-1.5 py-0.5 text-xs rounded-full"
-                    [ngClass]="
-                      resolution.is_active
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-gray-100 text-gray-500'
-                    "
+                  <app-badge
+                    [variant]="resolution.is_active ? 'success' : 'neutral'"
+                    size="xs"
                   >
                     {{ resolution.is_active ? 'Activa' : 'Inactiva' }}
-                  </span>
+                  </app-badge>
                 </div>
                 <div class="text-xs text-text-secondary space-y-0.5">
                   <div>
@@ -95,14 +92,14 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
               <div class="flex items-center gap-1 shrink-0">
                 <button
                   (click)="editResolution(resolution)"
-                  class="p-1.5 rounded-lg hover:bg-gray-100 transition-colors text-text-secondary hover:text-primary"
+                  class="p-1.5 rounded-lg hover:bg-[var(--color-surface-secondary)] transition-colors text-text-secondary hover:text-primary"
                   title="Editar"
                 >
                   <app-icon name="edit" [size]="14"></app-icon>
                 </button>
                 <button
                   (click)="onDeleteResolution(resolution.id)"
-                  class="p-1.5 rounded-lg hover:bg-red-50 transition-colors text-text-secondary hover:text-red-500"
+                  class="p-1.5 rounded-lg hover:bg-error-light transition-colors text-text-secondary hover:text-error"
                   title="Eliminar"
                 >
                   <app-icon name="trash-2" [size]="14"></app-icon>
@@ -116,7 +113,7 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
               <app-icon
                 name="file-text"
                 [size]="32"
-                class="text-gray-400 mx-auto mb-2"
+                class="text-text-secondary mx-auto mb-2"
               ></app-icon>
               <p class="text-text-secondary text-sm">
                 No hay resoluciones configuradas

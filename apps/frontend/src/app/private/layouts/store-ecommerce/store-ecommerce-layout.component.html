@@ -218,6 +218,145 @@
     </div>
   </header>
 
+  <!-- QR Table Banner (dine-in QR flow only) -->
+  @if (table_context.isActive()) {
+  <div class="table-banner" [class.table-banner--open-tab]="table_context.isOpenTab()"
+       [class.table-banner--require-staff]="table_context.isRequireStaff()">
+    <div class="table-banner-content">
+      <!-- Slim info line (siempre visible, 1 renglón, truncable) -->
+      <div class="table-banner-info">
+        <app-icon [name]="table_context.isOpenTab() ? 'concierge-bell' : 'utensils'" [size]="18"></app-icon>
+        <span class="table-banner-name">Mesa {{ table_context.tableName() }}</span>
+        @if (table_context.isOpenTab()) {
+        <span class="table-banner-status">Cuenta abierta</span>
+        } @else if (table_context.isRequireStaff()) {
+        <span class="table-banner-status">Esperando mesero</span>
+        } @else if (table_context.isMenuOnly()) {
+        <span class="table-banner-status">Carta digital</span>
+        } @else if (table_context.isMarkOccupied()) {
+        <span class="table-banner-status">Mesa ocupada</span>
+        }
+
+        <!-- Live kitchen status (SSE, GAP-3) -->
+        @if (table_sse.orderStatus(); as status) {
+        <span class="table-banner-order-status" [attr.data-status]="status">
+          @switch (status) {
+            @case ('listo') {
+            <app-icon name="bell-ring" [size]="15"></app-icon>
+            <span>Tu pedido está listo</span>
+            }
+            @case ('en-preparación') {
+            <app-icon name="chef-hat" [size]="15"></app-icon>
+            <span>En preparación</span>
+            }
+            @case ('enviado-a-cocina') {
+            <app-icon name="utensils" [size]="15"></app-icon>
+            <span>Enviado a cocina</span>
+            }
+            @case ('entregado') {
+            <app-icon name="check" [size]="15"></app-icon>
+            <span>Entregado</span>
+            }
+          }
+        </span>
+        }
+      </div>
+
+      <!-- Acciones inline (desktop ≥ md) -->
+      <div class="table-banner-actions">
+        @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+        <app-button variant="ghost" size="sm" [loading]="table_context.calling_waiter()" (clicked)="callWaiter()">
+          <app-icon slot="icon" name="concierge-bell" [size]="16"></app-icon>
+          Llamar al mesero
+        </app-button>
+        }
+        @if (table_context.isOpenTab()) {
+        <app-button variant="ghost" size="sm" (clicked)="is_bill_modal_open.set(true)">
+          <app-icon slot="icon" name="list" [size]="16"></app-icon>
+          Ver mi cuenta
+        </app-button>
+        <app-button variant="ghost" size="sm" [loading]="table_context.requesting_bill()" (clicked)="requestBill()">
+          <app-icon slot="icon" name="receipt" [size]="16"></app-icon>
+          Pedir la cuenta
+        </app-button>
+        <app-button variant="ghost" size="sm" [loading]="table_context.requesting_bill()" (clicked)="requestSplit()">
+          <app-icon slot="icon" name="split" [size]="16"></app-icon>
+          Dividir cuenta
+        </app-button>
+        <span class="table-banner-guests" title="Comensales en la mesa">
+          <app-icon name="users" [size]="15"></app-icon>
+          <app-quantity-control
+            [value]="guest_count()"
+            (valueChange)="onGuestCountChange($event)"
+            size="sm"
+            [min]="1"
+          ></app-quantity-control>
+        </span>
+        }
+      </div>
+
+      <!-- Disparador del bottom-sheet (móvil < md) -->
+      @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+      <button type="button" class="table-banner-trigger" (click)="openActionsSheet()" aria-label="Acciones de mesa">
+        <app-icon name="more-horizontal" [size]="18"></app-icon>
+        <span>Acciones</span>
+      </button>
+      }
+    </div>
+  </div>
+
+  <!-- Bottom-sheet de acciones (móvil < md; solo flujo dine-in QR) -->
+  @if (is_actions_sheet_open()) {
+  <div class="table-action-sheet" [class.table-action-sheet--open-tab]="table_context.isOpenTab()">
+    <div class="table-action-sheet__backdrop" (click)="closeActionsSheet()"></div>
+    <div class="table-action-sheet__panel" role="dialog" aria-modal="true" aria-label="Acciones de mesa">
+      <span class="table-action-sheet__grip" aria-hidden="true"></span>
+      <div class="table-action-sheet__header">
+        <span class="table-action-sheet__title">
+          <app-icon [name]="table_context.isOpenTab() ? 'concierge-bell' : 'utensils'" [size]="18"></app-icon>
+          Mesa {{ table_context.tableName() }}
+        </span>
+        <button type="button" class="table-action-sheet__close" (click)="closeActionsSheet()" aria-label="Cerrar">
+          <app-icon name="close" [size]="20"></app-icon>
+        </button>
+      </div>
+      <div class="table-action-sheet__body">
+        @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+        <button type="button" class="table-action-row" [disabled]="table_context.calling_waiter()" (click)="callWaiter(); closeActionsSheet()">
+          <app-icon name="concierge-bell" [size]="20"></app-icon>
+          <span>Llamar al mesero</span>
+        </button>
+        }
+        @if (table_context.isOpenTab()) {
+        <button type="button" class="table-action-row" (click)="is_bill_modal_open.set(true); closeActionsSheet()">
+          <app-icon name="list" [size]="20"></app-icon>
+          <span>Ver mi cuenta</span>
+        </button>
+        <button type="button" class="table-action-row" [disabled]="table_context.requesting_bill()" (click)="requestBill(); closeActionsSheet()">
+          <app-icon name="receipt" [size]="20"></app-icon>
+          <span>Pedir la cuenta</span>
+        </button>
+        <button type="button" class="table-action-row" [disabled]="table_context.requesting_bill()" (click)="requestSplit(); closeActionsSheet()">
+          <app-icon name="split" [size]="20"></app-icon>
+          <span>Dividir cuenta</span>
+        </button>
+        <div class="table-action-row table-action-row--guests">
+          <app-icon name="users" [size]="20"></app-icon>
+          <span>Comensales</span>
+          <app-quantity-control
+            [value]="guest_count()"
+            (valueChange)="onGuestCountChange($event)"
+            size="sm"
+            [min]="1"
+          ></app-quantity-control>
+        </div>
+        }
+      </div>
+    </div>
+  </div>
+  }
+  }
+
   <!-- Main Content -->
   <main class="ecommerce-main">
     <router-outlet></router-outlet>
@@ -422,4 +561,37 @@
   [content]="footer_settings()?.help?.returns_info || ''"
   (closed)="show_returns_modal.set(false)">
 </app-info-modal>
+}
+
+<!-- QR dine-in — Mi cuenta modal (GAP-5) -->
+@if (table_context.isOpenTab()) {
+<app-modal
+  [(isOpen)]="is_bill_modal_open"
+  title="Mi cuenta"
+  size="sm"
+  (opened)="loadBill()">
+  @if (table_context.loading_bill()) {
+  <p class="bill-empty">Cargando tu cuenta…</p>
+  } @else if (table_context.bill(); as bill) {
+    @if (bill.items.length) {
+    <ul class="bill-items">
+      @for (item of bill.items; track $index) {
+      <li class="bill-item">
+        <span class="bill-item-name">{{ item.name }}</span>
+        <span class="bill-item-qty">× {{ item.quantity }}</span>
+        <span class="bill-item-total">{{ item.total | currency }}</span>
+      </li>
+      }
+    </ul>
+    } @else {
+    <p class="bill-empty">Aún no has agregado nada a tu cuenta.</p>
+    }
+  } @else {
+  <p class="bill-empty">No pudimos cargar tu cuenta.</p>
+  }
+  <div slot="footer" class="bill-footer">
+    <span>Total</span>
+    <span class="bill-footer-total">{{ table_context.bill()?.grand_total | currency }}</span>
+  </div>
+</app-modal>
 }

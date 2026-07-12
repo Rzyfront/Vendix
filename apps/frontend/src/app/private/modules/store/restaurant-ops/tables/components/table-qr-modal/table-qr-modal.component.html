@@ -1,0 +1,45 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  [size]="'sm'"
+  [title]="title()"
+  subtitle="Escanea para abrir la carta de la mesa"
+>
+  @if (isLoading()) {
+    <div class="flex flex-col items-center justify-center py-10 gap-2">
+      <app-spinner size="md"></app-spinner>
+      <p class="text-sm text-text-secondary">Generando QR...</p>
+    </div>
+  } @else if (qrDataUrl() && publicUrl()) {
+    <div class="flex flex-col items-center gap-4 py-2">
+      <img
+        [src]="qrDataUrl()!"
+        alt="QR de la mesa"
+        class="w-56 h-56 rounded-lg border border-border bg-white"
+      />
+      <div class="w-full text-center">
+        <p class="text-xs text-text-muted mb-1">URL publica de la mesa</p>
+        <p class="text-xs text-text-secondary break-all font-mono">
+          {{ publicUrl() }}
+        </p>
+      </div>
+    </div>
+  } @else {
+    <div class="flex flex-col items-center justify-center py-10 gap-2">
+      <p class="text-sm text-text-secondary">No se pudo cargar el QR.</p>
+    </div>
+  }
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="ghost" (clicked)="onCancel()">Cerrar</app-button>
+    <app-button
+      variant="primary"
+      [disabled]="isLoading() || !qrDataUrl()"
+      (clicked)="onPrint()"
+    >
+      <app-icon slot="icon" name="printer" [size]="16"></app-icon>
+      Imprimir
+    </app-button>
+  </div>
+</app-modal>

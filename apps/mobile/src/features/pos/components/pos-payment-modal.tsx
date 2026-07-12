@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, Pressable, TextInput, StyleSheet, ScrollView,
-  FlatList, KeyboardAvoidingView, Platform, Keyboard, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -15,6 +15,8 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type { PaymentMethod, PosCustomer } from '@/features/store/types';
 import type { CreatePosPaymentDto } from '@/features/store/types';
+import { CheckoutStepIndicator } from './checkout-step-indicator';
+import { PosCustomerModal } from './pos-customer-modal';
 
 function resolvePositiveId(...values: unknown[]): number | undefined {
   for (const value of values) {
@@ -67,6 +69,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
   const [isAnonymous, setIsAnonymous] = useState(false);
 
   const [showCustomerSearch, setShowCustomerSearch] = useState(false);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerSearchResults, setCustomerSearchResults] = useState<PosCustomer[]>([]);
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
@@ -354,6 +357,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
           </Pressable>
         </View>
 
+        {/* Step indicator — UX: el usuario siempre sabe en qué paso está. */}
+        <CheckoutStepIndicator currentStep="payment" />
+        <View style={styles.stepDivider} />
+
         {/* Content - all sections stacked */}
         <ScrollView
           style={styles.scrollContent}
@@ -600,7 +607,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                   </View>
                   <Pressable
                     style={styles.changeCustomerBtn}
-                    onPress={() => setShowCustomerSearch(true)}
+                    onPress={() => setShowCustomerModal(true)}
                   >
                     <Icon name="edit-2" size={14} color={colors.primary} />
                   </Pressable>
@@ -613,10 +620,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
                   {!customer && !showCustomerSearch && (
                     <Pressable
                       style={styles.selectCustomerBtn}
-                      onPress={() => setShowCustomerSearch(true)}
+                      onPress={() => setShowCustomerModal(true)}
                     >
                       <Icon name="user-plus" size={18} color={colors.primary} />
-                      <Text style={styles.selectCustomerText}>Seleccionar Cliente</Text>
+                      <Text style={styles.selectCustomerText}>Buscar Cliente ...</Text>
                     </Pressable>
                   )}
 
@@ -783,6 +790,18 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+
+      <PosCustomerModal
+        visible={showCustomerModal}
+        onClose={() => setShowCustomerModal(false)}
+        onSelectCustomer={(c) => {
+          if (c) {
+            setCustomer(c);
+            setIsAnonymous(false);
+          }
+          setShowCustomerModal(false);
+        }}
+      />
     </View>
   );
 }
@@ -822,6 +841,10 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.semibold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
+  },
+  stepDivider: {
+    height: 1,
+    backgroundColor: colorScales.gray[100],
   },
   sectionTabs: {
     flexDirection: 'row',

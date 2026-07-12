@@ -548,6 +548,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
   KITCHEN_TICKET_REVERT_ORDER_FINISHED:
     'La orden ya esta finalizada; no se puede revertir la entrega del ticket.',
   KITCHEN_TICKET_NOT_FOUND: 'Ticket de cocina no encontrado.',
+
+  // QR Table dine-in (comensal — cuenta de mesa)
+  TABLE_SESSION_ADD_ITEMS_INVALID:
+    'No se pudieron agregar los productos a la cuenta de la mesa. Verifica que estén disponibles e intenta de nuevo.',
+  MENU_ITEM_NOT_AVAILABLE_NOW:
+    'Este producto no está disponible en este momento (fuera del horario del menú).',
+  TABLE_GUEST_COUNT_EXCEEDS_CAPACITY:
+    'El número de comensales supera la capacidad de la mesa.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

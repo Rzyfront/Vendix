@@ -1,0 +1,468 @@
+// =============================================================================
+// Provider Availability — Mobile-first styles (Vendix tokens)
+// =============================================================================
+
+:host {
+  display: block;
+  background: var(--color-background, #f4f4f4);
+  min-height: 100%;
+}
+
+.provider-availability {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+// ===== Tokens ===============================================================
+
+$surface: var(--color-surface, #ffffff);
+$surface-2: var(--color-surface-secondary, #f8fafc);
+$surface-hover: var(--color-surface-hover, #f1f5f9);
+$border: var(--color-border, #e6edf3);
+$border-soft: var(--color-border-soft, #f1f5f9);
+$primary: var(--color-primary, #2ecc71);
+$primary-rgb: var(--color-primary-rgb, 126, 215, 165);
+$primary-soft: rgba($primary-rgb, 0.12);
+$primary-softer: rgba($primary-rgb, 0.06);
+$on-primary: var(--color-text-on-primary, #ffffff);
+$accent: var(--color-accent, #a1f4d9);
+$text-primary: var(--color-text-primary, #0f172a);
+$text-secondary: var(--color-text-secondary, #64748b);
+$text-muted: var(--color-text-muted, #94a3b8);
+$danger: var(--color-destructive, #c46363);
+$danger-soft: rgba(196, 99, 99, 0.12);
+$success: var(--color-success, #22c55e);
+$warning: var(--color-warning, #fb923c);
+$radius-sm: var(--radius-sm, 0.25rem);
+$radius-md: var(--radius-md, 0.5rem);
+$radius-lg: var(--radius-lg, 0.75rem);
+$shadow-sm: var(--shadow-sm, 0 1px 2px rgba(15, 23, 42, 0.05));
+$touch-min: 2.75rem;
+
+// ===== Stats =================================================================
+
+.pa-stats {
+  margin: 0;
+}
+
+// ===== Toolbar (header inline: title + search + actions) =====================
+// Mirrors the Productos/Órdenes module header pattern: title left, search +
+// action buttons right with proper spacing. Critical: `min-width: 0` on the
+// controls wrapper + `flex-shrink` strategy so the buttons don't get clipped
+// at narrower viewports.
+
+.pa-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid $border;
+  background: $surface;
+  flex-wrap: wrap;
+
+  &__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: $text-primary;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  &__count {
+    font-weight: 400;
+    color: $text-muted;
+    margin-left: 4px;
+  }
+
+  &__controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  &__search {
+    flex: 0 1 240px; // shrinkable, ideal 240px
+    min-width: 160px;
+
+    @media (max-width: 640px) {
+      flex: 1 1 100%;
+      order: 1;
+    }
+  }
+
+  &__action {
+    flex-shrink: 0; // buttons never shrink below their natural size
+  }
+}
+
+// ===== Filters row (always visible inline) ===================================
+
+.pa-filters-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid $border-soft;
+  flex-wrap: wrap;
+
+  &__group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 130px;
+
+    @media (max-width: 640px) {
+      min-width: 0;
+      flex: 1 1 calc(50% - 6px);
+    }
+  }
+
+  &__label {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: $text-muted;
+  }
+
+  &__presets {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+
+    @media (max-width: 640px) {
+      margin-left: 0;
+      width: 100%;
+    }
+  }
+}
+
+// Modern input
+.pa-input {
+  background: var(--color-background, #f4f4f4);
+  border: 1px solid transparent;
+  border-radius: $radius-md;
+  color: $text-primary;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
+
+  &--sm {
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+
+  &:hover { border-color: $primary; }
+
+  &:focus {
+    outline: none;
+    background: $surface;
+    border-color: $primary;
+    box-shadow: 0 0 0 3px $primary-soft;
+  }
+}
+
+// Preset chips
+.pa-preset {
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: $radius-md;
+  border: 1px solid $border;
+  background: $surface;
+  color: $text-primary;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease-out,
+    border-color 150ms ease-out,
+    transform 100ms ease-out;
+
+  &:hover {
+    background: $surface-hover;
+    border-color: $primary;
+  }
+
+  &:active { transform: scale(0.98); }
+
+  &:focus-visible {
+    outline: 2px solid $primary;
+    outline-offset: 2px;
+  }
+}
+
+// ===== Table wrapper =========================================================
+
+.pa-table-wrapper {
+  min-height: 200px;
+  padding: 0 16px;
+}
+
+// Occupancy semantic colors (used by responsive-data-view cardConfig badges)
+.occ-low { color: $success; }
+.occ-mid { color: $warning; }
+.occ-high { color: $danger; }
+
+// ===== Loading & Empty states ===============================================
+
+.pa-loading {
+  padding: 48px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: $text-secondary;
+  font-size: 14px;
+}
+
+.pa-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba($primary-rgb, 0.25);
+  border-top-color: $primary;
+  animation: pa-spin 0.7s linear infinite;
+}
+
+@keyframes pa-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-spinner { animation: none; }
+  .pa-input,
+  .pa-preset { transition: none; }
+}
+
+.pa-empty {
+  padding: 56px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+
+  &__icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: $primary-softer;
+    color: $primary;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+
+  &__title {
+    font-size: 17px;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  &__desc {
+    margin: 0;
+    max-width: 44ch;
+    color: $text-secondary;
+    font-size: 14px;
+    line-height: 1.5;
+
+    strong {
+      color: $text-primary;
+      font-weight: 600;
+    }
+  }
+}
+
+// ===== Day detail modal =====================================================
+
+.pa-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 380px;
+
+  &__summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 14px;
+    background: var(--color-background, #f4f4f4);
+    border-radius: $radius-md;
+  }
+
+  &__stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  &__stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: $text-muted;
+    margin-bottom: 4px;
+  }
+
+  &__stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+
+    &--busy { color: $danger; }
+    &--free { color: $success; }
+  }
+
+  // Working window banner (e.g. "7:00 AM – 10:00 PM, 30 min/slot")
+  &__workwindow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: $primary-softer;
+    border-radius: $radius-md;
+    font-size: 13px;
+    color: $text-secondary;
+
+    app-icon { color: $primary; }
+    strong { color: $text-primary; font-weight: 600; }
+  }
+
+  &__legend {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    padding: 6px 0;
+  }
+
+  &__legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: $text-secondary;
+
+    app-icon { flex-shrink: 0; }
+  }
+
+  &__legend-swatch {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+
+    &--busy { background: rgba($danger, 0.2); border: 1px solid $danger; }
+    &--free { background: rgba($success, 0.15); border: 1px solid $success; }
+  }
+
+  // Morning / Afternoon section (grouped)
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: $text-muted;
+    padding: 0 4px;
+
+    app-icon { color: $primary; }
+  }
+
+  &__section-count {
+    font-weight: 500;
+    color: $text-muted;
+    margin-left: 2px;
+  }
+
+  &__slots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 6px;
+  }
+
+  &__slot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: $radius-sm;
+    font-size: 12px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    transition: filter 150ms ease-out;
+
+    &:hover { filter: brightness(0.96); }
+
+    &--busy {
+      background: rgba($danger, 0.12);
+      color: $danger;
+      border: 1px solid rgba($danger, 0.3);
+    }
+
+    &--free {
+      background: rgba($success, 0.1);
+      color: $success;
+      border: 1px solid rgba($success, 0.25);
+    }
+  }
+
+  &__note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba($primary-rgb, 0.06);
+    border-radius: $radius-sm;
+    font-size: 12px;
+    color: $text-secondary;
+    line-height: 1.4;
+    margin: 0;
+
+    app-icon {
+      flex-shrink: 0;
+      color: $primary;
+      margin-top: 2px;
+    }
+  }
+
+  &__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 32px 16px;
+    text-align: center;
+    color: $text-secondary;
+
+    p {
+      margin: 0;
+      max-width: 36ch;
+    }
+  }
+}

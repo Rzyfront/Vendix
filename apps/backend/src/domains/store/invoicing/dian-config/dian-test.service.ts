@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as AdmZip from 'adm-zip';
+import AdmZip = require('adm-zip');
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { S3Service } from '../../../../common/services/s3.service';
@@ -9,6 +9,7 @@ import {
   DianSoapClient,
   WsSecurityCredentials,
 } from '../providers/dian-direct/dian-soap.client';
+import { DianSendBillResponse } from '../providers/dian-direct/interfaces/dian-response.interface';
 import { DianResponseParserService } from '../providers/dian-direct/dian-response-parser.service';
 import { DianXmlSignerService } from '../providers/dian-direct/dian-xml-signer.service';
 import { UblInvoiceBuilder } from '../providers/dian-direct/xml/ubl-invoice.builder';
@@ -21,6 +22,14 @@ import {
   DianCustomerData,
 } from '../providers/dian-direct/interfaces/dian-config.interface';
 import { ProviderInvoiceData } from '../providers/invoice-provider.interface';
+
+/** One GetStatusZip poll attempt recorded in last_test_result for diagnostics. */
+export interface TestSetPollAttempt {
+  attempt: number;
+  status_code: string;
+  status_message: string;
+  success: boolean;
+}
 
 @Injectable()
 export class DianTestService {
@@ -45,6 +54,41 @@ export class DianTestService {
     }
 
     return config;
+  }
+
+  /**
+   * Extracts WS-Security credentials (private key + DER cert) from the config's
+   * stored .p12. Returns undefined and logs a warning if the certificate is
+   * missing or cannot be opened, so callers degrade gracefully.
+   */
+  private async loadWsCredentials(config: {
+    certificate_s3_key: string | null;
+    certificate_password_encrypted: string | null;
+  }): Promise<WsSecurityCredentials | undefined> {
+    if (!config.certificate_s3_key || !config.certificate_password_encrypted) {
+      return undefined;
+    }
+    try {
+      const cert_password = this.encryption.decrypt(
+        config.certificate_password_encrypted,
+      );
+      const p12_buffer = await this.s3_service.downloadImage(
+        config.certificate_s3_key,
+      );
+      const creds = this.xml_signer.extractCredentials(
+        p12_buffer,
+        cert_password,
+      );
+      return {
+        private_key_pem: creds.private_key_pem,
+        certificate_der_base64: creds.certificate_der_base64,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to extract WS-Security credentials, continuing without: ${error.message}`,
+      );
+      return undefined;
+    }
   }
 
   /**
@@ -166,6 +210,20 @@ export class DianTestService {
       );
     }
 
+    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
+    // numbering-resolution row so the AuthorizedInvoices range and authorization
+    // period rendered in the XML are the real habilitación values, not empty.
+    const control = {
+      invoice_authorization: resolution.resolution_number,
+      authorization_start_date: resolution.valid_from
+        .toISOString()
+        .split('T')[0],
+      authorization_end_date: resolution.valid_to.toISOString().split('T')[0],
+      prefix: resolution.prefix,
+      range_from: String(resolution.range_from),
+      range_to: String(resolution.range_to),
+    };
+
     // 3. Build issuer data from config + organization
     const context = RequestContextService.getContext();
     if (!context) {
@@ -283,6 +341,7 @@ export class DianTestService {
         invoice_number,
         invoice_type: '01',
         issue_date: today,
+        issue_time: time_now,
         subtotal_amount: subtotal,
         discount_amount: '0.00',
         tax_amount: tax,
@@ -312,6 +371,7 @@ export class DianTestService {
 
       let xml = UblInvoiceBuilder.build({
         invoice_data,
+        control,
         issuer,
         customer,
         software_security: {
@@ -364,6 +424,7 @@ export class DianTestService {
         invoice_number: note_number,
         invoice_type: '92',
         issue_date: today,
+        issue_time: time_now,
         subtotal_amount: subtotal,
         discount_amount: '0.00',
         tax_amount: tax,
@@ -394,6 +455,7 @@ export class DianTestService {
 
       let xml = UblDebitNoteBuilder.build({
         debit_note_data,
+        control,
         issuer,
         customer,
         software_security: {
@@ -447,6 +509,7 @@ export class DianTestService {
         invoice_number: note_number,
         invoice_type: '91',
         issue_date: today,
+        issue_time: time_now,
         subtotal_amount: subtotal,
         discount_amount: '0.00',
         tax_amount: tax,
@@ -477,6 +540,7 @@ export class DianTestService {
 
       let xml = UblCreditNoteBuilder.build({
         credit_note_data,
+        control,
         issuer,
         customer,
         software_security: {
@@ -501,8 +565,10 @@ export class DianTestService {
     // 7. Build multi-file ZIP
     const zip_base64 = this.buildMultiFileZip(files);
 
-    // 8. Send to DIAN
-    const response = await this.soap_client.sendTestSetAsync(
+    // 8. Submit to DIAN. SendTestSetAsync is ASYNCHRONOUS: DIAN only returns a
+    //    ZipKey acknowledgement here; the real validation verdict is obtained
+    //    afterwards by polling GetStatusZip(ZipKey).
+    const submit = await this.soap_client.sendTestSetAsync(
       zip_base64,
       'test_set.zip',
       config.test_set_id,
@@ -510,57 +576,236 @@ export class DianTestService {
       ws_credentials,
     );
 
-    // 9. Save result
+    const zip_key = submit.zip_key ?? null;
+
+    // 9. Poll GetStatusZip for the verdict (bounded, so the synchronous HTTP
+    //    request does not exceed the reverse-proxy timeout). If the set is still
+    //    processing when the window closes, the persisted zip_key lets the
+    //    GET :id/test-set-status endpoint re-poll without re-sending documents.
+    const poll_history: TestSetPollAttempt[] = [];
+    let verdict: DianSendBillResponse = submit;
+    if (zip_key) {
+      verdict = await this.pollTestSetStatus(
+        zip_key,
+        environment,
+        ws_credentials,
+        poll_history,
+      );
+    }
+
+    const success = verdict.success;
+    // A verdict is "still processing" ONLY when we never reached a terminal
+    // state (no numeric StatusCode / fault / error list). A terminal non-success
+    // (e.g. DIAN StatusCode 2 "set Rechazado") is a REJECTION, not pending.
+    const terminal = zip_key ? this.isTerminalZipStatus(verdict) : true;
+    const still_processing = !!zip_key && !success && !terminal;
+    const rejected = !success && !still_processing;
+
+    // 10. Persist result + raw evidence (DIAN's exact status XML for diagnosis).
     const result_data = {
       executed_at: new Date().toISOString(),
       total_documents: files.length,
       invoices: 30,
       debit_notes: 10,
       credit_notes: 10,
+      zip_key,
       dian_response: {
-        success: response.success,
-        status_code: response.status_code,
-        status_message: response.status_message,
+        success: verdict.success,
+        status_code: verdict.status_code,
+        status_message: verdict.status_message,
+        error_messages: verdict.error_messages ?? [],
+        raw_response: verdict.raw_response?.slice(0, 12000),
       },
-      tracking_id: response.status_code,
+      poll_history,
+      pending: still_processing,
+      rejected,
+      tracking_id: zip_key ?? verdict.status_code,
     };
 
     await this.prisma.dian_configurations.update({
       where: { id: config_id },
       data: {
         last_test_result: result_data,
-        enablement_status: response.success ? 'test_set_passed' : 'testing',
-        enablement_evidence: response.success ? result_data : undefined,
+        enablement_status: success ? 'test_set_passed' : 'testing',
+        enablement_evidence: success ? result_data : undefined,
       },
     });
 
     await this.createAuditLog(config.id, {
       action: 'run_test_set',
-      status: response.success ? 'success' : 'error',
-      error_message: response.success ? null : response.status_message,
-      duration_ms: response.duration_ms,
+      status: success ? 'success' : 'error',
+      error_message: success
+        ? null
+        : verdict.error_messages?.join(' | ') || verdict.status_message,
+      duration_ms: verdict.duration_ms,
     });
 
     const is_ws_security_error =
-      response.is_soap_fault === true &&
-      response.raw_response?.includes('InvalidSecurity');
+      submit.is_soap_fault === true &&
+      submit.raw_response?.includes('InvalidSecurity');
 
     return {
-      success: response.success,
+      success,
       documents_generated: true,
-      message: response.success
-        ? 'Set de pruebas procesado exitosamente por la DIAN'
+      message: success
+        ? 'Set de pruebas procesado y validado por la DIAN.'
         : is_ws_security_error
-          ? '50 documentos generados y firmados correctamente. Pendiente: firma WS-Security del envelope SOAP.'
-          : `Error al enviar set de pruebas: ${response.status_message}`,
+          ? '50 documentos generados y firmados. La DIAN rechazó la firma WS-Security del envelope SOAP.'
+          : verdict.error_messages?.length
+            ? `La DIAN reportó errores de validación: ${verdict.error_messages.join(' | ')}`
+            : still_processing
+              ? `Set recibido por la DIAN (ZipKey ${zip_key}); aún en proceso tras ${poll_history.length} consultas. Consulta GET :id/test-set-status en unos minutos.`
+              : `Set de pruebas RECHAZADO por la DIAN: ${verdict.status_message}`,
       tracking_id: result_data.tracking_id,
       total_documents: 50,
       invoices_count: 30,
       debit_notes_count: 10,
       credit_notes_count: 10,
       environment,
-      dian_status: response.status_code,
+      dian_status: verdict.status_code,
+      error_messages: verdict.error_messages ?? [],
+      zip_key,
+      pending: still_processing,
+      rejected,
     };
+  }
+
+  /**
+   * Re-polls GetStatusZip for a previously submitted test set using the stored
+   * ZipKey. Lets the caller resolve a verdict that was still "in process" when
+   * run-test-set returned — WITHOUT re-sending the 50 documents (which would
+   * burn resolution numbers). Updates last_test_result / enablement_status.
+   */
+  async checkTestSetStatus(config_id: number) {
+    const config = await this.getConfigById(config_id);
+    const environment = config.environment as 'test' | 'production';
+
+    const previous = (config.last_test_result ?? {}) as Record<string, any>;
+    const zip_key: string | null = previous.zip_key ?? null;
+
+    if (!zip_key) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'No hay un ZipKey de set de pruebas registrado. Ejecuta primero run-test-set.',
+      );
+    }
+
+    const ws_credentials = await this.loadWsCredentials(config);
+
+    const poll_history: TestSetPollAttempt[] = [];
+    const verdict = await this.pollTestSetStatus(
+      zip_key,
+      environment,
+      ws_credentials,
+      poll_history,
+    );
+
+    const success = verdict.success;
+    // Terminal non-success (real StatusCode / fault / errors) == rejected, not pending.
+    const still_processing = !success && !this.isTerminalZipStatus(verdict);
+    const rejected = !success && !still_processing;
+
+    const result_data = {
+      ...previous,
+      rechecked_at: new Date().toISOString(),
+      zip_key,
+      dian_response: {
+        success: verdict.success,
+        status_code: verdict.status_code,
+        status_message: verdict.status_message,
+        error_messages: verdict.error_messages ?? [],
+        raw_response: verdict.raw_response?.slice(0, 12000),
+      },
+      poll_history,
+      pending: still_processing,
+      rejected,
+    };
+
+    await this.prisma.dian_configurations.update({
+      where: { id: config_id },
+      data: {
+        last_test_result: result_data,
+        // Only ever promote enablement_status; never demote a passed set.
+        enablement_status: success
+          ? 'test_set_passed'
+          : config.enablement_status,
+        // Only write evidence on success; leave the prior value untouched otherwise.
+        ...(success && { enablement_evidence: result_data }),
+      },
+    });
+
+    return {
+      success,
+      pending: still_processing,
+      rejected,
+      zip_key,
+      dian_status: verdict.status_code,
+      status_message: verdict.status_message,
+      error_messages: verdict.error_messages ?? [],
+      poll_history,
+    };
+  }
+
+  /**
+   * Polls GetStatusZip until DIAN returns a terminal verdict or the bounded
+   * attempts are exhausted. Records each attempt in `poll_history`.
+   */
+  private async pollTestSetStatus(
+    zip_key: string,
+    environment: 'test' | 'production',
+    ws_credentials: WsSecurityCredentials | undefined,
+    poll_history: TestSetPollAttempt[],
+  ): Promise<DianSendBillResponse> {
+    const max_attempts = 6;
+    const delay_ms = 5_000;
+    let last: DianSendBillResponse | null = null;
+
+    for (let attempt = 1; attempt <= max_attempts; attempt++) {
+      // Give DIAN a moment to process the batch before each poll.
+      await this.sleep(delay_ms);
+
+      const status = await this.soap_client.getStatusZip(
+        zip_key,
+        environment,
+        ws_credentials,
+      );
+      last = status;
+
+      poll_history.push({
+        attempt,
+        status_code: status.status_code,
+        status_message: status.status_message,
+        success: status.success,
+      });
+
+      this.logger.log(
+        `[DIAN test-set] GetStatusZip ${attempt}/${max_attempts} ` +
+          `zipKey=${zip_key} status=${status.status_code} success=${status.success}`,
+      );
+
+      if (this.isTerminalZipStatus(status)) {
+        return status;
+      }
+    }
+
+    return last as DianSendBillResponse;
+  }
+
+  /**
+   * A GetStatusZip response is terminal (batch processed) when DIAN returns a
+   * numeric <b:StatusCode>, a SOAP fault, or a populated ErrorMessageList.
+   * Otherwise the batch is still being processed and we keep polling.
+   */
+  private isTerminalZipStatus(status: DianSendBillResponse): boolean {
+    if (status.is_soap_fault === true) return true;
+    if ((status.error_messages?.length ?? 0) > 0) return true;
+    return /<b:StatusCode>\s*\d+\s*<\/b:StatusCode>/.test(
+      status.raw_response || '',
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**

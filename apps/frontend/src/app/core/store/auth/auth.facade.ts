@@ -163,6 +163,10 @@ export class AuthFacade {
   readonly isAuthenticated = toSignal(this.isAuthenticated$, { initialValue: false });
   readonly authLoading = toSignal(this.loading$, { initialValue: false });
   readonly authError = toSignal(this.error$, { initialValue: null });
+  readonly passwordResetEmailSent = toSignal(
+    this.store.select(AuthSelectors.selectPasswordResetEmailSent),
+    { initialValue: false },
+  );
   readonly userRole = toSignal(this.userRole$, { initialValue: null as string | null });
   readonly userRoles = toSignal(this.userRoles$, { initialValue: [] as string[] });
   readonly userPermissions = toSignal(this.userPermissions$, { initialValue: [] as string[] });
@@ -380,6 +384,26 @@ export class AuthFacade {
     this.store.dispatch(
       AuthActions.resetOwnerPassword({ token, new_password }),
     );
+  }
+
+  forgotCustomerPassword(email: string, store_id: number): void {
+    this.store.dispatch(
+      AuthActions.forgotCustomerPassword({ email, store_id }),
+    );
+  }
+
+  resetCustomerPassword(
+    token: string,
+    new_password: string,
+    store_id?: number,
+  ): void {
+    this.store.dispatch(
+      AuthActions.resetCustomerPassword({ token, new_password, store_id }),
+    );
+  }
+
+  clearPasswordResetState(): void {
+    this.store.dispatch(AuthActions.clearPasswordResetState());
   }
 
   verifyEmail(token: string): void {

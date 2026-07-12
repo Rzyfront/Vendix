@@ -129,4 +129,10 @@
     (isOpenChange)="closeForm()"
     (saved)="onFormSaved()"
   />
+
+  <app-table-qr-modal
+    [isOpen]="isQrOpen()"
+    [table]="qrTable()"
+    (isOpenChange)="closeQr()"
+  />
 </div>

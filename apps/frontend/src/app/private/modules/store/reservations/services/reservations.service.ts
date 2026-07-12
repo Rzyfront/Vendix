@@ -12,6 +12,8 @@ import {
   ServiceProvider,
   ProviderSchedule,
   ProviderException,
+  ProviderAvailabilityOverview,
+  AvailabilityOverviewQuery,
 } from '../interfaces/reservation.interface';
 
 export interface PaginatedResponse<T> {
@@ -159,6 +161,58 @@ export class ReservationsService {
     return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  /**
+   * Aggregated per-provider × per-day availability overview for the
+   * /admin/reservations/availability dashboard.
+   *
+   * @see `provider-availability.service.ts` on the backend.
+   */
+  getAvailabilityOverview(
+    query: AvailabilityOverviewQuery,
+  ): Observable<ProviderAvailabilityOverview> {
+    let params = new HttpParams()
+      .set('date_from', query.date_from)
+      .set('date_to', query.date_to);
+
+    if (query.provider_id)
+      params = params.set('provider_id', query.provider_id.toString());
+    if (query.product_id)
+      params = params.set('product_id', query.product_id.toString());
+    if (query.slot_minutes)
+      params = params.set('slot_minutes', query.slot_minutes.toString());
+
+    return this.http
+      .get<any>(`${this.apiUrl}/providers/availability-overview`, { params })
+      .pipe(map((response) => response.data || response));
+  }
+
+  /**
+   * Quick-create an employee from the "Agregar Proveedor" modal.
+   * Backend route: POST /store/payroll/employees
+   *
+   * `base_salary` is REQUIRED by CreateEmployeeDto
+   * (@IsNumber + @Min(0) + @Type Number) — omitting it causes the
+   * global ValidationPipe (whitelist + forbidNonWhitelisted) to
+   * return 400 Bad Request before the controller is reached, so
+   * the type here marks it as required.
+   */
+  createQuickEmployee(dto: {
+    first_name: string;
+    last_name: string;
+    document_type?: string;
+    document_number?: string;
+    hire_date: string;
+    contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
+    base_salary: number;
+    position?: string;
+    email?: string;
+    phone?: string;
+  }): Observable<{ id: number; first_name: string; last_name: string; position?: string }> {
+    return this.http
+      .post<any>(`${environment.apiUrl}/store/payroll/employees`, dto)
+      .pipe(map((response) => response.data || response));
   }
 
   getCalendar(dateFrom: string, dateTo: string, productId?: number): Observable<Record<string, Booking[]>> {

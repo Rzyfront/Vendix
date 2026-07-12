@@ -94,6 +94,53 @@ export interface CalendarDateData {
   isCurrentMonth: boolean;
 }
 
+// ===== Provider availability overview =====
+
+export interface ProviderAvailabilityDay {
+  date: string;
+  total_slots: number;
+  booked_slots: number;
+  free_slots: number;
+  occupancy_pct: number;
+}
+
+export interface ProviderAvailabilityRow {
+  provider_id: number;
+  display_name: string;
+  avatar_url: string | null;
+  total_slots: number;
+  booked_slots: number;
+  free_slots: number;
+  occupancy_pct: number;
+  days: ProviderAvailabilityDay[];
+}
+
+export interface ProviderAvailabilityTotals {
+  total_slots: number;
+  booked_slots: number;
+  free_slots: number;
+  occupancy_pct: number;
+  most_loaded_provider_id: number | null;
+  most_loaded_provider_name: string | null;
+  average_occupancy_pct: number;
+}
+
+export interface ProviderAvailabilityOverview {
+  date_from: string;
+  date_to: string;
+  slot_minutes: number;
+  providers: ProviderAvailabilityRow[];
+  totals: ProviderAvailabilityTotals;
+}
+
+export interface AvailabilityOverviewQuery {
+  date_from: string;
+  date_to: string;
+  provider_id?: number;
+  product_id?: number;
+  slot_minutes?: number;
+}
+
 export interface ServiceProvider {
   id: number;
   store_id: number;

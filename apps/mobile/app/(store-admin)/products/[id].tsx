@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Image, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ProductService } from '@/features/store/services';
@@ -31,6 +32,7 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 export default function ProductDetailScreen() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -78,8 +80,10 @@ export default function ProductDetailScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header con back arrow */}
-      <View style={styles.header}>
+      {/* Header con back arrow — safe area top aplicado para que el
+          título "Detalle del producto" no quede tapado por el notch/status
+          bar en dispositivos con notch (iPhone X+, Pixel 3+, etc.). */}
+      <View style={[styles.header, { paddingTop: insets.top + spacing[2] }]}>
         <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
           <Icon name="chevron-left" size={24} color={colors.text.primary} />
         </Pressable>
@@ -87,7 +91,14 @@ export default function ProductDetailScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      {/* contentContainerStyle.paddingBottom = footer height (~96) +
+          safe area bottom (gesture bar / home indicator). Sin esto, en
+          dispositivos con barra de gestos, los botones Editar/Activar/Eliminar
+          del footer fixed quedan tapados por la barra del sistema. */}
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+      >
         <View style={styles.imagePlaceholder}>
           {product.image_url ? (
             <Image source={{ uri: product.image_url }} style={styles.productImage} />
@@ -163,7 +174,9 @@ export default function ProductDetailScreen() {
         </View>
       </ScrollView>
 
-      <View style={styles.footer}>
+      {/* Footer fixed: paddingBottom dinámico con safe area bottom para que
+          los botones no queden tapados por la gesture bar / home indicator. */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + spacing[3] }]}>
         {canUpdate && (
           <View style={styles.footerRow}>
             <Button
