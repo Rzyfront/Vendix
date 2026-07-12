@@ -1,3 +1,5 @@
+import { useShallow } from 'zustand/react/shallow';
+
 import { useTenantStore } from './tenant.store';
 
 /**
@@ -19,11 +21,16 @@ export interface ActiveStoreInfo {
 }
 
 export function useActiveStore(): ActiveStoreInfo {
-  return useTenantStore((s) => ({
-    storeId: s.storeId,
-    storeName: s.storeName,
-    storeSlug: s.storeSlug,
-    organizationId: s.organizationId,
-    organizationName: s.organizationName,
-  }));
+  // zustand v5 compares snapshots with Object.is; a selector that builds a
+  // new object each render is never equal, causing a getSnapshot loop.
+  // useShallow keeps the snapshot stable across unrelated store updates.
+  return useTenantStore(
+    useShallow((s) => ({
+      storeId: s.storeId,
+      storeName: s.storeName,
+      storeSlug: s.storeSlug,
+      organizationId: s.organizationId,
+      organizationName: s.organizationName,
+    })),
+  );
 }
