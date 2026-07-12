@@ -44,10 +44,26 @@ export interface PosCashMovementModalProps {
 
 type MovementType = 'cash_in' | 'cash_out';
 
-/** Parsea el input libre del monto (acepta coma o punto como decimal). */
+/**
+ * Parsea el input libre del monto. Soporta separadores de miles (COP:
+ * "50.000" -> 50000) y decimales ("50,00" / "50.00" -> 50). El último
+ * separador seguido de 1-2 dígitos se interpreta como decimal; cualquier
+ * otro separador es agrupador de miles.
+ */
 function parseAmount(text: string): number {
   if (!text) return 0;
-  const normalized = text.replace(/\s/g, '').replace(',', '.');
+  const s = text.replace(/[^\d.,]/g, '');
+  if (!s) return 0;
+  const decimalPos = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+  if (decimalPos === -1) {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const intPart = s.slice(0, decimalPos).replace(/[.,]/g, '');
+  const fracPart = s.slice(decimalPos + 1);
+  const normalized = /^\d{1,2}$/.test(fracPart)
+    ? `${intPart}.${fracPart}`
+    : `${intPart}${fracPart}`;
   const parsed = parseFloat(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
