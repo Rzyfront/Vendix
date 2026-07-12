@@ -438,6 +438,44 @@ export class AuthEffects {
       ),
     ),
   );
+  forgotCustomerPassword$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.forgotCustomerPassword),
+      mergeMap(({ email, store_id }) =>
+        this.authService.forgotCustomerPassword(email, store_id).pipe(
+          map((res) =>
+            AuthActions.forgotCustomerPasswordSuccess({
+              message: res?.message,
+            }),
+          ),
+          catchError((error) =>
+            of(
+              AuthActions.forgotCustomerPasswordFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  resetCustomerPassword$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resetCustomerPassword),
+      mergeMap(({ token, new_password }) =>
+        this.authService.resetCustomerPassword(token, new_password).pipe(
+          map(() => AuthActions.resetCustomerPasswordSuccess()),
+          catchError((error) =>
+            of(
+              AuthActions.resetCustomerPasswordFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
   verifyEmail$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.verifyEmail),
@@ -514,12 +552,25 @@ export class AuthEffects {
       ),
     { dispatch: false },
   );
+  resetCustomerPasswordSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.resetCustomerPasswordSuccess),
+        tap(() => {
+          this.toast.success('Contraseña restablecida con éxito.');
+          this.router.navigateByUrl('/');
+        }),
+      ),
+    { dispatch: false },
+  );
   failureToast$ = createEffect(
     () =>
       this.actions$.pipe(
         ofType(
           AuthActions.forgotOwnerPasswordFailure,
           AuthActions.resetOwnerPasswordFailure,
+          AuthActions.forgotCustomerPasswordFailure,
+          AuthActions.resetCustomerPasswordFailure,
           AuthActions.verifyEmailFailure,
           AuthActions.resendVerificationEmailFailure,
         ),

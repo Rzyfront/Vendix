@@ -99,7 +99,7 @@ export class StoreEcommerceLayoutComponent {
   readonly show_user_menu = signal(false);
   readonly show_mobile_menu = signal(false);
   readonly is_auth_modal_open = signal(false);
-  readonly auth_modal_mode = signal<'login' | 'register'>('login');
+  readonly auth_modal_mode = signal<'login' | 'register' | 'forgot'>('login');
 
   // Footer settings
   readonly footer_settings = signal<FooterSettings | null>(null);

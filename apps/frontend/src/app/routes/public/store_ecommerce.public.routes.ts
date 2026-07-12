@@ -209,6 +209,15 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        // Public customer password reset (link from recovery email).
+        // Token arrives as a query param: /reset-password?token=...
+        path: 'reset-password',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/reset-password/reset-password.component').then(
+            (c) => c.ResetPasswordComponent,
+          ),
+      },
+      {
         path: 'account/reservations',
         canActivate: [AuthGuard],
         loadComponent: () =>

@@ -179,6 +179,47 @@ export const resetOwnerPasswordFailure = createAction(
   props<{ error: NormalizedApiPayload | string }>(),
 );
 
+// Forgot Customer Password
+
+export const forgotCustomerPassword = createAction(
+  '[Auth] Forgot Customer Password',
+
+  props<{ email: string; store_id: number }>(),
+);
+
+export const forgotCustomerPasswordSuccess = createAction(
+  '[Auth] Forgot Customer Password Success',
+  props<{ message?: string }>(),
+);
+
+export const forgotCustomerPasswordFailure = createAction(
+  '[Auth] Forgot Customer Password Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
+// Reset Customer Password
+
+export const resetCustomerPassword = createAction(
+  '[Auth] Reset Customer Password',
+
+  props<{ token: string; new_password: string }>(),
+);
+
+export const resetCustomerPasswordSuccess = createAction(
+  '[Auth] Reset Customer Password Success',
+);
+
+export const resetCustomerPasswordFailure = createAction(
+  '[Auth] Reset Customer Password Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
+// Limpia el estado transitorio del flujo "olvidé mi contraseña"
+// (evita que la confirmación de un envío previo reaparezca al reabrir el modal).
+export const clearPasswordResetState = createAction(
+  '[Auth] Clear Password Reset State',
+);
+
 // Verify Email
 export const verifyEmail = createAction(
   '[Auth] Verify Email',

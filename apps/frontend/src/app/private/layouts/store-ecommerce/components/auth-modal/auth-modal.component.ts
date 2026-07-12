@@ -75,43 +75,41 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
         </div>
         <!-- Title -->
         <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">
-          {{ isLogin() ? 'Iniciar Sesion' : 'Crear Cuenta' }}
+          {{ headerTitle() }}
         </h3>
         <p class="text-sm text-[var(--color-text-secondary)] mt-1">
-          {{
-            isLogin()
-              ? 'Ingresa tus credenciales para continuar'
-              : 'Registrate para realizar tu compra'
-          }}
+          {{ headerSubtitle() }}
         </p>
       </div>
 
       <div class="space-y-4 py-2">
-        <!-- Tabs -->
-        <div class="flex border-b border-[var(--color-border)] mb-4">
-          <button
-            type="button"
-            (click)="switchMode(true)"
-            [class.border-b-2]="isLogin()"
-            [class.border-[var(--color-primary)]]="isLogin()"
-            [class.text-[var(--color-primary)]]="isLogin()"
-            [class.text-[var(--color-text-secondary)]]="!isLogin()"
-            class="flex-1 py-2 text-sm font-medium transition-colors"
-          >
-            Login
-          </button>
-          <button
-            type="button"
-            (click)="switchMode(false)"
-            [class.border-b-2]="!isLogin()"
-            [class.border-[var(--color-primary)]]="!isLogin()"
-            [class.text-[var(--color-primary)]]="!isLogin()"
-            [class.text-[var(--color-text-secondary)]]="isLogin()"
-            class="flex-1 py-2 text-sm font-medium transition-colors"
-          >
-            Registro
-          </button>
-        </div>
+        <!-- Tabs (solo login/registro; ocultos en modo recuperar contraseña) -->
+        @if (!isForgot()) {
+          <div class="flex border-b border-[var(--color-border)] mb-4">
+            <button
+              type="button"
+              (click)="switchMode(true)"
+              [class.border-b-2]="isLogin()"
+              [class.border-[var(--color-primary)]]="isLogin()"
+              [class.text-[var(--color-primary)]]="isLogin()"
+              [class.text-[var(--color-text-secondary)]]="!isLogin()"
+              class="flex-1 py-2 text-sm font-medium transition-colors"
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              (click)="switchMode(false)"
+              [class.border-b-2]="!isLogin()"
+              [class.border-[var(--color-primary)]]="!isLogin()"
+              [class.text-[var(--color-primary)]]="!isLogin()"
+              [class.text-[var(--color-text-secondary)]]="isLogin()"
+              class="flex-1 py-2 text-sm font-medium transition-colors"
+            >
+              Registro
+            </button>
+          </div>
+        }
 
         <!-- Error Message -->
         @if (errorMessage()) {
@@ -133,47 +131,101 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           </div>
         }
 
-        <form
-          id="authForm"
-          [formGroup]="authForm"
-          (ngSubmit)="onSubmit()"
-          class="space-y-4"
-        >
-          @if (!isLogin()) {
-            <div class="grid grid-cols-2 gap-4">
-              <app-input
-                label="Nombre"
-                placeholder="Ej. Juan"
-                formControlName="first_name"
-                [control]="firstNameControl"
-              ></app-input>
-              <app-input
-                label="Apellido"
-                placeholder="Ej. Perez"
-                formControlName="last_name"
-                [control]="lastNameControl"
-              ></app-input>
+        @if (isForgot() && passwordResetEmailSent()) {
+          <!-- Confirmación tras enviar el email de recuperación -->
+          <div
+            class="p-4 rounded-lg bg-green-50 border border-green-200"
+            role="status"
+          >
+            <div class="flex items-start gap-3">
+              <app-icon
+                name="check-circle"
+                [size]="20"
+                class="text-green-600 mt-0.5 flex-shrink-0"
+              ></app-icon>
+              <p class="text-sm text-green-800">
+                Si el email existe, te enviamos instrucciones para restablecer tu
+                contraseña. Revisa tu correo.
+              </p>
             </div>
-          }
+          </div>
+          <button
+            type="button"
+            (click)="goToLogin()"
+            class="w-full text-center text-sm text-[var(--color-primary)] font-medium hover:underline focus:outline-none mt-4"
+          >
+            Volver a iniciar sesión
+          </button>
+        } @else {
+          <form
+            id="authForm"
+            [formGroup]="authForm"
+            (ngSubmit)="onSubmit()"
+            class="space-y-4"
+          >
+            @if (isRegister()) {
+              <div class="grid grid-cols-2 gap-4">
+                <app-input
+                  label="Nombre"
+                  placeholder="Ej. Juan"
+                  formControlName="first_name"
+                  [control]="firstNameControl"
+                ></app-input>
+                <app-input
+                  label="Apellido"
+                  placeholder="Ej. Perez"
+                  formControlName="last_name"
+                  [control]="lastNameControl"
+                ></app-input>
+              </div>
+            }
 
-          <app-input
-            label="Correo Electronico"
-            type="email"
-            placeholder="tu@email.com"
-            formControlName="email"
-            [control]="emailControl"
-          ></app-input>
+            <app-input
+              label="Correo Electronico"
+              type="email"
+              placeholder="tu@email.com"
+              formControlName="email"
+              [control]="emailControl"
+            ></app-input>
 
-          <app-input
-            label="Contrasena"
-            type="password"
-            placeholder="********"
-            formControlName="password"
-            [control]="passwordControl"
-          ></app-input>
+            @if (!isForgot()) {
+              <app-input
+                label="Contrasena"
+                type="password"
+                placeholder="********"
+                formControlName="password"
+                [control]="passwordControl"
+              ></app-input>
+            }
 
-          <!-- Password requirements (always visible in register mode) -->
-          @if (!isLogin()) {
+            <!-- Link "¿Olvidaste tu contraseña?" (solo en login) -->
+            @if (isLogin()) {
+              <div class="text-right">
+                <button
+                  type="button"
+                  (click)="goToForgot()"
+                  class="text-sm text-[var(--color-primary)] hover:underline focus:outline-none"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+            }
+
+            <!-- Link "Volver a iniciar sesión" (solo en recuperar contraseña) -->
+            @if (isForgot()) {
+              <div class="text-center">
+                <button
+                  type="button"
+                  (click)="goToLogin()"
+                  class="text-sm text-[var(--color-primary)] font-medium hover:underline focus:outline-none"
+                >
+                  Volver a iniciar sesión
+                </button>
+              </div>
+            }
+
+            <!-- Password requirements (always visible in register mode) -->
+            @if (isRegister()) {
             <div
               class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100"
             >
@@ -198,7 +250,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           }
 
           <!-- Documentos Legales -->
-          @if (!isLogin() && pendingDocuments().length > 0) {
+          @if (isRegister() && pendingDocuments().length > 0) {
             <div class="space-y-3 pt-2">
               <p class="text-xs font-medium text-[var(--color-text-primary)]">
                 Documentos Legales
@@ -229,20 +281,29 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               }
             </div>
           }
-        </form>
+          </form>
+        }
       </div>
 
       <!-- Footer with Submit Button -->
       <div slot="footer" class="w-full">
-        <app-button
-          type="submit"
-          form="authForm"
-          [variant]="'primary'"
-          [fullWidth]="true"
-          [loading]="loading() || false"
-        >
-          {{ isLogin() ? 'Iniciar sesión' : 'Crear cuenta' }}
-        </app-button>
+        @if (!(isForgot() && passwordResetEmailSent())) {
+          <app-button
+            type="submit"
+            form="authForm"
+            [variant]="'primary'"
+            [fullWidth]="true"
+            [loading]="loading() || false"
+          >
+            {{
+              isForgot()
+                ? 'Enviar instrucciones'
+                : isLogin()
+                  ? 'Iniciar sesión'
+                  : 'Crear cuenta'
+            }}
+          </app-button>
+        }
       </div>
     </app-modal>
 
@@ -258,14 +319,35 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
 })
 export class AuthModalComponent {
   readonly isOpen = input(false);
-  readonly initialMode = input<'login' | 'register'>('login');
+  readonly initialMode = input<'login' | 'register' | 'forgot'>('login');
   readonly storeLogo = input<string | null>(null);
   readonly storeName = input('Tienda');
   readonly closed = output<void>();
 
-  readonly isLogin = signal(true);
+  // Modo del modal como fuente de verdad. `isLogin`/`isRegister`/`isForgot`
+  // se derivan de aquí para que el template siga invocando `isLogin()` igual.
+  readonly mode = signal<'login' | 'register' | 'forgot'>('login');
+  readonly isLogin = computed(() => this.mode() === 'login');
+  readonly isRegister = computed(() => this.mode() === 'register');
+  readonly isForgot = computed(() => this.mode() === 'forgot');
   readonly errorMessage = signal<string | null>(null);
   readonly errorTitle = signal('Error de autenticación');
+
+  // Títulos/subtítulos derivados del modo (evita ternarios anidados en template).
+  readonly headerTitle = computed(() =>
+    this.isForgot()
+      ? 'Recuperar contraseña'
+      : this.isLogin()
+        ? 'Iniciar Sesion'
+        : 'Crear Cuenta',
+  );
+  readonly headerSubtitle = computed(() =>
+    this.isForgot()
+      ? 'Te enviaremos instrucciones a tu correo'
+      : this.isLogin()
+        ? 'Ingresa tus credenciales para continuar'
+        : 'Registrate para realizar tu compra',
+  );
 
   // Legal Documents state
   readonly pendingDocuments = signal<PendingDocument[]>([]);
@@ -281,6 +363,8 @@ export class AuthModalComponent {
   private toast = inject(ToastService);
 
   loading = this.authFacade.authLoading;
+  // Señal del facade: true cuando el email de recuperación se envió con éxito.
+  readonly passwordResetEmailSent = this.authFacade.passwordResetEmailSent;
   authForm: FormGroup;
 
   // Password validation — computed signals reacting to form value changes
@@ -348,17 +432,16 @@ export class AuthModalComponent {
     // untracked() evita que mutar isLogin o leer signals internos re-dispare el effect
     // y revierta el tab switch que el usuario hace via switchMode().
     effect(() => {
-      const mode = this.initialMode();
+      const requestedMode = this.initialMode();
       const open = this.isOpen();
-      const isLoginMode = mode === 'login';
 
       untracked(() => {
-        this.isLogin.set(isLoginMode);
+        this.mode.set(requestedMode);
         this.updateValidators();
 
         if (open) {
           this.errorMessage.set(null);
-          if (!isLoginMode) {
+          if (requestedMode === 'register') {
             this.loadPendingDocuments();
           }
         }
@@ -560,32 +643,74 @@ export class AuthModalComponent {
   }
 
   switchMode(isLogin: boolean): void {
-    this.isLogin.set(isLogin);
+    this.mode.set(isLogin ? 'login' : 'register');
     this.errorMessage.set(null);
+    this.authFacade.setAuthError(null);
     this.updateValidators();
-    if (!this.isLogin()) {
+    if (this.mode() === 'register') {
       this.loadPendingDocuments();
     }
   }
 
+  /** Cambia a la vista "olvidé mi contraseña" (solo accesible desde login). */
+  goToForgot(): void {
+    this.mode.set('forgot');
+    this.authFacade.setAuthError(null);
+    this.authFacade.clearPasswordResetState();
+    this.errorMessage.set(null);
+    this.updateValidators();
+  }
+
+  /** Vuelve a la vista de inicio de sesión desde el flujo de recuperación. */
+  goToLogin(): void {
+    this.mode.set('login');
+    this.authFacade.setAuthError(null);
+    this.errorMessage.set(null);
+    this.updateValidators();
+  }
+
   updateValidators(): void {
+    const emailControl = this.authForm.get('email');
+    const passwordControl = this.authForm.get('password');
     const firstNameControl = this.authForm.get('first_name');
     const lastNameControl = this.authForm.get('last_name');
 
-    if (this.isLogin()) {
+    // Email siempre requerido en los tres modos.
+    emailControl?.setValidators([Validators.required, Validators.email]);
+
+    if (this.isForgot()) {
+      // Recuperar contraseña: solo email. Limpiamos el resto para que el
+      // submit no quede bloqueado por campos vacíos.
+      passwordControl?.clearValidators();
       firstNameControl?.clearValidators();
       lastNameControl?.clearValidators();
     } else {
-      firstNameControl?.setValidators([Validators.required]);
-      lastNameControl?.setValidators([Validators.required]);
+      // Login / Registro: contraseña requerida (min 8 + carácter especial).
+      passwordControl?.setValidators([
+        Validators.required,
+        Validators.minLength(8),
+        Validators.pattern(/.*[^A-Za-z0-9].*/),
+      ]);
+
+      if (this.isLogin()) {
+        firstNameControl?.clearValidators();
+        lastNameControl?.clearValidators();
+      } else {
+        firstNameControl?.setValidators([Validators.required]);
+        lastNameControl?.setValidators([Validators.required]);
+      }
     }
 
+    emailControl?.updateValueAndValidity();
+    passwordControl?.updateValueAndValidity();
     firstNameControl?.updateValueAndValidity();
     lastNameControl?.updateValueAndValidity();
   }
 
   onClose(): void {
     this.errorMessage.set(null);
+    this.authFacade.clearPasswordResetState();
+    this.mode.set('login');
     this.closed.emit();
     this.authForm.reset();
     this.pendingDocuments.set([]);
@@ -603,7 +728,7 @@ export class AuthModalComponent {
     }
 
     // Verificar aceptación de documentos legales en registro
-    if (!this.isLogin() && this.pendingDocuments().length > 0) {
+    if (this.isRegister() && this.pendingDocuments().length > 0) {
       const accepted = this.acceptedDocuments();
       const allAccepted = this.pendingDocuments().every(
         (doc) => accepted[doc.document_id],
@@ -618,6 +743,22 @@ export class AuthModalComponent {
 
     // Clear previous errors
     this.errorMessage.set(null);
+
+    if (this.isForgot()) {
+      // Recuperar contraseña: solo requiere el email + store_id.
+      const storeId = this.tenantFacade.getCurrentStoreId();
+
+      if (!storeId) {
+        this.errorMessage.set(
+          'No se pudo identificar la tienda. Por favor, recarga la página.',
+        );
+        return;
+      }
+
+      this.authFacade.forgotCustomerPassword(this.authForm.value.email, storeId);
+      // No cerramos el modal: la confirmación se muestra en la misma vista.
+      return;
+    }
 
     if (this.isLogin()) {
       // Use the dedicated loginCustomer for e-commerce
