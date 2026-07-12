@@ -1540,7 +1540,7 @@ function GeneralTab() {
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                     <View>
                       <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Módulos de la Tienda</Text>
-                      <Text style={{ fontSize: 13, color: '#4B5563', marginTop: 2, textTransform: 'uppercase' }}>STORE_ADMIN — visibilidad en el menú lateral</Text>
+                      <Text style={{ fontSize: 13, color: '#4B5563', marginTop: 2 }}>STORE_ADMIN — visibilidad en el menú lateral</Text>
                     </View>
                     <TouchableOpacity onPress={() => setShowModulesModal(false)} style={{ padding: 4 }}>
                       <Ionicons name="close" size={24} color="#9CA3AF" />
