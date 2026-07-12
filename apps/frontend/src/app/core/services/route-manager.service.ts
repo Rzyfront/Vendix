@@ -189,6 +189,17 @@ export class RouteManagerService {
               ),
           },
           {
+            // Customer password reset — reached from the email link sent
+            // by forgotCustomerPassword when a POS / backoffice customer
+            // tries to register on the ecommerce storefront and is
+            // offered the recovery path.
+            path: 'reset-customer-password',
+            loadComponent: () =>
+              import('../../public/auth/components/reset-customer-password/reset-customer-password').then(
+                (c) => c.ResetCustomerPasswordComponent,
+              ),
+          },
+          {
             path: 'verify-email',
             loadComponent: () =>
               import('../../public/auth/components/email-verification/email-verification.component').then(

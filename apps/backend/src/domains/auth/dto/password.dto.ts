@@ -1,4 +1,11 @@
-import { IsEmail, IsString, IsNotEmpty, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  IsNotEmpty,
+  MinLength,
+  IsInt,
+  IsOptional,
+} from 'class-validator';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
@@ -60,3 +67,56 @@ export class AuthChangePasswordDto {
 }
 
 export { AuthChangePasswordDto as ChangePasswordDto };
+
+export class ForgotCustomerPasswordDto {
+  @ApiProperty({
+    example: 'cliente@email.com',
+    description:
+      'Correo del cliente ecommerce. No requiere organization_slug — la tienda se resuelve desde el contexto del request',
+  })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({
+    example: 12,
+    description: 'ID de la tienda ecommerce donde el cliente intenta registrarse',
+  })
+  @IsInt()
+  @IsNotEmpty()
+  store_id: number;
+}
+
+export class ResetCustomerPasswordDto {
+  @ApiProperty({
+    example: 'reset-token-here',
+    description: 'Token recibido por email tras forgotCustomerPassword',
+  })
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+
+  @ApiProperty({
+    example: 'NuevaContraseña123!',
+    description:
+      'Nueva contraseña (mínimo 8 caracteres con mayúsculas, minúsculas y números). Si la cuenta estaba en pending_verification, también se activa.',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(8)
+  new_password: string;
+
+  /**
+   * The ecommerce store the recovery flow was initiated from. The
+   * controller will link the customer to this store (idempotent) and
+   * activate the account in a single transaction.
+   */
+  @ApiProperty({
+    example: 10,
+    description: 'ID of the ecommerce store the user is recovering on',
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  store_id?: number;
+}

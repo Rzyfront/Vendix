@@ -401,6 +401,39 @@ export class AuthService {
     });
   }
 
+  /**
+   * Customer-only password reset request. Used by ecommerce storefront
+   * when a customer created in POS / backoffice tries to register and
+   * hits the AUTH_CUSTOMER_CLAIMABLE_001 conflict. Sends a recovery
+   * email; the store_id scopes the lookup so the email enumeration
+   * surface stays narrow.
+   */
+  forgotCustomerPassword(
+    email: string,
+    store_id: number,
+  ): Observable<any> {
+    return this.http.post(`${this.API_URL}/forgot-customer-password`, {
+      email,
+      store_id,
+    });
+  }
+
+  /**
+   * Customer-only password reset. Activates the account if it was left
+   * in pending_verification (typical POS-created customer).
+   */
+  resetCustomerPassword(
+    token: string,
+    new_password: string,
+    store_id?: number,
+  ): Observable<any> {
+    return this.http.post(`${this.API_URL}/reset-customer-password`, {
+      token,
+      new_password,
+      ...(store_id ? { store_id } : {}),
+    });
+  }
+
   getProfile(): Observable<any> {
     return this.http.get(`${this.API_URL}/profile`);
   }

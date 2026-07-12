@@ -39,6 +39,16 @@ import type { IconName } from '../icon/icons.registry';
                     {{ t.description }}
                   </p>
                 }
+                @if (t.action) {
+                  <button
+                    type="button"
+                    class="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-primary)] hover:underline focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-[var(--color-primary)] rounded"
+                    (click)="onAction(t.id, t.action!.callback)"
+                  >
+                    {{ t.action!.label }}
+                    <span aria-hidden="true">→</span>
+                  </button>
+                }
               </div>
               <button
                 class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -60,6 +70,11 @@ export class ToastContainerComponent {
   toasts = this.toast.toasts;
 
   dismiss(id: string) {
+    this.toast.dismiss(id);
+  }
+
+  onAction(id: string, callback: () => void) {
+    callback();
     this.toast.dismiss(id);
   }
 

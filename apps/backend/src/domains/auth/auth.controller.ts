@@ -12,6 +12,7 @@ import {
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
@@ -24,7 +25,9 @@ import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import {
   ChangePasswordDto,
+  ForgotCustomerPasswordDto,
   ForgotPasswordDto,
+  ResetCustomerPasswordDto,
   ResetPasswordDto,
 } from './dto/password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -110,10 +113,14 @@ export class AuthController {
         'Cliente registrado exitosamente en la tienda.',
       );
     } catch (error) {
+      // F1: pass error.code as the 4th argument so structured error codes
+      // like AUTH_CUSTOMER_CLAIMABLE_001 reach the frontend and the auth
+      // modal can show the recovery CTA instead of a generic fallback.
       return this.responseService.error(
         error.message || 'Error al registrar el cliente',
         error.response?.message || error.message,
         error.status || 400,
+        (error as any).code,
       );
     }
   }
@@ -439,6 +446,47 @@ export class AuthController {
       const result = await this.authService.resetPassword(
         resetDto.token,
         resetDto.new_password,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al restablecer la contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('forgot-customer-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotCustomerPassword(@Body() forgotCustomerDto: ForgotCustomerPasswordDto) {
+    try {
+      const result = await this.authService.forgotCustomerPassword(
+        forgotCustomerDto.email,
+        forgotCustomerDto.store_id,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al solicitar recuperación de contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('reset-customer-password')
+  @HttpCode(HttpStatus.OK)
+  async resetCustomerPassword(@Body() resetCustomerDto: ResetCustomerPasswordDto) {
+    try {
+      const result = await this.authService.resetCustomerPassword(
+        resetCustomerDto.token,
+        resetCustomerDto.new_password,
+        resetCustomerDto.store_id,
       );
       return this.responseService.success(result, result.message);
     } catch (error) {
