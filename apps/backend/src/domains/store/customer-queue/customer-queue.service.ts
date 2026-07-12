@@ -268,4 +268,52 @@ export class CustomerQueueService {
 
     return { ...entry, current_position: currentPosition };
   }
+
+  /**
+   * Find an active queue entry by document (for queue rejoin scenario).
+   * Normalizes document_type (uppercase) and document_number (uppercase, no separators).
+   * Returns entry with current position if found, throws NotFoundException otherwise.
+   */
+  async findByDocument(
+    storeId: number,
+    documentType: string,
+    documentNumber: string,
+  ) {
+    // Normalize document (same logic as CustomersService)
+    const normalizedType = documentType ? documentType.trim().toUpperCase() : null;
+    const normalizedNumber = documentNumber
+      ? documentNumber.trim().toUpperCase().replace(/[\s\-.]/g, '')
+      : null;
+
+    if (!normalizedType || !normalizedNumber) {
+      throw new BadRequestException('INVALID_DOCUMENT');
+    }
+
+    const entry = await this.prisma.customer_queue.findFirst({
+      where: {
+        store_id: storeId,
+        document_type: normalizedType,
+        document_number: normalizedNumber,
+        status: { in: ['waiting', 'selected'] },
+        expires_at: { gt: new Date() },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (!entry) {
+      throw new NotFoundException('QUEUE_ENTRY_NOT_FOUND');
+    }
+
+    // Calculate current position among waiting entries
+    const currentPosition = await this.prisma.customer_queue.count({
+      where: {
+        store_id: entry.store_id,
+        status: 'waiting',
+        position: { lte: entry.position },
+        expires_at: { gt: new Date() },
+      },
+    });
+
+    return { ...entry, current_position: currentPosition };
+  }
 }

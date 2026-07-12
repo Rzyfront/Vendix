@@ -188,6 +188,13 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        path: 'fila/volver',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/queue-rejoin/queue-rejoin.component').then(
+            (c) => c.QueueRejoinComponent,
+          ),
+      },
+      {
         path: 'factura/:token',
         loadComponent: () =>
           import('../../public/ecommerce/pages/invoice-data/invoice-data.component').then(

@@ -16,6 +16,7 @@ import {
   SelectorComponent,
   IconComponent} from '../../../../shared/components';
 import { TenantFacade } from '../../../../core/store';
+import { RouterLink } from '@angular/router';
 
 @Component({
   selector: 'app-queue-register',
@@ -25,7 +26,8 @@ import { TenantFacade } from '../../../../core/store';
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    IconComponent
+    IconComponent,
+    RouterLink,
 ],
   template: `
     <div class="min-h-screen bg-[var(--color-background)] flex items-center justify-center p-4">
@@ -100,8 +102,14 @@ import { TenantFacade } from '../../../../core/store';
                 Registrarme en la Cola
               </app-button>
             </form>
+            <p class="text-xs text-[var(--color-text-secondary)] text-center">
+              ¿Ya estás en la cola?
+              <a routerLink="/fila/volver" class="text-[var(--color-primary)] font-medium hover:underline">
+                Busca tu posición aquí
+              </a>
+            </p>
             @if (errorMessage()) {
-              <p class="text-sm text-red-500 text-center">
+              <p class="text-sm text-red-500 text-center mt-3">
                 {{ errorMessage() }}
               </p>
             }
@@ -132,6 +140,14 @@ import { TenantFacade } from '../../../../core/store';
                 <p class="text-green-800 font-medium">Su compra ha sido procesada. ¡Gracias!</p>
               </div>
             }
+            <div class="pt-4 border-t border-[var(--color-border)]">
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                ¿Saliste de la página?
+                <a routerLink="/fila/volver" class="text-[var(--color-primary)] font-medium hover:underline">
+                  Vuelve a tu entrada aquí
+                </a>
+              </p>
+            </div>
           </div>
         }
       </div>
