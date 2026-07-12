@@ -22,6 +22,7 @@ import {
 } from '@/shared/components/selector/selector';
 import NotificationSoundSettings from '@/features/store/components/notification-sound-settings';
 import { SettingsService } from '@/features/store/services/settings.service';
+import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
 import type {
   StoreSettings,
   StoreUser,
@@ -1561,86 +1562,137 @@ function GeneralTab() {
                         <Text style={{ fontWeight: '700' }}>Apagado</Text> = oculto para todos. <Text style={{ fontWeight: '700' }}>Ausente / encendido</Text> = permitido (segun la configuracion por usuario).
                       </Text>
                     </View>
-                    {STORE_ADMIN_MODULES.map((mod) => {
-                      const isOn = form.panel_ui?.[mod.key] !== false; // default true
-                      return (
-                        <View key={mod.key} style={{ backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12, padding: 12 }}>
-                          {/* Parent row */}
-                          <View style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            backgroundColor: '#F9FAFB',
-                            borderWidth: 1,
-                            borderColor: '#F3F4F6',
-                            borderRadius: 12,
-                            padding: 10,
-                          }}>
-                            <View style={{ flex: 1, paddingRight: 16 }}>
-                              <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827' }}>{mod.label}</Text>
-                              {mod.description && <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{mod.description}</Text>}
-                            </View>
-                            <AppToggle
-                              value={isOn}
-                              onValueChange={(val) => {
-                                setForm((prev) => {
-                                  const newPanelUi = { ...prev.panel_ui, [mod.key]: val };
-                                  if (!val && mod.children) {
-                                    mod.children.forEach(child => {
-                                      newPanelUi[child.key] = false;
-                                    });
-                                  } else if (val && mod.children) {
-                                      mod.children.forEach(child => {
-                                          newPanelUi[child.key] = true;
-                                      });
-                                  }
-                                  return { ...prev, panel_ui: newPanelUi };
-                                });
-                              }}
-                            />
-                          </View>
-
-                          {/* Children */}
-                          {mod.children && mod.children.length > 0 && (
-                            <View style={{ marginTop: 12, marginLeft: 12, borderLeftWidth: 1.5, borderLeftColor: '#111827' }}>
-                              {mod.children.map(child => {
-                                const isChildOn = form.panel_ui?.[child.key] !== false;
-                                return (
-                                  <View key={child.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, position: 'relative' }}>
-                                    {/* Horizontal notch */}
-                                    <View style={{ width: 16, height: 1.5, backgroundColor: '#111827', position: 'absolute', left: 0, top: '50%' }} />
-                                    <View style={{
-                                      flexDirection: 'row',
-                                      alignItems: 'center',
-                                      justifyContent: 'space-between',
-                                      backgroundColor: '#F9FAFB',
-                                      borderWidth: 1,
-                                      borderColor: '#F3F4F6',
-                                      borderRadius: 12,
-                                      padding: 10,
-                                      marginLeft: 16,
-                                      flex: 1,
-                                      opacity: isOn ? 1 : 0.5,
-                                    }}>
-                                      <View style={{ flex: 1, paddingRight: 16 }}>
-                                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#374151' }}>{child.label}</Text>
-                                      </View>
-                                      <AppToggle
-                                        value={isChildOn && isOn}
-                                        disabled={!isOn}
-                                        onValueChange={(val) => {
-                                          setForm((prev) => ({ ...prev, panel_ui: { ...prev.panel_ui, [child.key]: val } }));
-                                        }}
-                                      />
-                                    </View>
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          )}
-                        </View>
+                    {(() => {
+                      // Industry ceiling: paridad con web `INDUSTRY_HIDDEN_MODULES`.
+                      // Calculado una sola vez por render del modal (cheap, ~5 keys).
+                      const hiddenByIndustries = getModulesHiddenByIndustries(
+                        form.general?.industries ?? ['retail'],
                       );
-                    })}
+                      return STORE_ADMIN_MODULES.map((mod) => {
+                        const isOn = form.panel_ui?.[mod.key] !== false; // default true
+                        const isGatedByIndustry = hiddenByIndustries.includes(mod.key);
+                        return (
+                          <View key={mod.key} style={{ backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12, padding: 12 }}>
+                            {/* Parent row */}
+                            <View style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              backgroundColor: '#F9FAFB',
+                              borderWidth: 1,
+                              borderColor: '#F3F4F6',
+                              borderRadius: 12,
+                              padding: 10,
+                            }}>
+                              <View style={{ flex: 1, paddingRight: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827' }}>{mod.label}</Text>
+                                  {isGatedByIndustry && (
+                                    <View style={{
+                                      marginLeft: 6,
+                                      paddingHorizontal: 6,
+                                      paddingVertical: 2,
+                                      borderRadius: 6,
+                                      backgroundColor: '#F3F4F6',
+                                    }}>
+                                      <Text style={{
+                                        fontSize: 9,
+                                        fontWeight: '700',
+                                        letterSpacing: 0.5,
+                                        color: '#6B7280',
+                                        textTransform: 'uppercase',
+                                      }}>Industria</Text>
+                                    </View>
+                                  )}
+                                </View>
+                                {mod.description && <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{mod.description}</Text>}
+                              </View>
+                              <AppToggle
+                                value={isOn}
+                                disabled={isGatedByIndustry}
+                                onValueChange={(val) => {
+                                  // Gated toggles no son interactivos (parity con web `onToggle`).
+                                  if (isGatedByIndustry) return;
+                                  setForm((prev) => {
+                                    const newPanelUi = { ...prev.panel_ui, [mod.key]: val };
+                                    if (!val && mod.children) {
+                                      mod.children.forEach(child => {
+                                        newPanelUi[child.key] = false;
+                                      });
+                                    } else if (val && mod.children) {
+                                        mod.children.forEach(child => {
+                                            newPanelUi[child.key] = true;
+                                        });
+                                    }
+                                    return { ...prev, panel_ui: newPanelUi };
+                                  });
+                                }}
+                              />
+                            </View>
+
+                            {/* Children */}
+                            {mod.children && mod.children.length > 0 && (
+                              <View style={{ marginTop: 12, marginLeft: 12, borderLeftWidth: 1.5, borderLeftColor: '#111827' }}>
+                                {mod.children.map(child => {
+                                  const isChildOn = form.panel_ui?.[child.key] !== false;
+                                  const isChildGatedByIndustry = hiddenByIndustries.includes(child.key);
+                                  return (
+                                    <View key={child.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, position: 'relative' }}>
+                                      {/* Horizontal notch */}
+                                      <View style={{ width: 16, height: 1.5, backgroundColor: '#111827', position: 'absolute', left: 0, top: '50%' }} />
+                                      <View style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        backgroundColor: '#F9FAFB',
+                                        borderWidth: 1,
+                                        borderColor: '#F3F4F6',
+                                        borderRadius: 12,
+                                        padding: 10,
+                                        marginLeft: 16,
+                                        flex: 1,
+                                        opacity: (isOn && !isChildGatedByIndustry) ? 1 : 0.5,
+                                      }}>
+                                        <View style={{ flex: 1, paddingRight: 16 }}>
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#374151' }}>{child.label}</Text>
+                                            {isChildGatedByIndustry && (
+                                              <View style={{
+                                                marginLeft: 6,
+                                                paddingHorizontal: 6,
+                                                paddingVertical: 2,
+                                                borderRadius: 6,
+                                                backgroundColor: '#F3F4F6',
+                                              }}>
+                                                <Text style={{
+                                                  fontSize: 9,
+                                                  fontWeight: '700',
+                                                  letterSpacing: 0.5,
+                                                  color: '#6B7280',
+                                                  textTransform: 'uppercase',
+                                                }}>Industria</Text>
+                                              </View>
+                                            )}
+                                          </View>
+                                        </View>
+                                        <AppToggle
+                                          value={isChildOn && isOn}
+                                          disabled={!isOn || isChildGatedByIndustry}
+                                          onValueChange={(val) => {
+                                            if (isChildGatedByIndustry) return;
+                                            setForm((prev) => ({ ...prev, panel_ui: { ...prev.panel_ui, [child.key]: val } }));
+                                          }}
+                                        />
+                                      </View>
+                                    </View>
+                                  );
+                                })}
+                              </View>
+                            )}
+                          </View>
+                        );
+                      });
+                    })()}
                   
                     </ScrollView>
                     <Button title="Listo" onPress={() => setShowModulesModal(false)} fullWidth style={{ marginTop: 16 }} />

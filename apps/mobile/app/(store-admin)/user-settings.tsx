@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/core/store/auth.store';
 import { AuthService } from '@/core/auth/auth.service';
+import { SettingsService } from '@/features/store/services/settings.service';
+import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
 import { Icon } from '@/shared/components/icon/icon';
 import { Button } from '@/shared/components/button/button';
 import { toastSuccess, toastError, toastInfo } from '@/shared/components/toast/toast.store';
@@ -175,6 +177,11 @@ export default function UserSettingsScreen() {
   const [modules, setModules] = useState<Record<string, boolean>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [hasModuleError, setHasModuleError] = useState(false);
+  // Industry ceiling (parity con web `INDUSTRY_HIDDEN_MODULES`).
+  // En esta pantalla no hay `form.general.industries`; hacemos un fetch
+  // paralelo a store settings. Default `['retail']` si falla (safe direction:
+  // oculta más, nunca menos).
+  const [storeIndustries, setStoreIndustries] = useState<string[]>(['retail']);
 
   useEffect(() => {
     loadSettings();
@@ -209,6 +216,19 @@ export default function UserSettingsScreen() {
         }
       });
       setModules(moduleState);
+
+      // Industries (stopgap, en paralelo — pequeño).
+      // SettingsResponse: StoreSettings → { general: { industries: [...] }, ... }.
+      try {
+        const storeSettings = await SettingsService.getSettings();
+        const industries =
+          storeSettings?.general?.industries?.length
+            ? storeSettings.general.industries
+            : ['retail'];
+        setStoreIndustries(industries);
+      } catch {
+        // Mantener default ['retail'] — safe direction (oculta más, nunca menos).
+      }
 
       // Can change app type
       const roles = user?.roles || [];
@@ -247,7 +267,17 @@ export default function UserSettingsScreen() {
       )
     : getStandaloneModules(appType);
 
+  // Industry ceiling — mismo helper que en settings.tsx.
+  const hiddenByIndustries = useMemo(
+    () => getModulesHiddenByIndustries(storeIndustries),
+    [storeIndustries],
+  );
+  const isGatedByIndustry = (key: string) => hiddenByIndustries.includes(key);
+
   const toggleModule = (key: string, value: boolean) => {
+    // Parity con web `onToggle`: nunca persistir un toggle por encima del
+    // ceiling de industria (industria > user preference).
+    if (isGatedByIndustry(key)) return;
     setModules((prev) => {
       const updated = { ...prev, [key]: value };
       // If parent module, toggle all children
@@ -468,61 +498,94 @@ export default function UserSettingsScreen() {
           </View>
 
           {/* Parent Modules with Children */}
-          {filteredParentModules.map((module) => (
-            <View key={module.key} style={styles.moduleGroup}>
-              <View style={styles.parentToggle}>
-                <View style={styles.parentToggleLeft}>
-                  <Text style={styles.parentLabel}>{module.label}</Text>
-                  {module.description && (
-                    <Text style={styles.parentDesc}>{module.description}</Text>
-                  )}
-                </View>
-                <Switch
-                  value={isParentEnabled(module.key)}
-                  onValueChange={(v) => toggleModule(module.key, v)}
-                  trackColor={{ false: colorScales.gray[200], true: colors.primary }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-              {isParentEnabled(module.key) && module.children && (
-                <View style={styles.childrenGrid}>
-                  {module.children.map((child) => (
-                    <View key={child.key} style={styles.childItem}>
-                      <Text style={styles.childLabel}>{child.label}</Text>
-                      <Switch
-                        value={modules[child.key] ?? false}
-                        onValueChange={(v) => toggleModule(child.key, v)}
-                        trackColor={{ false: colorScales.gray[200], true: colors.primary }}
-                        thumbColor="#FFFFFF"
-                      />
+          {filteredParentModules.map((module) => {
+            const isParentGated = isGatedByIndustry(module.key);
+            return (
+              <View key={module.key} style={styles.moduleGroup}>
+                <View style={styles.parentToggle}>
+                  <View style={styles.parentToggleLeft}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Text style={styles.parentLabel}>{module.label}</Text>
+                      {isParentGated && (
+                        <View style={styles.gatedBadge}>
+                          <Text style={styles.gatedBadgeText}>Industria</Text>
+                        </View>
+                      )}
                     </View>
-                  ))}
+                    {module.description && (
+                      <Text style={styles.parentDesc}>{module.description}</Text>
+                    )}
+                  </View>
+                  <Switch
+                    value={isParentEnabled(module.key)}
+                    disabled={isParentGated}
+                    onValueChange={(v) => toggleModule(module.key, v)}
+                    trackColor={{ false: colorScales.gray[200], true: colors.primary }}
+                    thumbColor="#FFFFFF"
+                  />
                 </View>
-              )}
-            </View>
-          ))}
+                {isParentEnabled(module.key) && module.children && (
+                  <View style={styles.childrenGrid}>
+                    {module.children.map((child) => {
+                      const isChildGated = isGatedByIndustry(child.key);
+                      return (
+                        <View key={child.key} style={styles.childItem}>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Text style={styles.childLabel}>{child.label}</Text>
+                            {isChildGated && (
+                              <View style={styles.gatedBadge}>
+                                <Text style={styles.gatedBadgeText}>Industria</Text>
+                              </View>
+                            )}
+                          </View>
+                          <Switch
+                            value={modules[child.key] ?? false}
+                            disabled={isChildGated}
+                            onValueChange={(v) => toggleModule(child.key, v)}
+                            trackColor={{ false: colorScales.gray[200], true: colors.primary }}
+                            thumbColor="#FFFFFF"
+                          />
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            );
+          })}
 
           {/* Standalone Modules */}
           {filteredStandaloneModules.length > 0 && (
             <View style={styles.standaloneContainer}>
               <Text style={styles.standaloneTitle}>Herramientas Directas</Text>
               <View style={styles.standaloneGrid}>
-                {filteredStandaloneModules.map((module) => (
-                  <View key={module.key} style={styles.standaloneItem}>
-                    <View style={styles.standaloneItemLeft}>
-                      <Text style={styles.standaloneLabel}>{module.label}</Text>
-                      {module.description && (
-                        <Text style={styles.standaloneDesc}>{module.description}</Text>
-                      )}
+                {filteredStandaloneModules.map((module) => {
+                  const isModuleGated = isGatedByIndustry(module.key);
+                  return (
+                    <View key={module.key} style={styles.standaloneItem}>
+                      <View style={styles.standaloneItemLeft}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <Text style={styles.standaloneLabel}>{module.label}</Text>
+                          {isModuleGated && (
+                            <View style={styles.gatedBadge}>
+                              <Text style={styles.gatedBadgeText}>Industria</Text>
+                            </View>
+                          )}
+                        </View>
+                        {module.description && (
+                          <Text style={styles.standaloneDesc}>{module.description}</Text>
+                        )}
+                      </View>
+                      <Switch
+                        value={modules[module.key] ?? false}
+                        disabled={isModuleGated}
+                        onValueChange={(v) => toggleModule(module.key, v)}
+                        trackColor={{ false: colorScales.gray[200], true: colors.primary }}
+                        thumbColor="#FFFFFF"
+                      />
                     </View>
-                    <Switch
-                      value={modules[module.key] ?? false}
-                      onValueChange={(v) => toggleModule(module.key, v)}
-                      trackColor={{ false: colorScales.gray[200], true: colors.primary }}
-                      thumbColor="#FFFFFF"
-                    />
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             </View>
           )}
@@ -866,5 +929,20 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: spacing[2],
+  },
+  // Badge "Industria" — mismo look que web `panel-toggle-reason-badge`.
+  gatedBadge: {
+    marginLeft: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: colorScales.gray[100],
+  },
+  gatedBadgeText: {
+    fontSize: 9,
+    fontWeight: typography.fontWeight.bold as any,
+    letterSpacing: 0.5,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
   },
 });
