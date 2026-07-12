@@ -202,7 +202,7 @@ export const forgotCustomerPasswordFailure = createAction(
 export const resetCustomerPassword = createAction(
   '[Auth] Reset Customer Password',
 
-  props<{ token: string; new_password: string }>(),
+  props<{ token: string; new_password: string; store_id?: number }>(),
 );
 
 export const resetCustomerPasswordSuccess = createAction(

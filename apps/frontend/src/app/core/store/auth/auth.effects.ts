@@ -184,7 +184,20 @@ export class AuthEffects {
       mergeMap(({ type, ...registerData }) =>
         this.authService.registerCustomer(registerData).pipe(
           map((response) => {
-            if (!response.data) throw new Error('Invalid response data');
+            // Handle the API envelope first. The backend returns
+            // { success: false, message, statusCode, ... } on error
+            // (no `data` field). Treat that as a failure so the
+            // downstream message reaches the modal's error mapper
+            // instead of being shadowed by a generic "Invalid response
+            // data" fallback.
+            if (response?.success === false) {
+              throw new Error(
+                response?.message ?? 'Error al registrar el cliente',
+              );
+            }
+            if (!response?.data) {
+              throw new Error('Invalid response data');
+            }
             return AuthActions.registerCustomerSuccess({
               user: response.data.user,
               user_settings: response.data.user_settings,
@@ -462,8 +475,10 @@ export class AuthEffects {
   resetCustomerPassword$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.resetCustomerPassword),
-      mergeMap(({ token, new_password }) =>
-        this.authService.resetCustomerPassword(token, new_password).pipe(
+      mergeMap(({ token, new_password, store_id }) =>
+        this.authService
+          .resetCustomerPassword(token, new_password, store_id)
+          .pipe(
           map(() => AuthActions.resetCustomerPasswordSuccess()),
           catchError((error) =>
             of(

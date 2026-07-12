@@ -101,22 +101,20 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    try {
-      const result = await this.authService.registerCustomer(
-        registerCustomerDto,
-        client_info,
-      );
-      return this.responseService.success(
-        result,
-        'Cliente registrado exitosamente en la tienda.',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al registrar el cliente',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // Sin try/catch: el AllExceptionsFilter global
+    // (common/filters/http-exception.filter.ts) detecta VendixHttpException y
+    // propaga `error_code` al body automáticamente. Capturar la excepción aquí
+    // perdería el error_code (vive en exception.errorCode), impidiendo que el
+    // frontend distinga AUTH_CUSTOMER_CLAIMABLE_001 para ofrecer el CTA de
+    // recuperación en vez de un 409 genérico.
+    const result = await this.authService.registerCustomer(
+      registerCustomerDto,
+      client_info,
+    );
+    return this.responseService.success(
+      result,
+      'Cliente registrado exitosamente en la tienda.',
+    );
   }
 
   @Post('register-staff')
@@ -475,9 +473,10 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetCustomerPassword(@Body() resetDto: ResetPasswordDto) {
     try {
-      const result = await this.authService.resetPassword(
+      const result = await this.authService.resetCustomerPassword(
         resetDto.token,
         resetDto.new_password,
+        resetDto.store_id,
       );
       return this.responseService.success(result, result.message);
     } catch (error) {

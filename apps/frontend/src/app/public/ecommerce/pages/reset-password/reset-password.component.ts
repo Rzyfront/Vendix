@@ -187,6 +187,13 @@ export class ResetPasswordComponent implements OnInit, OnDestroy {
   /** Recovery token read from the `?token=` query param. */
   readonly token = signal<string | null>(null);
 
+  /**
+   * Ecommerce store id read from the `?store_id=` query param. Optional:
+   * when present, the customer reset flow links the account to this store
+   * and activates it (claim). The reset still works without it.
+   */
+  readonly storeId = signal<number | null>(null);
+
   /** Loading + error state come straight from the auth facade signals. */
   readonly isLoading = this.authFacade.authLoading;
   readonly errorMessage = computed<string | null>(() => {
@@ -221,6 +228,15 @@ export class ResetPasswordComponent implements OnInit, OnDestroy {
       .pipe(
         tap((params) => {
           this.token.set(params.get('token'));
+          // store_id is optional — validate it's a positive integer,
+          // otherwise leave it null so the reset still proceeds.
+          const rawStoreId = params.get('store_id');
+          const parsedStoreId = rawStoreId ? Number(rawStoreId) : NaN;
+          this.storeId.set(
+            Number.isInteger(parsedStoreId) && parsedStoreId > 0
+              ? parsedStoreId
+              : null,
+          );
           if (!this.token()) {
             this.toast.error(
               'Token de restablecimiento no encontrado o inválido.',
@@ -246,7 +262,11 @@ export class ResetPasswordComponent implements OnInit, OnDestroy {
       const { new_password } = this.resetPasswordForm.value;
       // Success toast + navigation to '/' are handled by the
       // resetCustomerPasswordSuccess$ effect — do not duplicate them here.
-      this.authFacade.resetCustomerPassword(token, new_password);
+      this.authFacade.resetCustomerPassword(
+        token,
+        new_password,
+        this.storeId() ?? undefined,
+      );
     } else {
       this.resetPasswordForm.markAllAsTouched();
     }

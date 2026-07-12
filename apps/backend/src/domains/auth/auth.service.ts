@@ -28,6 +28,7 @@ import { DefaultPanelUIService } from '../../common/services/default-panel-ui.se
 import { toTitleCase } from '@common/utils/format.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { TOKEN_DEFAULTS } from './constants/token.constants';
+import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { organizations } from '@prisma/client';
@@ -89,6 +90,7 @@ export class AuthService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly s3Service: S3Service,
     private readonly eventEmitter: EventEmitter2,
+    private readonly customersService: CustomersService,
   ) {}
 
   /**
@@ -1026,6 +1028,35 @@ export class AuthService {
       },
     });
     if (existingUser) {
+      // Distinguish "account exists and can be claimed via password reset"
+      // from a generic 409. Per the issue ("conciliar la cuenta mediante
+      // una recuperación de contraseña"), the CTA should fire whenever a
+      // pre-existing customer tries to register on the ecommerce — even
+      // if they're already linked to the store but haven't activated
+      // their account (state=pending_verification). The frontend uses
+      // the AUTH_CUSTOMER_CLAIMABLE_001 code to offer the recovery
+      // CTA instead of dead-ending the flow.
+      const isCustomer = await this.prismaService.user_roles.findFirst({
+        where: {
+          user_id: existingUser.id,
+          roles: { name: 'customer' },
+        },
+      });
+      if (isCustomer) {
+        const alreadyLinked = await this.prismaService.store_users.findFirst({
+          where: { user_id: existingUser.id, store_id: store.id },
+        });
+        const isActive = existingUser.state === 'active';
+        // Fire the recovery CTA when:
+        //   - the customer is not yet linked to this ecommerce store, OR
+        //   - the customer is linked but still pending_verification (the
+        //     POS-created account they can't log in to).
+        if (!alreadyLinked || !isActive) {
+          throw new VendixHttpException(
+            ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001,
+          );
+        }
+      }
       throw new ConflictException(
         'El usuario con este email ya existe en esta organización/tienda',
       );
@@ -2668,14 +2699,16 @@ export class AuthService {
       },
     });
 
-    // 3. Anti-enumeración: mismo mensaje genérico si el usuario no existe,
-    // no tiene rol `customer`, o no está asociado a esta tienda.
-    // No revelamos cuál condición falló.
+    // 3. Anti-enumeración: mismo mensaje genérico si el usuario no existe
+    // o no tiene rol `customer`. NO exigimos que ya esté asociado a esta
+    // tienda: un cliente creado en POS/backoffice (state pending_verification)
+    // aún no tiene store_users para el ecommerce y debe poder reclamar su
+    // cuenta vía recuperación. El scope de organización ya está garantizado
+    // por el filtro organization_id de la query anterior.
     const roles = user?.user_roles?.map((ur) => ur.roles?.name) || [];
     const isCustomer = roles.includes('customer');
-    const belongsToStore = (user?.store_users?.length || 0) > 0;
 
-    if (!user || !isCustomer || !belongsToStore) {
+    if (!user || !isCustomer) {
       return { message: genericMessage };
     }
 
@@ -2701,8 +2734,8 @@ export class AuthService {
     // 5. Resolver URL de reseteo con el hostname del ecommerce de la tienda
     const base = await this.emailBrandingService.getStoreEcommerceUrl(store_id);
     const resetUrl = base
-      ? `${base}/reset-password?token=${token}`
-      : `${process.env.FRONTEND_URL || 'http://localhost:4200'}/reset-password?token=${token}`;
+      ? `${base}/reset-password?token=${token}&store_id=${store_id}`
+      : `${process.env.FRONTEND_URL || 'http://localhost:4200'}/reset-password?token=${token}&store_id=${store_id}`;
 
     // 6. Branding de la tienda para personalizar el email
     const branding = await this.emailBrandingService.getStoreBranding(store_id);
@@ -2817,6 +2850,137 @@ export class AuthService {
     );
 
     return { message: 'Contraseña restablecida exitosamente' };
+  }
+
+  /**
+   * Reset-password flow for ecommerce customers.
+   *
+   * Differs from `resetPassword` in that it also activates the account
+   * when the user was left in `pending_verification` (the typical state
+   * for customers created in the POS / backoffice with a temp password).
+   * This is what closes the customer-consolidation loop: the customer
+   * claims their account by proving control of the email + setting a
+   * real password, and from then on they can log in to ecommerce.
+   */
+  async resetCustomerPassword(
+    token: string,
+    newPassword: string,
+    store_id?: number,
+  ): Promise<{ message: string; activated: boolean }> {
+    const resetToken =
+      await this.prismaService.password_reset_tokens.findUnique({
+        where: { token },
+        include: { users: true },
+      });
+
+    if (!resetToken || resetToken.used || new Date() > resetToken.expires_at) {
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+    }
+
+    if (!resetToken.users) {
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
+    }
+
+    // Confirm this token was issued via the customer flow — defensive
+    // guard so an owner-token can't be reused through this entrypoint.
+    const isCustomer = await this.prismaService.user_roles.findFirst({
+      where: {
+        user_id: resetToken.user_id,
+        roles: { name: 'customer' },
+      },
+    });
+    if (!isCustomer) {
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
+    }
+
+    if (!this.validatePasswordStrength(newPassword)) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
+      );
+    }
+
+    const isSamePassword = await bcrypt.compare(
+      newPassword,
+      resetToken.users.password,
+    );
+    if (isSamePassword) {
+      throw new BadRequestException(
+        'La nueva contraseña no puede ser igual a la contraseña actual',
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Activate the account if it was left in pending_verification. The
+    // email is considered verified because the customer proved control
+    // by receiving the reset token in their inbox.
+    const wasPending = resetToken.users.state !== 'active';
+    const wasUnverified = !resetToken.users.email_verified;
+
+    // Atomic consume: only mark `used = true` if the row is still
+    // unused. If two concurrent requests race, only the first one
+    // updates the row — the second sees count = 0 and bails. The
+    // second statement then throws and the whole $transaction rolls
+    // back, so the password change is not persisted.
+    const consumed = await this.prismaService.$transaction(async (tx) => {
+      const result = await tx.password_reset_tokens.updateMany({
+        where: { id: resetToken.id, used: false, expires_at: { gt: new Date() } },
+        data: { used: true },
+      });
+      if (result.count === 0) {
+        // Another request consumed this token first. Abort.
+        return null;
+      }
+      await tx.users.update({
+        where: { id: resetToken.user_id },
+        data: {
+          password: hashedPassword,
+          failed_login_attempts: 0,
+          locked_until: null,
+          ...(wasPending || wasUnverified
+            ? { state: 'active', email_verified: true }
+            : {}),
+        },
+      });
+      await tx.refresh_tokens.deleteMany({
+        where: { user_id: resetToken.user_id },
+      });
+      return result;
+    });
+    if (!consumed) {
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+    }
+
+    // Link the customer to the ecommerce store (idempotent) and ensure
+    // the account is active. claimCustomerAccount does both: it
+    // inserts a store_users row if missing and activates the user if
+    // still pending. Without this, the customer reset their password
+    // but the store still didn't know about them — the link is the
+    // whole point of the recovery flow.
+    if (store_id) {
+      await this.customersService.claimCustomerAccount(
+        resetToken.user_id,
+        store_id,
+      );
+    }
+
+    await this.auditService.logAuth(
+      resetToken.user_id,
+      AuditAction.PASSWORD_RESET,
+      {
+        method: 'customer_password_reset_token',
+        success: true,
+        account_activated: wasPending || wasUnverified,
+      },
+    );
+
+    return {
+      message:
+        wasPending || wasUnverified
+          ? 'Cuenta activada y contraseña restablecida exitosamente'
+          : 'Contraseña restablecida exitosamente',
+      activated: wasPending || wasUnverified,
+    };
   }
 
   async changePassword(

@@ -406,10 +406,15 @@ export class AuthService {
       store_id,
     });
   }
-  resetCustomerPassword(token: string, new_password: string): Observable<any> {
+  resetCustomerPassword(
+    token: string,
+    new_password: string,
+    store_id?: number,
+  ): Observable<any> {
     return this.http.post(`${this.API_URL}/reset-customer-password`, {
       token,
       new_password,
+      ...(store_id ? { store_id } : {}),
     });
   }
 

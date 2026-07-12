@@ -5,6 +5,7 @@ import {
   MinLength,
   IsInt,
   IsPositive,
+  IsOptional,
 } from 'class-validator';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
@@ -62,6 +63,21 @@ export class ResetPasswordDto {
   @IsNotEmpty()
   @MinLength(8)
   new_password: string;
+
+  /**
+   * ID de la tienda ecommerce desde la que se inicia la recuperación.
+   * Opcional: cuando está presente, el flujo customer vincula al cliente
+   * con la tienda (idempotente) y activa la cuenta pending_verification.
+   * El reset genérico (owner/staff) lo ignora.
+   */
+  @ApiProperty({
+    example: 10,
+    description: 'ID de la tienda ecommerce donde el cliente recupera su cuenta',
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  store_id?: number;
 }
 
 @ApiSchema({ name: 'AuthChangePasswordDto' })

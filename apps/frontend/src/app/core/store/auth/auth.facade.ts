@@ -392,9 +392,13 @@ export class AuthFacade {
     );
   }
 
-  resetCustomerPassword(token: string, new_password: string): void {
+  resetCustomerPassword(
+    token: string,
+    new_password: string,
+    store_id?: number,
+  ): void {
     this.store.dispatch(
-      AuthActions.resetCustomerPassword({ token, new_password }),
+      AuthActions.resetCustomerPassword({ token, new_password, store_id }),
     );
   }
 
