@@ -103,26 +103,22 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    try {
-      const result = await this.authService.registerCustomer(
-        registerCustomerDto,
-        client_info,
-      );
-      return this.responseService.success(
-        result,
-        'Cliente registrado exitosamente en la tienda.',
-      );
-    } catch (error) {
-      // F1: pass error.code as the 4th argument so structured error codes
-      // like AUTH_CUSTOMER_CLAIMABLE_001 reach the frontend and the auth
-      // modal can show the recovery CTA instead of a generic fallback.
-      return this.responseService.error(
-        error.message || 'Error al registrar el cliente',
-        error.response?.message || error.message,
-        error.status || 400,
-        (error as any).code,
-      );
-    }
+    // F1 v2: NO try/catch aquí. AllExceptionsFilter global
+    // (common/filters/http-exception.filter.ts) detecta VendixHttpException
+    // y propaga `error_code` automáticamente al body. Si capturamos la
+    // excepción en este controller, perdemos el error_code (que vive en
+    // `exception.errorCode`, no en `exception.code`). El try/catch previo
+    // intentaba arreglar esto pasando el 4to arg de responseService.error()
+// pero la propiedad correcta es .errorCode y el filter global ya lo hace.
+// Remover el try/catch es la opción "preferred" del reviewer.
+    const result = await this.authService.registerCustomer(
+      registerCustomerDto,
+      client_info,
+    );
+    return this.responseService.success(
+      result,
+      'Cliente registrado exitosamente en la tienda.',
+    );
   }
 
   @Post('register-staff')
