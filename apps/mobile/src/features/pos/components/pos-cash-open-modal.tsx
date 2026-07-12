@@ -124,7 +124,7 @@ export const PosCashOpenModal: React.FC<PosCashOpenModalProps> = ({ visible, onC
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.headerIcon}>
-            <Icon name="cash-register" size={20} color={colors.primary} />
+            <Icon name="wallet" size={20} color={colors.primary} />
           </View>
           <View>
             <Text style={styles.headerTitle}>Abrir Caja</Text>

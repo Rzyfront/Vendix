@@ -90,7 +90,9 @@ export const PosCashCloseModal: React.FC<PosCashCloseModalProps> = ({
       const method = m.payment_method ?? 'otro';
       const entry = grouped.get(method) ?? { count: 0, total: 0 };
       entry.count += 1;
-      entry.total += m.amount;
+      // m.amount is a Prisma Decimal serialized as a JSON string; coerce so
+      // the running total sums numerically instead of concatenating ("$ NaN").
+      entry.total += Number(m.amount);
       grouped.set(method, entry);
     }
     return Array.from(grouped.entries()).map(([method, v]) => ({ method, ...v }));
@@ -201,7 +203,7 @@ export const PosCashCloseModal: React.FC<PosCashCloseModalProps> = ({
               <View style={styles.header}>
                 <View style={styles.headerLeft}>
                   <View style={styles.headerIcon}>
-                    <Icon name="cash-register" size={20} color={colors.primary} />
+                    <Icon name="wallet" size={20} color={colors.primary} />
                   </View>
                   <View>
                     <Text style={styles.headerTitle}>Cerrar Caja</Text>
