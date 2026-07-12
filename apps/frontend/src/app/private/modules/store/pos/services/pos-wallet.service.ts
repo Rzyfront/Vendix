@@ -27,10 +27,16 @@ export class PosWalletService {
   getCustomerWallet(customerId: number): Observable<WalletInfo | null> {
     return this.http.get<any>(`${this.apiUrl}/${customerId}`).pipe(
       map((response) => {
+        // FIX/POS wallet: backend GET /store/wallets/:customerId retorna
+        // { wallet_id, balance, held_balance, available } (forma normalizada
+        // del WalletService.getBalance), NO { id, balance, ... }. Antes este
+        // servicio buscaba data.id (undefined) y retornaba null, lo que
+        // hacía que el POS mostrara "El cliente no tiene saldo en su wallet"
+        // aunque el cliente sí tuviera $200k.
         const data = response.data || response;
-        if (!data || !data.id) return null;
+        if (!data || !data.wallet_id) return null;
         return {
-          wallet_id: data.id,
+          wallet_id: data.wallet_id,
           balance: Number(data.balance || 0),
           held_balance: Number(data.held_balance || 0),
           available: Number(data.balance || 0) - Number(data.held_balance || 0),
