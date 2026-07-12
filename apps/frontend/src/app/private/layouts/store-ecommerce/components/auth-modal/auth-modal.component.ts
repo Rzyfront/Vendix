@@ -368,11 +368,11 @@ export class AuthModalComponent {
       }
     });
 
-    // Listen for auth errors — surface them only in the inline banner
-    // (errorMessage). Removed the toast.error() call because the global
-    // authError signal persists between sessions and the toast kept
-    // re-firing stale errors on every modal open. The inline banner is
-    // cleared when the user starts typing or switches tabs.
+    // Listen for auth errors — surface them in BOTH the inline banner
+    // (errorMessage) AND a toast. The toast is essential because the inline
+    // banner is cleared when the user starts typing or switches tabs; without
+    // it, login/register failures become invisible. Dedup via lastShownError
+    // prevents the toast from re-firing the same message on every open.
     effect(() => {
       const error = this.authFacade.authError();
       const open = this.isOpen();
@@ -385,10 +385,11 @@ export class AuthModalComponent {
           const { title, message } = this.mapErrorToUserFriendly(error, rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
-          // Recovery CTA is rendered inline in the modal's amber banner
-          // (see template @if (claimableEmail())). The previous toast.withAction
-          // here was redundant once the inline banner was visible — keeping
-          // it produced two parallel surfaces for the same action. Removed.
+          // F3: show toast so errors that survive modal open (network,
+          // server validation) are visible even after the user starts
+          // typing or switches tabs. Dedup is enforced above via
+          // lastShownError, so the toast only fires once per unique error.
+          this.toast.error(message, title);
         });
       } else if (!error) {
         this.lastShownError.set(null);

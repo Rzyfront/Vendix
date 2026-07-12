@@ -113,10 +113,14 @@ export class AuthController {
         'Cliente registrado exitosamente en la tienda.',
       );
     } catch (error) {
+      // F1: pass error.code as the 4th argument so structured error codes
+      // like AUTH_CUSTOMER_CLAIMABLE_001 reach the frontend and the auth
+      // modal can show the recovery CTA instead of a generic fallback.
       return this.responseService.error(
         error.message || 'Error al registrar el cliente',
         error.response?.message || error.message,
         error.status || 400,
+        (error as any).code,
       );
     }
   }
