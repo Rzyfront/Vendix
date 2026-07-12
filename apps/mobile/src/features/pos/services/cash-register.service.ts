@@ -1,3 +1,5 @@
+import { apiClient, Endpoints } from '@/core/api';
+
 /**
  * Servicio de caja registradora — paridad con `pos-cash-register.service.ts` web.
  *
@@ -14,7 +16,6 @@
  * El backend envuelve cada respuesta con `{ success, data, message }`. La
  * función `unwrap` extrae `data` para mantener la firma simple.
  */
-import { apiClient, Endpoints } from '@/core/api';
 
 export interface CashRegister {
   id: number;
