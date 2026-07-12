@@ -13,6 +13,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 import { environment } from '../../../../../environments/environment';
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { Store } from '@ngrx/store';
 import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
 import { ShippingMethodsService } from '../settings/shipping/services/shipping-methods.service';
@@ -1414,7 +1415,19 @@ export class EcommerceComponent {
         },
         error: (error) => {
           this.isGeneratingQr.set(false);
-          this.toastService.error('Error al generar QR: ' + error.message);
+          // Domain-not-configured → offer a CTA to the domains setup page.
+          if (parseApiError(error).errorCode === 'ECOM_DOMAIN_NOT_PRIMARY_001') {
+            this.toastService.warningWithAction(
+              'Necesitas configurar un dominio principal de la tienda online para generar el QR.',
+              {
+                label: 'Ir a Dominios',
+                onAction: () => this.router.navigate(['/admin/settings/domains']),
+              },
+              'Configura tu dominio',
+            );
+          } else {
+            this.toastService.error('Error al generar QR: ' + error.message);
+          }
         },
       });
   }

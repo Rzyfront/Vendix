@@ -283,6 +283,13 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Product not available',
   },
+  ECOM_DOMAIN_NOT_PRIMARY_001: {
+    code: 'ECOM_DOMAIN_NOT_PRIMARY_001',
+    httpStatus: 400,
+    devMessage: 'No hay un dominio ecommerce principal activo para generar el QR',
+    userMessage:
+      'Necesitas configurar un dominio principal de la tienda online antes de generar el QR.',
+  },
   ECOM_CHECKOUT_001: {
     code: 'ECOM_CHECKOUT_001',
     httpStatus: 400,

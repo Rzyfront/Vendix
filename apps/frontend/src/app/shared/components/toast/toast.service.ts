@@ -2,6 +2,13 @@ import { Injectable, signal } from '@angular/core';
 
 export type ToastVariant = 'default' | 'success' | 'warning' | 'error' | 'info';
 
+export interface ToastAction {
+  /** Button label, e.g. "Ir a Dominios". */
+  label: string;
+  /** Invoked when the user clicks the action button. */
+  onAction: () => void;
+}
+
 export interface Toast {
   id: string;
   title?: string;
@@ -9,6 +16,8 @@ export interface Toast {
   variant: ToastVariant;
   duration: number; // ms
   leaving: boolean; // UI state for exit animation
+  /** Optional CTA button rendered next to the toast. */
+  action?: ToastAction;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -22,6 +31,7 @@ export class ToastService {
       title?: string;
       variant?: ToastVariant;
       duration?: number;
+      action?: ToastAction;
     },
   ) {
     const toast: Toast = {
@@ -31,6 +41,7 @@ export class ToastService {
       variant: input.variant ?? 'default',
       duration: input.duration ?? 1750,
       leaving: false,
+      action: input.action,
     };
     this.toastsSig.update((arr) => [toast, ...arr]);
     if (toast.duration > 0) {
@@ -76,5 +87,19 @@ export class ToastService {
   }
   info(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'info', duration });
+  }
+
+  /**
+   * Show a warning toast with a call-to-action button. Used to guide the
+   * user to a configuration page when an action is blocked by missing
+   * upstream data (e.g. no primary ecommerce domain configured).
+   */
+  warningWithAction(
+    msg: string,
+    action: ToastAction,
+    title?: string,
+    duration = 8000,
+  ) {
+    this.show({ title, description: msg, variant: 'warning', duration, action });
   }
 }

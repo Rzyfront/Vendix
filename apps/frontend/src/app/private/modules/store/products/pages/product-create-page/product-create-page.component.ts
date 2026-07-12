@@ -12,6 +12,7 @@ import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map, switchMap } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
   FormBuilder,
   FormGroup,
@@ -1394,6 +1395,19 @@ export class ProductCreatePageComponent {
         this.isGeneratingOnlinePurchaseLink.set(false);
       },
       error: (err: any) => {
+        // Domain-not-configured → offer a CTA to the domains setup page.
+        if (parseApiError(err).errorCode === 'ECOM_DOMAIN_NOT_PRIMARY_001') {
+          this.isGeneratingOnlinePurchaseLink.set(false);
+          this.toastService.warningWithAction(
+            'Necesitas configurar un dominio principal de la tienda online para generar el QR de compra online.',
+            {
+              label: 'Ir a Dominios',
+              onAction: () => this.router.navigate(['/admin/settings/domains']),
+            },
+            'Configura tu dominio',
+          );
+          return;
+        }
         const message =
           typeof err === 'string' ? err : extractApiErrorMessage(err);
         this.toastService.error(

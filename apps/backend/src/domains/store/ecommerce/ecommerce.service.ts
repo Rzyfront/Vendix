@@ -11,6 +11,7 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { QrService } from '../../../common/services/qr.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
   StoreSettings,
   EcommerceSettings,
@@ -319,9 +320,7 @@ export class EcommerceService {
 
     const domain = await this.findPrimaryEcommerceDomain(store_id);
     if (!domain) {
-      throw new Error(
-        'No hay un dominio ecommerce principal activo para generar el QR',
-      );
+      throw new VendixHttpException(ErrorCodes.ECOM_DOMAIN_NOT_PRIMARY_001);
     }
 
     if (domain.app_type !== appType) {

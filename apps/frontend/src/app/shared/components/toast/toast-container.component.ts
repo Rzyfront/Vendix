@@ -39,6 +39,16 @@ import type { IconName } from '../icon/icons.registry';
                     {{ t.description }}
                   </p>
                 }
+                @if (t.action) {
+                  <button
+                    type="button"
+                    class="mt-2 inline-flex items-center gap-1 rounded-md bg-white/70 px-2.5 py-1 text-xs font-semibold text-[var(--color-text-primary)] ring-1 ring-current/10 hover:bg-white"
+                    (click)="onAction(t.id, t.action!)"
+                  >
+                    {{ t.action.label }}
+                    <app-icon name="arrow-right" [size]="12"></app-icon>
+                  </button>
+                }
               </div>
               <button
                 class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -61,6 +71,15 @@ export class ToastContainerComponent {
 
   dismiss(id: string) {
     this.toast.dismiss(id);
+  }
+
+  /**
+   * Invoke the toast's action callback and dismiss the toast so the user
+   * sees the toast disappear as they navigate to the action target.
+   */
+  onAction(id: string, action: { label: string; onAction: () => void }) {
+    this.dismiss(id);
+    action.onAction();
   }
 
   variantClasses(variant: string) {

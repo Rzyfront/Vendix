@@ -2979,6 +2979,11 @@ export class ProductsService {
 
     const status = await this.resolveOnlinePurchaseStatus(product.store_id);
     if (!status.ready) {
+      // Use structured error code for the domain-not-configured case so
+      // the frontend can show a CTA linking to the domains setup.
+      if (status.reason === 'ecommerce_domain_not_active') {
+        throw new VendixHttpException(ErrorCodes.ECOM_DOMAIN_NOT_PRIMARY_001);
+      }
       throw new BadRequestException(status.message);
     }
 
