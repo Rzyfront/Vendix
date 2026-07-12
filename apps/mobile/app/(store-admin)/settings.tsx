@@ -1344,7 +1344,10 @@ function GeneralTab() {
           {
             label: 'Restablecer',
             onPress: handleReset,
-            variant: 'outline',
+            // Parity con web `app-button[variant="outline-danger"]`
+            // (borde + label rojos, fondo transparente). Distinto de
+            // `destructive` (sólido rojo) o `outline` (gris).
+            variant: 'outline-danger',
             icon: 'rotate-ccw',
           },
           {
