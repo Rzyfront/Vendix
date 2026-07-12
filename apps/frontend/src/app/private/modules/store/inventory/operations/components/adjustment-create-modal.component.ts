@@ -850,8 +850,14 @@ export class AdjustmentCreateModalComponent {
     }
     if (this.hasMissingType()) return null;
 
+    // Backend BatchCreateAdjustmentsDto exige location_id singular; el modal
+    // soporta selección múltiple en UI pero opera con la primera bodega
+    // (consistente con getLocationName(selectedLocations()[0]) y
+    // preselectedLocationId = selectedLocations()[0] en el resto del código).
+    const [primaryLocationId] = locationIds;
+
     return {
-      location_ids: locationIds,
+      location_id: primaryLocationId,
       items: this.adjustmentItems.map((item) => ({
         product_id: item.product_id,
         type: item.type,
