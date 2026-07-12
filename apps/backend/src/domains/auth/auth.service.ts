@@ -2626,6 +2626,114 @@ export class AuthService {
     };
   }
 
+  /**
+   * Recuperación de contraseña para clientes de ecommerce (store-scoped).
+   * Combina la resolución store-scoped de `loginCustomer` con la generación de
+   * token de `forgotPassword`. Anti-enumeración: siempre devuelve el mismo
+   * mensaje genérico, sin revelar si la tienda/usuario/rol/asociación falló.
+   */
+  async forgotPasswordCustomer(
+    email: string,
+    store_id: number,
+  ): Promise<{ message: string }> {
+    const genericMessage =
+      'Si el email existe, recibirás instrucciones para restablecer tu contraseña';
+
+    // 1. Resolver la tienda (scope multi-tenant ecommerce)
+    const store = await this.prismaService.stores.findUnique({
+      where: { id: store_id },
+    });
+
+    // Anti-enumeración: mismo mensaje genérico si la tienda no existe
+    if (!store) {
+      return { message: genericMessage };
+    }
+
+    // 2. Resolver el usuario dentro de la organización de la tienda,
+    // con roles y asociación a la tienda filtrada por store_id
+    const user = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: store.organization_id,
+      },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+        store_users: {
+          where: { store_id: store.id },
+        },
+      },
+    });
+
+    // 3. Anti-enumeración: mismo mensaje genérico si el usuario no existe,
+    // no tiene rol `customer`, o no está asociado a esta tienda.
+    // No revelamos cuál condición falló.
+    const roles = user?.user_roles?.map((ur) => ur.roles?.name) || [];
+    const isCustomer = roles.includes('customer');
+    const belongsToStore = (user?.store_users?.length || 0) > 0;
+
+    if (!user || !isCustomer || !belongsToStore) {
+      return { message: genericMessage };
+    }
+
+    // 4. Invalidar tokens anteriores
+    await this.prismaService.password_reset_tokens.updateMany({
+      where: { user_id: user.id },
+      data: { used: true },
+    });
+
+    // Crear nuevo token (expira en 1 hora)
+    const token = this.generateRandomToken();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1);
+
+    await this.prismaService.password_reset_tokens.create({
+      data: {
+        user_id: user.id,
+        token,
+        expires_at: expiresAt,
+      },
+    });
+
+    // 5. Resolver URL de reseteo con el hostname del ecommerce de la tienda
+    const base = await this.emailBrandingService.getStoreEcommerceUrl(store_id);
+    const resetUrl = base
+      ? `${base}/reset-password?token=${token}`
+      : `${process.env.FRONTEND_URL || 'http://localhost:4200'}/reset-password?token=${token}`;
+
+    // 6. Branding de la tienda para personalizar el email
+    const branding = await this.emailBrandingService.getStoreBranding(store_id);
+
+    // 7. Enviar email de recuperación (solo si el usuario tiene correo)
+    if (user.email) {
+      await this.emailService.sendPasswordResetEmail(
+        user.email,
+        token,
+        user.first_name,
+        { resetUrl, branding, storeName: store.name },
+      );
+    }
+
+    // 8. Registrar auditoría de solicitud de recuperación
+    await this.auditService.logAuth(
+      user.id,
+      AuditAction.PASSWORD_RESET,
+      {
+        method: 'forgot_password_customer_request',
+        success: true,
+        email_sent: true,
+      },
+      undefined, // IP no disponible en este contexto
+      undefined, // User-Agent no disponible en este contexto
+    );
+
+    // 9. Mensaje genérico (mismo shape que forgotPassword)
+    return { message: genericMessage };
+  }
+
   async resetPassword(
     token: string,
     newPassword: string,

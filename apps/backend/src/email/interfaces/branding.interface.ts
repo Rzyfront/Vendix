@@ -25,3 +25,13 @@ export interface WelcomeEmailOptions {
   organizationName?: string;
   storeName?: string;
 }
+
+/**
+ * Options for password reset email customization
+ */
+export interface PasswordResetEmailOptions {
+  resetUrl?: string;
+  branding?: EmailBranding;
+  storeName?: string;
+  organizationSlug?: string;
+}

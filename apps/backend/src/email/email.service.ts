@@ -7,6 +7,7 @@ import {
   EmailConfig,
   EmailAttachment,
 } from './interfaces/email.interface';
+import { PasswordResetEmailOptions } from './interfaces/branding.interface';
 import { ResendProvider } from './providers/resend.provider';
 import { SesProvider } from './providers/ses.provider';
 import { SendGridProvider } from './providers/sendgrid.provider';
@@ -287,9 +288,10 @@ export class EmailService implements OnModuleInit {
     to: string,
     token: string,
     username: string,
+    options?: PasswordResetEmailOptions,
   ): Promise<EmailResult> {
     this.logger.log(`Sending password reset email to ${to}`);
-    return this.provider.sendPasswordResetEmail(to, token, username);
+    return this.provider.sendPasswordResetEmail(to, token, username, options);
   }
 
   async sendWelcomeEmail(

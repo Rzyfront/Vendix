@@ -25,6 +25,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import {
   ChangePasswordDto,
   ForgotPasswordDto,
+  ForgotPasswordCustomerDto,
   ResetPasswordDto,
 } from './dto/password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -435,6 +436,44 @@ export class AuthController {
   @Post('reset-owner-password')
   @HttpCode(HttpStatus.OK)
   async resetOwnerPassword(@Body() resetDto: ResetPasswordDto) {
+    try {
+      const result = await this.authService.resetPassword(
+        resetDto.token,
+        resetDto.new_password,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al restablecer la contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Post('forgot-customer-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotCustomerPassword(@Body() forgotDto: ForgotPasswordCustomerDto) {
+    try {
+      const result = await this.authService.forgotPasswordCustomer(
+        forgotDto.email,
+        forgotDto.store_id,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al solicitar recuperación de contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Post('reset-customer-password')
+  @HttpCode(HttpStatus.OK)
+  async resetCustomerPassword(@Body() resetDto: ResetPasswordDto) {
     try {
       const result = await this.authService.resetPassword(
         resetDto.token,

@@ -87,6 +87,8 @@ export class AuthModule {
         { path: 'auth/register-staff', method: RequestMethod.POST },
         { path: 'auth/forgot-password', method: RequestMethod.POST },
         { path: 'auth/reset-password', method: RequestMethod.POST },
+        { path: 'auth/forgot-customer-password', method: RequestMethod.POST },
+        { path: 'auth/reset-customer-password', method: RequestMethod.POST },
       );
   }
 }

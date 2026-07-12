@@ -1,4 +1,8 @@
-import { EmailBranding, WelcomeEmailOptions } from './branding.interface';
+import {
+  EmailBranding,
+  WelcomeEmailOptions,
+  PasswordResetEmailOptions,
+} from './branding.interface';
 
 // Interfaz base para todos los proveedores de email
 export interface EmailProvider {
@@ -25,6 +29,7 @@ export interface EmailProvider {
     to: string,
     token: string,
     username: string,
+    options?: PasswordResetEmailOptions,
   ): Promise<EmailResult>;
   sendWelcomeEmail(
     to: string,

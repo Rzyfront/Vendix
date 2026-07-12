@@ -1,4 +1,11 @@
-import { IsEmail, IsString, IsNotEmpty, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  IsNotEmpty,
+  MinLength,
+  IsInt,
+  IsPositive,
+} from 'class-validator';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
@@ -18,6 +25,24 @@ export class ForgotPasswordDto {
   @IsString()
   @IsNotEmpty()
   organization_slug: string;
+}
+
+export class ForgotPasswordCustomerDto {
+  @ApiProperty({
+    example: 'cliente@email.com',
+    description: 'Correo electrónico del cliente',
+  })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({
+    example: 1,
+    description: 'ID de la tienda (requerido para multi-tenant ecommerce)',
+  })
+  @IsInt()
+  @IsPositive()
+  store_id: number;
 }
 
 export class ResetPasswordDto {

@@ -43,6 +43,47 @@ export class EmailBrandingService {
   }
 
   /**
+   * Resolve the public ecommerce URL of a store (without HTTP context).
+   * Prefers the active STORE_ECOMMERCE domain, then the active primary domain.
+   * Returns null when no domain is configured so the caller can fall back to
+   * FRONTEND_URL.
+   */
+  async getStoreEcommerceUrl(storeId: number): Promise<string | null> {
+    try {
+      const ecommerceDomain = await this.globalPrisma.domain_settings.findFirst(
+        {
+          where: {
+            store_id: storeId,
+            app_type: 'STORE_ECOMMERCE',
+            status: 'active',
+          },
+        },
+      );
+      if (ecommerceDomain?.hostname) {
+        return `https://${ecommerceDomain.hostname}`;
+      }
+
+      const primaryDomain = await this.globalPrisma.domain_settings.findFirst({
+        where: {
+          store_id: storeId,
+          is_primary: true,
+          status: 'active',
+        },
+      });
+      if (primaryDomain?.hostname) {
+        return `https://${primaryDomain.hostname}`;
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `Error resolving ecommerce URL for store ${storeId}: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Get branding for an organization by ID
    * Used for staff registration at organization level
    *
