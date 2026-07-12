@@ -61,12 +61,18 @@ export class VehicleFormModalComponent {
   private buildForm(): FormGroup {
     return this.fb.group({
       plate: ['', [Validators.required, Validators.maxLength(20)]],
-      type: ['truck' as VehicleType],
-      brand: ['', Validators.maxLength(80)],
-      model_name: ['', Validators.maxLength(80)],
-      capacity_kg: [null as number | null],
+      type: ['truck' as VehicleType, Validators.required],
+      brand: ['', [Validators.required, Validators.maxLength(80)]],
+      model_name: ['', [Validators.required, Validators.maxLength(80)]],
+      capacity_kg: [
+        null as number | null,
+        [Validators.required, Validators.min(0)],
+      ],
       capacity_units: [null as number | null],
-      primary_driver_id: [null as number | null],
+      primary_driver_id: [
+        null as number | null,
+        [Validators.required],
+      ],
       is_active: [true],
       notes: [''],
     });
