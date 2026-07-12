@@ -205,6 +205,36 @@ export class CheckoutService {
     );
   }
 
+  /**
+   * FIX/Wallet ecommerce: confirma el pago de una orden usando el saldo de
+   * wallet del cliente autenticado. Se llama DESPUÉS de checkout() cuando el
+   * método seleccionado es wallet. Sigue el patrón de confirmWompiPayment.
+   *
+   * El backend hace el debit autoritativamente con order.grand_total
+   * (recalculado del lado server), así que no enviamos amount desde el cliente.
+   */
+  payWithWallet(orderId: number): Observable<{
+    success: boolean;
+    data: {
+      state: string;
+      orderState: string;
+      paymentId: number;
+      balanceAfter?: number;
+      alreadyConfirmed: boolean;
+    };
+  }> {
+    return this.http.post<{
+      success: boolean;
+      data: {
+        state: string;
+        orderState: string;
+        paymentId: number;
+        balanceAfter?: number;
+        alreadyConfirmed: boolean;
+      };
+    }>(`${this.api_url}/pay-with-wallet/${orderId}`, {}, { headers: this.getHeaders() });
+  }
+
   prepareWompiPayment(
     orderId: number,
     amount: number,

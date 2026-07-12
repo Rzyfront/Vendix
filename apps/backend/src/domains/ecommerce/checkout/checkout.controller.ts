@@ -7,6 +7,7 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -161,6 +162,28 @@ export class CheckoutController {
       orderId,
       dto.public_order_token,
     );
+    return { success: true, data };
+  }
+
+  /**
+   * FIX/Wallet ecommerce: cobra una orden de e-commerce usando la wallet del
+   * cliente autenticado. Se llama DESPUÉS de POST /ecommerce/checkout (que
+   * crea la orden + payment en 'pending'). Sigue el mismo patrón de
+   * confirm-wompi-payment pero para wallet — auth REQUERIDA (no @OptionalAuth)
+   * porque necesitamos req.user.id para resolver la wallet del cliente.
+   */
+  @Post('pay-with-wallet/:orderId')
+  async payWithWallet(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Req() req: any,
+  ) {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      throw new BadRequestException(
+        'Se requiere autenticación del cliente para pagar con wallet',
+      );
+    }
+    const data = await this.checkout_service.payWithWallet(orderId, customerId);
     return { success: true, data };
   }
 

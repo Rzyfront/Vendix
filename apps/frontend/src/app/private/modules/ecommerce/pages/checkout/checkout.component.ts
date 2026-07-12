@@ -1057,6 +1057,60 @@ export class CheckoutComponent implements OnInit {
       request.shipping_address_id = this.selected_address_id() ?? undefined;
     }
 
+    // FIX/Wallet ecommerce: si el método seleccionado es wallet, bifurcamos
+    // ANTES del flujo normal/Wompi: creamos la orden con checkout() y luego
+    // llamamos payWithWallet() para que el backend debite la wallet
+    // autoritativamente. Antes del fix, checkout() creaba la orden y un
+    // payment en 'pending' pero nunca debitaba → el cliente veía la orden
+    // creada pero su saldo no se afectaba.
+    const selectedMethod = this.payment_methods().find(
+      (m) => m.id === this.selected_payment_method_id(),
+    );
+    const isWallet =
+      selectedMethod?.type === 'wallet' ||
+      selectedMethod?.provider === 'wallet';
+
+    if (isWallet && this.is_authenticated()) {
+      this.checkout_service
+        .checkout(request, this.payment_receipt_file())
+        .subscribe({
+          next: (response) => {
+            if (!response.success) return;
+            const orderId = response.data.order_id;
+            this.checkout_service.payWithWallet(orderId).subscribe({
+              next: (payResponse) => {
+                if (payResponse.success) {
+                  this.orderPlaced = true;
+                  this.is_submitting.set(false);
+                  this.cart_service.clearAllCart();
+                  this.router.navigate(['/account/orders', orderId], {
+                    queryParams: { success: true },
+                  });
+                } else {
+                  this.is_submitting.set(false);
+                  this.error_message.set(
+                    'No se pudo procesar el pago con wallet. Verifica tu saldo disponible.',
+                  );
+                }
+              },
+              error: (err) => {
+                this.is_submitting.set(false);
+                const msg = extractApiErrorMessage(err);
+                this.error_message.set(msg);
+                this.toast.error(msg, 'Error al cobrar wallet');
+              },
+            });
+          },
+          error: (err) => {
+            this.is_submitting.set(false);
+            const msg = extractApiErrorMessage(err);
+            this.error_message.set(msg);
+            this.toast.error(msg, 'Error al procesar el pedido');
+          },
+        });
+      return;
+    }
+
     // Wompi payment flow: create order first, then open widget
     if (this.isWompiPayment()) {
       this.wompiWidgetLoading.set(true);
@@ -1065,80 +1119,77 @@ export class CheckoutComponent implements OnInit {
       this.checkout_service
         .checkout(request, this.payment_receipt_file())
         .subscribe({
+          next: (response) => {
+            if (response.success) {
+              this.orderPlaced = true;
+              const orderId = response.data.order_id;
+              const publicOrderToken = response.data.public_order_token;
+              const totalAmount = Number(response.data.total);
+
+              this.checkout_service
+                .prepareWompiPayment(
+                  orderId,
+                  totalAmount,
+                  undefined,
+                  publicOrderToken
+                    ? `${window.location.origin}/pedido/${publicOrderToken}?wompi_callback=true`
+                    : `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+                  publicOrderToken,
+                )
+                .subscribe({
+                  next: (res) => {
+                    this.wompiWidgetLoading.set(false);
+                    this.openWompiWidget(res.data, orderId, publicOrderToken);
+                  },
+                  error: (err) => {
+                    this.wompiWidgetLoading.set(false);
+                    const msg = extractApiErrorMessage(err);
+                    this.error_message.set(msg);
+                    this.toast.error(msg, 'Error al preparar pago');
+                  },
+                });
+            }
+          },
+          error: (err) => {
+            this.wompiWidgetLoading.set(false);
+            const msg = extractApiErrorMessage(err);
+            this.error_message.set(msg);
+            this.toast.error(msg, 'Error al procesar el pedido');
+          },
+        });
+      return;
+    }
+
+    // Normal flow: cash, transfer, voucher, etc.
+    this.checkout_service
+      .checkout(request, this.payment_receipt_file())
+      .subscribe({
         next: (response) => {
           if (response.success) {
             this.orderPlaced = true;
-            const orderId = response.data.order_id;
-            const publicOrderToken = response.data.public_order_token;
-            // Use the backend-authoritative total returned in the order
-            // creation response — never recompute on the client because
-            // promotions + coupon discounts only exist server-side.
-            const totalAmount = Number(response.data.total);
-
-            this.checkout_service
-              .prepareWompiPayment(
-                orderId,
-                totalAmount,
-                undefined,
-                publicOrderToken
-                  ? `${window.location.origin}/pedido/${publicOrderToken}?wompi_callback=true`
-                  : `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
-                publicOrderToken,
-              )
-              .subscribe({
-                next: (res) => {
-                  this.wompiWidgetLoading.set(false);
-                  this.openWompiWidget(res.data, orderId, publicOrderToken);
+            this.is_submitting.set(false);
+            if (!this.is_authenticated() && response.data.public_order_token) {
+              this.cart_service.clearAllCart();
+              this.router.navigate(
+                ['/pedido', response.data.public_order_token],
+                {
+                  queryParams: { success: true },
                 },
-                error: (err) => {
-                  this.wompiWidgetLoading.set(false);
-                  const msg = extractApiErrorMessage(err);
-                  this.error_message.set(msg);
-                  this.toast.error(msg, 'Error al preparar pago');
-                },
+              );
+            } else {
+              this.router.navigate(['/account/orders', response.data.order_id], {
+                queryParams: { success: true },
               });
+            }
           }
         },
         error: (err) => {
-          this.wompiWidgetLoading.set(false);
+          this.is_submitting.set(false);
           const msg = extractApiErrorMessage(err);
           this.error_message.set(msg);
           this.toast.error(msg, 'Error al procesar el pedido');
         },
       });
-
-      return;
-    }
-
-    this.checkout_service
-      .checkout(request, this.payment_receipt_file())
-      .subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.orderPlaced = true;
-          this.is_submitting.set(false);
-          if (!this.is_authenticated() && response.data.public_order_token) {
-            this.cart_service.clearAllCart();
-            this.router.navigate(
-              ['/pedido', response.data.public_order_token],
-              {
-                queryParams: { success: true },
-              },
-            );
-          } else {
-            this.router.navigate(['/account/orders', response.data.order_id], {
-              queryParams: { success: true },
-            });
-          }
-        }
-      },
-      error: (err) => {
-        this.is_submitting.set(false);
-        const msg = extractApiErrorMessage(err);
-        this.error_message.set(msg);
-        this.toast.error(msg, 'Error al procesar el pedido');
-      },
-    });
   }
 
   onGuestDataCompleted(data: GuestCheckoutData | null): void {

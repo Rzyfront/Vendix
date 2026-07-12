@@ -12,6 +12,7 @@ import { ProductsModule } from '../../store/products/products.module';
 import { WompiModule } from '../../store/payments/processors/wompi/wompi.module';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
 import { PaymentsModule } from '../../store/payments/payments.module';
+import { WalletModule } from '../../store/wallet/wallet.module';
 import { ReservationsModule } from '../../store/reservations/reservations.module';
 import { InvoicingModule } from '../../store/invoicing/invoicing.module';
 import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.module';
@@ -37,6 +38,8 @@ import { MenusModule } from '../../store/menus/menus.module';
     // Wrapped in forwardRef defensively because PaymentsModule already pulls in
     // OrderFlow/Orders/PaymentLinks via forwardRef.
     forwardRef(() => PaymentsModule),
+    // FIX/Wallet ecommerce: provee WalletService (getOrCreateWallet).
+    WalletModule,
     ReservationsModule,
     InvoicingModule,
     InvoiceDataRequestsModule,

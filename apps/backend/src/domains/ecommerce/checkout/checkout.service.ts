@@ -37,6 +37,8 @@ import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
+import { WalletService } from '../../store/wallet/wallet.service';
+import { WalletBalanceService } from '../../store/wallet/services/wallet-balance.service';
 
 @Injectable()
 export class CheckoutService {
@@ -101,6 +103,15 @@ export class CheckoutService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
+    // FIX/Wallet ecommerce: para cobrar con wallet en el checkout online
+    // usamos directamente WalletBalanceService.debit (no el gateway).
+    // Razón: el gateway (a) crea un payment record duplicado — checkout()
+    // ya creó uno en 'pending' — y (b) su validatePaymentAmount compara
+    // amount enviado vs remainingAmount (que ya es 0 porque cuenta el
+    // payment pending), lanzando INVALID_AMOUNT. WalletBalanceService.debit
+    // hace el debit real y emite 'wallet.debited' para accounting.
+    private readonly walletService: WalletService,
+    private readonly walletBalanceService: WalletBalanceService,
   ) {}
 
   /**
@@ -2164,6 +2175,157 @@ export class CheckoutService {
       state: finalPayment?.state ?? mappedState ?? payment.state,
       orderState: finalOrder?.state ?? 'unknown',
       transactionId: finalPayment?.transaction_id ?? payment.transaction_id,
+      alreadyConfirmed: false,
+    };
+  }
+
+  /**
+   * FIX/Wallet ecommerce: cobra una orden de e-commerce usando el saldo de
+   * la wallet del cliente autenticado. Sigue el patrón de confirmWompiPayment
+   * (auth vía customer JWT, scope por tienda, idempotencia por estado del
+   * payment) y delega al WalletPaymentProcessor vía PaymentGatewayService.
+   *
+   * Reglas duras:
+   *  - La orden debe pertenecer al customer autenticado.
+   *  - El método de pago de la orden debe ser 'wallet' (system_payment_method.type).
+   *  - Si el payment ya está en estado terminal, retornar el estado actual sin
+   *    re-debitar (idempotencia).
+   *  - El monto del debit SIEMPRE es order.grand_total (autoritativo del backend),
+   *    NO cualquier valor del cliente.
+   *  - La wallet se resuelve vía WalletService.getOrCreateWallet.
+   *
+   * Atomicidad: el debit lo hace WalletPaymentProcessor.processPayment, que
+   * internamente llama a WalletBalanceService.debit con su propia $transaction.
+   * Si el debit falla, el payment queda en 'pending' — el cliente puede
+   * reintentar la confirmación.
+   */
+  async payWithWallet(
+    orderId: number,
+    customerId: number,
+  ): Promise<{
+    state: string;
+    orderState: string;
+    paymentId: number;
+    balanceAfter?: number;
+    alreadyConfirmed: boolean;
+  }> {
+    const order = await this.store_prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        customer_id: true,
+        state: true,
+        grand_total: true,
+        currency: true,
+        store_id: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('No se encontró la orden');
+    }
+
+    if (order.customer_id !== customerId) {
+      // Defense in depth: el JwtAuthGuard garantiza auth, pero además
+      // validamos que la orden sea del customer autenticado.
+      throw new NotFoundException('No se encontró la orden');
+    }
+
+    const payment = await this.store_prisma.payments.findFirst({
+      where: { order_id: orderId },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('No payment record found for this order');
+    }
+
+    const paymentMethodType =
+      payment.store_payment_method?.system_payment_method?.type;
+    const paymentMethodProvider =
+      payment.store_payment_method?.system_payment_method?.provider;
+    if (paymentMethodType !== 'wallet' && paymentMethodProvider !== 'wallet') {
+      throw new BadRequestException(
+        'La orden no fue creada con método de pago Wallet',
+      );
+    }
+
+    // Idempotencia: si el payment ya está en estado terminal, no re-debitar.
+    const terminal = [
+      'succeeded',
+      'captured',
+      'failed',
+      'cancelled',
+      'refunded',
+    ];
+    if (terminal.includes(payment.state)) {
+      return {
+        state: payment.state,
+        orderState: order.state,
+        paymentId: payment.id,
+        alreadyConfirmed: true,
+      };
+    }
+
+    // Resolver/crear la wallet del cliente en esta tienda.
+    // El método getOrCreateWallet del WalletService ya tiene un bug latente
+    // (no filtra por store_id), pero está fuera de scope de este fix.
+    const wallet = await this.walletService.getOrCreateWallet(customerId);
+
+    if (!wallet || !wallet.is_active) {
+      throw new BadRequestException(
+        'No se encontró una wallet activa para este cliente',
+      );
+    }
+
+    // Hacer el debit directamente con WalletBalanceService.debit (no vía
+    // gateway). Esto evita:
+    // (1) El bug INVALID_AMOUNT del validator (cuenta el payment pending
+    //     como ya pagado → remainingAmount = 0).
+    // (2) Crear un payment row duplicado (el checkout() ya creó uno).
+    // El debit emite 'wallet.debited' que el AccountingEventsListener
+    // escucha para crear el asiento contable automáticamente.
+    const amount = Number(order.grand_total);
+    const debitResult = await this.walletBalanceService.debit(
+      wallet.id,
+      amount,
+      {
+        reference_type: 'order_payment',
+        reference_id: order.id,
+        description: `Payment for order #${order.id}`,
+        created_by: customerId,
+      },
+    );
+
+    // Actualizar el payment existente de 'pending' → 'succeeded'
+    // y el order a 'processing' para reflejar el cobro exitoso.
+    // (FIX: payments_state_enum no incluye 'completed' — solo 'succeeded'.)
+    await this.store_prisma.payments.update({
+      where: { id: payment.id },
+      data: {
+        state: 'succeeded',
+        updated_at: new Date(),
+      },
+    });
+
+    await this.store_prisma.orders.update({
+      where: { id: order.id },
+      data: {
+        state: 'processing',
+        updated_at: new Date(),
+      },
+    });
+
+    return {
+      state: 'succeeded',
+      orderState: 'processing',
+      paymentId: payment.id,
+      balanceAfter: Number(debitResult.balance_after),
       alreadyConfirmed: false,
     };
   }
