@@ -11,7 +11,6 @@ import { NotificationsModal } from '@/features/notifications/notifications-modal
 import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { useAuthStore } from '@/core/store/auth.store';
-import { ToastContainer } from '@/shared/components/toast/toast';
 
 interface AdminShellProps {
   children: ReactNode;
@@ -202,9 +201,6 @@ export function AdminShell({
           <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant={variant} />
         </Animated.View>
       )}
-
-      {/* Toast notifications */}
-      <ToastContainer />
     </View>
   );
 }
