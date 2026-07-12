@@ -40,7 +40,10 @@ export default function BrandsListScreen() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<BrandState | undefined>(undefined);
   const [featuredFilter, setFeaturedFilter] = useState<boolean | undefined>(undefined);
+  const [sortBy, setSortBy] = useState<'name' | 'product_count' | 'is_featured' | 'created_at'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
+  const [forceConfirm, setForceConfirm] = useState<{ brand: Brand; productCount: number } | null>(null);
 
   const query: BrandQuery = {
     page,
@@ -114,48 +117,45 @@ export default function BrandsListScreen() {
               onChangeText={handleSearch}
               debounceMs={400}
             />
+
+        {/* Sort chips */}
+        <View style={{ flexDirection: 'row', gap: spacing[2], flexWrap: 'wrap' }}>
+          <SortChip label="Nombre" active={sortBy === 'name'} order={sortOrder} onPress={() => { setSortBy('name'); setSortOrder(sortBy === 'name' && sortOrder === 'asc' ? 'desc' : 'asc'); setPage(1); }} />
+          <SortChip label="Productos" active={sortBy === 'product_count'} order={sortOrder} onPress={() => { setSortBy('product_count'); setSortOrder(sortBy === 'product_count' && sortOrder === 'asc' ? 'desc' : 'asc'); setPage(1); }} />
+          <SortChip label="Destacada" active={sortBy === 'is_featured'} order={sortOrder} onPress={() => { setSortBy('is_featured'); setSortOrder(sortBy === 'is_featured' && sortOrder === 'asc' ? 'desc' : 'asc'); setPage(1); }} />
+        </View>
           </View>
           <OptionsDropdown
             filters={[
               {
-                key: 'state',
                 label: 'Estado',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'active', label: 'Activas' },
-                  { value: 'inactive', label: 'Inactivas' },
+                  { label: 'Todas', value: 'all' },
+                  { label: 'Activas', value: 'active' },
+                  { label: 'Inactivas', value: 'inactive' },
                 ],
+                onSelect: (value) => {
+                  setStateFilter(
+                    !value || value === 'all' ? undefined : (value as BrandState),
+                  );
+                  setPage(1);
+                },
               },
               {
-                key: 'featured',
                 label: 'Destacadas',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'true', label: 'Destacadas' },
-                  { value: 'false', label: 'No destacadas' },
+                  { label: 'Todas', value: 'all' },
+                  { label: 'Destacadas', value: 'true' },
+                  { label: 'No destacadas', value: 'false' },
                 ],
+                onSelect: (value) => {
+                  setFeaturedFilter(
+                    !value || value === 'all' ? undefined : value === 'true',
+                  );
+                  setPage(1);
+                },
               },
             ]}
-            filterValues={{
-              state: stateFilter ?? 'all',
-              featured:
-                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
-            }}
-            onFilterChange={(values) => {
-              const stateVal = values.state;
-              const featuredVal = values.featured;
-              setStateFilter(
-                !stateVal || stateVal === 'all' ? undefined : (stateVal as BrandState),
-              );
-              setFeaturedFilter(
-                !featuredVal || featuredVal === 'all'
-                  ? undefined
-                  : featuredVal === 'true',
-              );
-              setPage(1);
-            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Marca',
@@ -253,10 +253,14 @@ function BrandCard({
   brand,
   onPress,
   onLongPress,
+  onToggleFeatured,
+  isTogglingFeatured,
 }: {
   brand: Brand;
   onPress: () => void;
   onLongPress?: () => void;
+  onToggleFeatured?: () => void;
+  isTogglingFeatured?: boolean;
 }) {
   const stateVariant = brand.state === 'active' ? 'success' : brand.state === 'inactive' ? 'default' : 'warning';
   const stateLabel = brand.state === 'active' ? 'Activa' : brand.state === 'inactive' ? 'Inactiva' : 'Archivada';
@@ -325,7 +329,65 @@ function BrandCard({
           </Text>
         )}
       </View>
+      {onToggleFeatured ? (
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onToggleFeatured();
+          }}
+          hitSlop={8}
+          disabled={isTogglingFeatured}
+          style={({ pressed }) => [
+            {
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: brand.is_featured ? '#FEF3C7' : 'transparent',
+            },
+            pressed && { opacity: 0.6 },
+          ]}
+          accessibilityLabel={brand.is_featured ? 'Quitar destaque' : 'Destacar'}
+        >
+          <Icon
+            name="star"
+            size={18}
+            color={brand.is_featured ? colors.warning : colors.text.muted}
+          />
+        </Pressable>
+      ) : null}
       <Icon name="chevron-right" size={18} color={colors.text.muted} />
+    </Pressable>
+  );
+}
+
+function SortChip({ label, active, order, onPress }: { label: string; active: boolean; order: 'asc' | 'desc'; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      style={({ pressed }) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingHorizontal: spacing[2],
+          paddingVertical: 6,
+          borderRadius: borderRadius.md,
+          backgroundColor: active ? colors.primary : colors.card,
+          borderWidth: 1,
+          borderColor: active ? colors.primary : colorScales.gray[200],
+        },
+        pressed && { opacity: 0.7 },
+      ]}
+    >
+      <Text style={{ fontSize: typography.fontSize.xs, fontWeight: '600', color: active ? colors.background : colors.text.primary }}>
+        {label}
+      </Text>
+      {active ? (
+        <Icon name={order === 'asc' ? 'chevron-up' : 'chevron-down'} size={12} color={colors.background} />
+      ) : null}
     </Pressable>
   );
 }

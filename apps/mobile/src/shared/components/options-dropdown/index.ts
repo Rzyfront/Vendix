@@ -1,9 +1,7 @@
 export { OptionsDropdown } from './options-dropdown';
 export type {
-  FilterType,
-  FilterOption,
-  FilterConfig,
-  DropdownActionVariant,
-  DropdownAction,
-  FilterValues,
+  OptionsDropdownSection,
+  OptionsDropdownAction,
+  OptionsDropdownFilter,
+  OptionsDropdownProps,
 } from './options-dropdown';
