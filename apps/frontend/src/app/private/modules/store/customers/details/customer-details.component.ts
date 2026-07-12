@@ -1,6 +1,7 @@
 import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
+import { filter } from 'rxjs/operators';
 import {
   FormBuilder,
   FormGroup,
@@ -797,6 +798,24 @@ export class CustomerDetailsComponent {
           this.loadWalletHistory();
           this.loadCustomerMetadata(this.customerId()!);
           this.loadBookingHistory(this.customerId()!);
+        }
+      });
+
+    // FIX/Wallet refresh on navigation: paramMap solo emite cuando cambia el
+    // :id. Si el usuario navega al MISMO cliente (ej. viene de una compra
+    // ecommerce con wallet), la wallet no se recarga y muestra saldo stale
+    // hasta que el usuario haga F5. Forzamos recarga en cada navigationEnd
+    // cuando estamos en la misma ruta /admin/customers/:id.
+    this.router.events
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        // Filtrar solo navigationEnd (no params/resolve/etc.)
+        filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      )
+      .subscribe((e) => {
+        if (e.urlAfterRedirects.startsWith('/admin/customers/')) {
+          this.loadWallet();
+          this.loadWalletHistory();
         }
       });
   }
