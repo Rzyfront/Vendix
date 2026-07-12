@@ -15,8 +15,34 @@ const routeTitles: Record<string, string> = {
   settings: 'Configuración',
 };
 
-// Breadcrumb = sección padre (sin rutas hijas con padre en super-admin actualmente)
-const routeBreadcrumbs: Record<string, string> = {};
+// Breadcrumb = sección padre + segmento current + ícono current (azul).
+// Paridad con web `BreadcrumbService.routes` + `HeaderComponent`:
+//   [shield] Super admin  /  [home blue] currentLabel
+const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = {
+  dashboard: { label: 'Super admin', icon: 'shield' },
+  organizations: { label: 'Super admin', icon: 'shield' },
+  stores: { label: 'Super admin', icon: 'shield' },
+  users: { label: 'Super admin', icon: 'shield' },
+  subscriptions: { label: 'Super admin', icon: 'shield' },
+  'ai-engine': { label: 'Super admin', icon: 'shield' },
+  monitoring: { label: 'Super admin', icon: 'shield' },
+  settings: { label: 'Super admin', icon: 'shield' },
+};
+
+/**
+ * Etiqueta del segmento current del breadcrumb (final del path). Aparece
+ * al lado del ícono home (azul). Independiente del h1 `title`.
+ */
+const routeBreadcrumbCurrent: Record<string, string> = {
+  dashboard: 'Dashboard',
+  organizations: 'Organizaciones',
+  stores: 'Tiendas',
+  users: 'Usuarios',
+  subscriptions: 'Suscripciones',
+  'ai-engine': 'AI Engine',
+  monitoring: 'Monitoreo',
+  settings: 'Configuración',
+};
 
 export default function SuperAdminLayout() {
   const router = useRouter();
@@ -40,10 +66,18 @@ export default function SuperAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
-  const breadcrumb = routeBreadcrumbs[currentSegment];
+  const parent = routeBreadcrumbParent[currentSegment];
+  const currentLabel = routeBreadcrumbCurrent[currentSegment];
 
   return (
-    <AdminShell title={title} breadcrumb={breadcrumb} variant="super">
+    <AdminShell
+      title={title}
+      parentLabel={parent?.label}
+      parentIcon={parent?.icon}
+      currentLabel={currentLabel}
+      currentIcon="home"
+      variant="super"
+    >
       <Slot />
     </AdminShell>
   );
