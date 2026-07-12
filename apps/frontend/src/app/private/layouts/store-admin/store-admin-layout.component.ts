@@ -564,7 +564,7 @@ export class StoreAdminLayoutComponent {
         },
         {
           label: 'Reseñas',
-          icon: 'circle',
+          icon: 'star',
           route: '/admin/customers/reviews',
         },
         {
@@ -641,13 +641,13 @@ export class StoreAdminLayoutComponent {
         },
         {
           label: 'Compras',
-          icon: 'circle',
+          icon: 'shopping-cart',
           route: '/admin/analytics/purchases',
           alwaysVisible: true,
         },
         {
           label: 'Reseñas',
-          icon: 'circle',
+          icon: 'star',
           route: '/admin/analytics/reviews',
           alwaysVisible: true,
         },
