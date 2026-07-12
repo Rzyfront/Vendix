@@ -18,34 +18,52 @@
 
       <!-- Tipo -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Tipo</label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Tipo <span class="text-red-500">*</span></label>
         <select formControlName="type"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
           @for (opt of type_options; track opt.value) {
             <option [value]="opt.value">{{ opt.label }}</option>
           }
         </select>
+        @if (form.get('type')?.touched && form.get('type')?.invalid) {
+          <p class="mt-1 text-xs text-red-500">Selecciona un tipo de vehículo.</p>
+        }
       </div>
 
       <!-- Marca -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Marca</label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Marca <span class="text-red-500">*</span></label>
         <input type="text" formControlName="brand" placeholder="Chevrolet" maxlength="80"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+        @if (form.get('brand')?.touched && form.get('brand')?.invalid) {
+          <p class="mt-1 text-xs text-red-500">La marca es obligatoria (máx. 80 caracteres).</p>
+        }
       </div>
 
       <!-- Modelo -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Modelo</label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Modelo <span class="text-red-500">*</span></label>
         <input type="text" formControlName="model_name" placeholder="NHR / 2022" maxlength="80"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+        @if (form.get('model_name')?.touched && form.get('model_name')?.invalid) {
+          <p class="mt-1 text-xs text-red-500">El modelo es obligatorio (máx. 80 caracteres).</p>
+        }
       </div>
 
       <!-- Capacidad kg -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Capacidad (kg)</label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Capacidad (kg) <span class="text-red-500">*</span></label>
         <input type="number" formControlName="capacity_kg" min="0" step="0.01" placeholder="0"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+        @if (form.get('capacity_kg')?.touched && form.get('capacity_kg')?.invalid) {
+          <p class="mt-1 text-xs text-red-500">
+            @if (form.get('capacity_kg')?.errors?.['required']) {
+              La capacidad es obligatoria.
+            } @else if (form.get('capacity_kg')?.errors?.['min']) {
+              La capacidad no puede ser negativa.
+            }
+          </p>
+        }
       </div>
 
       <!-- Capacidad unidades -->
@@ -57,11 +75,14 @@
 
       <!-- Conductor principal -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Conductor principal</label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Conductor principal <span class="text-red-500">*</span></label>
         <app-store-user-select
           formControlName="primary_driver_id"
           placeholder="Buscar conductor..."
         />
+        @if (form.get('primary_driver_id')?.touched && form.get('primary_driver_id')?.invalid) {
+          <p class="mt-1 text-xs text-red-500">Debes asignar un conductor principal.</p>
+        }
       </div>
 
       <!-- Estado activo -->
