@@ -23,6 +23,7 @@
     "@vendix/shared-types": "file:../../libs/shared-types",
     "axios": "^1.15.2",
     "expo": "~54.0.35",
+    "expo-audio": "~1.1.1",
     "expo-clipboard": "~7.1.4",
     "expo-constants": "~18.0.13",
     "expo-document-picker": "~14.0.8",
