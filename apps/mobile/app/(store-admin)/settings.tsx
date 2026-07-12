@@ -1548,16 +1548,19 @@ function GeneralTab() {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Body intro (mismo texto que la web, vive DENTRO del body) */}
-                  <View style={{ marginBottom: 16 }}>
-                    <Text style={{ fontSize: 13, color: '#6B7280', lineHeight: 20 }}>
-                      Apaga un módulo para ocultarlo del menú lateral a <Text style={{ fontWeight: '700' }}>todos los usuarios</Text> de la tienda.
-                    </Text>
-                    <Text style={{ fontSize: 13, color: '#6B7280', lineHeight: 20, marginTop: 4 }}>
-                      <Text style={{ fontWeight: '700' }}>Apagado</Text> = oculto para todos. <Text style={{ fontWeight: '700' }}>Ausente / encendido</Text> = permitido (segun la configuracion por usuario).
-                    </Text>
-                  </View>
-                  <ScrollView style={{ flex: 1, marginTop: 16 }}>
+                  {/* Body scrollable (parity con web <app-modal>: descripción + lista
+                      viven dentro del MISMO contenedor overflow-y-auto, así la
+                      descripción scrollea con los módulos cuando el listado
+                      excede el alto del modal) */}
+                  <ScrollView style={{ flex: 1 }}>
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={{ fontSize: 13, color: '#6B7280', lineHeight: 20 }}>
+                        Apaga un módulo para ocultarlo del menú lateral a <Text style={{ fontWeight: '700' }}>todos los usuarios</Text> de la tienda.
+                      </Text>
+                      <Text style={{ fontSize: 13, color: '#6B7280', lineHeight: 20, marginTop: 4 }}>
+                        <Text style={{ fontWeight: '700' }}>Apagado</Text> = oculto para todos. <Text style={{ fontWeight: '700' }}>Ausente / encendido</Text> = permitido (segun la configuracion por usuario).
+                      </Text>
+                    </View>
                     {STORE_ADMIN_MODULES.map((mod) => {
                       const isOn = form.panel_ui?.[mod.key] !== false; // default true
                       return (
