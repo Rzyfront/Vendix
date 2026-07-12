@@ -1537,7 +1537,8 @@ function GeneralTab() {
                   <View style={{ backgroundColor: '#fff', borderRadius: 8, width: '100%', maxWidth: 600, maxHeight: '90%', flexShrink: 1 }}>
                     <View style={{ padding: 16, flexShrink: 1 }}>
 
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  {/* Header (parity con web `<app-modal>`: título + subtítulo + X) */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingBottom: 12, marginBottom: 12 }}>
                     <View>
                       <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>Módulos de la Tienda</Text>
                       <Text style={{ fontSize: 13, color: '#4B5563', marginTop: 2 }}>STORE_ADMIN — visibilidad en el menú lateral</Text>
@@ -1546,8 +1547,9 @@ function GeneralTab() {
                       <Ionicons name="close" size={24} color="#9CA3AF" />
                     </TouchableOpacity>
                   </View>
-                  
-                  <View style={{ marginBottom: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingBottom: 12 }}>
+
+                  {/* Body intro (mismo texto que la web, vive DENTRO del body) */}
+                  <View style={{ marginBottom: 16 }}>
                     <Text style={{ fontSize: 13, color: '#6B7280', lineHeight: 20 }}>
                       Apaga un módulo para ocultarlo del menú lateral a <Text style={{ fontWeight: '700' }}>todos los usuarios</Text> de la tienda.
                     </Text>
