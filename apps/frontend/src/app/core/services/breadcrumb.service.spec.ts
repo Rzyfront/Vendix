@@ -33,56 +33,58 @@ describe('BreadcrumbService', () => {
       url: string;
       expectedTitle: string;
       expectedParent?: string;
+      /** Cadena completa de padres esperada (de externo a cercano). */
+      expectedParents?: string[];
     }> = [
       // Overview shell
       { url: '/admin/analytics/overview', expectedTitle: 'Resumen General' },
 
       // Sales shell (6 sub-tabs)
-      { url: '/admin/analytics/sales', expectedTitle: 'Ventas', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/sales/summary', expectedTitle: 'Resumen de Ventas', expectedParent: 'Ventas' },
-      { url: '/admin/analytics/sales/by-product', expectedTitle: 'Por Producto', expectedParent: 'Ventas' },
-      { url: '/admin/analytics/sales/by-category', expectedTitle: 'Por Categoria', expectedParent: 'Ventas' },
-      { url: '/admin/analytics/sales/trends', expectedTitle: 'Tendencias', expectedParent: 'Ventas' },
-      { url: '/admin/analytics/sales/by-customer', expectedTitle: 'Por Cliente', expectedParent: 'Ventas' },
-      { url: '/admin/analytics/sales/by-payment', expectedTitle: 'Por Metodo de Pago', expectedParent: 'Ventas' },
+      { url: '/admin/analytics/sales', expectedTitle: 'Ventas', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/sales/summary', expectedTitle: 'Resumen de Ventas', expectedParent: 'Ventas', expectedParents: ['Analíticas', 'Ventas'] },
+      { url: '/admin/analytics/sales/by-product', expectedTitle: 'Por Producto', expectedParent: 'Ventas', expectedParents: ['Analíticas', 'Ventas'] },
+      { url: '/admin/analytics/sales/by-category', expectedTitle: 'Por Categoria', expectedParent: 'Ventas', expectedParents: ['Analíticas', 'Ventas'] },
+      { url: '/admin/analytics/sales/trends', expectedTitle: 'Tendencias', expectedParent: 'Ventas', expectedParents: ['Analíticas', 'Ventas'] },
+      { url: '/admin/analytics/sales/by-customer', expectedTitle: 'Por Cliente', expectedParent: 'Ventas', expectedParents: ['Analíticas', 'Ventas'] },
+      { url: '/admin/analytics/sales/by-payment', expectedTitle: 'Por Metodo de Pago', expectedParent: 'Ventas', expectedParents: ['Analíticas', 'Ventas'] },
 
       // Inventory shell (5 sub-tabs)
-      { url: '/admin/analytics/inventory', expectedTitle: 'Inventario', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/inventory/overview', expectedTitle: 'Resumen de Inventario', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/inventory/stock-info', expectedTitle: 'Info de Stock', expectedParent: 'Inventario' },
-      { url: '/admin/analytics/inventory/movements', expectedTitle: 'Movimientos de Inventario', expectedParent: 'Inventario' },
-      { url: '/admin/analytics/inventory/valuation', expectedTitle: 'Valoracion', expectedParent: 'Inventario' },
-      { url: '/admin/analytics/inventory/movement-analysis', expectedTitle: 'Analisis de Movimientos', expectedParent: 'Inventario' },
+      { url: '/admin/analytics/inventory', expectedTitle: 'Inventario', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/inventory/overview', expectedTitle: 'Resumen de Inventario', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/inventory/stock-info', expectedTitle: 'Info de Stock', expectedParent: 'Inventario', expectedParents: ['Analíticas', 'Inventario'] },
+      { url: '/admin/analytics/inventory/movements', expectedTitle: 'Movimientos de Inventario', expectedParent: 'Inventario', expectedParents: ['Analíticas', 'Inventario'] },
+      { url: '/admin/analytics/inventory/valuation', expectedTitle: 'Valoracion', expectedParent: 'Inventario', expectedParents: ['Analíticas', 'Inventario'] },
+      { url: '/admin/analytics/inventory/movement-analysis', expectedTitle: 'Analisis de Movimientos', expectedParent: 'Inventario', expectedParents: ['Analíticas', 'Inventario'] },
 
       // Products shell (3 sub-tabs)
-      { url: '/admin/analytics/products', expectedTitle: 'Productos', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/products/performance', expectedTitle: 'Rendimiento', expectedParent: 'Productos' },
-      { url: '/admin/analytics/products/top-sellers', expectedTitle: 'Top Ventas', expectedParent: 'Productos' },
-      { url: '/admin/analytics/products/profitability', expectedTitle: 'Rentabilidad', expectedParent: 'Productos' },
+      { url: '/admin/analytics/products', expectedTitle: 'Productos', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/products/performance', expectedTitle: 'Rendimiento', expectedParent: 'Productos', expectedParents: ['Analíticas', 'Productos'] },
+      { url: '/admin/analytics/products/top-sellers', expectedTitle: 'Top Ventas', expectedParent: 'Productos', expectedParents: ['Analíticas', 'Productos'] },
+      { url: '/admin/analytics/products/profitability', expectedTitle: 'Rentabilidad', expectedParent: 'Productos', expectedParents: ['Analíticas', 'Productos'] },
 
       // Purchases shell (2 sub-tabs)
-      { url: '/admin/analytics/purchases', expectedTitle: 'Compras', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/purchases/summary', expectedTitle: 'Resumen de Compras', expectedParent: 'Compras' },
-      { url: '/admin/analytics/purchases/by-supplier', expectedTitle: 'Compras por Proveedor', expectedParent: 'Compras' },
+      { url: '/admin/analytics/purchases', expectedTitle: 'Compras', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/purchases/summary', expectedTitle: 'Resumen de Compras', expectedParent: 'Compras', expectedParents: ['Analíticas', 'Compras'] },
+      { url: '/admin/analytics/purchases/by-supplier', expectedTitle: 'Compras por Proveedor', expectedParent: 'Compras', expectedParents: ['Analíticas', 'Compras'] },
 
       // Customers shell (3 sub-tabs)
-      { url: '/admin/analytics/customers', expectedTitle: 'Clientes', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/customers/summary', expectedTitle: 'Resumen de Clientes', expectedParent: 'Clientes' },
-      { url: '/admin/analytics/customers/acquisition', expectedTitle: 'Adquisición de Clientes', expectedParent: 'Clientes' },
-      { url: '/admin/analytics/customers/abandoned-carts', expectedTitle: 'Carritos Abandonados', expectedParent: 'Clientes' },
+      { url: '/admin/analytics/customers', expectedTitle: 'Clientes', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/customers/summary', expectedTitle: 'Resumen de Clientes', expectedParent: 'Clientes', expectedParents: ['Analíticas', 'Clientes'] },
+      { url: '/admin/analytics/customers/acquisition', expectedTitle: 'Adquisición de Clientes', expectedParent: 'Clientes', expectedParents: ['Analíticas', 'Clientes'] },
+      { url: '/admin/analytics/customers/abandoned-carts', expectedTitle: 'Carritos Abandonados', expectedParent: 'Clientes', expectedParents: ['Analíticas', 'Clientes'] },
 
       // Reviews shell (1 sub-tab)
-      { url: '/admin/analytics/reviews', expectedTitle: 'Reseñas', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/reviews/summary', expectedTitle: 'Resumen de Reseñas', expectedParent: 'Reseñas' },
+      { url: '/admin/analytics/reviews', expectedTitle: 'Reseñas', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/reviews/summary', expectedTitle: 'Resumen de Reseñas', expectedParent: 'Reseñas', expectedParents: ['Analíticas', 'Reseñas'] },
 
       // Financial shell (3 sub-tabs)
-      { url: '/admin/analytics/financial', expectedTitle: 'Financiero', expectedParent: 'Analíticas' },
-      { url: '/admin/analytics/financial/profit-loss', expectedTitle: 'Ganancias y Pérdidas', expectedParent: 'Financiero' },
-      { url: '/admin/analytics/financial/tax-summary', expectedTitle: 'Resumen de Impuestos', expectedParent: 'Financiero' },
-      { url: '/admin/analytics/financial/refunds', expectedTitle: 'Reembolsos', expectedParent: 'Financiero' },
+      { url: '/admin/analytics/financial', expectedTitle: 'Financiero', expectedParent: 'Analíticas', expectedParents: ['Analíticas'] },
+      { url: '/admin/analytics/financial/profit-loss', expectedTitle: 'Ganancias y Pérdidas', expectedParent: 'Financiero', expectedParents: ['Analíticas', 'Financiero'] },
+      { url: '/admin/analytics/financial/tax-summary', expectedTitle: 'Resumen de Impuestos', expectedParent: 'Financiero', expectedParents: ['Analíticas', 'Financiero'] },
+      { url: '/admin/analytics/financial/refunds', expectedTitle: 'Reembolsos', expectedParent: 'Financiero', expectedParents: ['Analíticas', 'Financiero'] },
     ];
 
-    analyticsExpectations.forEach(({ url, expectedTitle, expectedParent }) => {
+    analyticsExpectations.forEach(({ url, expectedTitle, expectedParent, expectedParents }) => {
       it(`resolves ${url} → title="${expectedTitle}"`, () => {
         // Re-create the service so the static table is populated for this test
         // (the seeded registry entries are async; the static table has the same paths)
@@ -91,6 +93,11 @@ describe('BreadcrumbService', () => {
         expect(crumb.current.label).toBe(expectedTitle);
         if (expectedParent) {
           expect(crumb.parent?.label).toBe(expectedParent);
+        }
+        if (expectedParents) {
+          expect(
+            crumb.parents?.map((p: { label: string }) => p.label),
+          ).toEqual(expectedParents);
         }
       });
     });
@@ -110,7 +117,9 @@ describe('BreadcrumbService', () => {
       );
       TestBed.tick();
 
-      expect(titleSetSpy).toHaveBeenCalledWith('Ventas > Por Producto | Vendix');
+      expect(titleSetSpy).toHaveBeenCalledWith(
+        'Analíticas > Ventas > Por Producto | Vendix',
+      );
     });
 
     it('uses just the tab name when there is no parent', () => {
