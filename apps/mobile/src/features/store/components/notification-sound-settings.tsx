@@ -4,7 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  PanResponder,
+  GestureResponderEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
@@ -28,7 +28,8 @@ import { borderRadius } from '@/shared/theme';
  *  - Catálogo de sonidos (`GET /notification-sounds`, cacheado a nivel de
  *    servicio — mismo patrón que `uom.service.ts`).
  *  - Reproductor de preview con `expo-audio` (auto-stop a 1.5s).
- *  - Slider de volumen (PanResponder, parity con web `<input type="range">`).
+ *  - Slider de volumen (responder handlers directos en un `<View>`,
+ *    parity con web `<input type="range">`).
  *  - Popover anchored para el selector de sonido (parity con el shared
  *    `<Selector>` que usan los módulos pop y prebulk).
  *
@@ -107,28 +108,25 @@ export default function NotificationSoundSettings({
     [soundRailWidth, onSoundVolumeChange],
   );
 
-  // PanResponder con captura: usa la fase de captura para ganar el touch
-// inicial al `<ScrollView>` padre, que de otro modo siempre reclama el
-// primer pointer como inicio de scroll vertical. Sin la fase `*Capture`
-// el evento nunca llega al slider y `onPanResponderGrant` jamás se llama.
-//
-// Trade-off: el ScrollView padre NO puede hacer scroll vertical cuando el
-// touch empieza sobre la barra de volumen. Aceptable porque la barra ocupa
-// solo 40px de alto — los usuarios pueden scrollear tocando fuera de ella.
-// Para scrolls horizontales pequeños en la página, los gestos verticales
-// sobre el resto del contenido siguen funcionando normalmente.
-  const volumePanResponder = useRef(
-    PanResponder.create({
-      // Capture phase: el View se vuelve "responder" antes que el padre.
-      onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponderCapture: (_evt, g) =>
-        Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
-      onPanResponderGrant: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
-      onPanResponderMove: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
-      onPanResponderRelease: () => {},
-      onPanResponderTerminate: () => {},
-    }),
-  ).current;
+  // Responder handlers directos sobre el `<View>` del track — patrón más simple
+  // de RN que evita las trampas del PanResponder vs ScrollView. Web usa
+  // `<input type="range">` nativo; en RN sin librería externa este es el
+  // equivalente más robusto.
+  //
+  // `onStartShouldSetResponderCapture: () => true` gana el touch al ScrollView
+  // padre en la fase de captura (no podemos llamar handlers directos porque
+  // RN resuelve el conflicto entre responder system y ScrollView via el
+  // sistema de capture phase). Si el padre pide release, lo negamos para
+  // mantener el responder durante todo el drag.
+  const onTrackResponderStart = useCallback(
+    (evt: GestureResponderEvent) => handleVolumeScrub(evt.nativeEvent.locationX),
+    [handleVolumeScrub],
+  );
+  const onTrackResponderMove = useCallback(
+    (evt: GestureResponderEvent) => handleVolumeScrub(evt.nativeEvent.locationX),
+    [handleVolumeScrub],
+  );
+  const onTrackResponderTerminateRequest = useCallback(() => false, []);
 
   // Limpia el timer de preview si el componente se desmonta.
   useEffect(() => {
@@ -178,10 +176,11 @@ export default function NotificationSoundSettings({
 
       <Text style={styles.volumeLabel}>Volumen: {safeVolume}%</Text>
       {/* Slider interactivo (parity web <input type="range">). Tap y drag
-          horizontal via PanResponder; el thumb sigue el dedo.
-          Arquitectura:
-          - `<View sliderTrack>` (40px alto) = área clicable completa + maneja
-            PanResponder + mide width real del rail.
+          horizontal via responder handlers directos en el `<View>`. El
+          thumb sigue el dedo. Arquitectura:
+          - `<View sliderTrack>` (40px alto) = área clicable completa +
+            captura el touch via `onStartShouldSetResponderCapture` para
+            ganar al `<ScrollView>` padre.
           - `<View sliderRail>` (4px alto) = línea visual del rail (gris/fill
             púrpura). Centrada vertical dentro del track.
           - `<View sliderThumb>` (16×16) = knob posicionado al % actual.
@@ -190,7 +189,11 @@ export default function NotificationSoundSettings({
       <View
         onLayout={(e) => setSoundRailWidth(e.nativeEvent.layout.width)}
         style={styles.sliderTrack}
-        {...volumePanResponder.panHandlers}
+        onStartShouldSetResponderCapture={() => true}
+        onMoveShouldSetResponderCapture={() => true}
+        onResponderTerminationRequest={onTrackResponderTerminateRequest}
+        onResponderGrant={onTrackResponderStart}
+        onResponderMove={onTrackResponderMove}
       >
         <View style={styles.sliderRail}>
           <View style={[styles.sliderFill, { width: `${safeVolume}%` }]} />
@@ -233,7 +236,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   sliderTrack: {
-    // Wrapper de 40px — área clicable amplia + maneja PanResponder.
+    // Wrapper de 40px — área clicable amplia + captura el touch via
+    // onStartShouldSetResponderCapture.
     height: 40,
     justifyContent: 'center',
     position: 'relative',
