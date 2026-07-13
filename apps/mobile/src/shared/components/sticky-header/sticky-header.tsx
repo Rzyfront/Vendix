@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useRef } from 'react';
 import { Pressable, Text, View, StyleSheet, ScrollView, ActivityIndicator, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
@@ -48,11 +49,29 @@ export function StickyHeader({
 }: StickyHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Guard contra doble-tap: router.push(backHref) acumulaba entradas en el
+  // stack si el usuario tocaba el botón dos veces seguidas. Ref-based guard
+  // es la opción más liviana (no necesitamos useState que cause re-render).
+  const navigatingRef = useRef(false);
 
   function handleBack() {
-    if (onBack) onBack();
-    else if (backHref) router.push(backHref as any);
-    else router.back();
+    if (navigatingRef.current) return;
+    if (onBack) {
+      onBack();
+      return;
+    }
+    if (backHref) {
+      navigatingRef.current = true;
+      // `navigate` (no `push`) es semánticamente correcto: si la ruta ya
+      // existe en el stack, vuelve a ella; si no, la pushea. Evita duplicar.
+      router.navigate(backHref as any);
+      // Reset después de un frame para permitir un back legítimo posterior.
+      setTimeout(() => {
+        navigatingRef.current = false;
+      }, 400);
+    } else {
+      router.back();
+    }
   }
 
   const isGlass = variant === 'glass';

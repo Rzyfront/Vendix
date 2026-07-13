@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
@@ -58,7 +58,7 @@ export default function PopCartModal({
   const insets = useSafeAreaInsets();
   const hasConfig = !!supplierName && !!locationName;
 
-  const renderItem = ({ item }: { item: PopCartItem }) => (
+  const renderItem = useCallback(({ item }: { item: PopCartItem }) => (
     <View style={styles.cartItem}>
       <View style={styles.itemImage}>
         <View style={styles.imagePlaceholder}>
@@ -86,7 +86,12 @@ export default function PopCartModal({
       </View>
 
       <View style={styles.removeWrapper}>
-        <TouchableOpacity style={styles.removeBtn} onPress={() => onRemoveItem(item.id)}>
+        <TouchableOpacity
+          style={styles.removeBtn}
+          onPress={() => onRemoveItem(item.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Eliminar ${item.product.name}`}
+        >
           <Ionicons name="close" size={16} color="#9ca3af" />
         </TouchableOpacity>
       </View>
@@ -96,13 +101,20 @@ export default function PopCartModal({
           <TouchableOpacity
             style={styles.qtyBtn}
             onPress={() => onUpdateItem(item.id, Math.max(1, item.quantity - 1), item.unit_cost)}
+            disabled={item.quantity <= 1}
+            accessibilityRole="button"
+            accessibilityLabel="Disminuir cantidad"
+            accessibilityValue={{ text: String(item.quantity), min: 1 }}
           >
-            <Ionicons name="remove" size={14} color="#374151" />
+            <Ionicons name="remove" size={14} color={item.quantity <= 1 ? '#d1d5db' : '#374151'} />
           </TouchableOpacity>
           <Text style={styles.qtyValue}>{item.quantity}</Text>
           <TouchableOpacity
             style={styles.qtyBtn}
             onPress={() => onUpdateItem(item.id, item.quantity + 1, item.unit_cost)}
+            accessibilityRole="button"
+            accessibilityLabel="Aumentar cantidad"
+            accessibilityValue={{ text: String(item.quantity) }}
           >
             <Ionicons name="add" size={14} color="#374151" />
           </TouchableOpacity>
@@ -110,7 +122,7 @@ export default function PopCartModal({
         <Text style={styles.itemTotal}>{formatCurrency(item.total)}</Text>
       </View>
     </View>
-  );
+  ), [onUpdateItem, onRemoveItem]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -128,6 +140,9 @@ export default function PopCartModal({
               style={styles.clearBtn}
               onPress={onClearCart}
               disabled={items.length === 0}
+              accessibilityRole="button"
+              accessibilityLabel="Vaciar carrito"
+              accessibilityState={{ disabled: items.length === 0 }}
             >
               <Text style={[styles.clearBtnText, items.length === 0 && styles.clearBtnDisabled]}>
                 Vaciar
@@ -167,6 +182,10 @@ export default function PopCartModal({
               keyExtractor={(item) => item.id}
               renderItem={renderItem}
               contentContainerStyle={styles.itemsContent}
+              initialNumToRender={6}
+              maxToRenderPerBatch={4}
+              windowSize={5}
+              removeClippedSubviews
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIcon}>

@@ -75,6 +75,9 @@ export default function PopProductGrid({
         style={[styles.card, { width: CARD_WIDTH }]}
         onPress={() => onSelectProduct(item)}
         activeOpacity={0.7}
+        accessibilityRole="button"
+        accessibilityLabel={`Agregar ${item.name}`}
+        accessibilityHint="Abre el detalle del producto para anadirlo al carrito"
       >
         <View style={styles.imageWrap}>
           {item.image_url ? (
