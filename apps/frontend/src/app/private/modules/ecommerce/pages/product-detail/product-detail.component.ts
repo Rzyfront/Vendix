@@ -23,6 +23,7 @@ import {
   ProductVariantDetail,
   EcommerceProduct,
   CatalogQuery,
+  formatMenuNextAvailable,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
@@ -33,6 +34,7 @@ import { ProductQuickViewModalComponent } from '../../components/product-quick-v
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
@@ -52,6 +54,7 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
     IconComponent,
     QuantityControlComponent,
     ButtonComponent,
+    BadgeComponent,
     ShareModalComponent,
     EmptyStateComponent,
     CurrencyPipe,
@@ -321,7 +324,11 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 
               <!-- Stock Minimal -->
               <div class="stock-minimal">
-                @if (isService()) {
+                @if (isOffSchedule()) {
+                  <app-badge variant="warning">
+                    Disponible {{ formatNextAvailable() }}
+                  </app-badge>
+                } @else if (isService()) {
                   <span class="s-dot service"></span>
                   <span class="s-text">Servicio disponible</span>
                 } @else if (isOnDemand()) {
@@ -1636,12 +1643,23 @@ export class ProductDetailComponent implements OnInit {
     return variant ? !this.isVariantAvailable(variant) : false;
   });
 
+  /** True when a menu (carta) schedule marks the dish unavailable right now. */
+  readonly isOffSchedule = computed(
+    (): boolean => this.product()?.is_available_now === false,
+  );
+
   readonly purchaseDisabled = computed((): boolean => {
+    if (this.isOffSchedule()) return true;
     if (this.hasMissingVariantAttributes()) return true;
     if (this.isService()) return false;
     if (this.selectedVariantUnavailable()) return true;
     return !this.isOnDemand() && this.displayStock() === 0;
   });
+
+  /** Short "Disponible Vie 08:00" label for the off-schedule badge. */
+  formatNextAvailable(): string {
+    return formatMenuNextAvailable(this.product()?.next_available ?? null);
+  }
 
   // Quick View Modal
   readonly quickViewOpen = model<boolean>(false);

@@ -1,6 +1,6 @@
 import { Component, ChangeDetectionStrategy, inject, input, output, signal } from '@angular/core';
 import { RouterModule, Router } from '@angular/router';
-import { EcommerceProduct } from '../../services/catalog.service';
+import { EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
 import { TableContextService } from '../../services/table-context.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -15,7 +15,7 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
   standalone: true,
   imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent, QuantityControlComponent],
   template: `
-    <article class="product-card" (click)="onCardClick($event)">
+    <article class="product-card" [class.product-card--off]="product().is_available_now === false" (click)="onCardClick($event)">
       <div class="product-image">
         @if (product().image_url) {
           <img [src]="product().image_url" [alt]="product().name" loading="lazy">
@@ -25,8 +25,14 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
           </div>
         }
 
-        <!-- Service Badge -->
-        @if (product().product_type === 'service') {
+        <!-- Menu (carta) off-schedule badge — replaces stock/service badges
+             when a dish's availability window is closed right now. -->
+        @if (product().is_available_now === false) {
+          <app-badge class="stock-badge-pos" variant="warning" size="sm" badgeStyle="outline">
+            Disponible {{ formatNextAvailable() }}
+          </app-badge>
+        } @else if (product().product_type === 'service') {
+          <!-- Service Badge -->
           <app-badge class="stock-badge-pos" variant="service" size="sm" badgeStyle="outline">
             Servicio
           </app-badge>
@@ -198,6 +204,10 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
           transform: scale(0.98);
         }
       }
+    }
+
+    .product-card--off {
+      opacity: 0.7;
     }
 
     .product-image {
@@ -756,6 +766,9 @@ export class ProductCardComponent {
 
   isUnavailable(): boolean {
     const product = this.product();
+    // Menu (carta) off-schedule dishes are not buyable right now, regardless
+    // of product type or stock tracking.
+    if (product.is_available_now === false) return true;
     if (product.product_type === 'service') return false;
     if (product.track_inventory === false) return false;
 
@@ -765,6 +778,11 @@ export class ProductCardComponent {
     }
 
     return product.is_available === false;
+  }
+
+  /** Short "Disponible Vie 08:00" label for the off-schedule badge. */
+  formatNextAvailable(): string {
+    return formatMenuNextAvailable(this.product().next_available ?? null);
   }
 
   quickActionIcon(): string {
