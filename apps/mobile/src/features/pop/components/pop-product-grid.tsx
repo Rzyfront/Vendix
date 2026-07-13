@@ -26,14 +26,18 @@ interface PopProductGridProps {
 }
 
 const CARD_GAP = 8;
-// Margen lateral del container + padding del grid + border del container.
-// El container ya descuenta el marginHorizontal: 12 (es decir, 24 a cada lado del padre).
-// Aquí solo descontamos: bordes del container (2) + padding del grid (24) + gap entre cards (8) = 34.
-const CONTAINER_BORDER = 2;     // 1 a cada lado
-const GRID_PADDING = 12;
-const CARD_WIDTH_DIVISOR = 2;
-// El cálculo real se hace dentro del componente con useWindowDimensions() para
+// Layout responsive: 2 columnas en mobile (<600px), 3 en tablet+.
+// Usamos flexBasis con porcentaje compensado para el gap (mimic CSS grid).
+// El cálculo se hace dentro del componente con useWindowDimensions() para
 // que se actualice ante rotaciones o cambios de layout.
+const TABLET_BREAKPOINT = 600;   // px — a partir de aquí usamos 3 columnas
+
+// Porcentajes compensados para el gap entre cards (8px).
+// 2 cols: 50% - 4px ≈ 48% (deja 4% libre + 8px gap → 2 cards + gap caben en 100%+).
+// 3 cols: 33.33% - 5.33px ≈ 31% (deja ~7% libre + 16px gap → 3 cards + 2 gaps caben).
+// Esto evita los problemas de box-sizing en RN Web donde border/padding se suman al width.
+const CARD_WIDTH_2COL = '48%';
+const CARD_WIDTH_3COL = '31%';
 
 export default function PopProductGrid({
   products,
@@ -45,14 +49,9 @@ export default function PopProductGrid({
   locationName,
 }: PopProductGridProps) {
   const { width: SCREEN_WIDTH } = useWindowDimensions();
-  // Cálculo: ancho disponible dentro del container descontando:
-  // - 2 bordes laterales del container (1px cada uno)
-  // - 2 paddings del grid (12px cada lado)
-  // - 1 gap entre cards (8px)
-  // = 34 px descontados total
-  // Se reduce 2% adicional para cards más estrechas.
-  const CARD_WIDTH =
-    ((SCREEN_WIDTH - CONTAINER_BORDER - GRID_PADDING * 2 - CARD_GAP) / CARD_WIDTH_DIVISOR) * 0.98;
+  // 2 columnas en mobile portrait, 3 en tablet+ / mobile landscape.
+  const NUM_COLUMNS = SCREEN_WIDTH >= TABLET_BREAKPOINT ? 3 : 2;
+  const CARD_WIDTH = NUM_COLUMNS === 3 ? CARD_WIDTH_3COL : CARD_WIDTH_2COL;
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -225,7 +224,7 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     paddingVertical: 0,
   },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: CARD_GAP, padding: 8, paddingBottom: 24 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start', gap: CARD_GAP, padding: 12, paddingBottom: 24 },
   card: {
     backgroundColor: colors.background,
     borderRadius: borderRadius.lg,

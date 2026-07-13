@@ -90,7 +90,7 @@ export function Modal({
     <RNModal
       visible={visible}
       animationType="slide"
-      presentationStyle="fullScreen"
+      presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
       <View style={[styles.root, style]} {...props}>

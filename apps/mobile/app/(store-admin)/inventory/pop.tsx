@@ -97,9 +97,7 @@ export default function PopScreen() {
   const [showScanner, setShowScanner] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [targetAction, setTargetAction] = useState<'draft' | 'create' | 'create-receive'>('create');
-  const [headerSettingsOpen, setHeaderSettingsOpen] = useState(false);
-  const [showConfigWarning, setShowConfigWarning] = useState(false);
-  const configWarningRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [configModalOpen, setConfigModalOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const [showSupplierCreate, setShowSupplierCreate] = useState(false);
@@ -146,6 +144,8 @@ export default function PopScreen() {
         code: supplierForm.code.trim() || undefined,
         email: supplierForm.email.trim() || undefined,
         phone: supplierForm.phone.trim() || undefined,
+        tax_id: supplierForm.tax_id.trim() || undefined,
+        payment_terms: supplierForm.payment_terms.trim() || undefined,
       });
       const newSupplier: PopSupplier = {
         id: Number(res.id),
@@ -204,6 +204,50 @@ export default function PopScreen() {
   const handleConfigConfirm = useCallback((result: PopProductConfigResult) => {
     setShowConfig(false);
     if (!selectedProduct) return;
+
+    // Caso A: nuevas variantes recién creadas en backend — cada una se agrega
+    // como una línea separada al cart (parity web).
+    if (result.newVariants && result.newVariants.length > 0) {
+      result.newVariants.forEach((variant) => {
+        cart.addToCart({
+          product: selectedProduct,
+          variant,
+          quantity: 1,
+          unit_cost: Number(variant.cost_price ?? result.unit_cost ?? 0),
+          lot_info: result.lot_info,
+        });
+      });
+      setSelectedProduct(null);
+      return;
+    }
+
+    // Caso B: variantes existentes seleccionadas (multi o single).
+    // Si hay 2+, una línea por variante. Si hay 1, flujo clásico.
+    if (result.variants && result.variants.length > 0) {
+      if (result.variants.length === 1) {
+        cart.addToCart({
+          product: selectedProduct,
+          variant: result.variants[0],
+          quantity: result.quantity,
+          unit_cost: Number(result.variants[0].cost_price ?? result.unit_cost ?? 0),
+          lot_info: result.lot_info,
+        });
+      } else {
+        result.variants.forEach((variant) => {
+          cart.addToCart({
+            product: selectedProduct,
+            variant,
+            quantity: 1,
+            unit_cost: Number(variant.cost_price ?? result.unit_cost ?? 0),
+            lot_info: result.lot_info,
+          });
+        });
+      }
+      setSelectedProduct(null);
+      return;
+    }
+
+    // Caso C: variant legacy (single-select, kept para back-compat).
     cart.addToCart({
       product: selectedProduct,
       variant: result.variant || null,
@@ -216,32 +260,51 @@ export default function PopScreen() {
 
   const executeOrder = useCallback(async (action: 'draft' | 'create' | 'create-receive') => {
     if (!cart.cart.supplierId || !cart.cart.locationId) {
-      setHeaderSettingsOpen(true);
-      setShowConfigWarning(true);
-      setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
-      if (configWarningRef.current) clearTimeout(configWarningRef.current);
-      configWarningRef.current = setTimeout(() => setShowConfigWarning(false), 3000);
+      setConfigModalOpen(true);
       setShowConfirm(false);
       return;
     }
     setIsCreating(true);
     try {
-      const items = cart.cart.items.map((i) => ({
-        product_id: i.product.id,
-        product_variant_id: i.variant?.id,
-        quantity: i.quantity,
-        unit_price: i.unit_cost,
-        notes: i.notes,
-        product_name: i.is_prebulk ? i.prebulk_data?.name : undefined,
-        sku: i.is_prebulk ? i.prebulk_data?.code : undefined,
-        product_description: i.is_prebulk ? i.prebulk_data?.description : undefined,
-      }));
+      const items = cart.cart.items.map((i) => {
+        // Prebulk products (Fase 5 — UoM parity con web): el backend acepta
+        // is_ingredient + purchase_uom_id + stock_uom_id por línea. Solo se
+        // propagan cuando el item fue creado vía PreBulkModal en modo insumo
+        // (ver features/pop/components/pop-prebulk-modal.tsx).
+        const prebulk = i.is_prebulk ? i.prebulk_data : null;
+        return {
+          product_id: i.product.id,
+          product_variant_id: i.variant?.id,
+          quantity: i.quantity,
+          unit_price: i.unit_cost,
+          notes: i.notes,
+          product_name: i.is_prebulk ? prebulk?.name : undefined,
+          sku: i.is_prebulk ? prebulk?.code : undefined,
+          product_description: i.is_prebulk ? prebulk?.description : undefined,
+          is_ingredient: prebulk?.is_ingredient || undefined,
+          is_sellable: prebulk?.is_ingredient !== undefined ? prebulk?.is_sellable : undefined,
+          purchase_uom_id: prebulk?.is_ingredient ? prebulk?.purchase_uom_id : undefined,
+          stock_uom_id: prebulk?.is_ingredient ? prebulk?.stock_uom_id : undefined,
+          batch_number: i.lot_info?.batch_number,
+          manufacturing_date: i.lot_info?.manufacturing_date ? new Date(i.lot_info.manufacturing_date).toISOString() : undefined,
+          expiration_date: i.lot_info?.expiration_date ? new Date(i.lot_info.expiration_date).toISOString() : undefined,
+        };
+      });
 
       const payload = {
         supplier_id: cart.cart.supplierId,
         location_id: cart.cart.locationId || 1,
         status: action === 'draft' ? 'draft' as const : 'approved' as const,
+        order_date: new Date(cart.cart.orderDate).toISOString(),
+        expected_date: cart.cart.expectedDate ? new Date(cart.cart.expectedDate).toISOString() : undefined,
+        payment_terms: cart.cart.paymentTerms,
+        shipping_method: cart.cart.shippingMethod,
+        shipping_cost: cart.cart.shippingCost,
+        subtotal_amount: cart.summary.subtotal,
+        tax_amount: cart.summary.tax_amount,
+        total_amount: cart.summary.total,
         notes: cart.cart.notes,
+        internal_notes: cart.cart.internalNotes,
         items,
       };
 
@@ -284,8 +347,7 @@ export default function PopScreen() {
 
   const handleConfigure = useCallback(() => {
     setShowCartModal(false);
-    setHeaderSettingsOpen(true);
-    setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 300);
+    setConfigModalOpen(true);
   }, []);
 
   const handlePrebulkConfirm = useCallback((data: PreBulkData) => {
@@ -335,26 +397,38 @@ export default function PopScreen() {
   const handleScanComplete = useCallback((result: ScanResult) => {
     if (!result.items || result.items.length === 0) return;
     for (const item of result.items) {
-      const tempProduct: PopProduct = {
-        id: -Date.now() - Math.floor(Math.random() * 1000),
-        name: item.name,
-        code: item.sku,
-        cost: item.unit_cost,
-        cost_price: item.unit_cost,
-      };
-      cart.addToCart({
-        product: tempProduct,
-        quantity: item.quantity,
-        unit_cost: item.unit_cost,
-        is_prebulk: true,
-        prebulk_data: {
+      const existingProd = products.find(
+        (p) => (item.sku && p.code === item.sku) || p.name.toLowerCase() === item.name.toLowerCase()
+      );
+      if (existingProd) {
+        cart.addToCart({
+          product: existingProd,
+          quantity: item.quantity,
+          unit_cost: item.unit_cost,
+        });
+      } else {
+        const tempProduct: PopProduct = {
+          id: -Date.now() - Math.floor(Math.random() * 1000),
           name: item.name,
           code: item.sku,
-          description: item.description,
-          unit_cost: item.unit_cost,
+          cost: item.unit_cost,
+          cost_price: item.unit_cost,
+        };
+        cart.addToCart({
+          product: tempProduct,
           quantity: item.quantity,
-        },
-      });
+          unit_cost: item.unit_cost,
+          is_prebulk: true,
+          prebulk_data: {
+            name: item.name,
+            code: item.sku,
+            description: item.description,
+            unit_cost: item.unit_cost,
+            quantity: item.quantity,
+            is_sellable: true,
+          },
+        });
+      }
     }
     if (result.supplier_name && !cart.cart.supplierId) {
       const found = suppliers.find(
@@ -366,7 +440,7 @@ export default function PopScreen() {
       'Factura escaneada',
       `${result.items.length} producto(s) agregados al carrito desde la factura.`
     );
-  }, [cart, suppliers]);
+  }, [cart, suppliers, products]);
 
   if (loading) {
     return (
@@ -391,20 +465,17 @@ export default function PopScreen() {
           orderDate={cart.cart.orderDate}
           expectedDate={cart.cart.expectedDate}
           shippingMethod={cart.cart.shippingMethod}
-          paymentTerms={cart.cart.paymentTerms}
-          notes={cart.cart.notes}
+          selectedSupplierId={cart.cart.supplierId}
+          selectedLocationId={cart.cart.locationId}
           suppliers={suppliers}
           locations={locations}
-          settingsOpen={headerSettingsOpen}
-          showConfigWarning={showConfigWarning}
-          onSettingsOpenChange={setHeaderSettingsOpen}
+          configModalOpen={configModalOpen}
+          onConfigModalOpenChange={setConfigModalOpen}
           onSupplierChange={cart.setSupplier}
           onLocationChange={cart.setLocation}
           onOrderDateChange={cart.setOrderDate}
           onExpectedDateChange={cart.setExpectedDate}
           onShippingMethodChange={cart.setShippingMethod}
-          onPaymentTermsChange={cart.setPaymentTerms}
-          onNotesChange={cart.setNotes}
           onQuickAddSupplier={() => setShowSupplierCreate(true)}
           onQuickAddLocation={() => setShowLocationCreate(true)}
         />
@@ -445,6 +516,7 @@ export default function PopScreen() {
         locationName={cart.cart.locationName}
         onClose={() => setShowCartModal(false)}
         onUpdateItem={(id, qty, cost) => cart.updateCartItem({ itemId: id, quantity: qty, unit_cost: cost })}
+        onUpdateShippingCost={cart.setShippingCost}
         onRemoveItem={cart.removeFromCart}
         onSaveDraft={handleSaveDraft}
         onCreateOrder={handleCreateOrder}

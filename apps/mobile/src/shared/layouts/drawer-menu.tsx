@@ -220,7 +220,13 @@ const storeMenuItems: MenuItem[] = [
   { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'invoicing' },
   { label: 'Contabilidad', icon: 'book-open', href: '/(store-admin)/accounting', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'accounting' },
   { label: 'Ayuda', icon: 'help-circle', href: '/(store-admin)/help' },
-  { label: 'Configuración', icon: 'settings', href: '/(store-admin)/settings' },
+  {
+    label: 'Configuración',
+    icon: 'settings',
+    children: [
+      { label: 'General', icon: 'sliders', href: '/(store-admin)/settings' },
+    ],
+  },
 ];
 
 const superMenuItems: MenuItem[] = [

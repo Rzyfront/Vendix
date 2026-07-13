@@ -20,6 +20,7 @@ interface PopCartModalProps {
   locationName?: string;
   onClose: () => void;
   onUpdateItem: (itemId: string, quantity: number, unitCost: number) => void;
+  onUpdateShippingCost: (cost: number) => void;
   onRemoveItem: (itemId: string) => void;
   onSaveDraft: () => void;
   onCreateOrder: () => void;
@@ -41,6 +42,7 @@ export default function PopCartModal({
   locationName,
   onClose,
   onUpdateItem,
+  onUpdateShippingCost,
   onRemoveItem,
   onSaveDraft,
   onCreateOrder,
@@ -183,6 +185,19 @@ export default function PopCartModal({
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>Impuestos</Text>
                   <Text style={styles.summaryValue}>{formatCurrency(summary.tax_amount)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Costo Envío</Text>
+                  <View style={styles.shippingInputWrap}>
+                    <Text style={styles.shippingCurrency}>$</Text>
+                    <TextInput
+                      style={styles.shippingInputField}
+                      value={String(Math.round(summary.shipping_cost || 0))}
+                      onChangeText={(v) => onUpdateShippingCost(Number(v) || 0)}
+                      keyboardType="numeric"
+                      placeholder="Envío"
+                    />
+                  </View>
                 </View>
                 <View style={[styles.summaryRow, styles.summaryTotal]}>
                   <Text style={styles.summaryTotalLabel}>Total Estimado</Text>
@@ -438,6 +453,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#111827',
+  },
+  shippingInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  shippingCurrency: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginRight: 2,
+  },
+  shippingInputField: {
+    width: 70,
+    padding: 0,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#111827',
+    textAlign: 'right',
   },
   removeWrapper: {
     alignItems: 'flex-end',

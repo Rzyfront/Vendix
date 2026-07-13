@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator, Platform, Alert } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors } from '@/shared/theme/colors';
 import * as DocumentPicker from 'expo-document-picker';
@@ -35,7 +35,7 @@ interface PopBulkModalProps {
 
 export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulkModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
-  const [selectedFile, setSelectedFile] = useState<{ name: string; size: number } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{ name: string; size: number; uri?: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [importedItems, setImportedItems] = useState<ImportedItem[]>([]);
@@ -100,48 +100,97 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
       if (result.canceled || !result.assets || result.assets.length === 0) return;
 
       const file = result.assets[0];
-      setSelectedFile({ name: file.name, size: file.size ?? 0 });
+      setSelectedFile({ name: file.name, size: file.size ?? 0, uri: file.uri });
     } catch (err) {
       console.error('Error picking file:', err);
     }
   };
 
-  const handleAnalyzeFile = () => {
-    if (!selectedFile) return;
+  const handleAnalyzeFile = async () => {
+    if (!selectedFile || !selectedFile.uri) return;
     setIsProcessing(true);
     setCurrentStep(1);
 
-    setTimeout(() => {
-      const mockItems: ImportedItem[] = [
-        {
-          name: 'Camiseta Básica Blanca', sku: 'CAM-BAS-BLA-001', quantity: 50, unit_cost: 8000, cost_price: 8000, base_price: 15000,
-          status: 'ready', warnings: [], errors: [],
-        },
-        {
-          name: 'Pantalón Jean Clásico', sku: 'PAN-JEA-CLA-032', quantity: 30, unit_cost: 22000, cost_price: 22000, base_price: 45000,
-          status: 'ready', warnings: [], errors: [],
-        },
-        {
-          name: 'Producto existente duplicado', sku: 'DUP-001', quantity: 5, unit_cost: 0, cost_price: 0, base_price: 0,
-          status: 'warning', warnings: ['Precio de compra no especificado', 'Producto duplicado en catálogo'], errors: [],
-        },
-        {
-          name: '', sku: '', quantity: 0, unit_cost: 0, cost_price: 0, base_price: 0,
-          status: 'error', warnings: [], errors: ['Falta nombre y SKU'],
-        },
-      ];
+    try {
+      const base64 = await FileSystem.readAsStringAsync(selectedFile.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const workbook = XLSX.read(base64, { type: 'base64' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<any>(sheet);
+
+      if (!rows || rows.length === 0) {
+        throw new Error('El archivo está vacío o no tiene un formato válido.');
+      }
+
+      // Helper function to normalize keys
+      const normalizeKey = (key: string) => key.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      const getRowValue = (row: any, ...aliases: string[]) => {
+        const normalizedAliases = aliases.map(normalizeKey);
+        for (const key of Object.keys(row)) {
+          if (normalizedAliases.includes(normalizeKey(key))) {
+            return row[key];
+          }
+        }
+        return undefined;
+      };
+
+      const parsedItems: ImportedItem[] = rows.map((row) => {
+        const name = String(getRowValue(row, 'nombre', 'name', 'producto', 'product') || '').trim();
+        const sku = String(getRowValue(row, 'sku', 'code', 'codigo', 'id') || '').trim();
+        const quantity = Number(getRowValue(row, 'cantidad', 'quantity', 'cant', 'cantidad inicial')) || 0;
+        const costPrice = Number(getRowValue(row, 'precio compra', 'precio_compra', 'cost_price', 'cost', 'costo', 'unit_cost')) || 0;
+        const basePrice = Number(getRowValue(row, 'precio venta', 'precio_venta', 'base_price', 'precio', 'price')) || 0;
+
+        const warnings: string[] = [];
+        const errors: string[] = [];
+
+        if (!name) {
+          errors.push('Falta el nombre del producto.');
+        }
+        if (!sku) {
+          errors.push('Falta el SKU del producto.');
+        }
+        if (quantity <= 0) {
+          warnings.push('La cantidad debe ser mayor a 0.');
+        }
+        if (costPrice <= 0) {
+          warnings.push('El precio de compra debe ser mayor a 0.');
+        }
+
+        const status = errors.length > 0 ? 'error' : (warnings.length > 0 ? 'warning' : 'ready');
+
+        return {
+          name,
+          sku,
+          quantity: Math.max(1, quantity),
+          unit_cost: costPrice,
+          cost_price: costPrice,
+          base_price: basePrice,
+          status,
+          warnings,
+          errors,
+        };
+      });
 
       const result: AnalysisResult = {
-        total: mockItems.length,
-        valid: mockItems.filter((i) => i.status === 'ready').length,
-        warnings: mockItems.filter((i) => i.status === 'warning').length,
-        errors: mockItems.filter((i) => i.status === 'error').length,
-        items: mockItems,
+        total: parsedItems.length,
+        valid: parsedItems.filter((i) => i.status === 'ready').length,
+        warnings: parsedItems.filter((i) => i.status === 'warning').length,
+        errors: parsedItems.filter((i) => i.status === 'error').length,
+        items: parsedItems,
       };
 
       setAnalysisResult(result);
+    } catch (err: any) {
+      console.error('Analyze file error:', err);
+      Alert.alert('Error', err?.message || 'Error al procesar el archivo Excel.');
+      setCurrentStep(0);
+    } finally {
       setIsProcessing(false);
-    }, 1500);
+    }
   };
 
   const handleConfirmImport = () => {

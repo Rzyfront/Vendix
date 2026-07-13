@@ -127,6 +127,10 @@ export function usePopCart() {
     setCart((prev) => ({ ...prev, notes }));
   }, []);
 
+  const setInternalNotes = useCallback((internalNotes?: string) => {
+    setCart((prev) => ({ ...prev, internalNotes }));
+  }, []);
+
   const loadOrder = useCallback((order: PurchaseOrder) => {
     const items: PopCartItem[] = (order.purchase_order_items || []).map((poItem, idx) => ({
       id: `LOADED_${idx}_${Date.now()}`,
@@ -151,7 +155,10 @@ export function usePopCart() {
       locationId: order.location_id,
       locationName: order.inventory_locations?.name,
       orderDate: order.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-      shippingCost: 0,
+      shippingCost: Number(order.shipping_cost) || 0,
+      paymentTerms: order.payment_terms || undefined,
+      notes: order.notes || undefined,
+      internalNotes: order.internal_notes || undefined,
       status: (order.status as PopOrderStatus) || 'draft',
       createdAt: order.created_at,
       updatedAt: new Date().toISOString(),
@@ -176,6 +183,7 @@ export function usePopCart() {
     setShippingCost,
     setPaymentTerms,
     setNotes,
+    setInternalNotes,
     loadOrder,
   };
 }
