@@ -313,15 +313,26 @@ export class PromotionListComponent {
       key: 'type',
       label: 'Tipo',
       priority: 2,
-      transform: (val: string) =>
-        val === 'percentage' ? 'Porcentaje' : 'Monto fijo',
+      // For quantity_tiered promos the root `type` is meaningless (the real
+      // type lives per-tier), so surface "Por escalas" instead of a misleading
+      // "Porcentaje"/"Monto fijo".
+      transform: (val: string, row: PromotionRow) =>
+        row.rule_type === 'quantity_tiered'
+          ? 'Por escalas'
+          : val === 'percentage'
+          ? 'Porcentaje'
+          : 'Monto fijo',
     },
     {
       key: 'value',
       label: 'Valor',
       priority: 1,
-      transform: (val: number, row: any) =>
-        row.type === 'percentage'
+      // quantity_tiered promos store a flat `value` of 0 (the real values live
+      // per-tier); show the tier count instead of the misleading "0"/"$0".
+      transform: (val: number, row: PromotionRow) =>
+        row.rule_type === 'quantity_tiered'
+          ? PromotionListComponent.tiersCountLabel(row.tiers_count)
+          : row.type === 'percentage'
           ? `${val}%`
           : this.currency_service.format(val),
     },
@@ -412,8 +423,14 @@ export class PromotionListComponent {
         key: 'type',
         label: 'Tipo',
         icon: 'percent',
-        transform: (val: string) =>
-          val === 'percentage' ? 'Porcentaje' : 'Monto fijo',
+        // Mirror of the desktop "Tipo" column: quantity_tiered promos show
+        // "Por escalas" because the root `type` does not represent them.
+        transform: (val: string, item: PromotionRow) =>
+          item.rule_type === 'quantity_tiered'
+            ? 'Por escalas'
+            : val === 'percentage'
+            ? 'Porcentaje'
+            : 'Monto fijo',
       },
       {
         key: 'tiers_summary',
@@ -440,8 +457,12 @@ export class PromotionListComponent {
     footerKey: 'value',
     footerLabel: 'Descuento',
     footerStyle: 'prominent',
-    footerTransform: (val: number, item: any) =>
-      item.type === 'percentage'
+    // Mirror of the desktop "Valor" column: quantity_tiered promos show the
+    // tier count ("N tramos") instead of the misleading flat "$0".
+    footerTransform: (val: number, item: PromotionRow) =>
+      item.rule_type === 'quantity_tiered'
+        ? PromotionListComponent.tiersCountLabel(item.tiers_count)
+        : item.type === 'percentage'
         ? `${val}%`
         : this.currency_service.format(val),
   };
@@ -513,6 +534,16 @@ export class PromotionListComponent {
   }
 
   // ── Tier helpers ────────────────────────────────────────────────────
+
+  /**
+   * Short "N tramo(s)" label shown where the flat `value` is meaningless for
+   * `quantity_tiered` promotions (the real values live per-tier and the root
+   * `value` is 0). Used by the desktop "Valor" column and the mobile card
+   * footer so both surfaces read "N tramos" instead of "$0".
+   */
+  private static tiersCountLabel(count: number): string {
+    return `${count} ${count === 1 ? 'tramo' : 'tramos'}`;
+  }
 
   /**
    * Compact human-readable tier breakdown used by the desktop table and the

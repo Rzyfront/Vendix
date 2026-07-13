@@ -108,6 +108,9 @@ export interface EcommerceHomeSectionsSettings {
   categories?: EcommerceHomeSectionSettings;
   brands?: EcommerceHomeSectionSettings;
   featured_products?: EcommerceHomeSectionSettings;
+  // Opt-in "Promociones activas" banner/section. Disabled by default so
+  // existing storefronts do not surface it until the store enables it.
+  promotions?: EcommerceHomeSectionSettings;
 }
 
 export interface EcommerceSettings {

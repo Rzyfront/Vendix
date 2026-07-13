@@ -9,7 +9,7 @@ import {
   output,
 } from '@angular/core';
 import { EcommerceProduct } from '../../services/catalog.service';
-import { CurrencyPipe } from '@angular/common';
+import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({

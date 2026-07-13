@@ -438,8 +438,9 @@ export class PosCartService {
    *   1. Sort tiers by `(min_quantity ASC, sort_order ASC, id ASC)`.
    *   2. Pick the first tier where `min_quantity <= scopedQty` and
    *      (`max_quantity` is null OR `>= scopedQty`) — resolved ONCE, not per line.
-   *   3. `percentage`: `lineTotal * tier.value / 100`.
-   *      `fixed_amount`: `tier.value * line.quantity` (per-unit value × qty).
+   *   3. `percentage`: per line `lineTotal * tier.value / 100` (summed).
+   *      `fixed_amount`: a FLAT `tier.value` applied ONCE over the scope
+   *      subtotal (`applicableTotal`), never `tier.value × units`.
    *   4. Cap each line discount at its line total (never-negative line).
    *   5. Sum across lines, cap by `max_discount_amount`, then by
    *      `applicableTotal` (scoped total ceiling).
@@ -509,18 +510,31 @@ export class PosCartService {
             );
             if (!matchedTier) continue;
 
-            // Per-line discount priced with the SINGLE resolved tier.
+            // Discount priced with the SINGLE resolved tier.
+            //  - percentage: per line (lineTotal × tier.value / 100), summed.
+            //  - fixed_amount: a FLAT tier.value applied ONCE over the scope
+            //    subtotal (applicableTotal), NOT tier.value × units. This
+            //    mirrors the authoritative backend semantics so the cashier
+            //    preview equals the amount actually charged at payment.
             const perLineDiscount: Array<{ item: CartItem; discount: number }> =
               [];
             let rawTotal = 0;
-            for (const item of applicableItems) {
-              const lineDiscount = this.computeTierDiscountForResolvedTier(
-                Number(item.finalPrice),
-                Number(item.quantity),
-                matchedTier,
-              );
-              perLineDiscount.push({ item, discount: lineDiscount });
-              rawTotal = this.roundMoney(rawTotal + lineDiscount);
+            if (matchedTier.type === 'percentage') {
+              for (const item of applicableItems) {
+                const lineDiscount = this.computeTierDiscountForResolvedTier(
+                  Number(item.finalPrice),
+                  Number(item.quantity),
+                  matchedTier,
+                );
+                perLineDiscount.push({ item, discount: lineDiscount });
+                rawTotal = this.roundMoney(rawTotal + lineDiscount);
+              }
+            } else {
+              const tierValue = Number(matchedTier.value);
+              rawTotal =
+                Number.isFinite(tierValue) && tierValue > 0
+                  ? this.roundMoney(Math.min(tierValue, applicableTotal))
+                  : 0;
             }
 
             if (rawTotal <= 0) continue;
@@ -647,9 +661,11 @@ export class PosCartService {
    * tier is ALREADY resolved from the aggregated scope quantity (scopedQty) by
    * the caller. The tier is fixed for every line in scope, so this helper never
    * does a `find`. MIRROR of `computeTierDiscountForResolvedTier` in the backend
-   * engine — KEEP math byte-identical.
+   * engine — KEEP percentage math byte-identical.
    *  - percentage: lineTotal × tier.value / 100
-   *  - fixed_amount: tier.value × quantity (per-unit value × line qty)
+   *  - fixed_amount: NOT priced here — it is a FLAT amount resolved ONCE over
+   *    the scope subtotal by the caller; this defensive fallback only caps the
+   *    flat value to the line total and never multiplies by quantity.
    */
   private computeTierDiscountForResolvedTier(
     unitPrice: number,
@@ -669,7 +685,9 @@ export class PosCartService {
     if (tier.type === 'percentage') {
       discount = (lineTotal * tierValue) / 100;
     } else {
-      discount = tierValue * qty;
+      // fixed_amount is a FLAT amount (resolved once over the scope subtotal by
+      // the caller); never tier.value × units. Defensive per-line cap only.
+      discount = Math.min(tierValue, lineTotal);
     }
 
     discount = Math.max(0, Math.min(discount, lineTotal));

@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
  * Current schema version for store_settings JSON.
  * Bump when adding a new migration entry to MIGRATIONS.
  */
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export interface SettingsMigration {
   from: number;
@@ -46,6 +46,32 @@ export const MIGRATIONS: SettingsMigration[] = [
     apply: (raw: any) => {
       if (raw?.pos && !raw.pos.schedule_mode) {
         raw.pos.schedule_mode = 'continuous';
+      }
+      return raw;
+    },
+  },
+  {
+    from: 2,
+    to: 3,
+    apply: (raw: any) => {
+      // Backfill the opt-in `promotions` home-section for stores that already
+      // configured their ecommerce home sections but predate this section.
+      // Idempotent: only sets it when `home_sections` exists and does not
+      // already carry `promotions`. Never touches other sections, and never
+      // injects an ecommerce/home_sections block into stores that never had
+      // one (they inherit the default via the ecommerce settings flow).
+      const homeSections = raw?.ecommerce?.home_sections;
+      if (
+        homeSections &&
+        typeof homeSections === 'object' &&
+        !Array.isArray(homeSections) &&
+        homeSections.promotions === undefined
+      ) {
+        homeSections.promotions = {
+          enabled: false,
+          title: 'Promociones activas',
+          sort_order: 60,
+        };
       }
       return raw;
     },

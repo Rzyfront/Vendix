@@ -165,6 +165,13 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             limit: 16,
             sort_order: 50,
           },
+          // Opt-in: disabled by default so existing storefronts keep their
+          // current layout until the store explicitly turns it on.
+          promotions: {
+            enabled: false,
+            title: 'Promociones activas',
+            sort_order: 60,
+          },
         },
         catalog: {
           products_per_page: 16,

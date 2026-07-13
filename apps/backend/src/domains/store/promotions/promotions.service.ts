@@ -194,6 +194,11 @@ export class PromotionsService {
       ...promotionData,
       rule_type,
       scope,
+      // Defaults applied explicitly here (NOT via DTO initializers) so that
+      // UpdatePromotionDto (PartialType) does not inherit phantom values that
+      // would clobber existing rows on a partial PATCH.
+      is_auto_apply: dto.is_auto_apply ?? false,
+      priority: dto.priority ?? 0,
       start_date: new Date(dto.start_date),
       end_date: dto.end_date ? new Date(dto.end_date) : null,
       state: 'draft',

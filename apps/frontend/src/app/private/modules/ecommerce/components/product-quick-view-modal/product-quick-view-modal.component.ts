@@ -9,7 +9,7 @@ import {
   computed,
 } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
-import { CurrencyPipe } from '@angular/common';
+import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
