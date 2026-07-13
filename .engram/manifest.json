@@ -608,6 +608,14 @@
       "sessions": 3,
       "memories": 7,
       "prompts": 0
+    },
+    {
+      "id": "78eab258",
+      "created_by": "yoner",
+      "created_at": "2026-07-13T23:04:43Z",
+      "sessions": 2,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }
