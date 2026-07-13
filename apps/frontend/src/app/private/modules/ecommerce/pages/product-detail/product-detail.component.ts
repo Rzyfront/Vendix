@@ -191,7 +191,7 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
                     >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
-                @if (isQuantityTiered() && promotionBadgeLabel()) {
+                @if (promotionBadgeLabel()) {
                   <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
                 }
               </div>

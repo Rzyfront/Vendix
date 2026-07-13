@@ -11,6 +11,7 @@ import { EcommerceCustomerQueueModule } from './customer-queue/ecommerce-custome
 import { EcommerceInvoiceDataModule } from './invoice-data/ecommerce-invoice-data.module';
 import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-collection.module';
 import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
+import { EcommercePromotionsModule } from './promotions/ecommerce-promotions.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -38,6 +39,7 @@ import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
     EcommerceInvoiceDataModule,
     EcommerceDataCollectionModule,
     EcommerceTablesModule,
+    EcommercePromotionsModule,
   ],
 })
 export class EcommerceDomainModule {}

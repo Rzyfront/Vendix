@@ -6,19 +6,22 @@ import { toSignal, toObservable, takeUntilDestroyed} from '@angular/core/rxjs-in
 import {
   PosCartService,
   CartState,
-  CartItem } from '../services/pos-cart.service';
+  CartItem,
+  PromotionTierProgress } from '../services/pos-cart.service';
 import { CartDiscount } from '../models/cart.model';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import {
+  BadgeComponent,
   ButtonComponent,
   InputComponent,
   SelectorComponent,
   TextareaComponent,
   TooltipComponent,
 } from '../../../../../shared/components';
+import type { BadgeVariant } from '../../../../../shared/components';
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import type { QuantityClampEvent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -43,6 +46,7 @@ import {
     FormsModule,
     IconComponent,
     ModalComponent,
+    BadgeComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
@@ -147,23 +151,43 @@ import {
                       {{ getPromotionDiscounts().length }}
                     </span>
                   </div>
-                  @for (disc of getPromotionDiscounts(); track disc) {
+                  @for (disc of getPromotionDiscounts(); track disc.id) {
                     <div
-                      class="flex items-center justify-between text-[11px] py-0.5"
+                      class="flex items-start justify-between gap-2 py-0.5"
                     >
-                      <div class="flex items-center gap-1 min-w-0">
-                        <span class="text-green-700 truncate">{{
-                          disc.description
-                        }}</span>
-                        @if (disc.is_auto_applied) {
-                          <span
-                            class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600"
-                            >auto</span
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1 min-w-0">
+                          <span class="text-[11px] text-green-700 truncate">{{
+                            disc.description
+                          }}</span>
+                          @if (disc.is_auto_applied) {
+                            <span
+                              class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600 shrink-0"
+                              >auto</span
+                            >
+                          }
+                        </div>
+                        <div class="mt-0.5 flex flex-wrap items-center gap-1">
+                          <app-badge
+                            [variant]="promotionTypeBadge(disc).variant"
+                            size="xsm"
+                            badgeStyle="outline"
                           >
-                        }
+                            {{ promotionTypeBadge(disc).label }}
+                          </app-badge>
+                          @if (disc.badge_label) {
+                            <app-badge
+                              variant="warning"
+                              size="xsm"
+                              badgeStyle="outline"
+                            >
+                              {{ disc.badge_label }}
+                            </app-badge>
+                          }
+                        </div>
                       </div>
                       <div class="flex items-center gap-1 shrink-0">
-                        <span class="font-medium text-green-700"
+                        <span class="text-[11px] font-medium text-green-700"
                           >-{{ formatCurrency(disc.amount) }}</span
                         >
                         @if (!disc.is_auto_applied) {
@@ -176,6 +200,42 @@ import {
                           </button>
                         }
                       </div>
+                    </div>
+                  }
+                </div>
+              }
+
+              <!--
+                Tier progress nudge (best-effort). Shown when a scaled promo
+                (quantity_tiered) already has in-scope items and a higher tier
+                is reachable. Data comes from the active-promotions payload
+                (promotion_quantity_tiers) — no extra backend call.
+              -->
+              @if (promotionTierProgress().length > 0) {
+                <div class="pt-1.5 border-t border-border/30 space-y-1">
+                  @for (
+                    progress of promotionTierProgress();
+                    track progress.promotion_id
+                  ) {
+                    <div
+                      class="flex items-start gap-1.5 text-[10px] leading-tight text-primary"
+                    >
+                      <app-icon
+                        name="trending-up"
+                        [size]="11"
+                        class="mt-0.5 shrink-0 text-primary"
+                      ></app-icon>
+                      <span>
+                        Agrega
+                        <span class="font-semibold"
+                          >{{ progress.remaining_quantity }} und</span
+                        >
+                        más y obtén
+                        <span class="font-semibold">{{
+                          progress.next_benefit_label
+                        }}</span>
+                        en “{{ progress.name }}”.
+                      </span>
                     </div>
                   }
                 </div>
@@ -944,9 +1004,24 @@ private cartService = inject(PosCartService);
     this.hasPermission('store:products:apply_pricing_tier'),
   );
 
-  activePromotions: any[] = [];
+  /**
+   * Active promotions fetched once from the backend. Signal-backed so the
+   * tier-progress computed re-derives when they load. Kept as `any[]` to match
+   * the existing loosely-typed promotions payload.
+   */
+  readonly activePromotions = signal<any[]>([]);
   couponCode = '';
   couponLoading = false;
+
+  /**
+   * Best-effort "faltan N und para el siguiente tramo" hints for auto-apply
+   * quantity_tiered promotions. Zoneless-safe computed: recomputes when the
+   * cart state (service signal) or the active promotions change. Empty when
+   * there is nothing to nudge toward.
+   */
+  readonly promotionTierProgress = computed<PromotionTierProgress[]>(() =>
+    this.cartService.getPromotionTierProgress(this.activePromotions()),
+  );
 
   readonly isEditMode = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
@@ -1025,11 +1100,11 @@ private cartService = inject(PosCartService);
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.activePromotions = response?.data || response || [];
+          this.activePromotions.set(response?.data || response || []);
         },
         error: () => {
           // Silently fail - promotions are not critical
-          this.activePromotions = [];
+          this.activePromotions.set([]);
         } });
 
     // Re-apply promotions when cart items change (use item count to avoid infinite loops)
@@ -1048,9 +1123,10 @@ private cartService = inject(PosCartService);
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
-        if (this.activePromotions.length > 0) {
+        const promotions = this.activePromotions();
+        if (promotions.length > 0) {
           this.cartService
-            .applyPromotions(this.activePromotions)
+            .applyPromotions(promotions)
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe();
         }
@@ -1454,6 +1530,17 @@ private cartService = inject(PosCartService);
     return this.cartService
       .getCurrentState()
       .appliedDiscounts.filter((d) => d.promotion_id);
+  }
+
+  /**
+   * Type badge descriptor for an applied promotion. Percentage promotions read
+   * as a success (green) badge, fixed-amount ones as a primary (blue) badge —
+   * purely presentational, driven by the already-resolved discount `type`.
+   */
+  promotionTypeBadge(disc: CartDiscount): { label: string; variant: BadgeVariant } {
+    return disc.type === 'percentage'
+      ? { label: 'Porcentaje', variant: 'success' }
+      : { label: 'Monto fijo', variant: 'primary' };
   }
 
   removePromoDiscount(discountId: string): void {

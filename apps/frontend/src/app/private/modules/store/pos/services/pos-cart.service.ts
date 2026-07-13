@@ -42,6 +42,21 @@ import {
 } from '../../price-tiers/interfaces';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+
+/**
+ * Presentational "faltan N und para el siguiente tramo" hint for an auto-apply
+ * quantity_tiered promotion. Derived from cart state + active promotions;
+ * carries no money/discount calculation.
+ */
+export interface PromotionTierProgress {
+  promotion_id: number;
+  name: string;
+  /** Units still needed to reach the next tier for the promo's scope. */
+  remaining_quantity: number;
+  /** Benefit of the next tier ("-X%" / "-$Y"). */
+  next_benefit_label: string;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -52,6 +67,7 @@ export class PosCartService {
 
   private destroyRef = inject(DestroyRef);
   private withholdingService = inject(WithholdingTaxService);
+  private currencyFormat = inject(CurrencyFormatService);
 
   constructor(
     private productService: PosProductService,
@@ -583,6 +599,8 @@ export class PosCartService {
               amount: discountAmount,
               promotion_id: promo.id,
               is_auto_applied: true,
+              // Presentation-only tier label (mirrors backend "Desde N und: -X%").
+              badge_label: this.buildTierBadgeLabel(matchedTier),
             });
             continue;
           }
@@ -692,6 +710,101 @@ export class PosCartService {
 
     discount = Math.max(0, Math.min(discount, lineTotal));
     return this.roundMoney(discount);
+  }
+
+  /**
+   * Format only the BENEFIT of a tier ("-X%" for percentage, "-$Y" for
+   * fixed_amount). Returns `undefined` when the value is missing/invalid.
+   * Presentation only — no discount math.
+   */
+  private formatTierBenefit(tier: {
+    type?: string | null;
+    value?: number | string | null;
+  }): string | undefined {
+    const value = Number(tier?.value ?? 0);
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    return tier?.type === 'percentage'
+      ? `-${value}%`
+      : `-${this.currencyFormat.format(value)}`;
+  }
+
+  /**
+   * Build a human tier/benefit label for a matched `quantity_tiered` tier,
+   * mirroring the backend enrichment ("Desde N und: -X%" for percentage,
+   * "Desde N und: -$Y" for fixed_amount). Presentation only — the discount
+   * amount is resolved by the caller. Returns `undefined` when the tier data
+   * is incomplete so the UI can simply skip the tramo badge.
+   */
+  private buildTierBadgeLabel(tier: {
+    min_quantity?: number | string | null;
+    type?: string | null;
+    value?: number | string | null;
+  }): string | undefined {
+    const min = Number(tier?.min_quantity ?? 0);
+    if (!Number.isFinite(min) || min <= 0) return undefined;
+    const benefit = this.formatTierBenefit(tier);
+    if (!benefit) return undefined;
+    return `Desde ${min} und: ${benefit}`;
+  }
+
+  /**
+   * Best-effort "faltan N und para el siguiente tramo" hint for auto-apply
+   * `quantity_tiered` promotions. Pure READ over the current cart plus the
+   * active promotions the caller already fetched: reuses the same scope
+   * resolution (`getPromotionApplicableItems`) and tier ordering as
+   * `applyPromotions`, and performs NO money/discount calculation. Returns one
+   * entry per promo that already has items in scope AND a next tier reachable
+   * above the current scoped quantity; empty otherwise.
+   */
+  getPromotionTierProgress(
+    activePromotions: any[],
+  ): PromotionTierProgress[] {
+    const items = this.cartState().items;
+    const progress: PromotionTierProgress[] = [];
+
+    for (const promo of activePromotions ?? []) {
+      if (!promo?.is_auto_apply) continue;
+      if (promo.rule_type !== 'quantity_tiered') continue;
+
+      const sortedTiers = (promo.promotion_quantity_tiers ?? [])
+        .slice()
+        .sort((a: any, b: any) => {
+          if (a.min_quantity !== b.min_quantity)
+            return a.min_quantity - b.min_quantity;
+          if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+          return Number(a.id) - Number(b.id);
+        });
+      if (sortedTiers.length === 0) continue;
+
+      const applicableItems = this.getPromotionApplicableItems(promo, items);
+      const scopedQty = applicableItems.reduce(
+        (sum, item) => sum + Number(item.quantity),
+        0,
+      );
+      // Only nudge when the customer already has in-scope items in the cart.
+      if (scopedQty <= 0) continue;
+
+      // Next tier = first tier whose threshold is still ABOVE the current qty.
+      const nextTier = sortedTiers.find(
+        (t: any) => Number(t.min_quantity) > scopedQty,
+      );
+      if (!nextTier) continue;
+
+      const remaining = Number(nextTier.min_quantity) - scopedQty;
+      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+
+      const benefit = this.formatTierBenefit(nextTier);
+      if (!benefit) continue;
+
+      progress.push({
+        promotion_id: Number(promo.id),
+        name: String(promo.name ?? ''),
+        remaining_quantity: remaining,
+        next_benefit_label: benefit,
+      });
+    }
+
+    return progress;
   }
 
   /**

@@ -40,6 +40,13 @@ export interface AppliedPromotion {
   promotion_id: number;
   name: string;
   discount_amount: number;
+  /**
+   * Discount type of the applied promotion. Optional because the current cart
+   * summary endpoint only surfaces `{ promotion_id, name, discount_amount }`.
+   * When the backend forwards it, the UI shows a precise type badge; otherwise
+   * it falls back to a generic "Promoción" badge.
+   */
+  type?: 'percentage' | 'fixed_amount';
 }
 
 export interface Cart {

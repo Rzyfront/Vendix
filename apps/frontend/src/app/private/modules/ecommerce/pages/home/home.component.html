@@ -40,6 +40,13 @@
         />
       }
 
+      @case ("promotions") {
+        <app-promotions-showcase
+          [title]="section.config.title || 'Promociones activas'"
+          [subtitle]="section.config.subtitle || ''"
+        />
+      }
+
       @case ("menus") {
         <app-menus-showcase
           [title]="section.config.title || 'Nuestras cartas'"

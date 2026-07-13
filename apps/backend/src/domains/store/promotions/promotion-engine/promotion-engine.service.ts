@@ -763,6 +763,58 @@ export class PromotionEngineService {
   }
 
   /**
+   * Build a badge label for a promotion in a LISTING / BANNER context where
+   * there is NO single product unit price (e.g. the public storefront "active
+   * promotions" banner). Reuses the SAME private builders that power product
+   * cards so the promotional copy stays consistent across surfaces:
+   *  - quantity_tiered → lowest tier via `buildQuantityTieredBadgeLabel`
+   *    ("Desde N und: -X%" / "Desde N und: -$Y").
+   *  - flat percentage → "-X% OFF".
+   *  - flat fixed_amount → "-$Y OFF" (es-CO whole-currency amount).
+   * Falls back to a generic "OFERTA" when the promotion carries no usable
+   * value. The parameter type intentionally uses only exported / inline types
+   * (no private engine names) so `declaration` emit stays clean.
+   */
+  buildPromotionBadgeLabel(promo: {
+    type: PromotionQuoteType;
+    value: unknown;
+    rule_type: 'flat' | 'quantity_tiered';
+    promotion_quantity_tiers?: Array<{
+      id: number;
+      promotion_id: number;
+      min_quantity: number;
+      max_quantity: number | null;
+      type: PromotionQuoteType;
+      value: unknown;
+      sort_order: number;
+    }>;
+  }): string {
+    if (promo.rule_type === 'quantity_tiered') {
+      const tiers = (promo.promotion_quantity_tiers ?? [])
+        .slice()
+        .sort((a, b) => {
+          if (a.min_quantity !== b.min_quantity)
+            return a.min_quantity - b.min_quantity;
+          if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+          return a.id - b.id;
+        });
+      const firstTier = tiers[0];
+      return firstTier
+        ? this.buildQuantityTieredBadgeLabel(firstTier)
+        : 'Descuentos por cantidad';
+    }
+
+    const value = Number(promo.value);
+    if (promo.type === 'percentage' && Number.isFinite(value) && value > 0) {
+      return `-${Math.round(value)}% OFF`;
+    }
+    if (promo.type === 'fixed_amount' && Number.isFinite(value) && value > 0) {
+      return `-$${this.formatCurrencyInteger(value)} OFF`;
+    }
+    return 'OFERTA';
+  }
+
+  /**
    * Build a compact badge label for product cards. Prefer percentage when the
    * promotion is percentage-typed, otherwise show the absolute saved amount.
    */

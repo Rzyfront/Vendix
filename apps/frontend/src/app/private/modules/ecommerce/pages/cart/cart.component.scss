@@ -298,6 +298,65 @@
     }
 }
 
+.summary-promotions {
+    margin-bottom: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--color-success) 8%, transparent);
+
+    .promotions-header {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        margin-bottom: 0.5rem;
+
+        .promotions-title {
+            font-size: var(--fs-xs, 0.75rem);
+            font-weight: var(--fw-semibold);
+            color: var(--color-success);
+        }
+
+        .promotions-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 1.125rem;
+            height: 1.125rem;
+            padding: 0 0.25rem;
+            border-radius: 999px;
+            font-size: 0.625rem;
+            font-weight: var(--fw-bold);
+            color: var(--color-success);
+            background: color-mix(in srgb, var(--color-success) 18%, transparent);
+        }
+    }
+
+    .promotion-line {
+        margin-bottom: 0.375rem;
+        align-items: flex-start;
+
+        &:last-child {
+            margin-bottom: 0;
+        }
+
+        .promotion-info {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            min-width: 0;
+            flex: 1;
+
+            .promotion-name {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+        }
+    }
+}
+
 .checkout-btn {
     width: 100%;
     padding: 1rem;

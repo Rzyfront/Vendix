@@ -23,6 +23,7 @@ import { HeroBannerComponent } from '../../components/hero-banner';
 import { CategoriesShowcaseComponent } from '../../components/categories-showcase/categories-showcase.component';
 import { BrandsShowcaseComponent } from '../../components/brands-showcase/brands-showcase.component';
 import { MenusShowcaseComponent } from '../../components/menus-showcase/menus-showcase.component';
+import { PromotionsShowcaseComponent } from '../../components/promotions-showcase/promotions-showcase.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -47,6 +48,7 @@ interface HomeSectionsConfig {
   categories: HomeSectionConfig;
   brands: HomeSectionConfig;
   featured_products: HomeSectionConfig;
+  promotions: HomeSectionConfig;
   menus: HomeSectionConfig;
 }
 
@@ -91,13 +93,22 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
     limit: 16,
     sort_order: 50,
   },
+  // Opt-in (default off). sort_order 60 = valor por defecto del backend.
+  // `menus` se subió a 70 para deshacer el empate histórico en 60.
+  promotions: {
+    enabled: false,
+    title: 'Promociones activas',
+    subtitle: 'Aprovecha las ofertas vigentes de la tienda',
+    sort_order: 60,
+  },
   menus: {
     enabled: false,
     title: 'Nuestras cartas',
     subtitle: 'Descubre los platos disponibles según el horario',
     // limit = tope de platos por carta en el teaser del home (showcase agrupa por carta)
     limit: 8,
-    sort_order: 60,
+    // Subido 60 -> 70 para no empatar con `promotions` (backend default 60).
+    sort_order: 70,
     // Inerte en el default del home (solo lo lee /cartas via menus-page).
     availability_display: 'hide',
   },
@@ -113,6 +124,7 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
     CategoriesShowcaseComponent,
     BrandsShowcaseComponent,
     MenusShowcaseComponent,
+    PromotionsShowcaseComponent,
     ProductQuickViewModalComponent,
     ShareModalComponent,
     ButtonComponent,
@@ -278,6 +290,10 @@ export class HomeComponent implements OnInit {
             featured_products: {
               ...DEFAULT_HOME_SECTIONS.featured_products,
               ...(configuredSections.featured_products || {}),
+            },
+            promotions: {
+              ...DEFAULT_HOME_SECTIONS.promotions,
+              ...(configuredSections.promotions || {}),
             },
             menus: {
               ...DEFAULT_HOME_SECTIONS.menus,

@@ -104,7 +104,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                   {{ prod.base_price | currency }}
                 </span>
               }
-              @if (isQuantityTiered() && promotionBadgeLabel()) {
+              @if (promotionBadgeLabel()) {
                 <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
               }
             </div>

@@ -52,6 +52,8 @@ export interface EcommerceSettings {
     categories?: HomeSectionSettings;
     brands?: HomeSectionSettings;
     featured_products?: HomeSectionSettings;
+    promotions?: HomeSectionSettings;
+    menus?: HomeSectionSettings;
   };
 
   // Catálogo
