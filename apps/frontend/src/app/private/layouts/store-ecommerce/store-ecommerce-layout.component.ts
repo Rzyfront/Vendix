@@ -7,17 +7,14 @@ import {
   PLATFORM_ID,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import {
-  CurrencyPipe,
-  isPlatformBrowser,
-  ViewportScroller,
-} from '@angular/common';
+import { isPlatformBrowser, ViewportScroller } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
+import { CartPromotionsComponent } from '../../modules/ecommerce/components/cart-promotions/cart-promotions.component';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
 import { TableContextService } from '../../modules/ecommerce/services/table-context.service';
@@ -32,6 +29,7 @@ import { ModalComponent } from '../../../shared/components/modal/modal.component
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { TableSessionSseService } from '../../modules/ecommerce/services/table-session-sse.service';
 import { parseApiError } from '../../../core/utils/parse-api-error';
+import { CurrencyPipe } from '../../../shared/pipes/currency';
 
 // Footer types (matching backend interfaces)
 interface FooterStoreInfo {
@@ -89,6 +87,7 @@ interface FooterSettings {
     ButtonComponent,
     ModalComponent,
     CurrencyPipe,
+    CartPromotionsComponent,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],

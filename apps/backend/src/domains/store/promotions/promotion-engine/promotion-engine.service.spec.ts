@@ -799,6 +799,105 @@ describe('PromotionEngineService - quoteDiscounts', () => {
     });
   });
 
+  describe('tier_progress (next tier nudge)', () => {
+    function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 1,
+        promotion_id: 100,
+        min_quantity: 3,
+        max_quantity: null as number | null,
+        value: 15,
+        type: 'percentage',
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    // scopedQty=2 sits below the lowest tier (min 3): NO discount applies
+    // (total_discount must stay 0 exactly as before this feature), and the
+    // nudge advertises the reachable min-3 tier with remaining_quantity=1.
+    it('surfaces the next reachable tier without altering the discount math', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 301,
+          name: 'Escala orden desde 3 und',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 301, min_quantity: 3, max_quantity: 5, value: 15, type: 'percentage', sort_order: 0 }),
+            buildTier({ id: 2, promotion_id: 301, min_quantity: 6, max_quantity: null, value: 25, type: 'percentage', sort_order: 1 }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 10000, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 20000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // No regression: scopedQty=2 < 3 => no tier fires => zero discount, same
+      // totals as if tier_progress had never been added.
+      expect(result.total_discount).toBe(0);
+      expect(result.promotional_subtotal).toBe(30000);
+      expect(result.applied_promotions).toEqual([]);
+
+      // Nudge points at the FIRST reachable tier (min_quantity 3).
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].promotion_id).toBe(301);
+      expect(result.tier_progress[0].name).toBe('Escala orden desde 3 und');
+      expect(result.tier_progress[0].remaining_quantity).toBe(1); // 3 - 2
+      expect(result.tier_progress[0].benefit_type).toBe('percentage');
+      expect(result.tier_progress[0].benefit_value).toBe(15);
+    });
+
+    it('emits no nudge when there are no in-scope items yet (scopedQty=0)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 302,
+          name: 'Escala producto 999',
+          scope: 'product',
+          rule_type: 'quantity_tiered',
+          promotion_products: [{ product_id: 999 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 302, min_quantity: 3, value: 15, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 10000, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.tier_progress).toEqual([]);
+    });
+
+    it('emits no nudge once the top tier is already reached', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 303,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 303, min_quantity: 3, max_quantity: null, value: 15, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 10000, quantity: 5 }],
+        now: REFERENCE_NOW,
+      });
+
+      // scopedQty=5 >= 3 (and no higher tier) => tier already unlocked, no nudge.
+      expect(result.tier_progress).toEqual([]);
+      expect(result.total_discount).toBe(7500); // 15% of 50000, discount still fires
+    });
+  });
+
   describe('quantity_tiered badge label (findActiveAutoPromotionsForProducts)', () => {
     function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
       return {

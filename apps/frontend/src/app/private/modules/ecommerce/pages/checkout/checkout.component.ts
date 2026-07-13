@@ -48,6 +48,7 @@ import {
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { BookingSlotPickerComponent } from '../../components/booking-slot-picker/booking-slot-picker.component';
+import { CartPromotionsComponent } from '../../components/cart-promotions/cart-promotions.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import {
   CurrencyPipe,
@@ -86,6 +87,7 @@ import { PaymentInstructionsModalComponent } from '../../components/payment-inst
     BookingSlotPickerComponent,
     GuestCheckoutDataModalComponent,
     PaymentInstructionsModalComponent,
+    CartPromotionsComponent,
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],

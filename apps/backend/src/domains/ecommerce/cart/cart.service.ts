@@ -505,6 +505,13 @@ export class CartService {
       scope: 'order' | 'product' | 'category';
       discount_amount: number;
     }>;
+    tier_progress: Array<{
+      promotion_id: number;
+      name: string;
+      remaining_quantity: number;
+      benefit_type: 'percentage' | 'fixed_amount';
+      benefit_value: number;
+    }>;
   }> {
     // Auth users: prefer the backend cart so quantities are server-side
     // canonical. Guests: use the DTO items array as the source of truth.
@@ -551,6 +558,7 @@ export class CartService {
           promotional_subtotal: 0,
           item_count: 0,
           applied_promotions: [],
+          tier_progress: [],
         };
       }
       resolvedItems = cart.cart_items.map((ci) => ({
@@ -568,6 +576,7 @@ export class CartService {
         promotional_subtotal: 0,
         item_count: 0,
         applied_promotions: [],
+        tier_progress: [],
       };
     }
 
@@ -609,6 +618,7 @@ export class CartService {
         scope: p.scope,
         discount_amount: p.discount_amount,
       })),
+      tier_progress: quote.tier_progress,
     };
   }
 

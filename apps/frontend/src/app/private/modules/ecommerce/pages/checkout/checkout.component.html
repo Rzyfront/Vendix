@@ -565,6 +565,8 @@
               </small>
             </div>
 
+            <app-cart-promotions [cart]="cart()" />
+
             <hr />
 
             <div class="summary-row total">
@@ -572,7 +574,7 @@
               <span>{{ cart()!.subtotal + shipping_cost | currency }}</span>
             </div>
             <small class="summary-total-hint">
-              Las promociones automáticas y cupones se aplican al confirmar.
+              Los cupones se aplican al confirmar.
             </small>
           }
         </div>

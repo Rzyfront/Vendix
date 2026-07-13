@@ -156,6 +156,7 @@
 
             @if (cart(); as cart) {
             @if (cart.items.length > 0) {
+            <app-cart-promotions [cart]="cart" [compact]="true" />
             <div class="cart-footer">
               <div class="cart-total">
                 <span>Total:</span>

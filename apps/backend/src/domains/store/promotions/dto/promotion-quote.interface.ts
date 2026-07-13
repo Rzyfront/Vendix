@@ -91,6 +91,24 @@ export interface OrderPromotionSnapshot {
   discount_amount: number;
 }
 
+/**
+ * "Next tier" nudge for an auto-apply `quantity_tiered` promotion that already
+ * has items in the cart scope but has NOT yet reached its next threshold.
+ * Structured, currency-unformatted mirror of the POS-only frontend helper
+ * (`getPromotionTierProgress` / `formatTierBenefit`) so POS and ecommerce nudge
+ * identically. Consumers format `benefit_value` for display; the engine never
+ * formats money here.
+ */
+export interface PromotionTierProgress {
+  promotion_id: number;
+  name: string;
+  /** Units still needed to unlock the next tier. */
+  remaining_quantity: number;
+  benefit_type: 'percentage' | 'fixed_amount';
+  /** RAW tier value (percentage points or money amount). NOT formatted. */
+  benefit_value: number;
+}
+
 export interface PromotionQuoteResult {
   /** Subtotal of items BEFORE any promotional discount. */
   subtotal: number;
@@ -102,6 +120,12 @@ export interface PromotionQuoteResult {
   items: PromotionQuoteItemBreakdown[];
   /** Order_promotions records ready to persist (one per applied promotion). */
   order_promotions_snapshot: OrderPromotionSnapshot[];
+  /**
+   * "Add N more and get X off" nudges for auto-apply quantity_tiered
+   * promotions with items already in scope but a higher tier still reachable.
+   * Pure read: never affects the discount math above.
+   */
+  tier_progress: PromotionTierProgress[];
 }
 
 /**

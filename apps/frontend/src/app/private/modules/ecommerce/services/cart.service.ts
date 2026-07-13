@@ -49,6 +49,31 @@ export interface AppliedPromotion {
   type?: 'percentage' | 'fixed_amount';
 }
 
+/**
+ * Progress toward the next tier of a `quantity_tiered` promotion, surfaced by
+ * `POST /ecommerce/cart/summary`. `benefit_value` is RAW (unformatted); the
+ * presentational component (`app-cart-promotions`) formats it. Mirrors the POS
+ * tier-progress nudge for POS↔ecommerce parity.
+ */
+export interface CartTierProgress {
+  promotion_id: number;
+  name: string;
+  remaining_quantity: number;
+  benefit_type: 'percentage' | 'fixed_amount';
+  benefit_value: number;
+}
+
+/**
+ * Promotional payload returned by the stateless `POST /ecommerce/cart/summary`
+ * endpoint (used for both guest and authenticated carts).
+ */
+export interface CartSummaryData {
+  promotion_discount?: number;
+  promotional_subtotal?: number;
+  applied_promotions?: AppliedPromotion[];
+  tier_progress?: CartTierProgress[];
+}
+
 export interface Cart {
   id: number;
   currency: string;
@@ -61,6 +86,11 @@ export interface Cart {
   promotional_subtotal?: number;
   /** Per-promotion breakdown of the applied discounts. */
   applied_promotions?: AppliedPromotion[];
+  /**
+   * Progress toward the next tier of active `quantity_tiered` promotions.
+   * Powers the "next tier" nudge shown in cart dropdown / page / checkout.
+   */
+  tier_progress?: CartTierProgress[];
 }
 
 interface LocalCartItem {
@@ -96,6 +126,12 @@ export class CartService {
 
   private is_authenticated = false;
   private readonly destroy_ref = inject(DestroyRef);
+  /**
+   * Monotonic token guaranteeing last-response-wins for the central
+   * promotional enrichment: a slow summary from a superseded cart state can
+   * never clobber a newer one (dedupe requirement).
+   */
+  private summary_seq = 0;
 
   constructor(
     private http: HttpClient,
@@ -199,10 +235,10 @@ export class CartService {
                 items: cartItems,
               };
               this.cart.set(cart);
-              // Enrich the guest cart with promotional discounts computed by
-              // the backend (localStorage carts are not persisted server-side,
-              // so we ask the stateless summary endpoint for the discount).
-              this.enrichGuestCartWithSummary(items);
+              // Centrally enrich the cart signal with promotional discounts +
+              // tier progress from the stateless summary endpoint (localStorage
+              // carts are not persisted server-side).
+              this.enrichCartWithSummary();
             },
             error: () => this.emitEmptyCart(),
           });
@@ -372,6 +408,7 @@ export class CartService {
         tap((response: any) => {
           if (response.success) {
             this.cart.set(response.data);
+            this.enrichCartWithSummary();
           }
         }),
       );
@@ -392,6 +429,7 @@ export class CartService {
         tap((response: any) => {
           if (response.success) {
             this.cart.set(response.data);
+            this.enrichCartWithSummary();
             this.item_added_subject.next();
           }
         }),
@@ -409,6 +447,7 @@ export class CartService {
         tap((response: any) => {
           if (response.success) {
             this.cart.set(response.data);
+            this.enrichCartWithSummary();
           }
         }),
       );
@@ -423,6 +462,7 @@ export class CartService {
         tap((response: any) => {
           if (response.success) {
             this.cart.set(response.data);
+            this.enrichCartWithSummary();
           }
         }),
       );
@@ -446,6 +486,7 @@ export class CartService {
         tap((response: any) => {
           if (response.success) {
             this.cart.set(response.data);
+            this.enrichCartWithSummary();
             // Limpiar localStorage INMEDIATAMENTE después de sincronizar
             localStorage.removeItem(this.local_storage_key);
           }
@@ -454,51 +495,94 @@ export class CartService {
   }
 
   /**
-   * Stateless promotional summary for guest carts. localStorage carts are not
-   * persisted server-side, so we send the raw items and let the backend
-   * compute `promotion_discount`, `promotional_subtotal` and the applied
-   * promotions breakdown.
+   * Stateless promotional summary. Sends the raw items and lets the backend
+   * compute `promotion_discount`, `promotional_subtotal`, the applied-promotion
+   * breakdown and `tier_progress`. Used for BOTH guest (localStorage, not
+   * persisted server-side) and authenticated carts by `enrichCartWithSummary`.
    */
   getCartSummary(
-    items: { product_id: number; product_variant_id?: number | null; quantity: number }[],
-  ): Observable<any> {
-    return this.http.post(
-      `${this.api_url}/summary`,
-      { items },
-      { headers: this.getHeaders() },
-    );
+    items: {
+      product_id: number;
+      product_variant_id?: number | null;
+      quantity: number;
+    }[],
+  ): Observable<CartSummaryData & { success?: boolean; data?: CartSummaryData }> {
+    return this.http.post<
+      CartSummaryData & { success?: boolean; data?: CartSummaryData }
+    >(`${this.api_url}/summary`, { items }, { headers: this.getHeaders() });
   }
 
   /**
-   * Fetches the promotional summary for the current guest cart and merges the
-   * discount fields into the local cart signal without altering item lines.
+   * CENTRAL promotional enrichment for the shared `cart` signal.
+   *
+   * Reads the CURRENT cart items — this works uniformly for guest
+   * (localStorage) and authenticated carts because both populate
+   * `cart().items` — asks the stateless `POST /ecommerce/cart/summary`
+   * endpoint for the promotional breakdown, and merges ONLY the promo fields
+   * (`promotion_discount`, `promotional_subtotal`, `applied_promotions`,
+   * `tier_progress`) into the signal. Item lines are never mutated.
+   *
+   * This is the SINGLE place that enriches the cart, so every consumer of the
+   * `cart` signal (page, layout dropdown, checkout) sees promotions + tier
+   * progress WITHOUT hitting the summary endpoint themselves. It is invoked
+   * after every load/mutation: getCart, addItem, updateItem, removeItem,
+   * syncFromLocalStorage and loadLocalCart.
+   *
+   * Concurrency: the `summary_seq` token guarantees last-response-wins so a
+   * slow summary from a superseded cart state can never clobber a newer one.
    */
-  private enrichGuestCartWithSummary(items: LocalCartItem[]): void {
+  private enrichCartWithSummary(): void {
+    const current = this.cart();
+    if (!current) return;
+
+    const items = current.items ?? [];
+    if (items.length === 0) {
+      // Empty cart: clear any stale promo fields so consumers don't render
+      // discounts/nudges over an empty cart.
+      const hasPromo =
+        !!current.promotion_discount ||
+        (current.applied_promotions?.length ?? 0) > 0 ||
+        (current.tier_progress?.length ?? 0) > 0;
+      if (hasPromo) {
+        this.cart.set({
+          ...current,
+          promotion_discount: 0,
+          promotional_subtotal: current.subtotal,
+          applied_promotions: [],
+          tier_progress: [],
+        });
+      }
+      return;
+    }
+
     const summaryItems = items.map((i) => ({
       product_id: i.product_id,
       product_variant_id: i.product_variant_id ?? null,
       quantity: i.quantity,
     }));
-    if (summaryItems.length === 0) return;
 
+    const seq = ++this.summary_seq;
     this.getCartSummary(summaryItems)
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
-        next: (response: any) => {
+        next: (response) => {
+          // Drop stale responses: a newer mutation already fired.
+          if (seq !== this.summary_seq) return;
           const data = response?.data ?? response;
-          const current = this.cart();
-          if (!current || !data) return;
+          const now = this.cart();
+          if (!now || !data) return;
           this.cart.set({
-            ...current,
+            ...now,
             promotion_discount: Number(data.promotion_discount) || 0,
             promotional_subtotal:
               data.promotional_subtotal != null
                 ? Number(data.promotional_subtotal)
-                : current.subtotal,
+                : now.subtotal,
             applied_promotions: data.applied_promotions ?? [],
+            tier_progress: data.tier_progress ?? [],
           });
         },
-        // On failure keep the cart as-is (no discount line shown).
+        // On failure keep the cart as-is (no promo lines shown).
         error: () => {},
       });
   }
