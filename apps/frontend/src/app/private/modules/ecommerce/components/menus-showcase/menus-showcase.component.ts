@@ -62,7 +62,6 @@ interface CartaBlock {
     @if (renderCartas().length || fallbackMenu()) {
       <section class="menus-section">
         <div class="section-header">
-          <span class="section-kicker">Carta del restaurante</span>
           <h2>{{ title() || 'Nuestras cartas' }}</h2>
           <p class="subtitle">
             {{ subtitle() || 'Descubre los platos disponibles según el horario' }}
@@ -206,14 +205,6 @@ interface CartaBlock {
       .section-header {
         text-align: center;
         margin-bottom: 1.75rem;
-      }
-      .section-kicker {
-        display: inline-block;
-        font-size: 0.75rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--color-primary, #2f6f4e);
-        font-weight: 600;
       }
       .section-header h2 {
         font-size: 1.75rem;

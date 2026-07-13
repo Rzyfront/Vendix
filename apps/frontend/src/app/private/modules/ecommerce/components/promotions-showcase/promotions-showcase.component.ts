@@ -41,7 +41,6 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     @if (promotions().length) {
       <section class="promotions-section">
         <div class="section-header">
-          <span class="section-kicker">Ofertas del momento</span>
           <h2>{{ title() || 'Promociones activas' }}</h2>
           @if (subtitle()) {
             <p class="subtitle">{{ subtitle() }}</p>
@@ -81,14 +80,6 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       .section-header {
         text-align: center;
         margin-bottom: 1.75rem;
-      }
-      .section-kicker {
-        display: inline-block;
-        font-size: 0.75rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--color-primary, #2f6f4e);
-        font-weight: 600;
       }
       .section-header h2 {
         font-size: 1.75rem;
