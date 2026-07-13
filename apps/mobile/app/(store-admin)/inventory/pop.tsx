@@ -31,10 +31,12 @@ import type {
   PopSupplier,
   PopLocation,
 } from '../../../src/features/pop/types';
+import { generateTempProductId } from '../../../src/features/pop/types';
 import type { ScanResult } from '../../../src/features/pop/components/pop-invoice-scanner';
 import { InventoryService } from '../../../src/features/store/services/inventory.service';
 import { ProductService } from '../../../src/features/store/services/product.service';
 import { borderRadius, colorScales, colors } from '../../../src/shared/theme';
+import { toastError } from '../../../src/shared/components/toast/toast.store';
 
 const LOCATION_TYPE_LABELS: Record<string, string> = {
   warehouse: 'Almacen / Bodega',
@@ -127,6 +129,7 @@ export default function PopScreen() {
       setProducts((productsRes.data || []) as PopProduct[]);
     } catch (err) {
       console.error('Error loading POP data:', err);
+      toastError('No pudimos cargar el catálogo. Verifica tu conexión e intenta de nuevo.');
     } finally {
       setLoading(false);
     }
@@ -356,7 +359,7 @@ export default function PopScreen() {
   const handlePrebulkConfirm = useCallback((data: PreBulkData) => {
     setShowPrebulk(false);
     const tempProduct: PopProduct = {
-      id: -Date.now(),
+      id: generateTempProductId(),
       name: data.name,
       code: data.code,
       cost: data.base_price,
@@ -374,7 +377,7 @@ export default function PopScreen() {
   const handleBulkDataLoaded = useCallback((items: any[]) => {
     for (const item of items) {
       const tempProduct: PopProduct = {
-        id: -Date.now() - Math.floor(Math.random() * 1000),
+        id: generateTempProductId(),
         name: item.name,
         code: item.sku,
         cost: item.base_price,
@@ -411,7 +414,7 @@ export default function PopScreen() {
         });
       } else {
         const tempProduct: PopProduct = {
-          id: -Date.now() - Math.floor(Math.random() * 1000),
+          id: generateTempProductId(),
           name: item.name,
           code: item.sku,
           cost: item.unit_cost,

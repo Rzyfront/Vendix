@@ -70,8 +70,11 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
       ws['!cols'] = headers.map(() => ({ wch: 20 }));
       XLSX.utils.book_append_sheet(wb, ws, 'Productos');
 
-      const wbout = XLSX.write(wb, { type: 'binary', bookType: 'xlsx' });
-      const base64 = btoa(wbout);
+      // Por qué NO `XLSX.write({type:'binary'}) + btoa(...)`: btoa opera sobre
+// strings Latin-1 y corrompe bytes no-ASCII (acentos, eñes) en celdas como
+// "Camiseta Básica". XLSX emite el binario correctamente si pedimos
+// `type: 'base64'` directo.
+const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
       const uri = FileSystem.cacheDirectory + `plantilla-pedido-${type}.xlsx`;
       await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
 

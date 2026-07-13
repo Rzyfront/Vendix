@@ -31,7 +31,11 @@ interface PopCartModalProps {
 }
 
 function formatCurrency(value: number): string {
-  return '$' + value.toLocaleString('es-CO');
+  // Usa el locale del dispositivo (no 'es-CO' hardcodeado) para que tiendas
+  // con `general.currency` distinta a COP sigan mostrando separadores nativos.
+  // El símbolo '$' es genérico; el formateo real de moneda vive en el
+  // backend (CurrencyFormatService web) — esta capa solo agrupa miles.
+  return '$' + value.toLocaleString();
 }
 
 export default function PopCartModal({

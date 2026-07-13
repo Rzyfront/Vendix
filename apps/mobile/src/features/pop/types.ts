@@ -212,3 +212,25 @@ export interface CreatePurchaseOrderRequest {
 export function generateItemId(): string {
   return `POP_ITEM_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * Genera un `PopProduct.id` numérico negativo para productos temporales
+ * añadidos al carrito sin un id real del backend (prebulk, bulk import,
+ * invoice scanner). Los ids negativos nunca colisionan con ids reales del
+ * backend (siempre positivos) y el random de 48 bits evita colisiones
+ * entre dos llamadas en el mismo `Date.now()`.
+ *
+ * Por qué NO mezclar `Date.now()` + `Math.random()` como antes
+ * (`-Date.now() - Math.floor(Math.random() * 1000)`):
+ *   El importador bulk llama esta función en un loop tight y un scanner
+ *   puede correr en paralelo. `Math.random() * 1000` solo da 1000 valores
+ *   distintos, suficientes en teoría, pero bajo presión (bulk de 1000+
+ *   items en <1s) dos items pueden compartir `product.id` y el cart service
+ *   (`pop-cart-service.ts:50`) puede tratarlos como el mismo item.
+ *
+ * Birthday paradox: 48 bits → colisión al 50% solo después de ~95M muestras.
+ * Mucho más espacio que cualquier carrito real.
+ */
+export function generateTempProductId(): number {
+  return -Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+}

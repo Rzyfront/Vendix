@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { StoreListItem } from '@/core/models/org-admin/store.types';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastError } from '@/shared/components/toast/toast.store';
+import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
 
 interface MenuItem {
   label: string;
@@ -545,6 +546,23 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     return {};
   }, [store_settings, appType]);
 
+  // Industry ceiling — paridad con settings.tsx y user-settings.tsx.
+  // Lee las industrias desde `store_settings.general.industries` (store-level)
+  // o, en variant='org', desde `orgSettings.general.industries`. Fallback a
+  // `['retail']` cuando la query falla para mantener comportamiento seguro:
+  // 'retail' oculta `restaurant_ops`, `memberships`, `orders_reservations`.
+  const storeIndustries = useMemo<string[]>(() => {
+    return (
+      (store_settings as any)?.general?.industries ??
+      (orgSettings as any)?.general?.industries ??
+      ['retail']
+    ) as string[];
+  }, [store_settings, orgSettings]);
+  const hiddenByIndustries = useMemo(
+    () => getModulesHiddenByIndustries(storeIndustries),
+    [storeIndustries],
+  );
+
   const isModuleKeyVisible = (
     moduleKey: string | string[],
     panelUi: Record<string, boolean>,
@@ -553,6 +571,12 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     const keys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
     return keys.some((key) => {
       if (storePanelUi[key] === false) {
+        return false;
+      }
+      // Industry ceiling: paridad con web `INDUSTRY_HIDDEN_MODULES`. Si la
+      // industria del store oculta este módulo (p.ej. `restaurant_ops` para
+      // retail), el item desaparece del drawer aunque `panel_ui[key]===true`.
+      if (hiddenByIndustries.includes(key)) {
         return false;
       }
       return panelUi[key] === true && !disabled.has(key);
@@ -669,7 +693,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     };
 
     return filterRecursive(items);
-  }, [items, variant, fiscalScope, operatingScope, activeFiscalAreas, currentAppPanelUi, disabledKeys]);
+  }, [items, variant, fiscalScope, operatingScope, activeFiscalAreas, currentAppPanelUi, disabledKeys, hiddenByIndustries, storePanelUi]);
 
   const handleOpenVlink = () => {
     if (vlinkUrl === '#') return;
