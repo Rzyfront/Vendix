@@ -13,6 +13,7 @@ import { Icon } from '@/shared/components/icon/icon';
 import { Toggle } from '@/shared/components/toggle/toggle';
 import { borderRadius, colorScales, colors } from '@/shared/theme';
 import { getUomCatalog, type UnitOfMeasure } from '@/features/store/services/uom.service';
+import { getQtyControlSize } from '../constants';
 import type { PreBulkData } from '../types';
 
 interface PopPrebulkModalProps {
@@ -23,11 +24,9 @@ interface PopPrebulkModalProps {
 
 export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPrebulkModalProps) {
   const { width: SCREEN_WIDTH } = useWindowDimensions();
-  // Tamaños responsive del bloque Cantidad (- [qty] +). En mobile pequeño (<360)
-  // los 40px buttons + input fontSize 16 + padding 16 quedan apretados.
-  const QTY_BTN_SIZE = SCREEN_WIDTH < 360 ? 36 : 40;
-  const QTY_FONT_SIZE = SCREEN_WIDTH < 360 ? 14 : 16;
-  const QTY_H_PAD = SCREEN_WIDTH < 360 ? 10 : 14;
+  // Tamaños responsive del bloque Cantidad (- [qty] +) compartidos con
+  // pop-config-modal via `getQtyControlSize`.
+  const { btnSize: QTY_BTN_SIZE, fontSize: QTY_FONT_SIZE, hPad: QTY_H_PAD } = getQtyControlSize(SCREEN_WIDTH);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');

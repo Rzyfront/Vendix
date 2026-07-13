@@ -109,7 +109,7 @@ export default function PopCartModal({
   );
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={[styles.overlay, visible && styles.overlayOpen]}>
         <View style={[styles.modal, visible && styles.modalOpen]}>
           <View style={styles.header}>

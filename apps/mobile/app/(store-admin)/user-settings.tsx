@@ -15,7 +15,7 @@ import { SettingsService } from '@/features/store/services/settings.service';
 import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
 import { Icon } from '@/shared/components/icon/icon';
 import { Button } from '@/shared/components/button/button';
-import { toastSuccess, toastError, toastInfo } from '@/shared/components/toast/toast.store';
+import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 
 type AppType = 'ORG_ADMIN' | 'STORE_ADMIN';

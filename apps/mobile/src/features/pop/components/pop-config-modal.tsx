@@ -25,7 +25,7 @@ import type {
   VariantAttributeDraft,
   GeneratedVariantDraft,
 } from '../types';
-import { defaultUnitCost } from '../constants';
+import { defaultUnitCost, getQtyControlSize } from '../constants';
 
 interface PopConfigModalProps {
   visible: boolean;
@@ -50,13 +50,9 @@ const QUICK_ATTRIBUTES = ['Color', 'Talla', 'Material'] as const;
 
 export default function PopConfigModal({ visible, product, onConfirm, onCancel }: PopConfigModalProps) {
   const { width: SCREEN_WIDTH } = useWindowDimensions();
-  // Tamaños responsive del bloque Cantidad (- [qty] +). En mobile pequeño (<360)
-  // los botones 44px + input fontSize 18 no caben con padding 16 → se reduce
-  // proporcionalmente. Breakpoints conservados simples — la mayoría del UI ya
-  // se adapta con `flex: 1`.
-  const QTY_BTN_SIZE = SCREEN_WIDTH < 360 ? 36 : 40;
-  const QTY_FONT_SIZE = SCREEN_WIDTH < 360 ? 15 : 17;
-  const QTY_H_PAD = SCREEN_WIDTH < 360 ? 10 : 14;
+  // Tamaños responsive del bloque Cantidad (- [qty] +) compartidos con
+  // pop-prebulk-modal via `getQtyControlSize`.
+  const { btnSize: QTY_BTN_SIZE, fontSize: QTY_FONT_SIZE, hPad: QTY_H_PAD } = getQtyControlSize(SCREEN_WIDTH);
   const [tab, setTab] = useState<ConfigTab>('general');
   const [selectedVariant, setSelectedVariant] = useState<PopProductVariant | null>(null);
   /** Multi-select para variantes existentes (parity web con `selectedVariantIds`). */
