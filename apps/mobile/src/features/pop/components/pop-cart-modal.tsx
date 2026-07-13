@@ -72,7 +72,7 @@ export default function PopCartModal({
             <Text style={styles.costCurrency}>$</Text>
             <TextInput
               style={styles.costInputField}
-              value={String(Math.round(item.unit_cost))}
+              value={item.unit_cost % 1 === 0 ? String(item.unit_cost) : item.unit_cost.toFixed(2)}
               onChangeText={(v) => onUpdateItem(item.id, item.quantity, Number(v) || 0)}
               keyboardType="numeric"
               placeholder="Costo"
@@ -182,17 +182,19 @@ export default function PopCartModal({
                   <Text style={styles.summaryLabel}>Subtotal</Text>
                   <Text style={styles.summaryValue}>{formatCurrency(summary.subtotal)}</Text>
                 </View>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Impuestos</Text>
-                  <Text style={styles.summaryValue}>{formatCurrency(summary.tax_amount)}</Text>
-                </View>
+                {summary.tax_amount > 0 && (
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Impuestos</Text>
+                    <Text style={styles.summaryValue}>{formatCurrency(summary.tax_amount)}</Text>
+                  </View>
+                )}
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>Costo Envío</Text>
                   <View style={styles.shippingInputWrap}>
                     <Text style={styles.shippingCurrency}>$</Text>
                     <TextInput
                       style={styles.shippingInputField}
-                      value={String(Math.round(summary.shipping_cost || 0))}
+                      value={(summary.shipping_cost || 0) % 1 === 0 ? String(summary.shipping_cost || 0) : (summary.shipping_cost || 0).toFixed(2)}
                       onChangeText={(v) => onUpdateShippingCost(Number(v) || 0)}
                       keyboardType="numeric"
                       placeholder="Envío"

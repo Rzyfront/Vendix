@@ -286,8 +286,11 @@ export default function PopScreen() {
           purchase_uom_id: prebulk?.is_ingredient ? prebulk?.purchase_uom_id : undefined,
           stock_uom_id: prebulk?.is_ingredient ? prebulk?.stock_uom_id : undefined,
           batch_number: i.lot_info?.batch_number,
-          manufacturing_date: i.lot_info?.manufacturing_date ? new Date(i.lot_info.manufacturing_date).toISOString() : undefined,
-          expiration_date: i.lot_info?.expiration_date ? new Date(i.lot_info.expiration_date).toISOString() : undefined,
+          // lot_dates son fechas de calendario elegidas por el usuario (YYYY-MM-DD).
+          // Las enviamos tal cual para no desfasar por zona horaria — el backend
+          // las trata como date-only, no como instant.
+          manufacturing_date: i.lot_info?.manufacturing_date || undefined,
+          expiration_date: i.lot_info?.expiration_date || undefined,
         };
       });
 
@@ -295,8 +298,8 @@ export default function PopScreen() {
         supplier_id: cart.cart.supplierId,
         location_id: cart.cart.locationId || 1,
         status: action === 'draft' ? 'draft' as const : 'approved' as const,
-        order_date: new Date(cart.cart.orderDate).toISOString(),
-        expected_date: cart.cart.expectedDate ? new Date(cart.cart.expectedDate).toISOString() : undefined,
+        order_date: cart.cart.orderDate,
+        expected_date: cart.cart.expectedDate || undefined,
         payment_terms: cart.cart.paymentTerms,
         shipping_method: cart.cart.shippingMethod,
         shipping_cost: cart.cart.shippingCost,

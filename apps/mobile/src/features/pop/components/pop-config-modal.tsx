@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { borderRadius, colorScales, colors } from '@/shared/theme';
-import { apiPost } from '@/core/api/http';
+import { apiPost, apiDelete } from '@/core/api/http';
 import { Endpoints } from '@/core/api/endpoints';
 import { DatePickerField } from '@/shared/components/date-picker-field/date-picker-field';
 import type {
@@ -274,21 +274,24 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
     // Caso A: variant creation mode — POST cada variant y emitir `newVariants`.
     if (isCreatingVariants && generatedVariants.length > 0) {
       setCreatingVariants(true);
+      // Creamos las variantes secuencialmente. Si una POST falla,
+      // hacemos rollback de las que ya quedaron creadas en backend
+      // para evitar variantes huérfanas en el producto.
+      const path = Endpoints.STORE.PRODUCTS.VARIANT_CREATE.replace(':productId', String(product.id));
+      const created: PopProductVariant[] = [];
       try {
-        const path = Endpoints.STORE.PRODUCTS.VARIANT_CREATE.replace(':productId', String(product.id));
-        const responses = await Promise.all(
-          generatedVariants.map((v) =>
-            apiPost<PopProductVariant>(path, {
-              sku: v.sku,
-              name: v.name,
-              cost_price: v.cost_price,
-              attributes: v.attributes,
-              stock_quantity: 0,
-            } as CreateVariantPayload),
-          ),
-        );
+        for (const v of generatedVariants) {
+          const created_v = await apiPost<PopProductVariant>(path, {
+            sku: v.sku,
+            name: v.name,
+            cost_price: v.cost_price,
+            attributes: v.attributes,
+            stock_quantity: 0,
+          } as CreateVariantPayload);
+          created.push(created_v);
+        }
         onConfirm({
-          newVariants: responses,
+          newVariants: created,
           quantity: Math.max(1, Number(quantity) || 1),
           unit_cost: Number(unitCost) || 0,
           pricing_type: pricingType,
@@ -299,8 +302,15 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
           } : undefined,
         });
       } catch (err) {
-        // Si falla, el caller (pop.tsx) no recibe nada — el modal sigue abierto.
-        // Para feedback al usuario, dejamos `creatingVariants=false` y propagamos.
+        // Rollback: borrar las variantes que ya quedaron creadas en backend
+        // antes de que fallara el loop. Errores de rollback se ignoran (best-effort)
+        // para no enmascarar el error original.
+        await Promise.all(
+          created.map((v) => {
+            const delPath = Endpoints.STORE.PRODUCTS.VARIANT_DELETE.replace(':variantId', String(v.id));
+            return apiDelete(delPath).catch(() => undefined);
+          }),
+        );
         setCreatingVariants(false);
         throw err;
       }

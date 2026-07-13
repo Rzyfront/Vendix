@@ -10,11 +10,25 @@ import type {
 import type { PurchaseOrder } from '../store/types/inventory.types';
 import { INITIAL_CART_SUMMARY, recalcItem, calcSummary, itemKey, defaultUnitCost } from './constants';
 
+/**
+ * YYYY-MM-DD en hora local del dispositivo. A diferencia de
+ * `new Date().toISOString().slice(0,10)` que produce la fecha UTC (y puede
+ * quedar desfasada por un día en zonas horarias negativas como Colombia UTC-5),
+ * esta helper respeta el calendario que el usuario ve en el picker.
+ */
+function todayLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function emptyState(): PopCartState {
   return {
     items: [],
     summary: { ...INITIAL_CART_SUMMARY },
-    orderDate: new Date().toISOString().slice(0, 10),
+    orderDate: todayLocal(),
     shippingCost: 0,
     status: 'draft',
     createdAt: new Date().toISOString(),
@@ -154,7 +168,7 @@ export function usePopCart() {
       supplierName: order.suppliers?.name,
       locationId: order.location_id,
       locationName: order.inventory_locations?.name,
-      orderDate: order.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+      orderDate: order.created_at?.slice(0, 10) || todayLocal(),
       shippingCost: Number(order.shipping_cost) || 0,
       paymentTerms: order.payment_terms || undefined,
       notes: order.notes || undefined,
