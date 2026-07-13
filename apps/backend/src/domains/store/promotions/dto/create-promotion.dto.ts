@@ -54,11 +54,11 @@ export class CreatePromotionDto {
    */
   @IsOptional()
   @IsEnum(['flat', 'quantity_tiered'])
-  rule_type?: 'flat' | 'quantity_tiered' = 'flat';
+  rule_type?: 'flat' | 'quantity_tiered';
 
   @IsOptional()
   @IsEnum(['order', 'product', 'category'])
-  scope?: 'order' | 'product' | 'category' = 'order';
+  scope?: 'order' | 'product' | 'category';
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -94,13 +94,13 @@ export class CreatePromotionDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
-  is_auto_apply?: boolean = false;
+  is_auto_apply?: boolean;
 
   @IsOptional()
   @IsInt()
   @Min(0)
   @Type(() => Number)
-  priority?: number = 0;
+  priority?: number;
 
   @ValidateIf((o) => o.scope === 'product')
   @IsArray({ message: 'Debes proporcionar la lista de productos' })

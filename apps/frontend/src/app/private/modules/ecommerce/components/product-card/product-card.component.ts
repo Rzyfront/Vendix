@@ -144,7 +144,7 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
             @if (hasActiveDiscount()) {
               <span class="original-price">{{ product().base_price | currency }}</span>
             }
-            @if (hasActiveDiscount() || isQuantityTiered()) {
+            @if (showPromotionBadge()) {
               <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
             }
           </div>
@@ -639,6 +639,16 @@ export class ProductCardComponent {
   promotionBadgeLabel(): string {
     const promo = this.product().active_promotion;
     return promo?.badge_label ?? `-${this.discountPercentage()}% OFF`;
+  }
+
+  /**
+   * Whether to render the informative promotion badge. Shows for ANY active
+   * product/category promotion that carries a `badge_label` (backend always
+   * enriches it) — not just quantity-tiered ones — plus the legacy
+   * discount/sale path so non-promotion sales keep their badge.
+   */
+  showPromotionBadge(): boolean {
+    return this.hasActiveDiscount() || !!this.product().active_promotion?.badge_label;
   }
 
   /**

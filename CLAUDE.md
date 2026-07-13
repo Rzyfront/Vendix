@@ -110,7 +110,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Checking current development app status | `buildcheck-dev` |
 | Checking if a Vendix Linear issue already exists | `linear-issues` |
 | Checking production resource locations, IPs, distributions, buckets, ECR, RDS, Route53, or Secrets Manager metadata | `vendix-cloud-operations` |
-| Choosing agent-browser for frontend E2E verification in a plan step | `how-to-plan` |
+| Choosing Playwright MCP for frontend E2E verification in a plan step | `how-to-plan` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Choosing test credentials from seeds or asking the user | `how-to-test` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
@@ -179,7 +179,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Distinguishing panel_ui visibility from backend authorization | `vendix-permissions` |
 | Documenting user stories or writing HU-X.Y stories for a feature | `user-story-flows` |
 | Drawing graphical user-story flow diagrams (nodes, branches, states) | `user-story-flows` |
-| Driving a browser to confirm UI behavior with agent-browser | `how-to-test` |
+| Driving a browser to confirm UI behavior with Playwright MCP | `how-to-test` |
 | EC2 maintenance, deployment disk issues, or Docker layer/pull failures | `vendix-ec2-maintenance` |
 | Editing @Permissions decorators | `vendix-permissions` |
 | Editing Schema | `vendix-prisma-schema` |
@@ -218,7 +218,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
-| Installing or configuring agent-browser (CLI or MCP) | `how-to-test` |
+| Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
 | Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |

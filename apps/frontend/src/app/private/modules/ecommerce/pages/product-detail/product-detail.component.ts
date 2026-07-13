@@ -36,6 +36,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
+import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 
 @Component({
   selector: 'app-product-detail',
@@ -53,6 +54,7 @@ import { EmptyStateComponent } from '../../../../../shared/components/empty-stat
     ButtonComponent,
     ShareModalComponent,
     EmptyStateComponent,
+    CurrencyPipe,
   ],
   template: `
     <div class="product-detail-page">
@@ -189,7 +191,7 @@ import { EmptyStateComponent } from '../../../../../shared/components/empty-stat
                     >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
-                @if (isQuantityTiered() && promotionBadgeLabel()) {
+                @if (promotionBadgeLabel()) {
                   <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
                 }
               </div>

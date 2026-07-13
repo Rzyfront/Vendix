@@ -1,12 +1,12 @@
 ---
 name: how-to-test
 description: >
-  Runtime verification methodology for Vendix: curl for API/auth contracts and agent-browser for
+  Runtime verification methodology for Vendix: curl for API/auth contracts and Playwright MCP for
   frontend end-to-end flows, run against the real local vhost (vendix.com). Every feature must be
   tested across THREE mandatory flow schemes — Happy Path, Sad Path, and Brute-Force.
   Trigger: Verifying an API endpoint or auth boundary with curl, running an end-to-end frontend
   flow, driving a browser to confirm UI behavior, designing happy/sad/brute-force test flows,
-  security or data-integrity probing of a flow, installing or configuring agent-browser, or
+  security or data-integrity probing of a flow, installing or configuring Playwright MCP (with agent-browser as fallback), or
   choosing test credentials (seed accounts vs user-provided).
 license: MIT
 metadata:
@@ -16,10 +16,10 @@ metadata:
   auto_invoke:
     - "Verifying an API endpoint or auth boundary with curl"
     - "Running an end-to-end frontend flow in a browser"
-    - "Driving a browser to confirm UI behavior with agent-browser"
+    - "Driving a browser to confirm UI behavior with Playwright MCP"
     - "Designing happy-path, sad-path, or brute-force test flows for a feature"
     - "Security, abuse, or data-integrity probing of a specific flow"
-    - "Installing or configuring agent-browser (CLI or MCP)"
+    - "Installing or configuring Playwright MCP (agent-browser as fallback)"
     - "Choosing test credentials from seeds or asking the user"
     - "Reaching the app via the local vhost vendix.com instead of localhost"
 allowed-tools: Read, Bash, Glob, Grep
@@ -34,7 +34,7 @@ Define **how an agent verifies Vendix at runtime** after a change. Two mechanism
 | Mechanism | Verifies | Owns |
 | --- | --- | --- |
 | `curl` | API contracts, auth boundaries, endpoint shape, status codes | Backend / API |
-| `agent-browser` | End-to-end frontend flows the user actually sees (login, navigation, forms, render) | Frontend |
+| `Playwright MCP` | End-to-end frontend flows the user actually sees (login, navigation, forms, render) | Frontend |
 
 This skill governs **functional/E2E verification**. It does **not** govern build/compile/runtime-log
 checks — those belong to `buildcheck-dev`. The two are complementary: `buildcheck-dev` proves the
@@ -45,7 +45,7 @@ code *compiles and boots*; `how-to-test` proves it *behaves correctly*.
 > **A feature is NOT verified until it passes ALL THREE flow schemes below.** Testing only the happy
 > path is incomplete work and must be reported as "not tested". This is the top-priority rule of this
 > skill: every module / feature / endpoint under test gets **Happy + Sad + Brute-Force** coverage,
-> each executed completely and correctly with `curl` (API/auth) and/or `agent-browser` (frontend E2E).
+> each executed completely and correctly with `curl` (API/auth) and/or `Playwright MCP` (frontend E2E).
 > No "it renders, ship it". Each scheme answers a different question; run them in order, because a
 > failure in an earlier scheme usually invalidates the later ones.
 
@@ -56,7 +56,7 @@ code *compiles and boots*; `how-to-test` proves it *behaves correctly*.
   each role/tenant that should succeed, each valid variant, empty→first-item, pagination, and the
   designed edit / cancel / renew / transition actions.
 - **How:** `curl` the endpoint sequence with valid payloads and a token that HAS the permission;
-  `agent-browser` the real UI journey (login → navigate → fill → submit → assert the rendered result).
+  drive the real UI journey with **Playwright MCP** (navigate → snapshot → fill → submit → assert the rendered result).
 - **Pass:** correct 2xx + correct response shape / state transition; the UI shows the designed
   outcome; every designed side-effect fires (event → journal entry, log row, notification).
 
@@ -72,7 +72,7 @@ code *compiles and boots*; `how-to-test` proves it *behaves correctly*.
   - **Abandon / resume:** open a modal and close it, start a flow and navigate away, session expires
     mid-flow, stale form (edit an entity another tab already changed).
   - **Wrong-but-owned data:** a valid id of the wrong type, referencing an inactive / soft-deleted row.
-- **How:** `curl` with malformed-but-honest payloads; `agent-browser` performing the clumsy sequence.
+- **How:** `curl` with malformed-but-honest payloads; **Playwright MCP** performing the clumsy sequence.
 - **Pass:** the system **fails safely** — a clear validation error (correct 4xx + a human-readable,
   actionable message, see `vendix-error-handling`), no crash, no half-written state, and **never a
   misleading "success" toast on a failed write**. The user is never stuck with no way out.
@@ -104,7 +104,7 @@ code *compiles and boots*; `how-to-test` proves it *behaves correctly*.
     close an already-closed period — the guard must reject, not create a corrupt state.
   - **Money / accounting invariants:** force an unbalanced entry, a payment > order total, a refund >
     paid — the invariant must hold (see `vendix-accounting-rules`, `vendix-auto-entries`).
-- **How:** scripted `curl` loops for authz / injection / rate / state; `agent-browser` for UI-level
+- **How:** scripted `curl` loops for authz / injection / rate / state; **Playwright MCP** for UI-level
   abuse (tamper a disabled control, resubmit, force a hidden action).
 - **Pass:** every abusive attempt is **rejected with the correct status + a safe error**, the
   datastore is **unchanged** (verify with a follow-up `curl` read or SQL), and nothing leaks another
@@ -114,7 +114,7 @@ code *compiles and boots*; `how-to-test` proves it *behaves correctly*.
 
 | Flow / story | Happy ✅ | Sad ⚠️ | Brute 🔒 | Mechanism | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| `HU-x.y — <flow>` | 2xx + correct state | 4xx + clear message, no partial write | 403/400, data intact, no cross-tenant leak | curl / agent-browser | command + observed result |
+| `HU-x.y — <flow>` | 2xx + correct state | 4xx + clear message, no partial write | 403/400, data intact, no cross-tenant leak | curl / Playwright MCP | command + observed result |
 
 A feature is "verified" only when **every row has all three schemes green** (or a documented,
 user-accepted risk). Report the matrix as the test result — not a single "it works".
@@ -124,18 +124,16 @@ user-accepted risk). Report the matrix as the test result — not a single "it w
 - **Every feature is tested across all three flow schemes — Happy + Sad + Brute-Force (see the
   section above). This is the highest-priority rule.** Happy-path-only verification is treated as
   incomplete and must not be reported as "tested". Run each scheme completely with `curl` and/or
-  `agent-browser`.
+  `Playwright MCP`.
 - **Step 0 — confirm the local dev server is healthy with `buildcheck-dev` BEFORE running any test.**
   This is the gate every other check depends on. A container showing `Up` is **not** proof it works:
   the Node process can crash on boot while the container stays `Up` (a `MODULE_NOT_FOUND` in
   `auth.service.ts` surfaces as nginx `502`, not a stopped container). Check Docker watch-mode **logs**
   and `curl -fsS http://localhost:3000/api/health`, never just `docker ps`. If the server is unhealthy,
-  fix that first — no `curl` or `agent-browser` result is valid against a broken server.
+  fix that first — no `curl` or `Playwright MCP` result is valid against a broken server.
 - **`curl` is the primary mechanism for API and auth verification. Never run Bruno (`.bru`) as agent
   verification** — Bruno is an opt-in template (`vendix-bruno-test`) only when a human explicitly asks.
-- **`agent-browser` is the mechanism for frontend E2E.** It sees the page as an accessibility tree
-  (roles + labels + `@e` refs), not pixels — deterministic, not CSS-selector-fragile. It verifies
-  *behavior*, not visual design (design judgment needs a screenshot + a vision model).
+- **Playwright MCP is the mechanism for frontend E2E.** It drives a real Chromium via `mcp__playwright__browser_*` tools and sees the page as an accessibility tree (roles + labels + `ref` ids), not pixels — deterministic, not CSS-selector-fragile. It also inspects network + console (`browser_network_requests`, `browser_console_messages`) to confirm API calls fire and catch zoneless/signals errors the DOM never shows. It verifies *behavior*, not visual design (design judgment needs a screenshot + a vision model). `agent-browser` stays installed as a scoped fallback — see Mechanism 2.
 - **Always reach the frontend through the real vhost (`https://vendix.com` and its subdomains), not
   `http://localhost:4200`.** The frontend resolves its `app_type` by hostname via
   `GET /api/public/domains/resolve/{hostname}` (`apps/frontend/src/app/core/services/app-config.service.ts`).
@@ -146,7 +144,7 @@ user-accepted risk). Report the matrix as the test result — not a single "it w
   provisioned (no `domain_settings` row for it), do **not** treat that as a blocker: log in on the
   default vhost and pass the `organization_slug` (or `store_slug`) in the login payload — the slug,
   not the hostname, selects the tenant in that case. `curl` against `https://api.vendix.com/api` with
-  `{"...","organization_slug":"<slug>"}` and `agent-browser` against `https://vendix.com` both work
+  `{"...","organization_slug":"<slug>"}` and `Playwright MCP` against `https://vendix.com` both work
   for any tenant this way. Use a subdomain only when the flow under test specifically depends on
   hostname-based `app_type` resolution (e.g. a storefront ecommerce render); for admin/API flows the
   default vhost + slug is sufficient and preferred when no subdomain exists.
@@ -180,7 +178,7 @@ The app runs in Docker with an nginx vhost in front. Before any E2E test:
    ```
    A green `docker ps` is **not** enough: a container stays `Up` while its Node process crashes on
    boot, surfacing as nginx `502`. If `/api/health` fails or logs show errors, **stop and fix the
-   server first** — every curl / agent-browser step below is invalid against a broken server.
+   server first** — every curl / Playwright MCP step below is invalid against a broken server.
 3. **Containers & ports** (`docker-compose.yml`, `nginx.conf`):
 
    | Container | Port | Vhost |
@@ -192,8 +190,9 @@ The app runs in Docker with an nginx vhost in front. Before any E2E test:
    | `vendix_nginx` | 80, 443 | TLS proxy (self-signed wildcard `*.vendix.com`) |
 
 4. **SSL:** the cert is a self-signed wildcard. Either trust the CA (`ssl/ca/ca-cert.pem`, see
-   `ssl/README-INSTALLATION.md`) or pass curl `-k` / the browser's TLS-ignore option. Verify the exact
-   browser flag with `agent-browser open --help` before assuming one.
+   `ssl/README-INSTALLATION.md`) or pass curl `-k`; for the E2E browser, launch **Playwright MCP**
+   with `--ignore-https-errors` — a single context-level flag that covers the page **and** every
+   subresource fetch (see Mechanism 2).
 5. **Frontend → backend wiring:** the frontend calls `https://api.vendix.com/api` (see
    `apps/frontend/src/environments/environment.development.ts`). Global API prefix is `/api`.
 
@@ -243,121 +242,95 @@ curl -sk -H "Authorization: Bearer $TOKEN" https://api.vendix.com/api/store/orde
 - **`jq`** is available for extraction.
 - For full endpoint conventions and pagination shape, see `vendix-backend-api`.
 
-## Mechanism 2 — agent-browser (frontend E2E)
+## Mechanism 2 — Playwright MCP (frontend E2E) — PRIMARY
 
-`agent-browser` is a native Rust CLI that drives Chrome via CDP. Workflow: **open → snapshot → act →
-assert → close**. Each command is stateless on the CLI but shares one long-lived browser daemon.
+**Playwright MCP** (`@playwright/mcp`) is the **primary engine** for frontend end-to-end verification. The agent drives a real Chromium through MCP tools prefixed `mcp__playwright__browser_*`. Workflow: **navigate → snapshot → act → assert → close**. It sees the page as an accessibility tree (roles + labels + `ref` ids), not pixels — deterministic, not CSS-selector-fragile.
 
-### ⚠️ Vendix convention — REQUIRED flags for local vhost
+Why it is primary over `agent-browser`: it adds **network + console inspection** (`browser_network_requests`, `browser_console_messages`) — indispensable to confirm API calls fire and to catch zoneless/signals JS errors the DOM never shows — plus cleaner (cheaper-token) snapshots and reusable `page.*` code for graduating a check into a `.spec.ts`. `agent-browser` remains a scoped fallback (see below).
 
-Vendix local vhosts use a **self-signed wildcard cert** (`*.vendix.com`). The `agent-browser` MCP
-binary hardcodes `headed: false` and **does NOT** ignore TLS by default — every `open` against the
-local vhost will fail with `ERR_CERT_AUTHORITY_INVALID` unless you pass the cert flags explicitly.
+### ⚠️ Vendix convention — local vhost self-signed cert (REQUIRED, one flag)
 
-**Always invoke** `agent-browser` (CLI or MCP) with **all three** of the following. Both cert flags
-are required together — passing only one is not enough:
+Vendix local vhosts (`vendix.com`, `api.vendix.com`, `*.vendix.com`) use a **self-signed wildcard cert**. The frontend also resolves its `app_type` by fetching `https://api.vendix.com/api/public/domains/resolve/{hostname}`; if the browser does not trust the cert that `fetch` dies in the **TLS handshake**, and the frontend treats *any* resolution failure as "this is the platform" and silently falls back to `AppType.VENDIX_LANDING` (`route-manager.service.ts`) — so a store/ecommerce subdomain renders the platform landing instead of the storefront.
 
-| Flag (CLI)                    | MCP (`extraArgs`)              | Reason                                                        |
-| ----------------------------- | ------------------------------ | ------------------------------------------------------------ |
-| `--headed`                    | `headed: true`                 | Dev runs locally — you need to **see** the browser open      |
-| `--ignore-certificate-errors` | `"--ignore-certificate-errors"` | Chrome accepts the self-signed cert (page + subresources)    |
-| `--ignore-https-errors`       | `"--ignore-https-errors"`      | Ignores TLS errors on the automation/CDP layer               |
+Launch Playwright MCP with **`--ignore-https-errors`**. This sets `ignoreHTTPSErrors: true` at the browser-**context** level, so it covers **both** the main navigation **and** every subresource `fetch`/XHR (including the `app_type` resolve call) with a **single** flag. This is the key difference from `agent-browser`, which needed **two** flags (`--ignore-certificate-errors` + `--ignore-https-errors`) because its cert-ignore only reached the CDP layer, not Chrome's own page fetches.
+
+Playwright MCP runs a **headed** browser by default, so the dev sees the session — no extra headed flag is needed locally.
+
+> **Scope: LOCAL testing only.** This trusts the local self-signed cert in the test browser; it is NOT a production fix. On prod (`www.vendix.online`, valid public cert) the flag is harmless and unnecessary.
+
+### Install / configure Playwright MCP if missing
+
+If the `mcp__playwright__browser_*` tools are not available, the dev must add the MCP server:
+
+```bash
+# Claude Code — register the MCP with the REQUIRED local cert flag
+claude mcp add playwright --scope user -- npx @playwright/mcp@latest --ignore-https-errors
+npx playwright install chrome        # one-time Chromium/Chrome download
+```
+
+Then **restart the agent** so it reloads the MCP subprocess. Verify with a `browser_navigate` to `https://vendix.com` (it should render the app, not a TLS error page).
+
+For other agents, add the same command to that tool's MCP config — always keep `--ignore-https-errors`:
+
+| Agent | Config file | Entry |
+| --- | --- | --- |
+| Claude Code | `claude mcp add …` (above) | `npx @playwright/mcp@latest --ignore-https-errors` |
+| OpenCode | `opencode.json` → `mcp` | `command: ["npx","@playwright/mcp@latest","--ignore-https-errors"]` |
+| Codex | `~/.codex/config.toml` → `[mcp_servers.playwright]` | `command="npx"`, `args=["@playwright/mcp@latest","--ignore-https-errors"]` |
+| Gemini CLI | `.gemini/settings.json` → `mcpServers.playwright` | same `npx` command + arg |
+
+### E2E recipe (Playwright MCP tools)
 
 ```ts
-// The canonical, always-correct local invocation:
-agent_browser_open(
-  url="https://roku-shop.vendix.com",
-  headed=true,
-  extraArgs=["--ignore-certificate-errors", "--ignore-https-errors"],
-)
+browser_navigate({ url: "https://admin-techsolutions.vendix.com" })
+browser_snapshot()                                  // a11y tree with ref ids — read refs from here
+browser_type({ element: "email input",    ref: "e12", text: "owner@techsolutions.co" })
+browser_type({ element: "password input", ref: "e13", text: "1125634q" })
+browser_click({ element: "submit button", ref: "e14" })
+browser_wait_for({ text: "Dashboard" })             // assert the post-login rendered state
+browser_network_requests()                          // confirm resolve/{hostname} = 200 + API calls fired
+browser_console_messages()                          // catch zoneless/signals JS errors
+browser_take_screenshot({ filename: "after-login.png" })   // evidence (saved to a file)
+browser_close()
 ```
 
-**Why BOTH flags, always (empirically confirmed 2026-06-30):** the frontend resolves its `app_type`
-by fetching `https://api.vendix.com/api/public/domains/resolve/{hostname}`. If Chrome does not trust
-the self-signed cert, that `fetch` dies in the **TLS handshake** (`TypeError: Failed to fetch` — this
-is NOT a CORS problem; CORS already allows the origin over http and https). The frontend treats *any*
-resolution failure as "this is the platform" and silently falls back to `AppType.VENDIX_LANDING`
-(`route-manager.service.ts:72-98`), so **an ecommerce/store subdomain renders the platform landing
-instead of the storefront**. With only `--ignore-https-errors` the CDP layer is satisfied but Chrome
-still blocks the page's `fetch`; you need `--ignore-certificate-errors` too. Pass both and the resolve
-`fetch` returns `200` → the correct app renders. Note: the storefront's `<title>` may still read
-"Vendix — Plataforma…" (static `index.html` title the ecommerce app doesn't override) — this is
-cosmetic; verify the **rendered body**, not the tab title.
+- `browser_snapshot()` can scope a large tree with `target` / `depth` and dump it to `filename`.
+- Prefer **refs** from a fresh snapshot; re-snapshot after any navigation/DOM change (refs go stale).
+- `browser_fill_form({ fields: [...] })` fills several inputs in one call.
+- Multi-tenant login without a subdomain: `browser_navigate` to `https://vendix.com` and pass the `organization_slug` (or `store_slug`) in the login form — the slug, not the hostname, selects the tenant.
 
-> **Scope: LOCAL testing only.** This is about trusting the local self-signed cert in the test
-> browser — it is NOT a production fix. For a normal (non-agent) local dev browser, either trust the
-> CA (`ssl/ca/ca-cert.pem`) in the OS keychain or launch Chrome with `--ignore-certificate-errors`.
+### Fallback — agent-browser (only when Playwright MCP cannot)
 
-The MCP server's defaults are **not** user-configurable without forking the Rust binary, so treat the
-three settings above as **mandatory**. If a sub-agent forgets, the E2E is silently invalid (browser
-either opens `about:blank` after a cert error, or renders the platform landing for a store subdomain).
+Keep `agent-browser` installed as a **support** MCP. Reach for it ONLY for the few things Playwright MCP does not do:
 
-### Install / configure if missing
+| Need | agent-browser tool | Why Playwright MCP falls short |
+| --- | --- | --- |
+| Wait for an arbitrary **CSS selector** to appear/disappear | `agent_browser_wait_for_selector` | `browser_wait_for` waits on text or time, not a selector |
+| **Explicit manual scroll** (lazy-load, IntersectionObserver, sticky header, echarts height) | `agent_browser_scroll` | Playwright only auto-scrolls into view on interaction |
+| Read a page as **text/markdown** (readability) | `agent_browser_read` | Playwright snapshot is an a11y tree, not article text |
+| Grab a single value without a full snapshot | `agent_browser_get_text` / `get_title` / `get_url` | Playwright needs `browser_evaluate` |
+| Run where **Node/npx is unavailable** | self-contained Rust binary | Playwright MCP needs Node |
 
-```bash
-command -v agent-browser || brew install agent-browser   # or: npm install -g agent-browser
-agent-browser install                                     # downloads Chrome for Testing
-agent-browser doctor                                      # must report 0 fail
-```
-
-Register as an MCP server so the agent gets native browser tools (per-agent config — the binary is
-global, the registration is not):
-
-```bash
-claude mcp add agent-browser --scope user -- agent-browser mcp   # Claude Code
-```
-
-For OpenCode / Codex / MiniMax Code, add the same `agent-browser mcp` command to that tool's own MCP
-config (`opencode.json` `mcp`, `~/.codex/config.toml` `[mcp_servers.*]`, `~/.mavis/mcp/mcp.json`).
-After registering, **restart the agent** so it loads the MCP subprocess. Until then, use the CLI.
-
-### E2E recipe (CLI)
-
-```bash
-# Global flags MUST come BEFORE the subcommand — pass BOTH cert flags
-agent-browser --headed --ignore-certificate-errors --ignore-https-errors open https://admin-techsolutions.vendix.com
-agent-browser snapshot -i                                   # interactive elements with @e refs
-agent-browser fill @e2 "owner@techsolutions.co"             # use refs from the snapshot
-agent-browser fill @e3 "1125634q"
-agent-browser click @e4                                     # submit
-agent-browser wait --load networkidle
-agent-browser get text @e1                                  # assert post-login state
-agent-browser screenshot /tmp/after-login.png               # optional, for a vision check
-agent-browser close
-```
-
-MCP equivalent (the only way the agent can drive the browser):
-
-```ts
-agent_browser_open(
-  url="https://admin-techsolutions.vendix.com",
-  headed=true,
-  extraArgs=["--ignore-certificate-errors", "--ignore-https-errors"],
-)
-```
-
-- `snapshot -i -c` (interactive + compact) keeps the tree small for reasoning; `-s "#sel"` scopes it.
-- Prefer **refs** (`@e2`) from a fresh snapshot, or semantic locators (`find role button --name "..."`).
-- `batch "open ..." "snapshot -i" "click @e1"` runs several steps in one call (less overhead).
-- Self-signed cert: trust `ssl/ca/ca-cert.pem` or use the browser TLS-ignore option (confirm the flag
-  via `agent-browser open --help`).
+If you do fall back locally, `agent-browser` needs **both** cert flags: `--headed --ignore-certificate-errors --ignore-https-errors`. Its fallback install: `brew install agent-browser` → `agent-browser install` → `claude mcp add agent-browser --scope user -- agent-browser mcp`.
 
 ## Decision Rules
 
 | Situation | Use |
 | --- | --- |
 | Any feature "done" claim | All three schemes (Happy + Sad + Brute) — report the coverage matrix |
-| Flow used as designed | **Happy Path** scheme via `curl` / `agent-browser` |
+| Flow used as designed | **Happy Path** scheme via `curl` / **Playwright MCP** |
 | Accidental misuse / confused user / bad input | **Sad Path** scheme — assert a safe 4xx + clear message |
 | Security, abuse, tenant isolation, data-integrity | **Brute-Force** scheme — assert rejection, data intact |
 | API contract / status code / response shape | `curl` |
 | Auth or permission boundary (200 vs 403) | `curl` with/without the right token |
-| Login flow as a user sees it | `agent-browser` against the vhost |
-| Navigation, form submit, modal, list render | `agent-browser` snapshot + act + assert |
+| Login flow as a user sees it | **Playwright MCP** against the vhost |
+| Navigation, form submit, modal, list render | **Playwright MCP** snapshot + act + assert |
 | "Does it compile / boot?" | `buildcheck-dev` (Docker logs), not this skill |
-| Visual design / "does it look right?" | `agent-browser screenshot` + human or vision model |
+| Visual design / "does it look right?" | **Playwright MCP** `browser_take_screenshot` + human or vision model |
 | Async/queue side-effect | `curl` to read state + `docker logs` (see `buildcheck-dev`) |
 | Developer explicitly wants a saved `.bru` test | `vendix-bruno-test` (opt-in only) |
+| Confirm an API call fired / catch a console error during a UI flow | **Playwright MCP** `browser_network_requests` / `browser_console_messages` |
+| Wait on a CSS selector, manual scroll, or read page markdown | **agent-browser** (fallback) — see Mechanism 2 |
 
 ## Anti-Patterns
 
@@ -370,9 +343,9 @@ agent_browser_open(
 | Running a `.bru` Bruno test as agent verification | `curl` for API; Bruno is opt-in human-driven only |
 | Reading the token from a JWT claim | Read `data.access_token`; permissions from `data.permissions` |
 | Inventing test credentials | Use a seed account or ask the user |
-| Clicking by guessed CSS selectors | Snapshot first, click by `@e` ref or semantic locator |
+| Clicking by guessed CSS selectors | Snapshot first, click by `ref` from `browser_snapshot` |
 | Claiming a UI fix works because the build passed | Build green ≠ flow works; run the E2E recipe |
-| Assuming an SSL/TLS flag exists | Verify with `agent-browser open --help` first |
+| Guessing extra TLS flags for the local vhost | The local self-signed vhost needs exactly `--ignore-https-errors` on the Playwright MCP server (one context-level flag covers page + subresources) |
 
 ## Related Skills
 

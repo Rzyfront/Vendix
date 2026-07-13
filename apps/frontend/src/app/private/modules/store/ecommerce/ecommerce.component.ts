@@ -58,6 +58,7 @@ type HomeSectionKey =
   | 'categories'
   | 'brands'
   | 'featured_products'
+  | 'promotions'
   | 'menus';
 
 interface HomeSectionAdminItem {
@@ -119,12 +120,23 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     limitMax: 48,
   },
   {
+    key: 'promotions',
+    label: 'Promociones activas',
+    description:
+      'Banner con las promociones automáticas vigentes de la tienda.',
+    icon: 'ticket',
+    defaultOrder: 60,
+    hasLimit: false,
+    limitMax: 1,
+  },
+  {
     key: 'menus',
     label: 'Cartas',
     description:
       'Cartas del restaurante con sus platos disponibles según el horario.',
     icon: 'book-open',
-    defaultOrder: 60,
+    // Subido 60 -> 70 para no empatar con `promotions` (default 60).
+    defaultOrder: 70,
     hasLimit: false,
     limitMax: 1,
   },
@@ -441,6 +453,12 @@ export class EcommerceComponent {
           limit: [16, [Validators.min(1), Validators.max(48)]],
           sort_order: [50, [Validators.min(1)]],
         }),
+        promotions: this.fb.group({
+          enabled: [false],
+          title: ['Promociones activas'],
+          subtitle: ['Aprovecha las ofertas vigentes de la tienda'],
+          sort_order: [60, [Validators.min(1)]],
+        }),
         menus: this.fb.group({
           enabled: [false],
           title: ['Nuestras cartas'],
@@ -448,7 +466,8 @@ export class EcommerceComponent {
           // hide = solo platos disponibles ahora; badge = mostrar todos con
           // "Disponible a las HH:mm" en los que están fuera de horario.
           availability_display: ['hide'],
-          sort_order: [60, [Validators.min(1)]],
+          // Subido 60 -> 70 para no empatar con `promotions` (default 60).
+          sort_order: [70, [Validators.min(1)]],
         }),
       }),
 

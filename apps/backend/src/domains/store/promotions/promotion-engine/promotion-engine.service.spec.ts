@@ -632,15 +632,51 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.items[0].promotion_discount).toBe(0);
     });
 
-    // Case 5 — fixed_amount tier: value is PER UNIT, applied to aggregated qty.
-    it('fixed_amount tier: discount is tier.value x aggregated quantity, capped at applicable total', async () => {
+    // Case 5 — fixed_amount tier: a FLAT amount applied ONCE across the scope.
+    // Business rule (confirmed): a fixed_amount tier behaves exactly like a
+    // non-tiered fixed discount — a single flat amount, NOT tier.value × units.
+    // Canonical example: cart 3×$12.000 (=$36.000), tier "2-4 und = $5.000"
+    // order scope → flat $5.000 off once (total $31.000), NOT $15.000/$21.000
+    // that the old per-unit (5000×3) math produced.
+    it('fixed_amount tier: FLAT discount applied once (not per unit), capped at applicable total', async () => {
       prisma.promotions.findMany.mockResolvedValue([
         buildPromotion({
           id: 105,
           scope: 'order',
           rule_type: 'quantity_tiered',
           promotion_quantity_tiers: [
-            buildTier({ id: 1, promotion_id: 105, min_quantity: 2, max_quantity: null, value: 1000, type: 'fixed_amount' }),
+            buildTier({ id: 1, promotion_id: 105, min_quantity: 2, max_quantity: 4, value: 5000, type: 'fixed_amount' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, unit_price: 12000, quantity: 3 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // scopedQty = 3 matches the 2-4 band -> flat $5.000 once.
+      expect(result.subtotal).toBe(36000);
+      expect(result.total_discount).toBe(5000);
+      expect(result.promotional_subtotal).toBe(31000);
+      const a = result.items.find((i) => i.line_id === 'a')!;
+      expect(a.promotion_discount).toBe(5000);
+      expect(result.applied_promotions[0].discount_amount).toBe(5000);
+    });
+
+    // Case 5b — regression guard: the flat amount stays a SINGLE discount even
+    // when the scope spans multiple lines. It is split proportionally across
+    // lines, never applied per line and never multiplied by unit count.
+    it('fixed_amount tier: flat amount is a single discount split across multiple lines (not per line)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 115,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 115, min_quantity: 2, max_quantity: null, value: 1000, type: 'fixed_amount' }),
           ],
         }),
       ]);
@@ -653,12 +689,13 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         now: REFERENCE_NOW,
       });
 
-      // 1000 per unit x 2 units = 2000 (applicableTotal = 10000, no cap hit).
-      expect(result.total_discount).toBe(2000);
+      // Flat $1.000 once across the whole order (5000/5000 split -> 500/500),
+      // NOT $1.000 per line and NOT per unit.
+      expect(result.total_discount).toBe(1000);
       const a = result.items.find((i) => i.line_id === 'a')!;
       const b = result.items.find((i) => i.line_id === 'b')!;
-      expect(a.promotion_discount).toBe(1000);
-      expect(b.promotion_discount).toBe(1000);
+      expect(a.promotion_discount).toBe(500);
+      expect(b.promotion_discount).toBe(500);
     });
 
     // Case 6 — the global max_discount_amount cap still applies on top of the
@@ -759,6 +796,72 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       });
       // lineTotal = 600, 20% = 120.
       expect(high.total_discount).toBe(120);
+    });
+  });
+
+  describe('quantity_tiered badge label (findActiveAutoPromotionsForProducts)', () => {
+    function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 1,
+        promotion_id: 200,
+        min_quantity: 2,
+        max_quantity: null as number | null,
+        value: 10,
+        type: 'percentage',
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    it('percentage tier badge advertises the min quantity and the -X% benefit', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 201,
+          scope: 'product',
+          rule_type: 'quantity_tiered',
+          type: 'percentage',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 201, min_quantity: 3, max_quantity: null, value: 15, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const map = await service.findActiveAutoPromotionsForProducts(
+        [{ product_id: 10, unit_price: 20000, category_ids: [] }],
+        REFERENCE_NOW,
+      );
+
+      const entry = map.get(10)!;
+      expect(entry).toBeDefined();
+      expect(entry.badge_label).toBe('Desde 3 und: -15%');
+    });
+
+    it('fixed_amount tier badge advertises the flat -$Y benefit formatted es-CO', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 202,
+          scope: 'product',
+          rule_type: 'quantity_tiered',
+          type: 'fixed_amount',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 202, min_quantity: 2, max_quantity: null, value: 5000, type: 'fixed_amount' }),
+          ],
+        }),
+      ]);
+
+      const map = await service.findActiveAutoPromotionsForProducts(
+        [{ product_id: 10, unit_price: 20000, category_ids: [] }],
+        REFERENCE_NOW,
+      );
+
+      const entry = map.get(10)!;
+      expect(entry).toBeDefined();
+      // Flat 5000 -> "-$5.000" (es-CO thousands separator), coherent with the
+      // discount_amount the same method exposes for this tier.
+      expect(entry.discount_amount).toBe(5000);
+      expect(entry.badge_label).toBe('Desde 2 und: -$5.000');
     });
   });
 });

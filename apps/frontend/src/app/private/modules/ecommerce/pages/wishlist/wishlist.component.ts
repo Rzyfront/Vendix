@@ -13,7 +13,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 @Component({
   selector: 'app-wishlist',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, ButtonComponent],
+  imports: [CommonModule, RouterModule, IconComponent, ButtonComponent, CurrencyPipe],
   templateUrl: './wishlist.component.html',
   styleUrls: ['./wishlist.component.scss'],
 })

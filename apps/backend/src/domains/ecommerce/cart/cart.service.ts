@@ -80,6 +80,8 @@ export class CartService {
     let applied_promotions: Array<{
       promotion_id: number;
       name: string;
+      type: 'percentage' | 'fixed_amount';
+      scope: 'order' | 'product' | 'category';
       discount_amount: number;
     }> = [];
     try {
@@ -499,6 +501,8 @@ export class CartService {
     applied_promotions: Array<{
       promotion_id: number;
       name: string;
+      type: 'percentage' | 'fixed_amount';
+      scope: 'order' | 'product' | 'category';
       discount_amount: number;
     }>;
   }> {
@@ -601,6 +605,8 @@ export class CartService {
       applied_promotions: quote.applied_promotions.map((p) => ({
         promotion_id: p.promotion_id,
         name: p.name,
+        type: p.type,
+        scope: p.scope,
         discount_amount: p.discount_amount,
       })),
     };

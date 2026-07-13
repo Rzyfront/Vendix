@@ -6,6 +6,7 @@ import {
   inject,
   effect,
   signal,
+  computed,
   DestroyRef,
 } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
@@ -48,6 +49,7 @@ import { PosSerialSelectionModalComponent } from './pos-serial-selection-modal/p
 import { MultiSelectorOption } from '../../../../../shared/components/multi-selector/multi-selector.component';
 import { SerialNumbersService } from '../../serial-numbers/services/serial-numbers.service';
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
+import { PosApiService } from '../services/pos-api.service';
 import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -60,6 +62,18 @@ import {
   Brand,
   ProductCategory,
 } from '../../products/interfaces';
+
+/**
+ * Minimal typed view of an active order-scope promotion, mapped from the
+ * `/store/promotions/active` response. Only the fields the grid chip needs.
+ */
+interface ActiveOrderPromotion {
+  id: number;
+  name: string;
+  type: 'percentage' | 'fixed_amount';
+  value: number;
+  minPurchaseAmount: number | null;
+}
 
 @Component({
   selector: 'app-pos-product-selection',
@@ -144,6 +158,27 @@ import {
             </app-button>
           }
         </div>
+
+        <!-- General order-scope promotion notice. Order-scope auto-apply
+             promotions discount the WHOLE order (not a single product), so
+             they cannot be surfaced on a per-product card — they get one
+             discreet view-level chip here. Source: /store/promotions/active
+             filtered to scope='order' && is_auto_apply. -->
+        @if (orderPromoNotice(); as notice) {
+          <div class="mt-2 flex">
+            <app-badge
+              variant="success"
+              size="sm"
+              badgeStyle="outline"
+              class="min-w-0"
+            >
+              <app-icon name="ticket" [size]="13" class="mr-1 shrink-0" />
+              <span class="truncate max-w-[220px] sm:max-w-[360px]">{{
+                notice
+              }}</span>
+            </app-badge>
+          </div>
+        }
       </div>
 
       <!-- Products Content -->
@@ -629,6 +664,31 @@ export class PosProductSelectionComponent {
   private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private serialNumbersService = inject(SerialNumbersService);
   private cashRegisterService = inject(PosCashRegisterService);
+  private posApiService = inject(PosApiService);
+
+  // ─── Order-scope promotion notice ──────────────────────────────────────────
+  /**
+   * Active auto-apply promotions whose scope is the WHOLE order. These never
+   * appear as a per-product `active_promotion` (that field is product/category
+   * only), so the grid surfaces them as a single view-level chip.
+   */
+  readonly orderScopePromotions = signal<ActiveOrderPromotion[]>([]);
+
+  /**
+   * Human-readable chip label for the highest-priority active order-scope
+   * promotion (backend already returns them ordered by priority desc), with a
+   * "+N" suffix when more than one is active. Null when none is active.
+   */
+  readonly orderPromoNotice = computed<string | null>(() => {
+    const promos = this.orderScopePromotions();
+    if (promos.length === 0) return null;
+    const top = promos[0];
+    const name = (top.name ?? '').trim();
+    const head = name ? `Promoción de orden: ${name}` : 'Promoción de orden activa';
+    const benefit = this.orderPromoBenefitLabel(top);
+    const detail = benefit ? `${head} · ${benefit}` : head;
+    return promos.length > 1 ? `${detail} (+${promos.length - 1})` : detail;
+  });
 
   constructor() {
     this.checkAuthState();
@@ -637,6 +697,7 @@ export class PosProductSelectionComponent {
     this.initializeBrands();
     this.setupSearchSubscription();
     this.loadProducts();
+    this.loadOrderScopePromotions();
 
     effect(() => {
       if (this.refreshTrigger() > 0) {
@@ -802,6 +863,57 @@ export class PosProductSelectionComponent {
           this.toastService.error('Error al cargar productos');
         },
       });
+  }
+
+  /**
+   * Load active auto-apply order-scope promotions for the view-level chip.
+   * Uses the same admin endpoint the cart already relies on
+   * (`/store/promotions/active`). Failures are non-critical — the chip simply
+   * stays hidden. Managed subscribe (takeUntilDestroyed) → signal, consistent
+   * with the rest of this component's data loads.
+   */
+  private loadOrderScopePromotions(): void {
+    this.posApiService
+      .getActivePromotions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const raw = response?.data ?? response ?? [];
+          const list: any[] = Array.isArray(raw) ? raw : [];
+          const orderPromos = list
+            .filter((p) => p?.scope === 'order' && p?.is_auto_apply === true)
+            .map(
+              (p): ActiveOrderPromotion => ({
+                id: Number(p.id),
+                name: String(p.name ?? ''),
+                type: p.type === 'fixed_amount' ? 'fixed_amount' : 'percentage',
+                value: Number(p.value ?? 0),
+                minPurchaseAmount:
+                  p.min_purchase_amount != null
+                    ? Number(p.min_purchase_amount)
+                    : null,
+              }),
+            );
+          this.orderScopePromotions.set(orderPromos);
+        },
+        error: () => {
+          this.orderScopePromotions.set([]);
+        },
+      });
+  }
+
+  /**
+   * Concise benefit fragment for an order-scope promotion chip:
+   * `-10%` for percentage, `-$5.000` for a fixed amount. Empty when the value
+   * is not a usable positive number.
+   */
+  private orderPromoBenefitLabel(promo: ActiveOrderPromotion): string {
+    const value = Number(promo.value);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    if (promo.type === 'percentage') {
+      return `-${value}%`;
+    }
+    return `-${this.formatPrice(value)}`;
   }
 
   onSearch(searchTerm: string): void {

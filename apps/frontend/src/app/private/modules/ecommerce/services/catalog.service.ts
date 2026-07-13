@@ -31,6 +31,25 @@ export interface ActiveProductPromotion {
   preview_min_discount?: number;
 }
 
+/**
+ * Store-wide active auto promotion returned by the public
+ * `GET /ecommerce/promotions/active` endpoint. The backend only returns
+ * currently-active automatic promotions for the tenant resolved from the
+ * public domain context, and `badge_label` arrives already formatted
+ * (tiered: "Desde N und: -X% / -$Y"; flat: "-X% OFF" / "-$Y OFF"), so the
+ * storefront renders it verbatim without recomputing anything.
+ */
+export interface ActiveStorePromotion {
+  id: number;
+  name: string;
+  rule_type: string;
+  scope: string;
+  type: 'percentage' | 'fixed_amount';
+  value: number;
+  badge_label: string;
+  min_purchase_amount: number | null;
+}
+
 export interface EcommerceProduct {
   id: number;
   name: string;
@@ -222,6 +241,7 @@ export interface PublicMenusResponse {
 })
 export class CatalogService {
   private api_url = `${environment.apiUrl}/ecommerce/catalog`;
+  private promotions_api_url = `${environment.apiUrl}/ecommerce/promotions`;
 
   constructor(
     private http: HttpClient,
@@ -304,6 +324,25 @@ export class CatalogService {
   getPublicConfig(): Observable<{ success: boolean; data: any }> {
     return this.http.get<{ success: boolean; data: any }>(
       `${this.api_url}/config/public`,
+      {
+        headers: this.getHeaders(),
+      },
+    );
+  }
+
+  /**
+   * Store-wide active auto promotions for the public storefront. Isolated by
+   * the resolved public domain (tenant) via `x-store-id`. Returns an empty
+   * list when there are no active automatic promotions; the home only renders
+   * the "Promociones activas" section when its `home_sections.promotions`
+   * toggle is enabled AND the list is non-empty.
+   */
+  getActivePromotions(): Observable<{
+    success: boolean;
+    data: ActiveStorePromotion[];
+  }> {
+    return this.http.get<{ success: boolean; data: ActiveStorePromotion[] }>(
+      `${this.promotions_api_url}/active`,
       {
         headers: this.getHeaders(),
       },

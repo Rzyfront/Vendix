@@ -295,6 +295,16 @@ export class EcommerceHomeSectionsDto {
   @ApiPropertyOptional({
     type: EcommerceHomeSectionDto,
     description:
+      'Active promotions section — opt-in (disabled by default) banner that surfaces the store\'s active promotions on the storefront home',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  promotions?: EcommerceHomeSectionDto;
+
+  @ApiPropertyOptional({
+    type: EcommerceHomeSectionDto,
+    description:
       'Restaurant menus (cartas) section — only honored when the store industry includes "restaurant"',
   })
   @IsOptional()

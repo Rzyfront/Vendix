@@ -42,6 +42,21 @@ import {
 } from '../../price-tiers/interfaces';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+
+/**
+ * Presentational "faltan N und para el siguiente tramo" hint for an auto-apply
+ * quantity_tiered promotion. Derived from cart state + active promotions;
+ * carries no money/discount calculation.
+ */
+export interface PromotionTierProgress {
+  promotion_id: number;
+  name: string;
+  /** Units still needed to reach the next tier for the promo's scope. */
+  remaining_quantity: number;
+  /** Benefit of the next tier ("-X%" / "-$Y"). */
+  next_benefit_label: string;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -52,6 +67,7 @@ export class PosCartService {
 
   private destroyRef = inject(DestroyRef);
   private withholdingService = inject(WithholdingTaxService);
+  private currencyFormat = inject(CurrencyFormatService);
 
   constructor(
     private productService: PosProductService,
@@ -438,8 +454,9 @@ export class PosCartService {
    *   1. Sort tiers by `(min_quantity ASC, sort_order ASC, id ASC)`.
    *   2. Pick the first tier where `min_quantity <= scopedQty` and
    *      (`max_quantity` is null OR `>= scopedQty`) — resolved ONCE, not per line.
-   *   3. `percentage`: `lineTotal * tier.value / 100`.
-   *      `fixed_amount`: `tier.value * line.quantity` (per-unit value × qty).
+   *   3. `percentage`: per line `lineTotal * tier.value / 100` (summed).
+   *      `fixed_amount`: a FLAT `tier.value` applied ONCE over the scope
+   *      subtotal (`applicableTotal`), never `tier.value × units`.
    *   4. Cap each line discount at its line total (never-negative line).
    *   5. Sum across lines, cap by `max_discount_amount`, then by
    *      `applicableTotal` (scoped total ceiling).
@@ -509,18 +526,31 @@ export class PosCartService {
             );
             if (!matchedTier) continue;
 
-            // Per-line discount priced with the SINGLE resolved tier.
+            // Discount priced with the SINGLE resolved tier.
+            //  - percentage: per line (lineTotal × tier.value / 100), summed.
+            //  - fixed_amount: a FLAT tier.value applied ONCE over the scope
+            //    subtotal (applicableTotal), NOT tier.value × units. This
+            //    mirrors the authoritative backend semantics so the cashier
+            //    preview equals the amount actually charged at payment.
             const perLineDiscount: Array<{ item: CartItem; discount: number }> =
               [];
             let rawTotal = 0;
-            for (const item of applicableItems) {
-              const lineDiscount = this.computeTierDiscountForResolvedTier(
-                Number(item.finalPrice),
-                Number(item.quantity),
-                matchedTier,
-              );
-              perLineDiscount.push({ item, discount: lineDiscount });
-              rawTotal = this.roundMoney(rawTotal + lineDiscount);
+            if (matchedTier.type === 'percentage') {
+              for (const item of applicableItems) {
+                const lineDiscount = this.computeTierDiscountForResolvedTier(
+                  Number(item.finalPrice),
+                  Number(item.quantity),
+                  matchedTier,
+                );
+                perLineDiscount.push({ item, discount: lineDiscount });
+                rawTotal = this.roundMoney(rawTotal + lineDiscount);
+              }
+            } else {
+              const tierValue = Number(matchedTier.value);
+              rawTotal =
+                Number.isFinite(tierValue) && tierValue > 0
+                  ? this.roundMoney(Math.min(tierValue, applicableTotal))
+                  : 0;
             }
 
             if (rawTotal <= 0) continue;
@@ -569,6 +599,8 @@ export class PosCartService {
               amount: discountAmount,
               promotion_id: promo.id,
               is_auto_applied: true,
+              // Presentation-only tier label (mirrors backend "Desde N und: -X%").
+              badge_label: this.buildTierBadgeLabel(matchedTier),
             });
             continue;
           }
@@ -647,9 +679,11 @@ export class PosCartService {
    * tier is ALREADY resolved from the aggregated scope quantity (scopedQty) by
    * the caller. The tier is fixed for every line in scope, so this helper never
    * does a `find`. MIRROR of `computeTierDiscountForResolvedTier` in the backend
-   * engine — KEEP math byte-identical.
+   * engine — KEEP percentage math byte-identical.
    *  - percentage: lineTotal × tier.value / 100
-   *  - fixed_amount: tier.value × quantity (per-unit value × line qty)
+   *  - fixed_amount: NOT priced here — it is a FLAT amount resolved ONCE over
+   *    the scope subtotal by the caller; this defensive fallback only caps the
+   *    flat value to the line total and never multiplies by quantity.
    */
   private computeTierDiscountForResolvedTier(
     unitPrice: number,
@@ -669,11 +703,108 @@ export class PosCartService {
     if (tier.type === 'percentage') {
       discount = (lineTotal * tierValue) / 100;
     } else {
-      discount = tierValue * qty;
+      // fixed_amount is a FLAT amount (resolved once over the scope subtotal by
+      // the caller); never tier.value × units. Defensive per-line cap only.
+      discount = Math.min(tierValue, lineTotal);
     }
 
     discount = Math.max(0, Math.min(discount, lineTotal));
     return this.roundMoney(discount);
+  }
+
+  /**
+   * Format only the BENEFIT of a tier ("-X%" for percentage, "-$Y" for
+   * fixed_amount). Returns `undefined` when the value is missing/invalid.
+   * Presentation only — no discount math.
+   */
+  private formatTierBenefit(tier: {
+    type?: string | null;
+    value?: number | string | null;
+  }): string | undefined {
+    const value = Number(tier?.value ?? 0);
+    if (!Number.isFinite(value) || value <= 0) return undefined;
+    return tier?.type === 'percentage'
+      ? `-${value}%`
+      : `-${this.currencyFormat.format(value)}`;
+  }
+
+  /**
+   * Build a human tier/benefit label for a matched `quantity_tiered` tier,
+   * mirroring the backend enrichment ("Desde N und: -X%" for percentage,
+   * "Desde N und: -$Y" for fixed_amount). Presentation only — the discount
+   * amount is resolved by the caller. Returns `undefined` when the tier data
+   * is incomplete so the UI can simply skip the tramo badge.
+   */
+  private buildTierBadgeLabel(tier: {
+    min_quantity?: number | string | null;
+    type?: string | null;
+    value?: number | string | null;
+  }): string | undefined {
+    const min = Number(tier?.min_quantity ?? 0);
+    if (!Number.isFinite(min) || min <= 0) return undefined;
+    const benefit = this.formatTierBenefit(tier);
+    if (!benefit) return undefined;
+    return `Desde ${min} und: ${benefit}`;
+  }
+
+  /**
+   * Best-effort "faltan N und para el siguiente tramo" hint for auto-apply
+   * `quantity_tiered` promotions. Pure READ over the current cart plus the
+   * active promotions the caller already fetched: reuses the same scope
+   * resolution (`getPromotionApplicableItems`) and tier ordering as
+   * `applyPromotions`, and performs NO money/discount calculation. Returns one
+   * entry per promo that already has items in scope AND a next tier reachable
+   * above the current scoped quantity; empty otherwise.
+   */
+  getPromotionTierProgress(
+    activePromotions: any[],
+  ): PromotionTierProgress[] {
+    const items = this.cartState().items;
+    const progress: PromotionTierProgress[] = [];
+
+    for (const promo of activePromotions ?? []) {
+      if (!promo?.is_auto_apply) continue;
+      if (promo.rule_type !== 'quantity_tiered') continue;
+
+      const sortedTiers = (promo.promotion_quantity_tiers ?? [])
+        .slice()
+        .sort((a: any, b: any) => {
+          if (a.min_quantity !== b.min_quantity)
+            return a.min_quantity - b.min_quantity;
+          if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+          return Number(a.id) - Number(b.id);
+        });
+      if (sortedTiers.length === 0) continue;
+
+      const applicableItems = this.getPromotionApplicableItems(promo, items);
+      const scopedQty = applicableItems.reduce(
+        (sum, item) => sum + Number(item.quantity),
+        0,
+      );
+      // Only nudge when the customer already has in-scope items in the cart.
+      if (scopedQty <= 0) continue;
+
+      // Next tier = first tier whose threshold is still ABOVE the current qty.
+      const nextTier = sortedTiers.find(
+        (t: any) => Number(t.min_quantity) > scopedQty,
+      );
+      if (!nextTier) continue;
+
+      const remaining = Number(nextTier.min_quantity) - scopedQty;
+      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+
+      const benefit = this.formatTierBenefit(nextTier);
+      if (!benefit) continue;
+
+      progress.push({
+        promotion_id: Number(promo.id),
+        name: String(promo.name ?? ''),
+        remaining_quantity: remaining,
+        next_benefit_label: benefit,
+      });
+    }
+
+    return progress;
   }
 
   /**

@@ -48,6 +48,25 @@ count_with_exempt() {
   fi
 }
 
+# Like count_with_exempt, but ignores matches that appear ONLY on comment
+# lines (//, *, /*). A docstring that says "no NgZone / markForCheck needed"
+# documents compliance and must not be flagged as a violation. Mirrors the
+# comment-skipping logic of the take(1) check below.
+count_code_only() {
+  local pattern="$1"
+  local exempt="$2"
+  rg -l "$pattern" --type ts 2>/dev/null \
+    | { if [ -n "$exempt" ]; then grep -vE "$exempt"; else cat; fi; } \
+    | while read -r f; do
+        awk -v pat="$pattern" '
+          /^[[:space:]]*(\/\/|\*|\/\*)/ { next }
+          $0 ~ pat { found = 1; exit }
+          END { if (found) print FILENAME }
+        ' "$f"
+      done \
+    | wc -l | tr -d ' '
+}
+
 # ─── Counts that MUST be 0 ───────────────────────────────────────────────
 hits=$(count_with_exempt '@Input\(|@Output\(' '')
 [ "$hits" = "0" ] && ok "@Input/@Output: 0" || fail "@Input/@Output: $hits archivos"
@@ -55,10 +74,10 @@ hits=$(count_with_exempt '@Input\(|@Output\(' '')
 hits=$(count_with_exempt 'EventEmitter' '')
 [ "$hits" = "0" ] && ok "EventEmitter: 0" || fail "EventEmitter: $hits archivos"
 
-hits=$(rg -l 'NgZone' --type ts 2>/dev/null | grep -v 'app.config.ts' | wc -l | tr -d ' ')
+hits=$(count_code_only 'NgZone' 'app\.config\.ts')
 [ "$hits" = "0" ] && ok "NgZone residual: 0" || fail "NgZone residual: $hits archivos"
 
-hits=$(count_with_exempt 'markForCheck|detectChanges' '\.spec\.ts$')
+hits=$(count_code_only 'markForCheck|detectChanges' '\.spec\.ts$')
 [ "$hits" = "0" ] && ok "markForCheck/detectChanges: 0" || fail "markForCheck/detectChanges: $hits archivos"
 
 hits=$(count_html '\*ngIf|\*ngFor|\*ngSwitch')

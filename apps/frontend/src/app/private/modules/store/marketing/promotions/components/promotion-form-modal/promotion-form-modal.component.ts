@@ -1,4 +1,4 @@
-import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, Signal, computed, effect, inject, input, output, signal } from '@angular/core';
 import {
   ReactiveFormsModule,
   AbstractControl,
@@ -9,7 +9,8 @@ import {
   ValidatorFn,
   Validators,
 } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs/operators';
 import {
   Promotion,
   PromotionQuantityTier,
@@ -17,6 +18,7 @@ import {
   CreatePromotionDto,
   UpdatePromotionDto,
 } from '../../interfaces/promotion.interface';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import {
   MultiSelectorComponent,
   MultiSelectorOption,
@@ -34,6 +36,23 @@ import {
 import { ProductsService } from '../../../../products/services/products.service';
 import { CategoriesService } from '../../../../products/services/categories.service';
 
+/** Raw value shape emitted by a tier FormGroup (untyped Angular forms). */
+interface TierFormRawValue {
+  id?: number | null;
+  min_quantity?: number | string | null;
+  max_quantity?: number | string | null;
+  type?: 'percentage' | 'fixed_amount';
+  value?: number | string | null;
+}
+
+/** Coerced, display-ready snapshot of a single tier row. */
+interface NormalizedTier {
+  min: number | null;
+  max: number | null;
+  type: 'percentage' | 'fixed_amount';
+  value: number | null;
+}
+
 @Component({
   selector: 'app-promotion-form-modal',
   standalone: true,
@@ -47,6 +66,37 @@ import { CategoriesService } from '../../../../products/services/categories.serv
     SelectorComponent,
     TextareaComponent,
     SettingToggleComponent,
+    CurrencyPipe,
+  ],
+  styles: [
+    `
+      /* Entry animation for a freshly-added tier row (inserted at the top).
+         Pure CSS: the repo has no @angular/animations infrastructure, so we
+         mark the new row with a class that plays a one-shot slide/fade-in. */
+      @keyframes tierRowEnter {
+        0% {
+          opacity: 0;
+          transform: translateY(-12px) scale(0.98);
+        }
+        60% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      .tier-row-enter {
+        animation: tierRowEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .tier-row-enter {
+          animation: none;
+        }
+      }
+    `,
   ],
   template: `
     <app-modal
@@ -130,11 +180,11 @@ import { CategoriesService } from '../../../../products/services/categories.serv
         <!-- Quantity-tiered: editor -->
         @if (form.get('rule_type')?.value === 'quantity_tiered') {
           <div class="border border-border rounded-lg p-3 bg-background space-y-3">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-3">
               <div>
                 <h4 class="text-sm font-semibold text-text-primary">Escalas por cantidad</h4>
                 <p class="text-xs text-text-secondary">
-                  Define rangos ascendentes de cantidad. Solo la ultima escala puede quedar abierta (sin maximo).
+                  Los rangos se etiquetan solos. Solo la ultima escala puede quedar abierta (sin maximo).
                 </p>
               </div>
               <app-button variant="outline" size="sm" (clicked)="addTier()">
@@ -149,21 +199,45 @@ import { CategoriesService } from '../../../../products/services/categories.serv
               </div>
             }
 
-            @if (quantityTiersError()) {
-              <p class="text-xs text-red-500">{{ quantityTiersError() }}</p>
+            <!-- Live contiguity feedback (non-blocking visual mirror of the backend rule). -->
+            @if (tierContiguity().state === 'ok') {
+              <div class="flex items-center gap-2 rounded-md border border-emerald-500 bg-surface px-3 py-2 text-xs text-emerald-600">
+                <app-icon name="check-circle" [size]="14"></app-icon>
+                <span>{{ tierContiguity().message }}</span>
+              </div>
+            } @else if (tierContiguity().state === 'warn') {
+              <div class="flex items-center gap-2 rounded-md border border-amber-500 bg-surface px-3 py-2 text-xs text-amber-600">
+                <app-icon name="alert-triangle" [size]="14"></app-icon>
+                <span>{{ tierContiguity().message }}</span>
+              </div>
             }
 
             <div formArrayName="quantity_tiers" class="space-y-3">
-              @for (tier of quantityTiers.controls; track $index; let i = $index) {
-                <div [formGroupName]="i" class="border border-border rounded-lg p-3 bg-surface space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-xs font-semibold text-text-secondary">Escala {{ i + 1 }}</span>
+              @for (tier of quantityTiers.controls; track tier; let i = $index) {
+                <div
+                  [formGroupName]="i"
+                  class="border border-border rounded-lg p-3 bg-surface space-y-2"
+                  [class.tier-row-enter]="tier === recentlyAddedTier()"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span
+                        class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold whitespace-nowrap"
+                        [class.bg-primary-50]="tierBadges()[i]?.hasRange"
+                        [class.text-primary-600]="tierBadges()[i]?.hasRange"
+                        [class.bg-background]="!tierBadges()[i]?.hasRange"
+                        [class.text-text-secondary]="!tierBadges()[i]?.hasRange"
+                      >
+                        {{ tierBadges()[i]?.range }}
+                      </span>
+                      <span class="text-xs text-text-secondary truncate">Escala {{ i + 1 }}</span>
+                    </div>
                     <app-button variant="ghost" size="sm" (clicked)="removeTier(i)">
                       <app-icon slot="icon" name="trash-2" [size]="14" class="text-red-500"></app-icon>
                     </app-button>
                   </div>
 
-                  <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <app-input
                       label="Cantidad min."
                       type="number"
@@ -201,17 +275,35 @@ import { CategoriesService } from '../../../../products/services/categories.serv
                     >
                       <span slot="prefix-icon">{{ tier.get('type')?.value === 'percentage' ? '%' : '$' }}</span>
                     </app-input>
-
-                    <app-input
-                      label="Orden"
-                      type="number"
-                      formControlName="sort_order"
-                      [min]="0"
-                    ></app-input>
                   </div>
                 </div>
               }
             </div>
+
+            <!-- Mini-preview: resulting discount staircase, sorted ascending by quantity. -->
+            @if (previewTiers().length > 0) {
+              <div class="rounded-lg border border-border bg-surface p-3">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="trending-up" [size]="14" class="text-primary-600"></app-icon>
+                  <span class="text-xs font-semibold text-text-primary">Vista previa de la escalera</span>
+                </div>
+                <div class="space-y-1.5">
+                  @for (step of previewTiers(); track $index) {
+                    <div class="flex items-center justify-between gap-2 text-xs">
+                      <span class="font-medium text-text-primary whitespace-nowrap">{{ step.range }}</span>
+                      <span class="flex-1 border-b border-dashed border-border mx-2"></span>
+                      <span class="font-semibold text-primary-600 whitespace-nowrap">
+                        @if (step.type === 'percentage') {
+                          -{{ step.value }}%
+                        } @else {
+                          -{{ step.value | currency }}
+                        }
+                      </span>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
           </div>
         }
 
@@ -344,6 +436,65 @@ export class PromotionFormModalComponent {
   readonly productOptions = signal<MultiSelectorOption[]>([]);
   readonly categoryOptions = signal<MultiSelectorOption[]>([]);
 
+  /** Reference to the tier row most recently inserted (drives the entry animation). */
+  readonly recentlyAddedTier = signal<AbstractControl | null>(null);
+
+  /**
+   * Live, zoneless-safe snapshot of the tiers array. Reactive Forms `value` is
+   * NOT a signal, so we bridge `valueChanges` into a signal (assigned in the
+   * constructor once `this.form` exists) and derive every visual helper from it.
+   */
+  private tiersValue!: Signal<TierFormRawValue[]>;
+
+  /** Coerced, positional snapshot aligned 1:1 with `quantityTiers.controls`. */
+  readonly tierRows = computed<NormalizedTier[]>(() =>
+    (this.tiersValue() ?? []).map((v) => this.normalizeTier(v)),
+  );
+
+  /** Per-row auto range labels ("2-4 und" / "5+ und") in editor (array) order. */
+  readonly tierBadges = computed(() =>
+    this.tierRows().map((r) => ({
+      range: this.rangeLabel(r),
+      hasRange: r.min != null,
+    })),
+  );
+
+  /** Resulting discount staircase, sorted ascending by quantity (preview only). */
+  readonly previewTiers = computed(() =>
+    this.tierRows()
+      .filter((r): r is NormalizedTier & { min: number; value: number } => r.min != null && r.value != null)
+      .sort((a, b) => a.min - b.min)
+      .map((r) => ({ range: this.rangeLabel(r), type: r.type, value: r.value })),
+  );
+
+  /**
+   * Live, non-blocking contiguity feedback. Mirrors the backend adjacency rule
+   * (no gaps / no overlap, only the last tier open) purely for visual guidance;
+   * the FormArray validator remains the source of truth that gates submit.
+   */
+  readonly tierContiguity = computed<{ state: 'empty' | 'ok' | 'warn'; message: string }>(() => {
+    const rows = this.tierRows().filter(
+      (r): r is NormalizedTier & { min: number } => r.min != null,
+    );
+    if (rows.length === 0) return { state: 'empty', message: '' };
+
+    const sorted = [...rows].sort((a, b) => a.min - b.min);
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const cur = sorted[i];
+      const next = sorted[i + 1];
+      if (cur.max == null) {
+        return { state: 'warn', message: `Solo la ultima escala puede quedar sin maximo (revisa ${cur.min}+).` };
+      }
+      if (next.min <= cur.max) {
+        return { state: 'warn', message: `Las escalas se solapan entre ${cur.min}-${cur.max} y ${next.min}.` };
+      }
+      if (next.min > cur.max + 1) {
+        return { state: 'warn', message: `Hay un salto entre ${cur.max} y ${next.min}: las escalas deben ser continuas.` };
+      }
+    }
+    return { state: 'ok', message: 'Escalas continuas y ascendentes.' };
+  });
+
   typeOptions: SelectorOption[] = [
     { value: 'percentage', label: 'Porcentaje' },
     { value: 'fixed_amount', label: 'Monto fijo' },
@@ -386,6 +537,15 @@ export class PromotionFormModalComponent {
       category_ids: [[]],
       quantity_tiers: this.fb.array([]),
     });
+
+    // Bridge the tiers FormArray value into a signal so range labels, the
+    // contiguity hint, and the preview recompute reactively (Zoneless-safe).
+    this.tiersValue = toSignal(
+      this.quantityTiers.valueChanges.pipe(
+        startWith(this.quantityTiers.getRawValue() as TierFormRawValue[]),
+      ),
+      { initialValue: [] as TierFormRawValue[] },
+    );
 
     effect(() => {
       this.populateForm(this.promotion());
@@ -444,23 +604,23 @@ export class PromotionFormModalComponent {
     return this.form.get('quantity_tiers') as FormArray;
   }
 
-  /**
-   * Form-level error string for the tier editor when the array is empty
-   * (only relevant in tiered mode) or fails the ascending / overlap check.
-   */
-  quantityTiersError(): string {
-    const ruleType = this.form.get('rule_type')?.value;
-    if (ruleType !== 'quantity_tiered') return '';
-    const tiersArray = this.form.get('quantity_tiers');
-    const errs = (tiersArray?.errors ?? null) as ValidationErrors | null;
-    if (!errs) return '';
-    if (errs['required']) {
-      return 'Agrega al menos una escala para esta regla.';
-    }
-    if (errs['tiersOrder']) {
-      return errs['tiersOrder'] as string;
-    }
-    return 'Revisa las escalas: deben ser ascendentes y continuas.';
+  /** Coerce a raw tier value into a display-ready, numeric-safe snapshot. */
+  private normalizeTier(v: TierFormRawValue): NormalizedTier {
+    const toNum = (x: unknown): number | null =>
+      x != null && x !== '' && Number.isFinite(Number(x)) ? Number(x) : null;
+    return {
+      min: toNum(v?.min_quantity),
+      max: toNum(v?.max_quantity),
+      type: (v?.type as 'percentage' | 'fixed_amount') ?? 'percentage',
+      value: toNum(v?.value),
+    };
+  }
+
+  /** Auto range label for a tier: "2-4 und", "5+ und", or a placeholder. */
+  private rangeLabel(r: NormalizedTier): string {
+    if (r.min == null) return 'Rango sin definir';
+    if (r.max == null) return `${r.min}+ und`;
+    return `${r.min}-${r.max} und`;
   }
 
   /**
@@ -489,19 +649,19 @@ export class PromotionFormModalComponent {
   }
 
   /**
-   * Insert a new empty tier row at the end of the array.
-   * `sort_order` defaults to the row index; `type` defaults to `'percentage'`
-   * to match the form-level default.
+   * Insert a new empty tier row at the TOP of the array so the latest addition
+   * is immediately visible, and flag it so the template plays a one-shot entry
+   * animation. `type` defaults to `'percentage'` to match the form-level
+   * default; `sort_order` is no longer stored per row — it is derived from the
+   * ascending quantity staircase when the DTO is built.
    */
   addTier(): void {
-    const index = this.quantityTiers.length;
     const group = this.fb.group({
       id: [null],
       min_quantity: [null, [Validators.required, Validators.min(1)]],
       max_quantity: [null, [Validators.min(1)]],
       type: ['percentage', Validators.required],
       value: [null, [Validators.required, Validators.min(0.01), Validators.max(100)]],
-      sort_order: [index, [Validators.min(0)]],
     });
 
     // Per-row type toggles its own `value` max(100) constraint, mirroring
@@ -518,8 +678,18 @@ export class PromotionFormModalComponent {
         valueCtrl?.updateValueAndValidity({ emitEvent: false });
       });
 
-    this.quantityTiers.push(group);
+    this.quantityTiers.insert(0, group);
     this.quantityTiers.updateValueAndValidity({ emitEvent: false });
+
+    // Mark the freshly inserted row for the CSS entry animation, then clear the
+    // flag once the animation has finished. Signal writes schedule change
+    // detection under Zoneless, so no NgZone/detectChanges is needed.
+    this.recentlyAddedTier.set(group);
+    setTimeout(() => {
+      if (this.recentlyAddedTier() === group) {
+        this.recentlyAddedTier.set(null);
+      }
+    }, 500);
   }
 
   /** Drop a tier row by index. Keeps the surrounding rows intact. */
@@ -554,7 +724,11 @@ export class PromotionFormModalComponent {
     this.quantityTiers.clear({ emitEvent: false });
     const tiers = promotion?.promotion_quantity_tiers ?? [];
     if (tiers.length) {
-      tiers.forEach((tier, idx) => this.pushTierRow(tier, idx));
+      // Seed persisted tiers in ascending quantity order so the editor and the
+      // preview read as a natural staircase when opening an existing promotion.
+      [...tiers]
+        .sort((a, b) => (a.min_quantity ?? 0) - (b.min_quantity ?? 0))
+        .forEach((tier) => this.pushTierRow(tier));
     }
 
     this.configureValueValidators(this.form.get('type')?.value);
@@ -567,14 +741,13 @@ export class PromotionFormModalComponent {
    * but accepts the canonical `PromotionQuantityTier` shape (value arrives as
    * a Decimal string from the API; we coerce to a number for the input).
    */
-  private pushTierRow(tier: PromotionQuantityTier, index: number): void {
+  private pushTierRow(tier: PromotionQuantityTier): void {
     const group = this.fb.group({
       id: [tier.id ?? null],
       min_quantity: [tier.min_quantity, [Validators.required, Validators.min(1)]],
       max_quantity: [tier.max_quantity ?? null, [Validators.min(1)]],
       type: [tier.type, Validators.required],
       value: [tier.value != null ? Number(tier.value) : null, [Validators.required, Validators.min(0.01), Validators.max(100)]],
-      sort_order: [tier.sort_order ?? index, [Validators.min(0)]],
     });
 
     if (tier.type !== 'percentage') {
@@ -671,8 +844,9 @@ export class PromotionFormModalComponent {
    *    when both are defined.
    *  - Only the LAST row may leave `max_quantity` empty.
    *
-   * Mirrors `IsValidQuantityTiers` from the backend DTO. The error key
-   * `tiersOrder` is surfaced via `quantityTiersError()`.
+   * Mirrors `IsValidQuantityTiers` from the backend DTO. This validator gates
+   * submit (via `form.invalid`); the live, non-blocking `tierContiguity()` hint
+   * mirrors the same rule visually for the user while editing.
    */
   private validateTiersOrder(): ValidatorFn {
     return (control: AbstractControl): ValidationErrors | null => {
@@ -810,16 +984,22 @@ export class PromotionFormModalComponent {
       // satisfy the DTO contract while keeping the flat path untouched, then
       // append the freshly built tiers array.
       dto.value = 0;
-      dto.quantity_tiers = this.quantityTiers.controls.map((ctrl) => {
-        const v = (ctrl as FormGroup).getRawValue();
-        return {
-          min_quantity: Number(v.min_quantity),
-          max_quantity: v.max_quantity != null && v.max_quantity !== '' ? Number(v.max_quantity) : null,
-          type: v.type,
-          value: Number(v.value),
-          sort_order: v.sort_order != null ? Number(v.sort_order) : 0,
-        };
-      });
+      // `sort_order` is DERIVED from the ascending quantity staircase — NOT from
+      // the visual insertion order (which is newest-first). Sorting by
+      // `min_quantity` and re-indexing keeps `sort_order` coherent with the
+      // backend ordering by (min_quantity, sort_order).
+      dto.quantity_tiers = this.quantityTiers.controls
+        .map((ctrl) => {
+          const v = (ctrl as FormGroup).getRawValue();
+          return {
+            min_quantity: Number(v.min_quantity),
+            max_quantity: v.max_quantity != null && v.max_quantity !== '' ? Number(v.max_quantity) : null,
+            type: v.type as 'percentage' | 'fixed_amount',
+            value: Number(v.value),
+          };
+        })
+        .sort((a, b) => a.min_quantity - b.min_quantity)
+        .map((tier, idx) => ({ ...tier, sort_order: idx }));
     } else {
       // Flat: drop the tiers array (it must not be persisted as dirty data).
       delete dto.quantity_tiers;

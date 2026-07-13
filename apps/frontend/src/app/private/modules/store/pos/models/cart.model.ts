@@ -74,6 +74,12 @@ export interface CartDiscount {
   coupon_id?: number;
   coupon_code?: string;
   is_auto_applied?: boolean;
+  /**
+   * Human tier/benefit label for scaled (quantity_tiered) promotions, mirroring
+   * the backend enrichment ("Desde N und: -X%" / "Desde N und: -$Y"). Presentation
+   * only — the discount amount is already computed. Undefined for flat promos.
+   */
+  badge_label?: string;
 }
 
 export interface CartSummary {

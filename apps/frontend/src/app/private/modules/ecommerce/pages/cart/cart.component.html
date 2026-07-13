@@ -88,7 +88,32 @@
             <span>{{ cart.subtotal | currency }}</span>
           </div>
 
-          @if (cart.promotion_discount && cart.promotion_discount > 0) {
+          @if (appliedPromotions().length > 0) {
+            <div class="summary-promotions">
+              <div class="promotions-header">
+                <app-icon name="tag" [size]="14" class="text-green-600"></app-icon>
+                <span class="promotions-title">Promociones aplicadas</span>
+                <span class="promotions-count">{{ appliedPromotions().length }}</span>
+              </div>
+              @for (promo of appliedPromotions(); track promo.promotion_id) {
+                <div class="summary-row discount promotion-line">
+                  <div class="promotion-info">
+                    <span class="promotion-name">{{ promo.name }}</span>
+                    <app-badge
+                      [variant]="promo.typeVariant"
+                      size="xs"
+                      badgeStyle="outline"
+                    >
+                      {{ promo.typeLabel }}
+                    </app-badge>
+                  </div>
+                  <span class="discount-amount"
+                    >-{{ promo.discount_amount | currency }}</span
+                  >
+                </div>
+              }
+            </div>
+          } @else if (cart.promotion_discount && cart.promotion_discount > 0) {
             <div class="summary-row discount">
               <span>Descuento por promociones</span>
               <span class="discount-amount">-{{ cart.promotion_discount | currency }}</span>

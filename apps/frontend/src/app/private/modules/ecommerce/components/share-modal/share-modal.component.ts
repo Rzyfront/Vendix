@@ -1,6 +1,6 @@
 import { Component, model, input, output, inject, signal } from '@angular/core';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { CurrencyPipe } from '@angular/common';
+import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { EcommerceProduct } from '../../services/catalog.service';
 

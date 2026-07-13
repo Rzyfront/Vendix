@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Code changes, feature work, fixes, refactors, or development execution"
@@ -76,7 +76,7 @@ After code or skill changes:
 
 - Use `buildcheck-dev` for development verification.
 - **Runtime API/endpoint verification uses `curl`, never Bruno.** Authenticate against dev with a seed owner account (`owner@techsolutions.co` or `owner@fashionretail.com`, password `1125634q`; see `apps/backend/prisma/seeds/users.seed.ts`), or ask the user for the `slug`, `email`, and `password` of an authorized dev test account. Bruno (`.bru`) is opt-in only when a developer explicitly requests it (`vendix-bruno-test`).
-- **Frontend changes require end-to-end verification with `agent-browser`, not just a passing build** (a green build does not catch zoneless/signals behavior bugs). Drive the real vhost (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its `app_type` by hostname. **Always pass `headed: true` + `extraArgs: ['--ignore-https-errors']`** (NOT `--ignore-certificate-errors` — that's the wrong flag) — Vendix uses a self-signed cert and the MCP defaults are headless + cert-strict. Note: `--ignore-https-errors` is a **global** flag in the CLI (before the subcommand), but in MCP `extraArgs` it can be passed per-call. See `how-to-test` § Vendix convention.
+- **Frontend changes require end-to-end verification with Playwright MCP, not just a passing build** (a green build does not catch zoneless/signals behavior bugs). Drive the real vhost (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its `app_type` by hostname. Launch the Playwright MCP server with **`--ignore-https-errors`** — a **single** context-level flag that makes Chromium trust the local self-signed vhost for **both** the page and every subresource `fetch` (including the `app_type` resolve call). Playwright MCP runs headed by default and can also inspect network + console (`browser_network_requests`, `browser_console_messages`) to confirm API calls fire and catch signals errors. `agent-browser` stays as a scoped **fallback** MCP for the few things Playwright MCP cannot do (arbitrary CSS-selector wait, manual scroll, page-markdown read). See `how-to-test` § Mechanism 2.
 - Use `skill-sync` after creating or modifying skills.
 - Run production build commands only when the human explicitly requests production verification.
 
@@ -88,5 +88,5 @@ After code or skill changes:
 - `pr-code-review` - Automated code review gate (load before any PR merge, RULE 8)
 - `agent-teams` - Multi-agent orchestration for non-trivial work
 - `buildcheck-dev` - Development verification through Docker watch-mode logs
-- `how-to-test` - Runtime verification methodology (curl for API/auth, agent-browser for frontend E2E)
+- `how-to-test` - Runtime verification methodology (curl for API/auth, Playwright MCP for frontend E2E, agent-browser fallback)
 - `skill-sync` - Synchronize skill metadata and generated agent files

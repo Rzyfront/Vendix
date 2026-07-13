@@ -438,6 +438,9 @@ export class PromotionEngineService {
 
         // Per-line discount computed from the FIXED winning tier (resolved once
         // from scopedQty above), not from each line's individual quantity.
+        // percentage tiers apply per line; fixed_amount tiers apply a single
+        // flat amount across the scope (capped at applicableTotal) split
+        // proportionally across lines — see computeTierDiscountForResolvedTier.
         const perLineDiscount = new Map<number, number>();
         let rawTotal = 0;
         for (const idx of applicableIndexes) {
@@ -446,6 +449,7 @@ export class PromotionEngineService {
             Number(item.unit_price),
             Number(item.quantity),
             matchedTier,
+            applicableTotal,
           );
           perLineDiscount.set(idx, lineDiscount);
           rawTotal = this.roundMoney(rawTotal + lineDiscount);
@@ -718,7 +722,7 @@ export class PromotionEngineService {
           discount_amount:
             firstTier.type === 'fixed_amount' ? tierValue : undefined,
           promotional_price: this.roundMoney(unitPrice),
-          badge_label: this.buildQuantityTieredBadgeLabel(firstTier.min_quantity),
+          badge_label: this.buildQuantityTieredBadgeLabel(firstTier),
           priority: promo.priority ?? 0,
         };
 
@@ -759,6 +763,58 @@ export class PromotionEngineService {
   }
 
   /**
+   * Build a badge label for a promotion in a LISTING / BANNER context where
+   * there is NO single product unit price (e.g. the public storefront "active
+   * promotions" banner). Reuses the SAME private builders that power product
+   * cards so the promotional copy stays consistent across surfaces:
+   *  - quantity_tiered → lowest tier via `buildQuantityTieredBadgeLabel`
+   *    ("Desde N und: -X%" / "Desde N und: -$Y").
+   *  - flat percentage → "-X% OFF".
+   *  - flat fixed_amount → "-$Y OFF" (es-CO whole-currency amount).
+   * Falls back to a generic "OFERTA" when the promotion carries no usable
+   * value. The parameter type intentionally uses only exported / inline types
+   * (no private engine names) so `declaration` emit stays clean.
+   */
+  buildPromotionBadgeLabel(promo: {
+    type: PromotionQuoteType;
+    value: unknown;
+    rule_type: 'flat' | 'quantity_tiered';
+    promotion_quantity_tiers?: Array<{
+      id: number;
+      promotion_id: number;
+      min_quantity: number;
+      max_quantity: number | null;
+      type: PromotionQuoteType;
+      value: unknown;
+      sort_order: number;
+    }>;
+  }): string {
+    if (promo.rule_type === 'quantity_tiered') {
+      const tiers = (promo.promotion_quantity_tiers ?? [])
+        .slice()
+        .sort((a, b) => {
+          if (a.min_quantity !== b.min_quantity)
+            return a.min_quantity - b.min_quantity;
+          if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+          return a.id - b.id;
+        });
+      const firstTier = tiers[0];
+      return firstTier
+        ? this.buildQuantityTieredBadgeLabel(firstTier)
+        : 'Descuentos por cantidad';
+    }
+
+    const value = Number(promo.value);
+    if (promo.type === 'percentage' && Number.isFinite(value) && value > 0) {
+      return `-${Math.round(value)}% OFF`;
+    }
+    if (promo.type === 'fixed_amount' && Number.isFinite(value) && value > 0) {
+      return `-$${this.formatCurrencyInteger(value)} OFF`;
+    }
+    return 'OFERTA';
+  }
+
+  /**
    * Build a compact badge label for product cards. Prefer percentage when the
    * promotion is percentage-typed, otherwise show the absolute saved amount.
    */
@@ -787,13 +843,46 @@ export class PromotionEngineService {
   /**
    * Compact badge label for quantity_tiered promotions on product cards.
    * Distinct from `buildBadgeLabel` because there is no instant single-unit
-   * discount — the badge advertises the minimum quantity needed.
+   * discount — the badge advertises the minimum quantity needed AND the real
+   * benefit of that tier, coherent with the `discount_percentage` /
+   * `discount_amount` signals the same method exposes for this tier:
+   *  - percentage   → "Desde N und: -X%"   (X without decimals when integer)
+   *  - fixed_amount → "Desde N und: -$Y"    (Y as an es-CO whole-currency
+   *                                           amount, e.g. -$5.000)
    */
-  private buildQuantityTieredBadgeLabel(minQuantity: number): string {
-    if (!Number.isFinite(minQuantity) || minQuantity <= 1) {
-      return 'Descuentos por cantidad';
+  private buildQuantityTieredBadgeLabel(
+    tier: PromotionQuantityTierRecord,
+  ): string {
+    const minQuantity = Number(tier.min_quantity);
+    const prefix =
+      Number.isFinite(minQuantity) && minQuantity > 1
+        ? `Desde ${minQuantity} und: `
+        : '';
+
+    const value = Number(tier.value);
+    if (Number.isFinite(value) && value > 0) {
+      if (tier.type === 'percentage') {
+        const pct = Number.isInteger(value)
+          ? value
+          : Math.round(value * 100) / 100;
+        return `${prefix}-${pct}%`;
+      }
+      // fixed_amount: flat currency amount.
+      return `${prefix}-$${this.formatCurrencyInteger(value)}`;
     }
-    return `Desde ${minQuantity} und: descuento`;
+
+    // No usable tier value: keep the generic quantity-discount hint.
+    return prefix ? `${prefix}descuento` : 'Descuentos por cantidad';
+  }
+
+  /**
+   * Format a whole-currency amount with es-CO thousands separators (e.g.
+   * `5000` → `5.000`). Matches the repo's existing `toLocaleString('es-CO')`
+   * money-rendering convention; no new dependencies.
+   */
+  private formatCurrencyInteger(value: number): string {
+    const amount = Math.round(Number(value) || 0);
+    return amount.toLocaleString('es-CO', { maximumFractionDigits: 0 });
   }
 
   /** Resolve which item indexes a promotion applies to based on its scope. */
@@ -857,21 +946,28 @@ export class PromotionEngineService {
   }
 
   /**
-   * Compute the per-line discount for a `quantity_tiered` promotion once the
-   * winning tier has ALREADY been resolved from the aggregated scope quantity
-   * (`scopedQty`) by the caller. The tier is fixed for every line in scope, so
-   * this helper never performs a `find`; it only applies the tier math to a
-   * single line. Tier math:
-   *  - percentage: `lineTotal × tier.value / 100`
-   *  - fixed_amount: `tier.value × quantity` (per-unit value × line qty)
-   * The returned discount is capped at the line total (never negative line)
-   * and rounded to 2 decimals. Returns 0 when guards fail
-   * (quantity <= 0, unitPrice <= 0, or tier.value <= 0).
+   * Compute the per-line discount contribution for a `quantity_tiered`
+   * promotion once the winning tier has ALREADY been resolved from the
+   * aggregated scope quantity (`scopedQty`) by the caller. The tier is fixed
+   * for every line in scope, so this helper never performs a `find`; it only
+   * applies the tier math to a single line. Tier math:
+   *  - percentage: `lineTotal × tier.value / 100` (each line, its own %).
+   *  - fixed_amount: a FLAT amount applied ONCE across the whole scope
+   *    (`min(tier.value, applicableTotal)`) — NOT multiplied per unit or per
+   *    line — split across lines proportional to each line total. This mirrors
+   *    the non-tiered `flat` fixed_amount path in `computeDiscountAmount`
+   *    (`Math.min(Number(promotion.value), applicableTotal)`). Business rule
+   *    confirmed: a fixed_amount tier discounts a single flat amount, exactly
+   *    like a non-tiered fixed discount.
+   * The returned share is capped at the line total (never a negative line) and
+   * rounded to 2 decimals. Returns 0 when guards fail (quantity <= 0,
+   * unitPrice <= 0, tier.value <= 0, or, for fixed_amount, applicableTotal <= 0).
    */
   private computeTierDiscountForResolvedTier(
     unitPrice: number,
     quantity: number,
     tier: PromotionQuantityTierRecord,
+    applicableTotal: number,
   ): number {
     const qty = Number(quantity);
     const price = Number(unitPrice);
@@ -886,8 +982,13 @@ export class PromotionEngineService {
     if (tier.type === 'percentage') {
       discount = (lineTotal * tierValue) / 100;
     } else {
-      // fixed_amount: tier.value applies per unit bought
-      discount = tierValue * qty;
+      // fixed_amount: FLAT amount applied ONCE to the whole scope, split across
+      // lines proportional to their line total (parity with the non-tiered flat
+      // fixed discount). It is NOT multiplied per unit or per line.
+      const scopeTotal = Number(applicableTotal);
+      if (!Number.isFinite(scopeTotal) || scopeTotal <= 0) return 0;
+      const flatDiscount = Math.min(tierValue, scopeTotal);
+      discount = (lineTotal / scopeTotal) * flatDiscount;
     }
 
     // Never discount more than the line total (final line total >= 0).
