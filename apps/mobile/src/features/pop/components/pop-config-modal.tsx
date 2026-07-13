@@ -26,6 +26,7 @@ import type {
   GeneratedVariantDraft,
 } from '../types';
 import { defaultUnitCost, getQtyControlSize } from '../constants';
+import { toastError } from '@/shared/components/toast/toast.store';
 
 interface PopConfigModalProps {
   visible: boolean;
@@ -308,7 +309,13 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
           }),
         );
         setCreatingVariants(false);
-        throw err;
+        // Antes: `throw err` propagaba la rejection. Pero ambos consumers
+        // (`pop.tsx` y `product-upsert-form.tsx`) llaman `handleConfirm` vía
+        // `onPress` sin await → la rejection no se capturaba y el usuario
+        // veía un modal pegado en estado de carga sin mensaje. Reemplazamos
+        // por un toast visible y dejamos el modal cerrable.
+        console.warn('[pop-config-modal] variant creation failed:', err);
+        toastError('No pudimos crear las variantes. Inténtalo de nuevo.');
       }
       return;
     }
