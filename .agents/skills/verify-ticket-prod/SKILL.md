@@ -2,7 +2,7 @@
 name: verify-ticket-prod
 description: >
   Controlled, non-destructive production verification that a Linear ticket is correctly deployed and
-  behaves as its requirement demands. Drives agent-browser E2E against the live app at
+  behaves as its requirement demands. Drives Playwright MCP E2E against the live app at
   www.vendix.online, ALWAYS logged in as the demo account (never a real tenant). Runs Happy Path and
   Sad Path like how-to-test, plus a non-destructive Controlled Probe that OBSERVES weaknesses and
   REPORTS them instead of breaking the system; also reports any disparity between observed behavior
@@ -30,7 +30,7 @@ allowed-tools: Read, Bash, Glob, Grep
 
 Define **how an agent confirms, in production, that a Linear ticket is actually applied and behaves
 as its requirement demands** — or surfaces where it fails, is incomplete, or diverges from the
-requirement. Verification is done **end-to-end through the live UI** with `agent-browser`, always as
+requirement. Verification is done **end-to-end through the live UI** with **Playwright MCP**, always as
 the **demo account**, and always **without breaking anything**.
 
 This skill governs **production ticket verification only**. It does **not** govern:
@@ -149,9 +149,9 @@ Every run ends in exactly one verdict, backed by evidence:
    destructive).
 3. **Step 0 — confirm prod is reachable and the demo login works.** Open `https://www.vendix.online`,
    confirm it renders (not an error page), and complete the demo login. A failed login or an error
-   page = `Not deployed / not reachable`; stop. (Prod uses a **valid public TLS cert** — the
-   self-signed cert flags from `how-to-test` are **not** needed here; keep `headed: true` so the prod
-   session is observable.)
+   page = `Not deployed / not reachable`; stop. (Prod uses a **valid public TLS cert** — no cert flag
+   is needed here, unlike the local self-signed vhost. Playwright MCP runs headed by default, so the
+   prod session is observable.)
    Then **switch to the target store**: user menu → "Administrar Organización" → click the store row
    → confirm the active store before proceeding (see the switching steps below).
 4. **Happy Path** — exercise the ticket's flow exactly as designed and assert every acceptance
@@ -175,7 +175,7 @@ Reuse `how-to-test` for the mechanics of Happy and Sad. The difference is the **
 
 ### 1. Happy Path — does prod do what the ticket promised?
 As in `how-to-test`: primary success path + every documented alternate success path, end-to-end via
-`agent-browser`, asserting the ticket's acceptance criteria. Pass = correct rendered outcome + every
+**Playwright MCP**, asserting the ticket's acceptance criteria. Pass = correct rendered outcome + every
 designed side-effect that is safe to observe on prod.
 
 ### 2. Sad Path — does prod fail safely when misused by accident?
@@ -211,28 +211,27 @@ partial write, no false success). All performed as the demo account, non-destruc
 
 | Ticket criterion / flow | Happy ✅ | Sad ⚠️ | Probe 🔒 | Evidence | Finding |
 | --- | --- | --- | --- | --- | --- |
-| `QUI-x — <criterion>` | expected result observed | safe failure, clear message | no unreported risk / risk described | agent-browser step + screenshot | matches / defect / anomaly |
+| `QUI-x — <criterion>` | expected result observed | safe failure, clear message | no unreported risk / risk described | Playwright MCP step + screenshot | matches / defect / anomaly |
 
 A ticket is "verified" only when every criterion has Happy + Sad + Probe resolved (green or a written
 finding), ending in one verdict from the table above.
 
-## agent-browser on Production
+## Playwright MCP on Production
 
-Reuse the `how-to-test` agent-browser recipe (open → snapshot → act → assert → close, refs from a
-fresh `snapshot -i`), with these production differences:
+Reuse the `how-to-test` Playwright MCP recipe (navigate → snapshot → act → assert → close, refs from a fresh `browser_snapshot`), with these production differences:
 
 - **URL:** always `https://www.vendix.online`.
-- **`headed: true`** — keep the prod session observable to a human.
-- **Cert flags NOT required** — prod serves a valid public cert, unlike the local self-signed vhost.
-  (If, and only if, an open fails on TLS, confirm the domain/cert before adding any override.)
-- **Login:** fill the demo `email` / `password` and `organization_slug: vendix` in the staff login
-  form. Confirm you are inside the **demo** org before any further step.
-- Prefer `snapshot`, `get_text`, and `screenshot` (observation) over write actions. Screenshot each
-  asserted state — screenshots are the primary evidence for a prod verdict.
+- **Headed by default** — Playwright MCP shows the browser, so the prod session stays observable to a human. No headed flag needed.
+- **No cert flag required** — prod serves a valid public cert, unlike the local self-signed vhost. (If, and only if, a navigation fails on TLS, confirm the domain/cert before adding any override.)
+- **Login:** fill the demo `email` / `password` and `organization_slug: vendix` in the staff login form. Confirm you are inside the **demo** org before any further step.
+- Prefer observation over writes: `browser_snapshot`, `browser_network_requests` (confirm the API answered), and `browser_take_screenshot` for evidence. Screenshot each asserted state — screenshots are the primary evidence for a prod verdict.
+- **Fallback:** if you need an arbitrary CSS-selector wait, a manual scroll, or a page-markdown read that Playwright MCP does not do, drop to `agent-browser` (support MCP) — see `how-to-test` § Fallback.
 
 ```ts
-agent_browser_open(url="https://www.vendix.online", headed=true)
-// snapshot -i → fill demo email/password + organization_slug "vendix" → submit → assert demo org
+browser_navigate({ url: "https://www.vendix.online" })
+browser_snapshot()                          // fill demo email/password + organization_slug "vendix" → submit
+// assert you are inside the demo org before running any scheme
+browser_take_screenshot({ filename: "prod-login.png" })
 ```
 
 ## Reporting
@@ -244,7 +243,7 @@ Deliver:
 3. **Findings**: each defect, disparity, anomaly, or unmitigated risk — with the flow, the safe repro
    steps, the observed vs. required behavior, and a screenshot. Mark cross-tenant leaks or would-break
    states as **blocking**.
-4. **Evidence**: screenshots + the agent-browser step sequence.
+4. **Evidence**: screenshots + the Playwright MCP step sequence.
 
 Update Linear only when asked / when the team flow requires it (`linear-issues`, `pr-code-review`).
 Never mark a ticket "verified" on prod from a build-passing or happy-path-only signal.
@@ -270,13 +269,13 @@ Never mark a ticket "verified" on prod from a build-passing or happy-path-only s
 | Hammering / flooding / injecting against prod to "prove" a hole | Observe the weakness, stop at the safe step, report it |
 | Forcing a corrupt write or illegal transition on prod to confirm a missing guard | Report the missing guard as a risk — do not corrupt state |
 | Reporting "works" from happy path only | Run Happy + Sad + Controlled Probe and report the matrix + verdict |
-| Adding self-signed cert flags on prod | Prod has a valid cert; only override after confirming a real TLS issue |
+| Adding a cert-ignore flag on prod | Prod has a valid cert; Playwright MCP needs no flag there — only override after confirming a real TLS issue |
 | Marking a ticket verified because the build passed | Build/deploy ≠ behaves; verify the flow E2E |
 | Reading further after seeing another tenant's data | Stop immediately; that read is itself the incident to report |
 
 ## Related Skills
 
-- `how-to-test` — the E2E mechanism (agent-browser recipe) and the three-flow-scheme discipline this
+- `how-to-test` — the E2E mechanism (Playwright MCP recipe, with agent-browser as fallback) and the three-flow-scheme discipline this
   skill adapts for production.
 - `linear-issues` — read the ticket requirement/criteria and update its status.
 - `pr-code-review` — pairing a code review verdict with this runtime prod verdict.

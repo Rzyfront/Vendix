@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.3"
+  version: "2.4"
   scope: [root]
   auto_invoke:
     - "Creating implementation plans or decomposing non-trivial work"
@@ -18,7 +18,7 @@ metadata:
     - "Running the Plan Validation Checklist before requesting approval"
     - "Selecting the correct skills for each plan step using the Skill Selection Matrix"
     - "Picking concrete verification mechanisms (curl, build, audit, log inspection) per step"
-    - "Choosing agent-browser for frontend E2E verification in a plan step"
+    - "Choosing Playwright MCP for frontend E2E verification in a plan step"
 ---
 
 # How To Plan
@@ -208,7 +208,8 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 | Mechanism | When | Example |
 |-----------|------|---------|
 | `curl` (primary API check) | API contract, auth boundaries & endpoint sanity | `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices` |
-| `agent-browser` (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `agent-browser --headed --ignore-https-errors open https://vendix.com && agent-browser snapshot -i` (see `how-to-test`; note `--ignore-https-errors` is a **global** flag, placed before the subcommand) |
+| **Playwright MCP** (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `browser_navigate({url:'https://vendix.com'})` then `browser_snapshot()` (see `how-to-test`; the Playwright MCP server must be launched with `--ignore-https-errors` — a single context-level flag that covers page + subresources on the local self-signed vhost) |
+| `agent-browser` (E2E fallback) | Only when Playwright MCP cannot: wait on a CSS selector, manual scroll, or read page markdown | `agent-browser` support MCP — see `how-to-test` § Fallback |
 | Backend unit test | Service logic | `npm run test -w apps/backend -- --runInBand src/domains/organization/invoicing/invoicing.service.spec.ts` |
 | Frontend build | Type safety after refactor | `npm run build:prod -w apps/frontend` |
 | Zoneless audit | Signal-based components | `npm run zoneless:audit` |
@@ -225,12 +226,14 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 > account. Bruno remains an opt-in template (`vendix-bruno-test`) only when a developer explicitly
 > requests writing a `.bru` test.
 >
-> **For frontend flows, `agent-browser` is the E2E verification mechanism** — drive the real vhost
-> (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its
-> `app_type` by hostname. **Always pass `headed: true` + `extraArgs: ['--ignore-https-errors']`** (NOT
-> `--ignore-certificate-errors`) in MCP calls — Vendix uses a self-signed cert and the MCP defaults
-> are headless + cert-strict. The full curl + agent-browser methodology (install, vhost setup,
-> credentials, recipes) lives in `how-to-test`.
+> **For frontend flows, Playwright MCP is the primary E2E verification mechanism** — drive the real
+> vhost (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves
+> its `app_type` by hostname. The Playwright MCP server must be launched with **`--ignore-https-errors`**
+> — a **single** context-level flag that makes Chromium trust the local self-signed vhost for **both**
+> the page and every subresource `fetch` (including the `app_type` resolve call). Playwright MCP runs
+> headed by default. `agent-browser` stays as a scoped **fallback** MCP for the few things Playwright
+> MCP cannot do (arbitrary CSS-selector wait, manual scroll, page-markdown read). The full
+> methodology (install, vhost setup, credentials, recipes, fallback matrix) lives in `how-to-test`.
 
 ## Plan Validation Checklist
 
@@ -392,9 +395,11 @@ If any of these gates is not met, the work is **not done** — return to the gat
 - `skill-sync` — Synchronizing skill metadata to AGENTS.md / CLAUDE.md after changes.
 - `vendix-core` — Map of skills by domain for Reuse Discovery.
 - `buildcheck-dev` — Verification of build / runtime after execution.
-- `how-to-test` — Runtime verification methodology: `curl` for API/auth, `agent-browser` for frontend E2E against the vhost.
+- `how-to-test` — Runtime verification methodology: `curl` for API/auth, **Playwright MCP** for frontend E2E against the vhost (`agent-browser` as fallback).
 
 ## Changelog
+
+- **v2.4** — Switched the frontend E2E verification mechanism from `agent-browser` to **Playwright MCP** (`@playwright/mcp`) as primary, with `agent-browser` demoted to a documented fallback. Updated the Verification Mechanisms Catalog (Playwright MCP row + agent-browser fallback row), the frontend verification note (single `--ignore-https-errors` context-level flag for the local self-signed vhost), and the `auto_invoke` trigger. Full methodology remains in `how-to-test`.
 
 - **v2.3** — Added `agent-browser` to the Verification Mechanisms Catalog as the frontend E2E mechanism (drive the real vhost, not `localhost:4200`). Linked the new `how-to-test` skill (full curl + agent-browser methodology) from the verification note and Related Skills. Synced frontmatter version (was stale at 2.1 while the changelog already listed 2.2).
 
