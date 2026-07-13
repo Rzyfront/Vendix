@@ -61,7 +61,10 @@ export default function PopProductGrid({
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.sku?.toLowerCase().includes(q) ||
-        p.code?.toLowerCase().includes(q)
+        // `p.code` puede ser undefined si el backend no lo devuelve
+        // (p.ej. productos prebulk sin persistir). Optional chaining evita
+        // crash en `undefined.toLowerCase()`.
+        (typeof p.code === 'string' && p.code.toLowerCase().includes(q))
     );
   }, [products, search]);
 

@@ -356,6 +356,10 @@ export default function PopScreen() {
     setConfigModalOpen(true);
   }, []);
 
+  const handleUpdateItem = useCallback((id: string, qty: number, cost: number) => {
+    cart.updateCartItem({ itemId: id, quantity: qty, unit_cost: cost });
+  }, [cart]);
+
   const handlePrebulkConfirm = useCallback((data: PreBulkData) => {
     setShowPrebulk(false);
     const tempProduct: PopProduct = {
@@ -521,7 +525,7 @@ export default function PopScreen() {
         supplierName={cart.cart.supplierName}
         locationName={cart.cart.locationName}
         onClose={() => setShowCartModal(false)}
-        onUpdateItem={(id, qty, cost) => cart.updateCartItem({ itemId: id, quantity: qty, unit_cost: cost })}
+        onUpdateItem={handleUpdateItem}
         onUpdateShippingCost={cart.setShippingCost}
         onRemoveItem={cart.removeFromCart}
         onSaveDraft={handleSaveDraft}
