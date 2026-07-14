@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { useRef, useEffect } from 'react';
 import { Pressable, Text, View, StyleSheet, ScrollView, ActivityIndicator, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
@@ -7,7 +8,7 @@ import { Icon } from '@/shared/components/icon/icon';
 export interface StickyHeaderAction {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'outline' | 'ghost' | 'destructive';
+  variant?: 'primary' | 'outline' | 'outline-danger' | 'ghost' | 'destructive';
   loading?: boolean;
   disabled?: boolean;
   icon?: string;
@@ -48,11 +49,39 @@ export function StickyHeader({
 }: StickyHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // Guard contra doble-tap: router.push(backHref) acumulaba entradas en el
+  // stack si el usuario tocaba el botón dos veces seguidas. Ref-based guard
+  // es la opción más liviana (no necesitamos useState que cause re-render).
+  const navigatingRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Limpia el timeout pendiente en unmount para no escribir en un ref de
+  // un componente desmontado (memory leak / lint warning).
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   function handleBack() {
-    if (onBack) onBack();
-    else if (backHref) router.push(backHref as any);
-    else router.back();
+    if (navigatingRef.current) return;
+    if (onBack) {
+      onBack();
+      return;
+    }
+    if (backHref) {
+      navigatingRef.current = true;
+      // `navigate` (no `push`) es semánticamente correcto: si la ruta ya
+      // existe en el stack, vuelve a ella; si no, la pushea. Evita duplicar.
+      router.navigate(backHref as any);
+      // Reset después de un frame para permitir un back legítimo posterior.
+      timeoutRef.current = setTimeout(() => {
+        navigatingRef.current = false;
+      }, 400);
+    } else {
+      router.back();
+    }
   }
 
   const isGlass = variant === 'glass';
@@ -86,7 +115,6 @@ export function StickyHeader({
             {title}
           </Text>
           {subtitle && (
-            // Mirror web `sticky-header-subtitle hidden sm:block` — sólo visible en pantallas anchas.
             <Text style={styles.subtitle} numberOfLines={1}>
               {subtitle}
             </Text>
@@ -136,16 +164,28 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
   const isPrimary = action.variant === 'primary';
   const isDestructive = action.variant === 'destructive';
   const isOutline = action.variant === 'outline';
+  const isOutlineDanger = action.variant === 'outline-danger';
 
   const bg = isPrimary
     ? colors.primary
     : isDestructive
       ? colorScales.red[600]
       : 'transparent';
-  const borderColor = isOutline ? 'rgba(126, 215, 165, 0.5)' : 'transparent';
-  const textColor = isPrimary || isDestructive
+
+  const borderColor = isOutlineDanger
+    ? colorScales.red[300]
+    : isOutline
+      ? colorScales.gray[300]
+      : isPrimary
+        ? colors.primary
+        : 'transparent';
+
+  const borderWidth = isOutline || isOutlineDanger ? 1 : 0;
+  const iconColor = isPrimary || isDestructive
     ? colors.background
-    : colors.primary;
+    : isOutlineDanger
+      ? colorScales.red[600]
+      : colors.text.primary;
 
   return (
     <Pressable
@@ -153,31 +193,24 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
       disabled={action.disabled || action.loading}
       style={({ pressed }) => [
         styles.actionButton,
-        isPrimary && styles.actionPrimary,
-        isOutline && styles.actionOutline,
+        {
+          backgroundColor: bg,
+          borderColor,
+          borderWidth,
+        },
+        isPrimary && styles.actionButtonPrimary,
         pressed && styles.actionPressed,
         (action.disabled || action.loading) && styles.disabled,
       ]}
     >
       {action.loading ? (
-        <ActivityIndicator size="small" color={textColor} />
+        <ActivityIndicator size="small" color={iconColor} />
+      ) : action.icon ? (
+        <Icon name={action.icon} size={18} color={iconColor} />
       ) : (
-        <>
-          {/* Icon (siempre visible) */}
-          {action.icon && !action.iconRight && (
-            <Icon name={action.icon} size={16} color={textColor} />
-          )}
-          {/* Label (oculto en mobile para ahorrar espacio — `md:flex-row` lo muestra en pantallas grandes).
-              Para forzar visibilidad en mobile, agregar `style={{ ...styles.actionLabelOverride, display: 'flex' }}` externamente. */}
-          {action.label ? (
-            <Text style={[styles.actionLabel, { color: textColor }]} numberOfLines={1}>
-              {action.label}
-            </Text>
-          ) : null}
-          {action.icon && action.iconRight && (
-            <Icon name={action.icon} size={16} color={textColor} />
-          )}
-        </>
+        <Text style={[styles.actionLabel, { color: iconColor }]} numberOfLines={1}>
+          {action.label}
+        </Text>
       )}
     </Pressable>
   );
@@ -186,8 +219,9 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
 const styles = StyleSheet.create({
   wrapper: {
     backgroundColor: colors.card,
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[1.5],
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[2],
+    paddingBottom: spacing[2],
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
     borderBottomLeftRadius: 12,
@@ -196,32 +230,31 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   wrapperGlass: {
-    // Mirror web `bg-[rgba(255,255,255,0.95)]` — fondo semitransparente.
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: 'rgba(255,255,255,0.85)',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    minHeight: 40,
     gap: spacing[2],
   },
-  // Botón back cuadrado (mirror web `!w-7 !h-7 md:!w-8 md:!h-8 !rounded-lg`).
   backButton: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   titleBlock: {
     flex: 1,
-    minWidth: 0,
   },
   title: {
+    // Parity con web responsive (`text-base md:text-lg font-bold text-gray-900`
+    // en sticky-header.component.html). En viewport < md la web usa 16px,
+    // coincidente con `typography.fontSize.base`. md+ la web sube a 18px
+    // (`text-lg`); este componente por ahora sirve la variante mobile.
     fontSize: typography.fontSize.base,
-    fontWeight: '700' as any,
+    fontWeight: '700',
     color: colors.text.primary,
   },
   subtitle: {
@@ -231,41 +264,30 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: spacing[2],
   },
-  // Action button: 36x36 icon-only en mobile. `actionPrimary` y `actionOutline`
-  // aplican los estilos exactos del web (`btn-shadow-primary` y `btn-outline-border`).
   actionButton: {
-    flexDirection: 'row',
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 36,
-    minHeight: 36,
-    paddingHorizontal: spacing[2],
-    borderRadius: 10,
+    backgroundColor: 'transparent',
   },
-  actionPrimary: {
-    backgroundColor: colors.primary,
-    shadowColor: '#7ED7A5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+  actionButtonPrimary: {
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
     elevation: 3,
   },
-  actionOutline: {
-    borderWidth: 1,
-    borderColor: 'rgba(126, 215, 165, 0.5)',
-  },
   actionPressed: {
-    opacity: 0.85,
+    opacity: 0.75,
+    transform: [{ scale: 0.95 }],
   },
-  // En mobile el label se oculta para mantener el botón icon-only.
   actionLabel: {
     fontSize: typography.fontSize.sm,
-    fontWeight: '700' as any,
-    marginLeft: spacing[2],
-    display: 'none',
+    fontWeight: '600',
   },
   disabled: {
     opacity: 0.5,

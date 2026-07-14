@@ -296,6 +296,7 @@ export const Endpoints = {
         PAY: '/store/accounting/payables/:id/pay',
       },
     },
+    NOTIFICATION_SOUNDS: '/notification-sounds',
   },
   HELP_CENTER: '/help-center',
   NOTIFICATIONS: '/store/notifications',

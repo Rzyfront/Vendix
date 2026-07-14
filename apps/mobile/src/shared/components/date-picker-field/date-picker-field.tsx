@@ -22,6 +22,8 @@ interface DatePickerFieldProps {
   onChange: (date: string) => void;
   placeholder?: string;
   accessibilityLabel?: string;
+  /** Fecha mínima seleccionable (YYYY-MM-DD). Días anteriores se ignoran al tap. */
+  minimumDate?: string;
 }
 
 const POPOVER_MAX_WIDTH = 300;
@@ -198,6 +200,7 @@ export function DatePickerField({
   onChange,
   placeholder = 'YYYY-MM-DD',
   accessibilityLabel = 'Selector de fecha',
+  minimumDate,
 }: DatePickerFieldProps) {
   // useWindowDimensions es reactivo a orientation change y window resize.
   // NO usar Dimensions.get('window') — solo lee el ancho al mount.
@@ -289,10 +292,16 @@ export function DatePickerField({
 
   const onDayPress = useCallback(
     (d: Date) => {
+      if (minimumDate) {
+        const min = parseIso(minimumDate);
+        if (min && d < min) {
+          return; // Día anterior al mínimo — no propagar.
+        }
+      }
       onChange(toIso(d));
       setOpen(false);
     },
-    [onChange],
+    [onChange, minimumDate],
   );
 
   const displayValue = value ? fmtDate(value) : '';
