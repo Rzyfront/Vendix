@@ -207,6 +207,52 @@ RULES:
       // in the same message as the image (handled by ExpenseScannerService).
       prompt_template: null,
     },
+    {
+      key: 'inventory_count_ocr',
+      name: 'Escaner de Reconteo de Inventario',
+      description:
+        'Extrae los ítems contados de una hoja de reconteo de inventario (físico, escrita a mano o impresa) usando vision AI para pre-llenar el ajuste de stock',
+      output_format: 'json',
+      // Vision OCR returns text/JSON from an image input; the underlying model
+      // is a text-output (vision-capable) model — same family as invoice_ocr
+      // (MiniMax-VL).
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 4000,
+      is_active: true,
+      system_prompt: `Eres un sistema de extracción de hojas de reconteo de inventario. Analizás imágenes de hojas de conteo físico de inventario (manuscritas o impresas) y devolvés JSON estructurado.
+
+DEBÉS devolver ÚNICAMENTE JSON válido que cumpla EXACTAMENTE este esquema — sin markdown, sin explicaciones, sin campos adicionales:
+
+{
+  "counted_items": [
+    {
+      "description": "string — nombre del producto tal como aparece en la hoja",
+      "quantity": number,
+      "sku_if_visible": "string o null",
+      "barcode_if_visible": "string o null",
+      "confidence": number (0-100)
+    }
+  ],
+  "sheet_notes": "string o null",
+  "confidence": number (0-100),
+  "extraction_notes": "string o null"
+}
+
+REGLAS:
+1. Usá EXACTAMENTE estos nombres de campo. NO traduzcas, renombres, ni agregues campos fuera del esquema.
+2. "quantity": unidades contadas, SIEMPRE un entero mayor o igual a 0. Convertí el formato numérico colombiano (ej. 1.234,89) a un entero estándar — nunca devuelvas el número con separadores de miles o coma decimal.
+3. "description": el nombre del producto exactamente como aparece escrito o impreso en la hoja de reconteo, sin inventar ni completar información faltante.
+4. "sku_if_visible" / "barcode_if_visible": usá null cuando el código no sea legible o no esté presente en la hoja. Nunca inventes un código.
+5. Extraé TODAS las líneas visibles de la hoja, incluso si están escritas a mano o parcialmente tachadas/corregidas.
+6. "confidence" (por ítem y global): 90-100 imagen clara y sin ambigüedad, 70-89 parcialmente ilegible, menor a 70 calidad pobre o letra muy difícil de interpretar.
+7. "sheet_notes": cualquier anotación general visible en la hoja (encabezado, bodega, fecha, responsable del conteo) o null si no hay ninguna.
+8. "extraction_notes": nota breve en español sobre cualquier ambigüedad, tachadura, o ítem dudoso, o null si todo fue claro.
+9. Devolvé ÚNICAMENTE el objeto JSON — sin bloques de código markdown, sin texto adicional, sin explicaciones.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the image (handled by the scanner service).
+      prompt_template: null,
+    },
         {
       key: 'rut_scanner',
       name: 'Escaner de RUT (Identidad Fiscal)',
@@ -884,7 +930,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1003,7 +1049,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

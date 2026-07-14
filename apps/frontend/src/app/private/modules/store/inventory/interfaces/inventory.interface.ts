@@ -355,6 +355,7 @@ export interface AdjustableProduct {
   id: number;
   name: string;
   sku: string | null;
+  product_variant_id?: number | null;
   stock_at_location: {
     quantity_on_hand: number;
     quantity_reserved: number;
@@ -383,6 +384,7 @@ export interface BatchCreateAdjustmentsRequest {
   location_id: number;
   items: {
     product_id: number;
+    product_variant_id?: number | null;
     type: AdjustmentType;
     quantity_after: number;
     reason_code?: string;

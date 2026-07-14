@@ -501,6 +501,7 @@ export class InventoryAdjustmentsService {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
             { sku: { contains: search, mode: 'insensitive' } },
+            { barcode: { contains: search, mode: 'insensitive' } },
           ],
         },
       },
@@ -516,6 +517,11 @@ export class InventoryAdjustmentsService {
       id: sl.products.id,
       name: sl.products.name,
       sku: sl.products.sku,
+      // Aditivo: expone la variante real de esta fila de stock_levels para
+      // que consumidores conscientes de variantes (picker manual del
+      // escáner de reconteo IA) puedan propagar product_variant_id al crear
+      // el ajuste. Consumidores que ignoran el campo no se ven afectados.
+      product_variant_id: sl.product_variant_id,
       stock_at_location: {
         quantity_on_hand: sl.quantity_on_hand,
         quantity_reserved: sl.quantity_reserved,

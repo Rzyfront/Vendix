@@ -26,6 +26,7 @@ import {
 } from '@nestjs/swagger';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
+import { InventoryCountScannerService } from './inventory-count-scanner.service';
 import {
   CreateAdjustmentDto,
   AdjustmentQueryDto,
@@ -36,6 +37,7 @@ import { ReleaseReservationsByProductDto } from './dto/release-reservations.dto'
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 @ApiTags('Inventory Adjustments')
 @Controller('store/inventory/adjustments')
@@ -45,6 +47,7 @@ export class InventoryAdjustmentsController {
   constructor(
     private readonly adjustmentsService: InventoryAdjustmentsService,
     private readonly bulkService: InventoryAdjustmentsBulkService,
+    private readonly inventoryCountScanner: InventoryCountScannerService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -202,6 +205,31 @@ export class InventoryAdjustmentsController {
     return this.responseService.success(
       result,
       'Adjustments created and applied successfully',
+    );
+  }
+
+  @Post('scan')
+  @ApiOperation({ summary: 'Scan inventory count sheet with AI' })
+  @ApiResponse({ status: 201, description: 'Count sheet scanned successfully' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async scanCount(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('location_id') location_id: string,
+  ) {
+    if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    if (!location_id)
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowed.includes(file.mimetype))
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+    const result = await this.inventoryCountScanner.scanCount(
+      file,
+      +location_id,
+    );
+    return this.responseService.success(
+      result,
+      'Hoja de reconteo escaneada exitosamente',
     );
   }
 
