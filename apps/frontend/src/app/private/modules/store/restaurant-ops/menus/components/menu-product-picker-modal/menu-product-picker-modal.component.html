@@ -54,10 +54,12 @@
             type="button"
             (click)="toggle(product.id)"
             [disabled]="isInMenu(product.id)"
-            class="flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors hover:border-primary-600 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-border"
+            class="flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors hover:border-primary-600 disabled:cursor-not-allowed"
             [class.border-primary-600]="isSelected(product.id)"
             [class.bg-primary-50]="isSelected(product.id)"
-            [class.border-border]="!isSelected(product.id)"
+            [class.border-border]="!isSelected(product.id) && !isInMenu(product.id)"
+            [style.borderColor]="isInMenu(product.id) ? 'var(--color-success)' : null"
+            [style.backgroundColor]="isInMenu(product.id) ? 'var(--color-success-light)' : null"
           >
             <!-- Miniatura -->
             <div
@@ -100,7 +102,7 @@
                 }
                 @if (isInMenu(product.id)) {
                   <span
-                    class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+                    class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[var(--color-success)] text-white"
                   >
                     <app-icon name="check" [size]="10" />
                     En la carta
@@ -119,14 +121,10 @@
             <!-- Check de selección / marca "ya en la carta" -->
             @if (isInMenu(product.id)) {
               <div
-                class="w-5 h-5 rounded-md border border-border flex items-center justify-center shrink-0 bg-[var(--color-surface-muted)]"
+                class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 border-[var(--color-success)] bg-[var(--color-success)]"
                 title="Ya está en la carta"
               >
-                <app-icon
-                  name="check"
-                  [size]="12"
-                  class="text-[var(--color-text-secondary)]"
-                />
+                <app-icon name="check" [size]="12" class="text-white" />
               </div>
             } @else {
               <div
