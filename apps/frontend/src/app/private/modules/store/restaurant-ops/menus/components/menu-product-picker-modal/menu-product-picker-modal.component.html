@@ -1,0 +1,165 @@
+<app-modal
+  [isOpen]="open()"
+  size="lg"
+  title="Agregar productos"
+  subtitle="Selecciona los productos para esta sección"
+  (cancel)="handleClose()"
+>
+  <div class="flex flex-col gap-3">
+    <!-- Buscador -->
+    <div class="relative">
+      <span
+        class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-text-secondary)]"
+      >
+        <app-icon name="search" [size]="16" />
+      </span>
+      <input
+        type="text"
+        [ngModel]="searchTerm()"
+        (ngModelChange)="onSearch($event)"
+        placeholder="Buscar por nombre o categoría..."
+        class="w-full h-10 sm:h-11 pl-9 pr-3 rounded-xl border border-border bg-[var(--color-background)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:bg-[var(--color-surface)] focus:shadow-[0_0_0_2px_var(--color-ring)] transition-colors"
+      />
+    </div>
+
+    @if (loading()) {
+      <!-- Estado de carga -->
+      <div
+        class="flex items-center justify-center gap-2 py-12 text-[var(--color-text-secondary)]"
+      >
+        <app-icon name="loader-2" [size]="20" [spin]="true" />
+        <span class="text-sm">Cargando productos...</span>
+      </div>
+    } @else if (visibleProducts().length === 0) {
+      <!-- Estado vacío -->
+      <div
+        class="flex flex-col items-center justify-center gap-2 py-12 text-center text-[var(--color-text-secondary)]"
+      >
+        <app-icon name="package" [size]="28" />
+        <span class="text-sm">
+          {{
+            products().length === 0
+              ? 'No hay productos disponibles'
+              : 'No se encontraron productos'
+          }}
+        </span>
+      </div>
+    } @else {
+      <!-- Grilla multi-select -->
+      <div
+        class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1"
+      >
+        @for (product of visibleProducts(); track product.id) {
+          <button
+            type="button"
+            (click)="toggle(product.id)"
+            [disabled]="isInMenu(product.id)"
+            class="flex items-center gap-3 p-2.5 rounded-xl border text-left transition-colors hover:border-primary-600 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-border"
+            [class.border-primary-600]="isSelected(product.id)"
+            [class.bg-primary-50]="isSelected(product.id)"
+            [class.border-border]="!isSelected(product.id)"
+          >
+            <!-- Miniatura -->
+            <div
+              class="w-12 h-12 rounded-md overflow-hidden shrink-0 flex items-center justify-center bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+            >
+              @if (product.imageUrl && !hasImageFailed(product.id)) {
+                <img
+                  [src]="product.imageUrl"
+                  [alt]="product.name"
+                  (error)="onImageError(product.id)"
+                  class="w-full h-full object-cover"
+                  style="max-width: 100%;"
+                />
+              } @else {
+                <app-icon name="image" [size]="20" />
+              }
+            </div>
+
+            <!-- Info -->
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span
+                  class="font-medium text-[var(--color-text-primary)] truncate"
+                >
+                  {{ product.name }}
+                </span>
+                @if (product.isCombo) {
+                  <span
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary-50 text-primary-700"
+                  >
+                    Combo
+                  </span>
+                }
+                @if (product.isSellable === false) {
+                  <span
+                    class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-surface-muted)] text-[var(--color-destructive)]"
+                  >
+                    No vendible
+                  </span>
+                }
+                @if (isInMenu(product.id)) {
+                  <span
+                    class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+                  >
+                    <app-icon name="check" [size]="10" />
+                    En la carta
+                  </span>
+                }
+              </div>
+              @if (product.category) {
+                <span
+                  class="block truncate text-sm text-[var(--color-text-secondary)]"
+                >
+                  {{ product.category }}
+                </span>
+              }
+            </div>
+
+            <!-- Check de selección / marca "ya en la carta" -->
+            @if (isInMenu(product.id)) {
+              <div
+                class="w-5 h-5 rounded-md border border-border flex items-center justify-center shrink-0 bg-[var(--color-surface-muted)]"
+                title="Ya está en la carta"
+              >
+                <app-icon
+                  name="check"
+                  [size]="12"
+                  class="text-[var(--color-text-secondary)]"
+                />
+              </div>
+            } @else {
+              <div
+                class="w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors"
+                [class.bg-primary-600]="isSelected(product.id)"
+                [class.border-primary-600]="isSelected(product.id)"
+                [class.border-gray-300]="!isSelected(product.id)"
+              >
+                @if (isSelected(product.id)) {
+                  <app-icon name="check" [size]="12" class="text-white" />
+                }
+              </div>
+            }
+          </button>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer" class="flex items-center justify-between gap-3">
+    <span class="text-sm text-[var(--color-text-secondary)]">
+      {{ selectedCount() }} seleccionado(s)
+    </span>
+    <div class="flex items-center gap-2">
+      <app-button variant="ghost" (clicked)="handleClose()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        [disabled]="selectedCount() === 0"
+        (clicked)="handleConfirm()"
+      >
+        Agregar ({{ selectedCount() }})
+      </app-button>
+    </div>
+  </div>
+</app-modal>

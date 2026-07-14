@@ -1,0 +1,53 @@
+<app-modal
+  [isOpen]="open()"
+  size="sm"
+  [title]="modalTitle()"
+  subtitle="Define el día y el rango horario de disponibilidad"
+  (cancel)="handleClose()"
+  (opened)="seedForm()"
+>
+  <div class="flex flex-col gap-4">
+    <app-selector
+      label="Día de la semana"
+      [options]="dayOptions"
+      [ngModel]="dayOfWeek()"
+      (valueChange)="onDayChange($event)"
+    ></app-selector>
+
+    <div class="grid grid-cols-2 gap-3">
+      <app-input
+        label="Hora de inicio"
+        [type]="'time'"
+        [ngModel]="startTime()"
+        (ngModelChange)="onStartTimeChange($event)"
+      ></app-input>
+      <app-input
+        label="Hora de fin"
+        [type]="'time'"
+        [ngModel]="endTime()"
+        (ngModelChange)="onEndTimeChange($event)"
+      ></app-input>
+    </div>
+
+    @if (showTimeError()) {
+      <div
+        class="flex items-center gap-1.5 text-sm text-[var(--color-destructive)]"
+      >
+        <app-icon name="alert-circle" [size]="14" />
+        <span>La hora de fin debe ser mayor que la de inicio</span>
+      </div>
+    }
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer" class="flex items-center justify-end gap-2">
+    <app-button variant="ghost" (clicked)="handleClose()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      [disabled]="!isValid()"
+      (clicked)="handleConfirm()"
+    >
+      Guardar
+    </app-button>
+  </div>
+</app-modal>

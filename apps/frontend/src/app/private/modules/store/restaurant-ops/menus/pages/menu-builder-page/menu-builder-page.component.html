@@ -42,27 +42,25 @@
       variant="glass"
       [showBackButton]="true"
       [backRoute]="'/admin/restaurant-ops/menus'"
+      [actions]="headerActions"
+      (actionClicked)="onHeaderAction($event)"
     />
 
     <div class="p-2 md:p-6 space-y-6">
-      <app-card
-        title="Secciones"
-        subtitle="Arrastra por la cejita para reordenar · clic en el nombre para renombrar"
-        [padding]="true"
-        [overflow]="'visible'"
-      >
-        <div class="flex flex-col md:flex-row gap-2 mb-4 md:items-end">
-          <app-input
-            class="flex-1"
-            [type]="'text'"
-            placeholder="Nombre de la nueva sección (Entradas, Platos Fuertes, Postres)"
-            [ngModel]="newSectionName()"
-            (ngModelChange)="newSectionName.set($event)"
-            (keyup.enter)="addSection()"
-          />
-          <app-button variant="primary" (clicked)="addSection()">
+      <!-- R3: card "Secciones" con header custom + botón compacto "+ Sección". -->
+      <app-card [padding]="true" [overflow]="'visible'" [showHeader]="true">
+        <div slot="header" class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">
+              Secciones
+            </h3>
+            <p class="text-sm text-[var(--color-text-secondary)] mt-1">
+              Arrastra por la cejita para reordenar · clic en el nombre para renombrar
+            </p>
+          </div>
+          <app-button variant="primary" size="sm" (clicked)="openSectionModal()">
             <app-icon slot="icon" name="plus" [size]="16" />
-            Agregar Sección
+            Sección
           </app-button>
         </div>
 
@@ -70,7 +68,7 @@
           <div class="mb-empty">
             <app-icon name="layers" [size]="28" class="text-text-secondary" />
             <p class="text-sm text-text-secondary">Aún no hay secciones en esta carta.</p>
-            <p class="text-xs text-text-secondary">Crea la primera para empezar a apilar platos.</p>
+            <p class="text-xs text-text-secondary">Usa "+ Sección" para crear la primera.</p>
           </div>
         }
 
@@ -127,6 +125,15 @@
                     <app-icon name="edit-2" [size]="13" class="mb-section__title-icon" />
                   </button>
                   <span class="mb-badge">{{ section.items?.length ?? 0 }}</span>
+                  <!-- R4: botón compacto "+ Producto" en el header de la sección. -->
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    (clicked)="openProductPicker(section)"
+                  >
+                    <app-icon slot="icon" name="plus" [size]="14" />
+                    Producto
+                  </app-button>
                   <app-button
                     variant="outline-danger"
                     size="sm"
@@ -155,6 +162,18 @@
                         >
                           <app-icon name="grip-vertical" [size]="14" />
                         </button>
+                        <span class="mb-item__thumb">
+                          @if (itemImage(item); as img) {
+                            <img
+                              [src]="img"
+                              [alt]="item.product?.name ?? ''"
+                              class="mb-item__thumb-img"
+                              loading="lazy"
+                            />
+                          } @else {
+                            <app-icon name="image" [size]="13" />
+                          }
+                        </span>
                         <span class="mb-item__name truncate">
                           {{ item.product?.name ?? getProductName(item.product_id) }}
                         </span>
@@ -171,30 +190,11 @@
                         </app-button>
                       </div>
                     } @empty {
-                      <p class="mb-item-empty">Sin productos en esta sección.</p>
+                      <p class="mb-item-empty">
+                        Sin productos en esta sección. Usa "+ Producto" para agregar.
+                      </p>
                     }
                   </div>
-
-                  <div class="flex flex-col md:flex-row gap-2 md:items-end mt-3">
-                    <app-selector
-                      class="flex-1"
-                      placeholder="Busca y selecciona un producto…"
-                      [options]="productSelectorOptions()"
-                      [searchable]="true"
-                      [ngModel]="newItemProductId()"
-                      (ngModelChange)="onProductSelect($event)"
-                    />
-                    <app-button variant="primary" (clicked)="addItem(section)">
-                      <app-icon slot="icon" name="plus" [size]="16" />
-                      Agregar producto
-                    </app-button>
-                  </div>
-                  @if (selectedProductIsCombo()) {
-                    <p class="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
-                      <app-icon name="info" [size]="12" />
-                      Este producto es un combo: al disparar a cocina descontará la receta del combo.
-                    </p>
-                  }
                 </div>
               }
             </div>
@@ -202,92 +202,138 @@
         </div>
       </app-card>
 
-      <app-card
-        title="Ventanas de Disponibilidad"
-        subtitle="Días y horarios en que la carta está activa (menu-level). Haz clic en el ícono de editar para modificar una ventana existente."
-        [padding]="true"
-      >
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4 md:items-end">
-          <app-selector
-            [options]="dayOptions"
-            [ngModel]="newWindow().day_of_week"
-            (ngModelChange)="onDaySelect($event)"
-          />
-          <app-input
-            [type]="'time'"
-            [ngModel]="newWindow().start_time"
-            (ngModelChange)="updateNewWindow({ start_time: $event })"
-          />
-          <app-input
-            [type]="'time'"
-            [ngModel]="newWindow().end_time"
-            (ngModelChange)="updateNewWindow({ end_time: $event })"
-          />
-          <app-button variant="primary" (clicked)="addWindow()">
+      <!-- R5/R6: card "Ventanas" con header custom + botón outline "+ Ventana". -->
+      <app-card [padding]="true" [showHeader]="true">
+        <div slot="header" class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">
+              Ventanas de Disponibilidad
+            </h3>
+            <p class="text-sm text-[var(--color-text-secondary)] mt-1">
+              Días y horarios en que la carta está activa (menu-level)
+            </p>
+          </div>
+          <app-button variant="outline" size="sm" (clicked)="openWindowCreate()">
             <app-icon slot="icon" name="plus" [size]="16" />
-            Agregar Ventana
+            Ventana
           </app-button>
         </div>
 
         @if (m.availability_windows.length === 0) {
-          <p class="text-sm text-text-secondary">Sin ventanas. La carta se considera disponible todo el tiempo.</p>
+          <div class="mb-empty">
+            <app-icon name="clock" [size]="28" class="text-text-secondary" />
+            <p class="text-sm text-text-secondary">
+              Sin ventanas. La carta se considera disponible todo el tiempo.
+            </p>
+            <p class="text-xs text-text-secondary">Usa "+ Ventana" para limitar los horarios.</p>
+          </div>
         }
 
-        <ul class="space-y-1">
+        <div class="mb-windows">
           @for (w of m.availability_windows; track w.id) {
-            <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm gap-2">
-              @if (isEditingWindow(w.id)) {
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 flex-1">
-                  <app-selector
-                    [options]="dayOptions"
-                    [ngModel]="editingWindowDraft().day_of_week"
-                    (ngModelChange)="onEditingDaySelect($event)"
-                  />
-                  <app-input
-                    [type]="'time'"
-                    [ngModel]="editingWindowDraft().start_time"
-                    (ngModelChange)="updateEditingWindow({ start_time: $event })"
-                  />
-                  <app-input
-                    [type]="'time'"
-                    [ngModel]="editingWindowDraft().end_time"
-                    (ngModelChange)="updateEditingWindow({ end_time: $event })"
-                  />
-                </div>
-                <div class="flex items-center gap-1">
-                  <app-button variant="primary" size="sm" (clicked)="saveWindow(w)">
-                    <app-icon slot="icon" name="check" [size]="14" />
-                    Guardar
-                  </app-button>
-                  <app-button variant="ghost" size="sm" (clicked)="cancelEditWindow()">
-                    <app-icon slot="icon" name="x" [size]="14" />
-                  </app-button>
-                </div>
-              } @else {
-                <span class="flex-1">
-                  <strong>{{ dayLabels[w.day_of_week] }}</strong>
-                  · {{ w.start_time }} – {{ w.end_time }}
-                </span>
-                <div class="flex items-center gap-1">
-                  <app-button
-                    variant="ghost"
-                    size="sm"
-                    (clicked)="startEditWindow(w)"
-                    customClasses="!p-1 !w-7 !h-7"
-                  >
-                    <app-icon slot="icon" name="edit-2" [size]="14" />
-                  </app-button>
-                  <app-button variant="outline-danger" size="sm" (clicked)="deleteWindow(w)">
-                    <app-icon slot="icon" name="trash-2" [size]="14" />
-                    Eliminar
-                  </app-button>
-                </div>
-              }
-            </li>
+            <div class="mb-window">
+              <span class="mb-window__day">
+                <app-icon name="clock" [size]="14" class="mb-window__icon" />
+                {{ dayLabels[w.day_of_week] }}
+              </span>
+              <span class="mb-window__range">{{ w.start_time }} – {{ w.end_time }}</span>
+              <span class="mb-window__spacer"></span>
+              <app-button
+                variant="ghost"
+                size="sm"
+                (clicked)="openWindowEdit(w)"
+                customClasses="!p-1.5 !w-8 !h-8"
+              >
+                <app-icon slot="icon" name="edit-2" [size]="14" />
+              </app-button>
+              <app-button
+                variant="outline-danger"
+                size="sm"
+                (clicked)="deleteWindow(w)"
+                customClasses="!p-1.5 !w-8 !h-8"
+              >
+                <app-icon slot="icon" name="trash-2" [size]="14" />
+              </app-button>
+            </div>
           }
-        </ul>
+        </div>
       </app-card>
     </div>
+
+    <!-- R2: modal "Cambiar nombre de la carta" (reemplaza la barra inline). -->
+    <app-modal
+      [(isOpen)]="editingMenuName"
+      title="Cambiar nombre de la carta"
+      subtitle="Actualiza el nombre visible de la carta"
+      size="sm"
+      (cancel)="cancelEditMenuName()"
+    >
+      <app-input
+        [type]="'text'"
+        label="Nombre de la carta"
+        placeholder="Ej: Almuerzo, Cena, Carta principal"
+        [ngModel]="editingMenuNameDraft()"
+        (ngModelChange)="onEditMenuName($event)"
+        (keyup.enter)="saveMenuName()"
+      />
+      <div slot="footer" class="flex items-center justify-end gap-2">
+        <app-button variant="ghost" (clicked)="cancelEditMenuName()">Cancelar</app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!editingMenuNameDraft().trim()"
+          (clicked)="saveMenuName()"
+        >
+          <app-icon slot="icon" name="check" [size]="16" />
+          Guardar
+        </app-button>
+      </div>
+    </app-modal>
+
+    <!-- R3: modal inline "Nueva sección" (un único input + Crear). -->
+    <app-modal
+      [(isOpen)]="sectionModalOpen"
+      title="Nueva sección"
+      subtitle="Dale un nombre a la sección (Entradas, Platos Fuertes, Postres)"
+      size="sm"
+      (cancel)="closeSectionModal()"
+    >
+      <app-input
+        [type]="'text'"
+        label="Nombre de la sección"
+        placeholder="Ej: Entradas, Platos Fuertes, Postres"
+        [ngModel]="sectionModalName()"
+        (ngModelChange)="sectionModalName.set($event)"
+        (keyup.enter)="confirmSectionModal()"
+      />
+      <div slot="footer" class="flex items-center justify-end gap-2">
+        <app-button variant="ghost" (clicked)="closeSectionModal()">Cancelar</app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!sectionModalName().trim()"
+          (clicked)="confirmSectionModal()"
+        >
+          <app-icon slot="icon" name="plus" [size]="16" />
+          Crear
+        </app-button>
+      </div>
+    </app-modal>
+
+    <!-- R4: picker multi-select de productos. -->
+    <app-menu-product-picker-modal
+      [open]="pickerOpen()"
+      [products]="pickerProducts()"
+      [inMenuIds]="pickerInMenuIds()"
+      (confirmed)="onPickerConfirmed($event)"
+      (closed)="onPickerClosed()"
+    />
+
+    <!-- R5/R6: modal de ventana horaria (creación + edición). -->
+    <app-menu-window-modal
+      [open]="windowModalOpen()"
+      [initialValue]="windowInitialValue()"
+      (confirmed)="onWindowConfirmed($event)"
+      (closed)="onWindowClosed()"
+    />
   } @else {
     <div class="p-6 text-center text-text-secondary">Cargando carta…</div>
   }

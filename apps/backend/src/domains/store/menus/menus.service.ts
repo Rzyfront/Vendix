@@ -104,6 +104,14 @@ export class MenusService {
                     is_combo: true,
                     state: true,
                     stock_unit: true,
+                    // La imagen vive en product_images (1:N), no en una columna.
+                    // Traemos la principal (is_main) y, en su defecto, la de menor
+                    // sort_order; luego la aplanamos a `image_url` para el builder.
+                    product_images: {
+                      select: { image_url: true },
+                      orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                      take: 1,
+                    },
                   },
                 },
               },
@@ -113,7 +121,26 @@ export class MenusService {
       },
     });
     if (!menu) throw new VendixHttpException(ErrorCodes.MENU_NOT_FOUND);
-    return menu;
+
+    // Aplana la imagen principal de cada producto (product_images[0]) a un
+    // campo plano `image_url`, contrato que consume el builder de la carta.
+    return {
+      ...menu,
+      sections: menu.sections.map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          if (!item.product) return item;
+          const { product_images, ...productRest } = item.product;
+          return {
+            ...item,
+            product: {
+              ...productRest,
+              image_url: product_images?.[0]?.image_url ?? null,
+            },
+          };
+        }),
+      })),
+    };
   }
 
   async update(id: number, dto: UpdateMenuDto) {

@@ -40,6 +40,7 @@ export interface MenuSectionItem {
   product?: {
     id: number;
     name: string;
+    image_url?: string | null;
     sku?: string | null;
     base_price?: number | string | null;
     is_sellable?: boolean;
