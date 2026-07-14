@@ -41,7 +41,11 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (appliedPromotions().length > 0 || tierProgress().length > 0) {
-      <div class="flex flex-col" [ngClass]="compact() ? 'gap-2' : 'gap-3'">
+      <div
+        class="flex flex-col"
+        [ngClass]="compact() ? 'gap-2' : 'gap-3'"
+        [attr.data-currency]="currencyCode()"
+      >
         <!-- Promociones aplicadas -->
         @if (appliedPromotions().length > 0) {
           <div class="flex flex-col gap-1">
@@ -124,6 +128,15 @@ export class CartPromotionsComponent {
   readonly compact = input<boolean>(false);
 
   private readonly currencyFormat = inject(CurrencyFormatService);
+
+  /**
+   * Tenant currency code, read in the template so this OnPush component's
+   * change detection is tied to the async currency load. Without it, the
+   * impure `| currency` pipe used for applied-promo amounts could stay on the
+   * "$12,300.00" fallback if the currency resolves after first render and no
+   * other input changes (the nudge already reacts via the tierProgress computed).
+   */
+  protected readonly currencyCode = this.currencyFormat.currencyCode;
 
   /**
    * Per-promotion applied-discount view. Reuses the EXACT classification logic

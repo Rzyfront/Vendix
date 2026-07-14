@@ -871,6 +871,13 @@
       }
     }
 
+    .cart-promotions-wrap {
+      padding: 0.75rem 1rem 0.85rem;
+      border-top: 1px solid var(--color-border);
+      background: var(--color-surface);
+      overflow: hidden; // keep badge + amount inside the rounded dropdown
+    }
+
     .cart-footer {
       padding: 1.25rem;
       background: var(--color-background);

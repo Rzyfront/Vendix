@@ -106,7 +106,7 @@
 
           <!-- Dropdown -->
           @if (show_cart_dropdown()) {
-          <div class="cart-dropdown">
+          <div class="cart-dropdown" [attr.data-currency]="currency_code()">
             <div class="cart-header">
               <div class="header-title" style="display: flex; align-items: center; gap: 0.5rem;">
                 <app-icon name="shopping-cart" [size]="20" class="text-primary"></app-icon>
@@ -156,7 +156,9 @@
 
             @if (cart(); as cart) {
             @if (cart.items.length > 0) {
-            <app-cart-promotions [cart]="cart" [compact]="true" />
+            <div class="cart-promotions-wrap">
+              <app-cart-promotions [cart]="cart" [compact]="true" />
+            </div>
             <div class="cart-footer">
               <div class="cart-total">
                 <span>Total:</span>

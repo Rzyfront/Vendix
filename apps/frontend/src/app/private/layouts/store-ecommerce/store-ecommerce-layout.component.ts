@@ -29,7 +29,7 @@ import { ModalComponent } from '../../../shared/components/modal/modal.component
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { TableSessionSseService } from '../../modules/ecommerce/services/table-session-sse.service';
 import { parseApiError } from '../../../core/utils/parse-api-error';
-import { CurrencyPipe } from '../../../shared/pipes/currency';
+import { CurrencyPipe, CurrencyFormatService } from '../../../shared/pipes/currency';
 
 // Footer types (matching backend interfaces)
 interface FooterStoreInfo {
@@ -132,6 +132,14 @@ export class StoreEcommerceLayoutComponent {
   private title_service = inject(Title); // Inject Title service
   private platform_id = inject(PLATFORM_ID);
   private readonly is_browser = isPlatformBrowser(this.platform_id);
+
+  // Tenant currency signal exposed so the cart dropdown template reactively
+  // depends on it. The custom CurrencyPipe is impure and reads the currency
+  // signal INSIDE transform(), which does not register a zoneless CD
+  // dependency; binding this signal in the dropdown template ties change
+  // detection to the async currency load, so prices refresh from the "$85,000.00"
+  // fallback to the tenant format ("$85.000") once the currency resolves.
+  protected readonly currency_code = inject(CurrencyFormatService).currencyCode;
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
