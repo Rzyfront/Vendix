@@ -226,7 +226,7 @@ export class HomeComponent implements OnInit {
 
     this.is_loading_featured.set(true);
     this.catalog_service
-      .getProducts({ limit, sort_by: 'newest', is_featured: true })
+      .getProducts({ limit, sort_by: 'newest', is_featured: true, fill: true })
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: (response) => {

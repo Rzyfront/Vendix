@@ -159,6 +159,7 @@ export interface CatalogQuery {
   created_after?: string;
   has_discount?: boolean;
   is_featured?: boolean;
+  fill?: boolean;
   product_type?: 'physical' | 'service';
 }
 
@@ -304,6 +305,9 @@ export class CatalogService {
       params = params.set('has_discount', query.has_discount.toString());
     if (query.is_featured !== undefined)
       params = params.set('is_featured', query.is_featured.toString());
+    if (query.fill !== undefined) {
+      params = params.set('fill', query.fill.toString());
+    }
     if (query.product_type)
       params = params.set('product_type', query.product_type);
 
