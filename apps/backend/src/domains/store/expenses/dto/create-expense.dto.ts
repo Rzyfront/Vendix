@@ -5,9 +5,33 @@ import {
   IsOptional,
   MaxLength,
   IsDecimal,
-  IsUrl,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class ExpenseLineItemDto {
+  @IsString()
+  @MaxLength(500)
+  description: string;
+
+  @IsNumber()
+  @Type(() => Number)
+  quantity: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  unit_price: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  amount: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  line_index?: number;
+}
 
 export class CreateExpenseDto {
   @IsOptional()
@@ -34,10 +58,16 @@ export class CreateExpenseDto {
   expense_date: Date;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   receipt_url?: string;
 
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ExpenseLineItemDto)
+  items?: ExpenseLineItemDto[];
 }

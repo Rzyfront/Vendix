@@ -53,6 +53,7 @@ export class ExpensesListComponent {
   readonly create = output<void>();
   readonly edit = output<Expense>();
   readonly categories = output<void>();
+  readonly scan = output<void>();
   readonly refresh = output<void>();
 
   private store = inject(Store);
@@ -89,6 +90,12 @@ export class ExpensesListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Categorías', icon: 'folder', action: 'categories' },
+    {
+      label: 'Escanear Factura',
+      icon: 'scan-line',
+      action: 'scan',
+      variant: 'primary',
+    },
     {
       label: 'Nuevo Gasto',
       icon: 'plus',
@@ -211,6 +218,9 @@ export class ExpensesListComponent {
         break;
       case 'categories':
         this.categories.emit(undefined);
+        break;
+      case 'scan':
+        this.scan.emit(undefined);
         break;
     }
   }

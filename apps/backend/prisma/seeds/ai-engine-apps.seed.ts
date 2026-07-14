@@ -153,6 +153,60 @@ RULES:
     - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 4); do NOT fold tax_rate into it.`,
       prompt_template: null,
     },
+    {
+      key: 'expense_invoice_ocr',
+      name: 'Escaner de Facturas de Gasto',
+      description:
+        'Extrae datos estructurados de facturas de gasto (expense receipts) usando vision AI para pre-llenar el registro de gastos con desglose de items',
+      output_format: 'json',
+      // Vision OCR returns text/JSON from an image input; the underlying model
+      // is a text-output (vision-capable) model — same family as invoice_ocr
+      // (MiniMax-VL).
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 4000,
+      is_active: true,
+      system_prompt: `You are an expense invoice extraction system. You analyze expense receipt / invoice images (a supplier bill a business incurs as an operational expense) and return structured JSON.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "supplier_name": "string or null — full business name of the supplier",
+  "supplier_tax_id": "string or null — NIT with verification digit",
+  "invoice_number": "string or null",
+  "invoice_date": "YYYY-MM-DD",
+  "currency": "COP",
+  "line_items": [
+    {
+      "description": "string — item description as printed",
+      "quantity": number,
+      "unit_price": number,
+      "amount": number
+    }
+  ],
+  "subtotal": number,
+  "tax_amount": number or null,
+  "total": number,
+  "confidence": number (0-100),
+  "extraction_notes": "string or null"
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
+2. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Never return formatted numbers.
+3. "supplier_tax_id" (NIT): include verification digit with hyphen (e.g., "900123456-7"). May appear as "NIT", "N.I.T.", "CC". Use null if not visible.
+4. "currency": default "COP". Use the ISO 4217 code printed on the invoice when explicitly stated (e.g. "USD", "EUR"). Otherwise "COP".
+5. "tax_amount": ONLY IVA. Do not include retenciones (ReteFuente, ReteICA, ReteIVA). Use null when the tax is not visible on the document.
+6. Use null (or [] for line_items) when a field is not present. Never invent data.
+7. Extract ALL visible line items. Each line: description as printed, quantity, unit_price, and amount (line total). If only the total is visible per line, derive unit_price = amount / quantity when quantity > 0.
+8. "subtotal": the net sum before tax. "total": the grand total to pay. When the document only shows a grand total, set subtotal = total and tax_amount = null.
+9. "confidence": 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
+10. "extraction_notes": short note in Spanish about anything ambiguous or missing, or null if everything was clear.
+11. Return ONLY the JSON object — no markdown fences, no prose, no explanations.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the image (handled by ExpenseScannerService).
+      prompt_template: null,
+    },
         {
       key: 'rut_scanner',
       name: 'Escaner de RUT (Identidad Fiscal)',
@@ -830,7 +884,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -949,7 +1003,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

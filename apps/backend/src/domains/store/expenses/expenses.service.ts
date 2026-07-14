@@ -109,7 +109,7 @@ export class ExpensesService {
   }
 
   async create(createExpenseDto: CreateExpenseDto) {
-    const { category_id, ...data } = createExpenseDto;
+    const { category_id, items, ...data } = createExpenseDto;
     const context = this.getContext();
 
     if (category_id) {
@@ -134,9 +134,21 @@ export class ExpensesService {
         category_id,
         created_by_user_id: context.user_id,
         expense_date: new Date(createExpenseDto.expense_date),
+        expense_items: items?.length
+          ? {
+              create: items.map((it, idx) => ({
+                description: it.description,
+                quantity: new Prisma.Decimal(it.quantity),
+                unit_price: new Prisma.Decimal(it.unit_price),
+                amount: new Prisma.Decimal(it.amount),
+                line_index: it.line_index ?? idx,
+              })),
+            }
+          : undefined,
       },
       include: {
         expense_categories: true,
+        expense_items: { orderBy: { line_index: 'asc' } },
         created_by_user: {
           select: { id: true, first_name: true, last_name: true },
         },
