@@ -51,9 +51,14 @@
 
     <!-- Main Grid: Two columns -->
     <div class="max-w-[1600px] mx-auto">
-      <!-- Channel + Delivery Info Bar -->
-      <div class="bg-surface border border-border rounded-lg px-3 py-2 mb-4">
-        <div class="flex items-center gap-3 text-[12px]">
+      <!-- Order summary strip: channel + delivery + credit (ultra-thin) -->
+      <div class="bg-surface border border-border rounded-lg px-3 py-1 mb-2">
+        <div class="flex items-center gap-2.5 text-[11px]">
+          <span
+            class="text-[10px] font-black uppercase tracking-wider text-text-secondary whitespace-nowrap"
+            >Resumen de compra</span
+          >
+          <span class="w-px h-3.5 bg-border"></span>
           <div class="flex items-center gap-1.5 text-text-primary font-medium">
             <app-icon
               [name]="channelConfig().icon"
