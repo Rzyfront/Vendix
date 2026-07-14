@@ -255,18 +255,6 @@ export class MenusListPageComponent implements OnInit {
     this.loadMenus();
   }
 
-  onCreateCombo(): void {
-    this.router.navigate(
-      ['/admin/products/create'],
-      {
-        queryParams: {
-          is_combo: 'true',
-          product_type: 'prepared',
-        },
-      },
-    );
-  }
-
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
