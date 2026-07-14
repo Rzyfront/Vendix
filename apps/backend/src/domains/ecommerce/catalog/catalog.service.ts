@@ -1166,8 +1166,11 @@ export class CatalogService {
     const industries = (store?.industries ?? []) as string[];
     if (!industries.includes('restaurant')) return empty(timezone);
 
-    const { day: nowDay, minutes: nowMinutes } =
+    // `minutes` de getDateInTimezone es minuto-de-la-hora (0-59); isWindowActive
+    // necesita minuto-del-día → componer hours*60+minutes (ver menu-availability-checker).
+    const { day: nowDay, hours, minutes } =
       this.menuAvailabilityChecker.getDateInTimezone(timezone);
+    const nowMinutes = hours * 60 + minutes;
 
     const menus = await this.storePrisma.menus.findMany({
       where: { is_active: true },

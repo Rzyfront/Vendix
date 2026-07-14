@@ -156,8 +156,11 @@ export class MenuAvailabilityCheckerService {
     if (gatingByProduct.length === 0) return blocked;
 
     const timezone = await this.getStoreTimezone(storeId);
-    const { day: nowDay, minutes: nowMinutes } =
-      this.getDateInTimezone(timezone);
+    // getDateInTimezone devuelve `minutes` como minuto-de-la-hora (0-59), no
+    // minuto-del-día. isWindowActive espera minuto-del-día, así que hay que
+    // componer `hours * 60 + minutes` (mismo patrón que membership-access).
+    const { day: nowDay, hours, minutes } = this.getDateInTimezone(timezone);
+    const nowMinutes = hours * 60 + minutes;
 
     // A product can appear in several sections/menus. It is AVAILABLE as soon as
     // ANY of its gating contexts is open (or windowless). It is BLOCKED only if
@@ -296,8 +299,11 @@ export class MenuAvailabilityCheckerService {
     if (gatingByProduct.length === 0) return map;
 
     const timezone = await this.getStoreTimezone(storeId);
-    const { day: nowDay, minutes: nowMinutes } =
-      this.getDateInTimezone(timezone);
+    // getDateInTimezone devuelve `minutes` como minuto-de-la-hora (0-59), no
+    // minuto-del-día. isWindowActive espera minuto-del-día, así que hay que
+    // componer `hours * 60 + minutes` (mismo patrón que membership-access).
+    const { day: nowDay, hours, minutes } = this.getDateInTimezone(timezone);
+    const nowMinutes = hours * 60 + minutes;
 
     // OR semantics: available as soon as ANY gating context is open (or
     // windowless). Accumulate the full window union per product so, when it ends
