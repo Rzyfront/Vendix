@@ -124,6 +124,24 @@ export class EcommerceGeneralDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      'Storefront checkout availability master switch. When false the store rejects checkout.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  store_available?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'Estamos cerrados temporalmente. Reabrimos pronto.',
+    description: 'Message shown to the customer when the store is unavailable',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  unavailable_message?: string;
 }
 
 /**
@@ -818,4 +836,27 @@ export class EcommerceSettingsDto {
 export class UpdateEcommerceSettingsDto {
   @IsObject()
   ecommerce: EcommerceSettingsDto;
+}
+
+/**
+ * DTO for the immediate storefront availability toggle.
+ * Deep-merges ONLY into `settings.ecommerce.general` (store_available +
+ * unavailable_message), preserving currency/locale/timezone and other keys.
+ */
+export class UpdateStoreAvailabilityDto {
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Whether the storefront accepts checkout',
+  })
+  @IsBoolean()
+  store_available: boolean;
+
+  @ApiPropertyOptional({
+    example: 'Estamos cerrados temporalmente. Reabrimos pronto.',
+    description: 'Optional message shown to the customer while unavailable',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  unavailable_message?: string;
 }

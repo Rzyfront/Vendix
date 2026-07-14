@@ -2,17 +2,20 @@ import { Component, DestroyRef, computed, signal, inject } from '@angular/core';
 
 import {
   FormBuilder,
+  FormControl,
   FormGroup,
   FormsModule,
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
+import {
+  CdkDragDrop,
+  DragDropModule,
+  moveItemInArray,
+} from '@angular/cdk/drag-drop';
 import { map, startWith } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
-import { environment } from '../../../../../environments/environment';
 import { Store } from '@ngrx/store';
 import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
 import { ShippingMethodsService } from '../settings/shipping/services/shipping-methods.service';
@@ -49,7 +52,6 @@ import { TourService } from '../../../../shared/components/tour/services/tour.se
 import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/configs/ecommerce-tour.config';
 import { SelectorOption } from '../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
-import type { Currency } from '../../../../shared/pipes/currency';
 import { ProductState } from '../products/interfaces';
 
 type HomeSectionKey =
@@ -148,6 +150,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
   imports: [
     ReactiveFormsModule,
     FormsModule,
+    DragDropModule,
     IconComponent,
     ButtonComponent,
     InputComponent,
@@ -172,7 +175,6 @@ export class EcommerceComponent {
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
-  private http = inject(HttpClient);
   private store = inject(Store);
   private router = inject(Router);
   private shippingMethodsService = inject(ShippingMethodsService);
@@ -183,8 +185,6 @@ export class EcommerceComponent {
   readonly ecommerceTourConfig = ECOMMERCE_TOUR_CONFIG;
 
   // Currencies for selector
-  currencies: SelectorOption[] = [];
-
   // Mode detection
   isSetupMode = signal(false);
   isEditMode = signal(false);
@@ -200,6 +200,18 @@ export class EcommerceComponent {
       startWith(this.settingsForm.getRawValue()),
     ),
     { initialValue: this.settingsForm.getRawValue() },
+  );
+
+  /**
+   * Disponibilidad pública de la tienda como signal (zoneless-safe): se deriva
+   * del valueChanges del control `general.store_available` con startWith para
+   * lectura síncrona en plantilla. No leer `.value` directamente en el template.
+   */
+  readonly storeAvailable = toSignal(
+    this.storeAvailableControl.valueChanges.pipe(
+      startWith(this.storeAvailableControl.value),
+    ),
+    { initialValue: this.storeAvailableControl.value },
   );
 
   /** La sección "Cartas" solo aplica a tiendas de industria restaurant. */
@@ -233,6 +245,54 @@ export class EcommerceComponent {
   readonly accentColor = computed(
     () => this.formValueSignal()?.inicio?.colores?.accent_color ?? '#F59E0B',
   );
+
+  // ─── Preferencias de zona bloqueadas a Colombia ───────────────────────────
+  // Solo se ofrece la opción colombiana (COP / es-CO / America/Bogota) como
+  // valor por defecto; si la tienda ya tiene otro valor guardado en BD se
+  // conserva como opción adicional para no romper el selector ni perder datos.
+  // Se exponen como `computed` (referencia memoizada) para evitar
+  // ExpressionChangedAfterItHasBeenCheckedError en zoneless.
+  private readonly CO_CURRENCY: SelectorOption = {
+    value: 'COP',
+    label: 'Peso Colombiano (COP)',
+  };
+  private readonly CO_LOCALE: SelectorOption = {
+    value: 'es-CO',
+    label: 'Español (Colombia)',
+  };
+  private readonly CO_TIMEZONE: SelectorOption = {
+    value: 'America/Bogota',
+    label: 'Bogotá (UTC-5)',
+  };
+
+  readonly currencyOptions = computed<SelectorOption[]>(() =>
+    this.lockedZoneOptions(
+      this.formValueSignal()?.general?.currency,
+      this.CO_CURRENCY,
+    ),
+  );
+  readonly localeOptions = computed<SelectorOption[]>(() =>
+    this.lockedZoneOptions(
+      this.formValueSignal()?.general?.locale,
+      this.CO_LOCALE,
+    ),
+  );
+  readonly timezoneOptions = computed<SelectorOption[]>(() =>
+    this.lockedZoneOptions(
+      this.formValueSignal()?.general?.timezone,
+      this.CO_TIMEZONE,
+    ),
+  );
+
+  /** [opción CO] + el valor actual si difiere (preserva datos históricos de BD). */
+  private lockedZoneOptions(
+    current: string | null | undefined,
+    co: SelectorOption,
+  ): SelectorOption[] {
+    return current && current !== co.value
+      ? [co, { value: current, label: current }]
+      : [co];
+  }
 
   // Slider images
   readonly sliderImages = signal<SliderImage[]>([]);
@@ -378,7 +438,6 @@ export class EcommerceComponent {
     this.loadSettings();
     this.loadSliderTargetOptions();
     this.currencyService.loadCurrency();
-    this.loadCurrencies();
     this.checkShippingStatus();
 
     this.destroyRef.onDestroy(() => {});
@@ -407,9 +466,13 @@ export class EcommerceComponent {
 
       // Configuración General
       general: this.fb.group({
-        currency: [this.currencyService.currencyCode() || 'COP'],
+        currency: ['COP'],
         locale: ['es-CO'],
         timezone: ['America/Bogota'],
+        // Disponibilidad pública de la tienda (persiste de forma inmediata,
+        // independiente del botón Guardar). Default true.
+        store_available: [true],
+        unavailable_message: [''],
       }),
 
       // Slider Principal
@@ -537,6 +600,12 @@ export class EcommerceComponent {
   }
   get timezoneControl() {
     return this.generalGroup.get('timezone') as any;
+  }
+  get storeAvailableControl(): FormControl<boolean> {
+    return this.generalGroup.get('store_available') as FormControl<boolean>;
+  }
+  get unavailableMessageControl(): FormControl<string> {
+    return this.generalGroup.get('unavailable_message') as FormControl<string>;
   }
 
   // Slider
@@ -813,41 +882,6 @@ export class EcommerceComponent {
   }
 
   /**
-   * Load active currencies for the selector
-   */
-  private async loadCurrencies(): Promise<void> {
-    try {
-      const response = await firstValueFrom(
-        this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
-          `${environment.apiUrl}/public/currencies/active`,
-        ),
-      );
-
-      if (response.success && response.data) {
-        this.currencies = response.data.map((c) => ({
-          value: c.code,
-          label: `${c.name} (${c.code})`,
-        }));
-      } else {
-        // Fallback to common currencies if service fails
-        this.currencies = [
-          { value: 'COP', label: 'Peso Colombiano (COP)' },
-          { value: 'USD', label: 'Dólar Americano (USD)' },
-          { value: 'EUR', label: 'Euro (EUR)' },
-        ];
-      }
-    } catch (error) {
-      console.error('Error loading currencies:', error);
-      // Fallback to common currencies
-      this.currencies = [
-        { value: 'COP', label: 'Peso Colombiano (COP)' },
-        { value: 'USD', label: 'Dólar Americano (USD)' },
-        { value: 'EUR', label: 'Euro (EUR)' },
-      ];
-    }
-  }
-
-  /**
    * Check if the store has active shipping methods configured
    */
   private checkShippingStatus(): void {
@@ -1119,6 +1153,63 @@ export class EcommerceComponent {
 
   private getHomeSectionGroup(key: HomeSectionKey): FormGroup {
     return this.settingsForm.get(['home_sections', key]) as FormGroup;
+  }
+
+  /**
+   * Reordena las secciones del inicio por drag & drop (reemplaza las flechas).
+   * Toma el orden visible, aplica el movimiento y reescribe `sort_order`
+   * secuencial (10, 20, 30…) en cada FormGroup para persistir el nuevo orden.
+   */
+  onHomeSectionDrop(event: CdkDragDrop<HomeSectionAdminItem[]>): void {
+    if (event.previousIndex === event.currentIndex) return;
+    const arr = [...this.orderedHomeSections()];
+    moveItemInArray(arr, event.previousIndex, event.currentIndex);
+    arr.forEach((item, i) => {
+      this.getHomeSectionGroup(item.key).patchValue({
+        sort_order: (i + 1) * 10,
+      });
+    });
+    this.settingsForm.markAsDirty();
+  }
+
+  /**
+   * Indica si una sección del inicio está habilitada. Se usa para colapsar los
+   * campos de configuración cuando la sección está desactivada (el header y su
+   * toggle permanecen siempre visibles). Zoneless-safe: lee formValueSignal.
+   */
+  isSectionEnabled(key: HomeSectionKey): boolean {
+    return this.formValueSignal()?.home_sections?.[key]?.enabled !== false;
+  }
+
+  /**
+   * Invierte la disponibilidad pública de la tienda y persiste de inmediato
+   * (independiente del botón Guardar). Ante error revierte el control local.
+   */
+  toggleStoreAvailability(): void {
+    const next = !this.storeAvailableControl.value;
+    this.storeAvailableControl.setValue(next);
+
+    const message = (this.unavailableMessageControl.value || '').trim();
+    this.ecommerceService
+      .setAvailability({
+        store_available: next,
+        unavailable_message: message || undefined,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            next ? 'Tienda activada' : 'Tienda desactivada',
+          );
+        },
+        error: (error) => {
+          // Revertir el estado local si el backend rechaza el cambio.
+          this.storeAvailableControl.setValue(!next);
+          this.toastService.error(
+            'Error al actualizar la disponibilidad: ' + error.message,
+          );
+        },
+      });
   }
 
   private getStoreBrandingFaviconUrl(): string | null {
