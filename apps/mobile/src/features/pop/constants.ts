@@ -51,3 +51,23 @@ function calcSummary(items: PopCartItem[], shippingCost = 0): PopCartSummary {
 }
 
 export { recalcItem, calcSummary };
+
+/**
+ * Dimensiones responsivas del control de cantidad (qty +/-) compartido entre
+ * `pop-config-modal` y `pop-prebulk-modal`. Ajusta a un breakpoint cuando el
+ * ancho de pantalla es < 360 (caso típico de teléfonos viejos).
+ */
+export const QTY_BREAKPOINT = 360;
+
+export interface QtyControlSize {
+  btnSize: number;
+  fontSize: number;
+  hPad: number;
+}
+
+export function getQtyControlSize(screenWidth: number): QtyControlSize {
+  if (screenWidth < QTY_BREAKPOINT) {
+    return { btnSize: 36, fontSize: 14, hPad: 10 };
+  }
+  return { btnSize: 40, fontSize: 16, hPad: 14 };
+}

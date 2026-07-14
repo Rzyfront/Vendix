@@ -1737,6 +1737,7 @@ export class PaymentsService {
         applied_promotions: [],
         items: [],
         order_promotions_snapshot: [],
+        tier_progress: [],
       };
     }
   }

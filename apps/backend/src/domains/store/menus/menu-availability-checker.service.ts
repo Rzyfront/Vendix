@@ -28,6 +28,17 @@ export interface AvailabilityWindow {
   end_time: string;
 }
 
+/**
+ * Per-product availability contract shared with the storefront catalog (card +
+ * detail). `next_available` is only populated when `is_available_now === false`.
+ * A product not gated by any window is always `{ is_available_now: true,
+ * next_available: null }` — this is what keeps retail products untouched.
+ */
+export interface ProductAvailability {
+  is_available_now: boolean;
+  next_available: { day_of_week: number; start_time: string } | null;
+}
+
 @Injectable()
 export class MenuAvailabilityCheckerService {
   constructor(private readonly storePrisma: StorePrismaService) {}
@@ -138,10 +149,69 @@ export class MenuAvailabilityCheckerService {
     productIds: number[],
   ): Promise<Set<number>> {
     const blocked = new Set<number>();
+    const gatingByProduct = await this.loadProductGatingWindows(
+      storeId,
+      productIds,
+    );
+    if (gatingByProduct.length === 0) return blocked;
+
+    const timezone = await this.getStoreTimezone(storeId);
+    // getDateInTimezone devuelve `minutes` como minuto-de-la-hora (0-59), no
+    // minuto-del-día. isWindowActive espera minuto-del-día, así que hay que
+    // componer `hours * 60 + minutes` (mismo patrón que membership-access).
+    const { day: nowDay, hours, minutes } = this.getDateInTimezone(timezone);
+    const nowMinutes = hours * 60 + minutes;
+
+    // A product can appear in several sections/menus. It is AVAILABLE as soon as
+    // ANY of its gating contexts is open (or windowless). It is BLOCKED only if
+    // EVERY context that references it has windows AND none is active now.
+    const availableProductIds = new Set<number>();
+    const windowedButClosed = new Set<number>();
+
+    for (const entry of gatingByProduct) {
+      const gatingWindows = entry.gatingWindows;
+      const isAvailableHere =
+        gatingWindows.length === 0 ||
+        gatingWindows.some((w) => this.isWindowActive(w, nowDay, nowMinutes));
+
+      if (isAvailableHere) {
+        availableProductIds.add(entry.product_id);
+      } else {
+        windowedButClosed.add(entry.product_id);
+      }
+    }
+
+    // Blocked = referenced somewhere with a closed windowed context AND never
+    // reachable through an open/windowless context.
+    for (const productId of windowedButClosed) {
+      if (!availableProductIds.has(productId)) {
+        blocked.add(productId);
+      }
+    }
+
+    return blocked;
+  }
+
+  /**
+   * Shared window loader for `getBlockedProductIds` and `getAvailabilityMap`.
+   * Returns, per `menu_section_items` row referencing one of `productIds` in an
+   * ACTIVE menu, the UNION (section ∪ parent-menu) of availability windows that
+   * gate that product in that context. A single query, no timezone math here —
+   * both public methods add the "now" evaluation on top of this raw gating set.
+   *
+   * Tenant scope: filtered by explicit `store_id` on every model read, matching
+   * the carta endpoint's store-scoped reads (vendix-prisma-scopes).
+   */
+  private async loadProductGatingWindows(
+    storeId: number,
+    productIds: number[],
+  ): Promise<
+    Array<{ product_id: number; gatingWindows: AvailabilityWindow[] }>
+  > {
     const uniqueIds = Array.from(new Set(productIds)).filter((id) =>
       Number.isFinite(id),
     );
-    if (uniqueIds.length === 0) return blocked;
+    if (uniqueIds.length === 0) return [];
 
     // All section-items of these products that live in ACTIVE menus. We pull
     // the section windows and the parent-menu windows in one query so the
@@ -177,46 +247,128 @@ export class MenuAvailabilityCheckerService {
       },
     });
 
-    if (items.length === 0) return blocked;
-
-    const timezone = await this.getStoreTimezone(storeId);
-    const { day: nowDay, minutes: nowMinutes } =
-      this.getDateInTimezone(timezone);
-
-    // A product can appear in several sections/menus. It is AVAILABLE as soon as
-    // ANY of its gating contexts is open (or windowless). It is BLOCKED only if
-    // EVERY context that references it has windows AND none is active now.
-    const availableProductIds = new Set<number>();
-    const windowedButClosed = new Set<number>();
-
-    for (const item of items) {
+    return items.map((item) => {
       const sectionWindows = item.menu_section?.availability_windows ?? [];
       const menuWindows = item.menu_section?.menu?.availability_windows ?? [];
-      const gatingWindows: AvailabilityWindow[] = [
-        ...sectionWindows,
-        ...menuWindows,
-      ];
+      return {
+        product_id: item.product_id,
+        gatingWindows: [
+          ...sectionWindows,
+          ...menuWindows,
+        ] as AvailabilityWindow[],
+      };
+    });
+  }
+
+  /**
+   * Per-product availability for the storefront catalog (card + detail),
+   * computed with the SAME window loader, timezone resolution and OR semantics
+   * as `getBlockedProductIds` — the single source of truth. For each requested
+   * id:
+   *  - `is_available_now`: false only when EVERY context referencing it has
+   *    windows and none is active now (identical to the "blocked" definition).
+   *  - `next_available`: the soonest upcoming window across the union of all
+   *    gating windows that reference the product, ONLY when it is not available
+   *    now; otherwise null.
+   *  - A product not reachable through any `menu_section_items`, or only through
+   *    windowless contexts, is `{ is_available_now: true, next_available: null }`
+   *    (retail stays untouched).
+   *
+   * Timezone and "now" are resolved internally; the caller never passes them.
+   */
+  async getAvailabilityMap(
+    storeId: number,
+    productIds: number[],
+  ): Promise<Map<number, ProductAvailability>> {
+    const map = new Map<number, ProductAvailability>();
+    const uniqueIds = Array.from(new Set(productIds)).filter((id) =>
+      Number.isFinite(id),
+    );
+    if (uniqueIds.length === 0) return map;
+
+    // Default: every requested product is available with no restriction. Only
+    // products gated by a closed window get downgraded below.
+    for (const id of uniqueIds) {
+      map.set(id, { is_available_now: true, next_available: null });
+    }
+
+    const gatingByProduct = await this.loadProductGatingWindows(
+      storeId,
+      uniqueIds,
+    );
+    if (gatingByProduct.length === 0) return map;
+
+    const timezone = await this.getStoreTimezone(storeId);
+    // getDateInTimezone devuelve `minutes` como minuto-de-la-hora (0-59), no
+    // minuto-del-día. isWindowActive espera minuto-del-día, así que hay que
+    // componer `hours * 60 + minutes` (mismo patrón que membership-access).
+    const { day: nowDay, hours, minutes } = this.getDateInTimezone(timezone);
+    const nowMinutes = hours * 60 + minutes;
+
+    // OR semantics: available as soon as ANY gating context is open (or
+    // windowless). Accumulate the full window union per product so, when it ends
+    // up blocked, `next_available` scans every window that references it.
+    const availableProductIds = new Set<number>();
+    const windowsByProduct = new Map<number, AvailabilityWindow[]>();
+
+    for (const entry of gatingByProduct) {
+      const gatingWindows = entry.gatingWindows;
+      const accumulated = windowsByProduct.get(entry.product_id) ?? [];
+      windowsByProduct.set(entry.product_id, [
+        ...accumulated,
+        ...gatingWindows,
+      ]);
 
       const isAvailableHere =
         gatingWindows.length === 0 ||
         gatingWindows.some((w) => this.isWindowActive(w, nowDay, nowMinutes));
-
       if (isAvailableHere) {
-        availableProductIds.add(item.product_id);
-      } else {
-        windowedButClosed.add(item.product_id);
+        availableProductIds.add(entry.product_id);
       }
     }
 
-    // Blocked = referenced somewhere with a closed windowed context AND never
-    // reachable through an open/windowless context.
-    for (const productId of windowedButClosed) {
-      if (!availableProductIds.has(productId)) {
-        blocked.add(productId);
-      }
+    for (const [productId, windows] of windowsByProduct) {
+      const isAvailable = availableProductIds.has(productId);
+      map.set(productId, {
+        is_available_now: isAvailable,
+        next_available: isAvailable
+          ? null
+          : this.nextAvailableWindow(windows, nowDay, nowMinutes),
+      });
     }
 
-    return blocked;
+    return map;
+  }
+
+  /**
+   * Soonest upcoming window (within a week) as {day_of_week, start_time}, or
+   * null when there are no windows. Centralized here as the single source of
+   * truth for "próxima ventana". `catalog.getPublicMenus` still keeps its own
+   * private copy for the carta view — that dedup is a deferred follow-up.
+   */
+  private nextAvailableWindow(
+    windows: AvailabilityWindow[],
+    nowDay: number,
+    nowMinutes: number,
+  ): { day_of_week: number; start_time: string } | null {
+    if (!windows || windows.length === 0) return null;
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+    let best: { day_of_week: number; start_time: string } | null = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const w of windows) {
+      const start = toMinutes(w.start_time);
+      const dayDiff = (w.day_of_week - nowDay + 7) % 7;
+      let delta = dayDiff * 1440 + (start - nowMinutes);
+      if (delta <= 0) delta += 7 * 1440;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = { day_of_week: w.day_of_week, start_time: w.start_time };
+      }
+    }
+    return best;
   }
 
   /**

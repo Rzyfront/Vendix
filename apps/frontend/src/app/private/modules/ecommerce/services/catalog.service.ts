@@ -78,6 +78,14 @@ export interface EcommerceProduct {
   categories: { id: number; name: string; slug: string }[];
   variant_count?: number;
   variants?: ProductVariantDetail[];
+  /**
+   * Menu (carta) availability for restaurant dishes. A product NOT tied to a
+   * menu schedule arrives with `is_available_now: true`. Optional for
+   * robustness against an older backend / cached payload — consumers MUST
+   * treat `undefined` as available and gate only on an explicit `=== false`.
+   */
+  is_available_now?: boolean;
+  next_available?: MenuNextAvailable | null;
 }
 
 export interface ProductVariantDetail {
@@ -183,6 +191,19 @@ export interface MenuAvailabilityWindow {
 export interface MenuNextAvailable {
   day_of_week: number;
   start_time: string;
+}
+
+/**
+ * Formats a `MenuNextAvailable` into a short label like "Vie 08:00" (día
+ * abreviado + hora), or "pronto" when null. Shared by the product card,
+ * product detail, and quick-view so the off-schedule badge reads identically
+ * to the menus showcase `formatNext`.
+ */
+export function formatMenuNextAvailable(next: MenuNextAvailable | null): string {
+  if (!next) return 'pronto';
+  const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const day = days[next.day_of_week] ?? '';
+  return `${day} ${next.start_time}`.trim();
 }
 
 export interface MenuItemProduct {

@@ -22,6 +22,13 @@ import {
  * Menu-level availability windows. Section-scoped windows are created by
  * passing `menu_section_id` in the body; the controller accepts both
  * shapes transparently.
+ *
+ * NOTA: sin try/catch. Las VendixHttpException del servicio (p.ej.
+ * MENU_AVAILABILITY_INVALID_TIME → 422) se propagan al AllExceptionsFilter
+ * global, que fija el HTTP status real y el error_code. Envolverlas aquí con
+ * responseService.error() devolvía 200/201 con un body {statusCode:422}, y
+ * Angular HttpClient —que sólo rechaza respuestas no-2xx— lo interpretaba como
+ * éxito (falso positivo en el formulario de horarios).
  */
 @Controller('store/menus/:menuId/availability-windows')
 @UseGuards(PermissionsGuard)
@@ -34,17 +41,8 @@ export class MenuAvailabilityController {
   @Get()
   @Permissions('store:menus:read')
   async list(@Param('menuId', ParseIntPipe) menuId: number) {
-    try {
-      const data = await this.availabilityService.listForMenu(menuId);
-      return this.responseService.success(data, 'Ventanas de disponibilidad');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener ventanas',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const data = await this.availabilityService.listForMenu(menuId);
+    return this.responseService.success(data, 'Ventanas de disponibilidad');
   }
 
   @Post()
@@ -53,17 +51,8 @@ export class MenuAvailabilityController {
     @Param('menuId', ParseIntPipe) menuId: number,
     @Body() dto: CreateAvailabilityWindowDto,
   ) {
-    try {
-      const data = await this.availabilityService.create(menuId, dto);
-      return this.responseService.created(data, 'Ventana creada');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al crear la ventana',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const data = await this.availabilityService.create(menuId, dto);
+    return this.responseService.created(data, 'Ventana creada');
   }
 
   @Patch(':id')
@@ -72,32 +61,14 @@ export class MenuAvailabilityController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateAvailabilityWindowDto,
   ) {
-    try {
-      const data = await this.availabilityService.update(id, dto);
-      return this.responseService.updated(data, 'Ventana actualizada');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la ventana',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const data = await this.availabilityService.update(id, dto);
+    return this.responseService.updated(data, 'Ventana actualizada');
   }
 
   @Delete(':id')
   @Permissions('store:menus:update')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.availabilityService.delete(id);
-      return this.responseService.deleted('Ventana eliminada');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la ventana',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    await this.availabilityService.delete(id);
+    return this.responseService.deleted('Ventana eliminada');
   }
 }

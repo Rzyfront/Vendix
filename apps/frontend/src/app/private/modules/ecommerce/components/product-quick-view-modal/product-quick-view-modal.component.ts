@@ -17,7 +17,8 @@ import { ModalComponent } from '../../../../../shared/components/modal/modal.com
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
-import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct } from '../../services/catalog.service';
+import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
+import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
 
@@ -31,6 +32,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     SpinnerComponent,
     IconComponent,
     ButtonComponent,
+    BadgeComponent,
     QuantityControlComponent,
     ShareModalComponent,
     CurrencyPipe,
@@ -145,7 +147,11 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
             <!-- Stock Status -->
             <div class="stock-status">
-              @if (isOnDemand()) {
+              @if (isOffSchedule()) {
+                <app-badge variant="warning">
+                  Disponible {{ formatNextAvailable() }}
+                </app-badge>
+              } @else if (isOnDemand()) {
                 <span class="on-demand">
                   <app-icon name="package" [size]="14" /> Disponible bajo pedido
                 </span>
@@ -628,12 +634,23 @@ export class ProductQuickViewModalComponent {
     return this.product()?.track_inventory === false;
   });
 
+  /** True when a menu (carta) schedule marks the dish unavailable right now. */
+  readonly isOffSchedule = computed(
+    () => this.product()?.is_available_now === false,
+  );
+
   readonly purchaseDisabled = computed(() => {
+    if (this.isOffSchedule()) return true;
     if (this.hasVariants() && !this.selectedVariant()) return true;
     const variant = this.selectedVariant();
     if (variant && !this.isVariantAvailable(variant)) return true;
     return !this.isOnDemand() && this.displayStock() === 0;
   });
+
+  /** Short "Disponible Vie 08:00" label for the off-schedule badge. */
+  formatNextAvailable(): string {
+    return formatMenuNextAvailable(this.product()?.next_available ?? null);
+  }
 
   readonly displayImageUrl = computed<string | null>(() => {
     const v = this.selectedVariant();

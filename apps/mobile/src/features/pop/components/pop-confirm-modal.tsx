@@ -23,7 +23,9 @@ interface PopConfirmModalProps {
 }
 
 function formatCurrency(n: number): string {
-  return '$' + n.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  // Locale del dispositivo (no 'es-CO' hardcodeado) — paridad con la fix
+  // L10 aplicada a pop-cart-modal.
+  return '$' + n.toLocaleString();
 }
 
 export default function PopConfirmModal({

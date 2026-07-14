@@ -482,6 +482,7 @@ export class CheckoutService {
           applied_promotions: [],
           items: [],
           order_promotions_snapshot: [],
+          tier_progress: [],
         },
         coupon: null,
         promotion_discount: 0,

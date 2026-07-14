@@ -52,13 +52,15 @@
           [title]="section.config.title || 'Nuestras cartas'"
           [subtitle]="section.config.subtitle || ''"
           [limit]="section.config.limit || 8"
+          [show_shipping_badge]="shipping_badge_enabled()"
+          (toggle_wishlist)="onToggleWishlist($event)"
+          (share)="onShare($event)"
         />
       }
 
       @case ("featured_products") {
         <section class="products-section">
           <div class="section-header">
-            <span class="section-kicker">Selección curada</span>
             <h2>{{ section.config.title || 'Productos destacados' }}</h2>
             <p class="subtitle">
               {{

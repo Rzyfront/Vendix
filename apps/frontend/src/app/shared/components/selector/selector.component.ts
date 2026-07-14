@@ -28,6 +28,9 @@ export interface SelectorOption {
   disabled?: boolean;
   description?: string;
   icon?: string;
+  /** URL de miniatura opcional; si está presente, el modo searchable la
+   * renderiza como avatar a la izquierda del label. Aditivo/retrocompatible. */
+  imageUrl?: string;
 }
 
 export type SelectorSize = 'sm' | 'md' | 'lg';
@@ -124,6 +127,31 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                       [class.bg-primary-50]="option.value == selectedValue()"
                       [class.font-semibold]="option.value == selectedValue()"
                       >
+                      <!-- Optional leading thumbnail/avatar. Only rendered when the
+                           option provides an imageUrl or an icon, so options that use
+                           neither look exactly as before (full backward compat). -->
+                      @if (option.imageUrl || option.icon) {
+                        @if (option.imageUrl && !hasImageFailed(option.imageUrl)) {
+                          <img
+                            [src]="option.imageUrl"
+                            [alt]="option.label"
+                            (error)="onImageError(option.imageUrl!)"
+                            class="w-7 h-7 rounded-md object-cover shrink-0 bg-[var(--color-surface-muted)]"
+                            />
+                        } @else if (option.icon) {
+                          <span
+                            class="w-7 h-7 rounded-md shrink-0 flex items-center justify-center bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+                            >
+                            <app-icon [name]="$any(option.icon)" [size]="16"></app-icon>
+                          </span>
+                        } @else {
+                          <span
+                            class="w-7 h-7 rounded-md shrink-0 flex items-center justify-center bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+                            >
+                            <app-icon name="image" [size]="16"></app-icon>
+                          </span>
+                        }
+                      }
                       <span
                         class="flex-1 min-w-0 text-[var(--color-text-primary)] truncate"
                         [class.text-primary-700]="option.value == selectedValue()"
@@ -259,6 +287,13 @@ export class SelectorComponent implements ControlValueAccessor {
    */
   readonly dropUp = signal<boolean>(false);
 
+  /**
+   * URLs de miniaturas que fallaron al cargar. Se registran vía `onImageError`
+   * para caer al placeholder/icono sin romper el layout. Es un signal para que
+   * el template reaccione en zoneless (la escritura agenda la detección).
+   */
+  private readonly failedImageUrls = signal<Set<string>>(new Set<string>());
+
   /** Estimated panel height used to decide whether to flip. Matches
    *  the visual `max-h-60` (~240px) plus the search-input row. */
   private readonly panelEstimatedHeight = 260;
@@ -360,6 +395,21 @@ export class SelectorComponent implements ControlValueAccessor {
 
   onSearch(term: string): void {
     this.searchTerm.set(term);
+  }
+
+  /** Marca una URL de miniatura como fallida para caer al fallback. */
+  onImageError(url: string): void {
+    this.failedImageUrls.update((set) => {
+      if (set.has(url)) return set;
+      const next = new Set(set);
+      next.add(url);
+      return next;
+    });
+  }
+
+  /** true si la miniatura de esa URL ya falló al cargar. */
+  hasImageFailed(url: string | undefined): boolean {
+    return url != null && this.failedImageUrls().has(url);
   }
 
   onFocus(): void {

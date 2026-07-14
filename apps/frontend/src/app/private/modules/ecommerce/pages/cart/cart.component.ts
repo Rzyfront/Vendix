@@ -4,7 +4,6 @@ import {
   DestroyRef,
   inject,
   signal,
-  computed,
   ChangeDetectionStrategy,
   viewChild,
 } from '@angular/core';
@@ -26,12 +25,12 @@ import {
 } from '../../services/catalog.service';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
-import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
-import type { BadgeVariant } from '../../../../../shared/components/badge/badge.component';
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
+import { CartPromotionsComponent } from '../../components/cart-promotions/cart-promotions.component';
+import { CartItemCardComponent } from '../../components/cart-item-card/cart-item-card.component';
+import { CartMobileFooterComponent } from '../../components/cart-mobile-footer/cart-mobile-footer.component';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -49,12 +48,13 @@ import {
     CommonModule,
     RouterModule,
     IconComponent,
-    QuantityControlComponent,
     ButtonComponent,
     ProductCarouselComponent,
     ProductQuickViewModalComponent,
     GuestCheckoutDataModalComponent,
-    BadgeComponent,
+    CartPromotionsComponent,
+    CartItemCardComponent,
+    CartMobileFooterComponent,
     CurrencyPipe,
   ],
   templateUrl: './cart.component.html',
@@ -65,34 +65,6 @@ export class CartComponent implements OnInit {
   readonly cart = signal<Cart | null>(null);
   readonly is_loading = signal(true);
 
-  /**
-   * Detailed, per-promotion view derived from the cart signal. Each entry
-   * carries a presentational type badge (label + variant); when the backend
-   * does not surface the discount `type`, it degrades to a generic "Promoción"
-   * badge. Zoneless-safe: pure computed over the `cart` signal.
-   */
-  readonly appliedPromotions = computed<
-    Array<{
-      promotion_id: number;
-      name: string;
-      discount_amount: number;
-      typeLabel: string;
-      typeVariant: BadgeVariant;
-    }>
-  >(() =>
-    (this.cart()?.applied_promotions ?? []).map((promo) => ({
-      promotion_id: promo.promotion_id,
-      name: promo.name,
-      discount_amount: promo.discount_amount,
-      typeLabel:
-        promo.type === 'percentage'
-          ? 'Porcentaje'
-          : promo.type === 'fixed_amount'
-            ? 'Monto fijo'
-            : 'Promoción',
-      typeVariant: promo.type === 'fixed_amount' ? 'primary' : 'success',
-    })),
-  );
   readonly is_authenticated = signal(false);
   readonly updating_item_id = signal<number | null>(null);
 

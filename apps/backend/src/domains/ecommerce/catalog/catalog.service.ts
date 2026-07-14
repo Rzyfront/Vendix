@@ -8,7 +8,10 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
-import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+import {
+  MenuAvailabilityCheckerService,
+  ProductAvailability,
+} from '../../store/menus/menu-availability-checker.service';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -303,11 +306,14 @@ export class CatalogService {
       } else {
         const activePromotionsByProductId =
           await this.resolveActivePromotionsForListing(finalData);
+        const availabilityByProductId =
+          await this.resolveAvailabilityForProducts(store_id, finalData);
         const mappedData = await Promise.all(
           finalData.map((p) =>
             this.mapProductToResponse(
               p,
               activePromotionsByProductId.get(p.id) ?? null,
+              availabilityByProductId.get(p.id) ?? null,
             ),
           ),
         );
@@ -370,11 +376,14 @@ export class CatalogService {
 
     const activePromotionsByProductId =
       await this.resolveActivePromotionsForListing(data);
+    const availabilityByProductId =
+      await this.resolveAvailabilityForProducts(store_id, data);
     const mappedData = await Promise.all(
       data.map((product) =>
         this.mapProductToResponse(
           product,
           activePromotionsByProductId.get(product.id) ?? null,
+          availabilityByProductId.get(product.id) ?? null,
         ),
       ),
     );
@@ -473,10 +482,20 @@ export class CatalogService {
     const activePromotion =
       activePromotionsByProductId.get(product.id) ?? null;
 
+    // Menu availability for the detail view via the SAME shared checker as the
+    // card, so the "Disponible a las HH:mm" badge matches the catalog listing.
+    const store_id = RequestContextService.getStoreId();
+    const availabilityByProductId = await this.resolveAvailabilityForProducts(
+      store_id,
+      [product],
+    );
+    const availability = availabilityByProductId.get(product.id) ?? null;
+
     return await this.mapProductDetailToResponse(
       product,
       reviews_enabled,
       activePromotion,
+      availability,
     );
   }
 
@@ -686,9 +705,33 @@ export class CatalogService {
       .map((item) => item.product_id as number);
   }
 
+  /**
+   * Resolve per-product menu availability for a page/detail through the shared
+   * single source of truth
+   * (`MenuAvailabilityCheckerService.getAvailabilityMap`). The checker resolves
+   * store timezone and "now" internally; retail products (not gated by any
+   * carta window) default to available. Returns an empty map when there is no
+   * store context or no products, so callers fall back to the
+   * `{ is_available_now: true, next_available: null }` default.
+   */
+  private async resolveAvailabilityForProducts(
+    storeId: number | undefined,
+    products: any[],
+  ): Promise<Map<number, ProductAvailability>> {
+    if (!storeId || !Array.isArray(products) || products.length === 0) {
+      return new Map();
+    }
+    const ids = products
+      .map((p) => Number(p?.id))
+      .filter((id) => Number.isFinite(id));
+    if (ids.length === 0) return new Map();
+    return this.menuAvailabilityChecker.getAvailabilityMap(storeId, ids);
+  }
+
   private async mapProductToResponse(
     product: any,
     activePromotion: ActiveProductPromotion | null = null,
+    availability: ProductAvailability | null = null,
   ) {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
@@ -726,6 +769,10 @@ export class CatalogService {
       stock_quantity: availableStock,
       available_stock: effectiveTracking ? availableStock : null,
       is_available: isAvailable,
+      // Menu availability (carta horario) — independiente del stock. Productos
+      // retail (sin ventana de carta) quedan siempre disponibles.
+      is_available_now: availability?.is_available_now ?? true,
+      next_available: availability?.next_available ?? null,
       effective_track_inventory: effectiveTracking,
       track_inventory: product.track_inventory,
       image_url: signed_image_url || null,
@@ -745,6 +792,7 @@ export class CatalogService {
     product: any,
     reviews_enabled = true,
     activePromotion: ActiveProductPromotion | null = null,
+    availability: ProductAvailability | null = null,
   ) {
     const reviews = reviews_enabled ? product.reviews || [] : [];
     let avg_rating = 0;
@@ -807,6 +855,10 @@ export class CatalogService {
       stock_quantity: productAvailableStock,
       available_stock: effectiveTracking ? productAvailableStock : null,
       is_available: productIsAvailable,
+      // Menu availability (carta horario) — independiente del stock. Productos
+      // retail (sin ventana de carta) quedan siempre disponibles.
+      is_available_now: availability?.is_available_now ?? true,
+      next_available: availability?.next_available ?? null,
       effective_track_inventory: effectiveTracking,
       track_inventory: product.track_inventory,
       images: signed_images,
@@ -1114,8 +1166,11 @@ export class CatalogService {
     const industries = (store?.industries ?? []) as string[];
     if (!industries.includes('restaurant')) return empty(timezone);
 
-    const { day: nowDay, minutes: nowMinutes } =
+    // `minutes` de getDateInTimezone es minuto-de-la-hora (0-59); isWindowActive
+    // necesita minuto-del-día → componer hours*60+minutes (ver menu-availability-checker).
+    const { day: nowDay, hours, minutes } =
       this.menuAvailabilityChecker.getDateInTimezone(timezone);
+    const nowMinutes = hours * 60 + minutes;
 
     const menus = await this.storePrisma.menus.findMany({
       where: { is_active: true },

@@ -127,7 +127,11 @@ export interface PurchaseOrder {
   subtotal_amount?: number;
   tax_amount?: number;
   total_amount?: number;
+  shipping_cost?: number;
+  shipping_method?: string;
+  payment_terms?: string;
   notes?: string;
+  internal_notes?: string;
   created_at: string;
   suppliers?: { id: number; name: string };
   inventory_locations?: { id: number; name: string };
@@ -153,6 +157,9 @@ export interface CreatePurchaseOrderDto {
   tax_amount?: number;
   total_amount?: number;
   discount_amount?: number;
+  shipping_cost?: number;
+  shipping_method?: string;
+  payment_terms?: string;
   notes?: string;
   internal_notes?: string;
   items: CreatePurchaseOrderItemDto[];

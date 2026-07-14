@@ -1,7 +1,24 @@
 import { useRef, useState } from 'react';
-import { Alert, Modal, Pressable, Text, View, StyleSheet, type ViewStyle } from 'react-native';
+import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  StyleSheet,
+  type ViewStyle,
+} from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
+
+/**
+ * Altura máxima por defecto del popover (en dp). Cuando la lista de opciones
+ * supera esta altura, el popover activa scroll interno en lugar de seguir
+ * creciendo y salirse de la pantalla (caso típico: catálogo de sonidos con
+ * N entradas en Settings).
+ */
+const DEFAULT_POPOVER_MAX_HEIGHT = 280;
 
 export interface SelectorOption<T = string | number> {
   label: string;
@@ -30,6 +47,12 @@ export interface SelectorProps<T = string | number> {
    * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
    */
   tooltip?: string;
+  /**
+   * Altura máxima del popover (en dp) antes de activar scroll interno.
+   * Útil cuando la lista de opciones es larga (catálogos con N entradas).
+   * Default: 280. Pasar `0` para deshabilitar el cap y permitir altura ilimitada.
+   */
+  maxHeight?: number;
   style?: ViewStyle;
 }
 
@@ -44,6 +67,7 @@ export function Selector<T = string | number>({
   required = false,
   description,
   tooltip,
+  maxHeight = DEFAULT_POPOVER_MAX_HEIGHT,
   style,
 }: SelectorProps<T>) {
   const [open, setOpen] = useState(false);
@@ -109,29 +133,41 @@ export function Selector<T = string | number>({
       >
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
         <View style={[styles.popover, { top: pos.top, left: pos.left, width: pos.width }]}>
-          {options.map((opt) => {
-            const isSelected = opt.value === value;
-            return (
-              <Pressable
-                key={String(opt.value)}
-                onPress={() => {
-                  onChange(opt.value);
-                  setOpen(false);
-                }}
-                style={({ pressed }) => [
-                  styles.option,
-                  pressed && styles.optionPressed,
-                  isSelected && styles.optionSelected,
-                ]}
-              >
-                {opt.icon ? <Icon name={opt.icon} size={18} color={isSelected ? colors.background : colors.text.primary} /> : null}
-                <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
-                  {opt.label}
-                </Text>
-                {isSelected ? <Icon name="check" size={16} color={colors.background} /> : null}
-              </Pressable>
-            );
-          })}
+          <ScrollView
+            style={maxHeight > 0 ? { maxHeight } : undefined}
+            // En Android la lista del Modal vive fuera del árbol nativo
+            // normal — nestedScrollEnabled garantiza que el scroll interno
+            // funcione cuando el popover esté anidado dentro de otro
+            // ScrollView (caso futuro si alguien mete un Selector dentro
+            // de un formulario scrolleable).
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+          >
+            {options.map((opt) => {
+              const isSelected = opt.value === value;
+              return (
+                <Pressable
+                  key={String(opt.value)}
+                  onPress={() => {
+                    onChange(opt.value);
+                    setOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.option,
+                    pressed && styles.optionPressed,
+                    isSelected && styles.optionSelected,
+                  ]}
+                >
+                  {opt.icon ? <Icon name={opt.icon} size={18} color={isSelected ? colors.background : colors.text.primary} /> : null}
+                  <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>
+                    {opt.label}
+                  </Text>
+                  {isSelected ? <Icon name="check" size={16} color={colors.background} /> : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -165,7 +201,7 @@ const styles = StyleSheet.create({
   },
   triggerText: {
     flex: 1,
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.base,
     color: colors.text.primary,
   },
   placeholder: {
@@ -222,7 +258,7 @@ const styles = StyleSheet.create({
   },
   optionLabel: {
     flex: 1,
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.base,
     color: colors.text.primary,
     fontWeight: typography.fontWeight.medium,
   },

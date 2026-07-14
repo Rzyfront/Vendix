@@ -16,23 +16,6 @@
     (actionClicked)="onActionClick($event)"
   />
 
-  <div class="px-2 md:px-6 pt-2">
-    <div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-md p-2 text-xs md:text-sm">
-      <span class="flex items-center gap-2 text-amber-800">
-        <app-icon name="info" [size]="14"></app-icon>
-        Los combos son productos de tipo preparado con receta. Crea el producto y agrégalo a una sección de la carta.
-      </span>
-      <app-button
-        variant="outline"
-        size="xsm"
-        (clicked)="onCreateCombo()"
-      >
-        <app-icon slot="icon" name="package" [size]="14"></app-icon>
-        Crear combo
-      </app-button>
-    </div>
-  </div>
-
   <div
     class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
   >

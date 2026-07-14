@@ -11,6 +11,7 @@ import {
   PromotionQuoteResult,
   PromotionQuoteScope,
   PromotionQuoteType,
+  PromotionTierProgress,
 } from '../dto/promotion-quote.interface';
 
 /** Promotions resolve rule types from the Prisma enum. */
@@ -338,6 +339,7 @@ export class PromotionEngineService {
         applied_promotions: [],
         items: [],
         order_promotions_snapshot: [],
+        tier_progress: [],
       };
     }
 
@@ -587,6 +589,10 @@ export class PromotionEngineService {
       discount_amount: p.discount_amount,
     }));
 
+    // Pure, non-mutating read over the SAME candidate set resolved above. Never
+    // touches the discount math; the return only GAINS this field.
+    const tierProgress = this.buildTierProgress(candidates, items);
+
     return {
       subtotal,
       total_discount: totalDiscount,
@@ -594,7 +600,68 @@ export class PromotionEngineService {
       applied_promotions: appliedPromotions,
       items: itemBreakdown,
       order_promotions_snapshot: snapshot,
+      tier_progress: tierProgress,
     };
+  }
+
+  /**
+   * Compute the "next tier" nudge for auto-apply `quantity_tiered` promotions.
+   * Pure READ over the candidate promotions + cart items: reuses the SAME scope
+   * resolver (`resolveApplicableItemIndexes`) and tier ordering as the discount
+   * branch, and performs NO discount math. Structured mirror of the POS-only
+   * frontend helper `getPromotionTierProgress` so POS and ecommerce nudge
+   * identically. Returns one entry per promo that already has items in scope AND
+   * a next tier reachable above the current aggregated scope quantity.
+   */
+  private buildTierProgress(
+    candidatePromos: PromotionRecord[],
+    items: PromotionQuoteItemInput[],
+  ): PromotionTierProgress[] {
+    const progress: PromotionTierProgress[] = [];
+
+    for (const promo of candidatePromos ?? []) {
+      // Only auto-apply quantity_tiered promos surface a nudge.
+      if (!promo?.is_auto_apply) continue;
+      if (promo.rule_type !== 'quantity_tiered') continue;
+
+      // Same tier ordering as the discount branch (min_quantity, sort_order, id).
+      const tiers = (promo.promotion_quantity_tiers ?? [])
+        .slice()
+        .sort((a, b) => {
+          if (a.min_quantity !== b.min_quantity)
+            return a.min_quantity - b.min_quantity;
+          if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+          return a.id - b.id;
+        });
+      if (tiers.length === 0) continue;
+
+      // Aggregate the scope quantity with the SAME resolver the discount branch
+      // uses, so the nudge and the applied discount always agree on scope.
+      const applicableIndexes = this.resolveApplicableItemIndexes(promo, items);
+      const scopedQty = applicableIndexes.reduce(
+        (sum, idx) => sum + Number(items[idx].quantity),
+        0,
+      );
+      // Only nudge when the customer already has in-scope items in the cart.
+      if (scopedQty <= 0) continue;
+
+      // Next tier = first tier whose threshold is still ABOVE the current qty.
+      const nextTier = tiers.find((t) => t.min_quantity > scopedQty);
+      if (!nextTier) continue;
+
+      const remaining = nextTier.min_quantity - scopedQty;
+      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+
+      progress.push({
+        promotion_id: Number(promo.id),
+        name: String(promo.name ?? ''),
+        remaining_quantity: remaining,
+        benefit_type: nextTier.type,
+        benefit_value: Number(nextTier.value),
+      });
+    }
+
+    return progress;
   }
 
   /**

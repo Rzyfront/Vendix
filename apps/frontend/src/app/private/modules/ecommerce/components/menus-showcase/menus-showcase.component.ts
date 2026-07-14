@@ -6,6 +6,7 @@ import {
   computed,
   inject,
   input,
+  output,
   signal,
 } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
@@ -14,11 +15,13 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   CatalogService,
+  EcommerceProduct,
   MenuItem,
   MenuNextAvailable,
   PublicMenu,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { WishlistService } from '../../services/wishlist.service';
 import { TableContextService } from '../../services/table-context.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
@@ -62,14 +65,17 @@ interface CartaBlock {
     @if (renderCartas().length || fallbackMenu()) {
       <section class="menus-section">
         <div class="section-header">
-          <span class="section-kicker">Carta del restaurante</span>
           <h2>{{ title() || 'Nuestras cartas' }}</h2>
           <p class="subtitle">
             {{ subtitle() || 'Descubre los platos disponibles según el horario' }}
           </p>
         </div>
 
-        <!-- Shared dish card template (used by available + fallback blocks). -->
+        <!-- Shared dish card template (used by available + fallback blocks).
+             Visualmente alineado a <app-product-card>: imagen 1:1 con badges
+             overlay + botón quick-add flotante, nombre y precio. Sin stepper de
+             cantidad — el quick-add agrega qty=1 (o enruta a detalle si el
+             plato tiene variantes, igual que el product-card). -->
         <ng-template #dishCard let-dish="dish">
           <a
             class="dish-card"
@@ -88,62 +94,88 @@ interface CartaBlock {
               } @else {
                 <div class="dish-image__placeholder">🍽️</div>
               }
+
+              @if (!dish.is_available_now) {
+                <app-badge
+                  class="dish-badge"
+                  variant="warning"
+                  size="sm"
+                  badgeStyle="outline"
+                >
+                  Disponible {{ formatNext(dish.next_available) }}
+                </app-badge>
+              } @else if (dish.product?.has_variants) {
+                <div class="dish-variant-badge">
+                  {{ dish.product?.variant_count }} variantes
+                </div>
+              }
+
+              <!-- Acciones Like + Compartir (espejo de .card-actions de
+                   product-card). Top-right, aparecen on-hover / focus. -->
+              <div class="card-actions">
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  customClasses="action-btn"
+                  [class.active]="isInWishlist(dish.product?.id)"
+                  (clicked)="onWishlistClick($event, dish)"
+                >
+                  <app-icon slot="icon" name="heart" [size]="18" />
+                </app-button>
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  customClasses="action-btn"
+                  (clicked)="onShareClick($event, dish)"
+                >
+                  <app-icon slot="icon" name="share" [size]="18" />
+                </app-button>
+              </div>
+
+              @if (dish.is_available_now) {
+                <button
+                  type="button"
+                  class="dish-quick-btn"
+                  [attr.aria-label]="
+                    dish.product?.has_variants
+                      ? 'Ver opciones'
+                      : 'Agregar al carrito'
+                  "
+                  [title]="
+                    dish.product?.has_variants
+                      ? 'Ver opciones'
+                      : 'Agregar al carrito'
+                  "
+                  (click)="onQuickAdd($event, dish)"
+                >
+                  <app-icon
+                    [name]="dish.product?.has_variants ? 'eye' : 'shopping-cart'"
+                    [size]="17"
+                  />
+                </button>
+              }
             </div>
             <div class="dish-body">
               <h3 class="dish-name">{{ dish.product?.name }}</h3>
-              <span class="dish-price">
-                {{ dishPrice(dish) | currency }}
-              </span>
-
-              @if (dish.product?.has_variants) {
-                <!-- Variant products: cart rejects them without a
-                     product_variant_id → route to detail to pick options. -->
-                <span class="dish-buy">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    [fullWidth]="true"
-                    [disabled]="!dish.is_available_now"
-                    (clicked)="onViewOptions($event, dish)"
-                  >
-                    <app-icon slot="icon" name="eye" [size]="15" />
-                    Ver opciones
-                  </app-button>
-                </span>
-              } @else {
-                <span class="dish-buy" (click)="stopCardNav($event)">
-                  <span class="qty-stepper">
-                    <button
-                      type="button"
-                      class="qty-btn"
-                      [disabled]="qtyOf(dish.id) <= 1"
-                      aria-label="Disminuir cantidad"
-                      (click)="decQty($event, dish.id)"
-                    >
-                      <app-icon name="minus" [size]="14" />
-                    </button>
-                    <span class="qty-value">{{ qtyOf(dish.id) }}</span>
-                    <button
-                      type="button"
-                      class="qty-btn"
-                      aria-label="Aumentar cantidad"
-                      (click)="incQty($event, dish.id)"
-                    >
-                      <app-icon name="plus" [size]="14" />
-                    </button>
-                  </span>
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    [fullWidth]="true"
-                    [disabled]="!dish.is_available_now"
-                    (clicked)="onAdd($event, dish)"
-                  >
-                    <app-icon slot="icon" name="shopping-cart" [size]="15" />
-                    Agregar
-                  </app-button>
-                </span>
+              @if (show_shipping_badge()) {
+                <div class="shipping-badge">
+                  <app-icon name="truck" [size]="12" />
+                  <span>Envío disponible</span>
+                </div>
               }
+              <div class="dish-price">
+                <span
+                  class="price"
+                  [class.sale-price]="dish.product?.is_on_sale"
+                >
+                  {{ dishPrice(dish) | currency }}
+                </span>
+                @if (dish.product?.is_on_sale) {
+                  <span class="original-price">
+                    {{ dish.product?.base_price | currency }}
+                  </span>
+                }
+              </div>
             </div>
           </a>
         </ng-template>
@@ -207,14 +239,6 @@ interface CartaBlock {
         text-align: center;
         margin-bottom: 1.75rem;
       }
-      .section-kicker {
-        display: inline-block;
-        font-size: 0.75rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--color-primary, #2f6f4e);
-        font-weight: 600;
-      }
       .section-header h2 {
         font-size: 1.75rem;
         font-weight: 700;
@@ -249,39 +273,62 @@ interface CartaBlock {
       }
       .dishes-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
         gap: 1rem;
       }
+
+      /* --- dish-card: espejo visual de .product-card --- */
       .dish-card {
+        position: relative;
         display: flex;
         flex-direction: column;
-        border-radius: 0.75rem;
+        height: 100%;
+        background-color: var(--color-surface);
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
         overflow: hidden;
-        background: #fff;
-        border: 1px solid #f0f0f0;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
         text-decoration: none;
         color: inherit;
+        cursor: pointer;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+        -webkit-tap-highlight-color: transparent;
         transition:
-          transform 0.15s ease,
-          box-shadow 0.15s ease;
+          border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+          background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+          box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+          transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
       }
-      .dish-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
+      .dish-card:hover,
+      .dish-card:focus-within {
+        background-color: var(--color-background);
+        box-shadow: 0 18px 38px -28px rgba(15, 23, 42, 0.5);
+        transform: translateY(-2px);
+        border-color: rgba(148, 163, 184, 0.34);
+      }
+      .dish-card:active {
+        transform: scale(0.97);
       }
       .dish-card--off {
         opacity: 0.7;
       }
+
       .dish-image {
         position: relative;
-        aspect-ratio: 4 / 3;
-        background: #f7f7f7;
+        aspect-ratio: 1;
+        background: var(--color-background);
+        overflow: hidden;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.12);
       }
       .dish-image img {
+        display: block;
         width: 100%;
         height: 100%;
         object-fit: cover;
+        object-position: center;
+        transition: transform 0.35s ease;
+      }
+      .dish-card:hover .dish-image img {
+        transform: scale(1.025);
       }
       .dish-image__placeholder {
         width: 100%;
@@ -289,61 +336,188 @@ interface CartaBlock {
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 2rem;
+        font-size: 3rem;
+        color: var(--color-text-muted);
+        background: var(--color-background);
       }
-      .dish-body {
-        padding: 0.65rem 0.75rem 0.85rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
+
+      .dish-badge {
+        position: absolute;
+        top: 0.55rem;
+        left: 0.55rem;
+        z-index: 1;
       }
-      .dish-name {
-        font-size: 0.95rem;
-        font-weight: 600;
-        margin: 0;
-        line-height: 1.2;
+      .dish-variant-badge {
+        position: absolute;
+        bottom: 0.58rem;
+        left: 0.58rem;
+        z-index: 1;
+        padding: 0.24rem 0.48rem;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: var(--fw-semibold);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.88);
+        color: var(--color-text-primary);
+        border: 1px solid rgba(148, 163, 184, 0.24);
       }
-      .dish-price {
-        font-weight: 700;
-        color: var(--color-primary, #2f6f4e);
-      }
-      .dish-buy {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        margin-top: 0.4rem;
-      }
-      .qty-stepper {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid #e5e7eb;
-        border-radius: 0.5rem;
-        overflow: hidden;
-        flex-shrink: 0;
-      }
-      .qty-btn {
+
+      .dish-quick-btn {
+        position: absolute;
+        right: 0.6rem;
+        bottom: 0.6rem;
+        z-index: 2;
+        width: 36px;
+        height: 36px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 1.9rem;
-        height: 2rem;
-        background: #fff;
-        border: none;
-        color: #374151;
+        color: var(--color-text-primary);
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 999px;
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.42);
         cursor: pointer;
+        opacity: 0;
+        transform: translateY(4px);
+        transition:
+          opacity 0.15s ease,
+          background-color 0.15s ease,
+          border-color 0.15s ease,
+          color 0.15s ease,
+          transform 0.15s ease;
       }
-      .qty-btn:hover:not(:disabled) {
-        background: #f3f4f6;
+      .dish-card:hover .dish-quick-btn,
+      .dish-quick-btn:focus-visible {
+        opacity: 1;
+        transform: translateY(0);
       }
-      .qty-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
+      .dish-quick-btn:hover {
+        color: var(--color-primary);
+        background: #ffffff;
+        border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+        transform: translateY(-1px) scale(1.02);
       }
-      .qty-value {
-        min-width: 1.6rem;
-        text-align: center;
-        font-size: 0.85rem;
-        font-weight: 600;
+      .dish-quick-btn:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.42);
+        outline-offset: 2px;
+      }
+
+      .dish-body {
+        padding: 0.82rem 0.85rem 0.9rem;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.24rem;
+      }
+      .dish-name {
+        font-size: var(--fs-sm);
+        font-weight: 700;
+        color: var(--color-text-primary);
+        margin: 0;
+        line-height: 1.28;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .dish-price {
+        margin-top: auto;
+        padding-top: 0.28rem;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.35rem;
+      }
+      .dish-price .price {
+        font-size: var(--fs-md);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+      }
+      .dish-price .price.sale-price {
+        color: var(--color-success);
+      }
+      .dish-price .original-price {
+        font-size: var(--fs-xs);
+        color: var(--color-text-muted);
+        text-decoration: line-through;
+      }
+
+      .card-actions {
+        position: absolute;
+        top: 0.55rem;
+        right: 0.55rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.38rem;
+        z-index: 3;
+        opacity: 0;
+        transform: translateY(-4px);
+        transition: opacity var(--transition-fast), transform var(--transition-fast);
+      }
+      .dish-card:hover .card-actions,
+      .card-actions:focus-within {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      :host ::ng-deep .action-btn {
+        width: 34px !important;
+        height: 34px !important;
+        min-width: 34px !important;
+        padding: 0 !important;
+        border-radius: 50% !important;
+        color: var(--color-text-secondary) !important;
+        background: rgba(255, 255, 255, 0.88) !important;
+        border: 1px solid rgba(148, 163, 184, 0.22) !important;
+        box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.45);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+      :host ::ng-deep .action-btn:hover {
+        background: #ffffff !important;
+        color: var(--color-primary) !important;
+      }
+      :host ::ng-deep .action-btn.active {
+        color: var(--color-error) !important;
+        background: var(--color-error-light) !important;
+      }
+
+      .shipping-badge {
+        display: inline-flex;
+        align-items: center;
+        align-self: flex-start;
+        gap: 0.25rem;
+        max-width: 100%;
+        padding: 0.18rem 0.46rem;
+        border-radius: 999px;
+        background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+        color: var(--color-primary);
+        font-size: 10.5px;
+        font-weight: var(--fw-semibold);
+        line-height: 1.1;
+      }
+      .shipping-badge span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      @media (max-width: 480px) {
+        .dish-quick-btn {
+          opacity: 1;
+          transform: translateY(0);
+        }
+        .card-actions {
+          top: 0.45rem;
+          right: 0.45rem;
+          gap: 0.3rem;
+          opacity: 1;
+          transform: none;
+        }
       }
     `,
   ],
@@ -353,10 +527,20 @@ export class MenusShowcaseComponent implements OnInit {
   readonly subtitle = input<string>('');
   /** Tope de platos por carta en el teaser del home. */
   readonly limit = input<number>(8);
+  /** Muestra el badge "Envío disponible" en cada plato (espejo del input
+   *  homónimo de <app-product-card>). Lo provee el home desde el store setting. */
+  readonly show_shipping_badge = input<boolean>(false);
+
+  /** Igual que <app-product-card>: el toggle pasa por el home para preservar
+   *  el gate de auth (openLoginModal) y los toasts. El estado de fill del
+   *  corazón se lee del WishlistService compartido (suscripción abajo). */
+  readonly toggle_wishlist = output<EcommerceProduct>();
+  readonly share = output<EcommerceProduct>();
 
   private readonly catalogService = inject(CatalogService);
   private readonly cartService = inject(CartService);
   private readonly tableContext = inject(TableContextService);
+  private readonly wishlistService = inject(WishlistService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -369,11 +553,10 @@ export class MenusShowcaseComponent implements OnInit {
     minutes: number;
   } | null>(null);
 
-  /**
-   * Per-item quantity for the inline stepper, keyed by `MenuItem.id`.
-   * Signal-based so the template re-renders under zoneless change detection.
-   */
-  private readonly quantities = signal<Record<number, number>>({});
+  /** Product_ids actualmente en favoritos — fuente de verdad compartida con
+   *  el home vía WishlistService (signal singleton). Alimenta el fill del
+   *  corazón del dish-card sin que el padre pase `in_wishlist` por plato. */
+  private readonly wishlist_ids = signal<Set<number>>(new Set());
 
   /**
    * Cartas disponibles ahora, cada una con sus platos disponibles capados a
@@ -449,6 +632,18 @@ export class MenusShowcaseComponent implements OnInit {
           this.menus.set([]);
         },
       });
+
+    // Fuente de verdad compartida con el home: el WishlistService expone el
+    // estado via `wishlist$` (toObservable de su signal). Mantener un Set de
+    // product_ids para el fill del corazón del dish-card.
+    this.wishlistService.wishlist$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((wishlist) => {
+        const ids = new Set<number>(
+          (wishlist?.items ?? []).map((i) => i.product_id),
+        );
+        this.wishlist_ids.set(ids);
+      });
   }
 
   /**
@@ -483,45 +678,85 @@ export class MenusShowcaseComponent implements OnInit {
     return `${day} ${na.start_time}`.trim();
   }
 
-  /** Current stepper quantity for an item (defaults to 1). */
-  qtyOf(itemId: number): number {
-    return this.quantities()[itemId] ?? 1;
-  }
-
-  incQty(event: Event, itemId: number): void {
-    this.stopCardNav(event);
-    const next = this.qtyOf(itemId) + 1;
-    this.quantities.update((q) => ({ ...q, [itemId]: next }));
-  }
-
-  decQty(event: Event, itemId: number): void {
-    this.stopCardNav(event);
-    const next = Math.max(1, this.qtyOf(itemId) - 1);
-    this.quantities.update((q) => ({ ...q, [itemId]: next }));
-  }
-
   /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */
   stopCardNav(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
   }
 
-  /** Routes a variant dish to its detail page so the customer can pick an option. */
-  onViewOptions(event: Event, item: MenuItem): void {
-    this.stopCardNav(event);
-    const slug = item.product?.slug;
-    if (slug) this.router.navigate(['/products', slug]);
+  /** Fill del corazón — lee del WishlistService compartido. */
+  isInWishlist(product_id: number | undefined): boolean {
+    return product_id != null && this.wishlist_ids().has(product_id);
   }
 
-  /** Adds a non-variant dish to the cart — or, in a dine-in `open_tab`
+  /** Toggle favoritos — delega al home (gate de auth + toasts). Espejo del
+   *  `onWishlistClick` de product-card, que emite `toggle_wishlist`. */
+  onWishlistClick(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const product = this.toEcommerceProduct(item);
+    if (product) this.toggle_wishlist.emit(product);
+  }
+
+  /** Compartir — delega al home (abre el share-modal con el producto). Espejo
+   *  del `onShareClick` de product-card. */
+  onShareClick(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const product = this.toEcommerceProduct(item);
+    if (product) this.share.emit(product);
+  }
+
+  /** Construye un EcommerceProduct mínimo a partir del MenuItemProduct del
+   *  plato — suficiente para el share-modal (name, slug, image_url, final_price)
+   *  y para el toggle de wishlist (id). `MenuItemProduct` es un subset de
+   *  `EcommerceProduct`, así que rellenamos los campos que el endpoint de
+   *  cartas no devuelve con defaults seguros (sin inventario/marca). */
+  private toEcommerceProduct(item: MenuItem): EcommerceProduct | null {
+    const p = item.product;
+    if (!p) return null;
+    const on_sale = !!p.is_on_sale && p.sale_price != null;
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      description: null,
+      base_price: p.base_price,
+      sale_price: p.sale_price ?? undefined,
+      is_on_sale: on_sale,
+      sku: null,
+      stock_quantity: null,
+      available_stock: null,
+      is_available: item.is_available_now,
+      final_price: on_sale ? p.sale_price! : p.base_price,
+      image_url: p.image_url,
+      brand: null,
+      categories: [],
+      variant_count: p.variant_count,
+    };
+  }
+
+  /** Quick action del dish-card (espejo del quick-cart-btn de product-card):
+   * los platos con variantes enrutan al detalle para elegir opción (el carrito
+   * los rechaza sin `product_variant_id`); los platos simples se agregan con
+   * qty fija de 1 — al carrito ecommerce, o a la mesa en sesión dine-in open_tab. */
+  onQuickAdd(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    if (!item.is_available_now) return;
+    if (item.product?.has_variants) {
+      const slug = item.product?.slug;
+      if (slug) this.router.navigate(['/products', slug]);
+      return;
+    }
+    this.addToCartOrTab(item);
+  }
+
+  /** Adds a non-variant dish (qty=1) to the cart — or, in a dine-in `open_tab`
    * session, straight to the diner's table tab. Backend rejects off-schedule
    * dishes (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated
    * by `is_available_now`; this is a defensive guard. */
-  onAdd(event: Event, item: MenuItem): void {
-    this.stopCardNav(event);
+  private addToCartOrTab(item: MenuItem): void {
     const product = item.product;
     if (!product || !item.is_available_now) return;
-    const qty = this.qtyOf(item.id);
+    const qty = 1;
 
     // Dine-in QR (open_tab): the dish belongs on the diner's table tab, NOT
     // the ecommerce cart. Mirrors product-card.onAddToCart so both entry
@@ -535,7 +770,6 @@ export class MenusShowcaseComponent implements OnInit {
               ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
               : `Agregado a la mesa ${this.tableContext.tableName()}`;
             this.toastService.success(msg);
-            this.quantities.update((q) => ({ ...q, [item.id]: 1 }));
           },
           error: (err) => {
             const { userMessage, devMessage } = parseApiError(err);

@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Pressable,
 } from 'react-native';
+import { apiClient, Endpoints } from '@/core/api';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Icon } from '@/shared/components/icon/icon';
@@ -102,21 +103,62 @@ export default function PopInvoiceScanner({ visible, onClose, onScanComplete }: 
     }
   };
 
-  const handleStartScan = () => {
+  const handleStartScan = async () => {
+    if (!imageUri) return;
     setCurrentStep(2);
     setAnalyzing(true);
-    setTimeout(() => {
-      const mockItems: ScannedItem[] = [
-        { name: 'Producto detectado 1', sku: 'DET-001', quantity: 10, unit_cost: 5000 },
-        { name: 'Producto detectado 2', sku: 'DET-002', quantity: 5, unit_cost: 8500 },
-        { name: 'Producto detectado 3', sku: 'DET-003', quantity: 20, unit_cost: 3200 },
-      ];
-      setScannedItems(mockItems);
-      setSupplierName('Proveedor detectado');
-      setInvoiceNumber('F001-001');
+    try {
+      const formData = new FormData();
+      const filename = imageUri.split('/').pop() || 'invoice.jpg';
+      let type = 'image/jpeg';
+      if (filename.toLowerCase().endsWith('.pdf')) {
+        type = 'application/pdf';
+      } else if (filename.toLowerCase().endsWith('.png')) {
+        type = 'image/png';
+      } else if (filename.toLowerCase().endsWith('.webp')) {
+        type = 'image/webp';
+      }
+
+      formData.append('file', {
+        uri: imageUri,
+        name: filename,
+        type,
+      } as any);
+
+      const res = await apiClient.post<any>(
+        `${Endpoints.STORE.PURCHASE_ORDERS.CREATE}/scan?orderType=retail`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+
+      const scanData = res.data?.data || res.data;
+      if (scanData && Array.isArray(scanData.line_items)) {
+        const mappedItems: ScannedItem[] = scanData.line_items.map((item: any) => ({
+          name: item.description,
+          sku: item.sku_if_visible || '',
+          quantity: item.quantity,
+          unit_cost: item.unit_price,
+          description: item.description,
+        }));
+        setScannedItems(mappedItems);
+        setSupplierName(scanData.supplier?.name || '');
+        setInvoiceNumber(scanData.invoice_number || '');
+        setCurrentStep(3);
+      } else {
+        Alert.alert('Error', 'No se pudieron extraer los productos de la factura.');
+        setCurrentStep(1);
+      }
+    } catch (err: any) {
+      console.error('Scan invoice error:', err);
+      Alert.alert('Error', err?.response?.data?.message || err?.message || 'Error al procesar la factura.');
+      setCurrentStep(1);
+    } finally {
       setAnalyzing(false);
-      setCurrentStep(3);
-    }, 2500);
+    }
   };
 
   const handleItemChange = (index: number, field: keyof ScannedItem, value: string | number) => {

@@ -12,17 +12,25 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   CatalogService,
+  EcommerceProduct,
   MenuItem,
   MenuNextAvailable,
   MenuSection,
   PublicMenu,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { WishlistService } from '../../services/wishlist.service';
+import { StoreUiService } from '../../services/store-ui.service';
+import { TableContextService } from '../../services/table-context.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 type AvailabilityDisplay = 'hide' | 'badge';
 
@@ -40,11 +48,21 @@ interface RenderMenu extends PublicMenu {
  * it consumes `/ecommerce/catalog/menus`, which returns nothing for
  * non-restaurant stores. The `hide`/`badge` behavior mirrors the store
  * setting `home_sections.menus.availability_display`.
+ *
+ * El dish-card es espejo visual de `<app-product-card>` (imagen 1:1, badges
+ * overlay, card-actions Like/Compartir, quick-add flotante, sin qty-stepper).
  */
 @Component({
   selector: 'app-menus-page',
   standalone: true,
-  imports: [RouterModule, CurrencyPipe, ButtonComponent, IconComponent],
+  imports: [
+    RouterModule,
+    CurrencyPipe,
+    ButtonComponent,
+    BadgeComponent,
+    IconComponent,
+    ShareModalComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './menus-page.component.html',
   styleUrls: ['./menus-page.component.scss'],
@@ -52,6 +70,10 @@ interface RenderMenu extends PublicMenu {
 export class MenusPageComponent implements OnInit {
   private readonly catalogService = inject(CatalogService);
   private readonly cartService = inject(CartService);
+  private readonly wishlistService = inject(WishlistService);
+  private readonly storeUiService = inject(StoreUiService);
+  private readonly tableContext = inject(TableContextService);
+  private readonly authFacade = inject(AuthFacade);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly tenantFacade = inject(TenantFacade);
@@ -59,13 +81,17 @@ export class MenusPageComponent implements OnInit {
 
   readonly isLoading = signal(true);
   readonly availabilityDisplay = signal<AvailabilityDisplay>('hide');
+  readonly shipping_badge_enabled = signal(false);
   private readonly menus = signal<PublicMenu[]>([]);
 
-  /**
-   * Per-item quantity for the inline stepper, keyed by `MenuItem.id`.
-   * Signal-based so the template re-renders under zoneless change detection.
-   */
-  private readonly quantities = signal<Record<number, number>>({});
+  /** Product_ids en favoritos — fuente de verdad compartida vía
+   *  WishlistService (signal singleton). Alimenta el fill del corazón. */
+  readonly wishlist_product_ids = signal<Set<number>>(new Set());
+  private is_authenticated = false;
+
+  /** Share modal state. */
+  readonly shareModalOpen = signal(false);
+  readonly shareProduct = signal<EcommerceProduct | null>(null);
 
   private static readonly DAY_LABELS = [
     'Domingo',
@@ -104,10 +130,32 @@ export class MenusPageComponent implements OnInit {
     this.tenantFacade.domainConfig$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((domainConfig: any) => {
-        const menusCfg =
-          domainConfig?.customConfig?.ecommerce?.home_sections?.menus;
+        const ecommerce = domainConfig?.customConfig?.ecommerce;
+        const menusCfg = ecommerce?.home_sections?.menus;
         const display = menusCfg?.availability_display;
         this.availabilityDisplay.set(display === 'badge' ? 'badge' : 'hide');
+        this.shipping_badge_enabled.set(this.hasConfiguredShipping(ecommerce));
+      });
+
+    // Auth state → load/clear wishlist (igual que catalog/home).
+    this.authFacade.isAuthenticated$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((is_auth) => {
+        this.is_authenticated = is_auth;
+        if (is_auth) {
+          this.wishlistService.getWishlist().subscribe();
+        } else {
+          this.wishlist_product_ids.set(new Set());
+        }
+      });
+
+    // Fuente de verdad del wishlist — alimenta el fill del corazón.
+    this.wishlistService.wishlist$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((wishlist) => {
+        this.wishlist_product_ids.set(
+          new Set((wishlist?.items ?? []).map((i) => i.product_id)),
+        );
       });
 
     this.catalogService
@@ -138,49 +186,136 @@ export class MenusPageComponent implements OnInit {
     return `${day} a las ${na.start_time}`.trim();
   }
 
-  /** Current stepper quantity for an item (defaults to 1). */
-  qtyOf(itemId: number): number {
-    return this.quantities()[itemId] ?? 1;
-  }
-
-  incQty(event: Event, itemId: number): void {
-    this.stopCardNav(event);
-    const next = this.qtyOf(itemId) + 1;
-    this.quantities.update((q) => ({ ...q, [itemId]: next }));
-  }
-
-  decQty(event: Event, itemId: number): void {
-    this.stopCardNav(event);
-    const next = Math.max(1, this.qtyOf(itemId) - 1);
-    this.quantities.update((q) => ({ ...q, [itemId]: next }));
-  }
-
   /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */
   stopCardNav(event: Event): void {
     event.preventDefault();
     event.stopPropagation();
   }
 
-  /** Routes a variant dish to its detail page so the customer can pick an option. */
-  onViewOptions(event: Event, item: MenuItem): void {
-    this.stopCardNav(event);
-    const slug = item.product?.slug;
-    if (slug) this.router.navigate(['/products', slug]);
+  /** Fill del corazón — lee del WishlistService compartido. */
+  isInWishlist(product_id: number | undefined): boolean {
+    return product_id != null && this.wishlist_product_ids().has(product_id);
   }
 
-  /** Adds a non-variant dish to the cart. Backend rejects off-schedule dishes
-   * (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated by
-   * `is_available_now`; this is a defensive guard. */
-  onAdd(event: Event, item: MenuItem): void {
+  /** Toggle favoritos — gate de auth (openLoginModal) + toasts, igual que
+   *  catalog/home. Espejo del `onWishlistClick` de product-card. */
+  onWishlistClick(event: Event, item: MenuItem): void {
     this.stopCardNav(event);
+    if (!this.is_authenticated) {
+      this.storeUiService.openLoginModal();
+      return;
+    }
+    const product = this.toEcommerceProduct(item);
+    if (!product) return;
+    if (this.isInWishlist(product.id)) {
+      this.wishlistService.removeItem(product.id).subscribe({
+        next: () => this.toastService.info('Producto eliminado de favoritos'),
+      });
+    } else {
+      this.wishlistService.addItem(product.id).subscribe({
+        next: () => this.toastService.success('Producto agregado a favoritos'),
+      });
+    }
+  }
+
+  /** Compartir — abre el share-modal con el producto. */
+  onShareClick(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const product = this.toEcommerceProduct(item);
+    if (!product) return;
+    this.shareProduct.set(product);
+    this.shareModalOpen.set(true);
+  }
+
+  onShareModalClosed(): void {
+    this.shareModalOpen.set(false);
+    this.shareProduct.set(null);
+  }
+
+  /** Quick action del dish-card (espejo del quick-cart-btn de product-card):
+   * variantes → ruta detalle; simples → carrito (o mesa en open_tab) qty=1. */
+  onQuickAdd(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    if (!item.is_available_now) return;
+    if (item.product?.has_variants) {
+      const slug = item.product?.slug;
+      if (slug) this.router.navigate(['/products', slug]);
+      return;
+    }
+    this.addToCartOrTab(item);
+  }
+
+  /** Agrega un plato simple (qty=1) al carrito — o a la mesa en sesión dine-in
+   *  open_tab. El backend rechaza platos fuera de horario (422
+   *  MENU_ITEM_NOT_AVAILABLE_NOW), por eso el botón se gatea con
+   *  `is_available_now`; esto es un guard defensivo. */
+  private addToCartOrTab(item: MenuItem): void {
     const product = item.product;
     if (!product || !item.is_available_now) return;
-    const result = this.cartService.addToCart(product.id, this.qtyOf(item.id));
+    const qty = 1;
+
+    if (this.tableContext.isOpenTab()) {
+      this.tableContext
+        .addOrder([{ product_id: product.id, quantity: qty }])
+        .subscribe({
+          next: () => {
+            const msg = this.tableContext.autoFire()
+              ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
+              : `Agregado a la mesa ${this.tableContext.tableName()}`;
+            this.toastService.success(msg);
+          },
+          error: (err) => {
+            const { userMessage, devMessage } = parseApiError(err);
+            this.toastService.error(userMessage);
+            if (devMessage) console.error('[table addOrder]', devMessage);
+          },
+        });
+      return;
+    }
+
+    const result = this.cartService.addToCart(product.id, qty);
     const done = () => this.toastService.success('Plato agregado al carrito');
     if (result) {
       result.subscribe({ next: done });
     } else {
       done();
     }
+  }
+
+  /** Construye un EcommerceProduct mínimo desde el MenuItemProduct del plato —
+   *  suficiente para el share-modal (name, slug, image_url, final_price) y
+   *  para el toggle de wishlist (id). `MenuItemProduct` es un subset, así que
+   *  rellenamos los campos que el endpoint de cartas no devuelve. */
+  private toEcommerceProduct(item: MenuItem): EcommerceProduct | null {
+    const p = item.product;
+    if (!p) return null;
+    const on_sale = !!p.is_on_sale && p.sale_price != null;
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      description: null,
+      base_price: p.base_price,
+      sale_price: p.sale_price ?? undefined,
+      is_on_sale: on_sale,
+      sku: null,
+      stock_quantity: null,
+      available_stock: null,
+      is_available: item.is_available_now,
+      final_price: on_sale ? p.sale_price! : p.base_price,
+      image_url: p.image_url,
+      brand: null,
+      categories: [],
+      variant_count: p.variant_count,
+    };
+  }
+
+  private hasConfiguredShipping(ecommerce: any): boolean {
+    const shipping = ecommerce?.shipping || {};
+    return (
+      shipping.has_configured_shipping === true ||
+      shipping.enabled === true ||
+      shipping.shipping_enabled === true
+    );
   }
 }
