@@ -52,6 +52,9 @@
           [title]="section.config.title || 'Nuestras cartas'"
           [subtitle]="section.config.subtitle || ''"
           [limit]="section.config.limit || 8"
+          [show_shipping_badge]="shipping_badge_enabled()"
+          (toggle_wishlist)="onToggleWishlist($event)"
+          (share)="onShare($event)"
         />
       }
 

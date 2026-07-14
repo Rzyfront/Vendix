@@ -1,6 +1,5 @@
 <div class="menus-page">
   <header class="menus-page__header">
-    <span class="kicker">Restaurante</span>
     <h1>Nuestra carta</h1>
     <p class="lead">Platos organizados por sección y horario de disponibilidad.</p>
   </header>
@@ -61,83 +60,96 @@
                     } @else {
                       <div class="dish-image__placeholder">🍽️</div>
                     }
+
                     @if (!item.is_available_now) {
-                      <span class="dish-badge">
+                      <app-badge
+                        class="dish-badge"
+                        variant="warning"
+                        size="sm"
+                        badgeStyle="outline"
+                      >
                         Disponible {{ nextLabel(item) }}
-                      </span>
+                      </app-badge>
+                    } @else if (item.product?.has_variants) {
+                      <div class="dish-variant-badge">
+                        {{ item.product?.variant_count }} variantes
+                      </div>
                     }
-                    @if (item.product?.is_combo) {
-                      <span class="dish-combo">Combo</span>
+
+                    <!-- Acciones Like + Compartir (espejo de .card-actions de
+                         product-card). Top-right, aparecen on-hover / focus. -->
+                    <div class="card-actions">
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        customClasses="action-btn"
+                        [class.active]="isInWishlist(item.product?.id)"
+                        (clicked)="onWishlistClick($event, item)"
+                      >
+                        <app-icon slot="icon" name="heart" [size]="18" />
+                      </app-button>
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        customClasses="action-btn"
+                        (clicked)="onShareClick($event, item)"
+                      >
+                        <app-icon slot="icon" name="share" [size]="18" />
+                      </app-button>
+                    </div>
+
+                    @if (item.is_available_now) {
+                      <button
+                        type="button"
+                        class="dish-quick-btn"
+                        [attr.aria-label]="
+                          item.product?.has_variants
+                            ? 'Ver opciones'
+                            : 'Agregar al carrito'
+                        "
+                        [title]="
+                          item.product?.has_variants
+                            ? 'Ver opciones'
+                            : 'Agregar al carrito'
+                        "
+                        (click)="onQuickAdd($event, item)"
+                      >
+                        <app-icon
+                          [name]="
+                            item.product?.has_variants ? 'eye' : 'shopping-cart'
+                          "
+                          [size]="17"
+                        />
+                      </button>
                     }
                   </div>
                   <div class="dish-body">
                     <h4 class="dish-name">{{ item.product?.name }}</h4>
-                    <div class="dish-price-row">
+                    @if (shipping_badge_enabled()) {
+                      <div class="shipping-badge">
+                        <app-icon name="truck" [size]="12" />
+                        <span>Envío disponible</span>
+                      </div>
+                    }
+                    <div class="dish-price">
+                      <span
+                        class="price"
+                        [class.sale-price]="
+                          item.product?.is_on_sale &&
+                          item.product?.sale_price != null
+                        "
+                      >
+                        {{ dishPrice(item) | currency }}
+                      </span>
                       @if (
                         item.product?.is_on_sale &&
                         item.product?.sale_price != null
                       ) {
-                        <span class="dish-price">
-                          {{ item.product?.sale_price | currency }}
-                        </span>
-                        <span class="dish-price--old">
-                          {{ item.product?.base_price | currency }}
-                        </span>
-                      } @else {
-                        <span class="dish-price">
+                        <span class="original-price">
                           {{ item.product?.base_price | currency }}
                         </span>
                       }
                     </div>
-
-                    @if (item.product?.has_variants) {
-                      <!-- Variant products: cart rejects them without a
-                           product_variant_id → route to detail to pick options. -->
-                      <div class="dish-buy">
-                        <app-button
-                          variant="outline"
-                          size="sm"
-                          [fullWidth]="true"
-                          (clicked)="onViewOptions($event, item)"
-                        >
-                          <app-icon slot="icon" name="eye" [size]="15" />
-                          Ver opciones
-                        </app-button>
-                      </div>
-                    } @else {
-                      <div class="dish-buy" (click)="stopCardNav($event)">
-                        <span class="qty-stepper">
-                          <button
-                            type="button"
-                            class="qty-btn"
-                            [disabled]="qtyOf(item.id) <= 1"
-                            aria-label="Disminuir cantidad"
-                            (click)="decQty($event, item.id)"
-                          >
-                            <app-icon name="minus" [size]="14" />
-                          </button>
-                          <span class="qty-value">{{ qtyOf(item.id) }}</span>
-                          <button
-                            type="button"
-                            class="qty-btn"
-                            aria-label="Aumentar cantidad"
-                            (click)="incQty($event, item.id)"
-                          >
-                            <app-icon name="plus" [size]="14" />
-                          </button>
-                        </span>
-                        <app-button
-                          variant="primary"
-                          size="sm"
-                          [fullWidth]="true"
-                          [disabled]="!item.is_available_now"
-                          (clicked)="onAdd($event, item)"
-                        >
-                          <app-icon slot="icon" name="shopping-cart" [size]="15" />
-                          Agregar
-                        </app-button>
-                      </div>
-                    }
                   </div>
                 </a>
               }
@@ -148,3 +160,10 @@
     }
   }
 </div>
+
+<!-- Share Modal -->
+<app-share-modal
+  [isOpen]="shareModalOpen()"
+  [product]="shareProduct()"
+  (closed)="onShareModalClosed()"
+/>
