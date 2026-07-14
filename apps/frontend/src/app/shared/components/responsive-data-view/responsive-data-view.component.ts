@@ -73,6 +73,7 @@ export type { ItemListCardConfig, ItemListSize };
           [compact]="compact()"
           [sortable]="sortable()"
           [actionsDisplay]="actionsDisplay()"
+          [rowClass]="rowClass()"
           (sort)="sort.emit($event)"
           (rowClick)="rowClick.emit($event)"
         ></app-table>
@@ -91,6 +92,7 @@ export type { ItemListCardConfig, ItemListSize };
           [emptyIcon]="emptyIcon()"
           [size]="itemListSize()"
           [actionsDisplay]="actionsDisplay()"
+          [rowClass]="rowClass()"
           (itemClick)="rowClick.emit($event)"
           (actionClick)="actionClick.emit($event)"
         ></app-item-list>
@@ -125,6 +127,9 @@ export class ResponsiveDataViewComponent {
 
   // Shared configuration
   readonly actions = input<TableAction[]>();
+  readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
+    () => undefined
+  );
   readonly loadingInput = input(false, { alias: 'loading' });
   private readonly internalLoading = signal(false);
   readonly loading = computed(() => this.loadingInput() || this.internalLoading());
