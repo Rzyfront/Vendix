@@ -1,0 +1,18 @@
+<div class="address-map-picker">
+  <div class="amp-map" #mapContainer></div>
+
+  @if (loading()) {
+    <div class="amp-loading" aria-live="polite">
+      <span class="amp-spinner" aria-hidden="true"></span>
+      <span>Cargando mapa...</span>
+    </div>
+  }
+
+  <p class="amp-hint">
+    Arrastra el marcador para ajustar tu ubicación exacta.
+  </p>
+
+  <p class="amp-attribution">
+    © OpenStreetMap · OpenFreeMap
+  </p>
+</div>

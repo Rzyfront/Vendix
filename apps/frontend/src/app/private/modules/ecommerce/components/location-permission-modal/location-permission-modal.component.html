@@ -1,0 +1,55 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  [size]="'sm'"
+  [showCloseButton]="false"
+>
+  <div class="lp-shell">
+    <!-- Hero -->
+    <div class="lp-hero">
+      <div class="lp-hero-bg" aria-hidden="true"></div>
+      <div class="lp-hero-pattern" aria-hidden="true"></div>
+      <div class="lp-hero-icon">
+        <span class="lp-hero-halo" aria-hidden="true"></span>
+        <app-icon
+          name="map-pin"
+          [size]="40"
+          class="relative z-10 text-white drop-shadow-sm"
+        />
+      </div>
+      <h3 class="lp-hero-title">Usa tu ubicación</h3>
+      <p class="lp-hero-subtitle">
+        Autocompletamos tu dirección de envío para que termines más rápido.
+      </p>
+    </div>
+
+    <!-- Body -->
+    <div class="lp-body">
+      <ul class="lp-benefits">
+        <li class="lp-benefit">
+          <app-icon name="zap" [size]="16" class="text-primary-500" />
+          <span>Rellena tu dirección en segundos</span>
+        </li>
+        <li class="lp-benefit">
+          <app-icon name="check-circle" [size]="16" class="text-primary-500" />
+          <span>Evita errores al escribir la dirección</span>
+        </li>
+        <li class="lp-benefit">
+          <app-icon name="shield-check" [size]="16" class="text-primary-500" />
+          <span>Solo tú decides: es opcional y puedes editarla</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <div slot="footer" class="lp-footer">
+    <app-button variant="ghost" size="md" (clicked)="onDecline()">
+      <app-icon slot="icon" name="pencil" [size]="16" />
+      Ingresar manualmente
+    </app-button>
+    <app-button variant="primary" size="md" (clicked)="onAccept()">
+      <app-icon slot="icon" name="navigation" [size]="16" />
+      Usar mi ubicación
+    </app-button>
+  </div>
+</app-modal>

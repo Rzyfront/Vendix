@@ -30,6 +30,9 @@ export interface Address {
   phone_number: string | null;
   is_primary: boolean;
   type: string;
+  /** Exact GPS coordinates captured via the map picker (opt-in). */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Order {

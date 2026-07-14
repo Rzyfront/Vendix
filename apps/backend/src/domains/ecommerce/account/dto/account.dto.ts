@@ -2,6 +2,9 @@ import {
   IsString,
   IsEmail,
   IsOptional,
+  IsNumber,
+  Min,
+  Max,
   MinLength,
   Matches,
 } from 'class-validator';
@@ -85,6 +88,18 @@ export class EcommerceAccountCreateAddressDto {
   phone_number?: string;
 
   @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
+
+  @IsOptional()
   is_primary?: boolean;
 
   @IsOptional()
@@ -121,6 +136,18 @@ export class UpdateAddressDto {
       'El teléfono solo puede contener números y los símbolos + # * ( ) -',
   })
   phone_number?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
 
   @IsOptional()
   is_primary?: boolean;

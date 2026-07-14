@@ -12,6 +12,7 @@ import { EcommerceInvoiceDataModule } from './invoice-data/ecommerce-invoice-dat
 import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-collection.module';
 import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
 import { EcommercePromotionsModule } from './promotions/ecommerce-promotions.module';
+import { GeocodingModule } from './geocoding/geocoding.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -40,6 +41,7 @@ import { EcommercePromotionsModule } from './promotions/ecommerce-promotions.mod
     EcommerceDataCollectionModule,
     EcommerceTablesModule,
     EcommercePromotionsModule,
+    GeocodingModule,
   ],
 })
 export class EcommerceDomainModule {}
