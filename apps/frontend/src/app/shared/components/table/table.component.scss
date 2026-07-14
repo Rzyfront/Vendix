@@ -991,6 +991,17 @@
   }
 }
 
+/* Filas nuevas: parpadeo verde suave translúcido al entrar al módulo */
+@keyframes order-flash {
+  0%   { background-color: rgba(34, 197, 94, 0); }
+  50%  { background-color: rgba(34, 197, 94, 0.16); }
+  100% { background-color: rgba(34, 197, 94, 0); }
+}
+
+tr.order-row--new {
+  animation: order-flash 1s ease-in-out 5;
+}
+
 // Tema oscuro mejorado
 [data-theme="dark"] {
   .loading-overlay {
