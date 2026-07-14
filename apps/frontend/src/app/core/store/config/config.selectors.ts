@@ -18,6 +18,11 @@ export const selectError = createSelector(
   (state: ConfigState) => state.error,
 );
 
+export const selectResolutionError = createSelector(
+  selectConfigState,
+  (state: ConfigState) => state.resolutionError,
+);
+
 export const selectDomainConfig = createSelector(
   selectAppConfig,
   (appConfig) => appConfig?.domainConfig || null,

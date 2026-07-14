@@ -6,6 +6,7 @@ import {
   PaywallDetails,
   SubscriptionAccessService,
 } from '../services/subscription-access.service';
+import { StoreAvailabilityService } from '../services/store-availability.service';
 
 /**
  * Error codes that should trigger the paywall modal.
@@ -48,6 +49,7 @@ const PICKER_ROUTE = '/admin/subscription/picker';
 export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => {
   const access = inject(SubscriptionAccessService);
   const router = inject(Router);
+  const storeAvailability = inject(StoreAvailabilityService);
   return next(req).pipe(
     catchError((err: unknown) => {
       if (err instanceof HttpErrorResponse) {
@@ -60,6 +62,20 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
           | null
           | undefined;
         const code = body?.error_code ?? '';
+
+        // Public storefront: the backend hard-blocks checkout when the store
+        // is unavailable. Instead of the subscription paywall, re-show the
+        // branded "store unavailable" banner so the customer understands why
+        // the action failed. Re-throw so the caller can still handle the error.
+        if (code === 'ECOM_CHECKOUT_004') {
+          try {
+            storeAvailability.reopen();
+          } catch {
+            // Swallow — never block error propagation.
+          }
+          return throwError(() => err);
+        }
+
         const blocking = BLOCKING_CODES.has(code);
         if (blocking) {
           // Always open the paywall modal first — informative UX comes

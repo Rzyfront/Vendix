@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '@common/services/s3.service';
+import { computeNextOpenMessage } from '../../store/settings/utils/next-open-time.util';
 
 /**
  * 🌐 Public Domains Service
@@ -138,6 +139,27 @@ export class PublicDomainsService {
         // Sign ecommerce images
         if (ecommerceSettings) {
           await this.signEcommerceImages(ecommerceSettings);
+        }
+
+        // Store-unavailable fallback message: if the store is explicitly
+        // closed for checkout and no custom message was configured, derive a
+        // "next open" hint from the POS business hours so the storefront can
+        // tell the customer when the store reopens.
+        if (
+          ecommerceSettings?.general?.store_available === false &&
+          !ecommerceSettings.general.unavailable_message?.trim()
+        ) {
+          const timezone =
+            generalSettings?.timezone ||
+            settingsData?.general?.timezone ||
+            'America/Bogota';
+          const nextOpenMessage = computeNextOpenMessage(
+            settingsData?.pos?.business_hours,
+            timezone,
+          );
+          if (nextOpenMessage) {
+            ecommerceSettings.general.unavailable_message = nextOpenMessage;
+          }
         }
       }
     }

@@ -405,6 +405,7 @@
     .mobile-logo-img {
       height: 32px;
       width: auto;
+      border-radius: var(--radius-md, 0.5rem);
     }
 
     .mobile-logo-fallback {
@@ -434,6 +435,7 @@
     .logo-img {
       height: 38px; // 20% larger for better visibility
       width: auto;
+      border-radius: var(--radius-md, 0.5rem);
     }
 
     .logo-fallback {

@@ -44,8 +44,12 @@
   </head>
   <body>
     <!--
-      Prerender Gate: hides prerendered Vendix Landing on non-Vendix domains.
-      Runs synchronously before first paint to prevent flash.
+      Prerender Gate: hides the prerendered HTML (Vendix Landing is baked into
+      the '/' prerender and served to every wildcard domain) on ALL domains so a
+      neutral Vendix splash shows from the first frame until Angular resolves the
+      final view. Runs synchronously before first paint to prevent the flash.
+      The 'vendix-prerender-hidden' class is removed by removePrerenderGate() in
+      AppComponent once the app decides its view — do NOT rename it.
     -->
     <style id="vendix-prerender-gate">
       .vendix-prerender-hidden app-root {
@@ -66,32 +70,88 @@
         top: 0;
         left: 0;
         z-index: 99999;
-        background: #f8fafc;
+        background: #f4f4f4;
       }
-      @keyframes vendix-spin {
+      .vendix-gate-loader-wrap {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 58px;
+        height: 58px;
+      }
+      /* Triple-ring Vendix loader (green tones, visible on light neutral bg) */
+      .vendix-gate-loader {
+        --v-size: 1.2px;
+        width: calc(48 * var(--v-size));
+        height: calc(48 * var(--v-size));
+        border-radius: 50%;
+        display: inline-block;
+        position: relative;
+        box-sizing: border-box;
+        border: calc(3 * var(--v-size)) solid;
+        border-color: #108a15 #108a15 transparent transparent;
+        animation: vendix-rot 1s linear infinite;
+      }
+      .vendix-gate-loader::after,
+      .vendix-gate-loader::before {
+        content: '';
+        box-sizing: border-box;
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        margin: auto;
+        border: calc(3 * var(--v-size)) solid;
+        border-color: transparent transparent #cbd5e1 #cbd5e1;
+        width: calc(40 * var(--v-size));
+        height: calc(40 * var(--v-size));
+        border-radius: 50%;
+        animation: vendix-rot-back 0.5s linear infinite;
+        transform-origin: center center;
+      }
+      .vendix-gate-loader::before {
+        width: calc(32 * var(--v-size));
+        height: calc(32 * var(--v-size));
+        border-color: #2ecc71 #2ecc71 transparent transparent;
+        animation: vendix-rot 1.5s linear infinite;
+      }
+      .vendix-gate-loader-logo {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        object-fit: contain;
+        pointer-events: none;
+      }
+      @keyframes vendix-rot {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
       }
-      .vendix-gate-spinner-ring {
-        width: 48px;
-        height: 48px;
-        border: 4px solid #e2e8f0;
-        border-top-color: #3b82f6;
-        border-radius: 50%;
-        animation: vendix-spin 0.8s linear infinite;
+      @keyframes vendix-rot-back {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(-360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .vendix-gate-loader,
+        .vendix-gate-loader::after,
+        .vendix-gate-loader::before {
+          animation: none !important;
+        }
       }
     </style>
     <script>
       (function() {
-        var h = window.location.hostname;
-        var isVendix = h === 'vendix.online' || h === 'www.vendix.online' || h === 'localhost';
-        if (!isVendix) {
-          document.documentElement.classList.add('vendix-prerender-hidden');
-        }
+        // Universal gate: hide the prerendered HTML on EVERY domain (no hostname
+        // allowlist) so no tenant ever sees the Vendix Landing flash.
+        document.documentElement.classList.add('vendix-prerender-hidden');
       })();
     </script>
     <div class="vendix-gate-spinner">
-      <div class="vendix-gate-spinner-ring"></div>
+      <div class="vendix-gate-loader-wrap">
+        <span class="vendix-gate-loader"></span>
+        <img class="vendix-gate-loader-logo" src="/vlogomono.png" alt="Vendix" width="22" height="22" />
+      </div>
     </div>
 
     <app-root></app-root>

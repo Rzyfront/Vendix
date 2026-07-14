@@ -18,6 +18,7 @@ import { CheckoutService } from './checkout.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { StoreAvailabilityGuard } from './guards/store-availability.guard';
 import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
 
 @Controller('ecommerce/checkout')
@@ -67,6 +68,7 @@ export class CheckoutController {
    */
   @Post()
   @OptionalAuth()
+  @UseGuards(StoreAvailabilityGuard)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
   )
@@ -166,6 +168,7 @@ export class CheckoutController {
 
   @OptionalAuth()
   @Post('whatsapp')
+  @UseGuards(StoreAvailabilityGuard)
   async whatsappCheckout(@Body() dto: WhatsappCheckoutDto) {
     const data = await this.checkout_service.whatsappCheckout(dto);
     return { success: true, data };
