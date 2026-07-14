@@ -25,11 +25,12 @@ import {
 } from '../../services/catalog.service';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { CartPromotionsComponent } from '../../components/cart-promotions/cart-promotions.component';
+import { CartItemCardComponent } from '../../components/cart-item-card/cart-item-card.component';
+import { CartMobileFooterComponent } from '../../components/cart-mobile-footer/cart-mobile-footer.component';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -47,12 +48,13 @@ import {
     CommonModule,
     RouterModule,
     IconComponent,
-    QuantityControlComponent,
     ButtonComponent,
     ProductCarouselComponent,
     ProductQuickViewModalComponent,
     GuestCheckoutDataModalComponent,
     CartPromotionsComponent,
+    CartItemCardComponent,
+    CartMobileFooterComponent,
     CurrencyPipe,
   ],
   templateUrl: './cart.component.html',

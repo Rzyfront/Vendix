@@ -40,14 +40,45 @@ import {
   imports: [CommonModule, IconComponent, BadgeComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (appliedPromotions().length > 0 || tierProgress().length > 0) {
+    @if (inline()) {
+      <!-- Modo inline: SOLO el nudge de próximo tramo, como pill compacto
+           (para el bannersito del carrito). -->
+      @if (showTier() && tierProgress().length > 0) {
+        <span
+          class="flex min-w-0 flex-wrap items-center gap-1.5"
+          [attr.data-currency]="currencyCode()"
+        >
+          @for (tier of tierProgress(); track tier.promotion_id) {
+            <span
+              class="nudge-pill inline-flex min-w-0 max-w-full items-center gap-1 rounded-xl px-2 py-0.5 text-[11px] font-medium leading-tight text-primary"
+            >
+              <app-icon
+                name="trending-up"
+                [size]="12"
+                class="shrink-0 text-primary"
+              />
+              <span>
+                Agrega
+                <span class="font-semibold">{{ tier.remaining_quantity }} und</span>
+                más y obtén
+                <span class="font-semibold">{{ tier.benefitLabel }}</span>
+                en '{{ tier.name }}'.
+              </span>
+            </span>
+          }
+        </span>
+      }
+    } @else if (
+      (showApplied() && appliedPromotions().length > 0) ||
+      (showTier() && tierProgress().length > 0)
+    ) {
       <div
         class="flex flex-col"
         [ngClass]="compact() ? 'gap-2' : 'gap-3'"
         [attr.data-currency]="currencyCode()"
       >
         <!-- Promociones aplicadas -->
-        @if (appliedPromotions().length > 0) {
+        @if (showApplied() && appliedPromotions().length > 0) {
           <div class="flex flex-col gap-1">
             <div class="flex items-center gap-1.5">
               <app-icon name="tag" [size]="14" class="shrink-0 text-green-600" />
@@ -89,10 +120,10 @@ import {
         }
 
         <!-- Próximo tramo (nudge) -->
-        @if (tierProgress().length > 0) {
+        @if (showTier() && tierProgress().length > 0) {
           <div
             class="flex flex-col gap-1 border-t border-border/30 pt-2"
-            [class.mt-1]="appliedPromotions().length > 0"
+            [class.mt-1]="showApplied() && appliedPromotions().length > 0"
           >
             @for (tier of tierProgress(); track tier.promotion_id) {
               <div
@@ -120,12 +151,29 @@ import {
       </div>
     }
   `,
+  styles: [
+    `
+      /* Pill del nudge inline (modo banner). Fondo/borde vía token RGB para
+         evitar el defecto de bg-primary/opacity que no compone (ver
+         reference_primary_token_defect). */
+      .nudge-pill {
+        background: rgba(var(--color-primary-rgb), 0.1);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+      }
+    `,
+  ],
 })
 export class CartPromotionsComponent {
   /** Source cart. Promotions/tier data are read reactively from this signal. */
   readonly cart = input<Cart | null>(null);
   /** Denser layout for the header dropdown; relaxed for page/checkout. */
   readonly compact = input<boolean>(false);
+  /** Show the "Promociones aplicadas" section (block layout only). */
+  readonly showApplied = input<boolean>(true);
+  /** Show the next-tier "Agrega N más…" nudge. */
+  readonly showTier = input<boolean>(true);
+  /** Inline layout: render ONLY the tier nudge as compact pill(s) — banner use. */
+  readonly inline = input<boolean>(false);
 
   private readonly currencyFormat = inject(CurrencyFormatService);
 

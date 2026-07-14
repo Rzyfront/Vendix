@@ -1,6 +1,4 @@
 <div class="cart-page">
-  <h1>Mi Carrito</h1>
-
   @if (is_loading()) {
     <div class="loading">
       <div class="spinner"></div>
@@ -18,64 +16,34 @@
   } @else if (cart(); as cart) {
     <div class="cart-content">
       <div class="cart-items">
+        <!-- Bannersito delgado (espejo del chip "Resumen de compra" del detalle
+             de orden): da header a la columna izquierda para simetría de tope
+             con la card "Resumen del pedido". -->
+        <div class="cart-list-banner">
+          <app-icon name="shopping-cart" [size]="14"></app-icon>
+          <span class="banner-eyebrow">Tu carrito</span>
+          <span class="banner-divider"></span>
+          <span class="banner-count">
+            {{ cart.item_count }}
+            {{ cart.item_count === 1 ? 'producto' : 'productos' }}
+          </span>
+
+          <!-- Nudge de escalas de descuento movido aquí (a la derecha), inline. -->
+          <app-cart-promotions
+            class="banner-nudge"
+            [cart]="cart"
+            [inline]="true"
+          />
+        </div>
+
         @for (item of cart.items; track item.id) {
-          <div
-            class="cart-item"
-            [class.updating]="updating_item_id() === item.id"
-          >
-            <div class="item-image">
-              @if (item.product.image_url) {
-                <img [src]="item.product.image_url" [alt]="item.product.name" />
-              } @else {
-                <div class="no-image">
-                  <app-icon
-                    name="image"
-                    [size]="24"
-                    class="text-muted"
-                  ></app-icon>
-                </div>
-              }
-            </div>
-
-            <div class="item-details">
-              <h3>{{ item.product.name }}</h3>
-              @if (item.variant) {
-                <span class="variant">{{ item.variant.name }}</span>
-              }
-              <span class="sku"
-                >SKU: {{ item.variant?.sku || item.product.sku }}</span
-              >
-            </div>
-
-            <div class="item-price">
-              <span class="price">{{ item.unit_price | currency }}</span>
-              <span class="tax-note">Imp. incl.</span>
-            </div>
-
-            <div class="item-quantity">
-              <app-quantity-control
-                [value]="item.quantity"
-                [min]="1"
-                [max]="maxQuantityPerItem()"
-                [size]="'md'"
-                [disabled]="updating_item_id() === item.id"
-                (valueChange)="updateQuantity(item, $event)"
-              ></app-quantity-control>
-            </div>
-
-            <div class="item-total">
-              {{ item.total_price | currency }}
-            </div>
-
-            <app-button
-              variant="ghost"
-              size="sm"
-              (clicked)="removeItem(item)"
-              title="Eliminar"
-            >
-              <app-icon slot="icon" name="trash-2" [size]="18"></app-icon>
-            </app-button>
-          </div>
+          <app-cart-item-card
+            [item]="item"
+            [updating]="updating_item_id() === item.id"
+            [maxQuantity]="maxQuantityPerItem()"
+            (quantityChange)="updateQuantity(item, $event)"
+            (remove)="removeItem(item)"
+          />
         }
       </div>
 
@@ -88,7 +56,7 @@
             <span>{{ cart.subtotal | currency }}</span>
           </div>
 
-          <app-cart-promotions [cart]="cart" />
+          <app-cart-promotions [cart]="cart" [showTier]="false" />
 
           <div class="summary-row">
             <span>Envío</span>
@@ -140,6 +108,17 @@
         </div>
       </div>
     </div>
+
+    <!-- Resumen como footer fijo estilo POS (solo móvil/tablet; oculto en desktop) -->
+    <app-cart-mobile-footer
+      [cart]="cart"
+      [isAuthenticated]="is_authenticated()"
+      [requiresRegistration]="requiresRegistration()"
+      [whatsappEnabled]="whatsappEnabled()"
+      [whatsappLoading]="is_whatsapp_loading()"
+      (checkout)="proceedToCheckout()"
+      (whatsapp)="whatsappCheckout()"
+    />
   }
 
   @if (relatedProductsEnabled() && recommendedProducts().length > 0) {
