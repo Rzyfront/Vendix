@@ -2,3 +2,260 @@
   display: block;
   width: 100%;
 }
+
+/* ---------------------------------------------------------------------------
+ * Estado vacío de secciones
+ * ------------------------------------------------------------------------- */
+.mb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  text-align: center;
+  padding: 2rem 1rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 0.75rem;
+  background: var(--color-surface-secondary);
+}
+
+/* ---------------------------------------------------------------------------
+ * Lista de secciones (apilado + drag & drop)
+ * ------------------------------------------------------------------------- */
+.mb-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.mb-section {
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: var(--color-surface);
+  overflow: visible;
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease,
+    opacity 220ms ease;
+
+  /* Aparición suave al agregar una sección nueva. Con `track section.id` en el
+   * @for, sólo el nodo recién insertado monta desde cero, así que @starting-style
+   * anima únicamente la sección nueva (las existentes conservan su DOM). */
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
+  }
+
+  &:hover {
+    border-color: rgba(var(--color-primary-rgb), 0.5);
+    box-shadow: 0 4px 14px -8px rgba(15, 23, 42, 0.25);
+  }
+}
+
+.mb-section__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.625rem;
+}
+
+/* Cejita de arrastre --------------------------------------------------------*/
+.mb-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  border-radius: 0.5rem;
+  color: var(--color-text-secondary);
+  cursor: grab;
+  touch-action: none;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+
+  &:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-secondary);
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+
+  &--sm {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.375rem;
+  }
+}
+
+/* Chevron colapsar/expandir -------------------------------------------------*/
+.mb-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  border-radius: 0.5rem;
+  color: var(--color-text-secondary);
+  transition:
+    transform 220ms ease,
+    color 160ms ease,
+    background-color 160ms ease;
+
+  &:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-secondary);
+  }
+
+  &--open {
+    transform: rotate(90deg);
+    color: var(--color-primary);
+  }
+}
+
+/* Título editable inline ----------------------------------------------------*/
+.mb-section__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.25rem 0.375rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-align: left;
+  color: var(--color-text-primary);
+  transition: background-color 160ms ease;
+
+  &:hover {
+    background: var(--color-surface-secondary);
+  }
+
+  .mb-section__title-icon {
+    flex: 0 0 auto;
+    opacity: 0;
+    color: var(--color-text-secondary);
+    transition: opacity 160ms ease;
+  }
+
+  &:hover .mb-section__title-icon {
+    opacity: 1;
+  }
+}
+
+.mb-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 999px;
+  color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+/* Cuerpo colapsable ---------------------------------------------------------*/
+.mb-section__body {
+  padding: 0 0.75rem 0.75rem;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 200ms ease,
+    transform 200ms ease;
+
+  /* Aparición al expandir (el @if monta el cuerpo). */
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* Ítems (drag & drop) -------------------------------------------------------*/
+.mb-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mb-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  background: var(--color-surface-secondary);
+  font-size: 0.875rem;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+.mb-item__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-text-primary);
+}
+
+.mb-item__combo {
+  flex: 0 0 auto;
+  font-size: 0.625rem;
+  padding: 0.075rem 0.4rem;
+  border-radius: 0.375rem;
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+.mb-item-empty {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--color-text-secondary);
+  padding: 0.25rem 0.125rem;
+}
+
+/* ---------------------------------------------------------------------------
+ * CDK Drag & Drop: preview, placeholder y animación de reacomodo.
+ * Estas clases las inyecta CDK; el preview se monta en <body> (fuera del host),
+ * por eso se estilan de forma global vía ::ng-deep (patrón estándar de CDK).
+ * ------------------------------------------------------------------------- */
+::ng-deep .cdk-drag-preview {
+  box-sizing: border-box;
+  border-radius: 0.75rem;
+  box-shadow:
+    0 12px 28px -8px rgba(15, 23, 42, 0.4),
+    0 4px 10px -6px rgba(15, 23, 42, 0.3);
+}
+
+::ng-deep .cdk-drag-placeholder {
+  opacity: 0.4;
+}
+
+/* Placeholder propio de sección: un hueco punteado que marca el destino. */
+.mb-section__ph {
+  height: 3rem;
+  border: 2px dashed rgba(var(--color-primary-rgb), 0.6);
+  border-radius: 0.75rem;
+  background: var(--color-primary-light);
+}
+
+::ng-deep .cdk-drag-animating {
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+/* Reacomodo suave del resto de elementos mientras se arrastra uno. */
+.mb-sections.cdk-drop-list-dragging .mb-section:not(.cdk-drag-placeholder),
+.mb-items.cdk-drop-list-dragging .mb-item:not(.cdk-drag-placeholder) {
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}

@@ -250,12 +250,13 @@ export class MenusService {
   }
 
   updateAvailability(
+    menuId: number,
     id: number,
     dto: UpdateAvailabilityWindowDto,
   ): Observable<AvailabilityWindow> {
     return this.http
       .patch<ApiResponse<AvailabilityWindow>>(
-        `${this.apiUrl}${this.basePath}/availability-windows/${id}`,
+        `${this.apiUrl}${this.basePath}/${menuId}/availability-windows/${id}`,
         dto,
       )
       .pipe(
@@ -264,10 +265,10 @@ export class MenusService {
       );
   }
 
-  removeAvailability(id: number): Observable<void> {
+  removeAvailability(menuId: number, id: number): Observable<void> {
     return this.http
       .delete<void>(
-        `${this.apiUrl}${this.basePath}/availability-windows/${id}`,
+        `${this.apiUrl}${this.basePath}/${menuId}/availability-windows/${id}`,
       )
       .pipe(catchError(this.handleError));
   }

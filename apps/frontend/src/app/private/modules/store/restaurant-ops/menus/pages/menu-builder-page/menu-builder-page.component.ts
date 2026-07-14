@@ -10,6 +10,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  CdkDragDrop,
+  DragDropModule,
+  moveItemInArray,
+} from '@angular/cdk/drag-drop';
 
 import {
   ButtonComponent,
@@ -52,6 +57,10 @@ interface ProductOption {
   base_price?: number | string | null;
   is_sellable?: boolean;
   is_combo?: boolean;
+  /** Miniatura del producto (Feature C): se muestra a la izquierda del label. */
+  imageUrl?: string;
+  /** Nombre de categoría (Feature C): se muestra a la derecha del dropdown. */
+  category?: string;
 }
 
 @Component({
@@ -60,6 +69,7 @@ interface ProductOption {
   imports: [
     CommonModule,
     FormsModule,
+    DragDropModule,
     StickyHeaderComponent,
     CardComponent,
     ButtonComponent,
@@ -82,6 +92,23 @@ export class MenuBuilderPageComponent implements OnInit {
   readonly menu = signal<MenuFull | null>(null);
   readonly isLoading = signal(false);
   readonly dayLabels = DAY_LABELS;
+
+  /** Secciones actualmente expandidas (acordeón). Se inicializa con todas las
+   * secciones en el primer load y auto-expande las recién creadas, preservando
+   * los colapsos manuales del usuario entre recargas. */
+  readonly expandedSectionIds = signal<Set<number>>(new Set<number>());
+  /** Secciones ya vistas: distingue "recién creada" (auto-expandir) de
+   * "existente que el usuario pudo haber colapsado". No es signal — es memoria
+   * de control interno, no estado observado por la plantilla. */
+  private readonly knownSectionIds = new Set<number>();
+
+  /** Secciones ordenadas por sort_order: fuente única para el @for y para que
+   * los índices del drag & drop coincidan con lo renderizado. */
+  readonly sortedSections = computed<MenuSection[]>(() => {
+    const m = this.menu();
+    if (!m) return [];
+    return [...m.sections].sort((a, b) => a.sort_order - b.sort_order);
+  });
 
   /** Modo creación: la ruta `new` no trae `:id`. El builder renderiza un
    * formulario de nombre y, al guardar, crea la carta y pasa a modo edición. */
@@ -128,7 +155,10 @@ export class MenuBuilderPageComponent implements OnInit {
         p.name +
         (p.is_combo ? ' · Combo' : '') +
         (p.is_sellable === false ? ' · (no vendible)' : ''),
-      description: p.is_combo ? 'Combo' : undefined,
+      // Categoría a la derecha del dropdown (degrada a undefined si no vino).
+      description: p.category,
+      // Miniatura a la izquierda (el app-selector la renderiza en modo searchable).
+      imageUrl: p.imageUrl,
     })),
   );
 
@@ -225,6 +255,17 @@ export class MenuBuilderPageComponent implements OnInit {
       .subscribe({
         next: (data) => {
           this.menu.set(data);
+          // Auto-expande las secciones no vistas antes (todas en el primer
+          // load y cualquier sección recién creada); conserva los colapsos
+          // manuales del usuario en las recargas posteriores.
+          const expanded = new Set(this.expandedSectionIds());
+          for (const s of data.sections ?? []) {
+            if (!this.knownSectionIds.has(s.id)) {
+              this.knownSectionIds.add(s.id);
+              expanded.add(s.id);
+            }
+          }
+          this.expandedSectionIds.set(expanded);
           this.isLoading.set(false);
         },
         error: (e: unknown) => {
@@ -260,6 +301,10 @@ export class MenuBuilderPageComponent implements OnInit {
               base_price: p.base_price,
               is_sellable: (p as any).is_sellable,
               is_combo: (p as any).is_combo,
+              // Feature C: miniatura + categoría. Degradan a undefined si la
+              // respuesta del backend no los trae (sin romper el selector).
+              imageUrl: p.image_url,
+              category: p.category?.name ?? p.categories?.[0]?.name,
             })),
           );
         },
@@ -280,8 +325,11 @@ export class MenuBuilderPageComponent implements OnInit {
       .createSection(menu.id, { name })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (created) => {
           this.newSectionName.set('');
+          // La sección nueva entra expandida (loadMenu la auto-expande al ser
+          // desconocida, pero lo hacemos explícito para dejar la intención clara).
+          this.expandSection(created.id);
           this.loadMenu(menu.id);
         },
         error: (e: unknown) =>
@@ -289,6 +337,37 @@ export class MenuBuilderPageComponent implements OnInit {
             typeof e === 'string' ? e : 'Error al crear sección',
           ),
       });
+  }
+
+  // -------------------------- accordion (expand/collapse) --------------
+
+  isSectionExpanded(id: number): boolean {
+    return this.expandedSectionIds().has(id);
+  }
+
+  toggleSection(id: number): void {
+    const next = new Set(this.expandedSectionIds());
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    this.expandedSectionIds.set(next);
+  }
+
+  private expandSection(id: number): void {
+    const next = new Set(this.expandedSectionIds());
+    next.add(id);
+    this.knownSectionIds.add(id);
+    this.expandedSectionIds.set(next);
+  }
+
+  /** Ítems de una sección ordenados por sort_order (fuente para el @for y el
+   * drag & drop de productos). Devuelve copia nueva: seguro para moveItemInArray. */
+  sortedItems(section: MenuSection): MenuSectionItem[] {
+    return [...(section.items ?? [])].sort(
+      (a, b) => a.sort_order - b.sort_order,
+    );
   }
 
   async deleteSection(section: MenuSection): Promise<void> {
@@ -313,18 +392,18 @@ export class MenuBuilderPageComponent implements OnInit {
       });
   }
 
-  moveSection(section: MenuSection, direction: -1 | 1): void {
+  /** Drop de sección (drag & drop). Reordena la lista visible y persiste el
+   * nuevo orden con sortSections (reemplaza las flechas chevron-up/down). */
+  onSectionDrop(event: CdkDragDrop<MenuSection[]>): void {
     const menu = this.menu();
-    if (!menu) return;
-    const ordered = [...(menu.sections ?? [])].sort(
-      (a, b) => a.sort_order - b.sort_order,
-    );
-    const idx = ordered.findIndex((s) => s.id === section.id);
-    const target = idx + direction;
-    if (target < 0 || target >= ordered.length) return;
-    [ordered[idx], ordered[target]] = [ordered[target], ordered[idx]];
+    if (!menu || event.previousIndex === event.currentIndex) return;
+    const ordered = [...this.sortedSections()];
+    moveItemInArray(ordered, event.previousIndex, event.currentIndex);
     this.menusService
-      .sortSections(menu.id, ordered.map((s) => s.id))
+      .sortSections(
+        menu.id,
+        ordered.map((s) => s.id),
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadMenu(menu.id),
@@ -378,18 +457,20 @@ export class MenuBuilderPageComponent implements OnInit {
       });
   }
 
-  moveItem(section: MenuSection, item: MenuSectionItem, dir: -1 | 1): void {
+  /** Drop de ítem dentro de una sección (drag & drop). Cada sección tiene su
+   * propia cdkDropList (no conectadas entre sí), así que un ítem no salta de
+   * sección. Persiste con sortItems (reemplaza las flechas chevron-up/down). */
+  onItemDrop(event: CdkDragDrop<MenuSectionItem[]>, section: MenuSection): void {
     const menu = this.menu();
-    if (!menu) return;
-    const items = [...(section.items ?? [])].sort(
-      (a, b) => a.sort_order - b.sort_order,
-    );
-    const idx = items.findIndex((i) => i.id === item.id);
-    const target = idx + dir;
-    if (target < 0 || target >= items.length) return;
-    [items[idx], items[target]] = [items[target], items[idx]];
+    if (!menu || event.previousIndex === event.currentIndex) return;
+    const items = this.sortedItems(section);
+    moveItemInArray(items, event.previousIndex, event.currentIndex);
     this.menusService
-      .sortItems(menu.id, section.id, items.map((i) => i.id))
+      .sortItems(
+        menu.id,
+        section.id,
+        items.map((i) => i.id),
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadMenu(menu.id),
@@ -479,7 +560,7 @@ export class MenuBuilderPageComponent implements OnInit {
       end_time: draft.end_time,
     };
     this.menusService
-      .updateAvailability(w.id, dto)
+      .updateAvailability(menu.id, w.id, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
@@ -546,14 +627,13 @@ export class MenuBuilderPageComponent implements OnInit {
       confirmVariant: 'danger',
     });
     if (!confirmed) return;
+    const menu = this.menu();
+    if (!menu) return;
     this.menusService
-      .removeAvailability(window.id)
+      .removeAvailability(menu.id, window.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
-          const m = this.menu();
-          if (m) this.loadMenu(m.id);
-        },
+        next: () => this.loadMenu(menu.id),
         error: (e: unknown) =>
           this.toastService.error(
             typeof e === 'string' ? e : 'Error al eliminar ventana',

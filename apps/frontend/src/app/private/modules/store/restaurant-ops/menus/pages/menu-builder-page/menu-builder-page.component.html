@@ -45,7 +45,12 @@
     />
 
     <div class="p-2 md:p-6 space-y-6">
-      <app-card title="Secciones" subtitle="Reordena con las flechas o haz clic en el nombre para renombrar" [padding]="true" [overflow]="'visible'">
+      <app-card
+        title="Secciones"
+        subtitle="Arrastra por la cejita para reordenar · clic en el nombre para renombrar"
+        [padding]="true"
+        [overflow]="'visible'"
+      >
         <div class="flex flex-col md:flex-row gap-2 mb-4 md:items-end">
           <app-input
             class="flex-1"
@@ -62,112 +67,139 @@
         </div>
 
         @if (m.sections.length === 0) {
-          <p class="text-sm text-text-secondary">Aún no hay secciones en esta carta.</p>
+          <div class="mb-empty">
+            <app-icon name="layers" [size]="28" class="text-text-secondary" />
+            <p class="text-sm text-text-secondary">Aún no hay secciones en esta carta.</p>
+            <p class="text-xs text-text-secondary">Crea la primera para empezar a apilar platos.</p>
+          </div>
         }
 
-        @for (section of m.sections; track section.id) {
-          <div class="border border-border rounded-md p-3 mb-3">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center gap-2 flex-1 min-w-0">
-                <app-button variant="outline" size="sm" (clicked)="moveSection(section, -1)">
-                  <app-icon slot="icon" name="chevron-up" [size]="16" />
-                </app-button>
-                <app-button variant="outline" size="sm" (clicked)="moveSection(section, 1)">
-                  <app-icon slot="icon" name="chevron-down" [size]="16" />
-                </app-button>
+        <div class="mb-sections" cdkDropList (cdkDropListDropped)="onSectionDrop($event)">
+          @for (section of sortedSections(); track section.id) {
+            <div class="mb-section" cdkDrag>
+              <div class="mb-section__ph" *cdkDragPlaceholder></div>
+
+              <div class="mb-section__header">
+                <button
+                  type="button"
+                  class="mb-handle"
+                  cdkDragHandle
+                  aria-label="Arrastrar sección para reordenar"
+                >
+                  <app-icon name="grip-vertical" [size]="16" />
+                </button>
+
+                <button
+                  type="button"
+                  class="mb-chevron"
+                  [class.mb-chevron--open]="isSectionExpanded(section.id)"
+                  [attr.aria-expanded]="isSectionExpanded(section.id)"
+                  aria-label="Expandir o colapsar sección"
+                  (click)="toggleSection(section.id)"
+                >
+                  <app-icon name="chevron-right" [size]="18" />
+                </button>
+
                 @if (isEditingSection(section.id)) {
                   <input
                     #sectionRenameInput
                     type="text"
-                    class="flex-1 min-w-0 px-2 py-1 text-sm border border-primary-300 rounded"
+                    class="flex-1 min-w-0 px-2 py-1.5 text-sm border border-primary rounded-md bg-transparent text-text-primary"
                     [value]="editingSectionName()"
                     (input)="onEditSectionName($any($event.target).value)"
                     (keyup.enter)="saveSectionName(section)"
                     (keyup.escape)="cancelEditSection()"
                     autofocus
                   />
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (clicked)="saveSectionName(section)"
-                  >
+                  <app-button variant="primary" size="sm" (clicked)="saveSectionName(section)">
                     <app-icon slot="icon" name="check" [size]="14" />
                   </app-button>
-                  <app-button
-                    variant="ghost"
-                    size="sm"
-                    (clicked)="cancelEditSection()"
-                  >
+                  <app-button variant="ghost" size="sm" (clicked)="cancelEditSection()">
                     <app-icon slot="icon" name="x" [size]="14" />
                   </app-button>
                 } @else {
-                  <h3 class="font-semibold text-sm md:text-base truncate">{{ section.name }}</h3>
-                  <app-button
-                    variant="ghost"
-                    size="sm"
-                    (clicked)="startEditSection(section)"
-                    customClasses="!p-1 !w-7 !h-7"
+                  <button
+                    type="button"
+                    class="mb-section__title"
+                    (click)="startEditSection(section)"
                   >
-                    <app-icon slot="icon" name="edit-2" [size]="14" />
+                    <span class="truncate">{{ section.name }}</span>
+                    <app-icon name="edit-2" [size]="13" class="mb-section__title-icon" />
+                  </button>
+                  <span class="mb-badge">{{ section.items?.length ?? 0 }}</span>
+                  <app-button
+                    variant="outline-danger"
+                    size="sm"
+                    (clicked)="deleteSection(section)"
+                    customClasses="!p-1.5 !w-8 !h-8"
+                  >
+                    <app-icon slot="icon" name="trash-2" [size]="14" />
                   </app-button>
-                  <span class="text-xs text-text-secondary">
-                    {{ section.items?.length ?? 0 }} productos
-                  </span>
                 }
               </div>
-              <app-button variant="outline-danger" size="sm" (clicked)="deleteSection(section)">
-                <app-icon slot="icon" name="trash-2" [size]="14" />
-                Eliminar sección
-              </app-button>
-            </div>
 
-            <ul class="space-y-1 mb-3">
-              @for (item of section.items ?? []; track item.id) {
-                <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm">
-                  <div class="flex items-center gap-2">
-                    <app-button variant="outline" size="sm" (clicked)="moveItem(section, item, -1)">
-                      <app-icon slot="icon" name="chevron-up" [size]="14" />
-                    </app-button>
-                    <app-button variant="outline" size="sm" (clicked)="moveItem(section, item, 1)">
-                      <app-icon slot="icon" name="chevron-down" [size]="14" />
-                    </app-button>
-                    <span>{{ item.product?.name ?? getProductName(item.product_id) }}</span>
-                    @if (item.product?.is_combo) {
-                      <span class="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-700">Combo</span>
+              @if (isSectionExpanded(section.id)) {
+                <div class="mb-section__body">
+                  <div
+                    class="mb-items"
+                    cdkDropList
+                    (cdkDropListDropped)="onItemDrop($event, section)"
+                  >
+                    @for (item of sortedItems(section); track item.id) {
+                      <div class="mb-item" cdkDrag>
+                        <button
+                          type="button"
+                          class="mb-handle mb-handle--sm"
+                          cdkDragHandle
+                          aria-label="Arrastrar producto para reordenar"
+                        >
+                          <app-icon name="grip-vertical" [size]="14" />
+                        </button>
+                        <span class="mb-item__name truncate">
+                          {{ item.product?.name ?? getProductName(item.product_id) }}
+                        </span>
+                        @if (item.product?.is_combo) {
+                          <span class="mb-item__combo">Combo</span>
+                        }
+                        <app-button
+                          variant="ghost"
+                          size="sm"
+                          (clicked)="removeItem(section, item)"
+                          customClasses="!p-1 !w-7 !h-7 !text-red-500"
+                        >
+                          <app-icon slot="icon" name="trash-2" [size]="14" />
+                        </app-button>
+                      </div>
+                    } @empty {
+                      <p class="mb-item-empty">Sin productos en esta sección.</p>
                     }
                   </div>
-                  <app-button variant="outline-danger" size="sm" (clicked)="removeItem(section, item)">
-                    <app-icon slot="icon" name="trash-2" [size]="14" />
-                    Quitar
-                  </app-button>
-                </li>
-              } @empty {
-                <li class="text-xs text-text-secondary italic">Sin productos en esta sección.</li>
-              }
-            </ul>
 
-            <div class="flex flex-col md:flex-row gap-2 md:items-end">
-              <app-selector
-                class="flex-1"
-                placeholder="Busca y selecciona un producto…"
-                [options]="productSelectorOptions()"
-                [searchable]="true"
-                [ngModel]="newItemProductId()"
-                (ngModelChange)="onProductSelect($event)"
-              />
-              <app-button variant="primary" (clicked)="addItem(section)">
-                <app-icon slot="icon" name="plus" [size]="16" />
-                Agregar producto
-              </app-button>
+                  <div class="flex flex-col md:flex-row gap-2 md:items-end mt-3">
+                    <app-selector
+                      class="flex-1"
+                      placeholder="Busca y selecciona un producto…"
+                      [options]="productSelectorOptions()"
+                      [searchable]="true"
+                      [ngModel]="newItemProductId()"
+                      (ngModelChange)="onProductSelect($event)"
+                    />
+                    <app-button variant="primary" (clicked)="addItem(section)">
+                      <app-icon slot="icon" name="plus" [size]="16" />
+                      Agregar producto
+                    </app-button>
+                  </div>
+                  @if (selectedProductIsCombo()) {
+                    <p class="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
+                      <app-icon name="info" [size]="12" />
+                      Este producto es un combo: al disparar a cocina descontará la receta del combo.
+                    </p>
+                  }
+                </div>
+              }
             </div>
-            @if (selectedProductIsCombo()) {
-              <p class="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
-                <app-icon name="info" [size]="12"></app-icon>
-                Este producto es un combo: al disparar a cocina descontará la receta del combo.
-              </p>
-            }
-          </div>
-        }
+          }
+        </div>
       </app-card>
 
       <app-card
