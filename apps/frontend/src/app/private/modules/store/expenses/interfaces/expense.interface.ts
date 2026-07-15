@@ -63,7 +63,7 @@ export interface CreateExpenseDto {
   amount: number;
   currency?: string;
   description?: string;
-  expense_date: Date;
+  expense_date: string; // YYYY-MM-DD — backend @IsDateString converts to UTC midnight
   receipt_url?: string;
   notes?: string;
   items?: ExpenseLineItem[];
@@ -74,7 +74,7 @@ export interface UpdateExpenseDto {
   amount?: number;
   currency?: string;
   description?: string;
-  expense_date?: Date;
+  expense_date?: string; // YYYY-MM-DD
   receipt_url?: string;
   notes?: string;
 }
