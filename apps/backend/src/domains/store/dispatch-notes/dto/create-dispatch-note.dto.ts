@@ -6,6 +6,8 @@ import {
   IsArray,
   ValidateNested,
   IsDateString,
+  IsEnum,
+  ValidateIf,
   Min,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
@@ -59,6 +61,62 @@ export class CreateDispatchNoteItemDto {
 }
 
 export class CreateDispatchNoteDto {
+  @IsOptional()
+  @IsEnum(['outbound', 'inbound'])
+  direction?: 'outbound' | 'inbound';
+
+  @IsOptional()
+  @IsEnum([
+    'customer_delivery',
+    'customer_return',
+    'transfer_out',
+    'transfer_in',
+    'purchase_receipt',
+  ])
+  subtype?:
+    | 'customer_delivery'
+    | 'customer_return'
+    | 'transfer_out'
+    | 'transfer_in'
+    | 'purchase_receipt';
+
+  @IsOptional()
+  @IsEnum([
+    'sale',
+    'sample',
+    'consignment',
+    'replacement_shipment',
+    'loan',
+    'defective',
+    'wrong_item',
+    'cancellation',
+    'warranty',
+    'overdelivery_return',
+    'replenishment',
+    'rebalancing',
+    'returned_from_consignee',
+    'normal_purchase',
+    'replacement_for_damage',
+    'sample_received',
+  ])
+  reason?:
+    | 'sale'
+    | 'sample'
+    | 'consignment'
+    | 'replacement_shipment'
+    | 'loan'
+    | 'defective'
+    | 'wrong_item'
+    | 'cancellation'
+    | 'warranty'
+    | 'overdelivery_return'
+    | 'replenishment'
+    | 'rebalancing'
+    | 'returned_from_consignee'
+    | 'normal_purchase'
+    | 'replacement_for_damage'
+    | 'sample_received';
+
   @IsInt()
   @Min(1)
   customer_id: number;
@@ -72,6 +130,26 @@ export class CreateDispatchNoteDto {
   @IsInt()
   @Min(1)
   dispatch_location_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  supplier_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  related_dispatch_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  from_location_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  to_location_id?: number;
 
   @IsOptional()
   @IsDateString()

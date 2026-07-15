@@ -2100,6 +2100,36 @@ export const ErrorCodes = {
     devMessage:
       'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
   },
+  DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION: {
+    code: 'DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION',
+    httpStatus: 400,
+    devMessage:
+      'The dispatch note subtype is not valid for the given direction (e.g. transfer_in requires inbound)',
+  },
+  DISPATCH_NOTE_CROSS_STORE_TRANSFER_BLOCKED: {
+    code: 'DISPATCH_NOTE_CROSS_STORE_TRANSFER_BLOCKED',
+    httpStatus: 403,
+    devMessage:
+      'Cross-store transfers are not allowed in STORE operating scope; switch to ORGANIZATION scope or use stock_transfers',
+  },
+  DISPATCH_NOTE_RETURN_REQUIRES_RELATED: {
+    code: 'DISPATCH_NOTE_RETURN_REQUIRES_RELATED',
+    httpStatus: 400,
+    devMessage:
+      'A customer return dispatch note requires related_dispatch_id pointing to the original outbound dispatch',
+  },
+  DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER: {
+    code: 'DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER',
+    httpStatus: 400,
+    devMessage:
+      'A purchase receipt dispatch note requires supplier_id',
+  },
+  DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE: {
+    code: 'DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE',
+    httpStatus: 409,
+    devMessage:
+      'Cannot void an invoiced dispatch note directly; issue a credit note via return_orders instead',
+  },
 
   // MCP (Model Context Protocol)
   AI_MCP_001: {

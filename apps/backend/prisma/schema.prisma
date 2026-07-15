@@ -1800,6 +1800,8 @@ model inventory_locations {
   layaway_items                 layaway_items[]
   dispatch_notes                dispatch_notes[]                @relation("dispatch_notes_location")
   dispatch_note_items           dispatch_note_items[]           @relation("dispatch_note_items_location")
+  dispatch_notes_from_location  dispatch_notes[]                @relation("dispatch_notes_from_location")
+  dispatch_notes_to_location    dispatch_notes[]                @relation("dispatch_notes_to_location")
   cash_registers                cash_registers[]
   // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
   // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
@@ -1957,6 +1959,7 @@ model suppliers {
   updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
   purchase_orders          purchase_orders[]
   supplier_products        supplier_products[]
+  dispatch_notes           dispatch_notes[]           @relation("dispatch_notes_supplier")
   organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                    stores?                    @relation(fields: [store_id], references: [id], onDelete: SetNull)
   addresses                addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2384,6 +2387,7 @@ model return_orders {
   organization_id    Int
   related_order_id   Int?
   related_order_type related_order_type_enum?
+  related_dispatch_id Int?
   partner_id         Int?
   partner_type       partner_type_enum?
   type               return_order_type_enum
@@ -2393,8 +2397,10 @@ model return_orders {
   updated_at         DateTime?                @default(now()) @db.Timestamp(6)
   return_order_items return_order_items[]
   organizations      organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  related_dispatch   dispatch_notes?          @relation("return_orders_related_dispatch", fields: [related_dispatch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([organization_id, type, status])
+  @@index([related_dispatch_id])
 }
 
 model return_order_items {
@@ -3665,8 +3671,41 @@ enum dispatch_note_status_enum {
   draft
   confirmed
   delivered
+  received
   invoiced
   voided
+}
+
+enum dispatch_note_direction_enum {
+  outbound
+  inbound
+}
+
+enum dispatch_note_subtype_enum {
+  customer_delivery
+  customer_return
+  transfer_out
+  transfer_in
+  purchase_receipt
+}
+
+enum dispatch_note_reason_enum {
+  sale
+  sample
+  consignment
+  replacement_shipment
+  loan
+  defective
+  wrong_item
+  cancellation
+  warranty
+  overdelivery_return
+  replenishment
+  rebalancing
+  returned_from_consignee
+  normal_purchase
+  replacement_for_damage
+  sample_received
 }
 
 enum related_order_type_enum {
@@ -6850,6 +6889,9 @@ model dispatch_notes {
   store_id             Int
   dispatch_number      String                    @db.VarChar(50)
   status               dispatch_note_status_enum @default(draft)
+  direction            dispatch_note_direction_enum @default(outbound)
+  subtype              dispatch_note_subtype_enum   @default(customer_delivery)
+  reason               dispatch_note_reason_enum?
   customer_id          Int
   customer_name        String?                   @db.VarChar(255)
   customer_tax_id      String?                   @db.VarChar(50)
@@ -6857,6 +6899,10 @@ model dispatch_notes {
   sales_order_id       Int?
   invoice_id           Int?
   order_id             Int?
+  supplier_id          Int?
+  related_dispatch_id  Int?
+  from_location_id     Int?
+  to_location_id       Int?
   needs_collection     Boolean?                  @default(false)
   emission_date        DateTime                  @default(now()) @db.Timestamp(6)
   agreed_delivery_date DateTime?                 @db.Timestamp(6)
@@ -6886,11 +6932,17 @@ model dispatch_notes {
   sales_order          sales_orders?          @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice              invoices?              @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                orders?                @relation("orders_dispatch_notes", fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier             suppliers?             @relation("dispatch_notes_supplier", fields: [supplier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  related_dispatch     dispatch_notes?        @relation("dispatch_notes_related", fields: [related_dispatch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  related_dispatchs    dispatch_notes[]       @relation("dispatch_notes_related")
+  from_location        inventory_locations?   @relation("dispatch_notes_from_location", fields: [from_location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  to_location          inventory_locations?   @relation("dispatch_notes_to_location", fields: [to_location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   dispatch_location    inventory_locations?   @relation("dispatch_notes_location", fields: [dispatch_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user      users?                 @relation("dispatch_notes_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   confirmed_by_user    users?                 @relation("dispatch_notes_confirmed_by", fields: [confirmed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   delivered_by_user    users?                 @relation("dispatch_notes_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   voided_by_user       users?                 @relation("dispatch_notes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  return_orders        return_orders[]        @relation("return_orders_related_dispatch")
   dispatch_route_stops dispatch_route_stops[]
 
   @@unique([store_id, dispatch_number])
@@ -6899,6 +6951,11 @@ model dispatch_notes {
   @@index([sales_order_id])
   @@index([invoice_id])
   @@index([store_id, order_id])
+  @@index([store_id, direction, subtype])
+  @@index([supplier_id])
+  @@index([related_dispatch_id])
+  @@index([from_location_id])
+  @@index([to_location_id])
 }
 
 model dispatch_note_items {
