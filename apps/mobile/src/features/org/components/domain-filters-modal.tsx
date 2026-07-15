@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { Icon } from '@/shared/components/icon/icon';
@@ -29,7 +29,7 @@ interface DomainFiltersModalProps {
  * popover flotante, no como sheet full-screen.
  *
  * Combina en un solo modal los 3 selects:
- *   - Estado: 17 statuses (PENDING, ACTIVE, FAILED, …)
+ *   - Estado: 16 statuses (PENDING, ACTIVE, FAILED, …)
  *   - Tipo (Ownership): VENDIX_SUBDOMAIN / CUSTOM_DOMAIN / CUSTOM_SUBDOMAIN / THIRD_PARTY_SUBDOMAIN
  *   - Tienda: Todas / Organización (sentinel) / tiendas reales del OrgStoreService
  *
@@ -41,34 +41,18 @@ export function DomainFiltersModal({ visible, initial, onClose, onApply }: Domai
   const [stores, setStores] = useState<StoreListItem[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
   const [openSelect, setOpenSelect] = useState<null | 'status' | 'ownership' | 'store'>(null);
-  const storesAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!visible) return;
     setDraft(initial);
     setOpenSelect(null);
     if (stores.length === 0) {
-      storesAbortRef.current?.abort();
-      const ac = new AbortController();
-      storesAbortRef.current = ac;
       setStoresLoading(true);
       OrgStoreService.list({ pageSize: 200 })
-        .then((r) => {
-          if (ac.signal.aborted) return;
-          setStores(r.data ?? []);
-        })
-        .catch(() => {
-          if (ac.signal.aborted) return;
-          setStores([]);
-        })
-        .finally(() => {
-          if (ac.signal.aborted) return;
-          setStoresLoading(false);
-        });
+        .then((r) => setStores(r.data ?? []))
+        .catch(() => setStores([]))
+        .finally(() => setStoresLoading(false));
     }
-    return () => {
-      storesAbortRef.current?.abort();
-    };
   }, [visible, initial, stores.length]);
 
   const handleApply = () => {
