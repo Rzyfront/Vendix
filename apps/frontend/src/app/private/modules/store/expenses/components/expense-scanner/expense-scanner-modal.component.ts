@@ -880,7 +880,7 @@ export class ExpenseScannerModalComponent {
         amount: Number(this.editAmount()),
         currency: this.editCurrency() || 'COP',
         category_id: this.editCategoryId() ?? undefined,
-        expense_date: new Date(this.editInvoiceDate() || toLocalDateString()),
+        expense_date: this.editInvoiceDate() || toLocalDateString(),
         notes: this.editNotes() || undefined,
         receipt_url: receiptKey,
         items: this.editableItems().map((it, idx) => ({

@@ -411,7 +411,10 @@ export class ExpenseCreateComponent {
 
     const formValue = this.expenseForm.value;
     const categoryId = formValue.category_id ? Number(formValue.category_id) : undefined;
-    const expenseDate = new Date(formValue.expense_date);
+    // Send YYYY-MM-DD as string directly (aligned with canonical pattern of
+    // dispatch-notes). Backend DTO uses @IsDateString and converts with
+    // `new Date(string)` → UTC midnight. See skills/vendix-date-timezone.
+    const expenseDate = formValue.expense_date;
 
     const createAndFinish = (receiptUrl?: string) => {
       this.expensesService.createExpense({
