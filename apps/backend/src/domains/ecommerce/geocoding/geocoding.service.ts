@@ -546,14 +546,37 @@ export class GeocodingService {
       this.fetchOverpassMirror(url, query),
     );
     try {
-      // Promise.any resolves with the first FULFILLED attempt. A mirror that is
-      // reachable but empty rejects (see fetchOverpassMirror) so a populated
-      // mirror wins the race instead of a fast-but-empty one.
-      return await Promise.any(attempts);
+      // First FULFILLED attempt wins. A mirror that is reachable but empty
+      // rejects (see fetchOverpassMirror) so a populated mirror beats a
+      // fast-but-empty one. Equivalent to Promise.any, hand-rolled because the
+      // backend targets ES2020 (Promise.any needs the ES2021 lib).
+      return await this.firstFulfilled(attempts);
     } catch {
       // Every mirror failed or returned nothing usable → keep a single axis.
       return [];
     }
+  }
+
+  /**
+   * Resolves with the first fulfilled promise, mirroring `Promise.any` without
+   * requiring the ES2021 lib (the backend targets ES2020). Rejects only once
+   * EVERY input has rejected, so a populated mirror still wins the race even if
+   * a faster mirror rejects first.
+   */
+  private firstFulfilled<T>(promises: Promise<T>[]): Promise<T> {
+    if (promises.length === 0) {
+      return Promise.reject(new Error('no attempts'));
+    }
+    return new Promise<T>((resolve, reject) => {
+      let remaining = promises.length;
+      for (const promise of promises) {
+        promise.then(resolve, () => {
+          if (--remaining === 0) {
+            reject(new Error('all attempts failed'));
+          }
+        });
+      }
+    });
   }
 
   /**
