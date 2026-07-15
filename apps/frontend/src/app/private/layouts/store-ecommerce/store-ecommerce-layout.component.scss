@@ -699,7 +699,10 @@
     position: absolute;
     top: calc(100% + 1rem);
     right: 0;
-    width: 360px;
+    // Topa el ancho al viewport en móviles angostos para que el dropdown no se
+    // desborde por la izquierda (anclado a right:0). 3rem = márgenes simétricos
+    // de 1.5rem que coinciden con el padding del .header-container.
+    width: min(360px, calc(100vw - 3rem));
     background: var(--color-surface);
     border-radius: 16px; // Más redondeado para look moderno
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); // Sombra premium

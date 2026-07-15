@@ -276,10 +276,30 @@ interface CartaBlock {
         text-align: center;
         margin-top: 1rem;
       }
+      /* Espejo del grid canónico del ecommerce (.products-grid del home):
+         mobile-first con 2 columnas fijas en móvil, escalando en desktop, para
+         que las cards de carta se comporten igual que el resto de cards. */
       .dishes-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-        gap: 1rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem 0.75rem;
+      }
+      @media (min-width: 768px) {
+        .dishes-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 1.5rem;
+        }
+      }
+      @media (min-width: 1100px) {
+        .dishes-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 2rem 1.75rem;
+        }
+      }
+      @media (min-width: 1320px) {
+        .dishes-grid {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
       }
 
       /* --- dish-card: espejo visual de .product-card --- */

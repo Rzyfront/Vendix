@@ -22,9 +22,13 @@ import {
  * Presentational, horizontal cart-item card for the ecommerce cart.
  *
  * Renders a single `CartItem` as a compact, detailed row that stays coherent
- * between mobile and desktop: product image on the left, name + variant/
- * attribute metadata + SKU + unit price in the middle, and a bottom action row
- * (quantity stepper, prominent line total, ghost remove button) on the right.
+ * between mobile and desktop: product image on the left; in the middle a title
+ * row (name + a ghost remove button pinned to the top-right corner), then
+ * variant/attribute metadata, then SKU + unit price; and a bottom action row
+ * (quantity stepper + prominent line total). Moving the remove button out of
+ * the action row keeps that row to two items so it can't overflow on narrow
+ * screens. Unit price is hidden when qty is 1 (equals the total) and the SKU
+ * collapses below 360px — the row degrades gracefully instead of breaking.
  *
  * Purely presentational — it derives everything from the `item` signal and
  * emits `quantityChange` / `remove`; the parent owns all cart mutations. Money
@@ -70,7 +74,23 @@ import {
       <!-- Body -->
       <div class="ci-body">
         <div class="ci-head">
-          <h3 class="ci-name">{{ item().product.name }}</h3>
+          <div class="ci-title-row">
+            <h3 class="ci-name">{{ item().product.name }}</h3>
+
+            <div class="ci-remove-slot">
+              <app-button
+                variant="ghost"
+                size="sm"
+                customClasses="ci-remove"
+                [disabled]="updating()"
+                [attr.aria-label]="'Eliminar'"
+                [title]="'Eliminar'"
+                (clicked)="onRemove()"
+              >
+                <app-icon slot="icon" name="trash-2" [size]="18"></app-icon>
+              </app-button>
+            </div>
+          </div>
 
           <!-- Variant + attribute + type metadata -->
           @if (
@@ -99,13 +119,17 @@ import {
             </div>
           }
 
-          <!-- SKU + unit price -->
+          <!-- SKU + unit price. Unit price only shows when qty > 1 (with qty 1
+               it equals the line total, so it is redundant); the SKU collapses
+               on very narrow screens (see max-width media query below). -->
           <div class="ci-sub">
             <span class="ci-sku">SKU: {{ item().variant?.sku || item().product.sku }}</span>
-            <span class="ci-unit">
-              {{ item().unit_price | currency }}
-              <span class="ci-tax">c/u · Imp. incl.</span>
-            </span>
+            @if (item().quantity > 1) {
+              <span class="ci-unit">
+                {{ item().unit_price | currency }}
+                <span class="ci-tax">c/u</span>
+              </span>
+            }
           </div>
         </div>
 
@@ -120,20 +144,7 @@ import {
             (valueChange)="onQuantityChange($event)"
           ></app-quantity-control>
 
-          <div class="ci-actions-right">
-            <span class="ci-total">{{ item().total_price | currency }}</span>
-            <app-button
-              variant="ghost"
-              size="sm"
-              customClasses="ci-remove"
-              [disabled]="updating()"
-              [attr.aria-label]="'Eliminar'"
-              [title]="'Eliminar'"
-              (clicked)="onRemove()"
-            >
-              <app-icon slot="icon" name="trash-2" [size]="18"></app-icon>
-            </app-button>
-          </div>
+          <span class="ci-total">{{ item().total_price | currency }}</span>
         </div>
       </div>
     </article>
@@ -219,7 +230,19 @@ import {
         min-width: 0;
       }
 
+      /* Title row: product name (flexes/clamps) + remove button pinned to the
+         top-right corner. Keeping the button in normal flow next to the name
+         avoids absolute-positioning overlap and reserves its width naturally. */
+      .ci-title-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.4rem;
+        min-width: 0;
+      }
+
       .ci-name {
+        flex: 1;
+        min-width: 0;
         margin: 0;
         font-size: var(--fs-sm);
         font-weight: var(--fw-bold);
@@ -229,6 +252,13 @@ import {
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
+      }
+
+      .ci-remove-slot {
+        flex-shrink: 0;
+        /* Pull the ghost button flush into the card's top-right corner without
+           nudging the name baseline. */
+        margin: -0.25rem -0.3rem 0 0;
       }
 
       .ci-meta {
@@ -285,7 +315,8 @@ import {
         color: var(--color-text-muted);
       }
 
-      /* Actions */
+      /* Actions — now just the quantity stepper + line total, so the row can
+         never overflow the way it did with the remove button competing here. */
       .ci-actions {
         margin-top: auto;
         display: flex;
@@ -294,15 +325,8 @@ import {
         min-width: 0;
       }
 
-      .ci-actions-right {
-        display: flex;
-        align-items: center;
-        gap: 0.35rem;
-        margin-left: auto;
-        min-width: 0;
-      }
-
       .ci-total {
+        margin-left: auto;
         font-size: var(--fs-base);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
@@ -321,6 +345,15 @@ import {
       :host ::ng-deep .ci-remove:hover:not(:disabled) {
         color: var(--color-destructive) !important;
         background: rgba(var(--color-destructive-rgb), 0.1) !important;
+      }
+
+      /* Very narrow screens — drop the SKU (rarely useful to shoppers) so the
+         SKU/price row can never force horizontal overflow. Placed after the
+         base .ci-sku rule so it wins the cascade. */
+      @media (max-width: 360px) {
+        .ci-sku {
+          display: none;
+        }
       }
 
       /* Desktop — larger image, more breathing room, same horizontal layout */
