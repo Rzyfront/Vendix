@@ -717,6 +717,12 @@
       align-items: center;
       background: rgba(var(--color-surface-rgb), 0.8);
       backdrop-filter: blur(8px);
+      cursor: pointer; // navega al carrito (reemplaza el click del icono)
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(var(--color-surface-rgb), 1);
+      }
 
       h3 {
         font-size: 1rem;
@@ -893,6 +899,7 @@
         font-weight: 700;
         color: var(--color-text-primary);
         font-size: 1.1rem;
+        cursor: pointer; // navega al carrito desde el footer
       }
 
       .cart-actions {
