@@ -70,7 +70,9 @@ export class DispatchNoteDetailComponent {
 
   // ── StickyHeader computed ───────────────────────────
   readonly headerTitle = computed(() => `Remision ${this.dispatch_note().dispatch_number}`);
-  readonly headerSubtitle = computed(() => `Creada el ${this.formatDate(this.dispatch_note().created_at)}`);
+  readonly headerSubtitle = computed(
+    () => `Creada el ${this.formatTimestampDate(this.dispatch_note().created_at)}`,
+  );
   readonly headerBadgeText = computed(() => STATUS_LABELS[this.dispatch_note().status] || this.dispatch_note().status);
   readonly headerBadgeColor = computed<StickyHeaderBadgeColor>(() => BADGE_COLOR_MAP[this.dispatch_note().status] || 'gray');
 
@@ -284,7 +286,30 @@ export class DispatchNoteDetailComponent {
     return this.currencyService.format(num);
   }
 
+  // ── Date formatters ────────────────────────────────
+  // Use formatDate() for DATE-ONLY fields (emission_date, agreed_delivery_date,
+  // actual_delivery_date). The backend stores these as UTC midnight, so we must
+  // render with timeZone: 'UTC' to prevent the off-by-one bug in negative offsets
+  // (e.g. Colombia UTC-5). See skills/vendix-date-timezone/SKILL.md.
+  //
+  // For TIMESTAMP fields (created_at, confirmed_at, etc.) use formatTimestampDate()
+  // — those represent an instant, not a calendar day, and need local TZ.
   formatDate(date: string | undefined): string {
+    if (!date) return '-';
+    return new Date(date).toLocaleDateString('es-CO', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC', // ← FIX: prevents off-by-one for date-only fields in UTC-5
+    });
+  }
+
+  formatTimestampDate(date: string | undefined): string {
+    // Render TIMESTAMP fields (created_at, confirmed_at, etc.) in the user's
+    // local TZ, date-only. These represent an INSTANT, not a calendar day, so
+    // we deliberately do NOT use timeZone: 'UTC' here (that would render the
+    // UTC date, which may not match the local calendar day for negative
+    // offsets like Colombia UTC-5). See skills/vendix-date-timezone.
     if (!date) return '-';
     return new Date(date).toLocaleDateString('es-CO', {
       year: 'numeric',
