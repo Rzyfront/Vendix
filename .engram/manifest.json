@@ -626,67 +626,11 @@
       "prompts": 0
     },
     {
-      "id": "c100100d",
-      "created_by": "rzy",
-      "created_at": "2026-07-16T00:43:20Z",
-      "sessions": 2,
-      "memories": 3,
-      "prompts": 0
-    },
-    {
-      "id": "1ed47104",
-      "created_by": "rzy",
-      "created_at": "2026-07-16T01:03:44Z",
+      "id": "8c92200e",
+      "created_by": "yoner",
+      "created_at": "2026-07-15T22:16:50Z",
       "sessions": 0,
       "memories": 2,
-      "prompts": 0
-    },
-    {
-      "id": "02f74c0e",
-      "created_by": "yoner",
-      "created_at": "2026-07-16T03:30:26Z",
-      "sessions": 2,
-      "memories": 1,
-      "prompts": 0
-    },
-    {
-      "id": "8369e850",
-      "created_by": "yoner",
-      "created_at": "2026-07-14T18:57:52Z",
-      "sessions": 0,
-      "memories": 5,
-      "prompts": 0
-    },
-    {
-      "id": "8680adb6",
-      "created_by": "rzy",
-      "created_at": "2026-07-17T14:21:33Z",
-      "sessions": 28,
-      "memories": 52,
-      "prompts": 1
-    },
-    {
-      "id": "f7fb1b8b",
-      "created_by": "rzy",
-      "created_at": "2026-07-18T20:25:42Z",
-      "sessions": 21,
-      "memories": 25,
-      "prompts": 0
-    },
-    {
-      "id": "2cf46bc4",
-      "created_by": "rzy",
-      "created_at": "2026-07-20T22:16:20Z",
-      "sessions": 37,
-      "memories": 47,
-      "prompts": 0
-    },
-    {
-      "id": "46755dde",
-      "created_by": "rzy",
-      "created_at": "2026-07-21T04:14:18Z",
-      "sessions": 6,
-      "memories": 4,
       "prompts": 0
     }
   ]
