@@ -20,6 +20,7 @@ import {
   PayTableSessionResult,
   TableQrResponse,
 } from '../interfaces';
+import type { IconName } from '../../../../../../shared/components/icon/icons.registry';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -300,6 +301,19 @@ export class TablesService {
         return 'var(--color-warning)';
       case 'cleaning':
         return 'var(--color-text-muted)';
+    }
+  }
+
+  static statusIcon(status: TableStatus): IconName {
+    switch (status) {
+      case 'available':
+        return 'circle-check';
+      case 'occupied':
+        return 'utensils';
+      case 'reserved':
+        return 'calendar-clock';
+      case 'cleaning':
+        return 'sparkles';
     }
   }
 

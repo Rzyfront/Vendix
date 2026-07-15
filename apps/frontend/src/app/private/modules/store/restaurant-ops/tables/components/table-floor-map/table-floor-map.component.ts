@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import type { IconName } from '../../../../../../../shared/components/icon/icons.registry';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { Table, TableStatus } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
@@ -21,6 +22,7 @@ interface TableCell {
   displayStatus: TableStatus;
   statusLabel: string;
   statusColor: string;
+  statusIcon: IconName;
   isOccupied: boolean;
   guestCount: number | null;
   /** Posición absoluta resuelta (px) usada por el lienzo. */
@@ -218,6 +220,7 @@ export class TableFloorMapComponent {
         displayStatus: status,
         statusLabel: TablesService.statusLabel(status),
         statusColor: TablesService.statusColorVar(status),
+        statusIcon: TablesService.statusIcon(status),
         isOccupied: status === 'occupied',
         guestCount: t.active_session?.guest_count ?? null,
         x,
