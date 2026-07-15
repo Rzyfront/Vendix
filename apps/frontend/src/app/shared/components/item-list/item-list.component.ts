@@ -27,6 +27,9 @@ export class ItemListComponent {
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
   readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
+  readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
+    () => undefined
+  );
 
   readonly itemClick = output<any>();
   readonly actionClick = output<{

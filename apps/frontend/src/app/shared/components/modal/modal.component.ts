@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 
-export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'full';
 
 @Component({
   selector: 'app-modal',
@@ -25,7 +25,8 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
     <!-- Modal backdrop -->
     @if (isOpen()) {
         <div
-          class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          class="fixed inset-0 z-[9999] flex items-center justify-center"
+          [class.p-4]="!isFull()"
           (click)="onWrapperClick($event)"
         >
         <!-- Backdrop overlay: bg-only, sin backdrop-filter -->
@@ -45,9 +46,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
           [class.opacity-0]="!isOpen()"
         >
           <!-- Modal content con diseño mejorado -->
-          <div
-            class="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-xl overflow-hidden flex flex-col max-h-[90vh] border border-[var(--color-border)]"
-          >
+          <div [class]="contentClasses()">
             <!-- Header con gradiente sutil -->
             @if (hasHeader()) {
               <div
@@ -156,6 +155,8 @@ export class ModalComponent {
       lg: ['max-w-5xl', 'w-full', 'max-h-[90vh]'],
       'xl-mid': ['max-w-[85vw]', 'w-full', 'max-h-[90vh]'],
       xl: ['max-w-[95vw]', 'w-full', 'max-h-[90vh]'],
+      // Takeover full-screen (estilo reporte semanal): ocupa todo el viewport.
+      full: ['max-w-full', 'w-full', 'h-full', 'max-h-full'],
     };
 
     const classes = [...baseClasses, ...sizeClasses[this.size()]];
@@ -165,6 +166,22 @@ export class ModalComponent {
     }
 
     return classes.join(' ');
+  });
+
+  /** True when the modal renders as a full-screen takeover. */
+  readonly isFull = computed(() => this.size() === 'full');
+
+  /**
+   * Inner content shell classes. Full-screen fills the viewport edge-to-edge
+   * (no rounding / no outer border / no 90vh cap); other sizes keep the
+   * rounded, bordered, height-capped card look.
+   */
+  readonly contentClasses = computed(() => {
+    const base =
+      'bg-[var(--color-surface)] shadow-xl overflow-hidden flex flex-col';
+    return this.isFull()
+      ? `${base} h-full w-full max-h-full`
+      : `${base} rounded-[var(--radius-lg)] max-h-[90vh] border border-[var(--color-border)]`;
   });
 
   readonly hasHeader = computed(() => !!(this.title() || this.subtitle()));

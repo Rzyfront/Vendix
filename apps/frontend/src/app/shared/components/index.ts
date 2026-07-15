@@ -63,6 +63,11 @@ export { StoreFiscalIdentityFormComponent } from './store-fiscal-identity-form/s
 export { StoreUserSelectComponent } from './store-user-select/store-user-select.component';
 export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';
 export { SaveRequirementsModalComponent } from './save-requirements-modal/save-requirements-modal.component';
+export { StoreUnavailableBannerComponent } from './store-unavailable-banner/store-unavailable-banner.component';
+export { DomainResolutionErrorComponent } from './domain-resolution-error/domain-resolution-error.component';
+export type { DomainResolutionErrorKind } from './domain-resolution-error/domain-resolution-error.component';
+export { MapViewComponent } from './map-view/map-view.component';
+export type { LatLng, MapMarker } from './map-view/map-view.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';

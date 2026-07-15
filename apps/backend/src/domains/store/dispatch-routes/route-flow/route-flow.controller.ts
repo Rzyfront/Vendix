@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Patch,
   Body,
   Param,
   Res,
@@ -18,6 +19,7 @@ import { RouteSheetScannerService } from './route-sheet-scanner.service';
 import {
   CloseDispatchRouteDto,
   ReleaseStopDto,
+  ReorderStopsDto,
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
@@ -81,6 +83,27 @@ export class RouteFlowController {
     return this.responseService.success(
       result,
       'Parada liberada para reasignación',
+    );
+  }
+
+  /**
+   * Reorder the not-yet-delivered stops of a route (apply the map's suggested
+   * shortest-path order). Only allowed while the route is editable
+   * (`draft` / `dispatched`). Reordering is a route-composition edit, so it
+   * uses the `:update` permission (like add/remove stops), not `:settle`
+   * (which governs per-stop delivery/collection).
+   */
+  @Patch(':id/stops/reorder')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_routes:update')
+  async reorderStops(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReorderStopsDto,
+  ) {
+    const result = await this.routeFlowService.reorderStops(id, dto);
+    return this.responseService.success(
+      result,
+      'Orden de paradas actualizado',
     );
   }
 

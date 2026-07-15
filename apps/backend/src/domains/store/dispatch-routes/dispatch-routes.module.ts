@@ -13,9 +13,18 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { S3Module } from '@common/services/s3.module';
+import { GeocodingModule } from '../../ecommerce/geocoding/geocoding.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, CashRegistersModule, S3Module],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    CashRegistersModule,
+    S3Module,
+    // Provides GeocodingService.forward() for resolving stop coordinates on
+    // the route map (fallback when no lat/lng is stored on the address).
+    GeocodingModule,
+  ],
   controllers: [
     DispatchRoutesController,
     VehiclesController,

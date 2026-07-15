@@ -405,6 +405,7 @@
     .mobile-logo-img {
       height: 32px;
       width: auto;
+      border-radius: var(--radius-md, 0.5rem);
     }
 
     .mobile-logo-fallback {
@@ -434,6 +435,7 @@
     .logo-img {
       height: 38px; // 20% larger for better visibility
       width: auto;
+      border-radius: var(--radius-md, 0.5rem);
     }
 
     .logo-fallback {
@@ -697,7 +699,10 @@
     position: absolute;
     top: calc(100% + 1rem);
     right: 0;
-    width: 360px;
+    // Topa el ancho al viewport en móviles angostos para que el dropdown no se
+    // desborde por la izquierda (anclado a right:0). 3rem = márgenes simétricos
+    // de 1.5rem que coinciden con el padding del .header-container.
+    width: min(360px, calc(100vw - 3rem));
     background: var(--color-surface);
     border-radius: 16px; // Más redondeado para look moderno
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); // Sombra premium
@@ -715,6 +720,12 @@
       align-items: center;
       background: rgba(var(--color-surface-rgb), 0.8);
       backdrop-filter: blur(8px);
+      cursor: pointer; // navega al carrito (reemplaza el click del icono)
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(var(--color-surface-rgb), 1);
+      }
 
       h3 {
         font-size: 1rem;
@@ -891,6 +902,7 @@
         font-weight: 700;
         color: var(--color-text-primary);
         font-size: 1.1rem;
+        cursor: pointer; // navega al carrito desde el footer
       }
 
       .cart-actions {

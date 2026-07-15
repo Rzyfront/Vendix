@@ -1,71 +1,206 @@
 .checkout-page {
     min-height: 50vh;
+}
 
-    h1 {
-        font-size: var(--fs-2xl);
+// Header — badge con ícono + eyebrow de confianza + título compacto, enmarcado
+// como card. Un relleno verde (::before) avanza de izquierda a derecha según el
+// progreso del checkout (--checkout-fill) y se vuelve verde sólido al completar.
+.checkout-header {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    margin-bottom: 1.25rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    transition: border-color 0.4s ease;
+
+    // Relleno de progreso: bloque verde suave cuyo ancho se anima con --checkout-fill.
+    // Se anima el width (transicionable), no el gradiente (no lo es). El mask difumina
+    // el borde derecho para que no quede una línea dura.
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        width: var(--checkout-fill, 0%);
+        background: linear-gradient(
+            90deg,
+            rgba(var(--color-success-rgb), 0.06),
+            rgba(var(--color-success-rgb), 0.2)
+        );
+        -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent);
+        mask-image: linear-gradient(90deg, #000 82%, transparent);
+        transition:
+            width 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+            background 0.4s ease;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    // Contenido por encima del relleno.
+    > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    &__badge {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        width: 44px;
+        height: 44px;
+        border-radius: var(--radius-md);
+        color: var(--color-primary);
+        background: var(--color-primary-light);
+        transition:
+            color 0.4s ease,
+            background 0.4s ease;
+    }
+
+    &__text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        min-width: 0;
+    }
+
+    &__eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--color-text-secondary);
+        transition: color 0.4s ease;
+    }
+
+    &__title {
+        margin: 0;
+        font-size: var(--fs-xl);
         font-weight: var(--fw-bold);
+        line-height: 1.1;
         color: var(--color-text-primary);
-        margin-bottom: 2rem;
+    }
+
+    // Estado completado: relleno al 100%, verde más sólido (sin feather) y
+    // acentos verdes en badge + eyebrow.
+    &.is-complete {
+        border-color: rgba(var(--color-success-rgb), 0.5);
+
+        &::before {
+            width: 100%;
+            background: linear-gradient(
+                90deg,
+                rgba(var(--color-success-rgb), 0.16),
+                rgba(var(--color-success-rgb), 0.3)
+            );
+            -webkit-mask-image: none;
+            mask-image: none;
+        }
+
+        .checkout-header__badge {
+            color: var(--color-success);
+            background: var(--color-success-light);
+        }
+
+        .checkout-header__eyebrow {
+            color: var(--color-success);
+        }
     }
 }
 
-// Steps
+// Steps — barra de progreso enmarcada (surface + border + radius-lg, espejo
+// del banner del carrito). Las líneas usan flex:1 para repartir los pasos de
+// forma simétrica a lo ancho del contenedor, sin importar cuántos se rendericen.
 .steps {
     display: flex;
     align-items: center;
-    justify-content: center;
-    margin-bottom: 3rem;
+    gap: 0.5rem;
+    padding: 0.75rem 1.25rem;
+    margin-bottom: 1.5rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
 }
 
 .step {
     display: flex;
-    flex-direction: column;
+    flex-shrink: 0;
     align-items: center;
     gap: 0.5rem;
 
-    .step-number {
-        width: 40px;
-        height: 40px;
-        border-radius: var(--radius-pill);
-        border: 2px solid var(--color-border);
-        background: var(--color-surface);
+    .step-marker {
         display: flex;
         align-items: center;
         justify-content: center;
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-secondary);
+        width: 30px;
+        height: 30px;
+        border-radius: var(--radius-pill);
+        border: 2px solid var(--color-border);
+        background: var(--color-surface);
+        color: var(--color-text-muted);
         transition: all var(--transition-fast);
     }
 
     .step-label {
         font-size: var(--fs-sm);
+        font-weight: var(--fw-medium);
         color: var(--color-text-secondary);
+        white-space: nowrap;
+        transition: color var(--transition-fast);
     }
 
-    &.active .step-number {
-        border-color: var(--color-primary);
-        color: var(--color-primary);
+    // Activo: aro suave (halo) + tinte primario para destacar el paso actual.
+    &.active {
+        .step-marker {
+            border-color: var(--color-primary);
+            background: var(--color-primary-light);
+            color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary-light);
+        }
+
+        .step-label {
+            font-weight: var(--fw-semibold);
+            color: var(--color-primary);
+        }
     }
 
-    &.completed .step-number {
-        background: var(--color-primary);
-        border-color: var(--color-primary);
-        color: var(--color-text-on-primary);
+    // Completado: círculo relleno con check blanco.
+    &.completed {
+        .step-marker {
+            border-color: var(--color-primary);
+            background: var(--color-primary);
+            color: var(--color-text-on-primary);
+        }
+
+        .step-label {
+            color: var(--color-text-primary);
+        }
     }
 }
 
 .step-line {
-    width: 60px;
+    flex: 1;
+    min-width: 1rem;
     height: 2px;
+    border-radius: 2px;
     background: var(--color-border);
-    margin: 0 1rem;
-    margin-bottom: 1.5rem;
     transition: background var(--transition-fast);
 
     &.completed {
         background: var(--color-primary);
     }
 }
+
+// NOTA: los overrides móviles (≤576px) están consolidados AL FINAL del archivo.
+// Deben ir después de todas las reglas base porque media query y regla normal
+// tienen igual especificidad: gana la última en orden de fuente.
 
 // Loading
 .loading {
@@ -628,6 +763,27 @@
     }
 }
 
+// Coupon block — defined, compact, "ticket" feel via dashed border
+.summary-coupon {
+    margin: 1rem 0;
+    padding: 0.875rem;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-background);
+
+    // app-input owns its own field styling; we only tighten spacing
+    // so the label/field/hint read as one compact, symmetric group.
+    app-input {
+        display: block;
+    }
+
+    // Prefix ticket icon uses the muted token to match system inputs
+    [slot='prefix-icon'] {
+        color: var(--color-text-muted);
+        display: inline-flex;
+    }
+}
+
 // Wompi Info Panel
 .wompi-info-panel {
     margin-top: 1rem;
@@ -676,5 +832,90 @@
 
     p {
         font-size: var(--fs-base);
+    }
+}
+
+// ============================================================================
+// Overrides móviles (≤576px) — CONSOLIDADOS AL FINAL A PROPÓSITO.
+// Media query y regla normal tienen igual especificidad; gana la última en
+// orden de fuente. Al vivir aquí, todos estos overrides vienen después de sus
+// reglas base (.checkout-main, .address-form, .summary-card, etc.) y ganan.
+// ============================================================================
+@media (max-width: 576px) {
+    // --- Fusión header + steps en un solo bloque enmarcado (~64px vs ~166px) ---
+    // Header: compacto en 1 línea. Abre su borde inferior y redondea solo
+    // arriba para pegarse a los steps y leerse como una sola card.
+    .checkout-header {
+        gap: 0.5rem;
+        padding: 0.375rem 0.75rem;
+        margin-bottom: 0;
+        border-bottom: none;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+
+        &__badge {
+            width: 24px;
+            height: 24px;
+        }
+
+        // Eyebrow ("Compra segura") se oculta: ahorra una línea completa.
+        &__eyebrow {
+            display: none;
+        }
+
+        &__title {
+            font-size: var(--fs-sm);
+        }
+    }
+
+    // Steps: pegado al header, esquinas solo abajo; su border-top hace de
+    // divisor interno del bloque fusionado. Labels ocultos, marcadores chicos.
+    .steps {
+        gap: 0.375rem;
+        padding: 0.3125rem 0.875rem;
+        margin-bottom: 1rem;
+        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    }
+
+    .step .step-marker {
+        width: 20px;
+        height: 20px;
+    }
+
+    .step .step-label {
+        display: none;
+    }
+
+    // --- Contenedor e inputs: cortamos el padding apilado que apretaba ---
+    .checkout-content {
+        gap: 1rem;
+    }
+
+    // Padding al 50% del valor de escritorio (2rem → 1rem) en móvil.
+    .checkout-main {
+        padding: 1rem;
+    }
+
+    .checkout-section h2 {
+        margin-bottom: 0.875rem;
+    }
+
+    .address-form {
+        margin-top: 0.75rem;
+        padding: 0.875rem;
+    }
+
+    .checkout-actions {
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+    }
+
+    // --- Resumen: ajuste ligero de consistencia (intacto por lo demás) ---
+    .summary-card {
+        padding: 1rem;
+    }
+
+    // Apilado en móvil, el sticky con top:120px no aporta; lo neutralizamos.
+    .checkout-summary {
+        position: static;
     }
 }

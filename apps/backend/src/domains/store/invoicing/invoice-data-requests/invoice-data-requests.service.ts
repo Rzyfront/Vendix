@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
 import { Prisma } from '@prisma/client';
@@ -47,6 +48,7 @@ export class InvoiceDataRequestsService {
     private readonly invoicingService: InvoicingService,
     private readonly creditNotesService: CreditNotesService,
     private readonly invoiceFlowService: InvoiceFlowService,
+    private readonly s3Service: S3Service,
   ) {}
 
   /**
@@ -159,10 +161,21 @@ export class InvoiceDataRequestsService {
               select: {
                 product_name: true,
                 variant_sku: true,
+                variant_attributes: true,
+                variant_image_url: true,
                 quantity: true,
                 unit_price: true,
                 total_price: true,
                 tax_amount_item: true,
+                products: {
+                  select: {
+                    product_images: {
+                      where: { is_main: true },
+                      take: 1,
+                      select: { image_url: true },
+                    },
+                  },
+                },
               },
             },
             payments: {
@@ -190,6 +203,45 @@ export class InvoiceDataRequestsService {
               orderBy: { created_at: 'desc' },
               take: 1,
             },
+            // Persisted discount snapshots — read what was actually charged,
+            // never recalculate against current promotions/coupons.
+            order_promotions: {
+              select: {
+                id: true,
+                promotion_id: true,
+                discount_amount: true,
+                created_at: true,
+                promotions: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                    type: true,
+                    scope: true,
+                    value: true,
+                  },
+                },
+              },
+              orderBy: { created_at: 'asc' },
+            },
+            coupon_uses: {
+              select: {
+                id: true,
+                coupon_id: true,
+                discount_applied: true,
+                used_at: true,
+                coupon: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    discount_type: true,
+                    discount_value: true,
+                  },
+                },
+              },
+              orderBy: { used_at: 'asc' },
+            },
           },
         },
         store: {
@@ -205,6 +257,25 @@ export class InvoiceDataRequestsService {
     if (!request) {
       throw new NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND');
     }
+
+    // Sign image URLs per item (mirrors account.service getOrderDetail).
+    const items = await Promise.all(
+      request.order.order_items.map(async (item) => ({
+        product_name: item.product_name,
+        variant_sku: item.variant_sku,
+        variant_attributes: item.variant_attributes,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        total_price: item.total_price,
+        tax_amount_item: item.tax_amount_item,
+        image_url: item.products?.product_images?.[0]?.image_url
+          ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
+          : null,
+        variant_image_url: item.variant_image_url
+          ? await this.s3Service.signUrl(item.variant_image_url)
+          : null,
+      })),
+    );
 
     return {
       token: request.token,
@@ -233,7 +304,29 @@ export class InvoiceDataRequestsService {
         created_at: request.order.created_at,
         placed_at: request.order.placed_at,
         shipping_address: request.order.shipping_address_snapshot,
-        items: request.order.order_items,
+        items,
+        // Historical discount snapshots persisted on the order.
+        applied_promotions: request.order.order_promotions.map((op) => ({
+          id: op.id,
+          promotion_id: op.promotion_id,
+          name: op.promotions?.name ?? null,
+          code: op.promotions?.code ?? null,
+          type: op.promotions?.type ?? null,
+          scope: op.promotions?.scope ?? null,
+          value: op.promotions?.value ?? null,
+          discount_amount: op.discount_amount,
+          created_at: op.created_at,
+        })),
+        applied_coupons: request.order.coupon_uses.map((cu) => ({
+          id: cu.id,
+          coupon_id: cu.coupon_id,
+          code: cu.coupon?.code ?? null,
+          name: cu.coupon?.name ?? null,
+          discount_type: cu.coupon?.discount_type ?? null,
+          discount_value: cu.coupon?.discount_value ?? null,
+          discount_applied: cu.discount_applied,
+          used_at: cu.used_at,
+        })),
         payments: request.order.payments.map((payment) => ({
           state: payment.state,
           amount: payment.amount,

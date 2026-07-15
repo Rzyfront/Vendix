@@ -94,6 +94,21 @@ export interface PublicationConfig {
 // ============================================================================
 export interface EcommerceConfig {
   enabled: boolean;
+  /**
+   * General storefront availability, resolved by the backend from the manual
+   * toggle or the calculated business-hours window. When `store_available` is
+   * `false`, the public storefront (STORE_ECOMMERCE) surfaces the full-screen
+   * "store unavailable" banner. `unavailable_message` already comes resolved
+   * (manual message or calculated schedule text). Backend also hard-blocks
+   * checkout with HTTP 403 + `error_code: 'ECOM_CHECKOUT_004'`.
+   */
+  general?: {
+    store_available?: boolean;
+    unavailable_message?: string;
+    currency?: string;
+    locale?: string;
+    timezone?: string;
+  };
   slider?: {
     enable: boolean;
     photos: Array<{

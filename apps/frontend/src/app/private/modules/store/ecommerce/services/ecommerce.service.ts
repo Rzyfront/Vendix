@@ -75,6 +75,22 @@ export class EcommerceService {
     );
   }
 
+  /**
+   * Toggle the public availability of the ecommerce store.
+   * Persists immediately (independent of the main settings save button).
+   */
+  setAvailability(payload: {
+    store_available: boolean;
+    unavailable_message?: string;
+  }): Observable<EcommerceSettings> {
+    return this.http
+      .patch<any>(`${this.apiBaseUrl}/availability`, payload)
+      .pipe(
+        map((response) => this.unwrapResponse<EcommerceSettings>(response)),
+        catchError(this.handleError),
+      );
+  }
+
   private unwrapResponse<T>(response: any): T {
     if (response?.success === false) {
       throw new Error(response.message || response.error || 'Unknown error');

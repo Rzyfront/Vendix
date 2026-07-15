@@ -9,6 +9,7 @@ import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { PriceResolverService } from '../../../../shared/services/pricing';
+import { StoreAvailabilityService } from '../../../../core/services/store-availability.service';
 
 export interface CartItem {
   id: number;
@@ -126,6 +127,9 @@ export class CartService {
 
   private is_authenticated = false;
   private readonly destroy_ref = inject(DestroyRef);
+  // Public storefront availability — used to re-surface the "store unavailable"
+  // banner when a customer tries to add to cart while the store is closed.
+  private readonly store_availability = inject(StoreAvailabilityService);
   /**
    * Monotonic token guaranteeing last-response-wins for the central
    * promotional enrichment: a slow summary from a superseded cart state can
@@ -600,6 +604,12 @@ export class CartService {
     product_variant_id?: number,
     variantInfo?: { name: string; sku: string; price: number },
   ): Observable<any> | void {
+    // Store closed: re-show the branded banner. The backend still hard-blocks
+    // checkout; this reinforces the UX at the earliest customer action.
+    if (this.store_availability.unavailable()) {
+      this.store_availability.reopen();
+    }
+
     if (this.is_authenticated) {
       return this.addItem(product_id, quantity, product_variant_id);
     } else {
