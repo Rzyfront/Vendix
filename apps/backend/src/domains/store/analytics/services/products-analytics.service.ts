@@ -130,7 +130,7 @@ export class ProductsAnalyticsService {
         total_price: true,
       },
       orderBy: {
-        _sum: { total_price: 'desc' },
+        _sum: { quantity: 'desc' },
       },
       take: query.limit || 10,
     });
