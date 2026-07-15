@@ -47,7 +47,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
             <button
               type="button"
               class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(0)"
+              (click)="goToStep.emit(0 + goToStepOffset())"
             >
               Editar
             </button>
@@ -78,7 +78,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
             <button
               type="button"
               class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(1)"
+              (click)="goToStep.emit(1 + goToStepOffset())"
             >
               Editar
             </button>
@@ -126,7 +126,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
             <button
               type="button"
               class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(2)"
+              (click)="goToStep.emit(2 + goToStepOffset())"
             >
               Editar
             </button>
@@ -160,7 +160,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
             <button
               type="button"
               class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(3)"
+              (click)="goToStep.emit(3 + goToStepOffset())"
             >
               Editar
             </button>
@@ -323,6 +323,13 @@ export class ReviewStepComponent {
   readonly created = input<boolean>(false);
   readonly createdNote = input<DispatchNote | null>(null);
   readonly completedAction = input<WizardTerminalAction>('draft');
+  /**
+   * Offset applied to `goToStep` emissions. The bidirectional wizard adds a
+   * Tipo step at index 0, shifting all subsequent steps by 1. Defaults to 0
+   * for backward compatibility with any consumer that still uses 0-based
+   * step indices (e.g. the original 5-step wizard before the Type step).
+   */
+  readonly goToStepOffset = input<number>(0);
 
   // Outputs
   readonly goToStep = output<number>();

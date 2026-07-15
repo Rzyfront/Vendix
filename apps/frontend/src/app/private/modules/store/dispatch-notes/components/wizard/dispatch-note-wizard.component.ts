@@ -29,6 +29,7 @@ import { OrderItemsStepComponent } from './order-items-step.component';
 import { DetailsStepComponent } from './details-step.component';
 import { RouteStepComponent } from './route-step.component';
 import { ReviewStepComponent } from './review-step.component';
+import { TypeStepComponent } from './type-step.component';
 import {
   DispatchNoteSerialsModalComponent,
   DispatchNoteSerialLine,
@@ -50,6 +51,7 @@ import {
     ButtonComponent,
     IconComponent,
     StepsLineComponent,
+    TypeStepComponent,
     OrderStepComponent,
     OrderItemsStepComponent,
     DetailsStepComponent,
@@ -78,11 +80,18 @@ import {
         ></app-steps-line>
         <p class="text-xs text-[var(--color-text-muted)] mt-1.5 mb-0.5">
           @switch (wizardService.currentStep()) {
-            @case (0) { Selecciona la orden a despachar }
-            @case (1) { Ajusta las cantidades a despachar }
-            @case (2) { Configura bodega, fecha y notas }
-            @case (3) { Asigna la remisión a una ruta (opcional) }
-            @case (4) { Revisa y elige la acción terminal }
+            @case (0) { Selecciona el tipo de remisión }
+            @case (1) { Selecciona la orden a despachar }
+            @case (2) { Ajusta las cantidades a despachar }
+            @case (3) { Configura bodega, fecha y notas }
+            @case (4) {
+              @if (wizardService.direction() === 'outbound') {
+                Asigna la remisión a una ruta (opcional)
+              } @else {
+                Revisa y elige la acción terminal
+              }
+            }
+            @case (5) { Revisa y elige la acción terminal }
           }
         </p>
       </div>
@@ -90,15 +99,32 @@ import {
       <!-- Step Content -->
       <div class="p-4 max-h-[55vh] overflow-y-auto">
         @switch (wizardService.currentStep()) {
-          @case (0) { <app-dispatch-wizard-order-step /> }
-          @case (1) { <app-dispatch-wizard-order-items-step /> }
-          @case (2) { <app-dispatch-wizard-details-step /> }
-          @case (3) { <app-dispatch-wizard-route-step /> }
+          @case (0) { <app-dispatch-wizard-type-step /> }
+          @case (1) { <app-dispatch-wizard-order-step /> }
+          @case (2) { <app-dispatch-wizard-order-items-step /> }
+          @case (3) { <app-dispatch-wizard-details-step /> }
           @case (4) {
+            @if (wizardService.direction() === 'outbound') {
+              <app-dispatch-wizard-route-step />
+            } @else {
+              <app-dispatch-wizard-review-step
+                [created]="isCreated()"
+                [createdNote]="createdNote()"
+                [completedAction]="completedAction()"
+                [goToStepOffset]="1"
+                (goToStep)="wizardService.goToStep($event)"
+                (viewDetail)="onViewDetail($event)"
+                (createAnother)="onCreateAnother()"
+                (printNote)="onPrint($event)"
+              />
+            }
+          }
+          @case (5) {
             <app-dispatch-wizard-review-step
               [created]="isCreated()"
               [createdNote]="createdNote()"
               [completedAction]="completedAction()"
+              [goToStepOffset]="1"
               (goToStep)="wizardService.goToStep($event)"
               (viewDetail)="onViewDetail($event)"
               (createAnother)="onCreateAnother()"
@@ -123,7 +149,7 @@ import {
             <div></div>
           }
 
-          @if (wizardService.currentStep() < 4 && !isCreated()) {
+          @if (wizardService.currentStep() < wizardService.lastStepIndex() && !isCreated()) {
             <app-button
               variant="primary"
               (clicked)="wizardService.nextStep()"

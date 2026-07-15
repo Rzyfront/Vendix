@@ -1,4 +1,77 @@
-export type DispatchNoteStatus = 'draft' | 'confirmed' | 'delivered' | 'invoiced' | 'voided';
+export type DispatchNoteStatus =
+  | 'draft'
+  | 'confirmed'
+  | 'delivered'
+  | 'received'
+  | 'invoiced'
+  | 'voided';
+
+// ============================================================================
+// Bidirectional dispatch notes — direction / subtype / reason
+// (ref plan Remisiones Bidireccionales, Fase 3 frontend cimiento)
+// ============================================================================
+
+export type DispatchNoteDirection = 'outbound' | 'inbound';
+
+export type DispatchNoteSubtype =
+  | 'customer_delivery'
+  | 'customer_return'
+  | 'transfer_out'
+  | 'transfer_in'
+  | 'purchase_receipt';
+
+export type DispatchNoteReason =
+  // outbound — customer_delivery
+  | 'sale'
+  | 'sample'
+  | 'consignment'
+  | 'replacement_shipment'
+  | 'loan'
+  // outbound — transfer_out
+  | 'transfer_to_consignee'
+  // inbound — customer_return
+  | 'defective'
+  | 'wrong_item'
+  | 'cancellation'
+  | 'warranty'
+  | 'overdelivery_return'
+  // inbound — transfer_in
+  | 'returned_from_consignee'
+  // shared between transfer_out / transfer_in
+  | 'replenishment'
+  | 'rebalancing'
+  // inbound — purchase_receipt
+  | 'normal_purchase'
+  | 'replacement_for_damage'
+  | 'sample_received';
+
+/**
+ * Map: direction → valid subtypes. Drives the subtype selector in the
+ * wizard's Type step. Kept in sync with the plan's direction→subtype table.
+ */
+export const DISPATCH_SUBTYPE_BY_DIRECTION: Record<
+  DispatchNoteDirection,
+  DispatchNoteSubtype[]
+> = {
+  outbound: ['customer_delivery', 'transfer_out'],
+  inbound: ['customer_return', 'transfer_in', 'purchase_receipt'],
+};
+
+/**
+ * Map: subtype → valid reasons. `undefined` means the subtype has no
+ * reason selector (reason is nullable / optional). Drives the reason
+ * selector in the wizard's Type step.
+ */
+export const DISPATCH_REASON_BY_SUBTYPE: Record<
+  DispatchNoteSubtype,
+  DispatchNoteReason[] | undefined
+> = {
+  customer_delivery: ['sale', 'sample', 'consignment', 'replacement_shipment', 'loan'],
+  customer_return: ['defective', 'wrong_item', 'cancellation', 'warranty', 'overdelivery_return'],
+  transfer_out: ['replenishment', 'rebalancing', 'transfer_to_consignee'],
+  transfer_in: ['replenishment', 'rebalancing', 'returned_from_consignee'],
+  purchase_receipt: ['normal_purchase', 'replacement_for_damage', 'sample_received'],
+};
 
 export interface DispatchNoteItem {
   id: number;
@@ -26,6 +99,14 @@ export interface DispatchNote {
   store_id: number;
   dispatch_number: string;
   status: DispatchNoteStatus;
+  /** Bidirectional fields (ref plan Remisiones Bidireccionales). */
+  direction?: DispatchNoteDirection;
+  subtype?: DispatchNoteSubtype;
+  reason?: DispatchNoteReason | null;
+  supplier_id?: number | null;
+  related_dispatch_id?: number | null;
+  from_location_id?: number | null;
+  to_location_id?: number | null;
   customer_id: number;
   customer_name: string;
   customer_tax_id?: string;
@@ -97,6 +178,9 @@ export interface DispatchNoteStats {
 
 export interface DispatchNoteQuery {
   status?: DispatchNoteStatus;
+  direction?: DispatchNoteDirection;
+  subtype?: DispatchNoteSubtype;
+  reason?: DispatchNoteReason;
   customer_id?: number;
   sales_order_id?: number;
   date_from?: string;
@@ -225,4 +309,69 @@ export interface CreateDispatchFromOrderDto {
   notes?: string;
   route_assignment?: CreateDispatchFromOrderRouteAssignmentDto;
   items: CreateDispatchFromOrderItemDto[];
+}
+
+// ============================================================================
+// Bidirectional DTOs — mirrors of backend DTOs to be created in Fase 1.
+// Frontend cimiento only; HTTP wiring deferred until backend exposes endpoints.
+// ============================================================================
+
+/**
+ * Body for creating a transfer dispatch note (outbound or inbound).
+ * `direction` determines whether origin is `from_location_id` (outbound) or
+ * destination is `to_location_id` (inbound). Cross-store scope validation
+ * is delegated to the backend.
+ */
+export interface CreateTransferDispatchDto {
+  direction: DispatchNoteDirection;
+  subtype: 'transfer_out' | 'transfer_in';
+  reason?: DispatchNoteReason;
+  from_location_id?: number;
+  to_location_id?: number;
+  dispatch_location_id?: number;
+  notes?: string;
+  internal_notes?: string;
+  currency?: string;
+  items: CreateDispatchNoteItemDto[];
+  target_status?: 'draft' | 'confirmed';
+}
+
+/**
+ * Body for creating a customer return dispatch note (inbound). Links the
+ * return to the original dispatch via `related_dispatch_id` and delegates
+ * financial processing to `ReturnOrdersService` on the backend.
+ */
+export interface CreateReturnDispatchDto {
+  direction: 'inbound';
+  subtype: 'customer_return';
+  reason?: DispatchNoteReason;
+  customer_id: number;
+  related_dispatch_id?: number;
+  related_order_id?: number;
+  dispatch_location_id?: number;
+  notes?: string;
+  internal_notes?: string;
+  currency?: string;
+  items: CreateDispatchNoteItemDto[];
+  target_status?: 'draft' | 'confirmed';
+}
+
+/**
+ * Body for creating a purchase receipt dispatch note (inbound). When
+ * `purchase_order_id` is present the backend delegates to
+ * `PurchaseOrdersService.receive`; otherwise it emits its own `stock_in`
+ * movement.
+ */
+export interface CreatePurchaseReceiptDispatchDto {
+  direction: 'inbound';
+  subtype: 'purchase_receipt';
+  reason?: DispatchNoteReason;
+  supplier_id: number;
+  purchase_order_id?: number;
+  dispatch_location_id?: number;
+  notes?: string;
+  internal_notes?: string;
+  currency?: string;
+  items: CreateDispatchNoteItemDto[];
+  target_status?: 'draft' | 'confirmed';
 }

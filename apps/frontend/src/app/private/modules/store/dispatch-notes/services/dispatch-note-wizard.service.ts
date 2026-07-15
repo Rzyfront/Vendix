@@ -3,6 +3,11 @@ import { Order, OrderItem, Product } from '../../orders/interfaces/order.interfa
 import {
   CreateDispatchFromOrderNewRouteDto,
   CreateDispatchFromOrderRouteAssignmentDto,
+  DispatchNoteDirection,
+  DispatchNoteSubtype,
+  DispatchNoteReason,
+  DISPATCH_SUBTYPE_BY_DIRECTION,
+  DISPATCH_REASON_BY_SUBTYPE,
 } from '../interfaces/dispatch-note.interface';
 
 // ============================================================================
@@ -60,17 +65,20 @@ export interface WizardTotals {
 // ============================================================================
 
 /**
- * Order-first remisión wizard service (ref 2026-06-25).
+ * Bidirectional remisión wizard service (ref plan Remisiones Bidireccionales).
  *
- * 5 steps: Orden → Items → Detalles → Ruta → Revisión.
+ * Outbound steps (6): Tipo → Orden → Items → Detalles → Ruta → Revisión.
+ * Inbound steps  (5): Tipo → Orden → Items → Detalles → Revisión.
  *
  * `@Injectable()` (not providedIn:'root') so each modal mount gets a
  * fresh instance.
  */
 @Injectable()
 export class DispatchNoteWizardService {
-  static readonly STEP_LABELS = ['Orden', 'Items', 'Detalles', 'Ruta', 'Revisión'];
-  static readonly TOTAL_STEPS = 5;
+  // --- Bidirectional state (step 0) ---
+  readonly direction = signal<DispatchNoteDirection>('outbound');
+  readonly subtype = signal<DispatchNoteSubtype>('customer_delivery');
+  readonly reason = signal<DispatchNoteReason | null>(null);
 
   readonly currentStep = signal<number>(0);
   readonly selectedOrder = signal<Order | null>(null);
@@ -83,6 +91,18 @@ export class DispatchNoteWizardService {
   readonly newRouteDraft = signal<CreateDispatchFromOrderNewRouteDto | null>(null);
 
   readonly terminalAction = signal<WizardTerminalAction>('draft');
+
+  // --- Step labels derived from direction ---
+  readonly stepLabels = computed<string[]>(() => {
+    if (this.direction() === 'inbound') {
+      return ['Tipo', 'Orden', 'Items', 'Detalles', 'Revisión'];
+    }
+    return ['Tipo', 'Orden', 'Items', 'Detalles', 'Ruta', 'Revisión'];
+  });
+
+  readonly totalSteps = computed<number>(() => this.stepLabels().length);
+
+  readonly lastStepIndex = computed<number>(() => this.totalSteps() - 1);
 
   readonly totals = computed<WizardTotals>(() => {
     let subtotal = 0;
@@ -100,18 +120,28 @@ export class DispatchNoteWizardService {
     const step = this.currentStep();
     switch (step) {
       case 0: {
+        // Tipo — direction/subtype always have valid defaults; subtype
+        // validity is enforced by setSubtype().
+        return true;
+      }
+      case 1: {
+        // Orden
         const order = this.selectedOrder();
         return !!order && (order.order_items?.length ?? 0) > 0;
       }
-      case 1: {
+      case 2: {
+        // Items
         const its = this.items();
         return its.length > 0 && its.every(
           (i) => i.dispatched_quantity > 0 && i.dispatched_quantity <= i.pending_quantity,
         );
       }
-      case 2:
+      case 3:
+        // Detalles
         return !!this.details().dispatch_location_id;
-      case 3: {
+      case 4: {
+        // Ruta (outbound only) — inbound has Revisión at index 4
+        if (this.direction() === 'inbound') return true;
         const mode = this.routeMode();
         if (mode === 'none') return true;
         if (mode === 'existing') return !!this.selectedRouteId();
@@ -121,7 +151,8 @@ export class DispatchNoteWizardService {
         }
         return false;
       }
-      case 4:
+      case 5:
+        // Revisión (outbound only)
         return true;
       default:
         return false;
@@ -129,7 +160,7 @@ export class DispatchNoteWizardService {
   });
 
   readonly stepsConfig = computed(() =>
-    DispatchNoteWizardService.STEP_LABELS.map((label, i) => ({
+    this.stepLabels().map((label, i) => ({
       label,
       completed: i < this.currentStep(),
     })),
@@ -139,10 +170,57 @@ export class DispatchNoteWizardService {
     this.items().some((i) => i.requires_serial_numbers),
   );
 
+  // --- Bidirectional setters (step 0) ---
+
+  setDirection(d: DispatchNoteDirection): void {
+    this.direction.set(d);
+    // Reset subtype to the first valid one for the new direction, and
+    // clear reason since it may not be valid for the new subtype.
+    const validSubtypes = DISPATCH_SUBTYPE_BY_DIRECTION[d];
+    if (!validSubtypes.includes(this.subtype())) {
+      this.subtype.set(validSubtypes[0]);
+    }
+    this.reason.set(null);
+  }
+
+  setSubtype(s: DispatchNoteSubtype): void {
+    // Validate that s is valid for the current direction.
+    const valid = DISPATCH_SUBTYPE_BY_DIRECTION[this.direction()];
+    if (!valid.includes(s)) return;
+    this.subtype.set(s);
+    // Clear reason if the new subtype has no reason catalog or the
+    // current reason is not in the new subtype's catalog.
+    const reasons = DISPATCH_REASON_BY_SUBTYPE[s];
+    if (!reasons || (this.reason() && !reasons.includes(this.reason()!))) {
+      this.reason.set(null);
+    }
+  }
+
+  setReason(r: DispatchNoteReason | null): void {
+    if (r === null) {
+      this.reason.set(null);
+      return;
+    }
+    // Validate that r is valid for the current subtype.
+    const reasons = DISPATCH_REASON_BY_SUBTYPE[this.subtype()];
+    if (!reasons || !reasons.includes(r)) return;
+    this.reason.set(r);
+  }
+
+  // --- Free item picker (future inbound / standalone flows) ---
+
+  addItem(item: WizardItem): void {
+    this.items.update((current) => [...current, item]);
+  }
+
+  removeItem(index: number): void {
+    this.items.update((current) => current.filter((_, i) => i !== index));
+  }
+
   // --- Navigation ---
   nextStep(): void {
     const c = this.currentStep();
-    if (c < DispatchNoteWizardService.TOTAL_STEPS - 1 && this.canProceed()) {
+    if (c < this.lastStepIndex() && this.canProceed()) {
       this.currentStep.set(c + 1);
     }
   }
@@ -151,7 +229,7 @@ export class DispatchNoteWizardService {
     if (c > 0) this.currentStep.set(c - 1);
   }
   goToStep(step: number): void {
-    if (step >= 0 && step < DispatchNoteWizardService.TOTAL_STEPS) {
+    if (step >= 0 && step < this.totalSteps()) {
       this.currentStep.set(step);
     }
   }
@@ -276,6 +354,9 @@ export class DispatchNoteWizardService {
 
   reset(): void {
     this.currentStep.set(0);
+    this.direction.set('outbound');
+    this.subtype.set('customer_delivery');
+    this.reason.set(null);
     this.selectedOrder.set(null);
     this.customer.set(null);
     this.items.set([]);
