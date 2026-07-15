@@ -174,8 +174,12 @@ export interface DispatchNoteStats {
   draft: number;
   confirmed: number;
   delivered: number;
+  received?: number;
   invoiced: number;
   voided: number;
+  /** Bidirectional breakdowns (ref plan Remisiones Bidireccionales — R2). */
+  by_direction?: { outbound: number; inbound: number };
+  by_subtype?: Partial<Record<DispatchNoteSubtype, number>>;
 }
 
 export interface DispatchNoteQuery {

@@ -18,6 +18,7 @@ export class DispatchNoteStatsComponent {
     draft: 0,
     confirmed: 0,
     delivered: 0,
+    received: 0,
     invoiced: 0,
     voided: 0,
   });
