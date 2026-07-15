@@ -60,7 +60,6 @@ export function DomainFormFields({
   const [hostnameError, setHostnameError] = useState<string | null>(null);
   const [hostnameValidating, setHostnameValidating] = useState(false);
   const lastValidatedHostname = useRef<string | null>(initial?.hostname ?? null);
-  const hostnameAbortRef = useRef<AbortController | null>(null);
 
   const [roots, setRoots] = useState<DomainRoot[]>([]);
   const [rootDomain, setRootDomain] = useState(initial?.root_domain ?? '');
@@ -89,30 +88,23 @@ export function DomainFormFields({
 
   const validateAndCheckDuplicate = async (value: string) => {
     if (!value || value === lastValidatedHostname.current) return;
-    hostnameAbortRef.current?.abort();
-    const ac = new AbortController();
-    hostnameAbortRef.current = ac;
     setHostnameValidating(true);
     setHostnameError(null);
     try {
       const v = await OrgDomainsService.validateHostname(value);
-      if (ac.signal.aborted) return;
       if (!v.valid) {
         setHostnameError(v.reason ?? 'Hostname inválido');
         return;
       }
       const dup = await OrgDomainsService.checkDuplicate(value);
-      if (ac.signal.aborted) return;
       if (dup.duplicate) {
         setHostnameError('Este hostname ya está registrado');
         return;
       }
       lastValidatedHostname.current = value;
-    } catch (e) {
-      if (ac.signal.aborted) return;
-      setHostnameError(e instanceof Error ? e.message : 'No se pudo validar el hostname');
+    } catch (e: any) {
+      setHostnameError(e?.message ?? 'No se pudo validar el hostname');
     } finally {
-      if (ac.signal.aborted) return;
       setHostnameValidating(false);
     }
   };
