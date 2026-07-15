@@ -151,12 +151,10 @@
             }
 
             @if (use_new_address()) {
-              @if (map_enabled()) {
-                <app-address-map-picker
-                  [center]="map_center()"
-                  (located)="onMapLocated($event)"
-                />
-              }
+              <app-address-map-picker
+                [center]="map_center()"
+                (located)="onMapLocated($event)"
+              />
               <form [formGroup]="address_form" class="address-form">
                 <app-input
                   label="Direccion"
@@ -596,23 +594,19 @@
             }
 
             <div class="summary-coupon">
-              <label for="coupon-code">¿Tienes un cupón?</label>
-              <input
-                id="coupon-code"
-                type="text"
-                class="coupon-input"
+              <app-input
+                label="¿Tienes un cupón?"
+                size="sm"
                 placeholder="Código de cupón"
-                [value]="coupon_code()"
-                (input)="
-                  coupon_code.set(
-                    $any($event.target).value.toUpperCase().trim()
-                  )
+                [prefixIcon]="true"
+                customInputClass="uppercase tracking-[0.08em] font-medium"
+                helperText="El descuento se calcula al confirmar la compra."
+                (inputChange)="
+                  coupon_code.set($event.toUpperCase().trim())
                 "
-                autocomplete="off"
-              />
-              <small class="summary-coupon-hint">
-                El descuento se calcula al confirmar la compra.
-              </small>
+              >
+                <app-icon slot="prefix-icon" name="ticket" [size]="16" />
+              </app-input>
             </div>
 
             <app-cart-promotions [cart]="cart()" />

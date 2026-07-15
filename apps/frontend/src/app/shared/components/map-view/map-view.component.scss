@@ -1,0 +1,183 @@
+/* Global MapLibre stylesheet (controls, marker, canvas positioning).
+   Inlined by the build via node_modules resolution; applies globally because
+   this component uses ViewEncapsulation.None. */
+@import 'maplibre-gl/dist/maplibre-gl.css';
+
+.map-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.mv-map {
+  position: relative;
+  width: 100%;
+  height: 320px;
+  border-radius: var(--radius-lg, 12px);
+  overflow: hidden;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-background, #f3f4f6);
+}
+
+/* Fill mode (`fill=true`): the map fills its (flex) container height instead of
+   the fixed 320px and drops the rounding/border for an edge-to-edge, immersive
+   look (e.g. the full-screen route modal). `fill=false` keeps the exact default
+   320px card behavior used by every other consumer. */
+.map-view--fill {
+  height: 100%;
+}
+
+.map-view--fill .mv-map,
+.map-view--fill .mv-skeleton,
+.map-view--fill .mv-error {
+  height: 100%;
+}
+
+.map-view--fill .mv-map {
+  border: 0;
+  border-radius: 0;
+}
+
+/* Skeleton reserves the map's exact footprint while tiles load. Absolutely
+   positioned over the (empty) canvas so the layout never jumps. */
+.mv-skeleton {
+  position: absolute;
+  inset: 0;
+  bottom: auto;
+  height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  background: var(--color-background, #f3f4f6);
+  border-radius: var(--radius-lg, 12px);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.mv-skeleton-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    rgba(229, 231, 235, 0.4) 30%,
+    rgba(255, 255, 255, 0.9) 50%,
+    rgba(229, 231, 235, 0.4) 70%
+  );
+  background-size: 200% 100%;
+  animation: mv-shimmer 1.4s ease-in-out infinite;
+}
+
+.mv-skeleton-label {
+  position: relative;
+  z-index: 1;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Placeholder shown when the map cannot render at all. Same reserved footprint. */
+.mv-error {
+  position: absolute;
+  inset: 0;
+  bottom: auto;
+  height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary, #6b7280);
+  background: var(--color-background, #f3f4f6);
+  border-radius: var(--radius-lg, 12px);
+  z-index: 2;
+}
+
+.mv-error-icon {
+  width: 26px;
+  height: 26px;
+  color: #16a34a;
+}
+
+/* Custom stop pin (numbered circular badge). Styled globally because the
+   component uses ViewEncapsulation.None and the element is created at runtime
+   and handed to `new maplibregl.Marker({ element })`. */
+.mv-marker {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font: 700 0.8125rem/1 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: var(--mv-marker-color, #16a34a);
+  border: 2px solid #fff;
+  border-radius: 9999px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: default;
+  user-select: none;
+}
+
+.mv-marker--interactive {
+  cursor: pointer;
+}
+
+/* Origin pin: larger, fixed blue, holding a home glyph so it reads clearly as
+   the start/warehouse and never collides with the numbered stop palette. */
+.mv-marker--origin {
+  width: 34px;
+  height: 34px;
+  background: #2563eb;
+  border-width: 3px;
+}
+
+.mv-marker--origin svg {
+  width: 16px;
+  height: 16px;
+  color: #fff;
+}
+
+/* OSM/OpenFreeMap attribution is REQUIRED by the ODbL license; kept subtle. */
+:where(.mv-map) .maplibregl-ctrl-attrib {
+  opacity: 0.7;
+  font-size: 0.5625rem;
+}
+
+:where(.mv-map) .maplibregl-ctrl-attrib.maplibregl-compact {
+  min-height: 20px;
+}
+
+/* Reveal the full credit on hover (on top of the native click toggle):
+   replicate what MapLibre's `maplibregl-compact-show` class does — expand the
+   pill and show the inner text. Keeps the collapsed ⓘ unobtrusive by default. */
+:where(.mv-map) .maplibregl-ctrl-attrib.maplibregl-compact:hover {
+  padding: 2px 28px 2px 8px;
+  visibility: visible;
+}
+
+:where(.mv-map)
+  .maplibregl-ctrl-attrib.maplibregl-compact:hover
+  .maplibregl-ctrl-attrib-inner {
+  display: block;
+}
+
+@keyframes mv-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-skeleton-shimmer {
+    animation: none;
+  }
+}
