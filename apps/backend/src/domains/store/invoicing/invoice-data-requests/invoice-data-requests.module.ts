@@ -5,9 +5,10 @@ import { InvoiceDataRequestSubmittedListener } from './invoice-data-request-subm
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { InvoicingModule } from '../invoicing.module';
+import { S3Module } from '@common/services/s3.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, InvoicingModule],
+  imports: [ResponseModule, PrismaModule, InvoicingModule, S3Module],
   controllers: [InvoiceDataRequestsController],
   providers: [InvoiceDataRequestsService, InvoiceDataRequestSubmittedListener],
   exports: [InvoiceDataRequestsService],

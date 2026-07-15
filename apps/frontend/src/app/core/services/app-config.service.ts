@@ -1,13 +1,14 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { firstValueFrom, throwError, timer } from 'rxjs';
+import { catchError, retry } from 'rxjs/operators';
 import {
   DomainConfig,
   DomainResolution,
   DomainResolutionResponse,
 } from '../models/domain-config.interface';
 import { AppType } from '../models/environment.enum';
+import type { DomainResolutionErrorKind } from '../store/config/config.actions';
 import { superAdminRoutes } from '../../routes/private/super_admin.routes';
 import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.public.routes';
 import { orgLandingPublicRoutes } from '../../routes/public/org_landing.public.routes';
@@ -38,6 +39,22 @@ export interface AppConfig {
   routes: Routes;
   layouts: LayoutConfig[];
   branding: BrandingConfig;
+}
+
+/**
+ * Error tipado de resolución de dominio/app_type. Transporta el `kind`
+ * (`not_found` | `transient`) para que la UI decida entre "no encontrado" y
+ * "reintentar". La resolución NUNCA se degrada a VENDIX_LANDING ante fallo;
+ * en su lugar propaga este error.
+ */
+export class DomainResolutionError extends Error {
+  constructor(
+    public readonly kind: DomainResolutionErrorKind,
+    message?: string,
+  ) {
+    super(message ?? `Domain resolution failed (${kind})`);
+    this.name = 'DomainResolutionError';
+  }
 }
 
 @Injectable({ providedIn: 'root' })
@@ -263,8 +280,9 @@ export class AppConfigService {
       hostname ||
       (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
     const currentHostname = this.cleanHostname(rawHostname);
+    // resolveDomainFromAPI devuelve una resolución válida o lanza un
+    // DomainResolutionError tipado. Nunca retorna null silencioso.
     const domainInfo = await this.resolveDomainFromAPI(currentHostname);
-    if (!domainInfo) throw new Error(`Domain ${currentHostname} not found`);
     return this.buildDomainConfig(currentHostname, domainInfo);
   }
 
@@ -278,20 +296,63 @@ export class AppConfigService {
 
   private async resolveDomainFromAPI(
     hostname: string,
-  ): Promise<DomainResolution | null> {
-    const response = await this.http
-      .get<DomainResolutionResponse>(
-        `${environment.apiUrl}/public/domains/resolve/${hostname}`,
-      )
-      .pipe(
-        catchError((error) => {
-          console.error('[AppConfigService] Domain API error:', error);
-          return of(null);
-        }),
-      )
-      .toPromise();
+  ): Promise<DomainResolution> {
+    const response = await firstValueFrom(
+      this.http
+        .get<DomainResolutionResponse>(
+          `${environment.apiUrl}/public/domains/resolve/${hostname}`,
+        )
+        .pipe(
+          // Reintentar SOLO ante error transitorio (red/CORS/cert, 5xx,
+          // timeout). Un 404 es definitivo: se re-lanza de inmediato sin
+          // reintentar. Backoff incremental: 500ms, 1000ms, 2000ms.
+          retry({
+            count: 3,
+            delay: (error: unknown, retryCount: number) => {
+              if (this.classifyDomainError(error) === 'not_found') {
+                return throwError(() => error);
+              }
+              const backoffMs = 500 * Math.pow(2, retryCount - 1);
+              return timer(backoffMs);
+            },
+          }),
+          // Agotados los reintentos (o ante 404): propagar Error tipado con
+          // `kind` — NUNCA `of(null)` silencioso ni degradación a landing.
+          catchError((error: unknown) =>
+            throwError(
+              () =>
+                new DomainResolutionError(
+                  this.classifyDomainError(error),
+                  error instanceof HttpErrorResponse
+                    ? `Domain API error ${error.status} for ${hostname}`
+                    : `Domain API error for ${hostname}`,
+                ),
+            ),
+          ),
+        ),
+    );
 
-    return response?.data ?? null;
+    const data = response?.data ?? null;
+    if (!data) {
+      // HTTP 200 sin payload de resolución → dominio no resoluble.
+      throw new DomainResolutionError(
+        'not_found',
+        `Domain ${hostname} not found (empty resolution payload)`,
+      );
+    }
+    return data;
+  }
+
+  /**
+   * Clasifica un error de la resolución de dominio en un `kind` tipado.
+   * - 404 → `not_found` (definitivo, no reintentar).
+   * - status 0 (red/CORS/cert), >= 500, timeout o cualquier otro → `transient`.
+   */
+  private classifyDomainError(error: unknown): DomainResolutionErrorKind {
+    if (error instanceof HttpErrorResponse) {
+      return error.status === 404 ? 'not_found' : 'transient';
+    }
+    return 'transient';
   }
 
   private buildDomainConfig(
@@ -343,7 +404,13 @@ export class AppConfigService {
 
   private normalizeEnvironment(env: string): AppType {
     if (!env) {
-      return AppType.VENDIX_LANDING;
+      // El backend NO envió app_type: config inválida. NO degradamos a
+      // VENDIX_LANDING; lo tratamos como error transitorio para permitir
+      // reintento desde la UI.
+      throw new DomainResolutionError(
+        'transient',
+        'Backend domain resolution returned empty app_type',
+      );
     }
     const normalized = env.toUpperCase() as AppType;
     return normalized;

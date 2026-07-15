@@ -7,8 +7,6 @@ import { tap } from 'rxjs/operators';
 import { ReplaySubject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
-import { AppType } from '../models/environment.enum';
-import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.public.routes';
 import { LandingOnlyGuard } from '../guards/landing-only.guard';
 
 @Injectable({
@@ -43,9 +41,14 @@ export class RouteManagerService {
       this.bootTimeout = null;
       if (!this.initialized_complete) {
         console.warn(
-          '[RouteManagerService] Boot timeout - routes not configured after 5s, forcing fallback',
+          '[RouteManagerService] Boot timeout - routes not configured after 5s, marking transient failure',
         );
-        this.configureFallbackRoutes();
+        // NO degradar a landing. Marcamos un fallo transitorio tipado; el
+        // handler de initializeAppFailure configura rutas neutras y libera
+        // el APP_INITIALIZER, y la UI mostrará el estado de error.
+        this.store.dispatch(
+          ConfigActions.initializeAppFailure({ error: { kind: 'transient' } }),
+        );
       }
     }, 5000);
   }
@@ -69,30 +72,16 @@ export class RouteManagerService {
       )
       .subscribe();
 
-    // Listen for app initialization FAILURE → recover with Vendix Landing fallback
+    // Listen for app initialization FAILURE.
+    // NO degradar a VENDIX_LANDING: el fallo debe quedar como fallo. El store
+    // ya expone `resolutionError` (tipado) para que la UI muestre la pantalla
+    // de error. Aquí solo configuramos rutas NEUTRAS (auth + catch-all, sin el
+    // landing) para que el router no rompa y para liberar el APP_INITIALIZER.
     this.actions$
       .pipe(
         ofType(ConfigActions.initializeAppFailure),
-        tap(({ error }) => {
-          // Dispatch success with fallback config to clear the error state
-          // and allow the router-outlet to render instead of the error screen
-          this.store.dispatch(
-            ConfigActions.initializeAppSuccess({
-              config: {
-                environment: AppType.VENDIX_LANDING,
-                domainConfig: {
-                  hostname: window.location.hostname,
-                  domainType: 'PRIMARY',
-                  environment: AppType.VENDIX_LANDING,
-                  isVendixDomain: true,
-                  isMainVendixDomain: true,
-                } as any,
-                routes: vendixLandingPublicRoutes,
-                layouts: [],
-                branding: {} as any,
-              },
-            }),
-          );
+        tap(() => {
+          this.configureFallbackRoutes();
         }),
         takeUntilDestroyed(this.destroyRef),
       )
@@ -200,24 +189,29 @@ export class RouteManagerService {
     ];
   }
 
+  /**
+   * Rutas NEUTRAS de recuperación cuando la resolución falla o expira.
+   *
+   * CRÍTICO: NUNCA montan `VendixLandingComponent`. El landing de Vendix SOLO
+   * debe montarse cuando la resolución devuelve app_type = VENDIX_LANDING
+   * explícitamente (vía initializeAppSuccess → configureDynamicRoutes).
+   *
+   * Se limitan a las rutas de auth + una raíz vacía sin contenido y un
+   * catch-all que redirige a ella, de modo que el router no rompa mientras la
+   * UI (app.component) muestra el estado de error tipado sobre el outlet.
+   */
   private getFallbackRoutes(): Routes {
     return [
       ...this.getStaticAuthRoutes(),
-      {
-        path: '',
-        loadComponent: () =>
-          import('../../public/landing/vendix-landing/vendix-landing.component').then(
-            (c) => c.VendixLandingComponent,
-          ),
-        pathMatch: 'full',
-      },
+      { path: '', children: [] },
       { path: '**', redirectTo: '' },
     ];
   }
 
   /**
-   * Configure fallback routes when initialization fails or times out.
-   * This is called by APP_INITIALIZER when there's a timeout.
+   * Configure neutral recovery routes when initialization fails or times out.
+   * Called by the initializeAppFailure handler (and as a safety net). Does NOT
+   * mount the Vendix landing.
    */
   configureFallbackRoutes(): void {
     if (this.bootTimeout) {

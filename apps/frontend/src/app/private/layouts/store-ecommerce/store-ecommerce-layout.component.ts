@@ -361,7 +361,16 @@ export class StoreEcommerceLayoutComponent {
     this.show_mobile_menu.update((v) => !v);
   }
 
+  toggleCart(): void {
+    // El botón del carrito ya no navega: solo abre/cierra el dropdown.
+    // Imprescindible en móvil, donde no existe hover para dispararlo.
+    clearTimeout(this.close_timer);
+    this.show_cart_dropdown.update((v) => !v);
+  }
+
   goToCart(): void {
+    // La navegación al carrito ahora vive en el header y footer del dropdown.
+    this.show_cart_dropdown.set(false);
     this.router.navigate(['/cart']);
   }
 

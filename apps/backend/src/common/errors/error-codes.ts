@@ -304,6 +304,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid shipping method',
   },
+  ECOM_CHECKOUT_004: {
+    code: 'ECOM_CHECKOUT_004',
+    httpStatus: 403,
+    devMessage: 'Store is unavailable for checkout',
+  },
   ECOM_ACCOUNT_001: {
     code: 'ECOM_ACCOUNT_001',
     httpStatus: 404,

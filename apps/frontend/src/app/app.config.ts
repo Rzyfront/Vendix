@@ -65,8 +65,13 @@ export function initializeApp(
             '[APP_INITIALIZER] Timeout or error waiting for routes:',
             error,
           );
-          // Return true to allow the app to continue with fallback routes
-          routeManager.configureFallbackRoutes();
+          // NO degradar a VENDIX_LANDING. Marcamos un fallo transitorio tipado:
+          // el handler de initializeAppFailure configura rutas neutras y la UI
+          // muestra el estado de error con opción de reintentar. Devolvemos
+          // true para no bloquear el arranque de la app.
+          store.dispatch(
+            ConfigActions.initializeAppFailure({ error: { kind: 'transient' } }),
+          );
           return of(true);
         }),
       ),

@@ -73,9 +73,14 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   styles: [
     `
       .promotions-section {
-        padding: 2.5rem 1rem;
+        padding: 0 1rem 1.25rem;
         max-width: 1200px;
         margin: 0 auto;
+      }
+      @media (min-width: 768px) {
+        .promotions-section {
+          padding-bottom: 2rem;
+        }
       }
       .section-header {
         text-align: center;

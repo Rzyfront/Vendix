@@ -85,6 +85,7 @@
           [cardConfig]="cardConfig"
           [loading]="loading()"
           [sortable]="true"
+          [rowClass]="rowClassFn"
           (sort)="onSort($event)"
           (rowClick)="handleViewOrder($event.id)"
         ></app-responsive-data-view>

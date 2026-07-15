@@ -223,8 +223,9 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
       return;
     }
 
-    // Top 5 by units
-    const top5 = topSellers.slice(0, 5);
+    // Top 5 by units (defensa: re-ordenamos por units_sold por si el backend cambia)
+    const sorted = [...topSellers].sort((a, b) => b.units_sold - a.units_sold);
+    const top5 = sorted.slice(0, 5);
     const names = top5.map((p) => p.product_name);
     const units = top5.map((p) => p.units_sold);
 

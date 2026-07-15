@@ -38,6 +38,10 @@ export interface EcommerceSettings {
     qr_code_url?: string;
     qr_code_data_url?: string;
     qr_code_generated_at?: string;
+    /** Disponibilidad pública de la tienda (default true). */
+    store_available?: boolean;
+    /** Mensaje mostrado a clientes cuando la tienda está desactivada. */
+    unavailable_message?: string;
   };
 
   // Slider Principal

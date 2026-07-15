@@ -75,4 +75,8 @@ export class CatalogQueryDto {
   @IsOptional()
   @IsString()
   is_featured?: string;
+
+  @IsOptional()
+  @IsString()
+  fill?: string;
 }

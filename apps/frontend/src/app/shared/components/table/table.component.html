@@ -62,7 +62,8 @@
         <tbody>
           @for (item of data(); track $index; let i = $index) {
             <tr [class]="getRowClasses(i)" (click)="onRowClick(item)"
-              [class.clickable-row]="true">
+              [class.clickable-row]="true"
+              [ngClass]="rowClass() ? rowClass()!(item, i) : ''">
               <!-- Data cells -->
               @for (column of columns(); track column.key) {
                 <td [class]="getCellClasses(column)">

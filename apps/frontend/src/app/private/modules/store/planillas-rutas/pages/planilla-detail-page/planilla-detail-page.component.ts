@@ -11,6 +11,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
+  ButtonComponent,
   CardComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -33,6 +34,7 @@ import { PlanillaPdfViewerComponent } from '../../components/planilla-pdf-viewer
 import { VoidDispatchRouteModalComponent } from '../../components/void-dispatch-route-modal/void-dispatch-route-modal.component';
 import { RouteSheetScannerModalComponent } from '../../components/route-sheet-scanner-modal/route-sheet-scanner-modal.component';
 import { StopDetailModalComponent } from '../../components/stop-detail-modal/stop-detail-modal.component';
+import { PlanillaMapModalComponent } from '../../components/planilla-map-modal/planilla-map-modal.component';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
@@ -53,6 +55,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
   standalone: true,
   imports: [
     CommonModule,
+    ButtonComponent,
     CardComponent,
     StickyHeaderComponent,
     IconComponent,
@@ -67,6 +70,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
     RouteSheetScannerModalComponent,
     VoidDispatchRouteModalComponent,
     StopDetailModalComponent,
+    PlanillaMapModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -240,14 +244,27 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
                 Paradas ({{ r.stops?.length || 0 }})
               </h2>
 
-              <app-options-dropdown
-                [filters]="[]"
-                [actions]="documentalActions()"
-                [showActions]="true"
-                triggerLabel="Acciones"
-                triggerIcon="more-horizontal"
-                (actionClick)="onDocumentalAction($event)"
-              ></app-options-dropdown>
+              <div class="flex items-center gap-2">
+                @if ((r.stops?.length || 0) > 0) {
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    (clicked)="showMapModal.set(true)"
+                  >
+                    <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
+                    Ver mapa
+                  </app-button>
+                }
+
+                <app-options-dropdown
+                  [filters]="[]"
+                  [actions]="documentalActions()"
+                  [showActions]="true"
+                  triggerLabel="Acciones"
+                  triggerIcon="more-horizontal"
+                  (actionClick)="onDocumentalAction($event)"
+                ></app-options-dropdown>
+              </div>
             </div>
 
             <app-responsive-data-view
@@ -325,6 +342,14 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         (goToNote)="goToDispatchNote($event)"
       ></app-stop-detail-modal>
     }
+
+    @if (showMapModal() && route()) {
+      <app-planilla-map-modal
+        [routeId]="route()!.id"
+        (close)="showMapModal.set(false)"
+        (reordered)="load()"
+      ></app-planilla-map-modal>
+    }
   `,
 })
 export class PlanillaDetailPageComponent {
@@ -348,6 +373,8 @@ export class PlanillaDetailPageComponent {
   readonly showPdfViewer = signal(false);
   readonly showVoidModal = signal(false);
   readonly showScannerModal = signal(false);
+  /** Route map modal (pending stops + suggested order). */
+  readonly showMapModal = signal(false);
 
   // A1 — Quick-view del detalle de una remisión/parada.
   readonly detailStop = signal<DispatchRouteStop | null>(null);

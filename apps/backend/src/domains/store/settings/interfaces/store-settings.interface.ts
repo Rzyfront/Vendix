@@ -111,6 +111,9 @@ export interface EcommerceHomeSectionsSettings {
   // Opt-in "Promociones activas" banner/section. Disabled by default so
   // existing storefronts do not surface it until the store enables it.
   promotions?: EcommerceHomeSectionSettings;
+  // Restaurant menus (cartas) section — only honored when the store industry
+  // includes "restaurant". Typing gap that mirrors the existing DTO field.
+  menus?: EcommerceHomeSectionSettings;
 }
 
 export interface EcommerceSettings {
@@ -122,6 +125,13 @@ export interface EcommerceSettings {
     qr_code_url?: string;
     qr_code_data_url?: string;
     qr_code_generated_at?: string;
+    // Storefront checkout availability master switch. When explicitly `false`
+    // the store rejects checkout (StoreAvailabilityGuard → ECOM_CHECKOUT_004).
+    // Absent/`true` ⇒ checkout allowed (default `true`).
+    store_available?: boolean;
+    // Optional message shown to the customer when the store is unavailable.
+    // If empty, PublicDomainsService computes a "next open" fallback message.
+    unavailable_message?: string;
   };
   slider?: {
     enable: boolean;

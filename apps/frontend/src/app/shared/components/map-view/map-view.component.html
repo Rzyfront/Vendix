@@ -1,0 +1,32 @@
+<div class="map-view" [class.map-view--fill]="fill()">
+  <div class="mv-map" #mapContainer></div>
+
+  @if (loading()) {
+    <!-- Skeleton reserves the exact map space (shimmer) while tiles load. -->
+    <div class="mv-skeleton" aria-live="polite" aria-busy="true">
+      <span class="mv-skeleton-shimmer" aria-hidden="true"></span>
+      <span class="mv-skeleton-label">Cargando mapa...</span>
+    </div>
+  }
+
+  @if (error()) {
+    <!-- Map could not render (WebGL/tiles). Keep the reserved space with a
+         placeholder so the surrounding view degrades gracefully. -->
+    <div class="mv-error" role="status">
+      <svg
+        class="mv-error-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+        <circle cx="12" cy="10" r="3" />
+      </svg>
+      <span>No se pudo cargar el mapa.</span>
+    </div>
+  }
+</div>

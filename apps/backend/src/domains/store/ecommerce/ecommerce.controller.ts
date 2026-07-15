@@ -12,7 +12,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '../../../common/responses/response.service';
 import { EcommerceService } from './ecommerce.service';
-import { UpdateEcommerceSettingsDto } from './dto/ecommerce-settings.dto';
+import {
+  UpdateEcommerceSettingsDto,
+  UpdateStoreAvailabilityDto,
+} from './dto/ecommerce-settings.dto';
 
 @Controller('store/ecommerce')
 export class EcommerceController {
@@ -122,6 +125,24 @@ export class EcommerceController {
     } catch (error) {
       return this.responseService.error(
         'Error al actualizar la configuración',
+        error.message,
+      );
+    }
+  }
+
+  @Patch('availability')
+  @Permissions('store:ecommerce:update')
+  async updateAvailability(@Body() dto: UpdateStoreAvailabilityDto) {
+    try {
+      const settings = await this.ecommerceService.updateAvailability(dto);
+
+      return this.responseService.updated(
+        settings,
+        'Disponibilidad de la tienda actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al actualizar la disponibilidad de la tienda',
         error.message,
       );
     }

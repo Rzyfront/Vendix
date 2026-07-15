@@ -5,6 +5,8 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
+import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { CatalogService } from './catalog.service';
 
 describe('CatalogService reviews', () => {
@@ -89,6 +91,12 @@ describe('CatalogService reviews', () => {
           },
         },
         { provide: PromotionEngineService, useValue: promotionEngine },
+        {
+          provide: MenuAvailabilityCheckerService,
+          useValue: {
+            getAvailabilityMap: jest.fn().mockResolvedValue(new Map()),
+          },
+        },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
       ],
     }).compile();
@@ -222,6 +230,12 @@ describe('CatalogService active promotions on listing', () => {
           },
         },
         { provide: PromotionEngineService, useValue: promotionEngine },
+        {
+          provide: MenuAvailabilityCheckerService,
+          useValue: {
+            getAvailabilityMap: jest.fn().mockResolvedValue(new Map()),
+          },
+        },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
       ],
     }).compile();
@@ -364,5 +378,238 @@ describe('CatalogService active promotions on listing', () => {
         }),
       ]),
     );
+  });
+});
+
+describe('CatalogService featured fill cascade', () => {
+  let service: CatalogService;
+  let prisma: {
+    store_settings: { findFirst: jest.Mock };
+    products: { findMany: jest.Mock; count: jest.Mock };
+    order_items: { groupBy: jest.Mock };
+    promotions: { findMany: jest.Mock };
+    product_categories: { findMany: jest.Mock };
+  };
+  let promotionEngine: { findActiveAutoPromotionsForProducts: jest.Mock };
+  let cache: { get: jest.Mock; set: jest.Mock };
+
+  const STORE_ID = 9;
+
+  const product = (id: number, is_featured = false) => ({
+    id,
+    name: `Producto ${id}`,
+    slug: `producto-${id}`,
+    description: 'Detalle',
+    base_price: 100,
+    sale_price: null,
+    is_on_sale: false,
+    is_featured,
+    sku: `SKU-${id}`,
+    track_inventory: true,
+    stock_quantity: 5,
+    product_images: [],
+    brands: null,
+    product_categories: [],
+    product_variants: [],
+    product_tax_assignments: [],
+    product_type: 'physical',
+    requires_booking: false,
+    service_duration_minutes: null,
+    service_modality: null,
+    booking_mode: null,
+    stock_levels: [],
+    _count: { product_variants: 0 },
+  });
+
+  const ids = (result: { data: Array<{ id: number }> }) =>
+    result.data.map((p) => p.id);
+
+  beforeEach(async () => {
+    prisma = {
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { ecommerce: { catalog: {} } },
+        }),
+      },
+      products: {
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      order_items: { groupBy: jest.fn().mockResolvedValue([]) },
+      promotions: { findMany: jest.fn().mockResolvedValue([]) },
+      product_categories: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    promotionEngine = {
+      findActiveAutoPromotionsForProducts: jest
+        .fn()
+        .mockResolvedValue(new Map()),
+    };
+    cache = { get: jest.fn().mockResolvedValue(null), set: jest.fn() };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CatalogService,
+        { provide: EcommercePrismaService, useValue: prisma },
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: S3Service,
+          useValue: { signUrl: jest.fn(async (key) => key ?? null) },
+        },
+        {
+          provide: PriceResolverService,
+          useValue: {
+            resolvePrice: jest.fn(() => ({
+              unitBasePrice: 100,
+              unitPriceWithTax: 100,
+            })),
+          },
+        },
+        { provide: PromotionEngineService, useValue: promotionEngine },
+        {
+          provide: MenuAvailabilityCheckerService,
+          useValue: {
+            getAvailabilityMap: jest.fn().mockResolvedValue(new Map()),
+          },
+        },
+        { provide: CACHE_MANAGER, useValue: cache },
+      ],
+    }).compile();
+
+    service = module.get(CatalogService);
+
+    // Habilita el escalón 2 (más vendidos) proveyendo store context.
+    jest
+      .spyOn(RequestContextService, 'getStoreId')
+      .mockReturnValue(STORE_ID);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('fills up to limit in order featured -> best sellers -> newest', async () => {
+    prisma.products.findMany
+      // Escalón 1: destacados
+      .mockResolvedValueOnce([product(1, true), product(2, true)])
+      // Escalón 2: best sellers (regresa desordenado, se reordena por ranking)
+      .mockResolvedValueOnce([product(5), product(3)])
+      // Escalón 3: newest filler
+      .mockResolvedValueOnce([product(9)]);
+    prisma.order_items.groupBy.mockResolvedValueOnce([
+      { product_id: 3, _sum: { quantity: 9 } },
+      { product_id: 5, _sum: { quantity: 4 } },
+    ]);
+
+    const result = await service.getProducts({
+      fill: 'true',
+      is_featured: 'true',
+      limit: 5,
+    } as any);
+
+    expect(ids(result)).toEqual([1, 2, 3, 5, 9]);
+    expect(result.data).toHaveLength(5);
+    expect(result.meta).toMatchObject({ page: 1, limit: 5, total_pages: 1 });
+    // La cascada nunca consulta count.
+    expect(prisma.products.count).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate a product that is both featured and a best seller', async () => {
+    prisma.products.findMany
+      .mockResolvedValueOnce([product(1, true), product(2, true)])
+      // El best seller 2 ya está en seen; sólo debe consultarse el 4.
+      .mockResolvedValueOnce([product(4)]);
+    prisma.order_items.groupBy.mockResolvedValueOnce([
+      { product_id: 2, _sum: { quantity: 20 } },
+      { product_id: 4, _sum: { quantity: 8 } },
+    ]);
+
+    const result = await service.getProducts({
+      fill: 'true',
+      is_featured: 'true',
+      limit: 3,
+    } as any);
+
+    expect(ids(result)).toEqual([1, 2, 4]);
+    expect(result.data).toHaveLength(3);
+    // El id ya visto (2) se excluye del filtro de best sellers.
+    const bestSellerWhere = prisma.products.findMany.mock.calls[1][0].where;
+    expect(bestSellerWhere.id).toEqual({ in: [4] });
+  });
+
+  it('keeps availability where without is_featured on the fill steps but with it on featured', async () => {
+    prisma.products.findMany
+      .mockResolvedValueOnce([product(1, true)])
+      .mockResolvedValueOnce([product(2)])
+      .mockResolvedValueOnce([product(9)]);
+    prisma.order_items.groupBy.mockResolvedValueOnce([
+      { product_id: 2, _sum: { quantity: 5 } },
+    ]);
+
+    await service.getProducts({
+      fill: 'true',
+      is_featured: 'true',
+      limit: 3,
+    } as any);
+
+    const featuredWhere = prisma.products.findMany.mock.calls[0][0].where;
+    const bestSellerWhere = prisma.products.findMany.mock.calls[1][0].where;
+    const fillerWhere = prisma.products.findMany.mock.calls[2][0].where;
+
+    expect(featuredWhere.is_featured).toBe(true);
+
+    for (const where of [bestSellerWhere, fillerWhere]) {
+      expect(where.is_featured).toBeUndefined();
+      expect(where.state).toBe('active');
+      expect(where.available_for_ecommerce).toBe(true);
+      expect(where.is_sellable).toBe(true);
+    }
+    expect(fillerWhere.id).toEqual({ notIn: [1, 2] });
+  });
+
+  it('falls back to newest when there are no sales in the last 30 days', async () => {
+    prisma.products.findMany
+      // Escalón 1
+      .mockResolvedValueOnce([product(1, true)])
+      // Escalón 3 (sin escalón 2 porque no hay best sellers)
+      .mockResolvedValueOnce([product(8), product(9)]);
+    prisma.order_items.groupBy.mockResolvedValueOnce([]);
+
+    const result = await service.getProducts({
+      fill: 'true',
+      is_featured: 'true',
+      limit: 3,
+    } as any);
+
+    expect(ids(result)).toEqual([1, 8, 9]);
+    expect(prisma.order_items.groupBy).toHaveBeenCalled();
+    // Sólo dos consultas: destacados + filler (best sellers no aporta candidatos).
+    expect(prisma.products.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns fewer than limit without throwing when catalog is insufficient', async () => {
+    prisma.products.findMany
+      .mockResolvedValueOnce([product(1, true)])
+      .mockResolvedValueOnce([]);
+    prisma.order_items.groupBy.mockResolvedValueOnce([]);
+
+    const result = await service.getProducts({
+      fill: 'true',
+      is_featured: 'true',
+      limit: 5,
+    } as any);
+
+    expect(result.data.length).toBeLessThan(5);
+    expect(result.data).toHaveLength(1);
+    expect(result.meta.total).toBe(result.data.length);
+  });
+
+  it('does NOT enter the cascade when fill=true but is_featured is missing', async () => {
+    prisma.products.findMany.mockResolvedValueOnce([]);
+    prisma.products.count.mockResolvedValueOnce(0);
+
+    await service.getProducts({ fill: 'true', limit: 5 } as any);
+
+    // Ruta normal de listado sí consulta count; la cascada nunca lo hace.
+    expect(prisma.products.count).toHaveBeenCalled();
   });
 });

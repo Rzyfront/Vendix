@@ -1,9 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
-import { from, of } from 'rxjs';
+import { from, of, Observable } from 'rxjs';
 import { switchMap, map, catchError, tap } from 'rxjs/operators';
-import { Store } from '@ngrx/store';
-import { AppConfigService } from '../../services/app-config.service';
+import { Action, Store } from '@ngrx/store';
+import {
+  AppConfigService,
+  DomainResolutionError,
+} from '../../services/app-config.service';
 import { ThemeService } from '../../services/theme.service';
 import { ManifestService } from '../../services/manifest.service';
 import * as ConfigActions from './config.actions';
@@ -17,18 +20,43 @@ export class ConfigEffects {
   private manifestService = inject(ManifestService);
   private store = inject(Store);
 
+  /**
+   * Cadena de resolución compartida por `initializeApp` y `retryResolution`.
+   * Convierte la Promise de setupConfig en Observable y mapea cualquier fallo
+   * a un payload tipado con `kind`. Un `DomainResolutionError` conserva su
+   * clasificación; cualquier otro error se trata como `transient` (permite
+   * reintento). NUNCA se degrada a VENDIX_LANDING.
+   */
+  private runResolution$(): Observable<Action> {
+    return from(this.appConfigService.setupConfig()).pipe(
+      map((config) => ConfigActions.initializeAppSuccess({ config })),
+      catchError((error: unknown) =>
+        of(
+          ConfigActions.initializeAppFailure({
+            error: {
+              kind:
+                error instanceof DomainResolutionError
+                  ? error.kind
+                  : 'transient',
+              message: error instanceof Error ? error.message : undefined,
+            },
+          }),
+        ),
+      ),
+    );
+  }
+
   initializeApp$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ConfigActions.initializeApp),
-      switchMap(() =>
-        // Usamos from() para convertir la Promise de setupConfig en un Observable
-        from(this.appConfigService.setupConfig()).pipe(
-          map((config) => ConfigActions.initializeAppSuccess({ config })),
-          catchError((error) =>
-            of(ConfigActions.initializeAppFailure({ error })),
-          ),
-        ),
-      ),
+      switchMap(() => this.runResolution$()),
+    ),
+  );
+
+  retryResolution$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ConfigActions.retryResolution),
+      switchMap(() => this.runResolution$()),
     ),
   );
 
