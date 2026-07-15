@@ -794,6 +794,8 @@ export class CheckoutService {
           country_code: dto.shipping_address.country_code,
           postal_code: dto.shipping_address.postal_code,
           phone_number: dto.shipping_address.phone_number,
+          latitude: dto.shipping_address.latitude,
+          longitude: dto.shipping_address.longitude,
           type: 'shipping',
         },
       });
@@ -812,6 +814,9 @@ export class CheckoutService {
           country_code: address.country_code,
           postal_code: address.postal_code,
           phone_number: address.phone_number,
+          latitude: address.latitude != null ? Number(address.latitude) : null,
+          longitude:
+            address.longitude != null ? Number(address.longitude) : null,
         };
       }
     }
@@ -1252,6 +1257,14 @@ export class CheckoutService {
           country_code: primary_address.country_code,
           postal_code: primary_address.postal_code,
           phone_number: primary_address.phone_number,
+          latitude:
+            primary_address.latitude != null
+              ? Number(primary_address.latitude)
+              : null,
+          longitude:
+            primary_address.longitude != null
+              ? Number(primary_address.longitude)
+              : null,
         };
       }
 

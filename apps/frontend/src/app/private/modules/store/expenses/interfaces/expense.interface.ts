@@ -1,3 +1,5 @@
+import { ExpenseLineItem } from './expense-scanner.interface';
+
 export interface Expense {
   id: number;
   store_id: number;
@@ -27,6 +29,7 @@ export interface Expense {
 
   // Relations
   expense_categories?: ExpenseCategory;
+  expense_items?: ExpenseLineItem[];
   created_by_user?: {
     id: number;
     first_name?: string;
@@ -63,6 +66,7 @@ export interface CreateExpenseDto {
   expense_date: Date;
   receipt_url?: string;
   notes?: string;
+  items?: ExpenseLineItem[];
 }
 
 export interface UpdateExpenseDto {

@@ -1,6 +1,6 @@
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
-import { UseGuards } from '@nestjs/common';
+import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import {
   Controller,
   Get,
@@ -13,9 +13,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ExpensesService } from './expenses.service';
 import { ExpenseFlowService } from './expense-flow/expense-flow.service';
+import { ExpenseScannerService } from './expense-scanner.service';
 import { ResponseService } from '../../../common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
@@ -29,6 +32,7 @@ export class ExpensesController {
   constructor(
     private readonly expenses_service: ExpensesService,
     private readonly expense_flow_service: ExpenseFlowService,
+    private readonly expense_scanner_service: ExpenseScannerService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -99,6 +103,26 @@ export class ExpensesController {
       dateTo,
     );
     return this.response_service.success(result);
+  }
+
+  @Post('scan')
+  @Permissions('store:expenses:create')
+  @UseInterceptors(FileInterceptor('file'))
+  async scanInvoice(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    const allowed = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ];
+    if (!allowed.includes(file.mimetype))
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+    const result = await this.expense_scanner_service.scanInvoice(file);
+    return this.response_service.success(
+      result,
+      'Factura de gasto escaneada exitosamente',
+    );
   }
 
   // --- Parameter Routes (MUST be last) ---

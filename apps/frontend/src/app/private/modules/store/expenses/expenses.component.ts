@@ -11,6 +11,7 @@ import { ExpensesListComponent } from './components/expenses-list/expenses-list.
 import { ExpenseCreateComponent } from './components/expense-create/expense-create.component';
 import { ExpenseEditComponent } from './components/expense-edit/expense-edit.component';
 import { ExpenseCategoriesComponent } from './components/expense-categories/expense-categories.component';
+import { ExpenseScannerModalComponent } from './components/expense-scanner/expense-scanner-modal.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 @Component({
@@ -22,6 +23,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     ExpenseCreateComponent,
     ExpenseEditComponent,
     ExpenseCategoriesComponent,
+    ExpenseScannerModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -37,6 +39,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         (create)="openCreateModal()"
         (edit)="editExpense($event)"
         (categories)="openCategoriesModal()"
+        (scan)="isScannerModalOpen.set(true)"
         (refresh)="refreshExpenses()"
       ></app-expenses-list>
 
@@ -58,6 +61,13 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         [isOpen]="isCategoriesModalOpen()"
         (isOpenChange)="isCategoriesModalOpen.set($event)"
       ></vendix-expense-categories>
+
+      <!-- Expense Scanner Modal -->
+      <app-expense-scanner-modal
+        [isOpen]="isScannerModalOpen()"
+        (isOpenChange)="isScannerModalOpen.set($event)"
+        (created)="onScannedCreated($event)"
+      ></app-expense-scanner-modal>
     </div>
   `,
 })
@@ -72,6 +82,7 @@ export class ExpensesComponent {
   readonly isCreateModalOpen = signal(false);
   readonly isEditModalOpen = signal(false);
   readonly isCategoriesModalOpen = signal(false);
+  readonly isScannerModalOpen = signal(false);
   readonly selectedExpense = signal<Expense | null>(null);
 
   constructor() {
@@ -98,5 +109,9 @@ export class ExpensesComponent {
   refreshExpenses(): void {
     this.store.dispatch(loadExpenses());
     this.store.dispatch(loadExpensesSummary());
+  }
+
+  onScannedCreated(expense: Expense): void {
+    this.isScannerModalOpen.set(false);
   }
 }

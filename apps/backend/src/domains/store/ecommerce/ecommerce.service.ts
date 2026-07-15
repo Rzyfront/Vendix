@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { EcommerceSettingsDto } from './dto/ecommerce-settings.dto';
+import {
+  EcommerceSettingsDto,
+  UpdateStoreAvailabilityDto,
+} from './dto/ecommerce-settings.dto';
 import {
   DomainGeneratorHelper,
   DomainContext,
@@ -515,6 +518,61 @@ export class EcommerceService {
     }
 
     return preparedEcommerce;
+  }
+
+  /**
+   * Immediate storefront availability toggle.
+   *
+   * Deep-merges ONLY into `settings.ecommerce.general` — preserving
+   * currency/locale/timezone/qr_* and every other key — and persists the full
+   * settings object so no sibling section is dropped. Returns the updated
+   * ecommerce settings block.
+   */
+  async updateAvailability(dto: UpdateStoreAvailabilityDto) {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new Error('Store ID not found in context');
+
+    // 1. Read current settings merged with defaults (raw S3 keys, not signed).
+    const storeSettings = await this.findStoreSettings(store_id);
+    const currentSettings = mergeStoreSettingsWithDefaults(
+      storeSettings?.settings,
+    );
+    const existingEcommerce =
+      currentSettings.ecommerce || ({} as Partial<EcommerceSettings>);
+
+    // 2. Deep-merge ONLY the general block: keep every existing general key and
+    //    only overwrite store_available (+ unavailable_message when provided).
+    const updatedEcommerce: EcommerceSettings = {
+      ...existingEcommerce,
+      enabled: existingEcommerce.enabled ?? true,
+      general: {
+        ...existingEcommerce.general,
+        store_available: dto.store_available,
+        ...(dto.unavailable_message !== undefined
+          ? { unavailable_message: dto.unavailable_message }
+          : {}),
+      },
+    } as EcommerceSettings;
+
+    // 3. Persist the full settings object with only ecommerce swapped in.
+    const updatedSettings = {
+      ...currentSettings,
+      ecommerce: updatedEcommerce,
+    };
+
+    await this.prisma.store_settings.upsert({
+      where: { store_id },
+      update: {
+        settings: updatedSettings as any,
+        updated_at: new Date(),
+      },
+      create: {
+        store_id,
+        settings: updatedSettings as any,
+      },
+    });
+
+    return updatedEcommerce;
   }
 
   /**

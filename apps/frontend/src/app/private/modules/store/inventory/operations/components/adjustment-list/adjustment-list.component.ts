@@ -55,6 +55,7 @@ export class AdjustmentListComponent {
   readonly clearFilters = output<void>();
   readonly actionClick = output<string>();
   readonly viewDetail = output<InventoryAdjustment>();
+  readonly scan = output<void>();
 
   // Local state
   searchTerm = '';
@@ -81,6 +82,7 @@ export class AdjustmentListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Escanear Reconteo', icon: 'scan-line', action: 'scan' },
     { label: 'Carga Masiva', icon: 'upload', action: 'bulk' },
     {
       label: 'Nuevo Ajuste',
@@ -231,6 +233,10 @@ export class AdjustmentListComponent {
   }
 
   onActionClick(action: string): void {
+    if (action === 'scan') {
+      this.scan.emit();
+      return;
+    }
     this.actionClick.emit(action);
   }
 

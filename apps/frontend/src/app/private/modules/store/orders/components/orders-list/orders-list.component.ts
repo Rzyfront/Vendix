@@ -69,6 +69,15 @@ export class OrdersListComponent {
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
 
+  /** Timestamp (epoch ms) del momento en que se cargó la lista actual. */
+  private loadedAt = 0;
+  /** IDs de órdenes ya abiertas por el usuario (no deben volver a parpadear). */
+  private seenOrderIds: Set<string> = new Set();
+  private readonly SEEN_KEY = 'vendix-orders-flash-seen';
+  private readonly NEW_WINDOW_MS = 5 * 60 * 1000; // 5 minutos
+  /** Signal puente para forzar reevaluación de rowClassFn cuando se marca una orden como vista. */
+  private readonly seenVersion = signal(0);
+
   // State
   readonly orders = signal<Order[]>([]);
   readonly loading = signal(false);
@@ -371,6 +380,25 @@ export class OrdersListComponent {
         this.loadOrders();
       }
     });
+
+    this.loadSeen();
+  }
+
+  private loadSeen(): void {
+    try {
+      const raw = sessionStorage.getItem(this.SEEN_KEY);
+      if (raw) this.seenOrderIds = new Set(JSON.parse(raw) as string[]);
+    } catch {
+      this.seenOrderIds = new Set();
+    }
+  }
+
+  private saveSeen(): void {
+    try {
+      sessionStorage.setItem(this.SEEN_KEY, JSON.stringify([...this.seenOrderIds]));
+    } catch {
+      /* ignore */
+    }
   }
 
   // Computed property for hasFilters
@@ -483,6 +511,7 @@ export class OrdersListComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
+          this.loadedAt = Date.now();
           // Unwrap ResponseService wrapper if present
           const paginatedData = response.data || response;
 
@@ -593,8 +622,29 @@ export class OrdersListComponent {
 
   // Actions
   handleViewOrder(orderId: string): void {
+    const sid = String(orderId);
+    if (!this.seenOrderIds.has(sid)) {
+      this.seenOrderIds.add(sid);
+      this.saveSeen();
+      this.seenVersion.update((v) => v + 1);
+    }
     this.viewOrder.emit(orderId);
   }
+
+  /** Determina si una orden debe parpadear como "nueva" (creada hace < 5 min y aún no abierta). */
+  isNewOrder(item: any): boolean {
+    this.seenVersion(); // touch para reevaluación reactiva
+    if (!item?.id || !item?.created_at) return false;
+    if (this.seenOrderIds.has(String(item.id))) return false;
+    const createdAt = new Date(item.created_at).getTime();
+    if (isNaN(createdAt) || !this.loadedAt) return false;
+    return this.loadedAt - createdAt < this.NEW_WINDOW_MS;
+  }
+
+  /** Función de clase por fila que consume app-table / app-item-list via responsive-data-view. */
+  rowClassFn = (item: any, index: number): string | undefined => {
+    return this.isNewOrder(item) ? 'order-row--new' : undefined;
+  };
 
   viewOrderDetails(order: Order): void {
     this.viewOrder.emit(order.id.toString());

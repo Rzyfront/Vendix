@@ -81,6 +81,9 @@ export class TableComponent {
   readonly sortable = input<boolean>(false);
   readonly actionsDisplay = input<TableActionsDisplay>('buttons');
   readonly customClasses = input<string>('');
+  readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
+    () => undefined
+  );
 
   // --- Outputs ---
   readonly sort = output<{ column: string; direction: SortDirection }>();

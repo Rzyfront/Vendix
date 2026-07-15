@@ -51,6 +51,9 @@ export interface CheckoutShippingAddress {
   country_code: string;
   postal_code?: string;
   phone_number?: string;
+  /** Exact GPS coordinates captured via the map picker (opt-in). */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface CheckoutRequest {

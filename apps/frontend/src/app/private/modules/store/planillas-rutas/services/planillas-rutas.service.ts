@@ -13,8 +13,10 @@ import {
   DispatchRouteQuery,
   DispatchRouteStats,
   DispatchRouteStop,
+  MapStopsResponse,
   PaginatedDispatchRoutesResponse,
   ReleaseStopDto,
+  ReorderStopEntry,
   RouteSheetMatchResult,
   RouteSheetScanResult,
   SettleStopDto,
@@ -50,6 +52,39 @@ export class PlanillasRutasService {
       .get<any>(`${this.apiUrl}/store/dispatch-routes/${id}`)
       .pipe(
         map((r) => r.data as DispatchRoute),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Fetches the map payload for a route: origin + geolocated pending stops +
+   * the pending stops that could not be located. Same unwrap pattern as the
+   * other reads (`ResponseService` wraps the body as `{ success, message, data }`).
+   * `GET /store/dispatch-routes/:id/map-stops`.
+   */
+  getMapStops(routeId: number): Observable<MapStopsResponse> {
+    return this.http
+      .get<any>(`${this.apiUrl}/store/dispatch-routes/${routeId}/map-stops`)
+      .pipe(
+        map((r) => r.data as MapStopsResponse),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Persists a new stop visiting order.
+   * `PATCH /store/dispatch-routes/:id/stops/reorder` with body `{ order }`
+   * where each entry is `{ stopId, sequence }` (sequence >= 1). Returns the
+   * refreshed route. Backend errors: 404 (foreign route), 409
+   * `DSP_ROUTE_NOT_EDITABLE_001` (status ∉ {draft,dispatched}), 400 (duplicate
+   * or foreign stopId/sequence).
+   */
+  reorderStops(routeId: number, order: ReorderStopEntry[]): Observable<DispatchRoute> {
+    return this.http
+      .patch<any>(`${this.apiUrl}/store/dispatch-routes/${routeId}/stops/reorder`, { order })
+      .pipe(
+        map((r) => r.data as DispatchRoute),
+        tap(() => this.invalidateStatsCache()),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }

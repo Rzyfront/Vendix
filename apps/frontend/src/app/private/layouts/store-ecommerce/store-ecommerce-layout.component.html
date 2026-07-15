@@ -83,7 +83,7 @@
 
         <!-- Cart Dropdown Container -->
         <div class="cart-container" (mouseenter)="onCartEnter()" (mouseleave)="onCartLeave()">
-          <button class="action-btn cart-btn" [class.shake-animation]="is_animating()" (click)="goToCart()"
+          <button class="action-btn cart-btn" [class.shake-animation]="is_animating()" (click)="toggleCart()"
             title="Carrito">
             <app-icon name="shopping-cart" [size]="20"></app-icon>
             @if (cart_badge(); as badge) {
@@ -107,7 +107,7 @@
           <!-- Dropdown -->
           @if (show_cart_dropdown()) {
           <div class="cart-dropdown" [attr.data-currency]="currency_code()">
-            <div class="cart-header">
+            <div class="cart-header" (click)="goToCart()">
               <div class="header-title" style="display: flex; align-items: center; gap: 0.5rem;">
                 <app-icon name="shopping-cart" [size]="20" class="text-primary"></app-icon>
                 <h3>Mi Carrito</h3>
@@ -160,7 +160,7 @@
               <app-cart-promotions [cart]="cart" [compact]="true" />
             </div>
             <div class="cart-footer">
-              <div class="cart-total">
+              <div class="cart-total" (click)="goToCart()">
                 <span>Total:</span>
                 <span class="total-amount">{{ cart.subtotal | currency }}</span>
               </div>

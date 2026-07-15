@@ -147,6 +147,20 @@ export class CatalogService {
       ];
     }
 
+    // Cascada de relleno para la sección de destacados del home:
+    // destacados -> más vendidos -> cualquiera, hasta completar `limit`.
+    // Sólo aplica a la carga inicial (page 1) sin búsqueda ni ids explícitos,
+    // para no interferir con listados filtrados o paginados.
+    if (
+      String(query.fill) === 'true' &&
+      String(query.is_featured) === 'true' &&
+      page === 1 &&
+      !search &&
+      !ids
+    ) {
+      return this.getFeaturedWithFill(where, store_id, Number(limit));
+    }
+
     let orderBy: any;
     let explicitIds: number[] | null = null;
 
@@ -703,6 +717,140 @@ export class CatalogService {
     return bestSelling
       .filter((item) => item.product_id !== null)
       .map((item) => item.product_id as number);
+  }
+
+  /**
+   * Include compartido para las cards del listado. Se define aquí para que la
+   * cascada de destacados (`getFeaturedWithFill`) no diverja del shape que
+   * consume `mapProductToResponse`. No se refactorizan los usos existentes.
+   */
+  private listingInclude(): any {
+    return {
+      product_images: { where: { is_main: true }, take: 1 },
+      brands: { select: { id: true, name: true } },
+      product_categories: {
+        include: {
+          categories: { select: { id: true, name: true, slug: true } },
+        },
+      },
+      product_tax_assignments: {
+        include: {
+          tax_categories: {
+            include: {
+              tax_rates: true,
+            },
+          },
+        },
+      },
+      stock_levels: {
+        select: {
+          product_variant_id: true,
+          quantity_available: true,
+        },
+      },
+      _count: { select: { product_variants: true } },
+    };
+  }
+
+  /**
+   * Cascada de relleno para "Productos destacados" del home.
+   * Completa hasta `limit` en 3 escalones sin duplicados, respetando el mismo
+   * where base (state/available/sellable + show_out_of_stock) que los destacados.
+   *   1) destacados (is_featured=true, newest)
+   *   2) más vendidos últimos 30d (ranking cacheado)
+   *   3) cualquiera (newest)
+   */
+  private async getFeaturedWithFill(
+    whereFeatured: any,
+    storeId: number | undefined,
+    limit: number,
+  ) {
+    const include = this.listingInclude();
+
+    // Escalón 1: destacados
+    const featured = await this.prisma.products.findMany({
+      where: whereFeatured,
+      take: limit,
+      orderBy: { created_at: 'desc' },
+      include,
+    });
+    const collected: any[] = [...featured];
+    const seen = new Set<number>(collected.map((p) => p.id));
+
+    // where SIN is_featured para escalones 2 y 3
+    const whereBase: any = { ...whereFeatured };
+    delete whereBase.is_featured;
+
+    // Escalón 2: más vendidos (ranking 30d, cacheado)
+    if (collected.length < limit && storeId) {
+      let rankedIds = await this.getBestSellingFromCache(storeId);
+      if (!rankedIds) {
+        rankedIds = await this.fetchBestSellingIds(storeId, limit);
+        await this.setBestSellingCache(storeId, rankedIds);
+      }
+      const candidateIds = rankedIds.filter((id) => !seen.has(id));
+      if (candidateIds.length > 0) {
+        const bestSellers = await this.prisma.products.findMany({
+          where: { ...whereBase, id: { in: candidateIds } },
+          include,
+        });
+        bestSellers.sort(
+          (a, b) => candidateIds.indexOf(a.id) - candidateIds.indexOf(b.id),
+        );
+        for (const product of bestSellers) {
+          if (collected.length >= limit) break;
+          if (!seen.has(product.id)) {
+            collected.push(product);
+            seen.add(product.id);
+          }
+        }
+      }
+    }
+
+    // Escalón 3: cualquiera (newest)
+    if (collected.length < limit) {
+      const needed = limit - collected.length;
+      const filler = await this.prisma.products.findMany({
+        where: { ...whereBase, id: { notIn: Array.from(seen) } },
+        take: needed,
+        orderBy: { created_at: 'desc' },
+        include,
+      });
+      for (const product of filler) {
+        if (collected.length >= limit) break;
+        if (!seen.has(product.id)) {
+          collected.push(product);
+          seen.add(product.id);
+        }
+      }
+    }
+
+    // Mapeo con el pipeline compartido (idéntico a getProducts)
+    const activePromotionsByProductId =
+      await this.resolveActivePromotionsForListing(collected);
+    const availabilityByProductId = await this.resolveAvailabilityForProducts(
+      storeId,
+      collected,
+    );
+    const data = await Promise.all(
+      collected.map((product) =>
+        this.mapProductToResponse(
+          product,
+          activePromotionsByProductId.get(product.id) ?? null,
+          availabilityByProductId.get(product.id) ?? null,
+        ),
+      ),
+    );
+
+    return {
+      data,
+      meta: {
+        total: data.length,
+        page: 1,
+        limit,
+        total_pages: 1,
+      },
+    };
   }
 
   /**

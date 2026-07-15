@@ -21,6 +21,7 @@ import { ModalComponent } from '../../../../../shared/components/modal/modal.com
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store';
 import { AuthService } from '../../../../../core/services/auth.service';
+import { StoreAvailabilityService } from '../../../../../core/services/store-availability.service';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -413,6 +414,7 @@ export class AuthModalComponent {
   private authFacade = inject(AuthFacade);
   private authService = inject(AuthService);
   private tenantFacade = inject(TenantFacade);
+  private storeAvailability = inject(StoreAvailabilityService);
   private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
   private toast = inject(ToastService);
@@ -845,6 +847,13 @@ export class AuthModalComponent {
   }
 
   onSubmit(): void {
+    // Store closed: re-surface the branded banner at the start of the auth
+    // action (login/register). The banner overlays without blocking the modal;
+    // the backend remains the real block.
+    if (this.storeAvailability.unavailable()) {
+      this.storeAvailability.reopen();
+    }
+
     if (this.authForm.invalid) {
       this.authForm.markAllAsTouched();
       this.toast.warning(

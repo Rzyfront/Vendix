@@ -1,13 +1,15 @@
 import { isPlatformBrowser } from '@angular/common';
-import {Component, PLATFORM_ID, effect, inject, signal} from '@angular/core';
-import {toSignal} from '@angular/core/rxjs-interop';
+import { Component, PLATFORM_ID, effect, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { ConfigFacade } from './core/store/config';
 import { RouteManagerService } from './core/services/route-manager.service';
-import { ToastService } from './shared/components/toast/toast.service';
 import { ToastContainerComponent } from './shared/components/toast/toast-container.component';
 import { GlobalUserModalsComponent } from './shared/components/global-user-modals/global-user-modals.component';
 import { AppLoadingComponent } from './shared/components/app-loading/app-loading.component';
+import { StoreUnavailableBannerComponent } from './shared/components/store-unavailable-banner/store-unavailable-banner.component';
+import { DomainResolutionErrorComponent } from './shared/components/domain-resolution-error/domain-resolution-error.component';
+import { StoreAvailabilityService } from './core/services/store-availability.service';
 
 @Component({
   selector: 'app-root',
@@ -17,21 +19,21 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
     ToastContainerComponent,
     GlobalUserModalsComponent,
     AppLoadingComponent,
+    StoreUnavailableBannerComponent,
+    DomainResolutionErrorComponent,
   ],
+  // Bootstrap state machine — order is intentional:
+  //   1. resolutionError  → branded error view (kitten + retry). Highest priority
+  //      so a decided failure always wins over stale neutral routes.
+  //   2. routesConfigured → the resolved app (tenant storefront / admin / Vendix
+  //      landing ONLY when resolution returned app_type=VENDIX_LANDING).
+  //   3. otherwise         → neutral Vendix splash (initial boot AND retry).
+  // The pre-Angular gate in index.html keeps <app-root> hidden until we reach a
+  // DECIDED state (error or success), so the prerendered Landing never flashes.
   template: `
-    @if (is_loading()) {
-      <app-loading />
-    } @else if (config_error()) {
-      <div class="min-h-screen flex items-center justify-center bg-background">
-        <div class="w-full max-w-md mx-4 text-center py-8">
-          <div class="text-6xl mb-4">&#x26A0;&#xFE0F;</div>
-          <h2 class="text-xl font-semibold text-text-primary mb-2">
-            Error de Aplicaci&oacute;n
-          </h2>
-          <p class="text-text-secondary mb-6">{{ config_error() }}</p>
-        </div>
-      </div>
-    } @else {
+    @if (resolutionError(); as err) {
+      <app-domain-resolution-error [kind]="err.kind" (retry)="onRetry()" />
+    } @else if (routesConfigured()) {
       <main>
         <router-outlet></router-outlet>
       </main>
@@ -39,6 +41,15 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
         <app-toast-container></app-toast-container>
         <app-global-user-modals></app-global-user-modals>
       }
+      <!-- Public storefront: full-screen "store unavailable" banner. Rendered
+           as an overlay ON TOP of the router-outlet so dismissing it reveals
+           the catalog underneath (read-only mode). The backend is the real
+           block; this reinforces the UX. -->
+      @if (storeAvailability.shouldShowBanner()) {
+        <app-store-unavailable-banner />
+      }
+    } @else {
+      <app-loading />
     }
   `,
   styles: `
@@ -50,44 +61,43 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
 export class AppComponent {
   private routeManager = inject(RouteManagerService);
   private configFacade = inject(ConfigFacade);
-  private toastService = inject(ToastService);
   private platformId = inject(PLATFORM_ID);
+  // Public storefront availability (drives the full-screen unavailable banner).
+  readonly storeAvailability = inject(StoreAvailabilityService);
 
-  is_loading = signal(true);
   readonly isBrowser = isPlatformBrowser(this.platformId);
-  config_error = toSignal(this.configFacade.error$, {
-    initialValue: null as any,
-  });
 
-  private readonly routesConfigured = toSignal(this.routeManager.routesConfigured$, {
+  /** Typed domain/app_type resolution failure (null while resolving/on success). */
+  readonly resolutionError = this.configFacade.resolutionError;
+
+  protected readonly routesConfigured = toSignal(this.routeManager.routesConfigured$, {
     initialValue: false,
   });
 
   constructor() {
-    // Track whether the boot-timeout warning is still relevant. Once routes
-    // are configured (the happy path) we cancel the timeout so the spurious
-    // "Boot timeout - routes did not configure" error never logs after a
-    // successful boot.
-    let bootTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
+    // Reveal <app-root> ONLY once the bootstrap reaches a decided state — a
+    // resolution error OR successfully configured routes. Never during the
+    // loading/retry phase, so the prerendered Vendix Landing stays hidden under
+    // the splash and can never flash on a tenant domain.
     effect(() => {
-      if (this.routesConfigured()) {
-        this.is_loading.set(false);
+      if (this.resolutionError() || this.routesConfigured()) {
         this.removePrerenderGate();
-        if (bootTimeoutId !== null) {
-          clearTimeout(bootTimeoutId);
-          bootTimeoutId = null;
-        }
       }
     });
+  }
 
-    bootTimeoutId = setTimeout(() => {
-      bootTimeoutId = null;
-      // Only fire the failure path if routes actually never configured.
-      if (this.routesConfigured()) return;
-      this.is_loading.set(false);
-      console.error('[AppComponent] Boot timeout - routes did not configure');
-    }, 10000);
+  /**
+   * Retry handler for the error view. A full reload re-runs the entire
+   * bootstrap from scratch (domain resolution included) and, thanks to the
+   * synchronous gate in index.html, the branded splash paints immediately with
+   * no white flash. This is deliberately more robust than the in-app NgRx
+   * retry(): it sidesteps stale neutral routes and the missing re-navigation
+   * after router.resetConfig() on a mid-session retry.
+   */
+  onRetry(): void {
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
   }
 
   private removePrerenderGate(): void {

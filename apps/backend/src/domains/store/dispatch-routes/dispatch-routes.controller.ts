@@ -77,6 +77,22 @@ export class DispatchRoutesController {
     return this.responseService.success(result, 'Planilla obtenida');
   }
 
+  /**
+   * Map view: not-yet-delivered stops (`pending` / `in_progress`) with their
+   * resolved coordinates plus the route origin, for rendering the suggested
+   * route on the planilla detail map. Stops whose coordinates cannot be
+   * resolved are returned under `unlocated[]`.
+   */
+  @Get(':id/map-stops')
+  @Permissions('store:dispatch_routes:read')
+  async getMapStops(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dispatchRoutesService.getMapStops(id);
+    return this.responseService.success(
+      result,
+      'Paradas del mapa obtenidas',
+    );
+  }
+
   @Post()
   @Permissions('store:dispatch_routes:create')
   async create(@Body() dto: CreateDispatchRouteDto) {

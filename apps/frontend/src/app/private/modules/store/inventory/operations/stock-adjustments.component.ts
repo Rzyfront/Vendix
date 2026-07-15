@@ -17,6 +17,7 @@ import { environment } from '../../../../../../environments/environment';
 import { AdjustmentDetailModalComponent } from './components/adjustment-detail-modal.component';
 import { AdjustmentCreateModalComponent } from './components/adjustment-create-modal.component';
 import { BulkAdjustmentModalComponent } from './components/bulk-adjustment-modal.component';
+import { InventoryScannerModalComponent } from './components/inventory-scanner-modal.component';
 import { AdjustmentListComponent } from './components/adjustment-list';
 
 import { InventoryService } from '../services';
@@ -33,6 +34,7 @@ import {
     AdjustmentDetailModalComponent,
     AdjustmentCreateModalComponent,
     BulkAdjustmentModalComponent,
+    InventoryScannerModalComponent,
     AdjustmentListComponent,
   ],
   template: `
@@ -89,7 +91,17 @@ import {
         (actionClick)="onActionClick($event)"
         (viewDetail)="viewDetail($event)"
         (pageChange)="changePage($event)"
+        (scan)="showScannerModal.set(true)"
       ></app-adjustment-list>
+
+      @defer (when showScannerModal()) {
+        <app-inventory-scanner-modal
+          [isOpen]="showScannerModal()"
+          [locations]="locationOptions()"
+          (isOpenChange)="showScannerModal.set($event)"
+          (created)="onRecountCreated()"
+        ></app-inventory-scanner-modal>
+      }
 
       @defer (when showCreateModal()) {
         <app-adjustment-create-modal
@@ -154,6 +166,7 @@ export class StockAdjustmentsComponent implements OnInit {
   // Signals
   showCreateModal = signal(false);
   showBulkModal = signal(false);
+  showScannerModal = signal(false);
   isSubmitting = signal(false);
   locationOptions = signal<SelectorOption[]>([]);
 ngOnInit(): void {
@@ -399,5 +412,10 @@ ngOnInit(): void {
   refresh(): void {
     this.inventoryService.invalidateCache();
     this.loadAdjustments();
+  }
+
+  onRecountCreated(): void {
+    this.showScannerModal.set(false);
+    this.refresh();
   }
 }
