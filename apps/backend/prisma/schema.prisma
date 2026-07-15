@@ -3702,6 +3702,7 @@ enum dispatch_note_reason_enum {
   overdelivery_return
   replenishment
   rebalancing
+  transfer_to_consignee
   returned_from_consignee
   normal_purchase
   replacement_for_damage

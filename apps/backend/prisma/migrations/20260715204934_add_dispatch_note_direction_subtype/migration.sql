@@ -27,7 +27,7 @@ END $$;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'dispatch_note_reason_enum') THEN
-    CREATE TYPE "dispatch_note_reason_enum" AS ENUM ('sale', 'sample', 'consignment', 'replacement_shipment', 'loan', 'defective', 'wrong_item', 'cancellation', 'warranty', 'overdelivery_return', 'replenishment', 'rebalancing', 'returned_from_consignee', 'normal_purchase', 'replacement_for_damage', 'sample_received');
+    CREATE TYPE "dispatch_note_reason_enum" AS ENUM ('sale', 'sample', 'consignment', 'replacement_shipment', 'loan', 'defective', 'wrong_item', 'cancellation', 'warranty', 'overdelivery_return', 'replenishment', 'rebalancing', 'transfer_to_consignee', 'returned_from_consignee', 'normal_purchase', 'replacement_for_damage', 'sample_received');
   END IF;
 END $$;
 

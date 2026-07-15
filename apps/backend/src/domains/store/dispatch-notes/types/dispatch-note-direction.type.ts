@@ -31,6 +31,7 @@ export type DispatchNoteReason =
   | 'overdelivery_return'
   | 'replenishment'
   | 'rebalancing'
+  | 'transfer_to_consignee'
   | 'returned_from_consignee'
   | 'normal_purchase'
   | 'replacement_for_damage'
@@ -65,7 +66,7 @@ export const VALID_REASONS_BY_SUBTYPE: Partial<
     'replacement_shipment',
     'loan',
   ],
-  transfer_out: ['replenishment', 'rebalancing'],
+  transfer_out: ['replenishment', 'rebalancing', 'transfer_to_consignee'],
   customer_return: [
     'defective',
     'wrong_item',
