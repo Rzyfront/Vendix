@@ -197,19 +197,10 @@ export default function DomainsScreen() {
   }, [domains, sort]);
 
   // ───── Mutations ───────────────────────────────────────────────────────────
-  const verifyMutation = useMutation({
-    mutationFn: (hostname: string) => OrgDomainsService.verify(hostname),
-    onSuccess: (r) => {
-      if (r.verified) {
-        queryClient.invalidateQueries({ queryKey: ['org-domains-list'] });
-        queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
-        toastSuccess('Propiedad verificada. Certificado pendiente de emisión.');
-      } else {
-        toastError(r.message ?? 'No se pudo verificar');
-      }
-    },
-    onError: () => toastError('Error al verificar el dominio'),
-  });
+  // NOTA: la verificación de DNS se ejecuta dentro del DomainVerifyModal
+  // (muestra resultado inline + tabla de records DNS). El parent solo
+  // invalida queries cuando `onVerified` se dispara — ver M3 fix en
+  // <DomainVerifyModal onVerified={...}> más abajo.
 
   const provisionMutation = useMutation({
     mutationFn: (id: string) => OrgDomainsService.provisionNextById(id),
@@ -390,8 +381,12 @@ export default function DomainsScreen() {
         domain={verifying}
         onClose={() => setVerifying(null)}
         onVerified={() => {
-          verifyMutation.mutate(verifying!.hostname);
+          // M3 fix: la verificación ya se ejecutó dentro del modal y mostró
+          // el resultado inline. NO re-llamar al endpoint acá para evitar
+          // doble toast + doble invalidación. Solo refrescar la lista.
           setVerifying(null);
+          queryClient.invalidateQueries({ queryKey: ['org-domains-list'] });
+          queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
         }}
       />
       <DomainDeleteModal

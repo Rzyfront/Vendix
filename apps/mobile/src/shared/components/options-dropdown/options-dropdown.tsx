@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -142,13 +142,15 @@ export function OptionsDropdown({
     actions: null,
     filters: null,
   });
-  const [localValues, setLocalValues] = useState<FilterValues>(filterValues);
+  const [localValues, setLocalValues] = useState<FilterValues>(() => filterValues);
 
   const actionsTriggerRef = useRef<ViewType>(null);
   const filtersTriggerRef = useRef<ViewType>(null);
 
   // ── Sync external filterValues → local state ─────────────────────────
-  useMemo(() => {
+  // M1 fix: useEffect (no useMemo) — React no garantiza que useMemo corra
+  // siempre; para sync de props→state hay que usar useEffect.
+  useEffect(() => {
     setLocalValues(filterValues);
   }, [filterValues]);
 
@@ -224,6 +226,14 @@ export function OptionsDropdown({
 
   // ── Filter change with debounce ───────────────────────────────────────
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // M2 fix: cleanup del debounce timer en unmount para evitar
+  // setState-on-unmounted-component si el padre se desmonta mid-debounce.
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, []);
 
   const handleFilterChange = (key: string, value: string | string[] | null) => {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
