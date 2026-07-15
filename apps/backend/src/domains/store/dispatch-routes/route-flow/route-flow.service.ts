@@ -18,6 +18,7 @@ import { PdfExportService } from './pdf-export.service';
 import {
   CloseDispatchRouteDto,
   ReleaseStopDto,
+  ReorderStopsDto,
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
@@ -974,6 +975,88 @@ export class RouteFlowService {
 
     this.logger.log(`Parada #${stopId} liberada para reasignación: ${dto.reason}`);
     return updated;
+  }
+
+  /**
+   * Reorder the stops of a route by rewriting their `stop_sequence`.
+   *
+   * State gate: only routes in `draft` or `dispatched` can be reordered — the
+   * same "editable" window `addStops` uses (once a route is in_transit/settling
+   * the field order is fixed). A route in any other state raises the existing
+   * `DSP_ROUTE_NOT_EDITABLE_001` (HTTP 409).
+   *
+   * Tenant-isolated like the rest of the domain: the route is loaded with a
+   * `{ id, store_id }` filter (dispatch_routes is NOT auto-scoped) so a route
+   * from another store yields a 404. Validates that every `stopId` belongs to
+   * the route and that the requested `sequence` values are unique before
+   * persisting all updates inside one `$transaction`. Returns the refreshed
+   * route (same shape as the other flow endpoints).
+   */
+  async reorderStops(id: number, dto: ReorderStopsDto) {
+    const store_id = this.getStoreId();
+
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      select: { id: true, status: true },
+    });
+    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+
+    // State guard: only "hot" routes (draft / dispatched) accept a reorder.
+    const REORDERABLE_STATES: dispatch_route_status_enum[] = [
+      'draft',
+      'dispatched',
+    ];
+    if (!REORDERABLE_STATES.includes(route.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001,
+        `No se pueden reordenar las paradas de una planilla en estado '${route.status}'`,
+      );
+    }
+
+    // Unique target sequences (two stops cannot claim the same position).
+    const sequences = dto.order.map((o) => o.sequence);
+    if (new Set(sequences).size !== sequences.length) {
+      throw new BadRequestException(
+        'Las secuencias de las paradas deben ser únicas',
+      );
+    }
+
+    // No duplicate stopId in the payload.
+    const stopIds = dto.order.map((o) => o.stopId);
+    if (new Set(stopIds).size !== stopIds.length) {
+      throw new BadRequestException('Hay stopId duplicados en la solicitud');
+    }
+
+    // Every stopId must belong to THIS route (the route is already tenant-scoped
+    // above, so route_id membership is the isolation boundary for the stops).
+    const routeStops = await this.prisma.dispatch_route_stops.findMany({
+      where: { route_id: id },
+      select: { id: true },
+    });
+    const routeStopIds = new Set(routeStops.map((s) => s.id));
+    const foreign = stopIds.filter((sid) => !routeStopIds.has(sid));
+    if (foreign.length > 0) {
+      throw new BadRequestException(
+        `Las paradas ${foreign.join(', ')} no pertenecen a la planilla #${id}`,
+      );
+    }
+
+    // Persist all sequence changes atomically. There is no UNIQUE constraint on
+    // (route_id, stop_sequence) (only an index), so a straight batch update
+    // needs no temp-negative two-phase trick.
+    await this.prisma.$transaction(
+      dto.order.map((o) =>
+        this.prisma.dispatch_route_stops.update({
+          where: { id: o.stopId },
+          data: { stop_sequence: o.sequence, updated_at: new Date() },
+        }),
+      ),
+    );
+
+    this.logger.log(
+      `Planilla #${id}: reordenadas ${dto.order.length} parada(s)`,
+    );
+    return this.getRoute(id, store_id);
   }
 
 
