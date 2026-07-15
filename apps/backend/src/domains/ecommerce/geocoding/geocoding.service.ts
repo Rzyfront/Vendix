@@ -32,6 +32,7 @@ interface NominatimAddress {
   residential?: string;
   suburb?: string;
   neighbourhood?: string;
+  quarter?: string;
   city?: string;
   town?: string;
   village?: string;
@@ -172,29 +173,82 @@ export class GeocodingService {
   private normalize(json: NominatimReverseResponse): NormalizedAddress {
     const a: NominatimAddress = json.address ?? {};
 
+    const city = this.cleanCity(
+      a.city ?? a.town ?? a.village ?? a.municipality ?? a.county ?? '',
+    );
+
+    // Primary street axis. A reverse-geocoded point sits on a SINGLE road axis,
+    // so Nominatim can only return the Calle OR the Carrera the point lies on —
+    // never the perpendicular cross-reference. In Colombian addressing that
+    // cross axis + plate live in the house number ("Calle 14H Bis # 26-30"),
+    // so we surface `road` + `# house_number` when the number is available and
+    // keep the line CLEAN (no barrio / POI / administrative noise). The
+    // customer completes any missing cross-reference on the editable prefilled
+    // form — reverse geocoding cannot synthesize it.
     const road = a.road ?? a.pedestrian ?? a.footway ?? a.residential ?? null;
+    const barrio = this.cleanBarrio(
+      a.neighbourhood ?? a.suburb ?? a.quarter ?? null,
+    );
+
     let addressLine1: string;
     if (road) {
-      addressLine1 = a.house_number ? `${road} ${a.house_number}` : road;
+      addressLine1 = a.house_number ? `${road} # ${a.house_number}` : road;
+    } else if (barrio) {
+      addressLine1 = barrio;
     } else if (json.display_name) {
-      // Fallback: first two segments of the display name, trimmed.
-      addressLine1 = json.display_name.split(',').slice(0, 2).join(',').trim();
+      // Last resort: only the first display-name segment (nearest feature),
+      // never the administrative tail that pollutes the field.
+      addressLine1 = json.display_name.split(',')[0].trim();
     } else {
       addressLine1 = '';
     }
 
-    const city =
-      a.city ?? a.town ?? a.village ?? a.municipality ?? a.county ?? '';
+    // Barrio/sector as the complement (address_line2), unless it already is the
+    // primary line.
+    const addressLine2 =
+      barrio && this.norm(barrio) !== this.norm(addressLine1) ? barrio : null;
 
     return {
       address_line1: addressLine1,
-      address_line2: a.suburb ?? a.neighbourhood ?? null,
+      address_line2: addressLine2,
       city,
       state_province: a.state ?? null,
       country_code: (a.country_code ?? '').toUpperCase(),
       postal_code: a.postcode ?? null,
       municipality_code: null, // Nominatim does not provide this.
     };
+  }
+
+  /**
+   * Drop administrative / planning labels (UPZ, Localidad, Comuna, RAP,
+   * Distrito, corregimiento, vereda) that Nominatim sometimes exposes as
+   * suburb/neighbourhood in Colombian cities — they are not a usable barrio for
+   * a shipping address and only add noise to the prefilled field.
+   */
+  private cleanBarrio(value: string | null): string | null {
+    if (!value) return null;
+    const ADMIN =
+      /\b(upz|upzs|localidad|comuna|rap|distrito|per[ií]metro|corregimiento|vereda)\b/i;
+    return ADMIN.test(value) ? null : value;
+  }
+
+  /**
+   * Strip the "Perímetro Urbano" administrative prefix Nominatim prepends to
+   * Colombian city names (e.g. "Perímetro Urbano Medellín" -> "Medellín"). The
+   * frontend maps this value to a City option in CountryService for CO, so the
+   * bare city name is what lets the dropdown auto-select.
+   */
+  private cleanCity(value: string): string {
+    return value.replace(/^per[ií]metro\s+urbano\s+/i, '').trim();
+  }
+
+  /** Accent-insensitive, lowercased normalization for comparisons. */
+  private norm(v: string): string {
+    return v
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .trim();
   }
 
   // --------------------------------------------------------------- Redis
