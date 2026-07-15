@@ -9,6 +9,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   dispatch_note_status_enum,
+  dispatch_note_direction_enum,
   serial_status_enum,
   sales_document_item_type_enum,
 } from '@prisma/client';
@@ -22,13 +23,34 @@ import { InventorySerialNumbersService } from '../../inventory/serial-numbers/in
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 type DispatchNoteStatus = dispatch_note_status_enum;
+type DispatchNoteDirection = dispatch_note_direction_enum;
 
-const VALID_TRANSITIONS: Record<DispatchNoteStatus, DispatchNoteStatus[]> = {
-  draft: ['confirmed', 'voided'],
-  confirmed: ['delivered', 'voided'],
-  delivered: ['invoiced'],
-  invoiced: [],
-  voided: [],
+/**
+ * Valid state transitions per direction. Outbound follows the classic
+ * draft→confirmed→delivered→invoiced cycle. Inbound follows
+ * draft→confirmed→received (received is terminal for inbound — invoiced
+ * does not apply).
+ */
+const VALID_TRANSITIONS_BY_DIRECTION: Record<
+  DispatchNoteDirection,
+  Record<DispatchNoteStatus, DispatchNoteStatus[]>
+> = {
+  outbound: {
+    draft: ['confirmed', 'voided'],
+    confirmed: ['delivered', 'voided'],
+    delivered: ['invoiced'],
+    received: [],
+    invoiced: [],
+    voided: [],
+  },
+  inbound: {
+    draft: ['confirmed', 'voided'],
+    confirmed: ['received', 'voided'],
+    delivered: [],
+    received: [],
+    invoiced: [],
+    voided: [],
+  },
 };
 
 const DISPATCH_NOTE_INCLUDE = {
@@ -103,11 +125,13 @@ export class DispatchNoteFlowService {
   private validateTransition(
     current_status: DispatchNoteStatus,
     target_status: DispatchNoteStatus,
+    direction: DispatchNoteDirection = dispatch_note_direction_enum.outbound,
   ): void {
-    const valid_targets = VALID_TRANSITIONS[current_status];
+    const transitions = VALID_TRANSITIONS_BY_DIRECTION[direction];
+    const valid_targets = transitions?.[current_status];
     if (!valid_targets || !valid_targets.includes(target_status)) {
       throw new BadRequestException(
-        `Transición de estado inválida: no se puede cambiar de '${current_status}' a '${target_status}'. ` +
+        `Transición de estado inválida: no se puede cambiar de '${current_status}' a '${target_status}' (direction: ${direction}). ` +
           `Transiciones válidas desde '${current_status}': [${(valid_targets || []).join(', ') || 'ninguna'}]`,
       );
     }
@@ -144,6 +168,7 @@ export class DispatchNoteFlowService {
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'confirmed',
+      dispatch_note.direction as DispatchNoteDirection,
     );
 
     // Validate customer is active
@@ -333,6 +358,7 @@ export class DispatchNoteFlowService {
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'delivered',
+      dispatch_note.direction as DispatchNoteDirection,
     );
 
     const user_id = RequestContextService.getUserId();
@@ -367,9 +393,20 @@ export class DispatchNoteFlowService {
   async void(id: number, dto: VoidDispatchNoteDto) {
     const dispatch_note = await this.getDispatchNote(id);
 
+    // Block void on received inbound notes: stock was already restocked, so
+    // voiding requires a reversal (credit note / stock_adjustment). That
+    // reversal flow is Fase 2 / R3. For now, reject with the credit-note code.
+    if (dispatch_note.status === 'received') {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE,
+        'Cannot void a received inbound dispatch note directly; reverse the stock movement via a stock adjustment or return_orders (Fase 2)',
+      );
+    }
+
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'voided',
+      dispatch_note.direction as DispatchNoteDirection,
     );
 
     const user_id = RequestContextService.getUserId();
@@ -405,6 +442,7 @@ export class DispatchNoteFlowService {
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'invoiced',
+      dispatch_note.direction as DispatchNoteDirection,
     );
 
     const updated = await this.prisma.dispatch_notes.update({
@@ -425,6 +463,59 @@ export class DispatchNoteFlowService {
     });
 
     this.logger.log(`Dispatch note #${id} invoiced`);
+    return updated;
+  }
+
+  /**
+   * Receive an inbound dispatch note (confirmed → received).
+   *
+   * This is the inbound equivalent of `deliver()` for outbound notes. It marks
+   * the goods as physically received at the destination location and stamps
+   * `actual_delivery_date` (reused as the reception timestamp — there is no
+   * dedicated `received_at` column). Emits `dispatch_note.received` which the
+   * listener uses to fire StockLevelManager.updateStock with the appropriate
+   * movement_type per subtype (stock_in for purchase_receipt, transfer for
+   * transfer_in, return for customer_return).
+   */
+  async receive(id: number) {
+    const dispatch_note = await this.getDispatchNote(id);
+
+    this.validateTransition(
+      dispatch_note.status as DispatchNoteStatus,
+      'received',
+      dispatch_note.direction as DispatchNoteDirection,
+    );
+
+    const user_id = RequestContextService.getUserId();
+
+    const updated = await this.prisma.dispatch_notes.update({
+      where: { id },
+      data: {
+        status: 'received',
+        // Reuse actual_delivery_date as the reception timestamp (no dedicated
+        // received_at column in the schema). delivered_by_user_id is also
+        // reused for the receiving user audit trail.
+        delivered_by_user_id: user_id,
+        delivered_at: new Date(),
+        actual_delivery_date: new Date(),
+        updated_at: new Date(),
+      },
+      include: DISPATCH_NOTE_INCLUDE,
+    });
+
+    this.eventEmitter.emit('dispatch_note.received', {
+      dispatch_note_id: id,
+      dispatch_number: updated.dispatch_number,
+      store_id: updated.store_id,
+      direction: updated.direction,
+      subtype: updated.subtype,
+      supplier_id: updated.supplier_id,
+      related_dispatch_id: updated.related_dispatch_id,
+      from_location_id: updated.from_location_id,
+      to_location_id: updated.to_location_id,
+    });
+
+    this.logger.log(`Dispatch note #${id} received (inbound)`);
     return updated;
   }
 }

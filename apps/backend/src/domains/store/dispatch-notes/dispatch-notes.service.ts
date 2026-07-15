@@ -12,10 +12,16 @@ import {
   DispatchNoteQueryDto,
   CreateFromSalesOrderDto,
   CreateFromOrderDto,
+  CreateTransferDispatchDto,
+  CreateReturnDispatchDto,
+  CreatePurchaseReceiptDispatchDto,
 } from './dto';
 import {
   dispatch_note_status_enum,
   dispatch_route_status_enum,
+  dispatch_note_direction_enum,
+  dispatch_note_subtype_enum,
+  dispatch_note_reason_enum,
   Prisma,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -33,6 +39,11 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { resolvePosStockScope } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
+import { PurchaseOrdersService } from '../orders/purchase-orders/purchase-orders.service';
+import {
+  VALID_SUBTYPES_BY_DIRECTION,
+  VALID_REASONS_BY_SUBTYPE,
+} from './types/dispatch-note-direction.type';
 
 const DISPATCH_NOTE_INCLUDE = {
   dispatch_note_items: {
@@ -124,6 +135,10 @@ export class DispatchNotesService {
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly eventEmitter: EventEmitter2,
     private readonly stockValidator: StockValidatorService,
+    // Injected for createPurchaseReceipt delegation when purchase_order_id is
+    // present. Optional so the module can boot without the PurchaseOrdersModule
+    // if that dependency is not wired yet (defensive — the module imports it).
+    private readonly purchaseOrdersService?: PurchaseOrdersService,
   ) {}
 
   /**
@@ -307,10 +322,88 @@ export class DispatchNotesService {
     }
   }
 
+  /**
+   * Validate cross-field invariants that the DTO cannot enforce on its own
+   * (per vendix-validation: cross-field invariants live in the service,
+   * post-lookup). Checks subtype↔direction and reason↔subtype consistency.
+   */
+  private validateDirectionSubtypeInvariants(
+    direction: dispatch_note_direction_enum,
+    subtype: dispatch_note_subtype_enum,
+    reason?: dispatch_note_reason_enum | null,
+  ): void {
+    const validSubtypes = VALID_SUBTYPES_BY_DIRECTION[direction];
+    if (!validSubtypes || !validSubtypes.includes(subtype)) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION,
+        undefined,
+        { direction, subtype },
+      );
+    }
+    if (reason) {
+      const validReasons = VALID_REASONS_BY_SUBTYPE[subtype];
+      if (validReasons && !validReasons.includes(reason)) {
+        throw new VendixHttpException(
+          ErrorCodes.DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION,
+          `Reason '${reason}' is not valid for subtype '${subtype}'`,
+          { direction, subtype, reason },
+        );
+      }
+    }
+  }
+
   async create(dto: CreateDispatchNoteDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    // ── Direction/subtype/reason resolution + invariant validation ──
+    // Backward-compat: when dto.direction is undefined (legacy callers),
+    // default to outbound + customer_delivery (the pre-bidirectional behavior).
+    const direction: dispatch_note_direction_enum =
+      dto.direction ?? dispatch_note_direction_enum.outbound;
+    const subtype: dispatch_note_subtype_enum =
+      dto.subtype ?? dispatch_note_subtype_enum.customer_delivery;
+    const reason = (dto.reason as dispatch_note_reason_enum | undefined) ?? null;
+
+    this.validateDirectionSubtypeInvariants(direction, subtype, reason);
+
+    // Inbound customer_return requires related_dispatch_id
+    if (
+      direction === dispatch_note_direction_enum.inbound &&
+      subtype === dispatch_note_subtype_enum.customer_return &&
+      !dto.related_dispatch_id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_RETURN_REQUIRES_RELATED,
+      );
+    }
+
+    // Inbound purchase_receipt requires supplier_id
+    if (
+      direction === dispatch_note_direction_enum.inbound &&
+      subtype === dispatch_note_subtype_enum.purchase_receipt &&
+      !dto.supplier_id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER,
+      );
+    }
+
+    // Validate related_dispatch_id belongs to same store when present
+    if (dto.related_dispatch_id) {
+      const related = await this.prisma.dispatch_notes.findFirst({
+        where: { id: dto.related_dispatch_id, store_id },
+        select: { id: true, direction: true, subtype: true },
+      });
+      if (!related) {
+        throw new VendixHttpException(
+          ErrorCodes.DISPATCH_NOTE_RETURN_REQUIRES_RELATED,
+          'The related dispatch note was not found in this store',
+          { related_dispatch_id: dto.related_dispatch_id },
+        );
+      }
+    }
 
     // Denormalize customer data
     const customer = await this.prisma.users.findUnique({
@@ -358,11 +451,18 @@ export class DispatchNotesService {
             store_id,
             dispatch_number,
             status: dispatch_note_status_enum.draft,
+            direction,
+            subtype,
+            reason,
             customer_id: dto.customer_id,
             customer_name,
             customer_tax_id: customer.document_number || null,
             sales_order_id: dto.sales_order_id,
             dispatch_location_id: dto.dispatch_location_id,
+            supplier_id: dto.supplier_id ?? null,
+            related_dispatch_id: dto.related_dispatch_id ?? null,
+            from_location_id: dto.from_location_id ?? null,
+            to_location_id: dto.to_location_id ?? null,
             emission_date: dto.emission_date
               ? new Date(dto.emission_date)
               : new Date(),
@@ -394,6 +494,464 @@ export class DispatchNotesService {
                   Number(item.tax_amount || 0),
                 lot_serial: item.lot_serial,
                 sales_order_item_id: item.sales_order_item_id,
+              })),
+            },
+          },
+          include: DISPATCH_NOTE_INCLUDE,
+        });
+
+        return dispatch_note;
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          const target = error.meta?.target as string[];
+          if (Array.isArray(target) && target.includes('dispatch_number')) {
+            retries--;
+            if (retries === 0) {
+              throw new ConflictException(
+                'No se pudo generar un número de remisión único después de varios intentos',
+              );
+            }
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Create a transfer dispatch note (outbound transfer_out or inbound
+   * transfer_in). Cross-store transfers are blocked in STORE operating scope
+   * (per vendix-operating-scope). The stock movement is deferred:
+   *   - transfer_out: the `dispatch_note.delivered` event deducts stock from
+   *     the origin location (movement_type stock_out via OrderStockCommitService).
+   *   - transfer_in: the `dispatch_note.received` event adds stock at the
+   *     destination location (movement_type transfer via StockLevelManager).
+   *
+   * Decision: EMIT-OWN. We create the dispatch_note here; the actual stock
+   * movement happens at state transition (delivered/received). We do NOT
+   * call StockLevelManager here — the listener handles it.
+   */
+  async createTransfer(dto: CreateTransferDispatchDto) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id ?? dto.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    // Validate direction↔subtype consistency
+    this.validateDirectionSubtypeInvariants(
+      dto.direction as dispatch_note_direction_enum,
+      dto.subtype as dispatch_note_subtype_enum,
+      (dto.reason as dispatch_note_reason_enum | undefined) ?? null,
+    );
+
+    // Cross-store scope guard: in STORE operating scope, from_location and
+    // to_location must belong to the same store. We check by looking up both
+    // locations and verifying their store_id matches the context store_id.
+    const [fromLoc, toLoc] = await Promise.all([
+      this.prisma.inventory_locations.findFirst({
+        where: { id: dto.from_location_id },
+        select: { id: true, store_id: true },
+      }),
+      this.prisma.inventory_locations.findFirst({
+        where: { id: dto.to_location_id },
+        select: { id: true, store_id: true },
+      }),
+    ]);
+
+    if (!fromLoc || !toLoc) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_CROSS_STORE_TRANSFER_BLOCKED,
+        'One or both locations were not found',
+        {
+          from_location_id: dto.from_location_id,
+          to_location_id: dto.to_location_id,
+        },
+      );
+    }
+
+    if (fromLoc.store_id !== store_id || toLoc.store_id !== store_id) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_CROSS_STORE_TRANSFER_BLOCKED,
+      );
+    }
+
+    // Calculate totals from items
+    const items: any[] = dto.items || [];
+    const subtotal = items.reduce(
+      (sum, item) =>
+        sum + Number(item.unit_price || 0) * item.dispatched_quantity,
+      0,
+    );
+    const total_discount = items.reduce(
+      (sum, item) => sum + Number(item.discount_amount || 0),
+      0,
+    );
+    const total_tax = items.reduce(
+      (sum, item) => sum + Number(item.tax_amount || 0),
+      0,
+    );
+    const grand_total = subtotal - total_discount + total_tax;
+
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const dispatch_number =
+          await this.dispatchNumberGenerator.generateNextNumber(store_id);
+
+        const dispatch_note = await this.prisma.dispatch_notes.create({
+          data: {
+            store_id,
+            dispatch_number,
+            status: dispatch_note_status_enum.draft,
+            direction: dto.direction as dispatch_note_direction_enum,
+            subtype: dto.subtype as dispatch_note_subtype_enum,
+            reason: (dto.reason as dispatch_note_reason_enum | undefined) ?? null,
+            // Transfers have no customer — their party is the other location
+            // (from_location_id / to_location_id). customer_id is nullable for
+            // non-customer flows (migration 20260715214000); leaving it null
+            // avoids contaminating the operator's record and blocking its
+            // deletion via the dispatch_notes_customer Restrict FK.
+            customer_id: null,
+            customer_name: null,
+            from_location_id: dto.from_location_id,
+            to_location_id: dto.to_location_id,
+            dispatch_location_id:
+              dto.direction === 'outbound'
+                ? dto.from_location_id
+                : dto.to_location_id,
+            emission_date: dto.emission_date ? new Date(dto.emission_date) : new Date(),
+            subtotal_amount: subtotal,
+            discount_amount: total_discount,
+            tax_amount: total_tax,
+            grand_total,
+            currency: 'COP',
+            notes: dto.notes,
+            internal_notes: dto.internal_notes,
+            created_by_user_id: context?.user_id,
+            updated_at: new Date(),
+            dispatch_note_items: {
+              create: items.map((item) => ({
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                location_id:
+                  item.location_id ??
+                  (dto.direction === 'outbound'
+                    ? dto.from_location_id
+                    : dto.to_location_id),
+                ordered_quantity: item.ordered_quantity,
+                dispatched_quantity: item.dispatched_quantity,
+                unit_price: item.unit_price ?? 0,
+                discount_amount: item.discount_amount || 0,
+                tax_amount: item.tax_amount || 0,
+                total_price:
+                  Number(item.unit_price || 0) * item.dispatched_quantity -
+                  Number(item.discount_amount || 0) +
+                  Number(item.tax_amount || 0),
+                lot_serial: item.lot_serial,
+                sales_order_item_id: item.sales_order_item_id,
+              })),
+            },
+          },
+          include: DISPATCH_NOTE_INCLUDE,
+        });
+
+        return dispatch_note;
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          const target = error.meta?.target as string[];
+          if (Array.isArray(target) && target.includes('dispatch_number')) {
+            retries--;
+            if (retries === 0) {
+              throw new ConflictException(
+                'No se pudo generar un número de remisión único después de varios intentos',
+              );
+            }
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Create a customer return dispatch note (inbound, subtype customer_return).
+   *
+   * Decision: EMIT-OWN for the dispatch_note creation. The financial refund
+   * (credit note, return_orders processing) is NOT coupled here — it goes
+   * through return_orders separately (v1 decoupling). The stock restock
+   * happens at the `dispatch_note.received` event via the listener
+   * (movement_type 'return', quantity_change +qty). If the user wants a
+   * refund, they create a return_orders record separately.
+   *
+   * related_dispatch_id is required and validated to exist + belong to same store.
+   */
+  async createReturn(dto: CreateReturnDispatchDto) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    // Validate direction↔subtype↔reason consistency
+    this.validateDirectionSubtypeInvariants(
+      dto.direction as dispatch_note_direction_enum,
+      dto.subtype as dispatch_note_subtype_enum,
+      dto.reason as dispatch_note_reason_enum,
+    );
+
+    // Validate related_dispatch_id exists and belongs to same store
+    const related = await this.prisma.dispatch_notes.findFirst({
+      where: { id: dto.related_dispatch_id, store_id },
+      include: {
+        dispatch_note_items: {
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            dispatched_quantity: true,
+            unit_price: true,
+            location_id: true,
+          },
+        },
+        customer: {
+          select: { id: true, first_name: true, last_name: true, document_number: true },
+        },
+      },
+    });
+    if (!related) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_RETURN_REQUIRES_RELATED,
+        'The related dispatch note was not found in this store',
+        { related_dispatch_id: dto.related_dispatch_id },
+      );
+    }
+
+    // Denormalize customer data from the original dispatch
+    const customer = related.customer;
+    const customer_name =
+      `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim();
+
+    // Calculate totals from items
+    const items: any[] = dto.items || [];
+    const subtotal = items.reduce(
+      (sum, item) =>
+        sum + Number(item.unit_price || 0) * item.dispatched_quantity,
+      0,
+    );
+    const total_discount = items.reduce(
+      (sum, item) => sum + Number(item.discount_amount || 0),
+      0,
+    );
+    const total_tax = items.reduce(
+      (sum, item) => sum + Number(item.tax_amount || 0),
+      0,
+    );
+    const grand_total = subtotal - total_discount + total_tax;
+
+    // Resolve the restock location: explicit to_location_id, or the original
+    // dispatch's dispatch_location_id, or the first item's location.
+    const restock_location_id =
+      dto.to_location_id ??
+      related.dispatch_location_id ??
+      related.dispatch_note_items[0]?.location_id ??
+      null;
+
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const dispatch_number =
+          await this.dispatchNumberGenerator.generateNextNumber(store_id);
+
+        const dispatch_note = await this.prisma.dispatch_notes.create({
+          data: {
+            store_id,
+            dispatch_number,
+            status: dispatch_note_status_enum.draft,
+            direction: dispatch_note_direction_enum.inbound,
+            subtype: dispatch_note_subtype_enum.customer_return,
+            reason: dto.reason as dispatch_note_reason_enum,
+            customer_id: dto.customer_id,
+            customer_name,
+            customer_tax_id: customer?.document_number || null,
+            related_dispatch_id: dto.related_dispatch_id,
+            to_location_id: restock_location_id,
+            dispatch_location_id: restock_location_id,
+            emission_date: dto.emission_date ? new Date(dto.emission_date) : new Date(),
+            subtotal_amount: subtotal,
+            discount_amount: total_discount,
+            tax_amount: total_tax,
+            grand_total,
+            currency: 'COP',
+            notes: dto.notes,
+            internal_notes: dto.internal_notes,
+            created_by_user_id: context?.user_id,
+            updated_at: new Date(),
+            dispatch_note_items: {
+              create: items.map((item) => ({
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                location_id: item.location_id ?? restock_location_id,
+                ordered_quantity: item.ordered_quantity,
+                dispatched_quantity: item.dispatched_quantity,
+                unit_price: item.unit_price ?? 0,
+                discount_amount: item.discount_amount || 0,
+                tax_amount: item.tax_amount || 0,
+                total_price:
+                  Number(item.unit_price || 0) * item.dispatched_quantity -
+                  Number(item.discount_amount || 0) +
+                  Number(item.tax_amount || 0),
+                lot_serial: item.lot_serial,
+              })),
+            },
+          },
+          include: DISPATCH_NOTE_INCLUDE,
+        });
+
+        return dispatch_note;
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          const target = error.meta?.target as string[];
+          if (Array.isArray(target) && target.includes('dispatch_number')) {
+            retries--;
+            if (retries === 0) {
+              throw new ConflictException(
+                'No se pudo generar un número de remisión único después de varios intentos',
+              );
+            }
+            continue;
+          }
+        }
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Create a purchase receipt dispatch note (inbound, subtype purchase_receipt).
+   *
+   * Decision: DELEGATE to PurchaseOrdersService.receive when purchase_order_id
+   * is present — that service handles reception records, stock-in, cost layers,
+   * IVA lifecycle, and purchase order status updates. When purchase_order_id
+   * is absent, EMIT-OWN: create the dispatch_note here; the `received` event
+   * fires stockLevelManager.updateStock({movement_type:'stock_in', ...}).
+   *
+   * supplier_id is required (DTO enforces it).
+   */
+  async createPurchaseReceipt(dto: CreatePurchaseReceiptDispatchDto) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    // Validate direction↔subtype↔reason consistency
+    this.validateDirectionSubtypeInvariants(
+      dto.direction as dispatch_note_direction_enum,
+      dto.subtype as dispatch_note_subtype_enum,
+      dto.reason as dispatch_note_reason_enum,
+    );
+
+    // If purchase_order_id is present, delegate to PurchaseOrdersService.receive.
+    // That service creates the reception record, increments PO quantities, and
+    // does the stock-in movement. We do NOT create a dispatch_note here — the
+    // PO reception is the canonical stock-in path.
+    if (dto.purchase_order_id) {
+      // Map dispatch items to ReceiveItemDto shape. The PO service expects
+      // { id: purchase_order_item_id, quantity_received: number }.
+      const receiveItems = dto.items.map((item) => ({
+        id: item.sales_order_item_id ?? item.product_id, // TODO: needs proper PO item mapping
+        quantity_received: item.dispatched_quantity,
+      }));
+
+      if (!this.purchaseOrdersService) {
+        throw new VendixHttpException(
+          ErrorCodes.DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER,
+          'PurchaseOrdersService is not available — cannot delegate to PO.receive',
+        );
+      }
+
+      return this.purchaseOrdersService.receive(dto.purchase_order_id, {
+        items: receiveItems,
+        notes: dto.notes,
+      } as any);
+    }
+
+    // EMIT-OWN: standalone purchase receipt (no PO). Create the dispatch_note;
+    // the `received` event will fire stockLevelManager.updateStock.
+    const items: any[] = dto.items || [];
+    const subtotal = items.reduce(
+      (sum, item) =>
+        sum + Number(item.unit_price || 0) * item.dispatched_quantity,
+      0,
+    );
+    const total_tax = items.reduce(
+      (sum, item) => sum + Number(item.tax_amount || 0),
+      0,
+    );
+    const grand_total = subtotal + total_tax;
+
+    // Resolve the receipt location
+    const receipt_location_id =
+      dto.to_location_id ??
+      items[0]?.location_id ??
+      null;
+
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const dispatch_number =
+          await this.dispatchNumberGenerator.generateNextNumber(store_id);
+
+        const dispatch_note = await this.prisma.dispatch_notes.create({
+          data: {
+            store_id,
+            dispatch_number,
+            status: dispatch_note_status_enum.draft,
+            direction: dispatch_note_direction_enum.inbound,
+            subtype: dispatch_note_subtype_enum.purchase_receipt,
+            reason: dto.reason as dispatch_note_reason_enum,
+            // Purchase receipts have no customer — their party is the supplier
+            // (supplier_id). customer_id is nullable for non-customer flows
+            // (migration 20260715214000); leaving it null avoids contaminating
+            // the operator's record and blocking its deletion via the
+            // dispatch_notes_customer Restrict FK.
+            customer_id: null,
+            customer_name: null,
+            supplier_id: dto.supplier_id,
+            related_dispatch_id: dto.related_dispatch_id ?? null,
+            to_location_id: receipt_location_id ?? undefined,
+            dispatch_location_id: receipt_location_id ?? undefined,
+            emission_date: dto.emission_date ? new Date(dto.emission_date) : new Date(),
+            subtotal_amount: subtotal,
+            discount_amount: 0,
+            tax_amount: total_tax,
+            grand_total,
+            currency: dto.currency ?? 'COP',
+            notes: dto.notes,
+            internal_notes: dto.internal_notes,
+            created_by_user_id: context?.user_id,
+            updated_at: new Date(),
+            dispatch_note_items: {
+              create: items.map((item) => ({
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                location_id: item.location_id ?? receipt_location_id ?? undefined,
+                ordered_quantity: item.ordered_quantity,
+                dispatched_quantity: item.dispatched_quantity,
+                unit_price: item.unit_price ?? 0,
+                discount_amount: item.discount_amount || 0,
+                tax_amount: item.tax_amount || 0,
+                total_price:
+                  Number(item.unit_price || 0) * item.dispatched_quantity -
+                  Number(item.discount_amount || 0) +
+                  Number(item.tax_amount || 0),
+                lot_serial: item.lot_serial,
               })),
             },
           },
@@ -758,6 +1316,13 @@ export class DispatchNotesService {
           status: is_confirmed
             ? dispatch_note_status_enum.confirmed
             : dispatch_note_status_enum.draft,
+          // Bidirectional fields — default to outbound/customer_delivery for
+          // backward compat (createFromOrder is the COD shortcut, always outbound).
+          direction: (dto.direction as dispatch_note_direction_enum | undefined) ??
+            dispatch_note_direction_enum.outbound,
+          subtype: (dto.subtype as dispatch_note_subtype_enum | undefined) ??
+            dispatch_note_subtype_enum.customer_delivery,
+          reason: (dto.reason as dispatch_note_reason_enum | undefined) ?? null,
           customer_id: order.customer_id,
           customer_name,
           customer_tax_id: order.users?.document_number || null,
@@ -765,6 +1330,10 @@ export class DispatchNotesService {
           customer_address: customer_address_snapshot ?? Prisma.JsonNull,
           order_id,
           needs_collection,
+          supplier_id: dto.supplier_id ?? null,
+          related_dispatch_id: dto.related_dispatch_id ?? null,
+          from_location_id: dto.from_location_id ?? null,
+          to_location_id: dto.to_location_id ?? null,
           // Surface the resolved warehouse on the remisión so the frontend can
           // display it (reservation location → store default fallback).
           dispatch_location_id: dto.dispatch_location_id ?? default_location_id,
@@ -1116,6 +1685,10 @@ export class DispatchNotesService {
       date_to,
       sort_by,
       sort_order,
+      direction,
+      subtype,
+      reason,
+      supplier_id,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -1129,6 +1702,10 @@ export class DispatchNotesService {
       ...(status && { status }),
       ...(customer_id && { customer_id }),
       ...(sales_order_id && { sales_order_id }),
+      ...(direction && { direction }),
+      ...(subtype && { subtype }),
+      ...(reason && { reason }),
+      ...(supplier_id && { supplier_id }),
       ...(date_from &&
         date_to && {
           created_at: {
@@ -1358,33 +1935,63 @@ export class DispatchNotesService {
   }
 
   async getStats() {
-    const [total, draft, confirmed, delivered, invoiced, voided, total_value] =
-      await Promise.all([
-        this.prisma.dispatch_notes.count(),
-        this.prisma.dispatch_notes.count({ where: { status: 'draft' } }),
-        this.prisma.dispatch_notes.count({ where: { status: 'confirmed' } }),
-        this.prisma.dispatch_notes.count({ where: { status: 'delivered' } }),
-        this.prisma.dispatch_notes.count({ where: { status: 'invoiced' } }),
-        this.prisma.dispatch_notes.count({ where: { status: 'voided' } }),
-        this.prisma.dispatch_notes.aggregate({
-          _sum: { grand_total: true },
-          where: { status: { not: 'voided' } },
-        }),
-      ]);
+    const [
+      total,
+      draft,
+      confirmed,
+      delivered,
+      received,
+      invoiced,
+      voided,
+      total_value,
+      outboundCount,
+      inboundCount,
+      bySubtypeAgg,
+    ] = await Promise.all([
+      this.prisma.dispatch_notes.count(),
+      this.prisma.dispatch_notes.count({ where: { status: 'draft' } }),
+      this.prisma.dispatch_notes.count({ where: { status: 'confirmed' } }),
+      this.prisma.dispatch_notes.count({ where: { status: 'delivered' } }),
+      this.prisma.dispatch_notes.count({ where: { status: 'received' } }),
+      this.prisma.dispatch_notes.count({ where: { status: 'invoiced' } }),
+      this.prisma.dispatch_notes.count({ where: { status: 'voided' } }),
+      this.prisma.dispatch_notes.aggregate({
+        _sum: { grand_total: true },
+        where: { status: { not: 'voided' } },
+      }),
+      this.prisma.dispatch_notes.count({ where: { direction: 'outbound' } }),
+      this.prisma.dispatch_notes.count({ where: { direction: 'inbound' } }),
+      this.prisma.dispatch_notes.groupBy({
+        by: ['subtype'],
+        _count: { id: true },
+      }),
+    ]);
 
     const pending_invoicing = delivered;
     const average_value =
       total > 0 ? Number(total_value._sum.grand_total || 0) / total : 0;
+
+    // Build by_subtype map from the groupBy result.
+    const by_subtype: Record<string, number> = {};
+    for (const group of bySubtypeAgg) {
+      by_subtype[group.subtype] = group._count.id;
+    }
 
     return {
       total,
       draft,
       confirmed,
       delivered,
+      received,
       invoiced,
       voided,
       pending_invoicing,
       average_value: Math.round(average_value * 100) / 100,
+      by_direction: {
+        outbound: outboundCount,
+        inbound: inboundCount,
+      },
+      by_subtype,
     };
   }
 

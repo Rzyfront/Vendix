@@ -22,6 +22,18 @@ interface DispatchNoteVoidedEvent extends DispatchNoteEvent {
   void_reason: string;
 }
 
+interface DispatchNoteReceivedEvent {
+  dispatch_note_id: number;
+  dispatch_number: string;
+  store_id: number;
+  direction: string;
+  subtype: string;
+  supplier_id?: number | null;
+  related_dispatch_id?: number | null;
+  from_location_id?: number | null;
+  to_location_id?: number | null;
+}
+
 @Injectable()
 export class DispatchNoteEventsListener {
   private readonly logger = new Logger(DispatchNoteEventsListener.name);
@@ -175,6 +187,14 @@ export class DispatchNoteEventsListener {
       // barrido defensivo libera residuales con decrementOnHand:false (fix doble
       // descuento standalone). consumeSerials FALSE: el ciclo de vida de seriales
       // de la remisión lo maneja markDispatchSerialsSold más abajo.
+      //
+      // NOTA transfer_out: para transfer_out, commitDispatchDelivery deduce
+      // stock_out del origen (movement_type stock_out). El +destino lo hace el
+      // listener handleReceived cuando la transfer_in llega a 'received'. NO
+      // hay doble deducción: commitDispatchDelivery usa el order_id/note.id como
+      // referencia, y el transfer_in usa el dispatch_note.id de la transfer_in
+      // (una remisión distinta). Para transfers standalone (sin order_id), el
+      // guard anti-doble-deducción de stock_reservations arriba aplica.
       const userId = RequestContextService.getUserId();
       const res = await this.orderStockCommit.commitDispatchDelivery(
         dispatch_note,
@@ -306,6 +326,155 @@ export class DispatchNoteEventsListener {
     } catch (error) {
       this.logger.error(
         `[voided] Error processing dispatch note #${event.dispatch_note_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ─── RECEIVED (inbound) ─────────────────────────────────────
+  @OnEvent('dispatch_note.received')
+  async handleReceived(event: DispatchNoteReceivedEvent) {
+    try {
+      const dispatch_note = await this.prisma.dispatch_notes.findFirst({
+        where: { id: event.dispatch_note_id },
+        include: {
+          dispatch_note_items: true,
+        },
+      });
+
+      if (!dispatch_note) {
+        this.logger.warn(
+          `[received] Dispatch note #${event.dispatch_note_id} not found`,
+        );
+        return;
+      }
+
+      // Guard anti doble-deducción: check whether we already processed this
+      // dispatch note by looking for an inventory_movements row whose notes
+      // contain the dispatch note id. The StockLevelManager persists the
+      // `reason` string (which includes "remisión #N") into both
+      // inventory_movements.reason and inventory_movements.notes, so a match
+      // means stock was already moved.
+      const existingMovement =
+        await this.prisma.withoutScope().inventory_movements.findFirst({
+          where: {
+            notes: { contains: `remisión #${dispatch_note.id}` },
+          },
+          select: { id: true },
+        });
+      if (existingMovement) {
+        this.logger.warn(
+          `[received] Dispatch note #${event.dispatch_number}: stock already moved (inventory_movement exists) — re-fire, skipping`,
+        );
+        return;
+      }
+
+      const userId = RequestContextService.getUserId();
+
+      // Determine the destination location for the stock-in movement.
+      // Priority: to_location_id (set on the note) → item.location_id →
+      // dispatch_location_id.
+      const resolveLocationId = (
+        item: { location_id: number | null },
+      ): number | null =>
+        dispatch_note.to_location_id ??
+        item.location_id ??
+        dispatch_note.dispatch_location_id ??
+        null;
+
+      // Branch by subtype — each does a different StockLevelManager movement.
+      const subtype = dispatch_note.subtype;
+      this.logger.log(
+        `[received] Processing dispatch note #${event.dispatch_number} — subtype: ${subtype}`,
+      );
+
+      if (subtype === 'purchase_receipt') {
+        // Standalone purchase receipt (no PO — PO delegation path doesn't
+        // reach here). Stock-in with movement_unit_cost = item unit_price.
+        for (const item of dispatch_note.dispatch_note_items) {
+          const location_id = resolveLocationId(item);
+          if (!location_id) continue;
+
+          try {
+            await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id,
+              quantity_change: item.dispatched_quantity,
+              movement_type: 'stock_in',
+              reason: `Purchase receipt remisión #${dispatch_note.id}`,
+              user_id: userId ?? undefined,
+              movement_unit_cost: Number(item.unit_price) || undefined,
+              create_movement: true,
+            });
+          } catch (err) {
+            this.logger.error(
+              `[received] Failed to stock_in for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
+            );
+          }
+        }
+      } else if (subtype === 'transfer_in') {
+        // Transfer-in: add stock at the destination location. The -origen was
+        // already done by the transfer_out's `delivered` event. We use
+        // movement_type 'transfer' with a positive quantity_change.
+        for (const item of dispatch_note.dispatch_note_items) {
+          const location_id = resolveLocationId(item);
+          if (!location_id) continue;
+
+          try {
+            await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id,
+              quantity_change: item.dispatched_quantity,
+              movement_type: 'transfer',
+              reason: `Transfer-in remisión #${dispatch_note.id}`,
+              user_id: userId ?? undefined,
+              from_location_id: dispatch_note.from_location_id ?? undefined,
+              to_location_id: location_id,
+              create_movement: true,
+            });
+          } catch (err) {
+            this.logger.error(
+              `[received] Failed to transfer-in for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
+            );
+          }
+        }
+      } else if (subtype === 'customer_return') {
+        // Customer return: restock with movement_type 'return' (positive).
+        for (const item of dispatch_note.dispatch_note_items) {
+          const location_id = resolveLocationId(item);
+          if (!location_id) continue;
+
+          try {
+            await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id,
+              quantity_change: item.dispatched_quantity,
+              movement_type: 'return',
+              reason: `Customer return remisión #${dispatch_note.id}`,
+              user_id: userId ?? undefined,
+              create_movement: true,
+            });
+          } catch (err) {
+            this.logger.error(
+              `[received] Failed to restock return for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
+            );
+          }
+        }
+      } else {
+        this.logger.warn(
+          `[received] Dispatch note #${event.dispatch_number}: unhandled subtype '${subtype}' — no stock movement`,
+        );
+      }
+
+      this.logger.log(
+        `[received] Dispatch note #${event.dispatch_number} processed — subtype: ${subtype}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[received] Error processing dispatch note #${event.dispatch_note_id}: ${error.message}`,
         error.stack,
       );
     }

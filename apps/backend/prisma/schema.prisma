@@ -6893,7 +6893,11 @@ model dispatch_notes {
   direction            dispatch_note_direction_enum @default(outbound)
   subtype              dispatch_note_subtype_enum   @default(customer_delivery)
   reason               dispatch_note_reason_enum?
-  customer_id          Int
+  // Nullable: non-customer flows (transfer_out/in, purchase_receipt) have no
+  // customer — their party lives in from_location_id/to_location_id (transfer)
+  // or supplier_id (purchase_receipt). Outbound customer_delivery/customer_return
+  // still require a real customer_id (enforced in the service layer).
+  customer_id          Int?
   customer_name        String?                   @db.VarChar(255)
   customer_tax_id      String?                   @db.VarChar(50)
   customer_address     Json?
@@ -6929,7 +6933,7 @@ model dispatch_notes {
 
   dispatch_note_items  dispatch_note_items[]
   store                stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  customer             users                  @relation("dispatch_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer             users?                 @relation("dispatch_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   sales_order          sales_orders?          @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice              invoices?              @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                orders?                @relation("orders_dispatch_notes", fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)

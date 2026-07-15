@@ -107,7 +107,9 @@ export interface DispatchNote {
   related_dispatch_id?: number | null;
   from_location_id?: number | null;
   to_location_id?: number | null;
-  customer_id: number;
+  // Nullable: non-customer flows (transfer_out/in, purchase_receipt) have no
+  // customer — party is a location (from/to_location_id) or supplier (supplier_id).
+  customer_id: number | null;
   customer_name: string;
   customer_tax_id?: string;
   customer_address?: any;

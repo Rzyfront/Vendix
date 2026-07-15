@@ -1,50 +1,25 @@
 /**
- * Provisional TS mirror of the dispatch_note direction/subtype/reason enums.
+ * Dispatch note direction/subtype/reason type aliases + validation maps.
  *
- * These types exist because the Prisma client has not yet been regenerated
- * after the migration `add_dispatch_note_direction_subtype`. Once the client
- * is regenerated, replace references to these types with the Prisma-generated
- * enums (e.g. `Prisma.dispatch_note_direction_enum`).
- *
- * Values MUST stay in sync with the enums defined in schema.prisma.
+ * The Prisma client has been regenerated (migration 20260715204934) so the
+ * enum types are now imported from @prisma/client directly. This file keeps
+ * the cross-field validation maps (VALID_SUBTYPES_BY_DIRECTION and
+ * VALID_REASONS_BY_SUBTYPE) that the service layer uses for invariant checks
+ * post-lookup (per vendix-validation: cross-field invariants live in the
+ * service, not in the DTO).
  */
 
-export type DispatchNoteDirection = 'outbound' | 'inbound';
+import type {
+  dispatch_note_direction_enum,
+  dispatch_note_subtype_enum,
+  dispatch_note_reason_enum,
+  dispatch_note_status_enum,
+} from '@prisma/client';
 
-export type DispatchNoteSubtype =
-  | 'customer_delivery'
-  | 'customer_return'
-  | 'transfer_out'
-  | 'transfer_in'
-  | 'purchase_receipt';
-
-export type DispatchNoteReason =
-  | 'sale'
-  | 'sample'
-  | 'consignment'
-  | 'replacement_shipment'
-  | 'loan'
-  | 'defective'
-  | 'wrong_item'
-  | 'cancellation'
-  | 'warranty'
-  | 'overdelivery_return'
-  | 'replenishment'
-  | 'rebalancing'
-  | 'transfer_to_consignee'
-  | 'returned_from_consignee'
-  | 'normal_purchase'
-  | 'replacement_for_damage'
-  | 'sample_received';
-
-/** Extended status enum including the new 'received' state for inbound notes. */
-export type DispatchNoteStatus =
-  | 'draft'
-  | 'confirmed'
-  | 'delivered'
-  | 'received'
-  | 'invoiced'
-  | 'voided';
+export type DispatchNoteDirection = dispatch_note_direction_enum;
+export type DispatchNoteSubtype = dispatch_note_subtype_enum;
+export type DispatchNoteReason = dispatch_note_reason_enum;
+export type DispatchNoteStatus = dispatch_note_status_enum;
 
 /** Valid subtypes per direction (service-layer validation uses this map). */
 export const VALID_SUBTYPES_BY_DIRECTION: Record<
@@ -75,5 +50,9 @@ export const VALID_REASONS_BY_SUBTYPE: Partial<
     'overdelivery_return',
   ],
   transfer_in: ['replenishment', 'rebalancing', 'returned_from_consignee'],
-  purchase_receipt: ['normal_purchase', 'replacement_for_damage', 'sample_received'],
+  purchase_receipt: [
+    'normal_purchase',
+    'replacement_for_damage',
+    'sample_received',
+  ],
 };
