@@ -9,10 +9,14 @@ import {
   Query,
   Res,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
@@ -33,10 +37,20 @@ import {
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 @Controller('store/dispatch-notes')
 @UseGuards(PermissionsGuard)
 export class DispatchNotesController {
+  private static readonly RECEIPT_SCAN_ALLOWED_MIMETYPES = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+
+  private static readonly RECEIPT_SCAN_MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+
   constructor(
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchNoteFlowService: DispatchNoteFlowService,
@@ -202,6 +216,44 @@ export class DispatchNotesController {
     return this.responseService.created(
       result,
       'Remisión de recepción de compra creada exitosamente',
+    );
+  }
+
+  /**
+   * R4c — Scan a purchase receipt / supplier invoice (multipart `file`) and
+   * return AI-suggested line items + supplier, each matched (tenant-scoped)
+   * against the store catalog. Reuses the dispatch-notes create permission.
+   * No persistence — the frontend prefills the create wizard with the result.
+   */
+  @Post('receipt-scan')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_notes:create')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: DispatchNotesController.RECEIPT_SCAN_MAX_FILE_BYTES },
+      fileFilter: (_req, file, cb) => {
+        if (
+          !DispatchNotesController.RECEIPT_SCAN_ALLOWED_MIMETYPES.includes(
+            file.mimetype,
+          )
+        ) {
+          return cb(
+            new VendixHttpException(
+              ErrorCodes.DISPATCH_RECEIPT_SCAN_INVALID_FILE,
+            ),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async receiptScan(@UploadedFile() file?: Express.Multer.File) {
+    const result = await this.dispatchNotesService.scanReceipt(file);
+    return this.responseService.success(
+      result,
+      'Recibo de compra escaneado exitosamente',
     );
   }
 

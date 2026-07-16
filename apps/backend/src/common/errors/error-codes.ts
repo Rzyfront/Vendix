@@ -2131,6 +2131,33 @@ export const ErrorCodes = {
       'Cannot void an invoiced dispatch note directly; issue a credit note via return_orders instead',
   },
 
+  // Dispatch Note Receipt Scanner (purchase-receipt OCR via AI — R4c)
+  DISPATCH_RECEIPT_SCAN_NO_FILE: {
+    code: 'DISPATCH_RECEIPT_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No receipt file provided',
+  },
+  DISPATCH_RECEIPT_SCAN_INVALID_FILE: {
+    code: 'DISPATCH_RECEIPT_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+  DISPATCH_RECEIPT_SCAN_AI_FAIL: {
+    code: 'DISPATCH_RECEIPT_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI purchase-receipt OCR processing failed',
+  },
+  DISPATCH_RECEIPT_SCAN_PARSE_FAIL: {
+    code: 'DISPATCH_RECEIPT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI purchase-receipt response as valid JSON',
+  },
+  DISPATCH_RECEIPT_SCAN_NO_ITEMS: {
+    code: 'DISPATCH_RECEIPT_SCAN_NO_ITEMS',
+    httpStatus: 400,
+    devMessage: 'No line items detected in the receipt document',
+  },
+
   // MCP (Model Context Protocol)
   AI_MCP_001: {
     code: 'AI_MCP_001',

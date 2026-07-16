@@ -6,6 +6,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
 import {
   CreateDispatchNoteDto,
   UpdateDispatchNoteDto,
@@ -16,6 +18,12 @@ import {
   CreateReturnDispatchDto,
   CreatePurchaseReceiptDispatchDto,
 } from './dto';
+import {
+  ScanReceiptResult,
+  ScannedReceiptItem,
+  RawReceiptScan,
+  RawReceiptItem,
+} from './dto/scan-receipt.dto';
 import {
   dispatch_note_status_enum,
   dispatch_route_status_enum,
@@ -44,6 +52,7 @@ import {
   VALID_SUBTYPES_BY_DIRECTION,
   VALID_REASONS_BY_SUBTYPE,
 } from './types/dispatch-note-direction.type';
+import sharp = require('sharp');
 
 const DISPATCH_NOTE_INCLUDE = {
   dispatch_note_items: {
@@ -135,11 +144,381 @@ export class DispatchNotesService {
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly eventEmitter: EventEmitter2,
     private readonly stockValidator: StockValidatorService,
+    // AIEngineService is provided by the @Global() AIEngineModule, so it is
+    // injectable here without importing the module (used by scanReceipt — R4c).
+    private readonly aiEngine: AIEngineService,
     // Injected for createPurchaseReceipt delegation when purchase_order_id is
     // present. Optional so the module can boot without the PurchaseOrdersModule
     // if that dependency is not wired yet (defensive — the module imports it).
     private readonly purchaseOrdersService?: PurchaseOrdersService,
   ) {}
+
+  // ───────────────────────────────────────────────────────────────────────
+  // R4c — Purchase-receipt AI scanner
+  // (POST /store/dispatch-notes/receipt-scan)
+  // ───────────────────────────────────────────────────────────────────────
+
+  /** Mimetypes accepted by the receipt scanner (mirrors invoice/member scanners). */
+  private static readonly RECEIPT_SCAN_ALLOWED_MIMETYPES = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+
+  /**
+   * Scan a purchase receipt / supplier invoice (image or PDF) and return
+   * suggested line items + supplier, each matched (tenant-scoped) against the
+   * store catalog. Does NOT persist anything.
+   *
+   * 1:1 mechanism calque of InvoiceScannerService / MemberBulkScannerService:
+   * validate → preprocess (sharp) → AIEngine.run('invoice_ocr') → defensive JSON
+   * parse → normalize → catalog matching. Product/supplier ids are NEVER
+   * invented: a match is emitted only on an exact SKU hit (variant or product)
+   * or an unambiguous single name match; anything doubtful returns a null id
+   * with confidence 'low'/'none'.
+   *
+   * NOTE (dev): with 0 rows in ai_engine_configs the AI call fails fast with
+   * AI_PROVIDER_002 — expected locally; the wiring/contract is still valid.
+   */
+  async scanReceipt(file?: Express.Multer.File): Promise<ScanReceiptResult> {
+    this.assertValidReceiptFile(file);
+
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    const { base64, mimeType } = await this.preprocessReceiptImage(file!);
+    const dataUri = `data:${mimeType};base64,${base64}`;
+
+    const imageMessage: AIMessage = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'Extract all data from this purchase receipt / invoice image. Return ONLY the JSON object matching the schema defined in your system instructions.',
+        },
+        {
+          type: 'image_url',
+          image_url: { url: dataUri, detail: 'high' },
+        },
+      ],
+    };
+
+    this.logger.debug(
+      `[ReceiptScan] Sending to AI engine (appKey=invoice_ocr, size=${file!.size}B)...`,
+    );
+
+    const response = await this.aiEngine.run('invoice_ocr', {}, [imageMessage]);
+
+    this.logger.debug(
+      `[ReceiptScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
+    );
+
+    if (!response.success || !response.content) {
+      this.logger.error(
+        `[ReceiptScan] AI failed: ${response.error ?? 'no content'}`,
+      );
+      throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_AI_FAIL);
+    }
+
+    let normalized: RawReceiptScan;
+    try {
+      const parsed = this.parseReceiptAiJson(response.content);
+      normalized = this.normalizeReceiptScan(parsed);
+    } catch (err: any) {
+      if (err instanceof VendixHttpException) throw err;
+      this.logger.error(
+        `[ReceiptScan] Failed to parse AI response (${err?.message}). Raw content: ${response.content}`,
+      );
+      throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_PARSE_FAIL);
+    }
+
+    if (normalized.items.length === 0) {
+      throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_NO_ITEMS);
+    }
+
+    const warnings: string[] = [];
+
+    // ── Supplier matching (tenant-scoped; never invents an id) ──────────────
+    const supplier_id = await this.matchReceiptSupplier(
+      normalized.supplier,
+      warnings,
+    );
+
+    // ── Item matching (SKU exact → unambiguous name; per-item best-effort) ──
+    const items: ScannedReceiptItem[] = [];
+    for (const raw of normalized.items) {
+      items.push(await this.matchReceiptItem(raw, warnings));
+    }
+
+    return {
+      supplier_name: normalized.supplier.name,
+      supplier_id,
+      currency: normalized.currency,
+      items,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+  }
+
+  private assertValidReceiptFile(file?: Express.Multer.File): void {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_NO_FILE);
+    }
+    if (
+      !DispatchNotesService.RECEIPT_SCAN_ALLOWED_MIMETYPES.includes(
+        file.mimetype,
+      )
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_RECEIPT_SCAN_INVALID_FILE,
+      );
+    }
+  }
+
+  /**
+   * Preprocess the upload for the vision model: downscale big images to 1536px
+   * and re-encode as JPEG. PDFs / unsupported types fall through to the raw
+   * buffer so the model handles them natively. Copy-on-purpose mirror of
+   * InvoiceScannerService.preprocessImage.
+   */
+  private async preprocessReceiptImage(
+    file: Express.Multer.File,
+  ): Promise<{ base64: string; mimeType: string }> {
+    const MAX_DIMENSION = 1536;
+    const JPEG_QUALITY = 85;
+    try {
+      const metadata = await sharp(file.buffer).metadata();
+      const needsResize =
+        (metadata.width && metadata.width > MAX_DIMENSION) ||
+        (metadata.height && metadata.height > MAX_DIMENSION);
+      let pipeline = sharp(file.buffer);
+      if (needsResize) {
+        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
+          fit: 'inside',
+          withoutEnlargement: true,
+        });
+      }
+      const processedBuffer = await pipeline
+        .jpeg({ quality: JPEG_QUALITY })
+        .toBuffer();
+      return {
+        base64: processedBuffer.toString('base64'),
+        mimeType: 'image/jpeg',
+      };
+    } catch (err: any) {
+      this.logger.warn(
+        `[ReceiptScan] Image preprocessing failed, using raw: ${err?.message}`,
+      );
+      return {
+        base64: file.buffer.toString('base64'),
+        mimeType: file.mimetype,
+      };
+    }
+  }
+
+  /**
+   * Defensive JSON parse: strip a ```json fence found anywhere, else fall back
+   * to the widest `{ ... }` slice. Mirrors MemberBulkScannerService.parseAiJson.
+   */
+  private parseReceiptAiJson(raw: string): any {
+    let content = raw.trim();
+    const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (fenceMatch) content = fenceMatch[1].trim();
+    try {
+      return JSON.parse(content);
+    } catch {
+      const start = content.indexOf('{');
+      const end = content.lastIndexOf('}');
+      if (start >= 0 && end > start) {
+        return JSON.parse(content.slice(start, end + 1));
+      }
+      throw new Error('No JSON object found in AI response');
+    }
+  }
+
+  /**
+   * Normalize the raw AI JSON into RawReceiptScan. Tolerates both invoice_ocr
+   * shapes: items keyed as `line_items` (canonical) or `items`; per item,
+   * `description`/`name`/`product_name`, `sku`/`sku_if_visible`, `quantity`,
+   * `unit_price`. Supplier tax id accepted as `tax_id` or `nit`.
+   */
+  private normalizeReceiptScan(parsed: any): RawReceiptScan {
+    if (!parsed || typeof parsed !== 'object') {
+      throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_PARSE_FAIL);
+    }
+    const rawItems: any[] = Array.isArray(parsed.line_items)
+      ? parsed.line_items
+      : Array.isArray(parsed.items)
+        ? parsed.items
+        : [];
+    const items: RawReceiptItem[] = rawItems.map((it: any) => ({
+      description:
+        this.toNonEmptyString(it?.description) ??
+        this.toNonEmptyString(it?.name) ??
+        this.toNonEmptyString(it?.product_name),
+      sku:
+        this.toNonEmptyString(it?.sku) ??
+        this.toNonEmptyString(it?.sku_if_visible),
+      quantity: this.toFiniteNumberOrNull(it?.quantity),
+      unit_price: this.toFiniteNumberOrNull(it?.unit_price),
+    }));
+    return {
+      supplier: {
+        name:
+          this.toNonEmptyString(parsed?.supplier?.name) ??
+          this.toNonEmptyString(parsed?.supplier_name),
+        tax_id:
+          this.toNonEmptyString(parsed?.supplier?.tax_id) ??
+          this.toNonEmptyString(parsed?.supplier?.nit) ??
+          this.toNonEmptyString(parsed?.supplier_tax_id),
+      },
+      currency: this.toNonEmptyString(parsed?.currency),
+      items,
+    };
+  }
+
+  private toNonEmptyString(v: any): string | null {
+    if (v == null) return null;
+    const s = String(v).trim();
+    return s.length > 0 ? s : null;
+  }
+
+  private toFiniteNumberOrNull(v: any): number | null {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Match the extracted supplier against the store's suppliers (tenant-scoped).
+   * Tier 1: exact tax_id/NIT (separator-tolerant, case-insensitive). Tier 2:
+   * exact name (case-insensitive, unambiguous). Returns the id on a confident
+   * match, else null (and pushes a warning). Never throws.
+   */
+  private async matchReceiptSupplier(
+    supplier: RawReceiptScan['supplier'],
+    warnings: string[],
+  ): Promise<number | null> {
+    try {
+      if (supplier.tax_id) {
+        const normalizedTax = supplier.tax_id.replace(/[\s\-.]/g, '');
+        if (normalizedTax) {
+          const byTax = await this.prisma.suppliers.findFirst({
+            where: { tax_id: { equals: normalizedTax, mode: 'insensitive' } },
+            select: { id: true },
+          });
+          if (byTax) return byTax.id;
+        }
+      }
+      if (supplier.name) {
+        const byName = await this.prisma.suppliers.findMany({
+          where: { name: { equals: supplier.name, mode: 'insensitive' } },
+          select: { id: true },
+          take: 2,
+        });
+        if (byName.length === 1) return byName[0].id;
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[ReceiptScan] Supplier matching failed: ${err?.message}`,
+      );
+    }
+    if (supplier.name) {
+      warnings.push(
+        `Proveedor "${supplier.name}" no se pudo asociar automáticamente; selecciónalo o créalo manualmente.`,
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Match one extracted item against the store catalog (tenant-scoped) without
+   * ever inventing an id:
+   *   1. SKU exact on a product_variant → matched_variant_id + parent product,
+   *      confidence 'high'.
+   *   2. SKU exact on a product → matched_product_id, confidence 'high'.
+   *   3. Unambiguous single name match (contains, case-insensitive, non-archived)
+   *      → matched_product_id, confidence 'high'.
+   *   4. Ambiguous (multiple name matches) → null id, confidence 'low'.
+   *   5. No match → null id, confidence 'none'.
+   */
+  private async matchReceiptItem(
+    raw: RawReceiptItem,
+    warnings: string[],
+  ): Promise<ScannedReceiptItem> {
+    const product_name = raw.description ?? '';
+    const base: ScannedReceiptItem = {
+      product_name,
+      sku: raw.sku,
+      quantity: raw.quantity ?? 0,
+      unit_price: raw.unit_price,
+      matched_product_id: null,
+      matched_variant_id: null,
+      match_confidence: 'none',
+    };
+
+    try {
+      // 1 + 2 — SKU exact (variant first, then product).
+      if (raw.sku) {
+        const variant = await this.prisma.product_variants.findFirst({
+          where: { sku: { equals: raw.sku, mode: 'insensitive' } },
+          select: { id: true, product_id: true },
+        });
+        if (variant) {
+          return {
+            ...base,
+            matched_product_id: variant.product_id,
+            matched_variant_id: variant.id,
+            match_confidence: 'high',
+          };
+        }
+        const product = await this.prisma.products.findFirst({
+          where: { sku: { equals: raw.sku, mode: 'insensitive' } },
+          select: { id: true },
+        });
+        if (product) {
+          return {
+            ...base,
+            matched_product_id: product.id,
+            match_confidence: 'high',
+          };
+        }
+      }
+
+      // 3 + 4 — name contains (unambiguous → high, ambiguous → low).
+      if (product_name.trim().length > 0) {
+        const byName = await this.prisma.products.findMany({
+          where: {
+            name: { contains: product_name.trim(), mode: 'insensitive' },
+            state: { not: 'archived' },
+          },
+          select: { id: true },
+          take: 2,
+        });
+        if (byName.length === 1) {
+          return {
+            ...base,
+            matched_product_id: byName[0].id,
+            match_confidence: 'high',
+          };
+        }
+        if (byName.length > 1) {
+          warnings.push(
+            `"${product_name}" coincide con varios productos; selecciónalo manualmente.`,
+          );
+          return { ...base, match_confidence: 'low' };
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[ReceiptScan] Item matching failed for "${product_name}": ${err?.message}`,
+      );
+    }
+
+    warnings.push(
+      `"${product_name || 'Ítem sin nombre'}" sin coincidencias en el catálogo.`,
+    );
+    return base;
+  }
 
   /**
    * Build the delivery-address snapshot persisted on `dispatch_notes.customer_address`

@@ -21,3 +21,8 @@ export {
 export { CreateTransferDispatchDto } from './create-transfer-dispatch.dto';
 export { CreateReturnDispatchDto } from './create-return-dispatch.dto';
 export { CreatePurchaseReceiptDispatchDto } from './create-purchase-receipt-dispatch.dto';
+export {
+  ScanReceiptResult,
+  ScannedReceiptItem,
+  ReceiptItemMatchConfidence,
+} from './scan-receipt.dto';
