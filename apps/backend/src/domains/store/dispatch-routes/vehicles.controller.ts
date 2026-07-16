@@ -11,7 +11,7 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { VehiclesService } from './vehicles.service';
-import { CreateVehicleDto } from './dto';
+import { CreateVehicleDto, UpdateVehicleDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -59,7 +59,7 @@ export class VehiclesController {
   @Permissions('store:dispatch_fleet:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: Partial<CreateVehicleDto>,
+    @Body() dto: UpdateVehicleDto,
   ) {
     const result = await this.vehiclesService.update(id, dto);
     return this.responseService.success(result, 'Vehículo actualizado');

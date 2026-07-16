@@ -28,6 +28,20 @@ export class VehiclesService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
 
+    // Defense-in-depth: validar FK primary_driver_id ANTES del insert.
+    // El DTO exige el campo, pero no garantiza que el user exista. Sin este
+    // check, Prisma fallaría con P2003 → 500 genérico. Acá retornamos 404
+    // con un mensaje claro y evitamos el query fallido.
+    const driver = await this.prisma.users.findFirst({
+      where: { id: dto.primary_driver_id, store_id },
+      select: { id: true },
+    });
+    if (!driver) {
+      throw new NotFoundException(
+        `El conductor con id ${dto.primary_driver_id} no existe en esta tienda`,
+      );
+    }
+
     let attempts = 0;
     while (true) {
       try {
