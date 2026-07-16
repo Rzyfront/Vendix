@@ -789,6 +789,29 @@ export class StoreEcommerceLayoutComponent {
     this.show_payment_modal.set(false);
   }
 
+  /**
+   * Plan §12 — Comensal `session_closed`: when staff closes the mesa, the
+   * diner sees a farewell modal (NOT just a toast). The modal lets the comensal
+   * (a) view their order summary (CTA → `/orders/:id` style guest-order-summary
+   * when available) or (b) cleanly exit the mesa. Both actions funnel through
+   * `acknowledgeSessionClosed()` which calls `leaveTable()` — clears the
+   * per-tab device UUID + the table token so a fresh `?mesa=` scan starts clean.
+   */
+  farewellViewSummary(): void {
+    const sessionId = this.table_context_service.sessionId();
+    this.table_context_service.acknowledgeSessionClosed();
+    if (sessionId != null) {
+      // Best-effort: order-detail page exists at `/account/orders/:id` for
+      // authed diners; for guest diners the public route is `/pedido/:token`.
+      // Falling back to `/orders` is a safe no-op UX-wise if neither resolves.
+      this.router.navigateByUrl(`/orders`);
+    }
+  }
+
+  farewellLeave(): void {
+    this.table_context_service.acknowledgeSessionClosed();
+  }
+
   /** Cash / bank transfer — backend keeps the payment `pending` until staff confirm. */
   payWithManualMethod(method: PaymentMethodView): void {
     const token = this.table_context_service.tableToken();

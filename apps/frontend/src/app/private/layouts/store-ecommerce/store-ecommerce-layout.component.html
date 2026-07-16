@@ -872,3 +872,32 @@
   </div>
 </app-modal>
 }
+
+<!-- Plan §12 — Comensal `session_closed` farewell (Plan Obj #5):
+     triggered when the mesa is closed by staff. NOT just a toast — the
+     diner sees a modal with two explicit CTAs (view summary / leave) so the
+     close is acknowledged explicitly instead of being silently swallowed. -->
+@if (table_context.sessionClosed()) {
+<app-modal
+  [isOpen]="true"
+  [closeOnBackdrop]="false"
+  [closeOnEscape]="false"
+  [showCloseButton]="false"
+  title="¡Gracias por tu visita!"
+  size="md">
+  <div class="farewell-modal-body">
+    <p class="farewell-modal-text">
+      Tu cuenta en la <strong>Mesa {{ table_context.tableName() }}</strong> fue cerrada.
+      ¡Esperamos que hayas disfrutado tu experiencia!
+    </p>
+  </div>
+  <div slot="footer" class="mesa-modal-footer farewell-modal-footer">
+    <app-button variant="ghost" size="md" (clicked)="farewellLeave()">
+      Salir de la mesa
+    </app-button>
+    <app-button variant="primary" size="md" (clicked)="farewellViewSummary()">
+      Ver resumen del pedido
+    </app-button>
+  </div>
+</app-modal>
+}

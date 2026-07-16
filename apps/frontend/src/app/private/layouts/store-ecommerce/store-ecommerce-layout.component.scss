@@ -711,6 +711,22 @@
   }
 }
 
+// Plan §12 — Farewell modal styles (session_closed)
+.farewell-modal-body {
+  padding: 0.25rem 0 0.5rem;
+}
+
+.farewell-modal-text {
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.farewell-modal-footer {
+  margin-top: 0.5rem;
+}
+
 .move-cart-items {
   list-style: none;
   margin: 0 0 0.25rem;
