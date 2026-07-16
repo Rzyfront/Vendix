@@ -42,7 +42,7 @@
         </label>
         <input type="text" formControlName="plate" placeholder="ABC123" maxlength="20"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-        @if (form.get('plate')?.touched && form.get('plate')?.invalid) {
+        @if (isFieldInError('plate')) {
           <p class="mt-1 text-xs text-red-500">La placa es obligatoria (máx. 20 caracteres).</p>
         }
       </div>
@@ -59,7 +59,7 @@
             <option [value]="opt.value">{{ opt.label }}</option>
           }
         </select>
-        @if (form.get('type')?.touched && form.get('type')?.invalid) {
+        @if (isFieldInError('type')) {
           <p class="mt-1 text-xs text-red-500">Selecciona un tipo de vehículo.</p>
         }
       </div>
@@ -72,7 +72,7 @@
         </label>
         <input type="text" formControlName="brand" placeholder="Chevrolet" maxlength="80"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-        @if (form.get('brand')?.touched && form.get('brand')?.invalid) {
+        @if (isFieldInError('brand')) {
           <p class="mt-1 text-xs text-red-500">La marca es obligatoria (máx. 80 caracteres).</p>
         }
       </div>
@@ -85,7 +85,7 @@
         </label>
         <input type="text" formControlName="model_name" placeholder="NHR / 2022" maxlength="80"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-        @if (form.get('model_name')?.touched && form.get('model_name')?.invalid) {
+        @if (isFieldInError('model_name')) {
           <p class="mt-1 text-xs text-red-500">El modelo es obligatorio (máx. 80 caracteres).</p>
         }
       </div>
@@ -98,12 +98,12 @@
         </label>
         <input type="number" formControlName="capacity_kg" min="0" step="0.01" placeholder="0"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-        @if (form.get('capacity_kg')?.touched && form.get('capacity_kg')?.invalid) {
+        @if (isFieldInError('capacity_kg')) {
           <p class="mt-1 text-xs text-red-500">
             @if (form.get('capacity_kg')?.errors?.['required']) {
               La capacidad es obligatoria.
             } @else if (form.get('capacity_kg')?.errors?.['min']) {
-              La capacidad no puede ser negativa.
+              La capacidad debe ser mayor a 0.
             }
           </p>
         }
@@ -126,7 +126,7 @@
           formControlName="primary_driver_id"
           placeholder="Buscar conductor..."
         />
-        @if (form.get('primary_driver_id')?.touched && form.get('primary_driver_id')?.invalid) {
+        @if (isFieldInError('primary_driver_id')) {
           <p class="mt-1 text-xs text-red-500">Debes asignar un conductor principal.</p>
         }
       </div>
