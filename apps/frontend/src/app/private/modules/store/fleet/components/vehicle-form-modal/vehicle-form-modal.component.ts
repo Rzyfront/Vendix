@@ -60,12 +60,26 @@ export class VehicleFormModalComponent {
    */
   readonly backendErrors = signal<string[]>([]);
 
+  /**
+   * Becomes true the first time the user clicks 'Crear Vehículo' on an
+   * invalid form. Used by the template to surface per-field error messages
+   * even when Angular's FormControl.touched has not yet propagated (e.g. for
+   * custom-wrapped controls like <app-store-user-select> which is a
+   * third-party component owning its own internal control). After this flag
+   * flips, the per-field error condition uses `submitAttempted() || touched`
+   * so every invalid required field is highlighted regardless of focus.
+   *
+   * Reset every time the modal opens (in the effect).
+   */
+  readonly submitAttempted = signal(false);
+
   form: FormGroup = this.buildForm();
 
   constructor() {
     effect(() => {
       if (this.is_open()) {
         this.backendErrors.set([]); // clear stale errors from previous open
+        this.submitAttempted.set(false); // reset submit-attempt flag
         this.form = this.buildForm();
         const v = this.vehicle();
         if (v) {
@@ -105,7 +119,12 @@ export class VehicleFormModalComponent {
    */
   isFieldInError(fieldName: string): boolean {
     const control = this.form.get(fieldName);
-    return !!(control?.touched && control?.invalid);
+    if (!control) return false;
+    // Show error when EITHER:
+    //   - the field has been touched by the user (normal Angular Forms rule)
+    //   - the user has attempted to submit at least once (forces all errors
+    //     visible after the first click on 'Crear', regardless of focus)
+    return (control.touched || this.submitAttempted()) && control.invalid;
   }
 
   private buildForm(): FormGroup {
@@ -156,6 +175,13 @@ export class VehicleFormModalComponent {
       Object.keys(this.form.controls).forEach((key) => {
         this.form.get(key)?.markAsTouched();
       });
+      // Belt-and-suspenders: also flip the submitAttempted signal so the
+      // template's per-field error condition can rely on it independently of
+      // FormControl.touched propagation. Custom components like
+      // app-store-user-select wrap their own internal control; even with
+      // markAsTouched() on the outer FormControl, the inner CVA might not
+      // re-evaluate in time. This signal ensures the error UI always shows.
+      this.submitAttempted.set(true);
       return;
     }
     const raw = this.form.value;
