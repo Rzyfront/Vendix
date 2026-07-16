@@ -194,9 +194,9 @@
                           </app-badge>
                         }
                         <!-- F1: toggle "Agotado". Icono y tooltip reflejan el estado
-                             actual del plato (disponible vs agotado). Cubiertos
-                             cruzados = símbolo gastronómico universal de "agotado/86'd"
-                             (iconos ya registrados: utensils / utensils-crossed). -->
+                             actual del plato (disponible vs agotado). circle-check =
+                             disponible (gris); alert-octagon = agotado (rojo, señal de
+                             "se acabó"). Iconos ya registrados: circle-check / alert-octagon. -->
                         <app-button
                           variant="ghost"
                           size="sm"
@@ -215,7 +215,7 @@
                         >
                           <app-icon
                             slot="icon"
-                            [name]="item.product?.is_sellable ? 'utensils' : 'utensils-crossed'"
+                            [name]="item.product?.is_sellable ? 'circle-check' : 'alert-octagon'"
                             [size]="14"
                             [class]="item.product?.is_sellable ? '!text-text-secondary' : '!text-red-500'"
                           />
