@@ -81,7 +81,8 @@
           }
         </div>
 
-        <!-- Cart Dropdown Container -->
+        <!-- Cart Dropdown Container (D6: gated by mesa — hidden when a table is active) -->
+        @if (!table_context.isActive()) {
         <div class="cart-container" (mouseenter)="onCartEnter()" (mouseleave)="onCartLeave()">
           <button class="action-btn cart-btn" [class.shake-animation]="is_animating()" (click)="toggleCart()"
             title="Carrito">
@@ -174,6 +175,7 @@
           </div>
           }
         </div>
+        }
 
         <!-- User Menu (Guest or Authenticated Dropdown) - DESKTOP ONLY -->
         <div class="user-menu-container desktop-only">
@@ -286,16 +288,30 @@
           <app-icon slot="icon" name="split" [size]="16"></app-icon>
           Dividir cuenta
         </app-button>
-        <span class="table-banner-guests" title="Comensales en la mesa">
+        <!-- D6: comensales stepper — live count from SSE -->
+        <span class="table-banner-diners" [attr.data-active]="table_context.activeDevicesCount()" title="Comensales conectados a la mesa">
           <app-icon name="users" [size]="15"></app-icon>
-          <app-quantity-control
-            [value]="guest_count()"
-            (valueChange)="onGuestCountChange($event)"
-            size="sm"
-            [min]="1"
-          ></app-quantity-control>
+          <span class="table-banner-diners__count">{{ diners_label() }}</span>
         </span>
+        <app-quantity-control
+          [value]="guest_count()"
+          (valueChange)="onGuestCountChange($event)"
+          size="sm"
+          [min]="1"
+        ></app-quantity-control>
         }
+        @if (table_context.isOpenTab() && table_context.enableTableCheckout()) {
+        <app-button variant="primary" size="sm" (clicked)="openPaymentModal()" [disabled]="!!table_context.paymentConfirmed()">
+          <app-icon slot="icon" name="circle-dollar-sign" [size]="16"></app-icon>
+          @if (table_context.paymentConfirmed()) { Pago confirmado }
+          @else if (table_context.paymentPending()) { Esperando confirmación… }
+          @else { Pagar la cuenta }
+        </app-button>
+        }
+        <app-button variant="ghost" size="sm" (clicked)="promptLeaveTable()" class="table-banner-leave">
+          <app-icon slot="icon" name="log-out" [size]="16"></app-icon>
+          Salir de la mesa
+        </app-button>
       </div>
 
       <!-- Disparador del bottom-sheet (móvil < md) -->
@@ -345,7 +361,12 @@
         </button>
         <div class="table-action-row table-action-row--guests">
           <app-icon name="users" [size]="20"></app-icon>
-          <span>Comensales</span>
+          <span>Comensales en sala</span>
+          <span class="table-action-row__diners">{{ diners_label() }}</span>
+        </div>
+        <div class="table-action-row table-action-row--guests">
+          <app-icon name="users" [size]="20"></app-icon>
+          <span>Comensales declarados</span>
           <app-quantity-control
             [value]="guest_count()"
             (valueChange)="onGuestCountChange($event)"
@@ -353,6 +374,20 @@
             [min]="1"
           ></app-quantity-control>
         </div>
+        @if (table_context.enableTableCheckout()) {
+        <button type="button" class="table-action-row table-action-row--primary" (click)="openPaymentModal()" [disabled]="!!table_context.paymentConfirmed()">
+          <app-icon name="circle-dollar-sign" [size]="20"></app-icon>
+          <span>
+            @if (table_context.paymentConfirmed()) { Pago confirmado }
+            @else if (table_context.paymentPending()) { Esperando confirmación… }
+            @else { Pagar la cuenta }
+          </span>
+        </button>
+        }
+        <button type="button" class="table-action-row table-action-row--leave" (click)="promptLeaveTable()">
+          <app-icon name="log-out" [size]="20"></app-icon>
+          <span>Salir de la mesa</span>
+        </button>
         }
       </div>
     </div>
@@ -595,6 +630,118 @@
   <div slot="footer" class="bill-footer">
     <span>Total</span>
     <span class="bill-footer-total">{{ table_context.bill()?.grand_total | currency }}</span>
+  </div>
+</app-modal>
+}
+
+<!-- D6: Confirmación "Salir de la mesa" -->
+<app-modal
+  [isOpen]="show_leave_confirm()"
+  (isOpenChange)="show_leave_confirm.set($event)"
+  title="¿Salir de la mesa?"
+  size="sm">
+  <p class="mesa-modal-text">
+    Si sales, dejarás de recibir actualizaciones en vivo de tu pedido. Podrás
+    volver a escanear el QR para reconectarte.
+  </p>
+  <div slot="footer" class="mesa-modal-footer">
+    <app-button variant="ghost" size="md" (clicked)="show_leave_confirm.set(false)">
+      Quedarme
+    </app-button>
+    <app-button variant="danger" size="md" (clicked)="confirmLeaveTable()">
+      <app-icon slot="icon" name="log-out" size="16"></app-icon>
+      Sí, salir
+    </app-button>
+  </div>
+</app-modal>
+
+<!-- D6: Mover carrito a la cuenta compartida (escaneo con items) -->
+<app-modal
+  [isOpen]="show_move_cart_modal()"
+  (isOpenChange)="show_move_cart_modal.set($event)"
+  title="¿Mover a la cuenta de la mesa?"
+  size="sm">
+  <p class="mesa-modal-text">
+    Tenías {{ cart()?.item_count ?? 0 }} producto(s) en tu carrito antes de
+    escanear el QR. ¿Quieres sumarlos a la cuenta compartida o mantenerlos
+    aparte?
+  </p>
+  @if (cart(); as cart) {
+  @if (cart.items.length > 0) {
+  <ul class="move-cart-items">
+    @for (item of cart.items; track item.id) {
+    <li class="move-cart-item">
+      <span class="move-cart-item__name">{{ item.product.name }}</span>
+      <span class="move-cart-item__qty">× {{ item.quantity }}</span>
+    </li>
+    }
+  </ul>
+  }
+  }
+  <div slot="footer" class="mesa-modal-footer">
+    <app-button variant="ghost" size="md" (clicked)="keepCartSeparate()">
+      Mantener aparte
+    </app-button>
+    <app-button variant="primary" size="md" (clicked)="moveCartToBill()">
+      <app-icon slot="icon" name="arrow-right-circle" size="16"></app-icon>
+      Mover a la cuenta
+    </app-button>
+  </div>
+</app-modal>
+
+<!-- D6: Picker de métodos de pago (mesa con enableTableCheckout) -->
+@if (table_context.isActive() && table_context.enableTableCheckout()) {
+<app-modal
+  [isOpen]="show_payment_modal()"
+  (isOpenChange)="show_payment_modal.set($event)"
+  title="Pagar la cuenta"
+  size="md">
+  @if (loading_pay_methods()) {
+  <p class="bill-empty">Cargando métodos de pago…</p>
+  } @else if (table_context.paymentConfirmed(); as ok) {
+  <div class="pay-status pay-status--ok">
+    <app-icon name="check-circle-2" size="22" class="text-success"></app-icon>
+    <div>
+      <strong>Pago confirmado</strong>
+      <p>Tu pago de {{ ok.amount | currency }} ya fue validado. ¡Buen provecho!</p>
+    </div>
+  </div>
+  } @else if (table_context.paymentPending(); as pending) {
+  <div class="pay-status pay-status--pending">
+    <app-icon name="hourglass" size="22"></app-icon>
+    <div>
+      <strong>Esperando confirmación del mesero</strong>
+      <p>Le avisamos al equipo. Te avisaremos cuando validen el pago.</p>
+    </div>
+  </div>
+  } @else {
+  <p class="bill-empty">
+    Selecciona cómo quieres pagar la cuenta de
+    {{ table_context.bill()?.grand_total | currency }}.
+  </p>
+  <div class="pay-method-list">
+    @for (m of table_context.paymentMethods(); track m.id) {
+    <button
+      type="button"
+      class="pay-method"
+      [class.pay-method--primary]="m.type === 'wompi'"
+      (click)="m.type === 'wompi' ? payWithWompi(m) : payWithManualMethod(m)"
+      [disabled]="table_context.paying_table()">
+      <app-icon [name]="iconForPaymentMethod(m.type)" size="20"></app-icon>
+      <span>{{ m.name }}</span>
+    </button>
+    }
+    @if (table_context.paymentMethods().length === 0) {
+    <p class="bill-empty">
+      Esta tienda aún no tiene métodos de pago configurados para pagar desde la mesa.
+    </p>
+    }
+  </div>
+  }
+  <div slot="footer" class="mesa-modal-footer">
+    <app-button variant="ghost" size="md" (clicked)="closePaymentModal()">
+      Cerrar
+    </app-button>
   </div>
 </app-modal>
 }

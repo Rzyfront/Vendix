@@ -375,6 +375,196 @@
   }
 }
 
+// ── D6: Modal footer + body shared styles ───────────────────────────────
+.mesa-modal-text {
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  margin: 0 0 0.75rem;
+}
+
+.mesa-modal-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  width: 100%;
+  flex-wrap: wrap;
+
+  app-button {
+    flex: 1;
+    min-width: 130px;
+  }
+}
+
+.move-cart-items {
+  list-style: none;
+  margin: 0 0 0.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.move-cart-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: var(--fs-sm);
+
+  &__name {
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__qty {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+}
+
+// ── D6: Payment picker (mesa self-checkout) ────────────────────────────
+.pay-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md, 0.5rem);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+
+  strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--color-text-primary);
+  }
+
+  p {
+    margin: 0;
+    color: var(--color-text-secondary);
+  }
+
+  &--ok {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.32);
+    color: var(--color-success);
+  }
+
+  &--pending {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    color: var(--color-warning, rgb(217, 119, 6));
+  }
+}
+
+.pay-method-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.pay-method {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 48px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.18s ease;
+
+  app-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  span {
+    flex: 1;
+  }
+
+  &:active {
+    background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  &--primary {
+    background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+    border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+  }
+}
+
+// ── D6: Banner — leave button + diners stepper ─────────────────────────
+.table-banner-diners {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+
+  &__count {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.table-banner-leave {
+  // Only show in desktop inline-actions; the sheet covers mobile.
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: var(--color-error, rgb(220, 38, 38)) !important;
+}
+
+// Sheet row variants
+.table-action-row {
+  &__diners {
+    margin-left: auto;
+    color: var(--color-text-secondary);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &--primary {
+    background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+    border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+  }
+
+  &--leave {
+    color: var(--color-error, rgb(220, 38, 38));
+    border-color: rgba(239, 68, 68, 0.32);
+
+    app-icon {
+      color: var(--color-error, rgb(220, 38, 38));
+    }
+
+    &:active {
+      background: rgba(239, 68, 68, 0.08);
+    }
+  }
+}
+
 // Header
 .ecommerce-header {
   background: var(--color-surface);

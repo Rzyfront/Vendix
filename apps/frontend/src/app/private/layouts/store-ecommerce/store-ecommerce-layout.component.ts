@@ -5,11 +5,14 @@ import {
   DestroyRef,
   signal,
   PLATFORM_ID,
+  effect,
+  computed,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { isPlatformBrowser, ViewportScroller } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import { filter, map } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
@@ -17,7 +20,11 @@ import { CartService } from '../../modules/ecommerce/services/cart.service';
 import { CartPromotionsComponent } from '../../modules/ecommerce/components/cart-promotions/cart-promotions.component';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
-import { TableContextService } from '../../modules/ecommerce/services/table-context.service';
+import {
+  TableContextService,
+  PaymentMethodView,
+  PaymentTablePendingView,
+} from '../../modules/ecommerce/services/table-context.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
@@ -30,6 +37,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
 import { TableSessionSseService } from '../../modules/ecommerce/services/table-session-sse.service';
 import { parseApiError } from '../../../core/utils/parse-api-error';
 import { CurrencyPipe, CurrencyFormatService } from '../../../shared/pipes/currency';
+import { WompiCheckoutService } from '../../../core/services/wompi-checkout.service';
 
 // Footer types (matching backend interfaces)
 interface FooterStoreInfo {
@@ -131,6 +139,7 @@ export class StoreEcommerceLayoutComponent {
   private destroy_ref = inject(DestroyRef);
   private title_service = inject(Title); // Inject Title service
   private platform_id = inject(PLATFORM_ID);
+  private wompi_checkout = inject(WompiCheckoutService); // shared widget opener
   private readonly is_browser = isPlatformBrowser(this.platform_id);
 
   // Tenant currency signal exposed so the cart dropdown template reactively
@@ -191,6 +200,27 @@ export class StoreEcommerceLayoutComponent {
   readonly show_wishlist_added_tooltip = signal(false);
   private wishlist_animation_timeout: any;
   private wishlist_tooltip_timeout: any;
+
+  // ── QR-table diner UX (D6) ─────────────────────────────────────────
+  /** Modal: "¿Seguro que quieres salir de la mesa?" */
+  readonly show_leave_confirm = signal(false);
+  /** Modal: mover carrito existente a la cuenta recién activada. */
+  readonly show_move_cart_modal = signal(false);
+  /** Modal: picker de métodos de pago de la cuenta compartida. */
+  readonly show_payment_modal = signal(false);
+  /** Loading del modal de pago mientras `loadPaymentMethods` viaja. */
+  readonly loading_pay_methods = signal(false);
+  /** Track each payment attempt so the UI can show the appropriate status. */
+  readonly payment_attempt = signal<
+    | { kind: 'cash'; pending: PaymentTablePendingView | null }
+    | { kind: 'wompi'; pending: PaymentTablePendingView | null }
+    | null
+  >(null);
+  /** One-shot guard to avoid re-prompting move-cart on every re-resolve. */
+  private move_cart_prompted_for_token: string | null = null;
+  /** Debounce timer for the "comensal joined" toast (D6: 3s). */
+  private join_toast_timer: ReturnType<typeof setTimeout> | null = null;
+  private join_toast_last_event_id = '';
 
   constructor() {
     // Restore body scroll if the actions sheet is torn down mid-open.
@@ -285,6 +315,13 @@ export class StoreEcommerceLayoutComponent {
           .resolve(mesaToken)
           .pipe(takeUntilDestroyed(this.destroy_ref))
           .subscribe({
+            next: () => {
+              // Resolve succeeded. If the diner already had items in their
+              // ecommerce cart before scanning the QR, prompt them to fold
+              // those items into the shared bill (plan D6: no silent data
+              // loss). Guarded by token so a fresh scan doesn't re-trigger.
+              this.maybePromptMoveCart(mesaToken);
+            },
             error: () => {
               // Invalid/expired token — clear any stale context.
               this.table_context_service.clear();
@@ -292,6 +329,34 @@ export class StoreEcommerceLayoutComponent {
           });
       }
     }
+
+    // D6 — "Otro comensal se unió a la mesa" toast, debounced 3s.
+    // The signal updates on every `comensal_joined` or `comensal_left` event
+    // that the SSE service routes through `TableContextService.recordDinerPresence`.
+    // We only surface a toast when the change comes from a DIFFERENT device
+    // (the diner doesn't need to be told they themselves joined) and after
+    // a 3-second silence so a burst of joiners collapses to one notification.
+    effect(() => {
+      const event = this.table_context_service.lastJoinEvent();
+      if (!event) return;
+      const ownId = this.table_context_service.deviceUuid();
+      if (!ownId || event.device_id === ownId) return;
+      // event.device_id is the same across joined/left; the timestamp is the
+      // only monotonically increasing discriminator. Coalesce repeats.
+      if (String(event.timestamp) === this.join_toast_last_event_id) return;
+      this.join_toast_last_event_id = String(event.timestamp);
+      if (this.join_toast_timer) clearTimeout(this.join_toast_timer);
+      this.join_toast_timer = setTimeout(() => {
+        this.join_toast_timer = null;
+        this.toast_service.info('Otro comensal se unió a la mesa');
+      }, 3000);
+    });
+
+    // Clear the debounce timer on destroy so a navigation mid-debounce
+    // doesn't fire a stale toast against a fresh table.
+    this.destroy_ref.onDestroy(() => {
+      if (this.join_toast_timer) clearTimeout(this.join_toast_timer);
+    });
   }
 
   private triggerCartAnimation(): void {
@@ -574,6 +639,217 @@ export class StoreEcommerceLayoutComponent {
         error: (err) => this.toast_service.error(parseApiError(err).userMessage),
       });
   }
+
+  // ── D6: mesa-aware layout UX ──────────────────────────────────────────
+
+  /**
+   * "Salir de la mesa" — surfaces the confirmation prompt. The actual
+   * teardown happens in `confirmLeaveTable()` so a stray tap on a banner
+   * button cannot silently disconnect the diner from the live stream.
+   */
+  promptLeaveTable(): void {
+    this.show_leave_confirm.set(true);
+    this.closeActionsSheet();
+  }
+
+  /**
+   * Tear down the diner's table presence and route them back to the
+   * storefront home. Re-scanning the QR re-joins — they never lose the
+   * open tab itself (backend keeps it), only the live stream.
+   */
+  async confirmLeaveTable(): Promise<void> {
+    this.show_leave_confirm.set(false);
+    this.payment_attempt.set(null);
+    this.table_context_service.leaveTable();
+    await this.router.navigate(['/']);
+  }
+
+  /**
+   * D6 — if a diner scanned a QR while their ecommerce cart had items,
+   * surface a one-shot prompt to move those items into the shared bill
+   * (so they don't silently vanish into a different person's tab).
+   * Coalesces by token so re-resolves of the same table don't re-prompt.
+   */
+  private maybePromptMoveCart(token: string): void {
+    if (!this.is_browser) return;
+    if (this.move_cart_prompted_for_token === token) return;
+    if (!this.table_context_service.isOpenTab()) return;
+    const cart = this.cart();
+    const items = cart?.items ?? [];
+    if (items.length === 0) return;
+    this.move_cart_prompted_for_token = token;
+    this.show_move_cart_modal.set(true);
+  }
+
+  /** Diner chose to fold their ecommerce cart into the shared table bill. */
+  async moveCartToBill(): Promise<void> {
+    const items = this.cart()?.items ?? [];
+    if (items.length === 0) {
+      this.show_move_cart_modal.set(false);
+      return;
+    }
+    // Build a single addOrder call — backend accepts an array of items.
+    const tableOrderItems = items.map((item: any) => ({
+      product_id: item.product_id,
+      quantity: item.quantity,
+      product_variant_id: item.product_variant_id || undefined,
+    }));
+    try {
+      await firstValueFrom(
+        this.table_context_service.addOrder(tableOrderItems),
+      );
+      this.cart_service.clearAllCart();
+      this.toast_service.success('Productos enviados a la cuenta de la mesa');
+    } catch (err) {
+      this.toast_service.error(parseApiError(err).userMessage);
+    } finally {
+      this.show_move_cart_modal.set(false);
+    }
+  }
+
+  /** Diner chose to keep cart separate — close the prompt and continue. */
+  keepCartSeparate(): void {
+    this.show_move_cart_modal.set(false);
+  }
+
+  /** Open the diner-facing payment picker (loads methods on demand). */
+  openPaymentModal(): void {
+    const token = this.table_context_service.tableToken();
+    if (!token) return;
+    this.loading_pay_methods.set(true);
+    this.table_context_service
+      .loadPaymentMethods(token)
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: () => this.loading_pay_methods.set(false),
+        error: (err) => {
+          this.loading_pay_methods.set(false);
+          this.toast_service.error(parseApiError(err).userMessage);
+        },
+      });
+    this.show_payment_modal.set(true);
+    this.closeActionsSheet();
+  }
+
+  closePaymentModal(): void {
+    this.show_payment_modal.set(false);
+  }
+
+  /** Cash / bank transfer — backend keeps the payment `pending` until staff confirm. */
+  payWithManualMethod(method: PaymentMethodView): void {
+    const token = this.table_context_service.tableToken();
+    if (!token) return;
+    const amount = this.table_context_service.bill()?.grand_total;
+    this.table_context_service
+      .payTable(token, {
+        store_payment_method_id: method.id,
+        amount,
+      })
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (result) => {
+          this.payment_attempt.set({
+            kind: 'cash',
+            pending: this.table_context_service.paymentPending(),
+          });
+          if (result.state === 'pending') {
+            this.toast_service.success(
+              'Pago enviado, esperando confirmación del mesero',
+            );
+          }
+        },
+        error: (err) =>
+          this.toast_service.error(parseApiError(err).userMessage),
+      });
+  }
+
+  /** Wompi — backend returns widget data; we open the widget, then confirm. */
+  payWithWompi(method: PaymentMethodView): void {
+    const token = this.table_context_service.tableToken();
+    if (!token) return;
+    const amount = this.table_context_service.bill()?.grand_total;
+    this.table_context_service
+      .payTable(token, {
+        store_payment_method_id: method.id,
+        amount,
+      })
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (result) => {
+          if (result.next !== 'wompi_widget' || !result.wompi_data) {
+            this.toast_service.error(
+              'No se pudo abrir la pasarela de pago, intenta de nuevo',
+            );
+            return;
+          }
+          this.payment_attempt.set({
+            kind: 'wompi',
+            pending: this.table_context_service.paymentPending(),
+          });
+          const wd = result.wompi_data;
+          void this.wompi_checkout.openWidget(
+            {
+              public_key: wd.public_key,
+              currency: wd.currency,
+              amount_in_cents: wd.amount_in_cents,
+              reference: wd.reference,
+              signature_integrity: wd.signature_integrity,
+              redirect_url: wd.redirect_url,
+              customer_email: wd.customer_email,
+            },
+            {
+              onApproved: () => {
+                this.table_context_service
+                  .confirmWompi(token, result.payment_id)
+                  .pipe(takeUntilDestroyed(this.destroy_ref))
+                  .subscribe({
+                    next: () =>
+                      this.toast_service.success('Pago confirmado'),
+                    error: (err) =>
+                      this.toast_service.error(
+                        parseApiError(err).userMessage,
+                      ),
+                  });
+              },
+              onDeclined: () =>
+                this.toast_service.error('Pago rechazado por Wompi'),
+              onError: (err) => {
+                // eslint-disable-next-line no-console
+                console.error('[pay-table] wompi widget error', err);
+                this.toast_service.error('No se pudo abrir la pasarela');
+              },
+            },
+          );
+        },
+        error: (err) =>
+          this.toast_service.error(parseApiError(err).userMessage),
+      });
+  }
+
+  /** Card icon for the method picker. */
+  iconForPaymentMethod(type: string): string {
+    switch (type) {
+      case 'cash':
+        return 'banknote';
+      case 'bank_transfer':
+        return 'building-2';
+      case 'wompi':
+        return 'credit-card';
+      default:
+        return 'circle-dollar-sign';
+    }
+  }
+
+  /**
+   * Comensales stepper label: when only the diner is on the table, surface
+   * "Estás solo/a" instead of a 1-person stepper (avoids the dead-state UX
+   * where the count would always read "1 comensal en la mesa").
+   */
+  readonly diners_label = computed(() => {
+    const n = this.table_context_service.activeDevicesCount();
+    if (n <= 1) return 'Estás solo/a';
+    return `${n} comensales en la mesa`;
+  });
 
   // Footer helper methods
   hasValidSocialLink(platform: 'facebook' | 'instagram' | 'tiktok'): boolean {
