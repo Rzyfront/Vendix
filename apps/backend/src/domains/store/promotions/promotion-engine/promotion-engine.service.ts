@@ -419,23 +419,57 @@ export class PromotionEngineService {
 
         if (tiers.length === 0) continue;
 
-        // Aggregate the scope quantity: ALL scopes sum the `quantity` of their
-        // applicable lines (order = whole cart, category = category lines,
-        // product = product lines INCLUDING variants/derivatives that share the
-        // same product_id, already merged by resolveApplicableItemIndexes).
-        const scopedQty = applicableIndexes.reduce(
-          (sum, idx) => sum + Number(items[idx].quantity),
-          0,
-        );
+        // Resolve the winning tier based on how quantities are counted.
+        //   cart_total (default, legacy): sum quantity across every applicable
+        //     line in scope (order = whole cart, category = category lines,
+        //     product = product lines including variants/derivatives that
+        //     share the same product_id).
+        //   per_product: each product_id is evaluated independently; the tier
+        //     fires only when a single product reaches min_quantity on its
+        //     own. Different SKUs are NOT aggregated.
+        const grouping = promo.quantity_grouping ?? 'cart_total';
+        let matchedTier:
+          | (typeof tiers)[number]
+          | null = null;
+        let scopedQty = 0;
 
-        // Resolve ONE winning tier from the aggregated quantity. Tiers are
-        // already sorted ascending by min_quantity, so `find` returns the
-        // correct band. That single tier applies to every line in scope.
-        const matchedTier = tiers.find(
-          (t) =>
-            t.min_quantity <= scopedQty &&
-            (t.max_quantity === null || t.max_quantity >= scopedQty),
-        );
+        if (grouping === 'per_product') {
+          // Group by product_id, then pick the BEST tier across all groups
+          // (largest discount value wins). This keeps the "best discount for
+          // the customer" semantics when multiple products individually meet
+          // different tier thresholds.
+          const byProduct = new Map<number, number>();
+          for (const idx of applicableIndexes) {
+            const pid = Number(items[idx].product_id);
+            byProduct.set(pid, (byProduct.get(pid) ?? 0) + Number(items[idx].quantity));
+          }
+          for (const qty of byProduct.values()) {
+            const candidate = tiers.find(
+              (t) =>
+                t.min_quantity <= qty &&
+                (t.max_quantity === null || t.max_quantity >= qty),
+            );
+            if (
+              candidate &&
+              (!matchedTier || Number(candidate.value) > Number(matchedTier.value))
+            ) {
+              matchedTier = candidate;
+              scopedQty = qty;
+            }
+          }
+        } else {
+          // cart_total: legacy behavior — sum across every applicable line.
+          scopedQty = applicableIndexes.reduce(
+            (sum, idx) => sum + Number(items[idx].quantity),
+            0,
+          );
+          matchedTier = tiers.find(
+            (t) =>
+              t.min_quantity <= scopedQty &&
+              (t.max_quantity === null || t.max_quantity >= scopedQty),
+          );
+        }
+
         if (!matchedTier) continue;
 
         // Per-line discount computed from the FIXED winning tier (resolved once
@@ -635,22 +669,49 @@ export class PromotionEngineService {
         });
       if (tiers.length === 0) continue;
 
-      // Aggregate the scope quantity with the SAME resolver the discount branch
-      // uses, so the nudge and the applied discount always agree on scope.
+      // Same scope resolver as the discount branch so the nudge and the
+      // applied discount always agree on scope.
       const applicableIndexes = this.resolveApplicableItemIndexes(promo, items);
-      const scopedQty = applicableIndexes.reduce(
-        (sum, idx) => sum + Number(items[idx].quantity),
-        0,
-      );
-      // Only nudge when the customer already has in-scope items in the cart.
-      if (scopedQty <= 0) continue;
+      if (applicableIndexes.length === 0) continue;
 
-      // Next tier = first tier whose threshold is still ABOVE the current qty.
-      const nextTier = tiers.find((t) => t.min_quantity > scopedQty);
-      if (!nextTier) continue;
+      const grouping = promo.quantity_grouping ?? 'cart_total';
+      let nextTier: (typeof tiers)[number] | null = null;
+      let remaining = 0;
 
-      const remaining = nextTier.min_quantity - scopedQty;
-      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+      if (grouping === 'per_product') {
+        // For each product in scope, find its current per-product qty and
+        // the smallest unmet tier for that product. The nudge shown is for
+        // the product closest to qualifying (smallest remaining gap).
+        for (const idx of applicableIndexes) {
+          const pid = Number(items[idx].product_id);
+          // Sum qty for this product across all its lines in cart.
+          const perProductQty = applicableIndexes
+            .filter((i) => Number(items[i].product_id) === pid)
+            .reduce((s, i) => s + Number(items[i].quantity), 0);
+          if (perProductQty <= 0) continue;
+          const candidate = tiers.find((t) => t.min_quantity > perProductQty);
+          if (!candidate) continue;
+          const gap = candidate.min_quantity - perProductQty;
+          if (gap <= 0) continue;
+          if (!nextTier || gap < remaining) {
+            nextTier = candidate;
+            remaining = gap;
+          }
+        }
+      } else {
+        // cart_total (legacy): sum across every applicable line.
+        const scopedQty = applicableIndexes.reduce(
+          (sum, idx) => sum + Number(items[idx].quantity),
+          0,
+        );
+        if (scopedQty <= 0) continue;
+        nextTier = tiers.find((t) => t.min_quantity > scopedQty);
+        if (!nextTier) continue;
+        remaining = nextTier.min_quantity - scopedQty;
+      }
+
+      if (!nextTier || remaining <= 0) continue;
+      if (!Number.isFinite(remaining)) continue;
 
       progress.push({
         promotion_id: Number(promo.id),
