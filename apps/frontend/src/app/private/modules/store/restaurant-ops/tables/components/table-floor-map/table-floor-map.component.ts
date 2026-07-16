@@ -16,6 +16,7 @@ import type { IconName } from '../../../../../../../shared/components/icon/icons
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { Table, TableStatus } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+import type { AdminTablesLivePayload } from '../../services/admin-tables-sse.service';
 
 interface TableCell {
   table: Table;
@@ -25,6 +26,12 @@ interface TableCell {
   statusIcon: IconName;
   isOccupied: boolean;
   guestCount: number | null;
+  /**
+   * Live counts del SSE staff (si la mesa tiene una sesión abierta).
+   * Se hidrata desde `liveCounts()` (input opcional); ausente para
+   * mesas sin sesión activa — el template lo trata como null.
+   */
+  live: AdminTablesLivePayload | null;
   /** Posición absoluta resuelta (px) usada por el lienzo. */
   x: number;
   y: number;
@@ -109,6 +116,15 @@ export class TableFloorMapComponent {
    * view to floor view in the manage page).
    */
   readonly autoReset = input<boolean>(false);
+  /**
+   * Live counts por sesión (key=session_id), alimentados por
+   * `AdminTablesSseService`. OPCIONAL — sin este input el componente
+   * sigue funcionando como antes (no live, sólo estado de mesa).
+   *
+   * El componente resuelve internamente `table_id → session_id` porque
+   * `tables.active_session` ya expone el id de la sesión abierta.
+   */
+  readonly liveCounts = input<Map<number, AdminTablesLivePayload> | null>(null);
   readonly tableClicked = output<Table>();
   readonly tableMoved = output<TableMovedEvent>();
 
@@ -195,6 +211,7 @@ export class TableFloorMapComponent {
   readonly cells = computed<TableCell[]>(() => {
     const list = this.tables() ?? [];
     const overrides = this.localPositions();
+    const liveMap = this.liveCounts();
     let autoIndex = 0;
     return list.map((t) => {
       const status = t.effective_status ?? t.status;
@@ -215,6 +232,10 @@ export class TableFloorMapComponent {
         y = row * (TABLE_H + GRID_GAP);
         autoIndex++;
       }
+      // Hidratar `live` resolviendo `table_id → session_id` por la sesión
+      // activa de la mesa. Sin liveMap o sin sesión abierta → null.
+      const sessionId = t.active_session?.id;
+      const live = liveMap && sessionId != null ? liveMap.get(sessionId) ?? null : null;
       return {
         table: t,
         displayStatus: status,
@@ -223,6 +244,7 @@ export class TableFloorMapComponent {
         statusIcon: TablesService.statusIcon(status),
         isOccupied: status === 'occupied',
         guestCount: t.active_session?.guest_count ?? null,
+        live,
         x,
         y,
       };

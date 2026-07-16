@@ -260,6 +260,61 @@
   app-icon { flex-shrink: 0; }
 }
 
+// ------------------------------------------------------------------
+// Live badges (AdminTablesSseService)
+// ------------------------------------------------------------------
+// Tira compacta de chips en la parte inferior de la celda. Sólo se
+// renderiza si el padre pasó `liveCounts` y la mesa tiene una sesión
+// abierta. Colores semánticos del design system para que no rompan la
+// paleta de la celda.
+.live-strip {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  margin-top: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  animation: live-chip-in 0.18s ease-out;
+}
+
+.live-chip--devices {
+  background: var(--color-info, #2563eb);
+}
+
+.live-chip--items {
+  background: var(--color-text-secondary, #6b7280);
+}
+
+.live-chip--pay-pending {
+  background: var(--color-warning, #ea580c);
+}
+
+.live-chip--pay-confirmed {
+  background: var(--color-success, #16a34a);
+}
+
+@keyframes live-chip-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 // Táctil (sin hover): el estado se muestra desplegado de forma permanente.
 @media (hover: none) {
   .status {

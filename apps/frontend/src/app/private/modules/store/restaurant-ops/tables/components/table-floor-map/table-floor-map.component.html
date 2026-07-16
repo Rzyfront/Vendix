@@ -111,6 +111,36 @@
                 </span>
               }
             </div>
+
+            <!-- Live badges: alimentados por AdminTablesSseService.
+                 Se renderizan sólo si el componente padre pasó
+                 `liveCounts` y la mesa tiene sesión abierta. -->
+            @if (cell.live) {
+              <div class="live-strip" aria-live="polite">
+                @if (cell.live.active_devices > 0) {
+                  <span class="live-chip live-chip--devices" title="Comensales activos">
+                    <app-icon name="smartphone" [size]="11"></app-icon>
+                    {{ cell.live.active_devices }}
+                  </span>
+                }
+                @if (cell.live.item_count > 0) {
+                  <span class="live-chip live-chip--items" title="Ítems en la cuenta">
+                    <app-icon name="utensils" [size]="11"></app-icon>
+                    {{ cell.live.item_count }}
+                  </span>
+                }
+                @if (cell.live.payment_state === 'pending') {
+                  <span class="live-chip live-chip--pay-pending" title="Pago pendiente">
+                    <app-icon name="clock" [size]="11"></app-icon>
+                  </span>
+                }
+                @if (cell.live.payment_state === 'confirmed') {
+                  <span class="live-chip live-chip--pay-confirmed" title="Pago confirmado">
+                    <app-icon name="check" [size]="11"></app-icon>
+                  </span>
+                }
+              </div>
+            }
           </div>
         }
       </div>
