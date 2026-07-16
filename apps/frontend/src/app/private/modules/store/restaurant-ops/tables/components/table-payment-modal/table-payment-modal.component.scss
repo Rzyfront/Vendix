@@ -244,3 +244,86 @@
   gap: 0.5rem;
   width: 100%;
 }
+
+// ── 'confirm' mode (E2) ─────────────────────────────────────────────
+//
+// Compact, read-only summary of a pending diner payment + optional tip.
+// Different visual hierarchy than the 'pos' flow — no method picker,
+// no cash input, no summary grid.
+
+.confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.confirm-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-background, #f9fafb);
+
+  .confirm-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+
+    app-icon {
+      color: var(--color-text-secondary, #6b7280);
+      flex-shrink: 0;
+    }
+
+    .label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-secondary, #6b7280);
+      min-width: 7.5rem;
+    }
+
+    strong {
+      font-weight: 600;
+      color: var(--color-text-primary, #111827);
+
+      &.amount {
+        font-size: 1.05rem;
+        color: var(--color-primary, #2f6f4e);
+      }
+    }
+
+    .breakdown {
+      display: block;
+      width: 100%;
+      margin-top: 0.25rem;
+      margin-left: 1.5rem;
+      font-size: 0.75rem;
+      color: var(--color-text-secondary, #6b7280);
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      color: var(--color-text-primary, #111827);
+      word-break: break-all;
+    }
+  }
+}
+
+.confirm-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary, #6b7280);
+  margin: 0;
+
+  app-icon {
+    color: var(--color-primary, #2f6f4e);
+    flex-shrink: 0;
+  }
+}

@@ -288,3 +288,49 @@ export interface SellableProductOption {
    */
   image_url?: string | null;
 }
+
+/**
+ * One row from `GET /store/table-sessions/:id/payments/pending`.
+ *
+ * Mirrors the backend projection in `TableSessionsService.listPendingPayments`
+ * (Restaurant Suite — table redesign C3). Includes the method info
+ * (`store_payment_method.system_payment_method`) so the mesero UI can
+ * render "Efectivo $X" / "Transferencia $Y" without a follow-up
+ * round-trip per row.
+ *
+ * `tip_amount` is OPTIONAL: the `payments` table does not carry a tip
+ * column, but the C3 confirmation DTO accepts the field so the mesero
+ * can echo the customer's intent during reconciliation. The UI sends
+ * it back on confirm only when > 0.
+ */
+export interface PaymentPendingView {
+  id: number;
+  order_id: number;
+  /** Total amount the diner paid (manual methods only). */
+  amount: number | string;
+  currency: string;
+  /** Always 'pending' — terminal rows are filtered out by the service. */
+  state: 'pending';
+  created_at: string | Date;
+  /** Gateway reference (e.g. cash voucher id, transfer reference). */
+  transaction_id: string | null;
+  method: {
+    store_payment_method_id: number;
+    /** Cash / bank_transfer / card — only manual methods can be confirmed. */
+    type: string | null;
+    /** Spanish label ("Efectivo", "Transferencia", …). */
+    display_name: string | null;
+  } | null;
+}
+
+/**
+ * Response shape for `POST /store/table-sessions/:id/payments/:paymentId/confirm`.
+ *
+ * The backend returns the bare `{ state: 'succeeded', payment_id }` envelope
+ * (no full payment row); we mirror it here so the mesero UI can react to the
+ * confirmation without re-fetching the pending list immediately.
+ */
+export interface ConfirmTablePaymentResult {
+  state: 'succeeded';
+  payment_id: number;
+}

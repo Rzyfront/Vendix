@@ -38,6 +38,7 @@ import {
   TableSessionAddItem,
   TableStatus,
   KitchenTicketItemRefStatus,
+  PaymentPendingView,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import {
@@ -52,6 +53,7 @@ import { SplitOrderModalComponent } from '../../components/split-order-modal/spl
 import {
   TablePaymentModalComponent,
   TablePaymentSubmit,
+  TablePaymentConfirmSubmit,
 } from '../../components/table-payment-modal/table-payment-modal.component';
 import { AssignCustomerModalComponent } from '../../components/assign-customer-modal/assign-customer-modal.component';
 
@@ -123,6 +125,14 @@ export class TableSessionPageComponent implements OnInit {
   readonly isClosing = signal(false);
   readonly isPaying = signal(false);
   readonly isAssigningCustomer = signal(false);
+
+  // ── Pending payments (E2 — staff confirmation) ────────────────────
+  /** Pending manual payments for the order backing this session. */
+  readonly pendingPayments = signal<PaymentPendingView[]>([]);
+  readonly isLoadingPendingPayments = signal(false);
+  readonly isConfirmOpen = signal(false);
+  readonly pendingConfirmPayment = signal<PaymentPendingView | null>(null);
+  readonly isConfirmingPayment = signal(false);
 
   /**
    * Live kitchen state merged from SSE: order_item_id → kitchen status.
@@ -327,6 +337,7 @@ export class TableSessionPageComponent implements OnInit {
     // Warm up the KDS SSE stream so badges update live. Idempotent.
     this.kdsSse.connect();
     this.loadSession(id);
+    this.loadPendingPayments(id);
   }
 
   /**
@@ -967,6 +978,86 @@ export class TableSessionPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  // ── Pending payments (E2 — staff confirmation) ────────────────────
+
+  /**
+   * Fetch pending manual payments for the order backing this session.
+   * Renders the "Pagos por confirmar" list + per-row "Confirmar" CTA.
+   * Silent: post-action refetches don't trigger the global loading state.
+   */
+  loadPendingPayments(sessionId: number, opts: { silent?: boolean } = {}): void {
+    if (!opts.silent) this.isLoadingPendingPayments.set(true);
+    this.tablesService
+      .listPendingPayments(sessionId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          this.pendingPayments.set(rows ?? []);
+          if (!opts.silent) this.isLoadingPendingPayments.set(false);
+        },
+        error: () => {
+          // Don't toast on refetch failures — they are usually background
+          // and the next interaction will retry. Initial load still gets
+          // a clear empty state.
+          this.pendingPayments.set([]);
+          if (!opts.silent) this.isLoadingPendingPayments.set(false);
+        },
+      });
+  }
+
+  /** Open the modal in 'confirm' mode for a single pending row. */
+  openConfirmPayment(payment: PaymentPendingView): void {
+    this.pendingConfirmPayment.set(payment);
+    this.isConfirmOpen.set(true);
+  }
+
+  /**
+   * Staff confirms a pending payment. Transitions the row to `succeeded`
+   * on the backend, refreshes the pending list, and refreshes the session
+   * so order balance + summary reflect the new state. The session
+   * REMAINS OPEN — staff can chain confirms until the order is fully paid.
+   */
+  onConfirmPayment(payload: TablePaymentConfirmSubmit): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isConfirmingPayment()) return;
+    this.isConfirmingPayment.set(true);
+    this.tablesService
+      .confirmPayment(sessionId, payload.payment_id, {
+        ...(payload.tip_amount != null && payload.tip_amount > 0
+          ? { tip_amount: payload.tip_amount }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isConfirmingPayment.set(false);
+          this.isConfirmOpen.set(false);
+          this.pendingConfirmPayment.set(null);
+          this.toastService.success('Pago confirmado por staff');
+          // Silent refetch: keeps the page body intact while the
+          // pending row disappears and the order balance updates.
+          this.loadPendingPayments(sessionId, { silent: true });
+          this.loadSession(sessionId, { silent: true });
+        },
+        error: (err: unknown) => {
+          this.isConfirmingPayment.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al confirmar el pago',
+          );
+        },
+      });
+  }
+
+  /** Operator-friendly label for a payment method. */
+  paymentMethodLabel(p: PaymentPendingView): string {
+    return p.method?.display_name || p.method?.type || '—';
+  }
+
+  /** TrackBy for the pending list (avoid DOM thrash on row swaps). */
+  trackByPaymentId(_i: number, p: PaymentPendingView): number {
+    return p.id;
   }
 
   // ── Close session ──────────────────────────────────────────────────────

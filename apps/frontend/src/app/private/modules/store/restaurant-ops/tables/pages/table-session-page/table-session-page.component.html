@@ -144,6 +144,79 @@
               </span>
             </div>
           }
+
+          <!--
+            E2 — Pagos por confirmar.
+            Mesero-only section that surfaces manual (cash / bank_transfer)
+            payments initiated by the diner that are still in state='pending'.
+            Each row offers a one-click "Confirmar" → opens
+            `table-payment-modal` in 'confirm' mode. The section self-hides
+            when the list is empty so the summary panel stays clean for
+            sessions without pending payments.
+
+            Live reflection: a future `AdminTablesSseService.tablesLive()`
+            event of type `payment.confirmed` triggers
+            `loadPendingPayments(id, { silent: true })`. Today we refetch
+            on confirm + on every action that mutates the session.
+          -->
+          @if (!isClosed()) {
+            <div class="pending-payments">
+              <div class="pending-payments-header">
+                <app-icon name="bell-ring" [size]="14"></app-icon>
+                <span class="label">Pagos por confirmar</span>
+                @if (pendingPayments().length > 0) {
+                  <app-badge variant="warning" size="sm">
+                    {{ pendingPayments().length }}
+                  </app-badge>
+                }
+              </div>
+
+              @if (isLoadingPendingPayments() && pendingPayments().length === 0) {
+                <p class="pending-payments-empty muted">Cargando pagos…</p>
+              } @else if (pendingPayments().length === 0) {
+                <p class="pending-payments-empty muted">
+                  Sin pagos pendientes de confirmar.
+                </p>
+              } @else {
+                <ul class="pending-payments-list" role="list">
+                  @for (payment of pendingPayments(); track trackByPaymentId($index, payment)) {
+                    <li class="pending-payment-row">
+                      <div class="pending-payment-main">
+                        <span class="method">
+                          <app-icon name="credit-card" [size]="14"></app-icon>
+                          {{ paymentMethodLabel(payment) }}
+                        </span>
+                        <strong class="amount">
+                          {{ +payment.amount | currency }}
+                        </strong>
+                      </div>
+                      <div class="pending-payment-meta">
+                        <span class="time">
+                          <app-icon name="clock" [size]="12"></app-icon>
+                          {{ payment.created_at | date: 'short' }}
+                        </span>
+                        @if (payment.transaction_id) {
+                          <span class="ref">
+                            <app-icon name="hash" [size]="12"></app-icon>
+                            {{ payment.transaction_id }}
+                          </span>
+                        }
+                      </div>
+                      <app-button
+                        class="pending-payment-action"
+                        variant="primary"
+                        size="sm"
+                        (clicked)="openConfirmPayment(payment)"
+                      >
+                        <app-icon slot="icon" name="check-circle" [size]="14"></app-icon>
+                        Confirmar
+                      </app-button>
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          }
         </app-card>
 
         <!-- ── Items ────────────────────────────────────────────────── -->
@@ -422,6 +495,21 @@
       (pay)="onPay($event)"
     />
   }
+
+  <!--
+    E2 — Modal de confirmación de pago pendiente (modo 'confirm').
+    Reusa `table-payment-modal`; el modo refactoriza la UI para que sea
+    read-only sobre el row + opcional tip.
+  -->
+  <app-table-payment-modal
+    [isOpen]="isConfirmOpen()"
+    mode="confirm"
+    [pendingPayment]="pendingConfirmPayment()"
+    [isProcessing]="isConfirmingPayment()"
+    [tableName]="session()?.table?.name ?? ''"
+    (isOpenChange)="isConfirmOpen.set($event)"
+    (confirmPayment)="onConfirmPayment($event)"
+  />
 
   <app-assign-customer-modal
     [isOpen]="isAssignCustomerOpen()"
