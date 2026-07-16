@@ -33,6 +33,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 import {
   GymMembership,
@@ -42,6 +43,7 @@ import {
 } from '../../interfaces';
 import { MembershipsService } from '../../services';
 import { RenewMembershipModalComponent } from '../../components/renew-membership-modal/renew-membership-modal.component';
+import { EditMembershipModalComponent } from '../../components/edit-membership-modal/edit-membership-modal.component';
 
 import { MembershipAccessService } from '../../../access/services/membership-access.service';
 import {
@@ -77,6 +79,7 @@ const MS_PER_DAY = 86_400_000;
     TextareaComponent,
     CurrencyPipe,
     RenewMembershipModalComponent,
+    EditMembershipModalComponent,
   ],
   templateUrl: './membership-detail-page.component.html',
   styleUrls: ['./membership-detail-page.component.css'],
@@ -90,12 +93,25 @@ export class MembershipDetailPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly membership = signal<GymMembership | null>(null);
   readonly isLoading = signal(false);
   readonly isSavingMeta = signal(false);
   readonly actionInProgress = signal(false);
   readonly showRenewModal = signal(false);
+  readonly showEditModal = signal(false);
+
+  /**
+   * UI gate for the admin "Editar membresía" action. The backend
+   * (`store:memberships:update`) remains the source of truth; this only hides
+   * the button for users without the permission. Reads the reactive
+   * permissions signal from the auth facade (frontend permissions come from
+   * `response.data.permissions`, not the JWT claim).
+   */
+  readonly canEditMembership = computed(() =>
+    this.authFacade.hasPermission('store:memberships:update'),
+  );
 
   // ── Access enrichment (credentials + recent access logs) ──────────
   readonly credentials = signal<GymAccessCredential[]>([]);
@@ -216,15 +232,26 @@ export class MembershipDetailPageComponent implements OnInit {
       this.canCancel(),
   );
 
-  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    {
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const actions: StickyHeaderActionButton[] = [];
+    if (this.canEditMembership()) {
+      actions.push({
+        id: 'edit',
+        label: 'Editar membresía',
+        icon: 'edit',
+        variant: 'outline',
+        disabled: !this.membership() || this.actionInProgress(),
+      });
+    }
+    actions.push({
       id: 'renew',
       label: 'Renovar',
       icon: 'refresh-cw',
       variant: 'primary',
       disabled: !this.membership() || this.actionInProgress(),
-    },
-  ]);
+    });
+    return actions;
+  });
 
   // ── Access log timeline (most recent first) ───────────────────────
   readonly accessTimelineSteps = computed<TimelineStep[]>(() =>
@@ -391,6 +418,7 @@ export class MembershipDetailPageComponent implements OnInit {
 
   onHeaderAction(actionId: string): void {
     if (actionId === 'renew') this.showRenewModal.set(true);
+    else if (actionId === 'edit') this.showEditModal.set(true);
   }
 
   goToProfile(): void {
@@ -446,6 +474,12 @@ export class MembershipDetailPageComponent implements OnInit {
   onRenewed(updated: GymMembership): void {
     this.applyMembership(updated);
     // Refresh access data after a renewal (status may have changed).
+    this.loadAccessData(updated.customer_id);
+  }
+
+  onEdited(updated: GymMembership): void {
+    this.applyMembership(updated);
+    // Plan/status/vigencia may have changed — refresh access enrichment too.
     this.loadAccessData(updated.customer_id);
   }
 }
