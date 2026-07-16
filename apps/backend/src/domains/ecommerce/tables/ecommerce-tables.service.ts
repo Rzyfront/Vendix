@@ -761,16 +761,16 @@ export class EcommerceTablesService {
 
     return methods
       .filter((m: any) =>
-        ['cash', 'bank_transfer', 'wompi', 'wallet'].includes(m.system_payment_methods?.type),
+        ['cash', 'bank_transfer', 'wompi', 'wallet'].includes(m.system_payment_method?.type),
       )
       .map((m: any) => ({
         id: m.id,
-        type: m.system_payment_methods.type,
-        name: m.display_name ?? m.system_payment_methods.name,
-        icon: m.system_payment_methods.icon,
+        type: m.system_payment_method.type,
+        name: m.display_name ?? m.system_payment_method.name,
+        icon: m.system_payment_method.icon,
         requires_reference:
-          m.system_payment_methods.type === 'bank_transfer' ||
-          m.system_payment_methods.type === 'wompi',
+          m.system_payment_method.type === 'bank_transfer' ||
+          m.system_payment_method.type === 'wompi',
       }));
   }
 
