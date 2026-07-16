@@ -713,7 +713,31 @@ export class OrganizationsService {
     const shippingCost = Number(row?.shipping_cost ?? 0);
     const cogs = Number(row?.cogs ?? 0);
 
-    return { _sum: { profit: revenue - shippingCost - cogs } };
+    // Plan Despacho Economía — FASE 8 paso 24. Resta el flete cobrado porque
+    // ya se contabiliza como ingreso separado (cuenta 414505). Lo recuperamos
+    // desde accounts_payable source_type='dispatch_route' como proxy del costo
+    // del transportador (suma de original_amount) — fuente operativa robusta
+    // a orgs sin fiscal flow activo.
+    const transportCostRows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ transport_cost: unknown }>
+    >`
+      SELECT COALESCE(SUM(ap.original_amount), 0) AS transport_cost
+      FROM accounts_payable ap
+      WHERE ap.organization_id = ${organizationId}
+        AND ap.source_type = 'dispatch_route'
+        ${storeFilter}
+    `;
+    const transportCost = Number(transportCostRows[0]?.transport_cost ?? 0);
+
+    // Fórmula corregida:
+    //   profit = (producto − COGS) + (ingreso flete − costo flete)
+    // donde:
+    //   producto   = revenue − shippingCost (lo ya cobrado)
+    //   ingreso flete = shippingCost (lo que ya estaba restando arriba)
+    // ⇒ producto − COGS + shippingCost − transportCost
+    //    = revenue − shippingCost − cogs + shippingCost − transportCost
+    //    = revenue − cogs − transportCost
+    return { _sum: { profit: revenue - cogs - transportCost } };
   }
 
   /**
