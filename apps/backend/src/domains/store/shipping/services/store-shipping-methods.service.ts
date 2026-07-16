@@ -194,6 +194,29 @@ export class StoreShippingMethodsService {
           custom_config: enable_dto.custom_config,
           min_order_amount: enable_dto.min_order_amount,
           max_order_amount: enable_dto.max_order_amount,
+          // Plan Despacho Economía — FASE 2 paso 8: copiar la política tipada
+          // desde el método de sistema (defaults de fábrica). El DTO permite
+          // sobrescribir al habilitar (ej. una tienda quiere su propio vehículo).
+          collects_payment:
+            enable_dto.collects_payment ?? system_method.collects_payment ?? false,
+          payment_timing:
+            enable_dto.payment_timing ?? system_method.payment_timing ?? 'on_delivery',
+          generates_transport_cost:
+            enable_dto.generates_transport_cost ??
+            system_method.generates_transport_cost ??
+            'none',
+          default_vehicle_id:
+            enable_dto.default_vehicle_id ?? system_method.default_vehicle_id ?? null,
+          default_driver_user_id:
+            enable_dto.default_driver_user_id ?? system_method.default_driver_user_id ?? null,
+          default_carrier_supplier_id:
+            enable_dto.default_carrier_supplier_id ??
+            system_method.default_carrier_supplier_id ??
+            null,
+          cost_settlement_timing:
+            enable_dto.cost_settlement_timing ??
+            system_method.cost_settlement_timing ??
+            'immediate_on_close',
           copied_from_system_method_id: system_shipping_method_id,
         },
       });
@@ -306,6 +329,15 @@ export class StoreShippingMethodsService {
 
   /**
    * Update store shipping method configuration
+   *
+   * Plan Despacho Economía — FASE 2 paso 8:
+   * `generates_transport_cost` y los defaults se validan con reglas cruzadas:
+   *   - Si genera costo de transporte, el ejecutor por defecto debe ser
+   *     coherente con `type`:
+   *       `own_fleet`      ⇒ `default_vehicle_id` (y opcional driver_user_id)
+   *       `carrier | third_party_provider` ⇒ `default_carrier_supplier_id`
+   *   - Si NO genera costo (none), no se exige ejecutor.
+   *   - Los ejecutores deben pertenecer a la misma tienda del método.
    */
   async updateStoreMethod(
     method_id: number,
@@ -322,10 +354,114 @@ export class StoreShippingMethodsService {
       throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
     }
 
+    // Resolver valores efectivos (mezcla dto + método existente) antes de validar.
+    const next_type =
+      update_dto.generates_transport_cost ?? method.generates_transport_cost;
+    const next_method_type = update_dto.name || method.type;
+    const next_default_vehicle =
+      update_dto.default_vehicle_id !== undefined
+        ? update_dto.default_vehicle_id
+        : method.default_vehicle_id;
+    const next_default_driver =
+      update_dto.default_driver_user_id !== undefined
+        ? update_dto.default_driver_user_id
+        : method.default_driver_user_id;
+    const next_default_carrier =
+      update_dto.default_carrier_supplier_id !== undefined
+        ? update_dto.default_carrier_supplier_id
+        : method.default_carrier_supplier_id;
+
+    if (next_type && next_type !== 'none') {
+      if (
+        next_method_type === 'own_fleet' &&
+        next_default_vehicle == null
+      ) {
+        throw new BadRequestException(
+          'Si el método es own_fleet con costo de transporte, debe tener default_vehicle_id',
+        );
+      }
+      if (
+        (next_method_type === 'carrier' ||
+          next_method_type === 'third_party_provider') &&
+        next_default_carrier == null
+      ) {
+        throw new BadRequestException(
+          'Si el método es carrier/third_party_provider con costo de transporte, debe tener default_carrier_supplier_id',
+        );
+      }
+    }
+
+    // Validar que los ejecutores pertenezcan al tenant actual.
+    if (next_default_vehicle != null) {
+      const v = await this.prisma.vehicles.findFirst({
+        where: { id: next_default_vehicle, store_id: method.store_id ?? undefined },
+      });
+      if (!v) {
+        throw new BadRequestException(
+          `El vehículo #${next_default_vehicle} no pertenece a esta tienda`,
+        );
+      }
+    }
+    if (next_default_carrier != null) {
+      const s = await this.prisma.suppliers.findFirst({
+        where: { id: next_default_carrier, store_id: method.store_id ?? undefined },
+      });
+      if (!s) {
+        throw new BadRequestException(
+          `El proveedor transportista #${next_default_carrier} no pertenece a esta tienda`,
+        );
+      }
+      if (s.supplier_category !== 'carrier') {
+        throw new BadRequestException(
+          `El proveedor #${next_default_carrier} debe tener supplier_category='carrier'`,
+        );
+      }
+    }
+
     return this.prisma.shipping_methods.update({
       where: { id: method_id },
       data: update_dto,
     });
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 2 paso 8.
+   * Política efectiva del método: merge del método con defaults globales de
+   * la tienda (`store_settings.dispatch`). El método tiene precedencia.
+   *
+   * GET /store/shipping/methods/:id/policy
+   */
+  async getEffectivePolicy(method_id: number) {
+    const method = await this.prisma.shipping_methods.findFirst({
+      where: { id: method_id, is_system: false },
+    });
+    if (!method) {
+      throw new VendixHttpException(ErrorCodes.SHIP_FIND_001);
+    }
+
+    const store_id = method.store_id;
+    const settings = store_id
+      ? await this.prisma.store_settings.findFirst({
+          where: { store_id, section: 'dispatch' },
+        })
+      : null;
+    const defaults =
+      (settings?.settings as Record<string, unknown> | null) ?? {};
+
+    return {
+      method_id: method.id,
+      method_type: method.type,
+      collects_payment: method.collects_payment,
+      payment_timing: method.payment_timing,
+      generates_transport_cost: method.generates_transport_cost,
+      default_vehicle_id: method.default_vehicle_id,
+      default_driver_user_id: method.default_driver_user_id,
+      default_carrier_supplier_id: method.default_carrier_supplier_id,
+      cost_settlement_timing: method.cost_settlement_timing,
+      // Defaults globales como fallback explícito (lo usa el frontend cuando
+      // el método no define un campo).
+      store_defaults: defaults,
+    };
   }
 
   /**

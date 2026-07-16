@@ -9,6 +9,7 @@ import {
   EnableShippingMethodDto,
   UpdateStoreShippingMethodDto,
   ReorderShippingMethodsDto,
+  ShippingMethodEffectivePolicy,
 } from '../interfaces/shipping-methods.interface';
 import {
   ShippingZone,
@@ -92,6 +93,25 @@ export class ShippingMethodsService {
       .pipe(
         map((response) => response.data || response),
         catchError(this.handleError)
+      );
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 2 paso 8.
+   * Política efectiva del método (método + defaults globales de la tienda).
+   * El método delega a esta ruta cuando necesita resolver el ejecutor
+   * por defecto para una ruta DSD (paso 11/12).
+   */
+  getEffectivePolicy(
+    method_id: number,
+  ): Observable<ShippingMethodEffectivePolicy> {
+    return this.http
+      .get<any>(
+        `${this.api_base_url}/shipping-methods/${method_id}/policy`,
+      )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError),
       );
   }
 
