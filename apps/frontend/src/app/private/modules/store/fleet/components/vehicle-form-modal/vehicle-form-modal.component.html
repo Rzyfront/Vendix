@@ -36,7 +36,10 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <!-- Placa -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Placa *</label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">
+          Placa
+          <span [class.text-red-500]="isFieldInError('plate')" [class.text-text-secondary]="!isFieldInError('plate')">*</span>
+        </label>
         <input type="text" formControlName="plate" placeholder="ABC123" maxlength="20"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
         @if (form.get('plate')?.touched && form.get('plate')?.invalid) {
@@ -46,7 +49,10 @@
 
       <!-- Tipo -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Tipo <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">
+          Tipo
+          <span [class.text-red-500]="isFieldInError('type')" [class.text-text-secondary]="!isFieldInError('type')">*</span>
+        </label>
         <select formControlName="type"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
           @for (opt of type_options; track opt.value) {
@@ -60,7 +66,10 @@
 
       <!-- Marca -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Marca <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">
+          Marca
+          <span [class.text-red-500]="isFieldInError('brand')" [class.text-text-secondary]="!isFieldInError('brand')">*</span>
+        </label>
         <input type="text" formControlName="brand" placeholder="Chevrolet" maxlength="80"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
         @if (form.get('brand')?.touched && form.get('brand')?.invalid) {
@@ -70,7 +79,10 @@
 
       <!-- Modelo -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Modelo <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">
+          Modelo
+          <span [class.text-red-500]="isFieldInError('model_name')" [class.text-text-secondary]="!isFieldInError('model_name')">*</span>
+        </label>
         <input type="text" formControlName="model_name" placeholder="NHR / 2022" maxlength="80"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
         @if (form.get('model_name')?.touched && form.get('model_name')?.invalid) {
@@ -80,7 +92,10 @@
 
       <!-- Capacidad kg -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Capacidad (kg) <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">
+          Capacidad (kg)
+          <span [class.text-red-500]="isFieldInError('capacity_kg')" [class.text-text-secondary]="!isFieldInError('capacity_kg')">*</span>
+        </label>
         <input type="number" formControlName="capacity_kg" min="0" step="0.01" placeholder="0"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
         @if (form.get('capacity_kg')?.touched && form.get('capacity_kg')?.invalid) {
@@ -103,7 +118,10 @@
 
       <!-- Conductor principal -->
       <div>
-        <label class="block text-sm font-medium text-text-secondary mb-1">Conductor principal <span class="text-red-500">*</span></label>
+        <label class="block text-sm font-medium text-text-secondary mb-1">
+          Conductor principal
+          <span [class.text-red-500]="isFieldInError('primary_driver_id')" [class.text-text-secondary]="!isFieldInError('primary_driver_id')">*</span>
+        </label>
         <app-store-user-select
           formControlName="primary_driver_id"
           placeholder="Buscar conductor..."

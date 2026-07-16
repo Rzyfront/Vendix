@@ -91,6 +91,23 @@ export class VehicleFormModalComponent {
     this.backendErrors.set([]);
   }
 
+  /**
+   * Returns true when the form control for `fieldName` has been touched by
+   * the user AND is currently invalid. Used by the template to color the
+   * required-asterisk red only when the field is in an error state, leaving
+   * it black for fields that are merely required but not yet edited.
+   *
+   * Example visual states for a field with `Validators.required`:
+   *   - untouched + empty     → asterisk BLACK, no error message
+   *   - untouched + filled    → asterisk BLACK, no error message
+   *   - touched   + empty     → asterisk RED, error message visible
+   *   - touched   + filled    → asterisk BLACK (valid), no error message
+   */
+  isFieldInError(fieldName: string): boolean {
+    const control = this.form.get(fieldName);
+    return !!(control?.touched && control?.invalid);
+  }
+
   private buildForm(): FormGroup {
     return this.fb.group({
       plate: ['', [Validators.required, Validators.maxLength(20)]],
@@ -131,6 +148,14 @@ export class VehicleFormModalComponent {
   handleSubmit(): void {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
+      // markAllAsTouched only fires on FormGroup/FormControl children. The
+      // ng-select for primary_driver_id (StoreUserSelectComponent) wraps
+      // its own internal control; touching the FormControl from outside is
+      // not always enough to surface its error message. Force the touched
+      // event on each control via markAsTouched() to be explicit.
+      Object.keys(this.form.controls).forEach((key) => {
+        this.form.get(key)?.markAsTouched();
+      });
       return;
     }
     const raw = this.form.value;
