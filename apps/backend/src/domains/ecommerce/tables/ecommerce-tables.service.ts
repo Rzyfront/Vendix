@@ -1,7 +1,14 @@
-import { Injectable, Logger, ConflictException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  ConflictException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type Redis from 'ioredis';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { REDIS_CLIENT } from '@common/redis/redis.module';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { TablesService } from '../../store/tables/tables.service';
 import { TableSessionsService } from '../../store/tables/table-sessions.service';
@@ -30,6 +37,7 @@ export interface ResolveByTokenResult {
   table: { id: number; name: string };
   behavior: QrScanBehavior;
   auto_fire: boolean;
+  enable_table_checkout: boolean;
   session_id?: number;
 }
 
@@ -114,19 +122,22 @@ export class EcommerceTablesService {
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     private readonly sseService: NotificationsSseService,
     private readonly notificationsService: NotificationsService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   // ------------------------------------------------------------- settings
   /**
-   * Reads `restaurant.qr_scan_behavior` and `restaurant.qr_auto_fire`
-   * from `store_settings.settings` for the current store. Follows the
-   * same direct-read pattern as `CheckoutService.getCheckoutSettings`
-   * (checkout.service.ts:250) — avoids the heavy `getSettings()` path
-   * (which signs S3 URLs etc.) for a lightweight settings-block read.
+   * Reads `restaurant.qr_scan_behavior`, `restaurant.qr_auto_fire` and
+   * `restaurant.enable_table_checkout` from `store_settings.settings`
+   * for the current store. Follows the same direct-read pattern as
+   * `CheckoutService.getCheckoutSettings` (checkout.service.ts:250) —
+   * avoids the heavy `getSettings()` path (which signs S3 URLs etc.) for
+   * a lightweight settings-block read.
    */
   private async getQrSettings(): Promise<{
     behavior: QrScanBehavior;
     auto_fire: boolean;
+    enable_table_checkout: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -142,6 +153,7 @@ export class EcommerceTablesService {
     return {
       behavior: (restaurant.qr_scan_behavior as QrScanBehavior) ?? 'menu_only',
       auto_fire: !!restaurant.qr_auto_fire,
+      enable_table_checkout: !!restaurant.enable_table_checkout,
     };
   }
 
@@ -178,7 +190,8 @@ export class EcommerceTablesService {
       throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
     }
 
-    const { behavior, auto_fire } = await this.getQrSettings();
+    const { behavior, auto_fire, enable_table_checkout } =
+      await this.getQrSettings();
 
     let session_id: number | undefined;
 
@@ -221,6 +234,7 @@ export class EcommerceTablesService {
       table: { id: table.id, name: table.name },
       behavior,
       auto_fire,
+      enable_table_checkout,
       ...(session_id !== undefined && { session_id }),
     };
   }
@@ -721,5 +735,54 @@ export class EcommerceTablesService {
       data: { table_id: tableId, table_name: tableName },
       created_at: new Date().toISOString(),
     });
+  }
+
+  // --------------------------------------------------- active_devices (Redis)
+  /**
+   * Tracks active diner devices per `table_session` so the
+   * `session_closed` / `guest_count_changed` SSE handlers can know how
+   * many clients are still attached and decide whether to push a banner
+   * vs silently close the channel. Backed by a Redis Set
+   * `table_session:{id}:devices` with a 2h sliding safety TTL.
+   *
+   * `uuid` is the diner's anonymous device identifier sent on the SSE
+   * connection (GAP-7 device-id contract). `sadd` returns 1 the first
+   * time a uuid joins, 0 if it was already in the set — used by the
+   * SSE connect handler to fire a `guest_joined` event.
+   */
+  private async registerDevice(
+    sessionId: string | number,
+    uuid: string,
+  ): Promise<number> {
+    const key = `table_session:${sessionId}:devices`;
+    const added = await this.redis.sadd(key, uuid);
+    await this.redis.expire(key, 7200);
+    return added;
+  }
+
+  /**
+   * Removes a diner device from the active set on SSE close / reconnect
+   * mismatch. `srem` returns 1 if the uuid was present, 0 otherwise —
+   * the SSE close handler uses this to skip a `guest_left` push when
+   * the device was already evicted (e.g. session-closed wipe).
+   */
+  private async unregisterDevice(
+    sessionId: string | number,
+    uuid: string,
+  ): Promise<number> {
+    return this.redis.srem(`table_session:${sessionId}:devices`, uuid);
+  }
+
+  /**
+   * Current device count for a session — used by the session-close path
+   * to decide whether to broadcast a final `session_closed` summary
+   * (count === 0) or just mark the session closed server-side without
+   * notifying (count > 0; the still-attached devices receive the event
+   * on the next snapshot tick).
+   */
+  private async getActiveDevicesCount(
+    sessionId: string | number,
+  ): Promise<number> {
+    return this.redis.scard(`table_session:${sessionId}:devices`);
   }
 }
