@@ -2162,6 +2162,7 @@ model purchase_orders {
   attachments           purchase_order_attachments[]
   payments              purchase_order_payments[]
   receptions            purchase_order_receptions[]
+  dispatch_notes        dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
 
   @@unique([organization_id, order_number])
 }
@@ -6907,6 +6908,12 @@ model dispatch_notes {
   invoice_id           Int?
   order_id             Int?
   supplier_id          Int?
+  // Order-first receipt bridge: when a purchase_receipt remisión is created
+  // from a purchase order, this links the two. The `received` event delegates
+  // stock-in/FIFO/UoM/IVA/accounting to PurchaseOrdersService.receive() (the
+  // canonical engine) instead of doing its own stock_in. Standalone receipts
+  // (no PO) leave this null and keep the EMIT-OWN stock_in path.
+  purchase_order_id    Int?
   related_dispatch_id  Int?
   from_location_id     Int?
   to_location_id       Int?
@@ -6940,6 +6947,7 @@ model dispatch_notes {
   invoice              invoices?              @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                orders?                @relation("orders_dispatch_notes", fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   supplier             suppliers?             @relation("dispatch_notes_supplier", fields: [supplier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  purchase_order       purchase_orders?       @relation("dispatch_notes_purchase_order", fields: [purchase_order_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   related_dispatch     dispatch_notes?        @relation("dispatch_notes_related", fields: [related_dispatch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   related_dispatchs    dispatch_notes[]       @relation("dispatch_notes_related")
   from_location        inventory_locations?   @relation("dispatch_notes_from_location", fields: [from_location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
@@ -6960,6 +6968,7 @@ model dispatch_notes {
   @@index([store_id, order_id])
   @@index([store_id, direction, subtype])
   @@index([supplier_id])
+  @@index([purchase_order_id])
   @@index([related_dispatch_id])
   @@index([from_location_id])
   @@index([to_location_id])

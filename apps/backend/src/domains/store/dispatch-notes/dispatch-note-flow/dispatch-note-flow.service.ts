@@ -176,14 +176,19 @@ export class DispatchNoteFlowService {
       dispatch_note.direction as DispatchNoteDirection,
     );
 
-    // Validate customer is active
-    const customer = await this.prisma.users.findUnique({
-      where: { id: dispatch_note.customer_id },
-      select: { id: true, state: true },
-    });
+    // Validate customer is active — only for customer-linked notes. Inbound
+    // purchase_receipt (supplier_id) and transfer_out/transfer_in (location)
+    // carry no customer_id; guarding avoids a Prisma `id must not be null`
+    // crash when confirming those bidirectional subtypes.
+    if (dispatch_note.customer_id) {
+      const customer = await this.prisma.users.findUnique({
+        where: { id: dispatch_note.customer_id },
+        select: { id: true, state: true },
+      });
 
-    if (!customer) {
-      throw new BadRequestException('El cliente asociado no existe');
+      if (!customer) {
+        throw new BadRequestException('El cliente asociado no existe');
+      }
     }
 
     const user_id = RequestContextService.getUserId();

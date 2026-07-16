@@ -12,6 +12,7 @@ import {
 } from '../../inventory/shared/services/stock-level-manager.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -58,6 +59,13 @@ export class DispatchNoteEventsListener {
     // evento contable son DISTINTOS de dispatch_note.delivered/received/voided
     // para NO re-disparar estos mismos handlers de stock (evita bucle).
     private readonly eventEmitter?: EventEmitter2,
+    // Order-first receipt bridge: when a purchase_receipt remisión carries a
+    // purchase_order_id, the `received` handler delegates the canonical
+    // stock-in / FIFO / UoM / IVA / accounting to PurchaseOrdersService.receive()
+    // instead of doing its own stock_in. Optional so the existing unit spec
+    // (3-arg construction) keeps compiling; when absent the delegation is a
+    // logged no-op (never a silent double stock-in).
+    private readonly purchaseOrdersService?: PurchaseOrdersService,
   ) {}
 
   /**
@@ -79,6 +87,104 @@ export class DispatchNoteEventsListener {
     }
   }
 
+  /**
+   * ORDER-FIRST receipt delegation. When a purchase_receipt remisión carries a
+   * purchase_order_id, the received goods must flow through the SINGLE canonical
+   * engine — PurchaseOrdersService.receive() — which owns stock-in, FIFO/CPP
+   * costing, UoM conversion (purchase_to_stock_factor), IVA lifecycle and the
+   * `purchase_order.received` accounting. We never call updateStock for this
+   * path (that would double the stock-in).
+   *
+   * Idempotency: receive() stamps its stock-in movements with reason
+   * 'Purchase order receipt' (no "remisión #N"), so the top-level
+   * inventory_movements guard cannot catch a re-fire of THIS path. We dedupe on
+   * purchase_order_receptions instead: every delegation writes the remisión ref
+   * into the reception notes, and a re-fire finds that reception and skips.
+   */
+  private async delegatePurchaseReceiptToPurchaseOrder(
+    dispatchNoteId: number,
+    purchaseOrderId: number,
+    items: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      dispatched_quantity: number;
+    }>,
+    dispatchNumber: string,
+  ): Promise<void> {
+    if (!this.purchaseOrdersService) {
+      this.logger.error(
+        `[received] Dispatch note #${dispatchNumber}: PurchaseOrdersService not injected — cannot delegate PO-linked receipt (PO #${purchaseOrderId}). Skipping to avoid a wrong/duplicate stock-in.`,
+      );
+      return;
+    }
+
+    // Idempotency dedupe on purchase_order_receptions (see method doc).
+    const receiptTag = `remisión #${dispatchNoteId}`;
+    const existingReception = await this.prisma
+      .withoutScope()
+      .purchase_order_receptions.findFirst({
+        where: {
+          purchase_order_id: purchaseOrderId,
+          notes: { contains: receiptTag },
+        },
+        select: { id: true },
+      });
+    if (existingReception) {
+      this.logger.warn(
+        `[received] Dispatch note #${dispatchNumber}: PO reception already exists for ${receiptTag} (reception #${existingReception.id}) — re-fire, skipping delegation`,
+      );
+      return;
+    }
+
+    // Re-derive each PO line id by matching product_id (+ variant) against the
+    // PO's lines (the remisión does not persist a per-line PO reference).
+    const poItems = await this.prisma
+      .withoutScope()
+      .purchase_order_items.findMany({
+        where: { purchase_order_id: purchaseOrderId },
+        select: { id: true, product_id: true, product_variant_id: true },
+      });
+
+    const receiveItems: Array<{ id: number; quantity_received: number }> = [];
+    for (const item of items) {
+      const poLine = poItems.find(
+        (p) =>
+          p.product_id === item.product_id &&
+          (p.product_variant_id ?? null) === (item.product_variant_id ?? null),
+      );
+      if (!poLine) {
+        this.logger.error(
+          `[received] Dispatch note #${dispatchNumber}: product #${item.product_id} not found on PO #${purchaseOrderId} — line skipped`,
+        );
+        continue;
+      }
+      // dispatched_quantity is in PURCHASE units (same basis the direct receive
+      // path uses); receive() applies purchase_to_stock_factor internally.
+      receiveItems.push({
+        id: poLine.id,
+        quantity_received: item.dispatched_quantity,
+      });
+    }
+
+    if (receiveItems.length === 0) {
+      this.logger.error(
+        `[received] Dispatch note #${dispatchNumber}: no PO lines resolved for PO #${purchaseOrderId} — nothing to receive`,
+      );
+      return;
+    }
+
+    await this.purchaseOrdersService.receive(purchaseOrderId, {
+      items: receiveItems,
+      // Stamp the remisión ref so the reception is deduped on re-fire (above)
+      // and the PO reception history is traceable back to the remisión document.
+      notes: `Recepción por ${receiptTag}`,
+    });
+
+    this.logger.log(
+      `[received] Dispatch note #${dispatchNumber}: delegated ${receiveItems.length} line(s) to PurchaseOrdersService.receive(PO #${purchaseOrderId})`,
+    );
+  }
+
   // ─── CONFIRMED ──────────────────────────────────────────────
   @OnEvent('dispatch_note.confirmed')
   async handleConfirmed(event: DispatchNoteEvent) {
@@ -97,11 +203,20 @@ export class DispatchNoteEventsListener {
         return;
       }
 
-      // Only reserve stock for standalone dispatch notes (no sales order and
-      // no order). When linked to a sales order OR an order, stock was already
-      // reserved during that order's confirmation — reserving again here would
-      // double-count the reservation.
-      if (!dispatch_note.sales_order_id && !dispatch_note.order_id) {
+      // Only reserve stock for OUTBOUND standalone dispatch notes (no sales
+      // order and no order). When linked to a sales order OR an order, stock was
+      // already reserved during that order's confirmation — reserving again here
+      // would double-count. INBOUND subtypes (purchase_receipt, transfer_in,
+      // customer_return) bring goods IN at `received`; reserving at confirm would
+      // lock phantom stock at the destination that `handleReceived` never
+      // releases. `!== 'inbound'` (not `=== 'outbound'`) so legacy rows with a
+      // null direction still reserve as before.
+      const isInbound = dispatch_note.direction === 'inbound';
+      if (
+        !isInbound &&
+        !dispatch_note.sales_order_id &&
+        !dispatch_note.order_id
+      ) {
         for (const item of dispatch_note.dispatch_note_items) {
           const location_id =
             item.location_id || dispatch_note.dispatch_location_id;
@@ -467,29 +582,45 @@ export class DispatchNoteEventsListener {
       let receivedCost = 0;
 
       if (subtype === 'purchase_receipt') {
-        // Standalone purchase receipt (no PO — PO delegation path doesn't
-        // reach here). Stock-in with movement_unit_cost = item unit_price.
-        for (const item of dispatch_note.dispatch_note_items) {
-          const location_id = resolveLocationId(item);
-          if (!location_id) continue;
+        if (dispatch_note.purchase_order_id != null) {
+          // ORDER-FIRST: delegate the canonical stock-in / FIFO / UoM / IVA /
+          // accounting to PurchaseOrdersService.receive(). This is the SINGLE
+          // stock-in path for PO-linked receipts — we do NOT call updateStock
+          // here (that would double-count). receive() also emits
+          // `purchase_order.received`, which drives the DR 1435 / CR 2205
+          // accounting, so the dispatch_note.accounting.received emit below is
+          // intentionally skipped (receivedCost stays 0 for this path).
+          await this.delegatePurchaseReceiptToPurchaseOrder(
+            dispatch_note.id,
+            dispatch_note.purchase_order_id,
+            dispatch_note.dispatch_note_items,
+            event.dispatch_number,
+          );
+        } else {
+          // Standalone purchase receipt (no PO). Stock-in with
+          // movement_unit_cost = item unit_price.
+          for (const item of dispatch_note.dispatch_note_items) {
+            const location_id = resolveLocationId(item);
+            if (!location_id) continue;
 
-          try {
-            const r = await this.stockLevelManager.updateStock({
-              product_id: item.product_id,
-              variant_id: item.product_variant_id ?? undefined,
-              location_id,
-              quantity_change: item.dispatched_quantity,
-              movement_type: 'stock_in',
-              reason: `Purchase receipt remisión #${dispatch_note.id}`,
-              user_id: userId ?? undefined,
-              movement_unit_cost: Number(item.unit_price) || undefined,
-              create_movement: true,
-            });
-            receivedCost += Number(r.cost_snapshot?.total_cost || 0);
-          } catch (err) {
-            this.logger.error(
-              `[received] Failed to stock_in for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
-            );
+            try {
+              const r = await this.stockLevelManager.updateStock({
+                product_id: item.product_id,
+                variant_id: item.product_variant_id ?? undefined,
+                location_id,
+                quantity_change: item.dispatched_quantity,
+                movement_type: 'stock_in',
+                reason: `Purchase receipt remisión #${dispatch_note.id}`,
+                user_id: userId ?? undefined,
+                movement_unit_cost: Number(item.unit_price) || undefined,
+                create_movement: true,
+              });
+              receivedCost += Number(r.cost_snapshot?.total_cost || 0);
+            } catch (err) {
+              this.logger.error(
+                `[received] Failed to stock_in for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
+              );
+            }
           }
         }
       } else if (subtype === 'transfer_in') {

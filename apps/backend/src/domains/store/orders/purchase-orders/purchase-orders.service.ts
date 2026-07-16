@@ -1406,6 +1406,37 @@ export class PurchaseOrdersService {
     const result = await this.prisma.$transaction(async (tx) => {
       // Create reception record
       const user_id = RequestContextService.getUserId();
+
+      // Guard: every incoming line must belong to THIS purchase order and must
+      // not exceed its pending quantity (ordered − already received). Without
+      // this, receive() blindly increments quantity_received, so an over-receipt
+      // (e.g. 99 against 1 ordered) is accepted and inflates stock, and a line
+      // id from another order could be received against this one. A throw here
+      // rolls back the whole transaction (no partial reception is persisted).
+      const poLines = await tx.purchase_order_items.findMany({
+        where: { purchase_order_id: id },
+        select: { id: true, quantity_ordered: true, quantity_received: true },
+      });
+      const poLineById = new Map<
+        number,
+        { id: number; quantity_ordered: number; quantity_received: number }
+      >(poLines.map((l) => [l.id, l]));
+      for (const item of dto.items) {
+        if (item.quantity_received <= 0) continue;
+        const poLine = poLineById.get(item.id);
+        if (!poLine) {
+          throw new BadRequestException(
+            `La línea ${item.id} no pertenece a esta orden de compra`,
+          );
+        }
+        const pending = poLine.quantity_ordered - poLine.quantity_received;
+        if (item.quantity_received > pending) {
+          throw new BadRequestException(
+            `No se puede recibir ${item.quantity_received} unidad(es) de la línea ${item.id}: solo quedan ${pending} pendiente(s) de ${poLine.quantity_ordered} pedida(s)`,
+          );
+        }
+      }
+
       const reception = await tx.purchase_order_receptions.create({
         data: {
           purchase_order_id: id,
@@ -1979,6 +2010,10 @@ export class PurchaseOrdersService {
           accounting_entity_id,
           total_amount: batch_amount,
           user_id: RequestContextService.getUserId(),
+          // ApEventsListener maps the scalar `supplier_id` into the required
+          // accounts_payable relation; without it createFromEvent receives
+          // `undefined` and the AP row is never created (no CxP on reception).
+          supplier_id: result.updated_po.supplier_id,
           // C4-followup: result.updated_po.suppliers ya viene completo del
           // include de la transacción — sin lookup adicional.
           supplier,

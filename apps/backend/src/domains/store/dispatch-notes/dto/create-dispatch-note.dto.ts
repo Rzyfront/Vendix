@@ -58,6 +58,19 @@ export class CreateDispatchNoteItemDto {
   @IsInt()
   @Min(1)
   sales_order_item_id?: number;
+
+  /**
+   * Order-first purchase-receipt line reference. When a purchase_receipt
+   * remisión is created from a purchase order, this optionally pins the exact
+   * `purchase_order_items.id` this line receives against. When omitted, the
+   * receive delegation re-derives it by matching product_id (+ variant) against
+   * the purchase order's lines. Declared here so `forbidNonWhitelisted` accepts
+   * it on the purchase-receipt payload.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  purchase_order_item_id?: number;
 }
 
 export class CreateDispatchNoteDto {

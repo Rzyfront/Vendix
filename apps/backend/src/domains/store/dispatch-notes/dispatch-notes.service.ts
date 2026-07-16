@@ -1236,33 +1236,61 @@ export class DispatchNotesService {
       dto.reason as dispatch_note_reason_enum,
     );
 
-    // If purchase_order_id is present, delegate to PurchaseOrdersService.receive.
-    // That service creates the reception record, increments PO quantities, and
-    // does the stock-in movement. We do NOT create a dispatch_note here — the
-    // PO reception is the canonical stock-in path.
+    // Order-first bridge: when purchase_order_id is present we CREATE the
+    // remisión as the DOCUMENT (draft, inbound, purchase_receipt) with the PO
+    // linked. We do NOT do any stock-in here — the canonical stock-in / FIFO /
+    // UoM / IVA / accounting all run later, ONCE, when the remisión is received:
+    // the `dispatch_note.received` listener delegates to
+    // PurchaseOrdersService.receive() (the canonical engine). This keeps the PO
+    // reception path as the single source of truth for stock and avoids the
+    // double stock-in that a here-and-now delegation would have caused.
+    let purchase_order_id: number | null = null;
+    let resolved_supplier_id = dto.supplier_id;
+    let po_location_id: number | null = null;
     if (dto.purchase_order_id) {
-      // Map dispatch items to ReceiveItemDto shape. The PO service expects
-      // { id: purchase_order_item_id, quantity_received: number }.
-      const receiveItems = dto.items.map((item) => ({
-        id: item.sales_order_item_id ?? item.product_id, // TODO: needs proper PO item mapping
-        quantity_received: item.dispatched_quantity,
-      }));
-
-      if (!this.purchaseOrdersService) {
-        throw new VendixHttpException(
-          ErrorCodes.DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER,
-          'PurchaseOrdersService is not available — cannot delegate to PO.receive',
+      // Validate the PO exists and is visible in this store (relationally
+      // scoped through location.store_id). Pull its lines so we can validate
+      // that every received line maps to a real PO line, and default the
+      // destination location + supplier from the PO (the PO is authoritative).
+      const purchase_order = await this.prisma.purchase_orders.findFirst({
+        where: { id: dto.purchase_order_id },
+        include: { purchase_order_items: true },
+      });
+      if (!purchase_order) {
+        throw new NotFoundException(
+          `Orden de compra #${dto.purchase_order_id} no encontrada`,
         );
       }
 
-      return this.purchaseOrdersService.receive(dto.purchase_order_id, {
-        items: receiveItems,
-        notes: dto.notes,
-      } as any);
+      // Validate each received line maps to a PO line — by explicit
+      // purchase_order_item_id when provided, else by product_id (+ variant).
+      // The received-side re-derivation (in the listener) uses the same match.
+      for (const item of dto.items) {
+        const poLine = item.purchase_order_item_id
+          ? purchase_order.purchase_order_items.find(
+              (p) => p.id === item.purchase_order_item_id,
+            )
+          : purchase_order.purchase_order_items.find(
+              (p) =>
+                p.product_id === item.product_id &&
+                (p.product_variant_id ?? null) ===
+                  (item.product_variant_id ?? null),
+            );
+        if (!poLine) {
+          throw new BadRequestException(
+            `El producto #${item.product_id} no pertenece a la orden de compra #${dto.purchase_order_id}`,
+          );
+        }
+      }
+
+      purchase_order_id = purchase_order.id;
+      resolved_supplier_id = purchase_order.supplier_id ?? dto.supplier_id;
+      po_location_id = purchase_order.location_id ?? null;
     }
 
-    // EMIT-OWN: standalone purchase receipt (no PO). Create the dispatch_note;
-    // the `received` event will fire stockLevelManager.updateStock.
+    // Both paths create the dispatch_note here. The `received` event decides the
+    // stock path (EMIT-OWN stock_in when purchase_order_id is null vs. PO.receive
+    // delegation when it is set) — see dispatch-note-events.listener.ts.
     const items: any[] = dto.items || [];
     const subtotal = items.reduce(
       (sum, item) =>
@@ -1275,10 +1303,13 @@ export class DispatchNotesService {
     );
     const grand_total = subtotal + total_tax;
 
-    // Resolve the receipt location
+    // Resolve the receipt location. For the order-first path the PO's own
+    // location is the canonical stock-in destination (PurchaseOrdersService.receive
+    // uses purchaseOrder.location_id), so fall back to it for display consistency.
     const receipt_location_id =
       dto.to_location_id ??
       items[0]?.location_id ??
+      po_location_id ??
       null;
 
     let retries = 3;
@@ -1302,7 +1333,8 @@ export class DispatchNotesService {
             // dispatch_notes_customer Restrict FK.
             customer_id: null,
             customer_name: null,
-            supplier_id: dto.supplier_id,
+            supplier_id: resolved_supplier_id,
+            purchase_order_id: purchase_order_id ?? undefined,
             related_dispatch_id: dto.related_dispatch_id ?? null,
             to_location_id: receipt_location_id ?? undefined,
             dispatch_location_id: receipt_location_id ?? undefined,
