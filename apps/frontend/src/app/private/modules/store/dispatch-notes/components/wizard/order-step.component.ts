@@ -22,8 +22,10 @@ import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.s
 /**
  * Order step (ref 2026-06-25, plan wizard remisión order-first).
  *
- * Lists the orders that are dispatchable (state=processing +
- * delivery_type ∈ {home_delivery, pickup}) and lets the operator pick one.
+ * Lists the orders that are dispatchable (state ∈ {processing,
+ * pending_payment} + delivery_type ∉ {direct_delivery, dine_in} — consumo en
+ * mesa y entrega en mostrador no generan remisión) and lets the operator pick
+ * one.
  * On selection the wizard service seeds:
  *   - `selectedOrder`
  *   - `customer` (from order.users)
@@ -62,7 +64,7 @@ import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.s
           [description]="
             searchPerformed()
               ? 'Intenta con otro término de búsqueda.'
-              : 'No hay órdenes en estado processing con delivery_type home_delivery o pickup.'
+              : 'No hay órdenes pendientes de despacho. Se excluyen las de consumo en mesa y entrega directa (no requieren remisión).'
           "
         ></app-empty-state>
       }
