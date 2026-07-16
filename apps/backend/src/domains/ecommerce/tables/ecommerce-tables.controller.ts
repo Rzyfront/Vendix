@@ -155,6 +155,20 @@ export class EcommerceTablesController {
   }
 
   /**
+   * Lists payment methods enabled for the current store, scoped to the
+   * table-token request. Public — diners use this to render the payment
+   * sheet. Filters out methods that should never surface to the mesa
+   * checkout flow (e.g. credit-on-account, layaway) by reusing the
+   * existing StorePaymentMethodsService.getEnabledForStore() allowlist.
+   */
+  @Get(':token/payment-methods')
+  @OptionalAuth()
+  async getPaymentMethods(@Param('token') token: string) {
+    const data = await this.service.getTablePaymentMethods(token);
+    return { success: true, data };
+  }
+
+  /**
    * GAP-3 — Real-time diner stream. Emits:
    *   1) A one-shot `{ type: 'snapshot', bill, active_devices }` warm-up
    *      (bill=null when no open check yet, so the banner can still attach).

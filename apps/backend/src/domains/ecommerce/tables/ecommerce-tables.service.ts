@@ -742,6 +742,38 @@ export class EcommerceTablesService {
    * The session is **NEVER** closed by this path — closing is reserved
    * for the staff-driven `applyPosPaymentToTableSession` flow (C3).
    */
+  async getTablePaymentMethods(token: string): Promise<
+    Array<{
+      id: number;
+      type: string;
+      name: string;
+      icon?: string;
+      requires_reference?: boolean;
+    }>
+  > {
+    const { store_id } = await this.resolveActiveSessionByToken(token);
+
+    // Reusa StorePaymentMethodsService.getEnabledForStore() — ya aplica
+    // el filtro de store_payment_methods.enabled + las políticas de la org.
+    // El controller del storefront recibe filas enmascaradas (custom_config
+    // no se filtra aquí porque no lo necesita el comensal).
+    const methods = await this.storePaymentMethodsService.getEnabledForStore();
+
+    return methods
+      .filter((m: any) =>
+        ['cash', 'bank_transfer', 'wompi', 'wallet'].includes(m.system_payment_methods?.type),
+      )
+      .map((m: any) => ({
+        id: m.id,
+        type: m.system_payment_methods.type,
+        name: m.display_name ?? m.system_payment_methods.name,
+        icon: m.system_payment_methods.icon,
+        requires_reference:
+          m.system_payment_methods.type === 'bank_transfer' ||
+          m.system_payment_methods.type === 'wompi',
+      }));
+  }
+
   async payTable(
     token: string,
     dto: PayTableDto,
