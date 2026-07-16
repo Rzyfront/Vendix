@@ -20,6 +20,11 @@ import {
   MenuNextAvailable,
   PublicMenu,
 } from '../../services/catalog.service';
+import {
+  formatNextAvailableDetailed,
+  NextAvailableDetailed,
+} from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../next-available-notice';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { TableContextService } from '../../services/table-context.service';
@@ -59,6 +64,7 @@ interface CartaBlock {
     ButtonComponent,
     BadgeComponent,
     IconComponent,
+    NextAvailableNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -104,6 +110,9 @@ interface CartaBlock {
                 >
                   Disponible {{ formatNext(dish.next_available) }}
                 </app-badge>
+                @if (nextAvailableFor(dish.next_available); as dishNext) {
+                  <app-next-available-notice [next]="dishNext" />
+                }
               } @else if (dish.product?.has_variants) {
                 <div class="dish-variant-badge">
                   {{ dish.product?.variant_count }} variantes
@@ -209,6 +218,9 @@ interface CartaBlock {
               <app-badge variant="warning">
                 Disponible {{ formatNext(fb.menu.next_available) }}
               </app-badge>
+              @if (nextAvailableFor(fb.menu.next_available); as fbNext) {
+                <app-next-available-notice [next]="fbNext" />
+              }
             </div>
             <div class="dishes-grid">
               @for (dish of fb.dishes; track dish.id) {
@@ -578,6 +590,11 @@ export class MenusShowcaseComponent implements OnInit {
     minutes: number;
   } | null>(null);
 
+  /** Store IANA timezone, used to compute the human "Vuelve el Sábado a las
+   *  08:00" labels. Comes from the `/ecommerce/catalog/menus` response so
+   *  we don't depend on TenantFacade being ready. */
+  private readonly storeTimezone = signal<string | null>(null);
+
   /** Product_ids actualmente en favoritos — fuente de verdad compartida con
    *  el home vía WishlistService (signal singleton). Alimenta el fill del
    *  corazón del dish-card sin que el padre pase `in_wishlist` por plato. */
@@ -650,10 +667,12 @@ export class MenusShowcaseComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.now.set(res.data?.now ?? null);
+          this.storeTimezone.set(res.data?.store_timezone ?? null);
           this.menus.set(res.data?.menus ?? []);
         },
         error: () => {
           this.now.set(null);
+          this.storeTimezone.set(null);
           this.menus.set([]);
         },
       });
@@ -701,6 +720,15 @@ export class MenusShowcaseComponent implements OnInit {
     const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     const day = days[na.day_of_week] ?? '';
     return `${day} ${na.start_time}`.trim();
+  }
+
+  /**
+   * Builds the structured payload expected by `<app-next-available-notice>` for
+   * a dish, menu or section. Returns null when `next_available` is missing or
+   * malformed (the notice block renders nothing in that case).
+   */
+  nextAvailableFor(na: MenuNextAvailable | null): NextAvailableDetailed | null {
+    return formatNextAvailableDetailed(na, this.storeTimezone(), new Date());
   }
 
   /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */

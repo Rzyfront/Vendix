@@ -25,6 +25,9 @@
             <span class="badge badge--off">
               Disponible {{ nextLabel(menu) }}
             </span>
+            @if (nextAvailableFor(menu); as menuNext) {
+              <app-next-available-notice [next]="menuNext" />
+            }
           } @else {
             <span class="badge badge--on">Disponible ahora</span>
           }
@@ -38,6 +41,9 @@
                 <span class="badge badge--off">
                   Disponible {{ nextLabel(section) }}
                 </span>
+                @if (nextAvailableFor(section); as sectionNext) {
+                  <app-next-available-notice [next]="sectionNext" />
+                }
               }
             </div>
 
@@ -70,6 +76,9 @@
                       >
                         Disponible {{ nextLabel(item) }}
                       </app-badge>
+                      @if (nextAvailableFor(item); as itemNext) {
+                        <app-next-available-notice [next]="itemNext" />
+                      }
                     } @else if (item.product?.has_variants) {
                       <div class="dish-variant-badge">
                         {{ item.product?.variant_count }} variantes

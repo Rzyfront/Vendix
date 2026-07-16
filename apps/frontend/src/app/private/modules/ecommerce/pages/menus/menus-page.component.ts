@@ -18,6 +18,11 @@ import {
   MenuSection,
   PublicMenu,
 } from '../../services/catalog.service';
+import {
+  formatNextAvailableDetailed,
+  NextAvailableDetailed,
+} from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../../components/next-available-notice';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
@@ -62,6 +67,7 @@ interface RenderMenu extends PublicMenu {
     BadgeComponent,
     IconComponent,
     ShareModalComponent,
+    NextAvailableNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './menus-page.component.html',
@@ -83,6 +89,10 @@ export class MenusPageComponent implements OnInit {
   readonly availabilityDisplay = signal<AvailabilityDisplay>('hide');
   readonly shipping_badge_enabled = signal(false);
   private readonly menus = signal<PublicMenu[]>([]);
+  /** Store IANA tz returned by `/ecommerce/catalog/menus`. Used for the
+   *  consolidated "next available" label + delta. Null until the response
+   *  arrives; falls back to the browser's local TZ in that case. */
+  private readonly storeTimezone = signal<string | null>(null);
 
   /** Product_ids en favoritos — fuente de verdad compartida vía
    *  WishlistService (signal singleton). Alimenta el fill del corazón. */
@@ -164,10 +174,12 @@ export class MenusPageComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.menus.set(res.data?.menus ?? []);
+          this.storeTimezone.set(res.data?.store_timezone ?? null);
           this.isLoading.set(false);
         },
         error: () => {
           this.menus.set([]);
+          this.storeTimezone.set(null);
           this.isLoading.set(false);
         },
       });
@@ -184,6 +196,20 @@ export class MenusPageComponent implements OnInit {
     if (!na) return 'pronto';
     const day = MenusPageComponent.DAY_LABELS[na.day_of_week] ?? '';
     return `${day} a las ${na.start_time}`.trim();
+  }
+
+  /** Structured payload for `<app-next-available-notice>` — used in templates
+   *  in addition to the legacy `nextLabel()` badge text. Returns null when
+   *  `next_available` is null (notice renders nothing). */
+  nextAvailableFor(
+    entity: { next_available: MenuNextAvailable | null } | null | undefined,
+  ): NextAvailableDetailed | null {
+    if (!entity) return null;
+    return formatNextAvailableDetailed(
+      entity.next_available,
+      this.storeTimezone(),
+      new Date(),
+    );
   }
 
   /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */

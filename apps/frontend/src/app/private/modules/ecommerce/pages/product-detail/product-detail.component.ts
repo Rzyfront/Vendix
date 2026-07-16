@@ -25,6 +25,8 @@ import {
   CatalogQuery,
   formatMenuNextAvailable,
 } from '../../services/catalog.service';
+import { formatNextAvailableDetailed } from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../../components/next-available-notice';
 import { CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
@@ -39,6 +41,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 
 @Component({
   selector: 'app-product-detail',
@@ -58,6 +61,7 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
     ShareModalComponent,
     EmptyStateComponent,
     CurrencyPipe,
+    NextAvailableNoticeComponent,
   ],
   template: `
     <div class="product-detail-page">
@@ -328,6 +332,9 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
                   <app-badge variant="warning">
                     Disponible {{ formatNextAvailable() }}
                   </app-badge>
+                  @if (nextAvailableDetailed(); as nextInfo) {
+                    <app-next-available-notice [next]="nextInfo" />
+                  }
                 } @else if (isService()) {
                   <span class="s-dot service"></span>
                   <span class="s-text">Servicio disponible</span>
@@ -1425,6 +1432,7 @@ export class ProductDetailComponent implements OnInit {
   private fb = inject(FormBuilder);
   private reviewsService = inject(EcommerceReviewsService);
   private priceResolver = inject(PriceResolverService);
+  private tenantFacade = inject(TenantFacade);
 
   // States
   product = signal<ProductDetail | null>(null);
@@ -1660,6 +1668,18 @@ export class ProductDetailComponent implements OnInit {
   formatNextAvailable(): string {
     return formatMenuNextAvailable(this.product()?.next_available ?? null);
   }
+
+  /** Structured payload for `<app-next-available-notice>`. Mirrors the
+   *  same TZ-aware logic used by `menus-showcase` and `menus-page`. */
+  readonly nextAvailableDetailed = computed(() => {
+    const p = this.product();
+    if (!p || p.is_available_now !== false) return null;
+    const na = p.next_available ?? null;
+    if (!na) return null;
+    const tz =
+      this.tenantFacade.domainConfig()?.customConfig?.ecommerce?.general?.timezone ?? null;
+    return formatNextAvailableDetailed(na, tz, new Date());
+  });
 
   // Quick View Modal
   readonly quickViewOpen = model<boolean>(false);

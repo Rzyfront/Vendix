@@ -1,7 +1,18 @@
-import { Component, ChangeDetectionStrategy, inject, input, output, signal } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
+import { formatNextAvailableDetailed } from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../next-available-notice';
 import { TableContextService } from '../../services/table-context.service';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -13,7 +24,15 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent, QuantityControlComponent],
+  imports: [
+    RouterModule,
+    IconComponent,
+    CurrencyPipe,
+    ButtonComponent,
+    BadgeComponent,
+    QuantityControlComponent,
+    NextAvailableNoticeComponent,
+  ],
   template: `
     <article class="product-card" [class.product-card--off]="product().is_available_now === false" (click)="onCardClick($event)">
       <div class="product-image">
@@ -154,6 +173,12 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
               <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
             }
           </div>
+          <!-- Inline "next opening" block — surfaces WHEN the off-schedule
+               dish will be available again. Closes the disabled-without-
+               context UX gap (bug #2). -->
+          @if (nextAvailableDetailed(); as nextInfo) {
+            <app-next-available-notice [next]="nextInfo" />
+          }
         </div>
       </div>
     </article>
@@ -579,6 +604,23 @@ export class ProductCardComponent {
   private currencyService = inject(CurrencyFormatService);
   public readonly tableContext = inject(TableContextService);
   private toastService = inject(ToastService);
+  private tenantFacade = inject(TenantFacade);
+
+  /**
+   * Detailed `next_available` (label + delta + target Date) for the off-schedule
+   * inline notice. Reads the store TZ from `domainConfig.customConfig.general`.
+   * Returns null when the product has no `next_available` (legacy backend or
+   * non-restaurant product) so the notice renders nothing.
+   */
+  readonly nextAvailableDetailed = computed(() => {
+    const product = this.product();
+    if (product.is_available_now !== false) return null;
+    const na = product.next_available;
+    if (!na) return null;
+    const tz =
+      this.tenantFacade.domainConfig()?.customConfig?.ecommerce?.general?.timezone ?? null;
+    return formatNextAvailableDetailed(na, tz, new Date());
+  });
 
   /**
    * Quantity to add to the table tab (QR open_tab). Signal-based so the
