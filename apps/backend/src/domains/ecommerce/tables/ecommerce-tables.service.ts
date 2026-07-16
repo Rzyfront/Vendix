@@ -789,7 +789,7 @@ export class EcommerceTablesService {
    * time a uuid joins, 0 if it was already in the set — used by the
    * SSE connect handler to fire a `guest_joined` event.
    */
-  private async registerDevice(
+  async registerDevice(
     sessionId: string | number,
     uuid: string,
   ): Promise<number> {
@@ -805,7 +805,7 @@ export class EcommerceTablesService {
    * the SSE close handler uses this to skip a `guest_left` push when
    * the device was already evicted (e.g. session-closed wipe).
    */
-  private async unregisterDevice(
+  async unregisterDevice(
     sessionId: string | number,
     uuid: string,
   ): Promise<number> {
@@ -819,7 +819,7 @@ export class EcommerceTablesService {
    * notifying (count > 0; the still-attached devices receive the event
    * on the next snapshot tick).
    */
-  private async getActiveDevicesCount(
+  async getActiveDevicesCount(
     sessionId: string | number,
   ): Promise<number> {
     return this.redis.scard(`table_session:${sessionId}:devices`);
