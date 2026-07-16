@@ -6,6 +6,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { MembershipPlansService } from '../membership-plans/membership-plans.service';
 import { CustomersService } from '../customers/customers.service';
 import { MembershipsService } from './memberships.service';
@@ -209,7 +210,7 @@ export class MemberBulkScannerService {
       .withoutScope()
       .membership_plans.findMany({
         where: { store_id: storeId },
-        select: { id: true, code: true, name: true },
+        select: { id: true, code: true, name: true, duration_days: true },
         take: 500,
       });
 
@@ -222,6 +223,35 @@ export class MemberBulkScannerService {
     planMatches.forEach((pm) => {
       planRefByIndex.set(pm.ref_index, pm.matched_plan_id ?? null);
     });
+
+    // Map detected_plans index → period length (days). Prefer the MATCHED
+    // plan's real `duration_days`; fall back to the value the AI extracted;
+    // default 30. Used to INFER a member's missing start/end date.
+    const planDurationByIndex = new Map<number, number>();
+    plansInput.forEach((p, idx) => {
+      const matchedId = planRefByIndex.get(idx);
+      const matched = matchedId
+        ? existingPlans.find((e) => e.id === matchedId)
+        : null;
+      const dur =
+        matched?.duration_days ??
+        (typeof p?.duration_days === 'number' ? p.duration_days : null) ??
+        30;
+      planDurationByIndex.set(idx, dur > 0 ? dur : 30);
+    });
+
+    // Resolve the store timezone ONCE and derive the current year in it. The
+    // source rosters omit the year ("4 de julio"); the model then invents one
+    // (usually a past year → everything imported as `expired`). We inject the
+    // store-local current year and let the status rule flag anything already
+    // elapsed as `expired` (decisión de producto: nunca rodar al año siguiente).
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const currentYear = Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric',
+      }).format(new Date()),
+    );
 
     // ── Member analysis ───────────────────────────────────────────────────
     const today = new Date();
@@ -262,21 +292,35 @@ export class MemberBulkScannerService {
         }
       }
 
-      // 2) Plan resolution — match by `plan_name` against detected_plans.
+      // 2) Plan resolution — match `plan_name` against detected_plans with the
+      //    accent/plural-tolerant helper. The old raw `===` missed "Élite" vs
+      //    "elite" and "Estudiante" vs "Estudiantes", so members were left
+      //    without a plan even when the plan DID match against the DB. Derive
+      //    both the plan ref and the period length in a single lookup.
       let planRef: number | null = null;
+      let durationDays = 30;
       if (raw.plan_name) {
-        const idx = plansInput.findIndex(
-          (p) => p?.name && p.name === raw.plan_name,
-        );
+        const idx = this.findDetectedPlanIndex(raw.plan_name, plansInput);
         if (idx >= 0) {
           planRef = planRefByIndex.get(idx) ?? null;
+          durationDays = planDurationByIndex.get(idx) ?? 30;
         }
       }
 
-      // 3) Status & dates per Decisión 2.
-      const { status, periodStart, periodEnd } = this.resolveStatusAndDates(
+      // 3) Status & dates: inject the current year when the source omitted it
+      //    and infer the missing start/end from the plan's duration.
+      const {
+        status,
+        periodStart,
+        periodEnd,
+        yearInjected,
+        startInferred,
+        endInferred,
+      } = this.resolveMembershipDates(
         raw.membership_start_date,
         raw.membership_end_date,
+        durationDays,
+        currentYear,
         today,
       );
 
@@ -284,6 +328,23 @@ export class MemberBulkScannerService {
       //    soft — the user can fix in the modal).
       const errors: string[] = [];
       const warnings: string[] = [];
+
+      // Date-inference advisories (soft): the user can override in the modal.
+      if (yearInjected) {
+        warnings.push(
+          `El año no venía en el archivo; se asumió ${currentYear}. Verifica la fecha.`,
+        );
+      }
+      if (startInferred) {
+        warnings.push(
+          `Fecha de inicio estimada (vencimiento − ${durationDays} días).`,
+        );
+      }
+      if (endInferred) {
+        warnings.push(
+          `Fecha de vencimiento estimada (inicio + ${durationDays} días).`,
+        );
+      }
 
       const hasName = !!(raw.first_name && raw.first_name.trim());
       const hasDoc = !!(raw.document_number && raw.document_number.trim());
@@ -700,6 +761,38 @@ export class MemberBulkScannerService {
   }
 
   /**
+   * Enlaza el `plan_name` de un socio contra `detected_plans[]` de forma
+   * insensible a tildes/mayúsculas y tolerante a singular/plural. Reutiliza
+   * `normalizeForMatch` (el mismo folding Unicode que usa `matchPlan`), de modo
+   * que "Élite"/"elite" y "Estudiante"/"Estudiantes" enlacen. El `===` crudo
+   * anterior fallaba en ambos casos y dejaba al socio sin plan aunque el plan
+   * sí hubiera matcheado contra la BD.
+   *
+   * Tier 1: igualdad normalizada. Tier 2: contains bidireccional (para
+   * singular/plural). Devuelve el índice en `plans` o -1 si no hay enlace.
+   */
+  private findDetectedPlanIndex(
+    planName: string | null | undefined,
+    plans: Array<{ name?: string | null }>,
+  ): number {
+    const target = this.normalizeForMatch(planName);
+    if (!target) return -1;
+
+    // Tier 1: igualdad normalizada.
+    let idx = plans.findIndex(
+      (p) => p?.name && this.normalizeForMatch(p.name) === target,
+    );
+    if (idx >= 0) return idx;
+
+    // Tier 2: contains bidireccional (Estudiante ⊂ Estudiantes).
+    idx = plans.findIndex((p) => {
+      const c = this.normalizeForMatch(p?.name);
+      return !!c && (c.includes(target) || target.includes(c));
+    });
+    return idx;
+  }
+
+  /**
    * Replicate the 3-tier scoring from `InvoiceScannerService.matchSupplier`
    * against the in-memory list of plans for this store. Returns the best
    * match and the top-5 candidates for the UI's "mapear a existente" picker.
@@ -841,49 +934,122 @@ export class MemberBulkScannerService {
   }
 
   /**
-   * Resolve initial status and dates per Decisión 2:
-   *   period_end >= today  → 'active'   + dates preserved
-   *   period_end <  today  → 'expired'  + dates preserved
-   *   no period_end        → 'pending_payment' + period_end = null
+   * Resuelve status y fechas de la membresía inyectando el año actual (tz de
+   * la tienda) cuando la fuente lo omite, e infiriendo la fecha faltante a
+   * partir de la duración del plan:
+   *   ambas       → se usan tal cual
+   *   solo inicio → fin    = inicio + durationDays
+   *   solo fin    → inicio = fin    − durationDays
+   *   ninguna     → pending_payment
    *
-   * Comparison against `today` (normalized to 00:00 local) avoids the
-   * off-by-one-day trap when comparing a `YYYY-MM-DD` string against
-   * `new Date()` (which would default to 00:00 UTC and skew by 5h in
-   * Colombian timezone).
+   * Política de año (decisión de producto): SIEMPRE se usa el año actual; si la
+   * fecha resultante ya pasó, la membresía queda `expired` + warning (nunca se
+   * rueda al año siguiente). El status compara el fin (mediodía local) contra
+   * `today` (00:00 local) para evitar el off-by-one de UTC.
    */
-  private resolveStatusAndDates(
-    startDateStr: string | null,
-    endDateStr: string | null,
+  private resolveMembershipDates(
+    startRaw: string | null,
+    endRaw: string | null,
+    durationDays: number,
+    currentYear: number,
     today: Date,
   ): {
     status: 'active' | 'expired' | 'pending_payment';
     periodStart: string | null;
     periodEnd: string | null;
+    yearInjected: boolean;
+    startInferred: boolean;
+    endInferred: boolean;
   } {
-    const periodStart = startDateStr ?? null;
+    const s = this.injectYear(startRaw, currentYear);
+    const e = this.injectYear(endRaw, currentYear);
 
-    if (!endDateStr) {
+    let start: Date;
+    let end: Date;
+    let startInferred = false;
+    let endInferred = false;
+
+    if (s && e) {
+      start = s.date;
+      end = e.date;
+    } else if (s && !e) {
+      start = s.date;
+      end = this.addDays(s.date, durationDays);
+      endInferred = true;
+    } else if (!s && e) {
+      end = e.date;
+      start = this.addDays(e.date, -durationDays);
+      startInferred = true;
+    } else {
+      // Ninguna fecha utilizable — el socio queda pendiente de cobro.
       return {
         status: 'pending_payment',
-        periodStart,
+        periodStart: null,
         periodEnd: null,
+        yearInjected: false,
+        startInferred: false,
+        endInferred: false,
       };
     }
 
-    const endDate = new Date(endDateStr);
-    if (!Number.isFinite(endDate.getTime())) {
-      // Unparseable — fall back to pending_payment so the user fixes it.
-      return {
-        status: 'pending_payment',
-        periodStart,
-        periodEnd: null,
-      };
+    const yearInjected = (s?.injected ?? false) || (e?.injected ?? false);
+    const status: 'active' | 'expired' =
+      end.getTime() >= today.getTime() ? 'active' : 'expired';
+
+    return {
+      status,
+      periodStart: this.toIsoDate(start),
+      periodEnd: this.toIsoDate(end),
+      yearInjected,
+      startInferred,
+      endInferred,
+    };
+  }
+
+  /**
+   * Parsea el prefijo `YYYY-MM-DD` del string. Cuando el año es un centinela
+   * (`0000`, `0`) o de dos dígitos (< 100), lo reemplaza por `currentYear` y
+   * marca `injected=true`. Construye la Date en HORA LOCAL a mediodía
+   * (`new Date(y, m-1, d, 12)`) para que el status compare contra `today`
+   * (00:00 local) sin el off-by-one de UTC. Devuelve `null` si no parsea.
+   */
+  private injectYear(
+    dateStr: string | null,
+    currentYear: number,
+  ): { date: Date; injected: boolean } | null {
+    if (!dateStr) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
+    if (!m) return null;
+
+    let year = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10);
+    const day = parseInt(m[3], 10);
+    if (!Number.isFinite(month) || !Number.isFinite(day)) return null;
+
+    let injected = false;
+    if (!Number.isFinite(year) || year < 100) {
+      year = currentYear;
+      injected = true;
     }
 
-    if (endDate.getTime() >= today.getTime()) {
-      return { status: 'active', periodStart, periodEnd: endDateStr };
-    }
-    return { status: 'expired', periodStart, periodEnd: endDateStr };
+    const date = new Date(year, month - 1, day, 12, 0, 0);
+    if (!Number.isFinite(date.getTime())) return null;
+    return { date, injected };
+  }
+
+  /** `YYYY-MM-DD` a partir de los componentes LOCALES de la Date. */
+  private toIsoDate(d: Date): string {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  /** Suma (o resta, con `n` negativo) días a una Date preservando la hora. */
+  private addDays(d: Date, n: number): Date {
+    const d2 = new Date(d);
+    d2.setDate(d2.getDate() + n);
+    return d2;
   }
 
   private async findCustomerByDocumentInOrg(
