@@ -30,6 +30,7 @@ import {
   AccessLogQueryDto,
   AdjustOccupancyDto,
   RegisterExitDto,
+  EnrollmentPingDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -44,9 +45,11 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   - POST /credentials        → store:membership_access:create
  *   - PATCH /credentials/:id   → store:membership_access:update
  *   - DELETE /credentials/:id  → store:membership_access:update (soft baja)
+ *   - POST   /credentials/:id/archive → store:membership_access:update (soft archive: hide + free partial unique slot)
  *   - GET  /occupancy          → store:membership_access:read
  *   - POST /exit               → store:membership_access:create (occupancy −1)
  *   - PATCH /occupancy/adjust  → store:membership_access:update (manual delta)
+ *   - POST /enrollment-ping    → store:membership_access:create (live fingerprint enrollment fan-out)
  */
 @Controller('store/memberships/access')
 @UseGuards(PermissionsGuard)
@@ -111,10 +114,38 @@ export class MembershipAccessController {
       filter(
         (payload: any) =>
           payload?.type === 'membership-access' ||
-          payload?.type === 'occupancy',
+          payload?.type === 'occupancy' ||
+          payload?.type === 'enrollment',
       ),
       map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
+  }
+
+  /**
+   * POST /store/memberships/access/enrollment-ping
+   *
+   * Endpoint the biometric device (or a stub integration) calls when it
+   * reads a raw fingerprint template. The backend just fans out an
+   * `enrollment` SSE event to current subscribers so the credential-creation
+   * modal can capture `external_ref` in real time.
+   *
+   * NOT a verification — we do not check the fingerprint against any
+   * existing credential. That happens later when the user assigns the
+   * captured template to a credential.
+   */
+  @Post('enrollment-ping')
+  @Permissions('store:membership_access:create')
+  async enrollmentPing(@Body() dto: EnrollmentPingDto) {
+    try {
+      const storeId = this.requireStoreId();
+      await this.service.publishEnrollment(storeId, dto.external_ref, dto.device_id);
+      return this.responseService.success(
+        { published: true },
+        'Enrollment ping publicado',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al publicar enrollment ping');
+    }
   }
 
   /**
@@ -240,6 +271,32 @@ export class MembershipAccessController {
       );
     } catch (error: any) {
       return this.fail(error, 'Error al dar de baja la credencial');
+    }
+  }
+
+  /**
+   * Soft-archive a credential — hides it from listings AND frees the partial
+   * unique slot (`membership_access_cred_active_uq`) so the operator can
+   * re-issue a credential with the same (store, customer, type). Atomic via
+   * the service: sets BOTH `deleted_at = now()` AND `is_active = false` in a
+   * single UPDATE.
+   *
+   * Differs from `deactivateCredential` (DELETE /credentials/:id) which only
+   * flips `is_active = false` and keeps the row visible to listings/history
+   * queries. Archive is the irreversible-feeling "borrar del catálogo" action;
+   * deactivate is the reversible "suspender".
+   */
+  @Post('credentials/:id/archive')
+  @Permissions('store:membership_access:update')
+  async archiveCredential(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.service.archiveCredential(id);
+      return this.responseService.success(
+        result,
+        'Credencial archivada exitosamente',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al archivar la credencial');
     }
   }
 }
