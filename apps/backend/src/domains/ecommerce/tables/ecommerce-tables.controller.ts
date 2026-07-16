@@ -6,6 +6,7 @@ import {
   Logger,
   MessageEvent,
   Param,
+  ParseIntPipe,
   Post,
   Query,
   Req,
@@ -25,6 +26,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
   CallWaiterDto,
+  PayTableDto,
   RequestBillDto,
   RequestSplitDto,
   SetGuestCountDto,
@@ -453,14 +455,66 @@ export class EcommerceTablesController {
     return { success: true, data };
   }
 
+  /**
+   * C2 — Diner initiates payment of the open session's bill. Honors the
+   * `restaurant.enable_table_checkout` gate (see `EcommerceTablesService.
+   * payTable`); flows:
+   *   - `cash` / `bank_transfer` → returns `{ payment_id, state:
+   *     'pending' }` + pushes `payment.pending` onto the diner stream.
+   *   - `wompi` → returns the same shape but adds `next: 'wompi_widget'`
+   *     and the `wompi_data` payload the storefront renders.
+   *
+   * Auth: `@OptionalAuth` — anonymous comensales are the common case,
+   * but a mesero who logged into the storefront can also fire this
+   * (the QR token is the implicit auth). Store context is resolved
+   * by `DomainResolverMiddleware`.
+   */
+  @Post(':token/pay')
+  @OptionalAuth()
+  async pay(
+    @Param('token') token: string,
+    @Body() dto: PayTableDto,
+  ) {
+    const userId = RequestContextService.getUserId() ?? undefined;
+    const data = await this.service.payTable(token, dto, userId);
+    return { success: true, data };
+  }
+
+  /**
+   * C2 — Diner re-enters from the Wompi widget callback and wants the
+   * canonical terminal state. Mirrors `CheckoutService.confirmWompiPayment`
+   * but scoped to the table-pay flow; on `succeeded`/`captured` also
+   * pushes `payment.confirmed` onto the diner stream + fires the staff
+   * notification.
+   *
+   * Idempotent — calling twice on a terminal payment just returns the
+   * persisted state.
+   */
+  @Post(':token/pay/confirm')
+  @OptionalAuth()
+  async confirmPay(
+    @Param('token') token: string,
+    @Body() body: { payment_id: number },
+  ) {
+    const data = await this.service.confirmWompiTablePayment(
+      token,
+      body.payment_id,
+    );
+    return { success: true, data };
+  }
+
   // -------------------------------------------------- diner projection
   /**
    * Whitelist of diner-side lifecycle event types (these are NOT KDS
    * events — they describe the comensal's view: who's at the table, what
-   * was added, party size changes). Each event is filtered by
-   * `data.table_session_id === binding.session_id` (with a fallback to
-   * `data.session_id` for the `comensal_*` pair — producer may emit
-   * either field name).
+   * was added, party size changes, payment state). Each event is
+   * filtered by `data.table_session_id === binding.session_id` (with a
+   * fallback to `data.session_id` for the `comensal_*` pair — producer
+   * may emit either field name).
+   *
+   * `payment.pending` / `payment.confirmed` are added in C5 so the
+   * banner can flip to "Pago pendiente" / "Pago confirmado" without a
+   * refetch (see `payTable` / `confirmWompiTablePayment`).
    */
   private static readonly DINER_LIFECYCLE_EVENTS: ReadonlySet<string> =
     new Set([
@@ -468,6 +522,8 @@ export class EcommerceTablesController {
       'comensal_left',
       'item_added',
       'guest_count_changed',
+      'payment.pending',
+      'payment.confirmed',
     ]);
 
   /**
@@ -477,8 +533,9 @@ export class EcommerceTablesController {
    *   - `bill.requested` events whose `data.table_session_id` equals the
    *     bound session.
    *   - Diner-side lifecycle events (`comensal_joined|left`, `item_added`,
-   *     `guest_count_changed`) whose `data.table_session_id` (or
-   *     `data.session_id`) equals the bound session.
+   *     `guest_count_changed`, `payment.pending`, `payment.confirmed`)
+   *     whose `data.table_session_id` (or `data.session_id`) equals the
+   *     bound session.
    * Everything else — including all other notification types and any
    * event for a different table — is dropped.
    */
@@ -515,11 +572,13 @@ export class EcommerceTablesController {
    * the diner only receives presentational dish state.
    *
    * For diner-side lifecycle events (`comensal_joined|left`,
-   * `item_added`, `guest_count_changed`) only fields present in `ev.data`
-   * are forwarded; absent fields are simply omitted (no `null` padding).
+   * `item_added`, `guest_count_changed`, `payment.pending`,
+   * `payment.confirmed`) only fields present in `ev.data` are
+   * forwarded; absent fields are simply omitted (no `null` padding).
    * The projected payload is intentionally minimal:
    *   `{ type, table_session_id, active_devices?, device_id?,
-   *      item_count?, subtotal?, guest_count?, payment_state?, ts }`
+   *      item_count?, subtotal?, guest_count?, payment_state?,
+   *      payment_id?, amount?, method?, ts }`
    */
   private projectForDiner(ev: Record<string, unknown>): Record<string, unknown> {
     const type = typeof ev?.type === 'string' ? (ev.type as string) : '';
@@ -545,6 +604,9 @@ export class EcommerceTablesController {
         'subtotal',
         'guest_count',
         'payment_state',
+        'payment_id',
+        'amount',
+        'method',
       ];
       for (const key of allowedKeys) {
         if (raw[key] !== undefined) {

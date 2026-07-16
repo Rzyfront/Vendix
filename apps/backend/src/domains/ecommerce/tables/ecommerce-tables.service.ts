@@ -17,9 +17,19 @@ import { KitchenFireService } from '../../store/kitchen-fire/kitchen-fire.servic
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { NotificationsSseService } from '../../store/notifications/notifications-sse.service';
 import { NotificationsService } from '../../store/notifications/notifications.service';
+import { StorePaymentMethodsService } from '../../store/payments/services/store-payment-methods.service';
+import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
+import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
+import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
+import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
-import { CallWaiterDto, RequestBillDto, RequestSplitDto } from './dto';
+import {
+  CallWaiterDto,
+  PayTableDto,
+  RequestBillDto,
+  RequestSplitDto,
+} from './dto';
 
 /**
  * QR-por-mesa scan behavior — mirrors the `restaurant.qr_scan_behavior`
@@ -77,6 +87,30 @@ export interface BillView {
 }
 
 /**
+ * Result for the diner-side pay endpoint. Mirrors the response shape of
+ * `POST /ecommerce/checkout/prepare-wompi-payment` (so the storefront can
+ * reuse its widget plumbing) but collapses manual methods to a flat
+ * `{ payment_id, state }` payload — no Wompi widget data is needed for
+ * `cash` / `bank_transfer`.
+ */
+export interface PayTableResult {
+  payment_id: number;
+  state: string;
+  next?: 'wompi_widget';
+  wompi_data?: {
+    public_key: string;
+    currency: string;
+    amount_in_cents: number;
+    reference: string;
+    signature_integrity: string;
+    redirect_url: string;
+    acceptance_token: string;
+    accept_personal_auth: string;
+    customer_email: string;
+  };
+}
+
+/**
  * Server-derived binding for the diner SSE stream. Both ids are resolved
  * from the `public_token` (never from the client), so a diner can only
  * ever see KDS/bill events for their own table's active order.
@@ -122,6 +156,9 @@ export class EcommerceTablesService {
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     private readonly sseService: NotificationsSseService,
     private readonly notificationsService: NotificationsService,
+    private readonly storePaymentMethodsService: StorePaymentMethodsService,
+    private readonly paymentEncryptionService: PaymentEncryptionService,
+    private readonly wompiClientFactory: WompiClientFactory,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -677,7 +714,520 @@ export class EcommerceTablesService {
     return { ok: true };
   }
 
-  // ----------------------------------------------------------- auto-fire
+  // --------------------------------------------------------- table payment
+  /**
+   * Diner-side payment entry — registers the diner's intent to pay the
+   * active session's bill via the chosen store payment method.
+   *
+   * Gate:
+   *   - `restaurant.enable_table_checkout` MUST be true. When the flag
+   *     is off (typical for stores that want a mesero to handle
+   *     payment from the POS), the request is rejected with 409 +
+   *     `TABLE_INVALID_STATUS` carrying a descriptive message.
+   *
+   * Method dispatch:
+   *   - `cash` / `bank_transfer` → `payments` row with `state='pending'`
+   *     (no cash register movement, no accounting entry, no session
+   *     close). The staff notification carries the reference so the
+   *     mesero can reconcile manually. Pushes `payment.pending` onto
+   *     the per-store SSE subject so the diner's banner flips to
+   *     "Pago pendiente" immediately.
+   *   - `wompi` → `payments` row with `state='pending'` + the Wompi
+   *     widget payload (`public_key`, integrity signature, acceptance
+   *     tokens). The storefront renders the Wompi Widget just like the
+   *     regular ecommerce checkout; the canonical confirm lands via
+   *     the webhook (C4, out of scope), with the `/pay/confirm` route
+   *     as a force-poll fallback.
+   *
+   * The session is **NEVER** closed by this path — closing is reserved
+   * for the staff-driven `applyPosPaymentToTableSession` flow (C3).
+   */
+  async payTable(
+    token: string,
+    dto: PayTableDto,
+    userId?: number,
+  ): Promise<PayTableResult> {
+    const { store_id, table, session } =
+      await this.resolveActiveSessionByToken(token);
+
+    // Gate — only stores that opted in to diner self-checkout expose
+    // this endpoint. `enable_table_checkout` is a per-store switch in
+    // `restaurant.*` (see settings-schemas.dto.ts).
+    const { enable_table_checkout } = await this.getQrSettings();
+    if (!enable_table_checkout) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_INVALID_STATUS,
+        'El cobro desde la mesa está deshabilitado. Solicita al mesero que procese el pago.',
+      );
+    }
+
+    // Resolve the chosen payment method. `findOne` already enforces
+    // store-scope via StorePrismaService auto-filter.
+    const storeMethod = await this.storePaymentMethodsService.findOne(
+      dto.store_payment_method_id,
+    );
+    if (!storeMethod || storeMethod.state !== 'enabled') {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'Método de pago no habilitado para esta tienda',
+      );
+    }
+    const methodType: string =
+      storeMethod.system_payment_method?.type ?? 'unknown';
+
+    // Resolve the open order so we can default the amount when the
+    // diner passes nothing (full bill pay) or accept a partial override.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: session.order_id },
+      select: { id: true, grand_total: true, currency: true },
+    });
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+    }
+    const amount = dto.amount ?? Number(order.grand_total);
+
+    // Manual methods (cash / bank_transfer) — insert a `pending`
+    // payment row and ask the mesero to reconcile. We deliberately
+    // do NOT close the session and do NOT touch cash registers /
+    // accounting; the staff will reconcile in their own flow.
+    if (methodType === 'cash' || methodType === 'bank_transfer') {
+      const payment = await this.prisma.payments.create({
+        data: {
+          order_id: session.order_id,
+          amount,
+          currency: order.currency ?? 'COP',
+          state: 'pending',
+          store_payment_method_id: storeMethod.id,
+          transaction_id: `${methodType}_${Date.now()}_${Math.random()
+            .toString(36)
+            .substring(2, 11)}`,
+          gateway_reference: dto.payment_reference ?? null,
+          gateway_response: {
+            table_session_id: session.id,
+            table_id: table.id,
+            method_type: methodType,
+            diner_user_id: userId ?? null,
+          },
+        },
+      });
+
+      // Post-commit diner SSE — keeps the banner in sync without
+      // forcing a refetch.
+      this.sseService.push(store_id, {
+        id: Date.now(),
+        type: 'payment.pending',
+        title: 'Pago pendiente',
+        body: `Mesa ${table.name} — ${methodType}`,
+        data: {
+          table_session_id: session.id,
+          payment_id: payment.id,
+          amount,
+          method: methodType,
+          state: 'pending',
+        },
+        created_at: new Date().toISOString(),
+      });
+
+      // Staff notification — bell + SSE + web push so the mesero knows
+      // to come reconcile.
+      await this.notificationsService.createAndBroadcast(
+        store_id,
+        'table_payment_pending',
+        'Pago pendiente de mesa',
+        `Mesa ${table.name} — ${methodType} — ${this.formatMoney(amount)}`,
+        {
+          table_id: table.id,
+          table_name: table.name,
+          table_session_id: session.id,
+          payment_id: payment.id,
+          method_type: methodType,
+          amount,
+          payment_reference: dto.payment_reference ?? null,
+        },
+      );
+
+      return { payment_id: payment.id, state: 'pending' };
+    }
+
+    // Wompi — prepare the widget payload by mirroring the
+    // checkout.prepareWompiPayment contract locally (CheckoutService is
+    // not directly available from this module — `EcommerceTablesModule`
+    // doesn't import `CheckoutModule`).
+    if (methodType === 'wompi') {
+      const wompiMethod = await this.prisma.store_payment_methods.findFirst(
+        {
+          where: {
+            id: storeMethod.id,
+            state: 'enabled',
+            system_payment_method: { type: 'wompi' },
+          },
+          include: { system_payment_method: true },
+        },
+      );
+      if (!wompiMethod?.custom_config) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_METHOD_DISABLED_001,
+          'Wompi no está configurado para esta tienda',
+        );
+      }
+      const cfg = this.paymentEncryptionService.decryptConfig(
+        wompiMethod.custom_config as Record<string, any>,
+        'wompi',
+      );
+      const wompiConfig = {
+        public_key: cfg.public_key,
+        private_key: cfg.private_key,
+        events_secret: cfg.events_secret || '',
+        integrity_secret: cfg.integrity_secret || '',
+        environment:
+          (cfg.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+      };
+      const client: WompiClient = this.wompiClientFactory.getClient(
+        `store-${store_id}`,
+        wompiConfig,
+      );
+
+      // Reuse reference if one was already issued for this order so
+      // the Widget reuses the same pending transaction instead of
+      // orphaning the previous one.
+      const existingPayment = await this.prisma.payments.findFirst({
+        where: { order_id: session.order_id },
+        orderBy: { created_at: 'desc' },
+      });
+      let reference: string;
+      let paymentId: number;
+      if (existingPayment?.gateway_reference) {
+        reference = existingPayment.gateway_reference;
+        paymentId = existingPayment.id;
+      } else {
+        reference = `vendix_${store_id}_${session.order_id}_${Date.now()}`;
+        const created = await this.prisma.payments.create({
+          data: {
+            order_id: session.order_id,
+            amount,
+            currency: order.currency ?? 'COP',
+            state: 'pending',
+            store_payment_method_id: wompiMethod.id,
+            transaction_id: `wompi_${Date.now()}_${Math.random()
+              .toString(36)
+              .substring(2, 11)}`,
+            gateway_reference: reference,
+            gateway_response: {
+              table_session_id: session.id,
+              table_id: table.id,
+              method_type: 'wompi',
+              diner_user_id: userId ?? null,
+            },
+          },
+        });
+        paymentId = created.id;
+      }
+
+      const currency = order.currency ?? 'COP';
+      const amountInCents = Math.round(amount * 100);
+      const signature = client.generateIntegritySignature(
+        reference,
+        amountInCents,
+        currency,
+      );
+      const tokens = await client.getAcceptanceTokens();
+
+      return {
+        payment_id: paymentId,
+        state: 'pending',
+        next: 'wompi_widget',
+        wompi_data: {
+          public_key: cfg.public_key,
+          currency,
+          amount_in_cents: amountInCents,
+          reference,
+          signature_integrity: signature,
+          redirect_url: '',
+          acceptance_token: tokens.acceptance_token,
+          accept_personal_auth: tokens.personal_auth_token,
+          customer_email: '',
+        },
+      };
+    }
+
+    // Anything else (card via Stripe / PayPal / wallet / …) is not
+    // part of the v1 comensal surface — staff-only. Reject with a
+    // descriptive 409 so the storefront can surface a friendly error
+    // instead of timing out on the Widget.
+    throw new VendixHttpException(
+      ErrorCodes.PAY_METHOD_DISABLED_001,
+      `Método de pago "${methodType}" no soportado en cobro de mesa`,
+    );
+  }
+
+  /**
+   * Force-confirms a Wompi payment registered via `payTable` by polling
+   * the Wompi API for the transaction state. Mirrors
+   * `CheckoutService.confirmWompiPayment` so the diner's return from
+   * the widget sees a deterministic state immediately.
+   *
+   * Idempotent: if the payment is already terminal (succeeded / failed
+   * / cancelled / refunded) it is returned as-is and no push is fired.
+   * If Wompi doesn't know the reference yet (user closed the widget
+   * before submitting) the payment row stays `pending` and we report
+   * that — the canonical webhook (C4) is still responsible for the
+   * terminal state transition.
+   *
+   * On terminal success, fires:
+   *   - `payment.confirmed` onto the per-store SSE subject (diner
+   *     filter, see `matchesDiner`).
+   *   - `table_payment_confirmed` staff notification (bell + push).
+   */
+  async confirmWompiTablePayment(
+    token: string,
+    paymentId: number,
+  ): Promise<{ state: string; order_state: string }> {
+    const { store_id, table, session } =
+      await this.resolveActiveSessionByToken(token);
+
+    // Gate — same `enable_table_checkout` requirement.
+    const { enable_table_checkout } = await this.getQrSettings();
+    if (!enable_table_checkout) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_INVALID_STATUS,
+        'El cobro desde la mesa está deshabilitado',
+      );
+    }
+
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId, order_id: session.order_id },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
+        },
+      },
+    });
+    if (!payment) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_FIND_001,
+        'Pago no encontrado para esta mesa',
+      );
+    }
+    if (
+      payment.store_payment_method?.system_payment_method?.type !== 'wompi'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_INVALID_ORDER_001,
+        'La orden no fue creada con Wompi',
+      );
+    }
+
+    // Idempotency — terminal states short-circuit.
+    const terminal = [
+      'succeeded',
+      'captured',
+      'failed',
+      'cancelled',
+      'refunded',
+    ];
+    if (terminal.includes(payment.state)) {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: payment.order_id },
+        select: { state: true },
+      });
+      return {
+        state: payment.state,
+        order_state: order?.state ?? 'unknown',
+      };
+    }
+
+    // Resolve Wompi client (same shape as `payTable`).
+    const wompiMethod = await this.prisma.store_payment_methods.findFirst({
+      where: {
+        state: 'enabled',
+        system_payment_method: { type: 'wompi' },
+      },
+      include: { system_payment_method: true },
+    });
+    if (!wompiMethod?.custom_config) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'Wompi no está configurado para esta tienda',
+      );
+    }
+    const cfg = this.paymentEncryptionService.decryptConfig(
+      wompiMethod.custom_config as Record<string, any>,
+      'wompi',
+    );
+    const wompiConfig = {
+      public_key: cfg.public_key,
+      private_key: cfg.private_key,
+      events_secret: cfg.events_secret || '',
+      integrity_secret: cfg.integrity_secret || '',
+      environment:
+        (cfg.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    };
+    const client: WompiClient = this.wompiClientFactory.getClient(
+      `store-${store_id}`,
+      wompiConfig,
+    );
+
+    // Lookup priority: real Wompi id first, then Vendix reference.
+    let txn: any = null;
+    const placeholderRe = /^[a-z_]+_\d{10,}_[a-z0-9]+$/i;
+    if (
+      payment.transaction_id &&
+      !placeholderRe.test(payment.transaction_id)
+    ) {
+      try {
+        const resp = await client.getTransaction(payment.transaction_id);
+        if (resp?.data?.id) txn = resp.data;
+      } catch (err) {
+        this.logger.warn(
+          `confirmWompiTablePayment getTransaction failed: ${
+            (err as Error).message
+          }`,
+        );
+      }
+    }
+    if (!txn && payment.gateway_reference) {
+      try {
+        const resp = await client.getTransactionsByReference(
+          payment.gateway_reference,
+        );
+        const list = resp?.data ?? [];
+        if (list.length > 0) {
+          txn = list.reduce(
+            (latest: any, c: any) =>
+              !latest ||
+              new Date(c.created_at) > new Date(latest.created_at)
+                ? c
+                : latest,
+            list[0],
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `confirmWompiTablePayment getTransactionsByReference failed: ${
+            (err as Error).message
+          }`,
+        );
+      }
+    }
+
+    if (!txn) {
+      this.logger.log(
+        `confirmWompiTablePayment: no Wompi txn for payment=${payment.id} ref=${payment.gateway_reference}`,
+      );
+      return { state: payment.state, order_state: 'pending_payment' };
+    }
+
+    await this.applyWompiState(txn, payment);
+    const finalPayment = await this.prisma.payments.findUnique({
+      where: { id: payment.id },
+      select: { state: true, transaction_id: true },
+    });
+    const finalOrder = await this.prisma.orders.findFirst({
+      where: { id: payment.order_id },
+      select: { state: true },
+    });
+
+    // Terminal success → post-commit diner push + staff notification.
+    const finalState = finalPayment?.state ?? payment.state;
+    if (finalState === 'succeeded' || finalState === 'captured') {
+      this.sseService.push(store_id, {
+        id: Date.now(),
+        type: 'payment.confirmed',
+        title: 'Pago confirmado',
+        body: `Mesa ${table.name}`,
+        data: {
+          table_session_id: session.id,
+          payment_id: payment.id,
+          amount: Number(payment.amount),
+          method: 'wompi',
+          state: finalState,
+        },
+        created_at: new Date().toISOString(),
+      });
+      await this.notificationsService.createAndBroadcast(
+        store_id,
+        'table_payment_confirmed',
+        'Pago confirmado de mesa',
+        `Mesa ${table.name} — wompi — ${this.formatMoney(Number(payment.amount))}`,
+        {
+          table_id: table.id,
+          table_name: table.name,
+          table_session_id: session.id,
+          payment_id: payment.id,
+          method_type: 'wompi',
+          amount: Number(payment.amount),
+        },
+      );
+    }
+    return {
+      state: finalState,
+      order_state: finalOrder?.state ?? 'unknown',
+    };
+  }
+
+  /**
+   * CAS-protected Wompi state-transition for the table-pay flow. Mirrors
+   * `webhookHandler.applyWompiTransaction` but is invoked from the
+   * user-facing `/pay/confirm` poll instead of the webhook. Refuses to
+   * overwrite terminal states. Returns the new payment state on
+   * transition, or `null` when Wompi still reports the txn as PENDING.
+   */
+  private async applyWompiState(
+    txn: any,
+    payment: { id: number; state: string; transaction_id: string | null },
+  ): Promise<string | null> {
+    const statusMap: Record<string, string> = {
+      APPROVED: 'succeeded',
+      DECLINED: 'failed',
+      VOIDED: 'cancelled',
+      ERROR: 'failed',
+    };
+    const mapped = statusMap[txn.status];
+    if (!mapped) {
+      // PENDING — leave as-is.
+      return null;
+    }
+    const terminal = [
+      'succeeded',
+      'captured',
+      'failed',
+      'cancelled',
+      'refunded',
+    ];
+    if (terminal.includes(payment.state)) {
+      return payment.state;
+    }
+    await this.prisma.payments.update({
+      where: { id: payment.id },
+      data: {
+        state: mapped,
+        transaction_id: payment.transaction_id ?? txn.id,
+        gateway_response: { transaction: txn },
+        paid_at:
+          mapped === 'succeeded' || mapped === 'captured' ? new Date() : null,
+        updated_at: new Date(),
+      },
+    });
+    return mapped;
+  }
+
+  /**
+   * Cheap currency formatting for staff notifications — uses `Intl` so
+   * the message reads naturally (e.g. `$ 45.000,00 COP`). Avoids
+   * pulling `CurrencyPipe` (frontend only) and stays defensive when
+   * `currency` is missing.
+   */
+  private formatMoney(amount: number, currency = 'COP'): string {
+    try {
+      return new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency,
+        maximumFractionDigits: 2,
+      }).format(amount);
+    } catch {
+      return `${amount} ${currency}`;
+    }
+  }
   /**
    * Best-effort auto-fire of `prepared` order items to the kitchen.
    * Mirrors the pattern in `split-order.service.ts:447` and
