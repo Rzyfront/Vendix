@@ -14,6 +14,8 @@ import {
   CreateVehicleDto,
   VehicleType,
   VEHICLE_TYPE_OPTIONS,
+  SettlementType,
+  SETTLEMENT_TYPE_OPTIONS,
 } from '../../interfaces/vehicle.interface';
 
 @Component({
@@ -39,7 +41,15 @@ export class VehicleFormModalComponent {
   readonly closed = output<void>();
 
   readonly type_options = VEHICLE_TYPE_OPTIONS;
+  readonly settlement_type_options = SETTLEMENT_TYPE_OPTIONS;
   readonly is_edit_mode = signal(false);
+
+  /**
+   * `settlement_rate` solo aplica cuando el tipo ≠ 'none'. Helper para mostrar
+   * el input en el template.
+   */
+  readonly showSettlementRate = (): boolean =>
+    (this.form?.get('settlement_type')?.value ?? 'none') !== 'none';
 
   form: FormGroup = this.buildForm();
 
@@ -75,6 +85,13 @@ export class VehicleFormModalComponent {
       ],
       is_active: [true],
       notes: [''],
+      // Plan Despacho Economía — FASE 1 paso 6.
+      settlement_type: ['none' as SettlementType],
+      settlement_rate: [
+        null as number | null,
+        // Solo se exige cuando settlement_type !== 'none' — el template alterna
+        // el estado required dinámicamente con `toggleRateValidator()`.
+      ],
     });
   }
 
@@ -92,7 +109,29 @@ export class VehicleFormModalComponent {
       primary_driver_id: v.primary_driver_id ?? null,
       is_active: v.is_active ?? true,
       notes: v.notes || '',
+      settlement_type: (v.settlement_type ?? 'none') as SettlementType,
+      settlement_rate:
+        v.settlement_rate !== null && v.settlement_rate !== undefined
+          ? Number(v.settlement_rate)
+          : null,
     });
+  }
+
+  /**
+   * Habilita/deshabilita el validator required en `settlement_rate` cuando
+   * cambia `settlement_type` (UX coherente con la regla cruzada del backend).
+   */
+  onSettlementTypeChange(): void {
+    const type = this.form.get('settlement_type')?.value as SettlementType;
+    const rateControl = this.form.get('settlement_rate');
+    if (!rateControl) return;
+    if (type === 'none') {
+      rateControl.clearValidators();
+      rateControl.setValue(null);
+    } else {
+      rateControl.setValidators([Validators.required, Validators.min(0)]);
+    }
+    rateControl.updateValueAndValidity({ emitEvent: false });
   }
 
   handleSubmit(): void {

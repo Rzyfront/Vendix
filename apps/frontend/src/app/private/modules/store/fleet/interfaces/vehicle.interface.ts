@@ -30,6 +30,20 @@ export interface VehicleDriver {
   last_name?: string;
 }
 
+export type SettlementType = 'none' | 'per_delivery' | 'per_route';
+
+export const SETTLEMENT_TYPE_LABELS: Record<SettlementType, string> = {
+  none: 'Sin tarifa (sueldo interno)',
+  per_delivery: 'Por entrega',
+  per_route: 'Por ruta cerrada',
+};
+
+export const SETTLEMENT_TYPE_OPTIONS: { value: SettlementType; label: string }[] = [
+  { value: 'none', label: SETTLEMENT_TYPE_LABELS.none },
+  { value: 'per_delivery', label: SETTLEMENT_TYPE_LABELS.per_delivery },
+  { value: 'per_route', label: SETTLEMENT_TYPE_LABELS.per_route },
+];
+
 export interface Vehicle {
   id: number;
   store_id: number;
@@ -42,6 +56,9 @@ export interface Vehicle {
   primary_driver_id?: number | null;
   is_active: boolean;
   notes?: string | null;
+  // Plan Despacho Economía — FASE 1 paso 6.
+  settlement_type?: SettlementType;
+  settlement_rate?: string | number | null;
   created_by_user_id?: number | null;
   created_at?: string;
   updated_at?: string;
@@ -58,6 +75,8 @@ export interface CreateVehicleDto {
   primary_driver_id?: number;
   is_active?: boolean;
   notes?: string;
+  settlement_type?: SettlementType;
+  settlement_rate?: number;
 }
 
 export type UpdateVehicleDto = Partial<CreateVehicleDto>;
