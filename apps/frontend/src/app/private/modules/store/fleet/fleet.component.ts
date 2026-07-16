@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ViewChild, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService, DialogService } from '../../../../shared/components/index';
 import { FleetService } from './services/fleet.service';
@@ -76,6 +76,15 @@ export class FleetComponent {
   // Modal
   readonly is_modal_open = signal(false);
   readonly selected_vehicle = signal<Vehicle | null>(null);
+
+  /**
+   * Reference to the vehicle form modal so we can call its public methods
+   * (e.g. setBackendErrors) when the API returns 400 with a list of
+   * validationErrors. The user sees the per-field error list in the modal
+   * instead of just a generic "Validation failed" toast.
+   */
+  @ViewChild(VehicleFormModalComponent)
+  formModal!: VehicleFormModalComponent;
 
   // Stats derived from current page + totals (no dedicated stats endpoint)
   readonly stats = computed<VehicleStats>(() => {
@@ -173,8 +182,25 @@ export class FleetComponent {
         this.loadVehicles();
       },
       error: (error) => {
-        this.toastService.error(error?.message || 'Error al guardar el vehículo');
         this.saving.set(false);
+        // Surface backend validation errors (class-validator 400 responses)
+        // inside the modal so the user sees which fields are wrong. The
+        // backend payload shape is:
+        //   { statusCode: 400, error_code: 'SYS_VALIDATION_001',
+        //     details: { validationErrors: string[] }, ... }
+        const validationErrors = error?.error?.details?.validationErrors;
+        if (
+          Array.isArray(validationErrors) &&
+          validationErrors.length > 0 &&
+          this.formModal
+        ) {
+          this.formModal.setBackendErrors(validationErrors);
+          this.toastService.error(
+            `El formulario tiene ${validationErrors.length} error(es). Revísalos en el modal.`,
+          );
+        } else {
+          this.toastService.error(error?.message || 'Error al guardar el vehículo');
+        }
       },
     });
   }

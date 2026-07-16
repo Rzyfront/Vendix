@@ -6,6 +6,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { StoreUserSelectComponent } from '../../../../../../shared/components/store-user-select/store-user-select.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
@@ -22,6 +23,7 @@ import {
   imports: [
     ReactiveFormsModule,
     ButtonComponent,
+    IconComponent,
     ModalComponent,
     StoreUserSelectComponent,
     ToggleComponent,
@@ -41,11 +43,29 @@ export class VehicleFormModalComponent {
   readonly type_options = VEHICLE_TYPE_OPTIONS;
   readonly is_edit_mode = signal(false);
 
+  /**
+   * Backend validation errors surfaced from the API (e.g. 400 responses with
+   * `details.validationErrors: string[]`). The parent (FleetComponent) calls
+   * `setBackendErrors()` when the create/update request fails. We display them
+   * in a single banner at the top of the modal so the user sees exactly which
+   * fields are wrong without having to inspect the network panel.
+   *
+   * Each error string from class-validator looks like:
+   *   "brand should not be empty"
+   *   "capacity_kg must not be less than 0.01"
+   *   "primary_driver_id must not be less than 1"
+   * The first token (split by space) is the field name; the rest is the
+   * human-readable message. We keep the full string for display because it's
+   * already pretty readable.
+   */
+  readonly backendErrors = signal<string[]>([]);
+
   form: FormGroup = this.buildForm();
 
   constructor() {
     effect(() => {
       if (this.is_open()) {
+        this.backendErrors.set([]); // clear stale errors from previous open
         this.form = this.buildForm();
         const v = this.vehicle();
         if (v) {
@@ -56,6 +76,19 @@ export class VehicleFormModalComponent {
         }
       }
     });
+  }
+
+  /**
+   * Set the list of validation errors returned by the backend so the user
+   * sees exactly which fields are wrong. Called by FleetComponent when the
+   * save request returns 400 with `details.validationErrors`.
+   */
+  setBackendErrors(errors: string[]): void {
+    this.backendErrors.set(Array.isArray(errors) ? errors : []);
+  }
+
+  clearBackendErrors(): void {
+    this.backendErrors.set([]);
   }
 
   private buildForm(): FormGroup {
