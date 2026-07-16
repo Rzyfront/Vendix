@@ -84,9 +84,12 @@ interface CartaBlock {
         <ng-template #dishCard let-dish="dish">
           <a
             class="dish-card"
-            [class.dish-card--off]="!dish.is_available_now"
+            [class.dish-card--off]="!dish.is_available_now || !!dish.is_sold_out"
+            [class.dish-card--sold-out]="!!dish.is_sold_out"
             [routerLink]="
-              dish.product?.slug ? ['/products', dish.product?.slug] : null
+              dish.is_sold_out || !dish.product?.slug
+                ? null
+                : ['/products', dish.product?.slug]
             "
           >
             <div class="dish-image">
@@ -100,7 +103,16 @@ interface CartaBlock {
                 <div class="dish-image__placeholder">🍽️</div>
               }
 
-              @if (!dish.is_available_now) {
+              @if (dish.is_sold_out) {
+                <app-badge
+                  class="dish-badge"
+                  variant="error"
+                  size="sm"
+                  badgeStyle="solid"
+                >
+                  Agotado
+                </app-badge>
+              } @else if (!dish.is_available_now) {
                 <app-badge
                   class="dish-badge"
                   variant="warning"
@@ -140,7 +152,7 @@ interface CartaBlock {
                 </app-button>
               </div>
 
-              @if (dish.is_available_now) {
+              @if (dish.is_available_now && !dish.is_sold_out) {
                 <button
                   type="button"
                   class="dish-quick-btn"
@@ -346,6 +358,16 @@ interface CartaBlock {
       }
       .dish-card--off {
         opacity: 0.7;
+      }
+      /* F2 — Plato agotado: además de opacidad, anula el cursor y el transform
+         de hover para comunicar "no comprable". Los botones internos (Like /
+         Compartir) conservan su pointer-events porque 'card-actions' y los
+         'app-button' restablecen su propio cursor. routerLink ya es null. */
+      .dish-card--sold-out {
+        cursor: default;
+      }
+      .dish-card--sold-out:hover {
+        transform: none;
       }
 
       .dish-image {
@@ -777,7 +799,7 @@ export class MenusShowcaseComponent implements OnInit {
       sku: null,
       stock_quantity: null,
       available_stock: null,
-      is_available: item.is_available_now,
+      is_available: item.is_available_now && !item.is_sold_out,
       final_price: on_sale ? p.sale_price! : p.base_price,
       image_url: p.image_url,
       brand: null,
@@ -792,7 +814,7 @@ export class MenusShowcaseComponent implements OnInit {
    * qty fija de 1 — al carrito ecommerce, o a la mesa en sesión dine-in open_tab. */
   onQuickAdd(event: Event, item: MenuItem): void {
     this.stopCardNav(event);
-    if (!item.is_available_now) return;
+    if (!item.is_available_now || item.is_sold_out) return;
     if (item.product?.has_variants) {
       const slug = item.product?.slug;
       if (slug) this.router.navigate(['/products', slug]);

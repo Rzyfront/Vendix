@@ -13,6 +13,7 @@ import { StoreContextRunner } from '@common/context/store-context-runner.service
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
+import { TableSessionsService } from '../../tables/table-sessions.service';
 import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
 
 // States considered terminal for compare-and-swap and idempotency checks.
@@ -37,6 +38,9 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
+    // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
+    // digital payment (wompi/wallet) is confirmed by the gateway webhook.
+    private readonly tableSessionsService: TableSessionsService,
     @Optional()
     @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
@@ -620,6 +624,23 @@ export class WebhookHandlerService {
         order.store_id,
         async () => {
           await this.orderFlowService.confirmPayment(orderId);
+
+          // Restaurant Suite (Obj 6): if this order backs a still-open table
+          // session, the POS deferred its close for a digital payment
+          // (wompi/wallet). Now that the gateway confirmed the charge, close
+          // the session — `closeSession` flips the table to `cleaning` and
+          // emits `session_closed` to staff + comensal streams. No-op for
+          // non-restaurant / non-table orders (findFirst returns null).
+          const openSession = await this.prisma.table_sessions.findFirst({
+            where: { order_id: orderId, closed_at: null },
+            select: { id: true },
+          });
+          if (openSession) {
+            await this.tableSessionsService.closeSession(openSession.id);
+            this.logger.log(
+              `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
+            );
+          }
         },
       );
       this.logger.log(

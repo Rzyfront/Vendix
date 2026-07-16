@@ -125,6 +125,8 @@ export class TableSessionPageComponent implements OnInit {
   readonly isClosing = signal(false);
   readonly isPaying = signal(false);
   readonly isAssigningCustomer = signal(false);
+  /** Order-item id currently being removed (drives the per-row spinner). */
+  readonly removingItemId = signal<number | null>(null);
 
   // ── Pending payments (E2 — staff confirmation) ────────────────────
   /** Pending manual payments for the order backing this session. */
@@ -442,6 +444,23 @@ export class TableSessionPageComponent implements OnInit {
     return item.inventory_consumed_at_fire || this.kitchenStatusFor(item) != null;
   }
 
+  /**
+   * Can the operator remove this line from the open check? (Frente 2)
+   *
+   * Rules mirror the backend gate:
+   *   - not closed, and
+   *   - the item was NEVER fired  → deletable outright, or
+   *   - the item was fired but its ticket is still `pending` → deletable
+   *     (backend cancels the KDS ticket + returns the fire-consumed stock).
+   *
+   * Hidden for `in_preparation` / `ready` / `delivered` / `cancelled`
+   * (terminal or in-progress kitchen states the backend rejects with 409).
+   */
+  canRemoveItem(item: TableSessionOrderItem): boolean {
+    if (this.isClosed()) return false;
+    return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+  }
+
   kitchenBadgeVariant(status: KitchenTicketItemRefStatus): BadgeVariant {
     switch (status) {
       case 'pending':
@@ -609,6 +628,53 @@ export class TableSessionPageComponent implements OnInit {
             typeof err === 'string' ? err : 'Error al agregar items',
           );
         },
+      });
+  }
+
+  // ── Remove item (Frente 2) ───────────────────────────────────────────
+
+  /**
+   * Remove a single line from the open check. Confirms first (the message
+   * warns about the kitchen-ticket cancel + stock return when the item was
+   * already fired-pending), then calls the backend and replaces the local
+   * session with the recalculated snapshot it returns.
+   */
+  onRemoveItem(item: TableSessionOrderItem): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isClosed()) return;
+    if (!this.canRemoveItem(item)) return;
+    const firedPending =
+      this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
+    this.dialogService
+      .confirm({
+        title: 'Eliminar plato',
+        message: firedPending
+          ? `¿Eliminar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina y se devolverá el inventario consumido.`
+          : `¿Eliminar "${item.product_name}" de la cuenta?`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.removingItemId.set(item.id);
+        this.tablesService
+          .removeItem(sessionId, item.id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (s) => {
+              this.removingItemId.set(null);
+              this.session.set(s);
+              this.seedKitchenStateFromOrder(s);
+              this.toastService.success('Plato eliminado de la cuenta');
+            },
+            error: (err: unknown) => {
+              this.removingItemId.set(null);
+              this.toastService.error(
+                typeof err === 'string' ? err : 'Error al eliminar el plato',
+              );
+            },
+          });
       });
   }
 

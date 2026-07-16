@@ -489,7 +489,15 @@
 
   .item-action {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    gap: 0.375rem;
+  }
+
+  /* Compact icon-only delete button — never stretches next to the
+     primary kitchen action. */
+  .item-remove-btn {
+    flex: 0 0 auto;
   }
 
   /* Terminal "Entregado" label when no further action remains */
@@ -521,10 +529,18 @@
 
     .item-action {
       grid-column: 1 / 4;
-      justify-content: stretch;
+      justify-content: flex-end;
+      gap: 0.5rem;
 
-      app-button {
-        width: 100%;
+      /* Primary kitchen action fills the row; the delete button stays
+         compact so the two never overflow on narrow screens. */
+      app-button:not(.item-remove-btn) {
+        flex: 1 1 auto;
+      }
+
+      .item-remove-btn {
+        flex: 0 0 auto;
+        width: auto;
       }
     }
   }

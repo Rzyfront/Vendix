@@ -2983,6 +2983,18 @@ export const ErrorCodes = {
     devMessage:
       'Items inválidos para agregar a la sesión de mesa',
   },
+  TABLE_SESSION_CUSTOMER_REQUIRED: {
+    code: 'TABLE_SESSION_CUSTOMER_REQUIRED',
+    httpStatus: 409,
+    devMessage:
+      'Customer is required to open a table when anonymous sales are disabled',
+  },
+  TABLE_SESSION_ITEM_NOT_REMOVABLE: {
+    code: 'TABLE_SESSION_ITEM_NOT_REMOVABLE',
+    httpStatus: 409,
+    devMessage:
+      'Cannot remove an item already being prepared in the kitchen',
+  },
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
     code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
     httpStatus: 422,

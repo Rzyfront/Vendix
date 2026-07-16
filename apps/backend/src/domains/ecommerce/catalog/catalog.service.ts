@@ -1436,6 +1436,12 @@ export class CatalogService {
                   product_id: item.product_id,
                   sort_order: item.sort_order,
                   is_available_now: isAvail,
+                  // Sold-out invariant: is_sellable=false → el plato SIGUE VISIBLE
+                  // en la carta (no se filtra) pero el frontend lo marca como
+                  // "Agotado" (off-card + sin quick-add). cart.addItem y checkout
+                  // lo rechazan backend-side. Va a nivel item, no del product,
+                  // porque es un estado de display del plato en la carta.
+                  is_sold_out: p ? !p.is_sellable : false,
                   next_available: isAvail
                     ? null
                     : this.nextAvailableWindow(

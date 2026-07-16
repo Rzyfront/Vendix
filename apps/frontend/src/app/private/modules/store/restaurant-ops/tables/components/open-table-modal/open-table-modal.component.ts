@@ -17,6 +17,7 @@ import {
 import { Table, OpenTableSessionDto } from '../../interfaces';
 import { PosCustomerSelectorComponent } from '../../../../pos/components/pos-customer-selector/pos-customer-selector.component';
 import { PosCustomer } from '../../../../pos/models/customer.model';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 
 /**
  * Modal for opening a new table session.
@@ -97,10 +98,23 @@ import { PosCustomer } from '../../../../pos/models/customer.model';
         } @else {
           <app-pos-customer-selector
             [selectedCustomer]="selectedCustomer()"
-            [allowAnonymous]="true"
+            [allowAnonymous]="allowAnonymousSales()"
             (customerSelected)="onCustomerSelected($event)"
             (customerCleared)="clearCustomer()"
           />
+        }
+
+        <!-- Gate feedback: mirror the POS anonymous-sale rule. -->
+        @if (!canOpen()) {
+          <p class="customer-hint customer-hint--error">
+            <app-icon name="circle-alert" [size]="14"></app-icon>
+            Selecciona un cliente para abrir la mesa.
+          </p>
+        } @else if (allowAnonymousSales() && !selectedCustomer()) {
+          <p class="customer-hint">
+            <app-icon name="info" [size]="14"></app-icon>
+            Se abrirá como consumidor final (venta anónima).
+          </p>
         }
       </div>
 
@@ -111,6 +125,7 @@ import { PosCustomer } from '../../../../pos/models/customer.model';
         <app-button
           variant="primary"
           [loading]="loading()"
+          [disabled]="!canOpen()"
           (clicked)="onSubmit()"
         >
           Abrir mesa
@@ -122,6 +137,7 @@ import { PosCustomer } from '../../../../pos/models/customer.model';
 })
 export class OpenTableModalComponent {
   private readonly fb = inject(FormBuilder);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   readonly isOpen = input(false);
   readonly table = input<Table | null>(null);
@@ -136,6 +152,30 @@ export class OpenTableModalComponent {
 
   /** Cliente opcional seleccionado para asociar a la sesión/orden. */
   readonly selectedCustomer = signal<PosCustomer | null>(null);
+
+  /**
+   * Anonymous-sale settings, read from the SAME reactive facade the POS
+   * payment interface uses (`pos.allow_anonymous_sales` /
+   * `pos.anonymous_sales_as_default`). When anonymous sales are OFF a table
+   * cannot be opened without a client — the backend rejects it with 422
+   * (`TABLE_SESSION_CUSTOMER_REQUIRED`), so we gate the button to give the
+   * operator immediate feedback instead of hitting that throw.
+   */
+  readonly allowAnonymousSales = computed(
+    () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
+  );
+  readonly anonymousSalesAsDefault = computed(
+    () => this.settingsFacade.pos()?.anonymous_sales_as_default ?? false,
+  );
+
+  /**
+   * Can the table be opened right now? Requires a selected client UNLESS
+   * anonymous sales are enabled (then it opens as consumidor final with
+   * `customer_id = null`).
+   */
+  readonly canOpen = computed(
+    () => this.allowAnonymousSales() || this.selectedCustomer() != null,
+  );
 
   constructor() {
     this.form = this.fb.group({
@@ -157,7 +197,7 @@ export class OpenTableModalComponent {
   }
 
   onSubmit(): void {
-    if (this.form.invalid || !this.table()) return;
+    if (this.form.invalid || !this.table() || !this.canOpen()) return;
     const v = this.form.getRawValue() as { guest_count: number | null };
     const customer = this.selectedCustomer();
     const customerId =

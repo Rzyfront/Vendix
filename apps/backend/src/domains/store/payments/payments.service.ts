@@ -53,6 +53,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
@@ -102,6 +103,9 @@ export class PaymentsService {
     private readonly priceResolverService: PriceResolverService,
     private readonly withholdingFlow: WithholdingFlowService,
     private readonly kitchenFireService: KitchenFireService,
+    // Restaurant Suite — POS table close-out emits `session_closed` post-commit
+    // (reuses the canonical emitter on TableSessionsService).
+    private readonly tableSessionsService: TableSessionsService,
     // QUI-431 — serial-number pool + enforcement (no-op for non-serialized
     // products, so they can be invoked unconditionally on the sale path).
     private readonly serialEnforcement: SerialNumberEnforcementService,
@@ -1037,16 +1041,10 @@ export class PaymentsService {
 
         // 2. Process payment if required
         let payment: any = null;
-        const isDigitalPayment =
-          createPosPaymentDto.requires_payment &&
-          ['wompi', 'wallet'].includes(
-            (
-              await tx.store_payment_methods.findUnique({
-                where: { id: createPosPaymentDto.store_payment_method_id },
-                include: { system_payment_method: true },
-              })
-            )?.system_payment_method?.type || '',
-          );
+        const isDigitalPayment = await this.isDeferredDigitalMethod(
+          tx,
+          createPosPaymentDto,
+        );
 
         if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
           // Direct methods (cash, card, bank_transfer) — process inside transaction
@@ -1375,6 +1373,10 @@ export class PaymentsService {
                 ),
               }
             : null,
+          // Restaurant Suite (Obj 4/6): the session closed by a POS table
+          // close-out (null when a digital payment deferred the close). Used
+          // AFTER commit to emit `session_closed` to staff + comensal streams.
+          closed_session_id: orderCreation.closedSessionId ?? null,
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -1427,6 +1429,18 @@ export class PaymentsService {
             (err as Error).stack,
           );
         }
+      }
+
+      // Restaurant Suite (Obj 4): if the POS payment closed out a table
+      // session (cash/card/transfer — NOT a deferred digital payment), emit
+      // `session_closed` AFTER the commit so the staff dashboard + the
+      // comensal storefront learn of the close in real time. A rollback would
+      // have thrown before reaching here, so no phantom event is possible.
+      if (result.closed_session_id) {
+        this.tableSessionsService.emitSessionClosed(
+          ctxStoreId,
+          result.closed_session_id,
+        );
       }
 
       // Process digital payments AFTER transaction commit (order is now visible)
@@ -2434,6 +2448,31 @@ export class PaymentsService {
   }
 
   /**
+   * True when a POS payment must be DEFERRED past the payment transaction
+   * commit: the method requires a real charge (`requires_payment`) AND is a
+   * digital gateway (`wompi` | `wallet`) that only settles asynchronously via
+   * webhook. Cash / card / bank_transfer settle in-band and return `false`.
+   *
+   * Single source of truth (mirror of the historical inline `isDigitalPayment`
+   * check in `processPosPayment`). Also gates the table-session close in
+   * `applyPosPaymentToTableSession`: a deferred digital payment must NOT close
+   * the table until its webhook confirms the charge (otherwise the mesa would
+   * flip to `cleaning` while the diner could still abandon the Wompi widget).
+   */
+  private async isDeferredDigitalMethod(
+    tx: any,
+    dto: CreatePosPaymentDto,
+  ): Promise<boolean> {
+    if (!dto.requires_payment) return false;
+    const method = await tx.store_payment_methods.findUnique({
+      where: { id: dto.store_payment_method_id },
+      include: { system_payment_method: true },
+    });
+    const type = method?.system_payment_method?.type || '';
+    return ['wompi', 'wallet'].includes(type);
+  }
+
+  /**
    * Create or update order from POS data
    */
   /**
@@ -2480,6 +2519,11 @@ export class PaymentsService {
       cogsTotal: number;
       consumedLineCount: number;
     } | null;
+    // Restaurant Suite (edge Wompi): the session id that was CLOSED in this
+    // transaction, or null when the close was deferred (digital payment
+    // awaiting webhook) or nothing was closed. The caller emits `session_closed`
+    // post-commit only when this is non-null.
+    closedSessionId: number | null;
   }> {
     const tableSessionId = dto.table_session_id!;
 
@@ -2693,14 +2737,25 @@ export class PaymentsService {
     // is misleading to staff (the seat is free, but the next cashier sees the
     // table as still occupied) and can race with the next `openTableSession`
     // call on the same table.
-    await tx.table_sessions.update({
-      where: { id: session.id },
-      data: { closed_at: new Date() },
-    });
-    await tx.tables.update({
-      where: { id: session.table_id },
-      data: { status: 'cleaning', updated_at: new Date() },
-    });
+    //
+    // Edge Wompi (Obj 6): a DEFERRED digital payment (wompi/wallet) must NOT
+    // close the table here — the charge is only pending. The session stays open
+    // + the table `occupied`; the close is reconciled by the gateway webhook
+    // (`WebhookHandlerService.confirmOrderPaid`). Cash/card/transfer close in
+    // the act. The auto-fire above and the totals write are NEVER deferred.
+    const isDeferred = await this.isDeferredDigitalMethod(tx, dto);
+    let closedSessionId: number | null = null;
+    if (!isDeferred) {
+      await tx.table_sessions.update({
+        where: { id: session.id },
+        data: { closed_at: new Date() },
+      });
+      await tx.tables.update({
+        where: { id: session.table_id },
+        data: { status: 'cleaning', updated_at: new Date() },
+      });
+      closedSessionId = session.id;
+    }
 
     // QUI-431 — detección de serializados sobre TODAS las líneas del pedido de
     // la mesa (las que ya vivían en el draft + las nuevas del cierre), no solo
@@ -2723,6 +2778,7 @@ export class PaymentsService {
       appliedPromotions: promotionQuote.applied_promotions ?? [],
       couponInfo,
       kitchenFire,
+      closedSessionId,
     };
   }
 
@@ -2957,6 +3013,9 @@ export class PaymentsService {
             cogsTotal: number;
             consumedLineCount: number;
           },
+          // Fresh sales never close a table session — only the table close-out
+          // branch (`applyPosPaymentToTableSession`) can. Keep the shape aligned.
+          closedSessionId: null as number | null,
         };
       } catch (error) {
         if (

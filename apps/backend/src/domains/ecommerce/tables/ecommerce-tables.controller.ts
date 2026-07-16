@@ -538,6 +538,10 @@ export class EcommerceTablesController {
       'guest_count_changed',
       'payment.pending',
       'payment.confirmed',
+      // Mesa cerrada por el staff (POS efectivo/tarjeta), el cierre canónico
+      // o la reconciliación de un pago digital (Wompi/wallet). El comensal
+      // recibe el evento y muestra la despedida / resumen de compra.
+      'session_closed',
     ]);
 
   /**

@@ -289,6 +289,14 @@ export class TableContextService {
   readonly paying_table = signal(false);
   readonly confirming_payment = signal(false);
 
+  /**
+   * True once the table session has been CLOSED (settled at the POS or via
+   * diner self-checkout). Set from the `session_closed` SSE event
+   * (`TableSessionSseService`). Drives the diner "Mesa cerrada / ¡Gracias por
+   * tu visita!" farewell. Reset on a fresh `resolve()` and on `clear()`.
+   */
+  readonly sessionClosed = signal(false);
+
   // ── Live counters (D1 — diner presence SSE) ─────────────────────
   /** Number of active devices on the current table (from `comensal_joined` / `comensal_left`). */
   readonly activeDevicesCount = signal<number>(1);
@@ -398,6 +406,7 @@ export class TableContextService {
     this._paymentMethods.set([]);
     this.activeDevicesCount.set(1);
     this.lastJoinEvent.set(null);
+    this.sessionClosed.set(false);
   }
 
   /**
@@ -557,9 +566,19 @@ export class TableContextService {
     this.confirming_payment.set(false);
     this.activeDevicesCount.set(1);
     this.lastJoinEvent.set(null);
+    this.sessionClosed.set(false);
     if (this.is_browser) {
       localStorage.removeItem(this.storage_key);
     }
+  }
+
+  /**
+   * Diner acknowledges the "Mesa cerrada" farewell — fully leaves the table
+   * (clears context + forgets the per-tab device id). Wire this to the
+   * farewell CTA so the storefront returns to normal browsing after a close.
+   */
+  acknowledgeSessionClosed(): void {
+    this.leaveTable();
   }
 
   /**

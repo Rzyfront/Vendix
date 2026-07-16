@@ -153,7 +153,11 @@
                     (cdkDropListDropped)="onItemDrop($event, section)"
                   >
                     @for (item of sortedItems(section); track item.id) {
-                      <div class="mb-item" cdkDrag>
+                      <div
+                        class="mb-item"
+                        [class.mb-item--off]="!item.product?.is_sellable"
+                        cdkDrag
+                      >
                         <button
                           type="button"
                           class="mb-handle mb-handle--sm"
@@ -180,6 +184,42 @@
                         @if (item.product?.is_combo) {
                           <span class="mb-item__combo">Combo</span>
                         }
+                        @if (!item.product?.is_sellable) {
+                          <app-badge
+                            variant="error"
+                            size="xs"
+                            badgeStyle="solid"
+                          >
+                            Agotado
+                          </app-badge>
+                        }
+                        <!-- F1: toggle "Agotado". Icono y tooltip reflejan el estado
+                             actual del plato (disponible vs agotado). Cubiertos
+                             cruzados = símbolo gastronómico universal de "agotado/86'd"
+                             (iconos ya registrados: utensils / utensils-crossed). -->
+                        <app-button
+                          variant="ghost"
+                          size="sm"
+                          [attr.title]="
+                            item.product?.is_sellable
+                              ? 'Marcar como agotado'
+                              : 'Habilitar venta'
+                          "
+                          [attr.aria-label]="
+                            item.product?.is_sellable
+                              ? 'Marcar como agotado'
+                              : 'Habilitar venta'
+                          "
+                          (clicked)="toggleItemStock(item)"
+                          customClasses="!p-1 !w-7 !h-7"
+                        >
+                          <app-icon
+                            slot="icon"
+                            [name]="item.product?.is_sellable ? 'utensils' : 'utensils-crossed'"
+                            [size]="14"
+                            [class]="item.product?.is_sellable ? '!text-text-secondary' : '!text-red-500'"
+                          />
+                        </app-button>
                         <app-button
                           variant="ghost"
                           size="sm"

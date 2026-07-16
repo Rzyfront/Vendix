@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { environment } from '../../../../../environments/environment';
 import { TableContextService } from './table-context.service';
+import { ToastService } from '../../../../shared/components/toast/toast.service';
 
 /**
  * Connection state for the diner-facing table stream. Exposed as a signal
@@ -106,6 +107,7 @@ const MAX_BACKOFF_MS = 30_000;
 export class TableSessionSseService {
   private readonly apiUrl = environment.apiUrl;
   private readonly tableContext = inject(TableContextService);
+  private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
   private eventSource: EventSource | null = null;
@@ -379,11 +381,61 @@ export class TableSessionSseService {
         return;
       }
 
+      case 'session_closed': {
+        // The table session was settled/closed (POS cash/card, diner
+        // self-checkout, or explicit close). Backend contract carries the
+        // closed session id under `data.table_session_id` (some diner
+        // projections flatten it to the top level — read both).
+        const closedSessionId =
+          (parsed as { table_session_id?: unknown }).table_session_id ??
+          (parsed as { data?: { table_session_id?: unknown } }).data
+            ?.table_session_id;
+        const active = this.tableContext.sessionId();
+        // Multi-tenant / stale-event isolation: when both ids are known and
+        // differ, this close belongs to another session — ignore it.
+        if (
+          typeof closedSessionId === 'number' &&
+          typeof active === 'number' &&
+          closedSessionId !== active
+        ) {
+          return;
+        }
+        this.handleSessionClosed();
+        return;
+      }
+
       default:
         // Unknown event type — already mirrored into `lastEvent` for
         // debugging. Ignore silently otherwise.
         return;
     }
+  }
+
+  /**
+   * Reacts to a `session_closed` event: flips the diner into the farewell
+   * state WITHOUT refetching the bill (the account is settled), stops the
+   * stream cleanly (no reconnect — the session is over), and surfaces a
+   * global "Mesa cerrada / ¡Gracias por tu visita!" toast.
+   *
+   * The table context is intentionally NOT cleared here — the diner keeps
+   * their final bill visible and acknowledges via
+   * `TableContextService.acknowledgeSessionClosed()` (wired to the banner
+   * farewell CTA), which then `leaveTable()`s.
+   */
+  private handleSessionClosed(): void {
+    // Mark closed — the banner reads `sessionClosed()` to show the farewell.
+    // Deliberately NO `getMyBill()` refetch: the closed bill is final.
+    this.tableContext.sessionClosed.set(true);
+    // Stop this stream cleanly; the session is over, so we neither keep the
+    // source open nor schedule a reconnect (which would re-snapshot a dead
+    // session in a tight backoff loop).
+    this.clearReconnectTimer();
+    this.teardownSource();
+    this.currentToken = null;
+    this.connectionState.set('closed');
+    // Immediate diner-facing farewell via the global toast overlay — visible
+    // even though the persistent banner lives in the (out-of-scope) layout.
+    this.toast.info('Mesa cerrada. ¡Gracias por tu visita!');
   }
 
   private scheduleReconnect(token: string): void {

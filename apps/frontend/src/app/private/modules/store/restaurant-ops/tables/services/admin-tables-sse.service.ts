@@ -143,7 +143,8 @@ export type AdminTablesEvent =
         | 'kitchen.cancelled';
       data: Record<string, unknown>;
       ts?: number;
-    };
+    }
+  | { type: 'session_closed'; data: Record<string, unknown>; ts?: number };
 
 /**
  * AdminTablesSseService — wrappea el `EventSource` del staff stream

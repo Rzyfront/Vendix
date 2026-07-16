@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   MessageEvent,
@@ -53,6 +54,9 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   if (type === 'payment.confirmed') return true;
   if (type === 'table_payment_pending') return true;
   if (type === 'table_payment_confirmed') return true;
+  // Mesa cerrada (POS close-out o cierre canónico / reconciliación Wompi) —
+  // el dashboard refresca la mesa a `cleaning` / libre.
+  if (type === 'session_closed') return true;
   if (type.startsWith('kitchen.')) return true;
   // The synthetic channels emitted by THIS SSE (snapshot / heartbeat) are
   // allowed through here too — they're emitted as their own typed
@@ -70,6 +74,7 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
  *   GET   /api/store/table-sessions/stream                staff real-time SSE (declared before :id)
  *   GET   /api/store/table-sessions/:id                   session detail with current draft order
  *   POST  /api/store/table-sessions/:id/add-items         append items to the draft order
+ *   DELETE /api/store/table-sessions/:id/items/:orderItemId  remove one item from the draft order
  *   PATCH /api/store/table-sessions/:id/customer          assign/detach the order customer
  *   POST  /api/store/table-sessions/:id/close             close the session (NOT the order)
  *   GET   /api/store/table-sessions/:id/payments/pending  list pending payments (C3)
@@ -244,6 +249,30 @@ export class TableSessionsController {
     return this.responseService.updated(
       result,
       'Items agregados a la cuenta',
+    );
+  }
+
+  /**
+   * Remove one item from the draft order backing an open table session.
+   * DELETE /api/store/table-sessions/:id/items/:orderItemId
+   *
+   * Business rules (see `TableSessionsService.removeItem`):
+   *   - Non-fired item → deleted + totals recomputed (inventory untouched).
+   *   - Fired item with a `pending` KDS ticket → ticket cancelled (SSE
+   *     `ticket.cancelled`), fire stock reversed, item deleted + recomputed.
+   *   - Fired item beyond `pending` (in_preparation/ready/delivered/cancelled)
+   *     → 409 TABLE_SESSION_ITEM_NOT_REMOVABLE.
+   */
+  @Delete(':id/items/:orderItemId')
+  @Permissions('store:table_sessions:update')
+  async removeItem(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+  ) {
+    const result = await this.tableSessionsService.removeItem(id, orderItemId);
+    return this.responseService.updated(
+      result,
+      'Item eliminado de la cuenta',
     );
   }
 

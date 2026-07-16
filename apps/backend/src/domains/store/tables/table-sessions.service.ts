@@ -10,6 +10,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -121,6 +123,11 @@ export class TableSessionsService {
     // POS arqueo behavior when a manual table payment is confirmed by staff.
     private readonly cashRegisterSessionsService: SessionsService,
     private readonly cashRegisterMovementsService: MovementsService,
+    // Restaurant Suite — item removal (frente 2). KitchenFireService is used to
+    // cancel a `pending` ticket in-tx + emit its SSE post-commit;
+    // StockLevelManager reverses the fire's inventory consumption.
+    private readonly kitchenFireService: KitchenFireService,
+    private readonly stockLevelManager: StockLevelManager,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -257,10 +264,23 @@ export class TableSessionsService {
     }
 
     // 2. Resolve the customer. We accept an explicit customer_id; if
-    //    absent, we use the opening user as a placeholder so the draft
-    //    order has a valid FK to `users`. A real customer can be set
-    //    later via the normal order update path.
-    const customerId = dto.customer_id ?? userId;
+    //    absent, the draft order is opened as a true anonymous sale
+    //    (`customer_id = null`, consumidor final) — we NEVER fall back to
+    //    the opening user (that misattributed the check to the waiter/admin
+    //    and violated the restaurant-ops "no id=1 sentinel" invariant).
+    //
+    //    Anonymous open is gated by the `pos.allow_anonymous_sales` setting
+    //    (mirrors the POS cobro flow): if anonymous sales are disabled and
+    //    no customer was provided, opening the table is a business error.
+    if (dto.customer_id == null) {
+      const settings = await this.settingsService.getSettings();
+      if (settings.pos?.allow_anonymous_sales !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_CUSTOMER_REQUIRED,
+        );
+      }
+    }
+    const customerId = dto.customer_id ?? null;
 
     // 3. ATOMIC: create order (empty items) + table_session + flip
     //    table status to 'occupied'. Delegates to the shared
@@ -520,6 +540,205 @@ export class TableSessionsService {
     return this.findOne(sessionId);
   }
 
+  // -------------------------------------------------------------- remove
+  /**
+   * Remove a single item from the draft order backing an open table session
+   * (Restaurant Suite — frente 2 "eliminar plato de la cuenta").
+   *
+   * Same gates as `addItems` (session open + order in `draft`). The item's
+   * kitchen state decides the branch:
+   *
+   *   Tier 1 — NOT fired (`inventory_consumed_at_fire=false` AND no
+   *     kitchen_ticket_item): plain delete + recompute. Inventory untouched.
+   *
+   *   Tier 2 — fired with its ticket in `pending`: cancel the KDS ticket
+   *     (in-tx, SSE emitted post-commit) and REVERSE the stock consumed at
+   *     fire, then delete + recompute. The reversal negates the recorded
+   *     `inventory_transactions` of the fire (NOT a BOM re-explosion): those
+   *     rows carry `order_item_id` + `product_id` + `quantity_change<0`; the
+   *     location is re-resolved deterministically the same way the fire did
+   *     (`getDefaultLocationForProduct`). The reversal `updateStock` call is a
+   *     positive `return` movement and MUST NOT carry `order_item_id` (a child
+   *     row with FK `onDelete: Restrict` would re-block the delete below).
+   *
+   *   Tier 3 — fired with its ticket in any non-`pending` status
+   *     (`in_preparation` | `ready` | `delivered` | `cancelled`): blocked with
+   *     `TABLE_SESSION_ITEM_NOT_REMOVABLE` (409).
+   *
+   * The accounting reversal of COGS is intentionally deferred (owner decision,
+   * MVP): only stock is returned here.
+   *
+   * FK reality: `order_items` is the parent of `inventory_transactions`
+   * (Restrict), `kitchen_ticket_items` (Restrict) and `order_item_taxes`
+   * (Restrict), so those children are purged in-tx BEFORE the hard delete.
+   *
+   * Everything (cancel writes + reversal + child purge + delete + recompute)
+   * runs in ONE `$transaction`; the `ticket.cancelled` SSE is emitted only
+   * AFTER the commit.
+   */
+  async removeItem(
+    sessionId: number,
+    orderItemId: number,
+  ): Promise<TableSessionView> {
+    // Mirror addItems: only store context is required (the POS controller path
+    // is already gated by @Permissions('store:table_sessions:update')).
+    this.requireStoreContext();
+
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+    if (!session.order) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+    }
+    if (session.order.state !== 'draft') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ORDER_NOT_DRAFT,
+      );
+    }
+
+    // Locate the item within the session's own draft order (this is also the
+    // ownership guard — findOne is store-scoped).
+    const orderItem = session.order.order_items.find(
+      (it) => it.id === orderItemId,
+    );
+    if (!orderItem) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `El ítem #${orderItemId} no existe o no pertenece a esta sesión de mesa`,
+      );
+    }
+
+    // Resolve the kitchen state. `kitchen_ticket_items` comes ordered desc by
+    // id from findOne, so [0] is the most recent ticket-item for this line.
+    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
+    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
+    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+
+    // "Fired" = the line was sent to the KDS at some point (flag flipped) OR it
+    // currently has a kitchen_ticket_item. Non-fired lines are Tier 1.
+    const wasFired =
+      orderItem.inventory_consumed_at_fire === true || activeKti != null;
+    const isPendingTicket = wasFired && ticketStatus === 'pending';
+
+    // Removable only if: not fired (Tier 1) OR fired with a pending ticket
+    // (Tier 2). Anything else (in_preparation/ready/delivered/cancelled) → 409.
+    if (wasFired && !isPendingTicket) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // Tier 2 — cancel the pending ticket + reverse the fire's stock.
+      if (isPendingTicket && ticketId != null) {
+        // TOCTOU guard: the kitchen may have advanced the ticket between the
+        // findOne read and this transaction. Re-read + re-validate inside tx.
+        const freshTicket = await tx.kitchen_tickets.findFirst({
+          where: { id: ticketId },
+          select: { status: true },
+        });
+        if (!freshTicket || freshTicket.status !== 'pending') {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+          );
+        }
+
+        // Cancel the ticket rows in-tx (no SSE here — emitted post-commit).
+        await this.kitchenFireService.cancelTicketInTx(tx, ticketId);
+
+        // Reverse the leaf-ingredient consumption recorded at fire time.
+        // inventory_movements has NO order_item_id; inventory_transactions
+        // does. Idempotency: negative consumption txns only exist for
+        // track_inventory ingredients — if there are none, there is nothing to
+        // reverse (e.g. recipe-less / non-tracked ingredients).
+        const consumptionTxns = await tx.inventory_transactions.findMany({
+          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            quantity_change: true,
+          },
+        });
+        for (const ct of consumptionTxns) {
+          const locationId =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              ct.product_id,
+              ct.product_variant_id ?? undefined,
+            );
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: ct.product_id,
+              variant_id: ct.product_variant_id ?? undefined,
+              location_id: locationId,
+              quantity_change: Math.abs(ct.quantity_change),
+              movement_type: 'return',
+              reason: 'Reversa fire — borrado de ítem de mesa',
+              source_module: 'kitchen_fire_reversal',
+              // NO order_item_id: the reversal must not create a child row that
+              // re-blocks the order_item delete below (FK onDelete: Restrict).
+              create_movement: true,
+              validate_availability: false,
+            },
+            tx,
+          );
+        }
+      }
+
+      // Purge FK children (all onDelete: Restrict) BEFORE the hard delete, in
+      // dependency order. Applies to every tier — even a non-fired line can
+      // carry order_item_taxes (POS-created lines do).
+      await tx.inventory_transactions.deleteMany({
+        where: { order_item_id: orderItemId },
+      });
+      await tx.kitchen_ticket_items.deleteMany({
+        where: { order_item_id: orderItemId },
+      });
+      await tx.order_item_taxes.deleteMany({
+        where: { order_item_id: orderItemId },
+      });
+
+      await tx.order_items.delete({ where: { id: orderItemId } });
+
+      // Recompute totals — EXACT mirror of addItems (subtotal = Σ total_price,
+      // tax = Σ tax_amount_item, grand_total = subtotal + tax; no promo/coupon).
+      const allItems = await tx.order_items.findMany({
+        where: { order_id: session.order_id },
+        select: { total_price: true, tax_amount_item: true },
+      });
+      const subtotal = allItems.reduce(
+        (acc, it) => acc + Number(it.total_price),
+        0,
+      );
+      const tax = allItems.reduce(
+        (acc, it) => acc + Number(it.tax_amount_item ?? 0),
+        0,
+      );
+      await tx.orders.update({
+        where: { id: session.order_id },
+        data: {
+          subtotal_amount: new Prisma.Decimal(subtotal),
+          tax_amount: new Prisma.Decimal(tax),
+          grand_total: new Prisma.Decimal(subtotal + tax),
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    // Post-commit: emit the KDS `ticket.cancelled` SSE (Tier 2 only). Never
+    // inside the tx — a rollback must not leave a phantom cancellation event.
+    if (isPendingTicket && ticketId != null) {
+      await this.kitchenFireService.emitTicketCancelledEvent(ticketId);
+    }
+
+    this.logger.log(
+      `Table session item removed: session=${sessionId} order=${session.order_id} item=${orderItemId} tier=${
+        isPendingTicket ? 'pending-reversal' : 'simple'
+      }`,
+    );
+    return this.findOne(sessionId);
+  }
+
   // --------------------------------------------------------------- close
   /**
    * Close a table session (mark `closed_at`). The order is left in
@@ -547,10 +766,47 @@ export class TableSessionsService {
       });
     });
 
+    // Notify staff + comensal streams of the close (ONLY on the real
+    // transition — the idempotent short-circuit above already returned, so a
+    // second close never re-emits). Post-commit: a rollback must not leave a
+    // phantom `session_closed`.
+    this.emitSessionClosed(session.store_id, sessionId);
+
     this.logger.log(
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id}`,
     );
     return this.findOne(sessionId);
+  }
+
+  /**
+   * Push the canonical `session_closed` SSE event on the per-store subject.
+   * Consumed by both the staff dashboard stream (whitelisted in
+   * `TableSessionsController`) and the comensal stream (whitelisted in
+   * `EcommerceTablesController.DINER_LIFECYCLE_EVENTS`); each stream filters
+   * by `data.table_session_id`. Best-effort — SSE failures must never break
+   * the (already committed) close.
+   *
+   * Reused by the POS close-out path (`PaymentsService.processPosPayment`),
+   * which closes the session directly inside its payment transaction and thus
+   * cannot rely on `closeSession`'s own emit.
+   */
+  emitSessionClosed(storeId: number, sessionId: number): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_closed',
+        title: 'Mesa cerrada',
+        body: 'La cuenta de la mesa fue cerrada',
+        data: { table_session_id: sessionId },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_closed for session ${sessionId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
   }
 
   // ------------------------------------------------------ active sessions

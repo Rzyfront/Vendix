@@ -261,7 +261,7 @@ export class MenusPageComponent implements OnInit {
    * variantes → ruta detalle; simples → carrito (o mesa en open_tab) qty=1. */
   onQuickAdd(event: Event, item: MenuItem): void {
     this.stopCardNav(event);
-    if (!item.is_available_now) return;
+    if (!item.is_available_now || item.is_sold_out) return;
     if (item.product?.has_variants) {
       const slug = item.product?.slug;
       if (slug) this.router.navigate(['/products', slug]);
@@ -310,7 +310,7 @@ export class MenusPageComponent implements OnInit {
       sku: null,
       stock_quantity: null,
       available_stock: null,
-      is_available: item.is_available_now,
+      is_available: item.is_available_now && !item.is_sold_out,
       final_price: on_sale ? p.sale_price! : p.base_price,
       image_url: p.image_url,
       brand: null,

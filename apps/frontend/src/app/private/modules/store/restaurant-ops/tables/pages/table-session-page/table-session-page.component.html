@@ -404,57 +404,89 @@
                     the "Entregado" / "Cancelado" terminal chip.
                   -->
                   @if (
-                    !isClosed() && !selectionMode() && isPrepared(item)
+                    !isClosed() &&
+                    !selectionMode() &&
+                    (isPrepared(item) || canRemoveItem(item))
                   ) {
                     <div class="item-action" (click)="$event.stopPropagation()">
-                      @if (!isItemFired(item)) {
+                      @if (isPrepared(item)) {
+                        @if (!isItemFired(item)) {
+                          <app-button
+                            variant="secondary"
+                            size="sm"
+                            [loading]="isFiring() && firingItemId() === item.id"
+                            (clicked)="fireItem(item)"
+                          >
+                            <app-icon
+                              slot="icon"
+                              name="flame"
+                              [size]="14"
+                            ></app-icon>
+                            Enviar a cocina
+                          </app-button>
+                        } @else if (canDeliver(item)) {
+                          <app-button
+                            variant="success"
+                            size="sm"
+                            [loading]="
+                              deliveringTicketId() != null &&
+                              kitchenStatusFor(item) !== 'delivered'
+                            "
+                            [attr.title]="deliverHint(item)"
+                            (clicked)="markDelivered(item)"
+                          >
+                            <app-icon
+                              slot="icon"
+                              name="check"
+                              [size]="14"
+                            ></app-icon>
+                            Marcar entregado
+                          </app-button>
+                        } @else if (kitchenStatusFor(item) === 'delivered') {
+                          <span
+                            class="item-done"
+                            [attr.title]="deliverHint(item)"
+                          >
+                            <app-icon
+                              name="circle-check"
+                              [size]="14"
+                            ></app-icon>
+                            Entregado
+                          </span>
+                        } @else if (kitchenStatusFor(item) === 'cancelled') {
+                          <span
+                            class="item-done item-cancelled"
+                            [attr.title]="deliverHint(item)"
+                          >
+                            <app-icon name="x-circle" [size]="14"></app-icon>
+                            Cancelado
+                          </span>
+                        }
+                      }
+
+                      <!--
+                        Per-line delete (Frente 2). Visible only when the item
+                        is NOT fired, or its kitchen ticket is still `pending`
+                        (see `canRemoveItem`). Hidden for in_preparation /
+                        ready / delivered / cancelled — the backend rejects
+                        those with 409.
+                      -->
+                      @if (canRemoveItem(item)) {
                         <app-button
-                          variant="secondary"
+                          class="item-remove-btn"
+                          variant="ghost"
                           size="sm"
-                          [loading]="isFiring() && firingItemId() === item.id"
-                          (clicked)="fireItem(item)"
+                          [loading]="removingItemId() === item.id"
+                          [attr.title]="'Eliminar de la cuenta'"
+                          [attr.aria-label]="'Eliminar ' + item.product_name"
+                          (clicked)="onRemoveItem(item)"
                         >
                           <app-icon
                             slot="icon"
-                            name="flame"
+                            name="trash-2"
                             [size]="14"
                           ></app-icon>
-                          Enviar a cocina
                         </app-button>
-                      } @else if (canDeliver(item)) {
-                        <app-button
-                          variant="success"
-                          size="sm"
-                          [loading]="
-                            deliveringTicketId() != null &&
-                            kitchenStatusFor(item) !== 'delivered'
-                          "
-                          [attr.title]="deliverHint(item)"
-                          (clicked)="markDelivered(item)"
-                        >
-                          <app-icon
-                            slot="icon"
-                            name="check"
-                            [size]="14"
-                          ></app-icon>
-                          Marcar entregado
-                        </app-button>
-                      } @else if (kitchenStatusFor(item) === 'delivered') {
-                        <span
-                          class="item-done"
-                          [attr.title]="deliverHint(item)"
-                        >
-                          <app-icon name="circle-check" [size]="14"></app-icon>
-                          Entregado
-                        </span>
-                      } @else if (kitchenStatusFor(item) === 'cancelled') {
-                        <span
-                          class="item-done item-cancelled"
-                          [attr.title]="deliverHint(item)"
-                        >
-                          <app-icon name="x-circle" [size]="14"></app-icon>
-                          Cancelado
-                        </span>
                       }
                     </div>
                   }

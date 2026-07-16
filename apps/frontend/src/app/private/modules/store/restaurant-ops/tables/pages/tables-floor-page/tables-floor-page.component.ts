@@ -17,7 +17,7 @@ import {
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { Table, TableStatus } from '../../interfaces';
+import { Table, TableStatus, OpenTableSessionDto } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import {
   AdminTablesLivePayload,
@@ -211,7 +211,10 @@ export class TablesFloorPageComponent implements OnInit {
     this.loadFloor();
   }
 
-  onOpenSession(dto: { table_id: number; guest_count?: number }): void {
+  onOpenSession(dto: OpenTableSessionDto): void {
+    // The modal emits the full `OpenTableSessionDto` (including the optional
+    // `customer_id`); forward it verbatim so the chosen client reaches the
+    // backend instead of being dropped by a narrower local type (Paso 10).
     this.isOpeningSession.set(true);
     this.tablesService
       .openSession(dto)

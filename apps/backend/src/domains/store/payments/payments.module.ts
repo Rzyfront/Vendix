@@ -51,6 +51,7 @@ import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/in
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
+import { TablesModule } from '../tables/tables.module';
 
 @Module({
   imports: [
@@ -76,6 +77,9 @@ import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.m
     InvoiceDataRequestsModule,
     WithholdingTaxModule,
     InventorySerialNumbersModule,
+    // Restaurant Suite — table close-out / Wompi reconciliation needs
+    // TableSessionsService (session_closed emit + deferred-close reconcile).
+    TablesModule,
   ],
   controllers: [
     PaymentsController,

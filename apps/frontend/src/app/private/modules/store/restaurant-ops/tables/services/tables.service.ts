@@ -173,6 +173,28 @@ export class TablesService {
       );
   }
 
+  /**
+   * Removes a single order item from the session's draft order
+   * (`DELETE /store/table-sessions/:id/items/:orderItemId`). Mirrors
+   * `addItems`: the backend recalculates totals and returns the SAME
+   * `TableSessionView` shape so the caller just replaces its local session.
+   *
+   * Backend gate (Frente 2): an un-fired item is deleted outright; a fired
+   * item whose kitchen ticket is still `pending` cancels the ticket + returns
+   * the fire-consumed stock; items in `in_preparation`/`ready`/`delivered`
+   * are rejected with 409 `TABLE_SESSION_ITEM_FIRED`.
+   */
+  removeItem(sessionId: number, orderItemId: number): Observable<TableSession> {
+    return this.http
+      .delete<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   closeSession(sessionId: number): Observable<TableSession> {
     return this.http
       .post<ApiResponse<TableSession>>(
