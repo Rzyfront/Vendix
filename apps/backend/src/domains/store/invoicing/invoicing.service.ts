@@ -696,6 +696,10 @@ export class InvoicingService {
         subtotal_amount: new Prisma.Decimal(subtotal),
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
+        // Plan Despacho Economía — FASE 4 paso 13. Persistir el monto del flete
+        // separado del subtotal de productos. El asiento diferenciará producto
+        // (4135) vs flete (414505) al validar la factura.
+        shipping_amount: new Prisma.Decimal(shippingCost),
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),

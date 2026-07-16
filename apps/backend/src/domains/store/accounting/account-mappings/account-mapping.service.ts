@@ -22,6 +22,25 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Cuentas por Cobrar',
   },
   'invoice.validated.revenue': { code: '4135', description: 'Ingresos' },
+  // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado
+  // en 414505 "Transporte Terrestre". Se reconoce al validar la factura
+  // (shipping_amount > 0) y al recibir un pago POS con flete sin factura.
+  'invoice.validated.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'payment.received.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'credit_sale.created.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'refund.completed.shipping_income_reversal': {
+    code: '414505',
+    description: 'Transporte Terrestre (Reversión Ingresos por Fletes)',
+  },
   'invoice.validated.vat_payable': {
     code: '2408',
     description: 'IVA por Pagar',

@@ -744,6 +744,9 @@ export class InvoiceFlowService {
         subtotal_amount: Number(updated.subtotal_amount),
         discount_amount: Number(updated.discount_amount),
         tax_amount: Number(updated.tax_amount),
+        // Plan Despacho Economía — FASE 4 paso 14. Propagar shipping_amount al
+        // listener de auto-entry para que separe producto vs flete.
+        shipping_amount: Number(updated.shipping_amount ?? 0),
         tax_breakdown: buildTaxBreakdown(updated.invoice_taxes || []),
         withholding_amount: Number(updated.withholding_amount),
         withholding_breakdown,
@@ -837,6 +840,9 @@ export class InvoiceFlowService {
         subtotal_amount: Number(updated.subtotal_amount),
         discount_amount: Number(updated.discount_amount),
         tax_amount: Number(updated.tax_amount),
+        // Plan Despacho Economía — FASE 4 paso 14. Propagar shipping_amount al
+        // listener de auto-entry para que separe producto vs flete.
+        shipping_amount: Number(updated.shipping_amount ?? 0),
         tax_breakdown: buildTaxBreakdown(updated.invoice_taxes || []),
         withholding_amount: Number(updated.withholding_amount),
         withholding_breakdown,

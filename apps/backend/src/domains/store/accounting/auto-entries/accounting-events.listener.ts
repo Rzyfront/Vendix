@@ -120,6 +120,9 @@ export class AccountingEventsListener {
         accounting_entity_id: event.accounting_entity_id,
         subtotal: event.subtotal_amount,
         tax_amount: event.tax_amount,
+        // Plan Despacho Economía — FASE 4 paso 14. Propagar el monto del flete
+        // para que el split producto/flete se contabilice correctamente.
+        shipping_amount: (event as any).shipping_amount ?? 0,
         tax_breakdown: event.tax_breakdown,
         withholding_breakdown: event.withholding_breakdown,
         total: event.total_amount,
