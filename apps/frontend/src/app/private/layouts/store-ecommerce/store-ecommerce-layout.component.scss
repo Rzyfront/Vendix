@@ -41,6 +41,7 @@
     margin: 0 auto;
     width: 100%;
     flex-wrap: wrap;
+    min-width: 0;
   }
 
   .table-banner-info {
@@ -93,12 +94,32 @@
   }
 
   // Acciones inline — desktop (base visible; se ocultan en el override móvil).
+  // Dos subgrupos: secundarias (envuelven al angostar) + primarias (fijas,
+  // pegadas a la derecha) para que NO se encimen en 1024/1280/1440px.
   .table-banner-actions {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.5rem;
     margin-left: auto;
+    min-width: 0;
+    justify-content: flex-end;
+
+    &__secondary {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    &__primary {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
   }
 
   .table-banner-guests {
@@ -137,6 +158,323 @@
     &:active {
       background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
     }
+  }
+}
+
+// ── Timbre accionable (banner + header del sheet) ─────────────────────────────
+// Clase top-level (NO anidada en .table-banner) porque también viste el ícono
+// del header del bottom-sheet, que vive fuera de .table-banner. Decorativo por
+// defecto; interactivo sólo cuando `.is-actionable` (modos con sesión).
+.table-banner-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill, 999px);
+  color: inherit;
+
+  &.is-actionable {
+    cursor: pointer;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+
+    &:hover {
+      transform: scale(1.12);
+    }
+
+    &:active {
+      transform: scale(0.94);
+    }
+
+    &:focus-visible {
+      outline: 2px solid currentColor;
+      outline-offset: 2px;
+    }
+  }
+
+  &.is-loading {
+    opacity: 0.65;
+    animation: table-bell-pulse 1s ease-in-out infinite;
+  }
+}
+
+@keyframes table-bell-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+// ── Panel "Mi cuenta" (responsive) ────────────────────────────────────────────
+// Base = desktop (≥1024px): side-drawer lateral DERECHO, full-height, entra
+// desde la derecha (translateX). El override móvil al FINAL del archivo lo
+// re-ancla como bottom-sheet (translateY). Mismo marcado; el @media decide eje.
+.bill-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+
+  .bill-panel__overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    animation: bill-panel-fade 0.28s ease-out;
+  }
+
+  .bill-panel__drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: min(420px, 90vw);
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    border-left: 1px solid var(--color-border);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.2);
+    animation: bill-drawer-in 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  // Grip: sólo bottom-sheet (móvil). Oculto en el drawer desktop.
+  .bill-panel__handle {
+    display: none;
+    width: 44px;
+    height: 5px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: var(--color-border);
+    margin: 8px auto 2px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .bill-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .bill-panel__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: var(--fw-bold);
+    font-size: var(--fs-lg);
+    color: var(--color-text-primary);
+
+    app-icon {
+      color: var(--color-primary);
+    }
+  }
+
+  .bill-panel__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color 0.18s ease, color 0.18s ease;
+
+    &:hover {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+      color: var(--color-text-primary);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+  }
+
+  .bill-panel__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1rem 1.25rem;
+  }
+
+  .bill-panel__items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .bill-panel__item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .bill-panel__item-media {
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md, 0.5rem);
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    background: var(--color-background);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .bill-panel__item-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-muted);
+    }
+  }
+
+  .bill-panel__item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .bill-panel__item-name {
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bill-panel__item-meta {
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bill-panel__item-total {
+    font-weight: var(--fw-bold);
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  .bill-panel__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--color-text-secondary);
+    font-size: var(--fs-sm);
+    text-align: center;
+    padding: 2.5rem 1rem;
+
+    app-icon {
+      color: var(--color-text-muted);
+    }
+  }
+
+  .bill-panel__summary {
+    flex-shrink: 0;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .bill-panel__summary-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+
+    > span:last-child {
+      font-variant-numeric: tabular-nums;
+      color: var(--color-text-primary);
+      font-weight: var(--fw-medium);
+    }
+
+    &--balance > span:last-child {
+      color: var(--color-warning, rgb(217, 119, 6));
+      font-weight: var(--fw-semibold);
+    }
+
+    &--total {
+      margin-top: 0.15rem;
+      padding-top: 0.55rem;
+      border-top: 1px dashed var(--color-border);
+      color: var(--color-text-primary);
+      font-weight: var(--fw-bold);
+
+      > span:last-child {
+        font-size: var(--fs-lg);
+        color: var(--color-text-primary);
+        font-weight: var(--fw-bold);
+      }
+    }
+  }
+}
+
+@keyframes bill-panel-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bill-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes bill-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bill-panel .bill-panel__drawer,
+  .bill-panel .bill-panel__overlay {
+    animation: none;
+  }
+
+  .table-banner-bell.is-actionable {
+    transition: none;
+  }
+
+  .table-banner-bell.is-loading {
+    animation: none;
   }
 }
 
@@ -1713,6 +2051,35 @@
     .table-banner-trigger {
       display: inline-flex;
       flex: 0 0 auto;
+    }
+  }
+
+  // Panel "Mi cuenta": en móvil se re-ancla como BOTTOM-SHEET (sube desde el
+  // borde inferior con translateY) en vez del drawer lateral desktop. Override
+  // al FINAL del archivo para ganar la cascada por orden de fuente.
+  .bill-panel {
+    .bill-panel__drawer {
+      top: auto;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: auto;
+      width: 100%;
+      max-height: 85vh;
+      border-left: none;
+      border-top: 1px solid var(--color-border);
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.2);
+      animation: bill-sheet-up 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+
+    .bill-panel__handle {
+      display: block;
+    }
+
+    // Safe-area: el resumen es el elemento inferior del sheet.
+    .bill-panel__summary {
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
     }
   }
 

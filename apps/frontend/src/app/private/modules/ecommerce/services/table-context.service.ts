@@ -163,6 +163,12 @@ export interface TableBillItem {
   quantity: number;
   unit_price: number;
   total: number;
+  /**
+   * Product image URL, surfaced by the diner bill so the "Mi cuenta" panel can
+   * render a thumbnail per line. Optional — use as-is (never sign/transform;
+   * same contract as the catalog). Null/undefined → placeholder icon.
+   */
+  image_url?: string | null;
 }
 
 /**

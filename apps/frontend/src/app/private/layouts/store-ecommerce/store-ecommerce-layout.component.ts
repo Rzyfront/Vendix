@@ -182,8 +182,9 @@ export class StoreEcommerceLayoutComponent {
   // Live table-session stream (auto-connects on active table token)
   readonly table_sse = this.table_sse_service;
 
-  // QR dine-in — "Mi cuenta" modal + guest count (GAP-5)
-  readonly is_bill_modal_open = signal(false);
+  // QR dine-in — "Mi cuenta" panel (bottom-sheet <1024 / drawer derecho ≥1024)
+  // + guest count (GAP-5).
+  readonly is_bill_panel_open = signal(false);
   readonly guest_count = signal(1);
   // QR dine-in — bottom-sheet de acciones (móvil). Sólo activo en flujo de mesa.
   readonly is_actions_sheet_open = signal(false);
@@ -630,7 +631,7 @@ export class StoreEcommerceLayoutComponent {
       });
   }
 
-  /** Load the current bill (called when the "Mi cuenta" modal opens). */
+  /** Load the current bill (called when the "Mi cuenta" panel opens). */
   loadBill(): void {
     this.table_context_service
       .getMyBill()
@@ -638,6 +639,23 @@ export class StoreEcommerceLayoutComponent {
       .subscribe({
         error: (err) => this.toast_service.error(parseApiError(err).userMessage),
       });
+  }
+
+  /**
+   * Open the responsive "Mi cuenta" panel — a bottom-sheet on <1024px and a
+   * right side-drawer on ≥1024px. Locks body scroll and (re)loads the running
+   * bill so the diner always sees the latest items/total on open.
+   */
+  openBillPanel(): void {
+    this.is_bill_panel_open.set(true);
+    this.setBodyScrollLock(true);
+    this.loadBill();
+  }
+
+  /** Close the "Mi cuenta" panel and release the body scroll lock. */
+  closeBillPanel(): void {
+    this.is_bill_panel_open.set(false);
+    this.setBodyScrollLock(false);
   }
 
   /** Open the mobile bottom-sheet of table actions (locks body scroll). */
@@ -875,6 +893,19 @@ export class StoreEcommerceLayoutComponent {
         return 'circle-dollar-sign';
     }
   }
+
+  /**
+   * True when the diner MAY ring for a waiter — the same session-bearing modes
+   * that surface the "Llamar al mesero" button (open_tab / require_staff /
+   * mark_occupied). Gates the actionable table bell in the banner + sheet
+   * header; in `menu_only` the bell stays a decorative "utensils" glyph.
+   */
+  readonly canCallTableWaiter = computed(
+    () =>
+      this.table_context_service.isOpenTab() ||
+      this.table_context_service.isRequireStaff() ||
+      this.table_context_service.isMarkOccupied(),
+  );
 
   /**
    * Comensales stepper label: when only the diner is on the table, surface

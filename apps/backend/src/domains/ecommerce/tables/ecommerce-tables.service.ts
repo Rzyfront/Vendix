@@ -74,6 +74,13 @@ export interface BillItemView {
   quantity: number;
   unit_price: number;
   total: number;
+  /**
+   * Diner-facing thumbnail: the variant's denormalized image when the line
+   * is a variant, else the product's primary image (lowest `sort_order`),
+   * else `null`. Returned as the persisted S3 key/URL — never signed —
+   * matching the catalog/cart contract.
+   */
+  image_url: string | null;
 }
 
 export interface BillView {
@@ -593,11 +600,43 @@ export class EcommerceTablesService {
       },
     });
 
-    const items: BillItemView[] = (order?.order_items ?? []).map((it) => ({
+    // Diner-safe line projection. `findOne` (the staff session view) does NOT
+    // carry per-item images, and we must not enrich that shared view. Instead
+    // read the order's lines directly with a lightweight, image-only include.
+    // `this.prisma` (StorePrismaService) scopes `order_items` relationally via
+    // `orders.store_id`, and the `order_id` was already resolved from a
+    // store-scoped table + active-session lookup — so this stays tenant-safe.
+    // No cost/COGS/recipe fields are selected (diner-safe).
+    const lines = await this.prisma.order_items.findMany({
+      where: { order_id: session.order_id },
+      select: {
+        product_name: true,
+        quantity: true,
+        unit_price: true,
+        total_price: true,
+        variant_image_url: true,
+        products: {
+          select: {
+            product_images: {
+              select: { image_url: true },
+              orderBy: { sort_order: 'asc' },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    const items: BillItemView[] = lines.map((it) => ({
       name: it.product_name,
       quantity: it.quantity,
       unit_price: Number(it.unit_price),
       total: Number(it.total_price),
+      image_url:
+        it.variant_image_url ??
+        it.products?.product_images?.[0]?.image_url ??
+        null,
     }));
 
     const grandTotal = Number(orderRow?.grand_total ?? order?.grand_total ?? 0);
