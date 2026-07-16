@@ -3494,4 +3494,136 @@ export class PaymentsService {
       );
     }
   }
+
+  // --------------------------------------------------------------------
+  // C3 — staff-confirmed payment helper
+  // --------------------------------------------------------------------
+  /**
+   * Confirm a previously-pending payment by transitioning it to `succeeded`
+   * and emitting the canonical `payment.received` event so the auto-entry
+   * listener (`AccountingEventsListener`) and the notification listener
+   * both fire with the SAME shape as the POS fresh-sale path.
+   *
+   * Designed for flows where the payment row was created in `state='pending'`
+   * by an upstream actor (e.g. comensal requesting the bill via QR) and is
+   * later confirmed by staff (manual methods: cash / bank_transfer) — NOT
+   * Wompi/webhooks, which are already final at creation.
+   *
+   * CAS semantics: if the payment is no longer `pending` (already `succeeded`
+   * by a webhook, another staff, or a duplicate call), this method is a
+   * no-op and returns `false`. Otherwise it updates the row in the caller's
+   * transaction (`tx`) and emits the event AFTER the state write succeeds
+   * (event emissions are not transactional — the listener will simply see
+   * a duplicate event if the outer `$transaction` aborts, which is harmless
+   * because the accounting listener is idempotent on `payment_id`).
+   *
+   * This helper does NOT:
+   *   - close the order (the order lifecycle is owned by callers).
+   *   - close the table session (the session lifecycle is owned by callers).
+   *   - write to `cash_register_movements` (run AFTER commit by the caller
+   *     using `recordCashRegisterMovement`, mirroring the POS fresh-sale flow).
+   *
+   * It is intentionally `public` so future cross-module consumers (e.g.
+   * `TableSessionsService.confirmPayment`) can call it without re-implementing
+   * the CAS + emit logic. Not currently injected (would require a module
+   * wiring change) — callers duplicate the logic for now.
+   */
+  async applyConfirmedPaymentToOrder(args: {
+    paymentId: number;
+    staffUser: { id: number; store_id: number };
+    tx: Prisma.TransactionClient;
+  }): Promise<boolean> {
+    const { paymentId, staffUser, tx } = args;
+
+    // CAS load — only proceed if the payment is still pending.
+    const payment = await tx.payments.findUnique({
+      where: { id: paymentId },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
+        },
+        orders: {
+          select: {
+            id: true,
+            order_number: true,
+            subtotal_amount: true,
+            tax_amount: true,
+            discount_amount: true,
+            tip_amount: true,
+            customer_id: true,
+            stores: { select: { organization_id: true } },
+          },
+        },
+      },
+    });
+    if (!payment) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_FIND_001,
+        `Pago #${paymentId} no encontrado`,
+      );
+    }
+    if (payment.state !== 'pending') {
+      // Already final — idempotent short-circuit.
+      this.logger.debug(
+        `[applyConfirmedPaymentToOrder] payment ${paymentId} state=${payment.state}; skipping (already final).`,
+      );
+      return false;
+    }
+
+    // 1. Transition the payment row to `succeeded`.
+    await tx.payments.update({
+      where: { id: paymentId },
+      data: {
+        state: 'succeeded',
+        paid_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // 2. Update `orders.total_paid` / `remaining_balance` so the order
+    //    reflects the new paid amount. Mirrors the GAP-2 helper used by
+    //    `processPosPaymentTransaction`.
+    await this.applyOrderBalanceOnPayment(
+      tx,
+      payment.order_id,
+      Number(payment.amount),
+    );
+
+    // 3. Emit `payment.received` with the SAME shape as the POS fresh-sale
+    //    path (payments.service.ts L1179) so the auto-entry listener maps
+    //    the cash/bank/tip lines identically. Tax breakdown is intentionally
+    //    omitted here (table-session checks are typically dine-in with no
+    //    withholding applied at the payment step — the order's persisted
+    //    tax_breakdown is on `order_item_taxes`, but at this layer we only
+    //    need the totals for the accounting listener).
+    this.eventEmitter.emit('payment.received', {
+      payment_id: payment.id,
+      store_id: staffUser.store_id,
+      organization_id: payment.orders?.stores?.organization_id,
+      order_id: payment.order_id,
+      order_number: payment.orders?.order_number,
+      amount: Number(payment.amount),
+      subtotal_amount: Number(payment.orders?.subtotal_amount || 0),
+      tax_amount: Number(payment.orders?.tax_amount || 0),
+      tax_breakdown: [],
+      withholding_breakdown: [],
+      discount_amount: Number(payment.orders?.discount_amount || 0),
+      tip_amount: Number(payment.orders?.tip_amount || 0),
+      currency: payment.currency || 'COP',
+      payment_method:
+        payment.store_payment_method?.system_payment_method?.display_name ||
+        payment.store_payment_method?.display_name ||
+        'Unknown',
+      user_id: staffUser.id,
+      customer: payment.orders?.customer_id
+        ? { id: Number(payment.orders.customer_id) }
+        : undefined,
+    });
+
+    this.logger.log(
+      `[applyConfirmedPaymentToOrder] payment ${paymentId} → succeeded by staff ${staffUser.id} (order ${payment.order_id})`,
+    );
+
+    return true;
+  }
 }

@@ -1,10 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { TablesService } from './tables.service';
 import { SettingsService } from '../settings/settings.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -109,6 +112,9 @@ export class TableSessionsService {
     private prisma: StorePrismaService,
     private tablesService: TablesService,
     private settingsService: SettingsService,
+    private readonly notificationsService: NotificationsService,
+    private readonly notificationsSseService: NotificationsSseService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -825,5 +831,303 @@ export class TableSessionsService {
     );
 
     return this.findOne(sessionId);
+  }
+
+  // --------------------------------------------------- C3 — staff payments
+  /**
+   * List pending payments for the order backing a table session
+   * (Restaurant Suite — table redesign C3).
+   *
+   * Returns every `payments` row where:
+   *   - the row's `order_id` matches `session.order_id`, AND
+   *   - `state = 'pending'`.
+   *
+   * Includes the method info (`store_payment_method.system_payment_method`)
+   * so the POS UI can show "Efectivo $X" / "Transferencia $Y" badges
+   * without a follow-up round-trip per row.
+   *
+   * Tenant-guard: `findOne(sessionId)` is store-scoped via
+   * `StorePrismaService`, so a session id from another store surfaces as
+   * `TABLE_SESSION_NOT_FOUND` before we touch the payments table.
+   */
+  async listPendingPayments(sessionId: number) {
+    const session = await this.findOne(sessionId);
+
+    const rows = await this.prisma.payments.findMany({
+      where: {
+        order_id: session.order_id,
+        state: 'pending',
+      },
+      orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+      include: {
+        store_payment_method: {
+          include: {
+            system_payment_method: {
+              select: {
+                id: true,
+                type: true,
+                display_name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return rows.map((p) => ({
+      id: p.id,
+      order_id: p.order_id,
+      amount: p.amount,
+      currency: p.currency,
+      state: p.state,
+      created_at: p.created_at,
+      transaction_id: p.transaction_id,
+      method: p.store_payment_method
+        ? {
+            store_payment_method_id: p.store_payment_method.id,
+            type: p.store_payment_method.system_payment_method?.type ?? null,
+            display_name:
+              p.store_payment_method.system_payment_method?.display_name ??
+              p.store_payment_method.display_name ??
+              null,
+          }
+        : null,
+    }));
+  }
+
+  /**
+   * Staff-side confirmation of a pending table-session payment
+   * (Restaurant Suite — table redesign C3).
+   *
+   * Validates:
+   *   1. Session exists, belongs to the current store (findOne is scoped).
+   *   2. Session is still OPEN (closed_at IS NULL). Closed sessions do not
+   *      accept new payment transitions (the order can still be paid via
+   *      the normal POS path).
+   *   3. Payment belongs to the session's order AND is in state='pending'.
+   *   4. Method is manual (`cash` / `bank_transfer` / `card`). Wompi /
+   *      wallet payments are NEVER re-confirmed by staff — those are
+   *      finalized by the gateway webhook (`webhook-handler.service.ts`)
+   *      and the auto-entry listener (`AccountingEventsListener`).
+   *
+   * On success:
+   *   - Updates the payment to `succeeded` + `paid_at` (CAS: no-op if the
+   *     row is already in a final state — e.g. a webhook landed first).
+   *   - Updates `orders.total_paid` / `remaining_balance` so the order
+   *     reflects the new paid amount.
+   *   - Emits `payment.received` with the canonical shape so the auto-entry
+   *     listener + notification listener both fire identically to the POS
+   *     fresh-sale path.
+   *   - Pushes `payment.confirmed` on the per-store SSE subject (so the
+   *     comensal UI updates the check live) and broadcasts a
+   *     `table_payment_confirmed` notification (so the staff dashboard
+   *     bell + sidebar refresh fire).
+   *
+   * The session REMAINS OPEN — staff can confirm one payment, then another,
+   * until the full amount is covered. Session/table closure happens
+   * separately (today via `applyPosPaymentToTableSession` when the last
+   * payment drives the POS close-out, or via `closeSession`).
+   */
+  async confirmPayment(
+    sessionId: number,
+    paymentId: number,
+  ): Promise<{ state: 'succeeded'; payment_id: number }> {
+    const { storeId, userId } = this.requireContext();
+
+    // 1. Tenant + open-session guards.
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    // 2. Resolve + authorize the payment row INSIDE the transaction so
+    //    the CAS + balance update are atomic.
+    const result = await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payments.findFirst({
+        where: { id: paymentId, order_id: session.order_id },
+        include: {
+          store_payment_method: {
+            include: { system_payment_method: true },
+          },
+          orders: {
+            select: {
+              id: true,
+              order_number: true,
+              store_id: true,
+              subtotal_amount: true,
+              tax_amount: true,
+              discount_amount: true,
+              tip_amount: true,
+              customer_id: true,
+              stores: { select: { organization_id: true } },
+            },
+          },
+        },
+      });
+
+      if (!payment) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_FIND_001,
+          `Pago #${paymentId} no encontrado o no pertenece a esta sesión de mesa`,
+        );
+      }
+      if (payment.orders?.store_id !== storeId) {
+        // Defense in depth — `findOne(sessionId)` is already store-scoped,
+        // but re-check on the joined order to be safe.
+        throw new VendixHttpException(
+          ErrorCodes.STORE_CONTEXT_001,
+          'La orden asociada pertenece a otra tienda',
+        );
+      }
+
+      const methodType =
+        payment.store_payment_method?.system_payment_method?.type ?? null;
+      // 3. Manual-only gate. Wompi/webhook payments are finalized by the
+      //    gateway; staff must not re-confirm them.
+      const MANUAL_METHODS = new Set(['cash', 'bank_transfer', 'card']);
+      if (!methodType || !MANUAL_METHODS.has(methodType)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_METHOD_DISABLED_001,
+          `El método de pago (${methodType ?? 'desconocido'}) no puede ser confirmado por staff. Use el webhook del procesador.`,
+        );
+      }
+
+      // 4. CAS: skip the transition if the row is no longer pending.
+      if (payment.state !== 'pending') {
+        this.logger.log(
+          `[confirmPayment] payment ${paymentId} state=${payment.state}; idempotent skip.`,
+        );
+        return { state: 'succeeded' as const, payment_id: payment.id, noop: true };
+      }
+
+      // 5. Transition + balance update.
+      await tx.payments.update({
+        where: { id: payment.id },
+        data: {
+          state: 'succeeded',
+          paid_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+
+      const order = payment.orders;
+      const orderTotalPaid = await this.bumpOrderBalanceInTx(
+        tx,
+        order.id,
+        Number(payment.amount),
+      );
+
+      // 6. Emit canonical `payment.received`. Shape mirrors the POS fresh-sale
+      //    emit (payments.service.ts L1179) so the auto-entry listener + the
+      //    notification listener both process it identically.
+      this.eventEmitter.emit('payment.received', {
+        payment_id: payment.id,
+        store_id: storeId,
+        organization_id: order?.stores?.organization_id,
+        order_id: order?.id,
+        order_number: order?.order_number,
+        amount: Number(payment.amount),
+        subtotal_amount: Number(order?.subtotal_amount || 0),
+        tax_amount: Number(order?.tax_amount || 0),
+        tax_breakdown: [],
+        withholding_breakdown: [],
+        discount_amount: Number(order?.discount_amount || 0),
+        tip_amount: Number(order?.tip_amount || 0),
+        currency: payment.currency || 'COP',
+        payment_method:
+          payment.store_payment_method?.system_payment_method?.display_name ||
+          payment.store_payment_method?.display_name ||
+          'Unknown',
+        user_id: userId,
+        customer: order?.customer_id
+          ? { id: Number(order.customer_id) }
+          : undefined,
+      });
+
+      return {
+        state: 'succeeded' as const,
+        payment_id: payment.id,
+        noop: false,
+        orderNumber: order?.order_number ?? '',
+        methodType,
+        newTotalPaid: orderTotalPaid,
+      };
+    });
+
+    // 7. Post-commit side effects — fire-and-await because the SSE push
+    //    + notification broadcast are the only consumer-facing signal that
+    //    the confirmation happened. They are safe to retry on idempotent
+    //    state (`table_payment_confirmed` dedup is up to the consumer).
+    if (!result.noop) {
+      // 7a. SSE push — `payment.confirmed` so the comensal UI updates the
+      //     live check (the `payments.pending` row disappears). Goes through
+      //     the per-store subject — `TableSessionsController.stream` whitelists
+      //     this type.
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'payment.confirmed',
+        title: 'Pago confirmado',
+        body: `Pago #${result.payment_id} confirmado`,
+        data: {
+          table_session_id: sessionId,
+          payment_id: result.payment_id,
+          amount: result.newTotalPaid,
+          method: result.methodType,
+          order_number: result.orderNumber,
+        },
+        created_at: new Date().toISOString(),
+      });
+
+      // 7b. Notification row + web push + SSE for the staff dashboard.
+      await this.notificationsService.createAndBroadcast(
+        storeId,
+        'table_payment_confirmed',
+        'Pago confirmado',
+        `Pago de mesa #${sessionId} confirmado por staff`,
+        {
+          route: `/admin/restaurant-ops/tables/session/${sessionId}`,
+          table_session_id: sessionId,
+          payment_id: result.payment_id,
+          method: result.methodType,
+        },
+      );
+
+      this.logger.log(
+        `[confirmPayment] payment ${result.payment_id} confirmed by staff ${userId} on session ${sessionId}`,
+      );
+    }
+
+    return { state: 'succeeded', payment_id: result.payment_id };
+  }
+
+  /**
+   * GAP-2-equivalent balance bump — re-reads `grand_total` and `total_paid`
+   * INSIDE the transaction (so we see the latest values) and writes
+   * `total_paid += payment.amount` / `remaining_balance = max(0, ...)` on
+   * the order. Returns the NEW total_paid so callers (e.g. SSE push) can
+   * surface the running sum without a follow-up read.
+   */
+  private async bumpOrderBalanceInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    paidAmount: number,
+  ): Promise<number> {
+    const order = await tx.orders.findUnique({
+      where: { id: orderId },
+      select: { grand_total: true, total_paid: true },
+    });
+    if (!order) return 0;
+    const grandTotal = Number(order.grand_total || 0);
+    const newTotalPaid = Number(order.total_paid || 0) + Number(paidAmount || 0);
+    const remainingBalance = Math.max(grandTotal - newTotalPaid, 0);
+    await tx.orders.update({
+      where: { id: orderId },
+      data: {
+        total_paid: Math.round(newTotalPaid * 100) / 100,
+        remaining_balance: Math.round(remainingBalance * 100) / 100,
+        updated_at: new Date(),
+      },
+    });
+    return Math.round(newTotalPaid * 100) / 100;
   }
 }

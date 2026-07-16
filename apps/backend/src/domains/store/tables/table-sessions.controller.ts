@@ -22,6 +22,7 @@ import {
   OpenTableSessionDto,
   AddItemsToTableSessionDto,
   AssignCustomerDto,
+  ConfirmTablePaymentDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -65,16 +66,19 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
  *
  * REST seam for the `table_sessions` domain (open checks).
  *
- *   POST  /api/store/table-sessions              open session (creates order draft)
- *   GET   /api/store/table-sessions/:id          session detail with current draft order
- *   POST  /api/store/table-sessions/:id/add-items append items to the draft order
- *   PATCH /api/store/table-sessions/:id/customer assign/detach the order customer
- *   POST  /api/store/table-sessions/:id/close    close the session (NOT the order)
+ *   POST  /api/store/table-sessions                       open session (creates order draft)
+ *   GET   /api/store/table-sessions/:id                   session detail with current draft order
+ *   POST  /api/store/table-sessions/:id/add-items         append items to the draft order
+ *   PATCH /api/store/table-sessions/:id/customer          assign/detach the order customer
+ *   POST  /api/store/table-sessions/:id/close             close the session (NOT the order)
+ *   GET   /api/store/table-sessions/:id/payments/pending  list pending payments (C3)
+ *   POST  /api/store/table-sessions/:id/payments/:pid/confirm  staff confirm payment (C3)
  *
  * Permission policy:
  *   - GET detail  → store:table_sessions:read
  *   - POST open   → store:table_sessions:create
- *   - POST add-items / PATCH customer / close → store:table_sessions:update
+ *   - POST add-items / PATCH customer / close / confirm payment → store:table_sessions:update
+ *   - GET pending payments → store:table_sessions:read
  */
 @Controller('store/table-sessions')
 @UseGuards(PermissionsGuard)
@@ -185,6 +189,80 @@ export class TableSessionsController {
     } catch (error: any) {
       return this.responseService.error(
         error.message || 'Error al cerrar la mesa',
+        error.response?.message || error.message,
+        error.status || 400,
+        error.error_code,
+      );
+    }
+  }
+
+  // ------------------------------------------------------ C3 — staff payments
+  /**
+   * List pending payments for the order backing a table session.
+   * GET /api/store/table-sessions/:id/payments/pending
+   *
+   * Used by the POS UI to render the "pending bill" badge + a per-payment
+   * confirm button (one click per manual payment). Returns an empty array
+   * when the session has no pending payments — the POS can then move to
+   * the normal POS close-out flow.
+   */
+  @Get(':id/payments/pending')
+  @Permissions('store:table_sessions:read')
+  async listPendingPayments(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.tableSessionsService.listPendingPayments(id);
+      return this.responseService.success(
+        result,
+        'Pagos pendientes de la sesión',
+      );
+    } catch (error: any) {
+      return this.responseService.error(
+        error.message || 'Error al listar pagos pendientes',
+        error.response?.message || error.message,
+        error.status || 400,
+        error.error_code,
+      );
+    }
+  }
+
+  /**
+   * Staff-side confirmation of a pending table-session payment.
+   * POST /api/store/table-sessions/:id/payments/:paymentId/confirm
+   *
+   * Transitions a `state='pending'` payment row to `succeeded`, updates
+   * `orders.total_paid` / `remaining_balance`, emits the canonical
+   * `payment.received` event (driving the auto-entry accounting listener
+   * AND the notification listener), pushes `payment.confirmed` on the
+   * per-store SSE, and broadcasts a `table_payment_confirmed`
+   * notification (staff dashboard bell).
+   *
+   * Manual methods ONLY (cash / bank_transfer / card). Wompi / wallet
+   * payments are finalized by the gateway webhook and MUST NOT be
+   * re-confirmed by staff — attempting so returns PAY_METHOD_DISABLED_001.
+   *
+   * The session REMAINS OPEN — staff can confirm multiple payments in
+   * sequence until the order's grand_total is fully covered. Session /
+   * table closure happens via the existing close-out paths.
+   */
+  @Post(':id/payments/:paymentId/confirm')
+  @Permissions('store:table_sessions:update')
+  async confirmPayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+    @Body() _dto: ConfirmTablePaymentDto,
+  ) {
+    try {
+      const result = await this.tableSessionsService.confirmPayment(
+        id,
+        paymentId,
+      );
+      return this.responseService.updated(
+        result,
+        'Pago confirmado por staff',
+      );
+    } catch (error: any) {
+      return this.responseService.error(
+        error.message || 'Error al confirmar el pago',
         error.response?.message || error.message,
         error.status || 400,
         error.error_code,
