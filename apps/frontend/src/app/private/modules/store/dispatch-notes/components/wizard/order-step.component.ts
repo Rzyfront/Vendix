@@ -580,16 +580,17 @@ export class OrderStepComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
-          // El envelope real es { success, message, data: { data: Order[],
-          // pagination } } (curl-verified; PaginatedOrdersResponse miente: no
-          // hay interceptor que desenvuelva el sobre). El array vive en
-          // res.data.data; fallback a res.data por si algún día se aplana.
-          const list = res?.data?.data ?? res?.data ?? [];
-          const total =
-            res?.data?.pagination?.total ??
-            (Array.isArray(list) ? list.length : 0);
-          this.orders.set(Array.isArray(list) ? list : []);
-          this.totalItems.set(Number(total) || 0);
+          // OrdersService.getOrders ya desenvuelve el envelope
+          // { success, data: { data: Order[], pagination } } → { data: Order[],
+          // pagination }. Aquí sólo necesitamos proyección segura.
+          const list = Array.isArray(res?.data)
+            ? res.data
+            : Array.isArray(res)
+            ? res
+            : [];
+          const total = Number(res?.pagination?.total ?? list.length);
+          this.orders.set(list);
+          this.totalItems.set(total || 0);
           this.loading.set(false);
         },
         error: () => {

@@ -5,8 +5,6 @@ export { DispatchNoteDetailComponent } from './dispatch-note-detail/dispatch-not
 export { DeliverModalComponent } from './deliver-modal/deliver-modal.component';
 export { VoidModalComponent } from './void-modal/void-modal.component';
 export { InvoiceModalComponent } from './invoice-modal/invoice-modal.component';
-export { CustomerStepComponent } from './wizard/customer-step.component';
-export { ProductsStepComponent } from './wizard/products-step.component';
 export { DetailsStepComponent } from './wizard/details-step.component';
 export { ReviewStepComponent } from './wizard/review-step.component';
 export { DispatchNoteWizardComponent } from './wizard/dispatch-note-wizard.component';

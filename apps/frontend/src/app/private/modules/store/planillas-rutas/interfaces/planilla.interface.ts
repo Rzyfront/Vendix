@@ -2,7 +2,6 @@ export type DispatchRouteStatus =
   | 'draft'
   | 'dispatched'
   | 'in_transit'
-  | 'settling'
   | 'closed'
   | 'voided';
 

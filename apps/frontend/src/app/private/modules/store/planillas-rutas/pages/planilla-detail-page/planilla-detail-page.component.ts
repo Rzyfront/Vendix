@@ -386,7 +386,6 @@ export class PlanillaDetailPageComponent {
     { status: 'draft', label: 'Borrador' },
     { status: 'dispatched', label: 'Despachada' },
     { status: 'in_transit', label: 'En ruta' },
-    { status: 'settling', label: 'Cuadrando' },
     { status: 'closed', label: 'Cerrada' },
   ];
 
@@ -434,8 +433,6 @@ export class PlanillaDetailPageComponent {
       case 'dispatched':
       case 'in_transit':
         return 'blue';
-      case 'settling':
-        return 'yellow';
       case 'closed':
         return 'green';
       case 'voided':
@@ -466,7 +463,7 @@ export class PlanillaDetailPageComponent {
       });
     }
 
-    if (['dispatched', 'in_transit', 'settling'].includes(r.status)) {
+    if (['dispatched', 'in_transit'].includes(r.status)) {
       actions.push({
         id: 'close',
         label: 'Cerrar y cuadrar',
@@ -495,7 +492,7 @@ export class PlanillaDetailPageComponent {
 
   /**
    * Whether the scanned-sheet closure shortcut is available. It only makes sense
-   * while the route is active (dispatched / in_transit / settling): a
+   * while the route is active (dispatched / in_transit): a
    * closed/draft/voided route has nothing to settle from a scan. Additionally,
    * we require at least one PENDING/IN_PROGRESS stop — otherwise the scan would
    * be a no-op on an already-settled route. Mirrors the original header gating.
@@ -504,7 +501,7 @@ export class PlanillaDetailPageComponent {
     const r = this.route();
     if (!r) return false;
     if (this.actionLoading()) return false;
-    if (!['dispatched', 'in_transit', 'settling'].includes(r.status)) {
+    if (!['dispatched', 'in_transit'].includes(r.status)) {
       return false;
     }
     return !!r.stops?.some(
@@ -516,8 +513,8 @@ export class PlanillaDetailPageComponent {
   readonly scanSheetDisabledReason = computed<string | null>(() => {
     if (this.canScanSheet()) return null;
     const r = this.route();
-    if (!r || !['dispatched', 'in_transit', 'settling'].includes(r.status)) {
-      return 'Solo disponible en planillas despachadas, en ruta o cuadrando.';
+    if (!r || !['dispatched', 'in_transit'].includes(r.status)) {
+      return 'Solo disponible en planillas despachadas o en ruta.';
     }
     return 'Todas las paradas ya están liquidadas o liberadas.';
   });
@@ -1075,7 +1072,6 @@ export class PlanillaDetailPageComponent {
       draft: 'Borrador',
       dispatched: 'Despachada',
       in_transit: 'En ruta',
-      settling: 'Cuadrando',
       closed: 'Cerrada',
       voided: 'Anulada',
     };
@@ -1248,7 +1244,7 @@ export class PlanillaDetailPageComponent {
   /** Stop is in an active route and not yet finalized → can be settled/released. */
   canActOnStop(routeStatus: string, stopStatus: string): boolean {
     return (
-      ['dispatched', 'in_transit', 'settling'].includes(routeStatus) &&
+      ['dispatched', 'in_transit'].includes(routeStatus) &&
       !['delivered', 'released', 'rejected', 'partial'].includes(stopStatus)
     );
   }
