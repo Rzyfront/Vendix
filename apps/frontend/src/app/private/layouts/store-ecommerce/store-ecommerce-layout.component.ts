@@ -218,6 +218,13 @@ export class StoreEcommerceLayoutComponent {
   >(null);
   /** One-shot guard to avoid re-prompting move-cart on every re-resolve. */
   private move_cart_prompted_for_token: string | null = null;
+  /**
+   * De-dupe key for the fixed mobile-bar bill auto-load. Combines the table
+   * token with the live kitchen-status tick so the running total is fetched
+   * once per token and refreshed whenever the order advances (a new fire
+   * changes the amount). Read-only fetch — never mutates the bill server-side.
+   */
+  private bill_autoload_key = '';
   /** Debounce timer for the "comensal joined" toast (D6: 3s). */
   private join_toast_timer: ReturnType<typeof setTimeout> | null = null;
   private join_toast_last_event_id = '';
@@ -350,6 +357,27 @@ export class StoreEcommerceLayoutComponent {
         this.join_toast_timer = null;
         this.toast_service.info('Otro comensal se unió a la mesa');
       }, 3000);
+    });
+
+    // Auto-load the running table bill so the fixed mobile bar can surface the
+    // amount due without forcing the diner to open the "Mi cuenta" modal first.
+    // Fires once per (token, kitchen-status) tick: orderStatus advancing is a
+    // cheap proxy for "the order changed", so the bar total stays fresh as
+    // items are fired. Read-only (getMyBill); errors are swallowed so the bar
+    // simply omits the amount instead of surfacing a toast on a background poll.
+    effect(() => {
+      if (!this.is_browser) return;
+      if (!this.table_context_service.isOpenTab()) return;
+      const token = this.table_context_service.tableToken();
+      if (!token) return;
+      const tick = this.table_sse_service.orderStatus() ?? 'init';
+      const key = `${token}::${tick}`;
+      if (key === this.bill_autoload_key) return;
+      this.bill_autoload_key = key;
+      this.table_context_service
+        .getMyBill()
+        .pipe(takeUntilDestroyed(this.destroy_ref))
+        .subscribe({ error: () => {} });
     });
 
     // Clear the debounce timer on destroy so a navigation mid-debounce
@@ -699,6 +727,14 @@ export class StoreEcommerceLayoutComponent {
         this.table_context_service.addOrder(tableOrderItems),
       );
       this.cart_service.clearAllCart();
+      // Refresh the running bill so the fixed mobile bar reflects the items
+      // just folded into the shared tab (auto-load is keyed on kitchen status,
+      // which does not tick on a plain add).
+      this.bill_autoload_key = '';
+      this.table_context_service
+        .getMyBill()
+        .pipe(takeUntilDestroyed(this.destroy_ref))
+        .subscribe({ error: () => {} });
       this.toast_service.success('Productos enviados a la cuenta de la mesa');
     } catch (err) {
       this.toast_service.error(parseApiError(err).userMessage);
@@ -849,6 +885,20 @@ export class StoreEcommerceLayoutComponent {
     const n = this.table_context_service.activeDevicesCount();
     if (n <= 1) return 'Estás solo/a';
     return `${n} comensales en la mesa`;
+  });
+
+  /**
+   * Amount surfaced by the fixed mobile bar: the outstanding balance when the
+   * backend provides it (partial payments applied), otherwise the full bill
+   * total. `null` while the bill has not loaded yet so the bar can render a
+   * placeholder instead of a misleading $0.
+   */
+  readonly table_bill_amount = computed<number | null>(() => {
+    const bill = this.table_context_service.bill();
+    if (!bill) return null;
+    return typeof bill.balance_due === 'number'
+      ? bill.balance_due
+      : bill.grand_total;
   });
 
   // Footer helper methods

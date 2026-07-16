@@ -177,6 +177,10 @@ export interface TableBill {
   subtotal: number;
   grand_total: number;
   currency: string;
+  /** Amount already settled against this bill (backend getBill). Optional. */
+  total_paid?: number;
+  /** Outstanding balance = grand_total − total_paid (backend getBill). Optional. */
+  balance_due?: number;
 }
 
 interface TableBillResponse {

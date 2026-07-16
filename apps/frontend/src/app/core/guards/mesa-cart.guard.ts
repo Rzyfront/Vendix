@@ -24,6 +24,15 @@ export const mesaCartGuard: CanActivateFn = () => {
   const tableContext = inject(TableContextService);
   const router = inject(Router);
 
+  // Anti-race: on a cold deep-link to `/cart` or `/checkout` (e.g. `?mesa=`
+  // active) this guard runs BEFORE the storefront layout's `ngOnInit`, which
+  // is where `hydrate()` normally reads the persisted mesa token from
+  // localStorage. Without hydrating here, `isActive()` would still be false
+  // and the standard cart/checkout would leak through. `hydrate()` is
+  // SSR-safe (it self-guards with `isPlatformBrowser` internally) and
+  // idempotent, so calling it here is a no-op when already hydrated.
+  tableContext.hydrate();
+
   if (tableContext.isActive()) {
     return router.createUrlTree(['/cartas']);
   }

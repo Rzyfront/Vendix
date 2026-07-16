@@ -8,11 +8,14 @@
 }
 
 // QR Table Banner
-// ── Banner de mesa (dine-in QR) — mobile-first ───────────────────────────────
+// ── Banner de mesa (dine-in QR) ──────────────────────────────────────────────
+// Desktop (≥ lg): banner slim en la parte superior con acciones inline (base).
+// Móvil (< lg): re-anclado como barra fija inferior (override al FINAL del
+// archivo) para manipularlo con el pulgar, a la par del carrito móvil.
 .table-banner {
   background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
   border-bottom: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.18);
-  padding: 0.4rem 0.9rem;
+  padding: 0.42rem 1.5rem;
   display: flex;
   align-items: center;
   font-size: var(--fs-sm);
@@ -37,19 +40,15 @@
     max-width: 1600px;
     margin: 0 auto;
     width: 100%;
-    // Móvil: una sola línea (info flexible + disparador a la derecha).
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 
-  // Línea slim: se encoge y trunca antes de empujar el disparador.
   .table-banner-info {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     min-width: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    white-space: nowrap;
+    flex: 0 1 auto;
   }
 
   .table-banner-name {
@@ -75,7 +74,6 @@
     background: rgba(59, 130, 246, 0.12);
     color: var(--color-primary);
     flex-shrink: 0;
-    max-width: 45%;
     overflow: hidden;
 
     span {
@@ -94,31 +92,9 @@
     }
   }
 
-  // Disparador del sheet — sólo móvil.
-  .table-banner-trigger {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    flex-shrink: 0;
-    margin-left: auto;
-    padding: 0.32rem 0.7rem;
-    border-radius: 999px;
-    border: 1px solid currentColor;
-    background: transparent;
-    color: inherit;
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-semibold);
-    cursor: pointer;
-    transition: background-color 0.18s ease;
-
-    &:active {
-      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.14);
-    }
-  }
-
-  // Acciones inline — sólo desktop.
+  // Acciones inline — desktop (base visible; se ocultan en el override móvil).
   .table-banner-actions {
-    display: none;
+    display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 0.35rem;
@@ -131,34 +107,35 @@
     gap: 0.3rem;
   }
 
-  // ≥ md: fila inline pulida; el disparador móvil desaparece.
-  @media (min-width: 768px) {
-    padding: 0.42rem 1.5rem;
+  // Monto de la cuenta + fila de acción móvil: ocultos en el base desktop;
+  // se muestran en el override < lg (barra fija inferior) al final del archivo.
+  .table-banner-amount {
+    display: none;
+  }
 
-    .table-banner-content {
-      flex-wrap: wrap;
-    }
+  .table-banner-mobile {
+    display: none;
+  }
 
-    .table-banner-info {
-      flex: 0 1 auto;
-      white-space: normal;
-      overflow: visible;
-    }
+  // Disparador del sheet — sólo móvil (se muestra en el override < lg).
+  .table-banner-trigger {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-lg, 0.75rem);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+    transition: background-color 0.18s ease;
 
-    .table-banner-status {
-      overflow: visible;
-    }
-
-    .table-banner-order-status {
-      max-width: none;
-    }
-
-    .table-banner-trigger {
-      display: none;
-    }
-
-    .table-banner-actions {
-      display: flex;
+    &:active {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
     }
   }
 }
@@ -289,8 +266,8 @@
     }
   }
 
-  // El sheet es exclusivo de móvil; en desktop nunca se muestra.
-  @media (min-width: 768px) {
+  // El sheet es exclusivo de móvil; en desktop (≥ lg) nunca se muestra.
+  @media (min-width: 1024px) {
     display: none;
   }
 }
@@ -1632,5 +1609,116 @@
 
   .ecommerce-main {
     padding: 1rem 0.5rem;
+  }
+}
+
+// ── Móvil (< lg): banner de mesa como barra fija inferior ─────────────────────
+// Override colocado al FINAL del archivo para ganar la cascada por orden de
+// fuente (los @media móviles deben ir DESPUÉS de las reglas base — gotcha
+// conocido del repo). Modelado a partir de cart-mobile-footer: fija abajo,
+// blur, sombra hacia arriba, safe-area, y gate a < 1024px (paridad carrito/POS).
+@media (max-width: 1023px) {
+  .table-banner {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60; // sobre el contenido; el action-sheet (9998) queda por encima
+    padding: 0.5rem 0.9rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    border-bottom: none;
+    border-top: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.35);
+    background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 -8px 24px -12px rgba(15, 23, 42, 0.35);
+    color: var(--color-text-primary);
+
+    // Los tintes de modo pasan a un acento en el borde superior; el fondo se
+    // mantiene en surface+blur para legibilidad sobre el contenido.
+    &--open-tab {
+      background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+      border-top-color: rgba(34, 197, 94, 0.5);
+    }
+
+    &--require-staff {
+      background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+      border-top-color: rgba(245, 158, 11, 0.5);
+    }
+
+    .table-banner-content {
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.5rem;
+    }
+
+    // Fila 1 izquierda: info que se encoge y trunca.
+    .table-banner-info {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .table-banner-name,
+    .table-banner-status {
+      color: var(--color-text-primary);
+    }
+
+    .table-banner-order-status {
+      max-width: 55%;
+    }
+
+    // Fila 1 derecha: monto de la cuenta.
+    .table-banner-amount {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-end;
+      flex: 0 0 auto;
+      line-height: 1.1;
+
+      &__label {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+      }
+
+      &__value {
+        font-size: var(--fs-base);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+    }
+
+    // Acciones inline de desktop: ocultas en móvil.
+    .table-banner-actions {
+      display: none;
+    }
+
+    // Fila 2 a lo ancho: CTA primaria flexible + disparador "Acciones".
+    .table-banner-mobile {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex: 1 1 100%;
+      width: 100%;
+    }
+
+    .table-banner-mobile__cta {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .table-banner-trigger {
+      display: inline-flex;
+      flex: 0 0 auto;
+    }
+  }
+
+  // Clearance: la barra fija no debe tapar el footer ni el contenido inferior.
+  // Sólo cuando hay mesa activa (la barra existe únicamente en ese estado).
+  .ecommerce-layout--table-bar .ecommerce-footer {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
   }
 }
