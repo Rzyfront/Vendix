@@ -35,7 +35,6 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 type AvailabilityDisplay = 'hide' | 'badge';
 
@@ -274,32 +273,16 @@ export class MenusPageComponent implements OnInit {
   /** Agrega un plato simple (qty=1) al carrito — o a la mesa en sesión dine-in
    *  open_tab. El backend rechaza platos fuera de horario (422
    *  MENU_ITEM_NOT_AVAILABLE_NOW), por eso el botón se gatea con
-   *  `is_available_now`; esto es un guard defensivo. */
+   *  `is_available_now`; esto es un guard defensivo. El chokepoint mesa-vs-cart
+   *  y el toast mesa viven ahora en `cartService.addProduct` (D3); aquí sólo
+   *  sumamos el toast del camino ecommerce. */
   private addToCartOrTab(item: MenuItem): void {
     const product = item.product;
     if (!product || !item.is_available_now) return;
     const qty = 1;
-
-    if (this.tableContext.isOpenTab()) {
-      this.tableContext
-        .addOrder([{ product_id: product.id, quantity: qty }])
-        .subscribe({
-          next: () => {
-            const msg = this.tableContext.autoFire()
-              ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
-              : `Agregado a la mesa ${this.tableContext.tableName()}`;
-            this.toastService.success(msg);
-          },
-          error: (err) => {
-            const { userMessage, devMessage } = parseApiError(err);
-            this.toastService.error(userMessage);
-            if (devMessage) console.error('[table addOrder]', devMessage);
-          },
-        });
-      return;
-    }
-
-    const result = this.cartService.addToCart(product.id, qty);
+    const isMesa = this.tableContext.isOpenTab();
+    const result = this.cartService.addProduct(product.id, qty);
+    if (isMesa) return; // mesa path toasts internally inside addProduct
     const done = () => this.toastService.success('Plato agregado al carrito');
     if (result) {
       result.subscribe({ next: done });

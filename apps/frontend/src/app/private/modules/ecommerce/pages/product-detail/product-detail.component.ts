@@ -2009,7 +2009,8 @@ export class ProductDetailComponent implements OnInit {
     const variantInfo = variant
       ? { name: variant.name, sku: variant.sku, price: variant.final_price }
       : undefined;
-    const result = this.cartService.addToCart(
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
       variantId,
@@ -2044,7 +2045,8 @@ export class ProductDetailComponent implements OnInit {
     const variantInfo = variant
       ? { name: variant.name, sku: variant.sku, price: variant.final_price }
       : undefined;
-    const result = this.cartService.addToCart(
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
       variantId,

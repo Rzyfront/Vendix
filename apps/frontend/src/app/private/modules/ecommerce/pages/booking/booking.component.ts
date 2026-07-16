@@ -414,7 +414,8 @@ export class BookingComponent implements OnInit {
     const product = this.product();
     const variant = this.selectedVariant();
     if (product) {
-      const result = this.cartService.addToCart(
+      // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+      const result = this.cartService.addProduct(
         product.id,
         1,
         variant?.id,

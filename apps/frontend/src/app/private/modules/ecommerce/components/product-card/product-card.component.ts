@@ -12,14 +12,13 @@ import { EcommerceProduct, formatMenuNextAvailable } from '../../services/catalo
 import { formatNextAvailableDetailed } from '../../services/next-available.util';
 import { NextAvailableNoticeComponent } from '../next-available-notice';
 import { TableContextService } from '../../services/table-context.service';
+import { CartService } from '../../services/cart.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
-import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-product-card',
@@ -603,7 +602,9 @@ export class ProductCardComponent {
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
   public readonly tableContext = inject(TableContextService);
-  private toastService = inject(ToastService);
+  // Chokepoint (D3): the mesa-vs-cart routing lives here so we can absorb the
+  // D5 ad-hoc mesa branch from `onAddToCart`.
+  private readonly cartService = inject(CartService);
   private tenantFacade = inject(TenantFacade);
 
   /**
@@ -765,6 +766,14 @@ export class ProductCardComponent {
       return;
     }
     this.add_to_cart.emit(this.product());
+    // QR table — open_tab: do NOT redirect to /cart — the dish belongs on the
+    // table tab and the parent's `cartService.addProduct` already routes to
+    // `addOrder`. The mesaCartGuard (D6) would bounce /cart anyway. The
+    // `add_to_cart` emit is preserved so external listeners (sliders, etc.)
+    // keep their post-add wiring.
+    if (this.tableContext.isOpenTab()) {
+      return;
+    }
     this.router.navigate(['/cart']);
   }
 
@@ -779,29 +788,17 @@ export class ProductCardComponent {
       this.router.navigate(['/products', this.product().slug]);
       return;
     }
-    // QR table — open_tab: send item directly to the table's running order
-    // instead of adding to the regular cart. No payment here (bill settles
-    // at the table at the end).
-    if (this.tableContext.isOpenTab()) {
-      this.tableContext
-        .addOrder([{ product_id: this.product().id, quantity: this.qtyToAdd() }])
-        .subscribe({
-          next: (res) => {
-            if (res.success) {
-              const msg = res.data.fired
-                ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
-                : `Agregado a la mesa ${this.tableContext.tableName()}`;
-              this.toastService.success(msg);
-              this.qtyToAdd.set(1);
-            }
-          },
-          error: (err) => {
-            const { userMessage, devMessage } = parseApiError(err);
-            this.toastService.error(userMessage);
-            if (devMessage) console.error('[table addOrder]', devMessage);
-          },
-        });
-      return;
+    // Chokepoint (D3): mesa-vs-cart routing + mesa success/error toast live in
+    // `cartService.addProduct`. We keep only the local qty-stepper reset here
+    // (the qty signal is component-local, can't live in the service).
+    const result = this.cartService.addProduct(
+      this.product().id,
+      this.qtyToAdd(),
+    );
+    if (result && this.tableContext.isOpenTab()) {
+      // mesa path: addProduct returns the addOrder observable; reset stepper
+      // on success (the chokepoint already toasted the mesa success).
+      result.subscribe(() => this.qtyToAdd.set(1));
     }
     this.add_to_cart.emit(this.product());
   }

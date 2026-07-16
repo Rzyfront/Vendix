@@ -454,7 +454,8 @@ export class CatalogComponent implements OnInit {
       this.router.navigate(['/products', product.slug]);
       return;
     }
-    const result = this.cart_service.addToCart(product.id, 1);
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cart_service.addProduct(product.id, 1);
     if (result) {
       result.subscribe();
     }
