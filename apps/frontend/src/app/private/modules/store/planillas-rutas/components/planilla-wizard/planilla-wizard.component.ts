@@ -418,6 +418,14 @@ export class PlanillaWizardComponent {
   /** Contexto precargado al llegar desde un método de envío (atajo). */
   readonly prefillNote = input<string | null>(null);
 
+  // Plan Despacho Economía — FASE 3 paso 12. Prefill estructurado (no
+  // cosmético) desde la política efectiva del método. Se aplican al iniciar
+  // el wizard si están presentes; permanecen editables para granular control.
+  readonly prefillShippingMethodId = input<number | null>(null);
+  readonly prefillVehicleId = input<number | null>(null);
+  readonly prefillDriverUserId = input<number | null>(null);
+  readonly prefillCarrierSupplierId = input<number | null>(null);
+
   readonly close = output<void>();
   readonly created = output<DispatchRoute>();
 

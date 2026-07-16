@@ -46,6 +46,10 @@ import { DispatchRoute, DispatchRouteStats } from './interfaces/planilla.interfa
     @if (showWizard()) {
       <app-planilla-wizard
         [prefillNote]="prefillNote()"
+        [prefillShippingMethodId]="prefillShippingMethodId()"
+        [prefillVehicleId]="prefillVehicleId()"
+        [prefillDriverUserId]="prefillDriverUserId()"
+        [prefillCarrierSupplierId]="prefillCarrierSupplierId()"
         (close)="closeWizard()"
         (created)="onCreated($event)"
       ></app-planilla-wizard>
@@ -67,6 +71,12 @@ export class PlanillasRutasComponent {
   readonly showWizard = signal(false);
   // Prefill context passed to the wizard when arriving from a shipping method
   readonly prefillNote = signal<string | null>(null);
+  // Plan Despacho Economía — FASE 3 paso 12: prefill estructurado (no
+  // cosmético) desde la política efectiva del método.
+  readonly prefillShippingMethodId = signal<number | null>(null);
+  readonly prefillVehicleId = signal<number | null>(null);
+  readonly prefillDriverUserId = signal<number | null>(null);
+  readonly prefillCarrierSupplierId = signal<number | null>(null);
 
   ngOnInit() {
     this.refreshStats();
@@ -76,8 +86,9 @@ export class PlanillasRutasComponent {
   /**
    * Atajo método de envío → planilla. Si llega `prefill=1` con
    * `shipping_method_id`, abre el wizard de creación automáticamente y precarga
-   * el contexto del método (nota). El flujo normal (sin queryParams) no se ve
-   * afectado: el wizard se sigue abriendo manualmente con "Crear planilla".
+   * el contexto del método (nota + vehículo/ejecutor derivados de la política).
+   * El flujo normal (sin queryParams) no se ve afectado: el wizard se sigue
+   * abriendo manualmente con "Crear planilla".
    */
   private handlePrefillFromQueryParams(): void {
     const params = this.activatedRoute.snapshot.queryParamMap;
@@ -91,19 +102,31 @@ export class PlanillasRutasComponent {
 
     if (!methodId || Number.isNaN(methodId)) return;
 
+    // Plan Despacho Economía — FASE 3 paso 12.
+    // Resolvemos la política efectiva (método + defaults de tienda) y
+    // preseleccionamos el ejecutor por defecto en el wizard.
     this.shippingService
-      .getShippingMethod(methodId)
+      .getEffectivePolicy(methodId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (method) => {
+        next: (policy) => {
+          this.prefillShippingMethodId.set(policy.method_id);
+          if (policy.default_vehicle_id) {
+            this.prefillVehicleId.set(policy.default_vehicle_id);
+          }
+          if (policy.default_driver_user_id) {
+            this.prefillDriverUserId.set(policy.default_driver_user_id);
+          }
+          if (policy.default_carrier_supplier_id) {
+            this.prefillCarrierSupplierId.set(
+              policy.default_carrier_supplier_id,
+            );
+          }
           this.prefillNote.set(
-            `Despacho del método de envío "${method.name}" (#${method.id}).`,
+            `Despacho del método de envío #${policy.method_id} (tipo ${policy.method_type}).`,
           );
-          // TODO(atajo): cuando el DTO de ruta acepte un vínculo directo a
-          // shipping_method (o derive vehicle_id por defecto del método),
-          // preseleccionar aquí vehículo/remisiones filtradas por el método.
         },
-        // Si falla la carga del método, el wizard ya está abierto en modo manual.
+        // Si falla, el wizard ya está abierto en modo manual.
         error: () => {},
       });
   }
