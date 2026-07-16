@@ -83,6 +83,10 @@ export interface BillView {
   items: BillItemView[];
   subtotal: number;
   grand_total: number;
+  /** Sum of applied (succeeded) payments against this order. */
+  total_paid: number;
+  /** Outstanding amount the diner still owes (`grand_total − total_paid`). */
+  balance_due: number;
   currency: string;
 }
 
@@ -572,10 +576,21 @@ export class EcommerceTablesService {
     const order = view.order;
 
     // `findOne` intentionally omits currency; read it cheaply from the
-    // scoped order row so the storefront can format money correctly.
+    // scoped order row so the storefront can format money correctly, and
+    // pull the denormalized balance columns while we're here.
     const orderRow = await this.prisma.orders.findFirst({
       where: { id: session.order_id },
-      select: { currency: true },
+      select: {
+        currency: true,
+        grand_total: true,
+        total_paid: true,
+        // `remaining_balance` exists on the order but is refreshed ONLY when
+        // a payment is applied (bumpOrderBalanceInTx); for an unpaid draft
+        // tab it stays 0 while items accumulate. We therefore derive the
+        // live balance from `grand_total − total_paid` (the same formula
+        // bumpOrderBalanceInTx uses) instead of reading it directly.
+        remaining_balance: true,
+      },
     });
 
     const items: BillItemView[] = (order?.order_items ?? []).map((it) => ({
@@ -585,6 +600,10 @@ export class EcommerceTablesService {
       total: Number(it.total_price),
     }));
 
+    const grandTotal = Number(orderRow?.grand_total ?? order?.grand_total ?? 0);
+    const totalPaid = Number(orderRow?.total_paid ?? 0);
+    const balanceDue = Math.max(Math.round((grandTotal - totalPaid) * 100) / 100, 0);
+
     return {
       table: { id: table.id, name: table.name },
       session_id: session.id,
@@ -592,6 +611,8 @@ export class EcommerceTablesService {
       items,
       subtotal: Number(order?.subtotal_amount ?? 0),
       grand_total: Number(order?.grand_total ?? 0),
+      total_paid: totalPaid,
+      balance_due: balanceDue,
       currency: orderRow?.currency ?? 'COP',
     };
   }
@@ -811,12 +832,61 @@ export class EcommerceTablesService {
     // diner passes nothing (full bill pay) or accept a partial override.
     const order = await this.prisma.orders.findFirst({
       where: { id: session.order_id },
-      select: { id: true, grand_total: true, currency: true },
+      select: {
+        id: true,
+        grand_total: true,
+        total_paid: true,
+        // Denormalized column; stale (0) for an unpaid draft tab — see the
+        // balance derivation below. Selected for completeness/parity with
+        // getBill; the live balance is computed from grand_total/total_paid.
+        remaining_balance: true,
+        currency: true,
+      },
     });
     if (!order) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
     }
-    const amount = dto.amount ?? Number(order.grand_total);
+
+    // Outstanding balance = grand_total − succeeded payments (total_paid).
+    // Derived instead of reading `remaining_balance` directly because that
+    // column is only refreshed when a payment is applied (bumpOrderBalanceInTx)
+    // and stays 0 for an unpaid draft tab while items accumulate. `total_paid`
+    // counts succeeded payments only, so this is the true amount owed.
+    const currencyCode = order.currency ?? 'COP';
+    const balanceDue =
+      Math.round(
+        Math.max(Number(order.grand_total) - Number(order.total_paid), 0) * 100,
+      ) / 100;
+
+    // Default to the full outstanding balance when the diner does not pass
+    // an explicit amount (full-bill pay). A client-supplied amount is
+    // accepted only up to the outstanding balance (guarded below).
+    const amount = dto.amount ?? balanceDue;
+
+    // Anti-overpayment guard — reject with 4xx BEFORE creating any `payments`
+    // row so the diner can never register more than what is owed. A one-cent
+    // tolerance absorbs Decimal/float rounding noise on an exact-balance pay.
+    if (balanceDue <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_INVALID_AMOUNT_001,
+        'La cuenta de la mesa ya está saldada; no hay saldo pendiente por pagar.',
+        { balance_due: balanceDue, currency: currencyCode },
+      );
+    }
+    if (amount <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_INVALID_AMOUNT_001,
+        'El monto a pagar debe ser mayor a cero.',
+        { amount, balance_due: balanceDue, currency: currencyCode },
+      );
+    }
+    if (amount > balanceDue + 0.001) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_INVALID_AMOUNT_001,
+        `El monto (${this.formatMoney(amount, currencyCode)}) supera el saldo pendiente de la cuenta (${this.formatMoney(balanceDue, currencyCode)}).`,
+        { amount, balance_due: balanceDue, currency: currencyCode },
+      );
+    }
 
     // Manual methods (cash / bank_transfer) — insert a `pending`
     // payment row and ask the mesero to reconcile. We deliberately

@@ -8,6 +8,8 @@ import { TablesService } from './tables.service';
 import { SettingsService } from '../settings/settings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { MovementsService } from '../cash-registers/movements/movements.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -115,6 +117,10 @@ export class TableSessionsService {
     private readonly notificationsService: NotificationsService,
     private readonly notificationsSseService: NotificationsSseService,
     private readonly eventEmitter: EventEmitter2,
+    // Cash-register services (from CashRegistersModule) — used to mirror the
+    // POS arqueo behavior when a manual table payment is confirmed by staff.
+    private readonly cashRegisterSessionsService: SessionsService,
+    private readonly cashRegisterMovementsService: MovementsService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -1049,6 +1055,8 @@ export class TableSessionsService {
         payment_id: payment.id,
         noop: false,
         orderNumber: order?.order_number ?? '',
+        orderId: order.id,
+        amount: Number(payment.amount),
         methodType,
         newTotalPaid: orderTotalPaid,
       };
@@ -1092,12 +1100,95 @@ export class TableSessionsService {
         },
       );
 
+      // 7c. Cash-register movement (staff arqueo). Mirror of the POS
+      //     `PaymentsService.recordCashRegisterMovement`: only if the staff
+      //     user has an OPEN cash session and the settings gate allows it.
+      //     Runs ONLY on a real transition (guarded by `!result.noop`), so a
+      //     webhook/idempotent re-confirm never double-counts the arqueo. A
+      //     missing session or disabled gate is a SILENT skip — it must NEVER
+      //     block the already-committed payment confirmation.
+      await this.recordStaffCashMovement({
+        storeId,
+        userId,
+        orderId: result.orderId,
+        paymentId: result.payment_id,
+        amount: result.amount,
+        paymentMethod: result.methodType,
+      });
+
       this.logger.log(
         `[confirmPayment] payment ${result.payment_id} confirmed by staff ${userId} on session ${sessionId}`,
       );
     }
 
     return { state: 'succeeded', payment_id: result.payment_id };
+  }
+
+  /**
+   * Register a `sale` movement in `cash_register_movements` when a manual
+   * table payment is confirmed by staff — the exact mirror of the POS
+   * `PaymentsService.recordCashRegisterMovement`. Without this, the staff
+   * cash count (arqueo) stays at 0 while accounting already booked the
+   * cash-in (DR 1105 via the `payment.received` event), breaking the
+   * cash-register ↔ ledger reconciliation.
+   *
+   * Business rule (mirror of the POS `processPosPayment` path): record ONLY if
+   *   1. `pos.cash_register.enabled` is on, AND
+   *   2. the confirming staff user has an OPEN cash session, AND
+   *   3. for non-cash methods, `track_non_cash_payments` is on.
+   * Any miss is a SILENT skip. This helper never throws and never blocks the
+   * already-committed payment confirmation (called after the COMMIT and only
+   * on a real transition, i.e. `!result.noop`).
+   */
+  private async recordStaffCashMovement(args: {
+    storeId: number;
+    userId: number;
+    orderId: number;
+    paymentId: number;
+    amount: number;
+    paymentMethod: string;
+  }): Promise<void> {
+    const { storeId, userId, orderId, paymentId, amount, paymentMethod } = args;
+    try {
+      if (amount <= 0) return;
+
+      // 1. Feature gate — same key the POS reads.
+      const settings = await this.settingsService.getSettings();
+      const crSettings = settings.pos?.cash_register;
+      if (!crSettings?.enabled) return;
+
+      // 2. Open cash session for THIS staff user (store-scoped via context).
+      const session = await this.cashRegisterSessionsService.getActiveSession(
+        userId,
+      );
+      if (!session) return;
+
+      // 3. Non-cash gate — skip unless the store tracks non-cash movements.
+      if (paymentMethod !== 'cash' && !crSettings.track_non_cash_payments) {
+        return;
+      }
+
+      await this.cashRegisterMovementsService.recordSaleMovement(session.id, {
+        store_id: storeId,
+        user_id: userId,
+        amount,
+        payment_method: paymentMethod,
+        order_id: orderId,
+        payment_id: paymentId,
+      });
+
+      this.logger.log(
+        `[confirmPayment] cash-register sale movement recorded for session ${session.id}, order ${orderId}, payment ${paymentId}`,
+      );
+    } catch (error) {
+      // Never let a cash-register failure surface to the confirmation — the
+      // payment is already committed. Log and move on (mirror of the POS).
+      this.logger.error(
+        `[confirmPayment] error recording cash-register movement for order ${orderId}, payment ${paymentId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**
