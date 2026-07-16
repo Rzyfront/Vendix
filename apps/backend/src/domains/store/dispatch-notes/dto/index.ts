@@ -12,6 +12,7 @@ export {
   CreateFromOrderDto,
   CreateFromOrderItemDto,
 } from './create-from-order.dto';
+export { CreateFromOrdersBatchDto } from './create-from-orders-batch.dto';
 export { VoidDispatchNoteDto } from './void-dispatch-note.dto';
 export { DeliverDispatchNoteDto } from './deliver-dispatch-note.dto';
 export {
