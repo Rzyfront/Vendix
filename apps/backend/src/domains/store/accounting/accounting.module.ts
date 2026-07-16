@@ -31,6 +31,8 @@ import { AccountMappingService } from './account-mappings/account-mapping.servic
 // Auto Entries
 import { AutoEntryService } from './auto-entries/auto-entry.service';
 import { AccountingEventsListener } from './auto-entries/accounting-events.listener';
+// Plan Despacho Economía — FASE 5 paso 17. Listener de liquidación de ruta.
+import { DispatchSettlementListener } from './listeners/dispatch-settlement.listener';
 import {
   AccountingEntryFailureService,
   ACCOUNTING_ENTRY_RETRY_QUEUE,
@@ -108,6 +110,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     AutoEntryService,
     AccountingEventsListener,
     AccountingEntryFailureService,
+    DispatchSettlementListener,
     AccountingEntryRetryProcessor,
     PlatformOrgService,
     BankAccountsService,

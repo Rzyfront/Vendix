@@ -14,10 +14,12 @@ export interface SeedDefaultAccountMappingsResult {
 const MAPPING_DEFAULTS: Record<string, string> = {
   'invoice.validated.accounts_receivable': '1305',
   'invoice.validated.revenue': '4135',
+  'invoice.validated.shipping_income': '414505',
   'invoice.validated.vat_payable': '2408',
   'payment.received.cash': '1105',
   'payment.received.accounts_receivable': '1305',
   'payment.received.revenue': '4135',
+  'payment.received.shipping_income': '414505',
   'expense.approved.expense': '5195',
   'expense.approved.accounts_payable': '2205',
   'expense.paid.accounts_payable': '2205',
@@ -267,6 +269,10 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'dispatch_route.closed.cash': '1105',
   'dispatch_route.closed.surplus': '4295',
   'dispatch_route.closed.shortage_receivable': '1365',
+  // Plan Despacho Economía — FASE 5 paso 17. Costo del transportador al
+  // liquidar la ruta. DR 523550 (gross), CR 2205→banco (pago neto).
+  'dispatch_route.settlement.transport_cost': '523550',
+  'dispatch_route.settlement.accounts_payable': '2205',
   // SaaS Subscription (RNC-31) — Store side: gasto admin del cliente
   'saas_subscription_expense.expense': '5135',
   'saas_subscription_expense.cash_bank': '1110',
