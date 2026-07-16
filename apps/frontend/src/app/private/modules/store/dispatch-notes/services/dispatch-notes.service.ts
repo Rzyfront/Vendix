@@ -14,6 +14,7 @@ import {
   CreateTransferDispatchDto,
   CreateReturnDispatchDto,
   CreatePurchaseReceiptDispatchDto,
+  ReceiptScanResult,
 } from '../interfaces/dispatch-note.interface';
 
 let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
@@ -242,6 +243,23 @@ export class DispatchNotesService {
       .pipe(
         catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
       );
+  }
+
+  /**
+   * Scan a purchase receipt (image or PDF) with the backend AI/OCR pipeline
+   * (R4c). Sends `file` as multipart/form-data to
+   * `POST /store/dispatch-notes/receipt-scan` and returns detected supplier +
+   * line items best-effort matched against the store catalog. Do NOT set a
+   * `Content-Type` header manually — the browser sets the multipart boundary.
+   */
+  scanReceipt(file: File): Observable<ReceiptScanResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = `${this.apiUrl}/store/dispatch-notes/receipt-scan`;
+    return this.http.post<any>(url, formData).pipe(
+      map((r) => r.data || r),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
   }
 
   invalidateCache(): void {

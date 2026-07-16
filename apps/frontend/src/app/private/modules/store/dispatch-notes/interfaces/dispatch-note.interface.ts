@@ -362,6 +362,43 @@ export interface CreateReturnDispatchDto {
   target_status?: 'draft' | 'confirmed';
 }
 
+// ============================================================================
+// Receipt scan (R4c) — multi-input purchase-receipt item import (Manual / Excel / IA)
+// ============================================================================
+
+/**
+ * One line detected on a scanned purchase receipt (IA) or parsed from an
+ * Excel sheet. IA/Excel produce product NAMES; `purchase_receipt` requires a
+ * `product_id`, so each line must be resolved to a catalog product before it
+ * becomes a `WizardItem`:
+ *   - `matched_product_id != null` → added directly.
+ *   - `matched_product_id == null` → surfaced in the "por vincular" list for
+ *     manual product resolution.
+ * Mirror of the backend `POST /store/dispatch-notes/receipt-scan` item shape.
+ */
+export interface ReceiptScanItem {
+  product_name: string;
+  sku: string | null;
+  quantity: number;
+  unit_price: number | null;
+  matched_product_id: number | null;
+  matched_variant_id: number | null;
+  match_confidence: 'high' | 'low' | 'none';
+}
+
+/**
+ * Response of `POST /store/dispatch-notes/receipt-scan` (multipart, field
+ * `file`). The backend OCRs/parses the receipt image or PDF and best-effort
+ * matches each line against the store catalog.
+ */
+export interface ReceiptScanResult {
+  supplier_name: string | null;
+  supplier_id: number | null;
+  currency: string | null;
+  items: ReceiptScanItem[];
+  warnings?: string[];
+}
+
 /**
  * Body for creating a purchase receipt dispatch note (inbound). When
  * `purchase_order_id` is present the backend delegates to
