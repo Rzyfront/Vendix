@@ -323,6 +323,27 @@ export class EcommerceTablesService {
     const orderId = updated.order?.id ?? activeSession.order_id;
     const added = dto.items.length;
 
+    // 5b. Post-commit SSE push — `item_added` for diner-side and staff-side
+    //     listeners (ecommerce stream + /store/table-sessions/stream).
+    //     The $transaction inside `addItems` has already committed by the
+    //     time we get here, so the projected counts are stable.
+    //     `store_id` is passed explicitly because the push executes
+    //     synchronously and ALS is not relied on at this depth.
+    const itemCount = updated.order?.order_items?.length ?? 0;
+    const subtotal = Number(updated.order?.subtotal_amount ?? 0);
+    this.sseService.push(store_id, {
+      id: Date.now(),
+      type: 'item_added',
+      title: 'Items agregados a la cuenta',
+      body: `Mesa ${table.name} — ${added} ítem(s) nuevo(s)`,
+      data: {
+        table_session_id: activeSession.id,
+        item_count: itemCount,
+        subtotal,
+      },
+      created_at: new Date().toISOString(),
+    });
+
     // 6. Auto-fire to kitchen if configured.
     let fired = false;
     if (auto_fire) {
@@ -466,7 +487,8 @@ export class EcommerceTablesService {
     token: string,
     guestCount: number,
   ): Promise<SetGuestsResult> {
-    const { table, session } = await this.resolveActiveSessionByToken(token);
+    const { store_id, table, session } =
+      await this.resolveActiveSessionByToken(token);
 
     if (table.capacity != null && guestCount > table.capacity) {
       throw new VendixHttpException(
@@ -476,6 +498,23 @@ export class EcommerceTablesService {
     }
 
     await this.tableSessionsService.setGuestCount(session.id, guestCount);
+
+    // Post-commit SSE push — `guest_count_changed` for diner-side and
+    // staff-side listeners. The `table_sessions.updateMany` inside
+    // `setGuestCount` has already committed by the time we get here.
+    // `store_id` is captured from the initial resolution (no ALS reliance
+    // at this depth) and passed explicitly to `push()`.
+    this.sseService.push(store_id, {
+      id: Date.now(),
+      type: 'guest_count_changed',
+      title: 'Comensales actualizados',
+      body: `Mesa ${table.name} — ${guestCount} comensal(es)`,
+      data: {
+        table_session_id: session.id,
+        guest_count: guestCount,
+      },
+      created_at: new Date().toISOString(),
+    });
 
     return { session_id: session.id, guest_count: guestCount };
   }
