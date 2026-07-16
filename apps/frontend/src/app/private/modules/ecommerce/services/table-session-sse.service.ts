@@ -44,6 +44,39 @@ interface TableSseEvent {
 }
 
 /**
+ * Minimal shape of a `comensal_joined` / `comensal_left` event. Mirrors
+ * `DinerJoinEvent` in `TableContextService` (kept loose here so the SSE
+ * service does not depend on the diner-context type at runtime).
+ */
+interface ComensalPresenceEvent {
+  device_id: string;
+  active_devices: number;
+  timestamp?: number;
+}
+
+/**
+ * Minimal shape of a `payment.pending` SSE event. Mirrors
+ * `PaymentTablePendingView` from `TableContextService` — kept loose here
+ * so the SSE service does not couple to the diner-context type.
+ */
+interface PaymentPendingEvent {
+  payment_id: number;
+  amount?: number;
+  method?: string;
+}
+
+/**
+ * Minimal shape of a `payment.confirmed` SSE event. Mirrors
+ * `PaymentTableConfirmedView` from `TableContextService`.
+ */
+interface PaymentConfirmedEvent {
+  payment_id: number;
+  amount?: number;
+  method?: string;
+  state?: string;
+}
+
+/**
  * Backoff schedule: 1s, 2s, 4s, 8s, 16s, capped at 30s. Matches the KDS
  * service's visible-backoff approach so the diner UI can reason about it.
  */
@@ -85,6 +118,21 @@ export class TableSessionSseService {
   readonly lastEvent = signal<TableSseEvent | null>(null);
   /** Last kitchen event type received — drives `orderStatus`. */
   private readonly lastKitchenType = signal<KitchenEventType | null>(null);
+
+  // ── Diner presence + bill + guest count mirrors (D2) ───────────────
+  /**
+   * Wall-clock epoch (ms) of the most recent `item_added` event for this
+   * table. Templates use this as a "dirty" tick to refresh the bill view
+   * via the existing `getMyBill()` (D3 wires the explicit refetch). Just
+   * exposing the timestamp avoids a forced HTTP round-trip on every SSE
+   * delta — consumers can opt into a refetch when they care.
+   */
+  readonly billLastUpdated = signal<number>(0);
+  /**
+   * `guest_count` mirror. The backend pushes `guest_count_changed` whenever
+   * the table's diner count changes (POST `/guests` or a mesero edit).
+   */
+  readonly guestCount = signal<number>(0);
 
   /**
    * Diner-friendly order status derived from the most recent kitchen event.
@@ -155,6 +203,8 @@ export class TableSessionSseService {
     this.currentToken = null;
     this.lastKitchenType.set(null);
     this.lastEvent.set(null);
+    this.billLastUpdated.set(0);
+    this.guestCount.set(0);
     this.connectionState.set('closed');
   }
 
@@ -167,10 +217,23 @@ export class TableSessionSseService {
     // `x-store-id` header, so the store the middleware needs is passed as a
     // query param (`DomainResolverMiddleware` reads `req.query.store_id`).
     // Without it the stream resolves store_id=undefined → 403 → tight retry.
+    //
+    // `device_id` is the per-tab UUID from `TableContextService.deviceUuid()`
+    // (sessionStorage, see D1). The backend reads it from `req.query.device_id`
+    // and feeds it to `recordDinerPresence` so the staff can see how many
+    // phones are at the table. We send it on EVERY reconnect (the
+    // sessionStorage value is stable for the lifetime of the tab).
     const storeId = this.tableContext.storeId();
-    const url =
-      `${this.apiUrl}/ecommerce/tables/${encodeURIComponent(token)}/stream` +
-      (storeId != null ? `?store_id=${storeId}` : '');
+    const deviceId = this.tableContext.deviceUuid();
+    const params: string[] = [];
+    if (storeId != null) {
+      params.push(`store_id=${encodeURIComponent(String(storeId))}`);
+    }
+    if (deviceId) {
+      params.push(`device_id=${encodeURIComponent(deviceId)}`);
+    }
+    const query = params.length > 0 ? `?${params.join('&')}` : '';
+    const url = `${this.apiUrl}/ecommerce/tables/${encodeURIComponent(token)}/stream${query}`;
 
     this.connectionState.set(
       this.reconnectAttempt > 0 ? 'reconnecting' : 'connecting',
@@ -217,15 +280,109 @@ export class TableSessionSseService {
     }
     this.lastEvent.set(parsed);
 
-    // Mirror the live bill from snapshots into the shared table context so the
-    // "Mi cuenta" modal reflects new items without a manual refetch.
-    if (parsed.type === 'snapshot' && parsed.bill) {
-      this.tableContext.bill.set(parsed.bill as never);
-      return;
-    }
+    // Dispatch on `type`. The `switch` keeps the mapping table-shaped — easy
+    // to audit against the backend's `comensal_joined`, `item_added`, etc.
+    // event list (see `vendix-restaurant-table-qr` §SSE Snapshot Pattern).
+    switch (parsed.type) {
+      case 'snapshot': {
+        // Mirror the live bill from snapshots into the shared table context
+        // so the "Mi cuenta" modal reflects new items without a manual
+        // refetch. `guest_count` is also seedable from the snapshot.
+        if (parsed.bill) {
+          this.tableContext.bill.set(parsed.bill as never);
+        }
+        const guestCount = (parsed as { guest_count?: unknown }).guest_count;
+        if (typeof guestCount === 'number') {
+          this.guestCount.set(guestCount);
+        }
+        return;
+      }
 
-    if (typeof parsed.type === 'string' && parsed.type.startsWith('kitchen.')) {
-      this.lastKitchenType.set(parsed.type as KitchenEventType);
+      case 'kitchen.fired':
+      case 'kitchen.preparing':
+      case 'kitchen.ready':
+      case 'kitchen.delivered': {
+        this.lastKitchenType.set(parsed.type as KitchenEventType);
+        return;
+      }
+
+      case 'comensal_joined':
+      case 'comensal_left': {
+        // Diner presence — the backend tells us the new running count of
+        // active devices so the banner can render "3 dispositivos en la
+        // mesa". We delegate the write to `TableContextService` so it stays
+        // the single source of truth for diner presence signals.
+        const ev = parsed as unknown as Partial<ComensalPresenceEvent>;
+        if (
+          typeof ev.device_id === 'string' &&
+          typeof ev.active_devices === 'number'
+        ) {
+          this.tableContext.recordDinerPresence({
+            device_id: ev.device_id,
+            active_devices: ev.active_devices,
+            timestamp:
+              typeof ev.timestamp === 'number' ? ev.timestamp : Date.now(),
+          });
+        }
+        return;
+      }
+
+      case 'item_added': {
+        // Bill is dirty. We do NOT push a partial line into
+        // `tableContext.bill` here — the authoritative bill payload comes
+        // from the backend's snapshot/bill endpoint and is reconciled by
+        // D3. We just bump a timestamp so templates can opt into a
+        // reactive refetch via `effect(() => billLastUpdated())`.
+        this.billLastUpdated.set(Date.now());
+        return;
+      }
+
+      case 'guest_count_changed': {
+        const ev = parsed as { guest_count?: unknown };
+        if (typeof ev.guest_count === 'number') {
+          this.guestCount.set(ev.guest_count);
+        }
+        return;
+      }
+
+      case 'payment.pending': {
+        // Mirrors `PaymentTablePendingView` into the shared table-context
+        // signal so the banner flips to "Pago pendiente" without a refetch.
+        const ev = parsed as Partial<PaymentPendingEvent>;
+        if (typeof ev.payment_id === 'number') {
+          this.tableContext.paymentPending.set({
+            payment_id: ev.payment_id,
+            amount: typeof ev.amount === 'number' ? ev.amount : 0,
+            method: typeof ev.method === 'string' ? ev.method : '',
+            state: 'pending',
+          });
+        }
+        return;
+      }
+
+      case 'payment.confirmed': {
+        // Mirrors `PaymentTableConfirmedView` AND clears the pending slot —
+        // a confirmed payment always supersedes a pending one for the same
+        // diner flow.
+        const ev = parsed as Partial<PaymentConfirmedEvent>;
+        if (typeof ev.payment_id === 'number') {
+          const state: 'succeeded' | 'captured' =
+            ev.state === 'captured' ? 'captured' : 'succeeded';
+          this.tableContext.paymentConfirmed.set({
+            payment_id: ev.payment_id,
+            amount: typeof ev.amount === 'number' ? ev.amount : 0,
+            method: typeof ev.method === 'string' ? ev.method : '',
+            state,
+          });
+          this.tableContext.paymentPending.set(null);
+        }
+        return;
+      }
+
+      default:
+        // Unknown event type — already mirrored into `lastEvent` for
+        // debugging. Ignore silently otherwise.
+        return;
     }
   }
 
