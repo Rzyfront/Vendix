@@ -789,7 +789,8 @@ export class ProductQuickViewModalComponent {
     const variantInfo = sv
       ? { name: sv.name, sku: sv.sku, price: sv.final_price }
       : undefined;
-    const result = this.cartService.addToCart(
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
       variantId,
@@ -821,7 +822,8 @@ export class ProductQuickViewModalComponent {
     const variantInfo = sv
       ? { name: sv.name, sku: sv.sku, price: sv.final_price }
       : undefined;
-    const result = this.cartService.addToCart(
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
       variantId,

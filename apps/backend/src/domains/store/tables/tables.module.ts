@@ -3,6 +3,9 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { CashRegistersModule } from '../cash-registers/cash-registers.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { QrService } from '@common/services/qr.service';
 import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
@@ -32,7 +35,7 @@ import { SplitOrderService } from './split-order.service';
  * flows that depend on it run later, after the session is open).
  */
 @Module({
-  imports: [ResponseModule, PrismaModule, SettingsModule, KitchenFireModule],
+  imports: [ResponseModule, PrismaModule, SettingsModule, KitchenFireModule, NotificationsModule, CashRegistersModule, InventoryModule],
   controllers: [
     TablesController,
     TableSessionsController,

@@ -55,6 +55,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-prisma-scopes` |
 | -- | `vendix-redis-quota` |
 | -- | `vendix-restaurant-ops` |
+| -- | `vendix-restaurant-table-qr` |
 | -- | `vendix-saas-billing` |
 | -- | `vendix-settings-system` |
 | -- | `vendix-subscription-gate` |
@@ -84,6 +85,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding new settings sections to stores or organizations | `vendix-settings-system` |
 | Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes | `vendix-restaurant-ops` |
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
+| Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
 | Adding or editing per-industry module rules | `vendix-panel-ui` |
 | Adding or modifying notification types | `vendix-notifications-system` |
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
@@ -183,6 +185,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | EC2 maintenance, deployment disk issues, or Docker layer/pull failures | `vendix-ec2-maintenance` |
 | Editing @Permissions decorators | `vendix-permissions` |
 | Editing Schema | `vendix-prisma-schema` |
+| Editing `apps/backend/src/domains/ecommerce/tables/*` (resolveByToken, getBill, addOrder) | `vendix-restaurant-table-qr` |
+| Editing `apps/frontend/src/app/public/modules/store-ecommerce/` table-banner, table-context, table-session-sse | `vendix-restaurant-table-qr` |
+| Editing `store_settings.restaurant.{qr_scan_behavior, qr_auto_fire, enable_table_checkout}` | `vendix-restaurant-table-qr` |
+| Editing `tables.public_token`, mesa QR generation, or qr_code_url regeneration | `vendix-restaurant-table-qr` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
 | Editing industry gating so that only `restaurant` stores see restaurant_ops | `vendix-restaurant-ops` |
 | Editing industry rules in INDUSTRY_HIDDEN_MODULES | `vendix-panel-ui` |
@@ -217,6 +223,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing semantic search | `vendix-ai-embeddings-rag` |
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
+| Implementing the per-table `scan_mode` override (currently GAP-6 — pendiente por mesa) | `vendix-restaurant-table-qr` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
@@ -236,6 +243,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the POS for restaurant flow (fire, open table, split bill) | `vendix-restaurant-ops` |
 | Modifying the POS open-table flow that propagates an optional customer to the session and draft order | `vendix-restaurant-ops` |
 | Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning) | `vendix-restaurant-ops` |
+| Modifying the storefront's `?mesa=` deep-link, mesa token hydration, or localStorage mesaToken guard | `vendix-restaurant-table-qr` |
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
@@ -306,6 +314,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |
 | When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations | `vendix-calculated-pricing` |
 | Wiring the KDS ticket detail modal (recipe + actions replica) | `vendix-restaurant-ops` |
+| Wiring the comensal SSE endpoint `/ecommerce/tables/{token}/stream?store_id=` | `vendix-restaurant-table-qr` |
 | Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
 | Wiring withholding (retefuente/reteiva/reteica) accounting or declarations | `vendix-tax-typing` |
 | Working across apps or shared libraries | `vendix-core` |

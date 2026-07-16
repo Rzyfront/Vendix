@@ -1235,6 +1235,58 @@ export class KitchenFireService {
   }
 
   /**
+   * Transaction-local cancel of a kitchen ticket WITHOUT the SSE push.
+   *
+   * Mirrors the write body of `cancelTicket` (status flip on the ticket +
+   * its non-delivered items) but takes the caller's `tx` so the mutation is
+   * atomic with a larger operation (e.g. removing a fired item from a table
+   * session), and does NOT open its own `$transaction` (which would nest)
+   * nor emit any SSE (which must happen AFTER the outer commit). The caller
+   * is responsible for calling `emitTicketCancelledEvent(ticketId)` once the
+   * enclosing transaction commits.
+   *
+   * The caller MUST have already validated tenancy + the `pending` precondition
+   * (this helper performs the raw writes only).
+   */
+  async cancelTicketInTx(
+    tx: Prisma.TransactionClient,
+    ticketId: number,
+  ): Promise<void> {
+    await tx.kitchen_tickets.update({
+      where: { id: ticketId },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+    await tx.kitchen_ticket_items.updateMany({
+      where: { kitchen_ticket_id: ticketId, status: { not: 'delivered' } },
+      data: { status: 'cancelled', updated_at: new Date() },
+    });
+  }
+
+  /**
+   * Post-commit SSE emitter for a ticket that was cancelled inside another
+   * service's transaction via `cancelTicketInTx`. Re-reads the (now cancelled)
+   * ticket in the current store context and pushes the canonical
+   * `ticket.cancelled` KDS event. Best-effort: a failure is logged and never
+   * bubbles up (the DB state is already committed).
+   */
+  async emitTicketCancelledEvent(ticketId: number): Promise<void> {
+    try {
+      const { ticket, store_id } = await this.getTicketForStore(ticketId);
+      this.pushKitchenEvent(store_id, {
+        type: 'ticket.cancelled',
+        ticket,
+        ts: Date.now(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to emit ticket.cancelled for ticket ${ticketId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
    * Reversa "un paso atrás" del estado de un ticket (botón del modal de
    * detalle del KDS). El mapa de retroceso es:
    *   pending        → (sin estado previo) → error KITCHEN_TICKET_CANNOT_REVERT

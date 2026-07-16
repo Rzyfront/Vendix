@@ -2100,6 +2100,63 @@ export const ErrorCodes = {
     devMessage:
       'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
   },
+  DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION: {
+    code: 'DISPATCH_NOTE_INVALID_SUBTYPE_FOR_DIRECTION',
+    httpStatus: 400,
+    devMessage:
+      'The dispatch note subtype is not valid for the given direction (e.g. transfer_in requires inbound)',
+  },
+  DISPATCH_NOTE_CROSS_STORE_TRANSFER_BLOCKED: {
+    code: 'DISPATCH_NOTE_CROSS_STORE_TRANSFER_BLOCKED',
+    httpStatus: 403,
+    devMessage:
+      'Cross-store transfers are not allowed in STORE operating scope; switch to ORGANIZATION scope or use stock_transfers',
+  },
+  DISPATCH_NOTE_RETURN_REQUIRES_RELATED: {
+    code: 'DISPATCH_NOTE_RETURN_REQUIRES_RELATED',
+    httpStatus: 400,
+    devMessage:
+      'A customer return dispatch note requires related_dispatch_id pointing to the original outbound dispatch',
+  },
+  DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER: {
+    code: 'DISPATCH_NOTE_RECEIPT_REQUIRES_SUPPLIER',
+    httpStatus: 400,
+    devMessage:
+      'A purchase receipt dispatch note requires supplier_id',
+  },
+  DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE: {
+    code: 'DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE',
+    httpStatus: 409,
+    devMessage:
+      'Cannot void an invoiced dispatch note directly; issue a credit note via return_orders instead',
+  },
+
+  // Dispatch Note Receipt Scanner (purchase-receipt OCR via AI — R4c)
+  DISPATCH_RECEIPT_SCAN_NO_FILE: {
+    code: 'DISPATCH_RECEIPT_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No receipt file provided',
+  },
+  DISPATCH_RECEIPT_SCAN_INVALID_FILE: {
+    code: 'DISPATCH_RECEIPT_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+  DISPATCH_RECEIPT_SCAN_AI_FAIL: {
+    code: 'DISPATCH_RECEIPT_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI purchase-receipt OCR processing failed',
+  },
+  DISPATCH_RECEIPT_SCAN_PARSE_FAIL: {
+    code: 'DISPATCH_RECEIPT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI purchase-receipt response as valid JSON',
+  },
+  DISPATCH_RECEIPT_SCAN_NO_ITEMS: {
+    code: 'DISPATCH_RECEIPT_SCAN_NO_ITEMS',
+    httpStatus: 400,
+    devMessage: 'No line items detected in the receipt document',
+  },
 
   // MCP (Model Context Protocol)
   AI_MCP_001: {
@@ -2925,6 +2982,18 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'Items inválidos para agregar a la sesión de mesa',
+  },
+  TABLE_SESSION_CUSTOMER_REQUIRED: {
+    code: 'TABLE_SESSION_CUSTOMER_REQUIRED',
+    httpStatus: 409,
+    devMessage:
+      'Customer is required to open a table when anonymous sales are disabled',
+  },
+  TABLE_SESSION_ITEM_NOT_REMOVABLE: {
+    code: 'TABLE_SESSION_ITEM_NOT_REMOVABLE',
+    httpStatus: 409,
+    devMessage:
+      'Cannot remove an item already being prepared in the kitchen',
   },
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
     code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',

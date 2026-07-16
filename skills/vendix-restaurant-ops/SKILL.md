@@ -402,10 +402,26 @@ permission keys used by the controllers:
 - `store:menus:create|read|update|delete`
 - `store:menu_engineering:read`
 
+## Comensal / Storefront side
+
+The **comensal-side** flow (scanning a physical QR from the storefront,
+re-joining an active session, comensal SSE) is governed by the companion
+skill `vendix-restaurant-table-qr`. This skill covers POS-side and
+admin-side behavior (open session from POS, fire-to-kitchen, KDS, split
+bill) — when working on the public storefront comensal experience, the
+table-qr skill is the source of truth for the
+`apps/backend/src/domains/ecommerce/tables/*` endpoints, the
+`?mesa=<public_token>` deep-link, the `qr_scan_behavior` enum, and the
+table-banner UI in `apps/frontend/src/app/public/modules/store-ecommerce/`.
+Do not duplicate that documentation here.
+
 ## Source of Truth (paths)
 
 - Backend modules: `apps/backend/src/domains/store/{recipes,production,kitchen-fire,tables,menus}/`
 - Frontend modules: `apps/frontend/src/app/private/modules/store/restaurant-ops/{recipes,production,kds,tables,menus}/`
+- Storefront comensal: `apps/backend/src/domains/ecommerce/tables/` +
+  `apps/frontend/src/app/public/modules/store-ecommerce/` (see companion
+  `vendix-restaurant-table-qr`).
 - Schemas: `apps/backend/prisma/schema.prisma` + the migration
   `20260613000000_restaurant_suite_foundation/migration.sql` (Fase A) and
   `20260613000001_fire_to_kitchen_inventory_flag/migration.sql` (Fase D).

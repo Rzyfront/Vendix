@@ -228,6 +228,11 @@ export interface MenuItem {
   product_id: number;
   sort_order: number;
   is_available_now: boolean;
+  /** F1/F2/F3 — Plato "agotado" (visible pero NO comprable). El backend lo
+   * deriva de `!products.is_sellable` y lo expone en el payload público de
+   * cartas. Cuando es `true`, el card se muestra con estilo off, badge
+   * "Agotado" (prioridad sobre el badge de horario) y sin botón quick-add. */
+  is_sold_out?: boolean;
   next_available: MenuNextAvailable | null;
   product: MenuItemProduct | null;
 }

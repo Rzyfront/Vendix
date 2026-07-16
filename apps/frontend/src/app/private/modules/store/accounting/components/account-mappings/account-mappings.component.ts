@@ -86,6 +86,13 @@ const MAPPING_LABELS: Record<string, string> = {
   'payroll.paid.bank': 'Banco',
   'order.completed.cogs': 'Costo de Ventas',
   'order.completed.inventory': 'Inventario (Salida)',
+  // Remisiones bidireccionales (Fase 4)
+  'dispatch_note.delivered.cogs': 'Costo de Ventas (Remisión)',
+  'dispatch_note.delivered.inventory': 'Inventario (Remisión Entregada)',
+  'dispatch_note.received.inventory': 'Inventario (Recepción Remisión)',
+  'dispatch_note.received.accounts_payable': 'Proveedores (Recepción Remisión)',
+  'dispatch_note.return.inventory': 'Inventario (Devolución Cliente)',
+  'dispatch_note.return.cogs': 'Reversa Costo de Ventas (Devolución)',
   'refund.completed.revenue': 'Ingresos (Reversa)',
   'refund.completed.cash': 'Caja / Banco (Reembolso)',
   'refund.completed.vat_payable': 'IVA por Pagar (Reversa Devolucion)',
@@ -328,6 +335,7 @@ const GROUP_DEFINITIONS: Array<{
       'purchase.vat_recognized.',
       'purchase_order.payment.',
       'inventory.adjusted.',
+      'dispatch_note.',
     ],
   },
   {

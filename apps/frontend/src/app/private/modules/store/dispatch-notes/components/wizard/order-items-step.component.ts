@@ -102,7 +102,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
                 [min]="0"
                 [max]="item.pending_quantity"
                 [ngModel]="item.dispatched_quantity"
-                (ngModelChange)="onQtyChange(item.order_item_id, $event)"
+                (ngModelChange)="onQtyChange(item.order_item_id!, $event)"
                 customClasses="w-20"
               ></app-input>
 

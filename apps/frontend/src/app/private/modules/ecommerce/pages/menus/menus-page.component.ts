@@ -18,6 +18,11 @@ import {
   MenuSection,
   PublicMenu,
 } from '../../services/catalog.service';
+import {
+  formatNextAvailableDetailed,
+  NextAvailableDetailed,
+} from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../../components/next-available-notice';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
@@ -30,7 +35,6 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 type AvailabilityDisplay = 'hide' | 'badge';
 
@@ -62,6 +66,7 @@ interface RenderMenu extends PublicMenu {
     BadgeComponent,
     IconComponent,
     ShareModalComponent,
+    NextAvailableNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './menus-page.component.html',
@@ -83,6 +88,10 @@ export class MenusPageComponent implements OnInit {
   readonly availabilityDisplay = signal<AvailabilityDisplay>('hide');
   readonly shipping_badge_enabled = signal(false);
   private readonly menus = signal<PublicMenu[]>([]);
+  /** Store IANA tz returned by `/ecommerce/catalog/menus`. Used for the
+   *  consolidated "next available" label + delta. Null until the response
+   *  arrives; falls back to the browser's local TZ in that case. */
+  private readonly storeTimezone = signal<string | null>(null);
 
   /** Product_ids en favoritos — fuente de verdad compartida vía
    *  WishlistService (signal singleton). Alimenta el fill del corazón. */
@@ -164,10 +173,12 @@ export class MenusPageComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.menus.set(res.data?.menus ?? []);
+          this.storeTimezone.set(res.data?.store_timezone ?? null);
           this.isLoading.set(false);
         },
         error: () => {
           this.menus.set([]);
+          this.storeTimezone.set(null);
           this.isLoading.set(false);
         },
       });
@@ -184,6 +195,20 @@ export class MenusPageComponent implements OnInit {
     if (!na) return 'pronto';
     const day = MenusPageComponent.DAY_LABELS[na.day_of_week] ?? '';
     return `${day} a las ${na.start_time}`.trim();
+  }
+
+  /** Structured payload for `<app-next-available-notice>` — used in templates
+   *  in addition to the legacy `nextLabel()` badge text. Returns null when
+   *  `next_available` is null (notice renders nothing). */
+  nextAvailableFor(
+    entity: { next_available: MenuNextAvailable | null } | null | undefined,
+  ): NextAvailableDetailed | null {
+    if (!entity) return null;
+    return formatNextAvailableDetailed(
+      entity.next_available,
+      this.storeTimezone(),
+      new Date(),
+    );
   }
 
   /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */
@@ -236,7 +261,7 @@ export class MenusPageComponent implements OnInit {
    * variantes → ruta detalle; simples → carrito (o mesa en open_tab) qty=1. */
   onQuickAdd(event: Event, item: MenuItem): void {
     this.stopCardNav(event);
-    if (!item.is_available_now) return;
+    if (!item.is_available_now || item.is_sold_out) return;
     if (item.product?.has_variants) {
       const slug = item.product?.slug;
       if (slug) this.router.navigate(['/products', slug]);
@@ -248,32 +273,16 @@ export class MenusPageComponent implements OnInit {
   /** Agrega un plato simple (qty=1) al carrito — o a la mesa en sesión dine-in
    *  open_tab. El backend rechaza platos fuera de horario (422
    *  MENU_ITEM_NOT_AVAILABLE_NOW), por eso el botón se gatea con
-   *  `is_available_now`; esto es un guard defensivo. */
+   *  `is_available_now`; esto es un guard defensivo. El chokepoint mesa-vs-cart
+   *  y el toast mesa viven ahora en `cartService.addProduct` (D3); aquí sólo
+   *  sumamos el toast del camino ecommerce. */
   private addToCartOrTab(item: MenuItem): void {
     const product = item.product;
     if (!product || !item.is_available_now) return;
     const qty = 1;
-
-    if (this.tableContext.isOpenTab()) {
-      this.tableContext
-        .addOrder([{ product_id: product.id, quantity: qty }])
-        .subscribe({
-          next: () => {
-            const msg = this.tableContext.autoFire()
-              ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
-              : `Agregado a la mesa ${this.tableContext.tableName()}`;
-            this.toastService.success(msg);
-          },
-          error: (err) => {
-            const { userMessage, devMessage } = parseApiError(err);
-            this.toastService.error(userMessage);
-            if (devMessage) console.error('[table addOrder]', devMessage);
-          },
-        });
-      return;
-    }
-
-    const result = this.cartService.addToCart(product.id, qty);
+    const isMesa = this.tableContext.isOpenTab();
+    const result = this.cartService.addProduct(product.id, qty);
+    if (isMesa) return; // mesa path toasts internally inside addProduct
     const done = () => this.toastService.success('Plato agregado al carrito');
     if (result) {
       result.subscribe({ next: done });
@@ -301,7 +310,7 @@ export class MenusPageComponent implements OnInit {
       sku: null,
       stock_quantity: null,
       available_stock: null,
-      is_available: item.is_available_now,
+      is_available: item.is_available_now && !item.is_sold_out,
       final_price: on_sale ? p.sale_price! : p.base_price,
       image_url: p.image_url,
       brand: null,

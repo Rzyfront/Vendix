@@ -293,12 +293,25 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
       </div>
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
-          <app-button variant="primary" (clicked)="onConfirm()">
-            <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon" ></app-icon>
-            {{ actionType() === 'create-receive' ? 'Crear y Recibir' : 'Crear Orden' }}
-          </app-button>
+        <div class="flex flex-col gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100 sm:flex-row sm:items-center sm:justify-between">
+          <!-- Directa | Por remisión (coherente con la vista dedicada de OC) -->
+          @if (actionType() === 'create-receive') {
+            <div class="inline-flex self-start rounded-lg border border-border overflow-hidden text-xs">
+              <button type="button" class="px-3 py-1.5 font-medium transition-colors"
+                [class]="receiveMode() === 'direct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-surface-secondary'"
+                (click)="setReceiveMode('direct')">Directa</button>
+              <button type="button" class="px-3 py-1.5 font-medium transition-colors border-l border-border"
+                [class]="receiveMode() === 'remision' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-surface-secondary'"
+                (click)="setReceiveMode('remision')">Por remisión</button>
+            </div>
+          }
+          <div class="flex items-center justify-end gap-3">
+            <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+            <app-button variant="primary" (clicked)="onConfirm()">
+              <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon" ></app-icon>
+              {{ actionType() === 'create-receive' ? 'Crear y Recibir' : 'Crear Orden' }}
+            </app-button>
+          </div>
         </div>
       </div>
     </app-modal>
@@ -322,6 +335,19 @@ export class PopOrderConfirmationModalComponent {
   // round-trip through the modal. The parent decides what to do with it
   // (e.g. gate the submit button, surface a summary, etc.).
   readonly pricingOverridesChange = output<PricingOverridesMap>();
+
+  /**
+   * Reception mode for "Crear y Recibir", coherent with the dedicated PO view
+   * selector. Emitted so the parent can branch between PO.receive (direct) and
+   * an inbound purchase-receipt dispatch note (por remisión).
+   */
+  readonly receiveMode = signal<'direct' | 'remision'>('direct');
+  readonly receiveModeChange = output<'direct' | 'remision'>();
+
+  setReceiveMode(mode: 'direct' | 'remision'): void {
+    this.receiveMode.set(mode);
+    this.receiveModeChange.emit(mode);
+  }
 
   /**
    * Signal-backed Map of overrides keyed by the same string used in the

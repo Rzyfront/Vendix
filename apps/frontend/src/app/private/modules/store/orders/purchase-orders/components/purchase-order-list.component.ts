@@ -6,6 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -55,6 +56,7 @@ import { PurchaseOrderPrintService } from '../services/purchase-order-print.serv
 export class PurchaseOrderListComponent {
   private currencyService = inject(CurrencyFormatService);
   private printService = inject(PurchaseOrderPrintService);
+  private router = inject(Router);
   private destroyRef = inject(DestroyRef);
 
   readonly viewOrder = output<PurchaseOrder>();
@@ -167,10 +169,18 @@ export class PurchaseOrderListComponent {
 
   table_actions: TableAction[] = [
     {
-      label: 'View Details',
+      label: 'Ver',
       icon: 'eye',
       action: (order: PurchaseOrder) => this.viewOrderDetails(order),
       variant: 'secondary',
+    },
+    {
+      label: 'Aprobar',
+      icon: 'check-circle',
+      action: (order: PurchaseOrder) => this.approveOrder(order),
+      variant: 'primary',
+      show: (order: PurchaseOrder) =>
+        ['draft', 'submitted'].includes(order.status),
     },
     {
       label: 'Imprimir',
@@ -408,8 +418,35 @@ export class PurchaseOrderListComponent {
   }
 
   // Actions
+  // Navigate to the dedicated full-page detail view (replaces the modal flow).
   viewOrderDetails(order: PurchaseOrder): void {
-    this.viewOrder.emit(order);
+    this.router.navigate(['/admin/orders/purchase-orders', order.id]);
+  }
+
+  async approveOrder(order: PurchaseOrder): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Aprobar Orden de Compra',
+      message: `¿Confirmas la aprobación de la orden ${order.order_number || '#' + order.id}? Quedará lista para recepción.`,
+      confirmText: 'Aprobar',
+      cancelText: 'Cancelar',
+    });
+    if (!confirmed) return;
+
+    this.purchaseOrdersService
+      .approvePurchaseOrder(order.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Orden aprobada exitosamente');
+          this.loadOrders();
+        },
+        error: (error: any) => {
+          console.error('Error approving purchase order:', error);
+          this.toastService.error(
+            typeof error === 'string' ? error : 'Error al aprobar la orden.',
+          );
+        },
+      });
   }
 
   async cancelOrder(order: PurchaseOrder): Promise<void> {

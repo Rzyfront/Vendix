@@ -692,6 +692,10 @@ export class AutoEntryService {
       stock_transfer: 'auto_inventory',
       'intercompany_transfer.shipped': 'auto_inventory',
       'intercompany_transfer.received': 'auto_inventory',
+      // Remisiones bidireccionales (Fase 4)
+      'dispatch_note.delivered': 'auto_inventory',
+      'dispatch_note.received': 'auto_inventory',
+      'dispatch_note.void': 'adjustment',
       cash_register_opened: 'adjustment',
       cash_register_closed: 'adjustment',
       cash_register_movement: 'adjustment',
@@ -2209,6 +2213,241 @@ export class AutoEntryService {
       source_id: data.order_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description: `Order completed #${data.order_id} - COGS`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== DISPATCH NOTES (remisiones bidireccionales — Fase 4) =====
+
+  /**
+   * dispatch_note.delivered — COGS de una remisión de salida STANDALONE
+   * (customer_delivery sin orden/SO). DR 6135 Costo de Ventas / CR 1435
+   * Inventario. El anti-doble-COGS ya lo aplica el emisor (sólo emite para
+   * standalone). Idempotente por (org, 'dispatch_note.delivered', note_id).
+   */
+  async onDispatchNoteDelivered(data: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const total = Number(data.total_cost || 0);
+    if (total <= 0) return null;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_note.delivered.cogs',
+        `Costo de ventas — remisión ${data.dispatch_number}`,
+        total,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_note.delivered.inventory',
+        `Inventario — remisión ${data.dispatch_number}`,
+        0,
+        total,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_note.delivered',
+      source_id: data.dispatch_note_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Remisión entregada ${data.dispatch_number} — COGS`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * dispatch_note.received — entrada de inventario de una remisión de entrada:
+   *  - purchase_receipt: DR 1435 Inventario / CR 2205 Proveedores (con tercero)
+   *  - customer_return : DR 1435 Inventario / CR 6135 Reversa COGS
+   * Idempotente por (org, 'dispatch_note.received', note_id).
+   */
+  async onDispatchNoteReceived(data: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    subtype: string;
+    total_cost: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const total = Number(data.total_cost || 0);
+    if (total <= 0) return null;
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    let lines: (AutoEntryLine | null)[];
+    if (data.subtype === 'purchase_receipt') {
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.inventory',
+          `Inventario — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.accounts_payable',
+          `Proveedores — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+          supplier_third_party,
+        ),
+      ]);
+    } else {
+      // customer_return
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.inventory',
+          `Inventario (devolución) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.cogs',
+          `Reversa costo de ventas — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    }
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_note.received',
+      source_id: data.dispatch_note_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Remisión recibida ${data.dispatch_number} — ${data.subtype}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * dispatch_note.void — reversa contable (asiento espejo) al anular una
+   * remisión ya materializada. Invierte débito↔crédito del asiento original.
+   * Sólo llega para casos cuyo asiento posteó este módulo. Idempotente por
+   * (org, 'dispatch_note.void', note_id).
+   */
+  async onDispatchNoteVoided(data: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    direction: string;
+    subtype: string;
+    total_cost: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const total = Number(data.total_cost || 0);
+    if (total <= 0) return null;
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    let lines: (AutoEntryLine | null)[];
+    if (data.direction === 'outbound') {
+      // Reversa de customer_delivery standalone: DR inventario / CR COGS.
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.delivered.inventory',
+          `Inventario (reversa anulación) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.delivered.cogs',
+          `Reversa costo de ventas (anulación) — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    } else if (data.subtype === 'purchase_receipt') {
+      // Reversa recepción de compra: DR proveedores / CR inventario.
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.accounts_payable',
+          `Proveedores (reversa anulación) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+          supplier_third_party,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.inventory',
+          `Inventario (reversa anulación) — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    } else {
+      // Reversa customer_return: DR COGS / CR inventario.
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.cogs',
+          `Costo de ventas (reversa devolución) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.inventory',
+          `Inventario (reversa devolución) — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    }
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_note.void',
+      source_id: data.dispatch_note_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Remisión anulada ${data.dispatch_number} — reversa (${data.direction}/${data.subtype})`,
       lines,
       user_id: data.user_id,
     });

@@ -25,6 +25,9 @@
             <span class="badge badge--off">
               Disponible {{ nextLabel(menu) }}
             </span>
+            @if (nextAvailableFor(menu); as menuNext) {
+              <app-next-available-notice [next]="menuNext" />
+            }
           } @else {
             <span class="badge badge--on">Disponible ahora</span>
           }
@@ -38,6 +41,9 @@
                 <span class="badge badge--off">
                   Disponible {{ nextLabel(section) }}
                 </span>
+                @if (nextAvailableFor(section); as sectionNext) {
+                  <app-next-available-notice [next]="sectionNext" />
+                }
               }
             </div>
 
@@ -45,9 +51,14 @@
               @for (item of section.visibleItems; track item.id) {
                 <a
                   class="dish-card"
-                  [class.dish-card--off]="!item.is_available_now"
+                  [class.dish-card--off]="
+                    !item.is_available_now || !!item.is_sold_out
+                  "
+                  [class.dish-card--sold-out]="!!item.is_sold_out"
                   [routerLink]="
-                    item.product?.slug ? ['/products', item.product?.slug] : null
+                    item.is_sold_out || !item.product?.slug
+                      ? null
+                      : ['/products', item.product?.slug]
                   "
                 >
                   <div class="dish-image">
@@ -61,7 +72,16 @@
                       <div class="dish-image__placeholder">🍽️</div>
                     }
 
-                    @if (!item.is_available_now) {
+                    @if (item.is_sold_out) {
+                      <app-badge
+                        class="dish-badge"
+                        variant="error"
+                        size="sm"
+                        badgeStyle="solid"
+                      >
+                        Agotado
+                      </app-badge>
+                    } @else if (!item.is_available_now) {
                       <app-badge
                         class="dish-badge"
                         variant="warning"
@@ -70,6 +90,9 @@
                       >
                         Disponible {{ nextLabel(item) }}
                       </app-badge>
+                      @if (nextAvailableFor(item); as itemNext) {
+                        <app-next-available-notice [next]="itemNext" />
+                      }
                     } @else if (item.product?.has_variants) {
                       <div class="dish-variant-badge">
                         {{ item.product?.variant_count }} variantes
@@ -98,7 +121,7 @@
                       </app-button>
                     </div>
 
-                    @if (item.is_available_now) {
+                    @if (item.is_available_now && !item.is_sold_out) {
                       <button
                         type="button"
                         class="dish-quick-btn"

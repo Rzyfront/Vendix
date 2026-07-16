@@ -731,6 +731,18 @@ export class CheckoutService {
       if (productVariantCount > 0 && !item.product_variant_id) {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
+      // Sold-out gate: is_sellable=false -> plato "agotado". El checkout guest
+      // construye items desde el DTO (localStorage) sin pasar por cart.addItem,
+      // por lo que este check es necesario aqui. Mismo codigo que cart.addItem
+      // (ECOM_PRODUCT_002 = "Product not available") para mantener la invariant
+      // is_sellable consistente entre add-to-cart y checkout.
+      if (!item.product || item.product.is_sellable !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_PRODUCT_002,
+          `Product ${item.product?.name ?? item.product_id} is sold out and cannot be checked out`,
+        );
+      }
+
 
       const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
         item.product,
@@ -1376,6 +1388,17 @@ export class CheckoutService {
 
       if (productVariantCount > 0 && !item.product_variant_id) {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
+      }
+
+      // Sold-out invariant (mirror of checkout B3): un plato con is_sellable=false
+      // (marcado agotado desde la carta) no puede checkearse. Cubre el path
+      // guest/localStorage de whatsappCheckout, que construye items desde DTO
+      // sin pasar por cart.addItem. Mismo ECOM_PRODUCT_002 que cart.addItem.
+      if (!item.product || item.product.is_sellable !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_PRODUCT_002,
+          `Product ${item.product?.name ?? item.product_id} is sold out and cannot be checked out`,
+        );
       }
 
       const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(

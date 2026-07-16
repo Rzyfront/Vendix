@@ -38,4 +38,16 @@
     iconColor="text-emerald-500"
     [loading]="loading()"
   ></app-stats>
+
+  @if (stats().received) {
+    <app-stats
+      title="Recepciones"
+      [value]="formatNumber(stats().received ?? 0)"
+      smallText="Entradas recibidas"
+      iconName="package-check"
+      iconBgColor="bg-indigo-100"
+      iconColor="text-indigo-500"
+      [loading]="loading()"
+    ></app-stats>
+  }
 </ng-container>

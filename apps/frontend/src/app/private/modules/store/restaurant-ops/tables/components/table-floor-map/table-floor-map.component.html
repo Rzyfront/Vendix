@@ -73,41 +73,35 @@
               'Mesa ' + cell.table.name + ' - ' + cell.statusLabel
             "
           >
-            <div class="cell-header">
-              <span class="table-name">{{ cell.table.name }}</span>
-              @if (cell.table.zone) {
-                <span class="zone">{{ cell.table.zone }}</span>
-              }
-            </div>
+            <span class="table-name" [title]="cell.table.name">{{ cell.table.name }}</span>
 
-            <div class="cell-body">
-              @if (cell.table.capacity) {
-                <span class="capacity">
-                  <app-icon name="users" [size]="14"></app-icon>
-                  {{ cell.table.capacity }}
+            <div class="cell-meta">
+              <span class="meta location">
+                <app-icon name="map-pin" [size]="13"></app-icon>
+                <span class="meta-text">{{ cell.table.zone || 'Sin zona' }}</span>
+              </span>
+              <span class="meta occupancy">
+                <app-icon name="users" [size]="13"></app-icon>
+                <span class="meta-text">
+                  @if (cell.isOccupied && cell.guestCount != null) {
+                    {{ cell.guestCount }}<span class="cap-sep">/</span>{{ cell.table.capacity ?? '∞' }}
+                  } @else {
+                    {{ cell.table.capacity ?? '—' }}
+                  }
                 </span>
-              }
-              @if (cell.guestCount != null && cell.isOccupied) {
-                <span class="guests">
-                  <app-icon name="user" [size]="14"></app-icon>
-                  {{ cell.guestCount }}
-                </span>
-              }
+              </span>
             </div>
 
             <div class="cell-footer">
-              <span
-                class="status-pill"
-                [style.background-color]="cell.statusColor"
-              >
-                {{ cell.statusLabel }}
+              <span class="status" [attr.title]="cell.statusLabel">
+                <span class="status-ico" aria-hidden="true">
+                  <app-icon [name]="cell.statusIcon" [size]="15"></app-icon>
+                </span>
+                <span class="status-label">{{ cell.statusLabel }}</span>
               </span>
               @if (cell.isOccupied && cell.table.active_session) {
-                <span class="session-id"
-                  >#{{ cell.table.active_session.id }}</span
-                >
-              }
-              @if (
+                <span class="footer-meta">#{{ cell.table.active_session.id }}</span>
+              } @else if (
                 cell.displayStatus === 'reserved' &&
                 (cell.table.pending_bookings?.length ?? 0) > 0
               ) {
@@ -117,6 +111,36 @@
                 </span>
               }
             </div>
+
+            <!-- Live badges: alimentados por AdminTablesSseService.
+                 Se renderizan sólo si el componente padre pasó
+                 `liveCounts` y la mesa tiene sesión abierta. -->
+            @if (cell.live) {
+              <div class="live-strip" aria-live="polite">
+                @if (cell.live.active_devices > 0) {
+                  <span class="live-chip live-chip--devices" title="Comensales activos">
+                    <app-icon name="smartphone" [size]="11"></app-icon>
+                    {{ cell.live.active_devices }}
+                  </span>
+                }
+                @if (cell.live.item_count > 0) {
+                  <span class="live-chip live-chip--items" title="Ítems en la cuenta">
+                    <app-icon name="utensils" [size]="11"></app-icon>
+                    {{ cell.live.item_count }}
+                  </span>
+                }
+                @if (cell.live.payment_state === 'pending') {
+                  <span class="live-chip live-chip--pay-pending" title="Pago pendiente">
+                    <app-icon name="clock" [size]="11"></app-icon>
+                  </span>
+                }
+                @if (cell.live.payment_state === 'confirmed') {
+                  <span class="live-chip live-chip--pay-confirmed" title="Pago confirmado">
+                    <app-icon name="check" [size]="11"></app-icon>
+                  </span>
+                }
+              </div>
+            }
           </div>
         }
       </div>

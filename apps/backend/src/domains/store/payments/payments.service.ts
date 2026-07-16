@@ -53,6 +53,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
@@ -102,6 +103,9 @@ export class PaymentsService {
     private readonly priceResolverService: PriceResolverService,
     private readonly withholdingFlow: WithholdingFlowService,
     private readonly kitchenFireService: KitchenFireService,
+    // Restaurant Suite — POS table close-out emits `session_closed` post-commit
+    // (reuses the canonical emitter on TableSessionsService).
+    private readonly tableSessionsService: TableSessionsService,
     // QUI-431 — serial-number pool + enforcement (no-op for non-serialized
     // products, so they can be invoked unconditionally on the sale path).
     private readonly serialEnforcement: SerialNumberEnforcementService,
@@ -1037,16 +1041,10 @@ export class PaymentsService {
 
         // 2. Process payment if required
         let payment: any = null;
-        const isDigitalPayment =
-          createPosPaymentDto.requires_payment &&
-          ['wompi', 'wallet'].includes(
-            (
-              await tx.store_payment_methods.findUnique({
-                where: { id: createPosPaymentDto.store_payment_method_id },
-                include: { system_payment_method: true },
-              })
-            )?.system_payment_method?.type || '',
-          );
+        const isDigitalPayment = await this.isDeferredDigitalMethod(
+          tx,
+          createPosPaymentDto,
+        );
 
         if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
           // Direct methods (cash, card, bank_transfer) — process inside transaction
@@ -1375,6 +1373,10 @@ export class PaymentsService {
                 ),
               }
             : null,
+          // Restaurant Suite (Obj 4/6): the session closed by a POS table
+          // close-out (null when a digital payment deferred the close). Used
+          // AFTER commit to emit `session_closed` to staff + comensal streams.
+          closed_session_id: orderCreation.closedSessionId ?? null,
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -1427,6 +1429,18 @@ export class PaymentsService {
             (err as Error).stack,
           );
         }
+      }
+
+      // Restaurant Suite (Obj 4): if the POS payment closed out a table
+      // session (cash/card/transfer — NOT a deferred digital payment), emit
+      // `session_closed` AFTER the commit so the staff dashboard + the
+      // comensal storefront learn of the close in real time. A rollback would
+      // have thrown before reaching here, so no phantom event is possible.
+      if (result.closed_session_id) {
+        this.tableSessionsService.emitSessionClosed(
+          ctxStoreId,
+          result.closed_session_id,
+        );
       }
 
       // Process digital payments AFTER transaction commit (order is now visible)
@@ -2434,6 +2448,31 @@ export class PaymentsService {
   }
 
   /**
+   * True when a POS payment must be DEFERRED past the payment transaction
+   * commit: the method requires a real charge (`requires_payment`) AND is a
+   * digital gateway (`wompi` | `wallet`) that only settles asynchronously via
+   * webhook. Cash / card / bank_transfer settle in-band and return `false`.
+   *
+   * Single source of truth (mirror of the historical inline `isDigitalPayment`
+   * check in `processPosPayment`). Also gates the table-session close in
+   * `applyPosPaymentToTableSession`: a deferred digital payment must NOT close
+   * the table until its webhook confirms the charge (otherwise the mesa would
+   * flip to `cleaning` while the diner could still abandon the Wompi widget).
+   */
+  private async isDeferredDigitalMethod(
+    tx: any,
+    dto: CreatePosPaymentDto,
+  ): Promise<boolean> {
+    if (!dto.requires_payment) return false;
+    const method = await tx.store_payment_methods.findUnique({
+      where: { id: dto.store_payment_method_id },
+      include: { system_payment_method: true },
+    });
+    const type = method?.system_payment_method?.type || '';
+    return ['wompi', 'wallet'].includes(type);
+  }
+
+  /**
    * Create or update order from POS data
    */
   /**
@@ -2480,6 +2519,11 @@ export class PaymentsService {
       cogsTotal: number;
       consumedLineCount: number;
     } | null;
+    // Restaurant Suite (edge Wompi): the session id that was CLOSED in this
+    // transaction, or null when the close was deferred (digital payment
+    // awaiting webhook) or nothing was closed. The caller emits `session_closed`
+    // post-commit only when this is non-null.
+    closedSessionId: number | null;
   }> {
     const tableSessionId = dto.table_session_id!;
 
@@ -2693,14 +2737,25 @@ export class PaymentsService {
     // is misleading to staff (the seat is free, but the next cashier sees the
     // table as still occupied) and can race with the next `openTableSession`
     // call on the same table.
-    await tx.table_sessions.update({
-      where: { id: session.id },
-      data: { closed_at: new Date() },
-    });
-    await tx.tables.update({
-      where: { id: session.table_id },
-      data: { status: 'cleaning', updated_at: new Date() },
-    });
+    //
+    // Edge Wompi (Obj 6): a DEFERRED digital payment (wompi/wallet) must NOT
+    // close the table here — the charge is only pending. The session stays open
+    // + the table `occupied`; the close is reconciled by the gateway webhook
+    // (`WebhookHandlerService.confirmOrderPaid`). Cash/card/transfer close in
+    // the act. The auto-fire above and the totals write are NEVER deferred.
+    const isDeferred = await this.isDeferredDigitalMethod(tx, dto);
+    let closedSessionId: number | null = null;
+    if (!isDeferred) {
+      await tx.table_sessions.update({
+        where: { id: session.id },
+        data: { closed_at: new Date() },
+      });
+      await tx.tables.update({
+        where: { id: session.table_id },
+        data: { status: 'cleaning', updated_at: new Date() },
+      });
+      closedSessionId = session.id;
+    }
 
     // QUI-431 — detección de serializados sobre TODAS las líneas del pedido de
     // la mesa (las que ya vivían en el draft + las nuevas del cierre), no solo
@@ -2723,6 +2778,7 @@ export class PaymentsService {
       appliedPromotions: promotionQuote.applied_promotions ?? [],
       couponInfo,
       kitchenFire,
+      closedSessionId,
     };
   }
 
@@ -2957,6 +3013,9 @@ export class PaymentsService {
             cogsTotal: number;
             consumedLineCount: number;
           },
+          // Fresh sales never close a table session — only the table close-out
+          // branch (`applyPosPaymentToTableSession`) can. Keep the shape aligned.
+          closedSessionId: null as number | null,
         };
       } catch (error) {
         if (
@@ -3493,5 +3552,137 @@ export class PaymentsService {
         error.stack,
       );
     }
+  }
+
+  // --------------------------------------------------------------------
+  // C3 — staff-confirmed payment helper
+  // --------------------------------------------------------------------
+  /**
+   * Confirm a previously-pending payment by transitioning it to `succeeded`
+   * and emitting the canonical `payment.received` event so the auto-entry
+   * listener (`AccountingEventsListener`) and the notification listener
+   * both fire with the SAME shape as the POS fresh-sale path.
+   *
+   * Designed for flows where the payment row was created in `state='pending'`
+   * by an upstream actor (e.g. comensal requesting the bill via QR) and is
+   * later confirmed by staff (manual methods: cash / bank_transfer) — NOT
+   * Wompi/webhooks, which are already final at creation.
+   *
+   * CAS semantics: if the payment is no longer `pending` (already `succeeded`
+   * by a webhook, another staff, or a duplicate call), this method is a
+   * no-op and returns `false`. Otherwise it updates the row in the caller's
+   * transaction (`tx`) and emits the event AFTER the state write succeeds
+   * (event emissions are not transactional — the listener will simply see
+   * a duplicate event if the outer `$transaction` aborts, which is harmless
+   * because the accounting listener is idempotent on `payment_id`).
+   *
+   * This helper does NOT:
+   *   - close the order (the order lifecycle is owned by callers).
+   *   - close the table session (the session lifecycle is owned by callers).
+   *   - write to `cash_register_movements` (run AFTER commit by the caller
+   *     using `recordCashRegisterMovement`, mirroring the POS fresh-sale flow).
+   *
+   * It is intentionally `public` so future cross-module consumers (e.g.
+   * `TableSessionsService.confirmPayment`) can call it without re-implementing
+   * the CAS + emit logic. Not currently injected (would require a module
+   * wiring change) — callers duplicate the logic for now.
+   */
+  async applyConfirmedPaymentToOrder(args: {
+    paymentId: number;
+    staffUser: { id: number; store_id: number };
+    tx: Prisma.TransactionClient;
+  }): Promise<boolean> {
+    const { paymentId, staffUser, tx } = args;
+
+    // CAS load — only proceed if the payment is still pending.
+    const payment = await tx.payments.findUnique({
+      where: { id: paymentId },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
+        },
+        orders: {
+          select: {
+            id: true,
+            order_number: true,
+            subtotal_amount: true,
+            tax_amount: true,
+            discount_amount: true,
+            tip_amount: true,
+            customer_id: true,
+            stores: { select: { organization_id: true } },
+          },
+        },
+      },
+    });
+    if (!payment) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_FIND_001,
+        `Pago #${paymentId} no encontrado`,
+      );
+    }
+    if (payment.state !== 'pending') {
+      // Already final — idempotent short-circuit.
+      this.logger.debug(
+        `[applyConfirmedPaymentToOrder] payment ${paymentId} state=${payment.state}; skipping (already final).`,
+      );
+      return false;
+    }
+
+    // 1. Transition the payment row to `succeeded`.
+    await tx.payments.update({
+      where: { id: paymentId },
+      data: {
+        state: 'succeeded',
+        paid_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // 2. Update `orders.total_paid` / `remaining_balance` so the order
+    //    reflects the new paid amount. Mirrors the GAP-2 helper used by
+    //    `processPosPaymentTransaction`.
+    await this.applyOrderBalanceOnPayment(
+      tx,
+      payment.order_id,
+      Number(payment.amount),
+    );
+
+    // 3. Emit `payment.received` with the SAME shape as the POS fresh-sale
+    //    path (payments.service.ts L1179) so the auto-entry listener maps
+    //    the cash/bank/tip lines identically. Tax breakdown is intentionally
+    //    omitted here (table-session checks are typically dine-in with no
+    //    withholding applied at the payment step — the order's persisted
+    //    tax_breakdown is on `order_item_taxes`, but at this layer we only
+    //    need the totals for the accounting listener).
+    this.eventEmitter.emit('payment.received', {
+      payment_id: payment.id,
+      store_id: staffUser.store_id,
+      organization_id: payment.orders?.stores?.organization_id,
+      order_id: payment.order_id,
+      order_number: payment.orders?.order_number,
+      amount: Number(payment.amount),
+      subtotal_amount: Number(payment.orders?.subtotal_amount || 0),
+      tax_amount: Number(payment.orders?.tax_amount || 0),
+      tax_breakdown: [],
+      withholding_breakdown: [],
+      discount_amount: Number(payment.orders?.discount_amount || 0),
+      tip_amount: Number(payment.orders?.tip_amount || 0),
+      currency: payment.currency || 'COP',
+      payment_method:
+        payment.store_payment_method?.system_payment_method?.display_name ||
+        payment.store_payment_method?.display_name ||
+        'Unknown',
+      user_id: staffUser.id,
+      customer: payment.orders?.customer_id
+        ? { id: Number(payment.orders.customer_id) }
+        : undefined,
+    });
+
+    this.logger.log(
+      `[applyConfirmedPaymentToOrder] payment ${paymentId} → succeeded by staff ${staffUser.id} (order ${payment.order_id})`,
+    );
+
+    return true;
   }
 }

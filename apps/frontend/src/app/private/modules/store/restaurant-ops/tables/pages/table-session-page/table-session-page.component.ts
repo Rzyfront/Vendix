@@ -38,6 +38,7 @@ import {
   TableSessionAddItem,
   TableStatus,
   KitchenTicketItemRefStatus,
+  PaymentPendingView,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import {
@@ -52,6 +53,7 @@ import { SplitOrderModalComponent } from '../../components/split-order-modal/spl
 import {
   TablePaymentModalComponent,
   TablePaymentSubmit,
+  TablePaymentConfirmSubmit,
 } from '../../components/table-payment-modal/table-payment-modal.component';
 import { AssignCustomerModalComponent } from '../../components/assign-customer-modal/assign-customer-modal.component';
 
@@ -123,6 +125,16 @@ export class TableSessionPageComponent implements OnInit {
   readonly isClosing = signal(false);
   readonly isPaying = signal(false);
   readonly isAssigningCustomer = signal(false);
+  /** Order-item id currently being removed (drives the per-row spinner). */
+  readonly removingItemId = signal<number | null>(null);
+
+  // ── Pending payments (E2 — staff confirmation) ────────────────────
+  /** Pending manual payments for the order backing this session. */
+  readonly pendingPayments = signal<PaymentPendingView[]>([]);
+  readonly isLoadingPendingPayments = signal(false);
+  readonly isConfirmOpen = signal(false);
+  readonly pendingConfirmPayment = signal<PaymentPendingView | null>(null);
+  readonly isConfirmingPayment = signal(false);
 
   /**
    * Live kitchen state merged from SSE: order_item_id → kitchen status.
@@ -327,6 +339,7 @@ export class TableSessionPageComponent implements OnInit {
     // Warm up the KDS SSE stream so badges update live. Idempotent.
     this.kdsSse.connect();
     this.loadSession(id);
+    this.loadPendingPayments(id);
   }
 
   /**
@@ -429,6 +442,23 @@ export class TableSessionPageComponent implements OnInit {
   /** True when the item has been fired to the kitchen (any ticket state). */
   isItemFired(item: TableSessionOrderItem): boolean {
     return item.inventory_consumed_at_fire || this.kitchenStatusFor(item) != null;
+  }
+
+  /**
+   * Can the operator remove this line from the open check? (Frente 2)
+   *
+   * Rules mirror the backend gate:
+   *   - not closed, and
+   *   - the item was NEVER fired  → deletable outright, or
+   *   - the item was fired but its ticket is still `pending` → deletable
+   *     (backend cancels the KDS ticket + returns the fire-consumed stock).
+   *
+   * Hidden for `in_preparation` / `ready` / `delivered` / `cancelled`
+   * (terminal or in-progress kitchen states the backend rejects with 409).
+   */
+  canRemoveItem(item: TableSessionOrderItem): boolean {
+    if (this.isClosed()) return false;
+    return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
   }
 
   kitchenBadgeVariant(status: KitchenTicketItemRefStatus): BadgeVariant {
@@ -598,6 +628,53 @@ export class TableSessionPageComponent implements OnInit {
             typeof err === 'string' ? err : 'Error al agregar items',
           );
         },
+      });
+  }
+
+  // ── Remove item (Frente 2) ───────────────────────────────────────────
+
+  /**
+   * Remove a single line from the open check. Confirms first (the message
+   * warns about the kitchen-ticket cancel + stock return when the item was
+   * already fired-pending), then calls the backend and replaces the local
+   * session with the recalculated snapshot it returns.
+   */
+  onRemoveItem(item: TableSessionOrderItem): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isClosed()) return;
+    if (!this.canRemoveItem(item)) return;
+    const firedPending =
+      this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
+    this.dialogService
+      .confirm({
+        title: 'Eliminar plato',
+        message: firedPending
+          ? `¿Eliminar "${item.product_name}" de la cuenta? Se cancelará su ticket de cocina y se devolverá el inventario consumido.`
+          : `¿Eliminar "${item.product_name}" de la cuenta?`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.removingItemId.set(item.id);
+        this.tablesService
+          .removeItem(sessionId, item.id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (s) => {
+              this.removingItemId.set(null);
+              this.session.set(s);
+              this.seedKitchenStateFromOrder(s);
+              this.toastService.success('Plato eliminado de la cuenta');
+            },
+            error: (err: unknown) => {
+              this.removingItemId.set(null);
+              this.toastService.error(
+                typeof err === 'string' ? err : 'Error al eliminar el plato',
+              );
+            },
+          });
       });
   }
 
@@ -967,6 +1044,86 @@ export class TableSessionPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  // ── Pending payments (E2 — staff confirmation) ────────────────────
+
+  /**
+   * Fetch pending manual payments for the order backing this session.
+   * Renders the "Pagos por confirmar" list + per-row "Confirmar" CTA.
+   * Silent: post-action refetches don't trigger the global loading state.
+   */
+  loadPendingPayments(sessionId: number, opts: { silent?: boolean } = {}): void {
+    if (!opts.silent) this.isLoadingPendingPayments.set(true);
+    this.tablesService
+      .listPendingPayments(sessionId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          this.pendingPayments.set(rows ?? []);
+          if (!opts.silent) this.isLoadingPendingPayments.set(false);
+        },
+        error: () => {
+          // Don't toast on refetch failures — they are usually background
+          // and the next interaction will retry. Initial load still gets
+          // a clear empty state.
+          this.pendingPayments.set([]);
+          if (!opts.silent) this.isLoadingPendingPayments.set(false);
+        },
+      });
+  }
+
+  /** Open the modal in 'confirm' mode for a single pending row. */
+  openConfirmPayment(payment: PaymentPendingView): void {
+    this.pendingConfirmPayment.set(payment);
+    this.isConfirmOpen.set(true);
+  }
+
+  /**
+   * Staff confirms a pending payment. Transitions the row to `succeeded`
+   * on the backend, refreshes the pending list, and refreshes the session
+   * so order balance + summary reflect the new state. The session
+   * REMAINS OPEN — staff can chain confirms until the order is fully paid.
+   */
+  onConfirmPayment(payload: TablePaymentConfirmSubmit): void {
+    const sessionId = this.session()?.id;
+    if (!sessionId || this.isConfirmingPayment()) return;
+    this.isConfirmingPayment.set(true);
+    this.tablesService
+      .confirmPayment(sessionId, payload.payment_id, {
+        ...(payload.tip_amount != null && payload.tip_amount > 0
+          ? { tip_amount: payload.tip_amount }
+          : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isConfirmingPayment.set(false);
+          this.isConfirmOpen.set(false);
+          this.pendingConfirmPayment.set(null);
+          this.toastService.success('Pago confirmado por staff');
+          // Silent refetch: keeps the page body intact while the
+          // pending row disappears and the order balance updates.
+          this.loadPendingPayments(sessionId, { silent: true });
+          this.loadSession(sessionId, { silent: true });
+        },
+        error: (err: unknown) => {
+          this.isConfirmingPayment.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al confirmar el pago',
+          );
+        },
+      });
+  }
+
+  /** Operator-friendly label for a payment method. */
+  paymentMethodLabel(p: PaymentPendingView): string {
+    return p.method?.display_name || p.method?.type || '—';
+  }
+
+  /** TrackBy for the pending list (avoid DOM thrash on row swaps). */
+  trackByPaymentId(_i: number, p: PaymentPendingView): number {
+    return p.id;
   }
 
   // ── Close session ──────────────────────────────────────────────────────

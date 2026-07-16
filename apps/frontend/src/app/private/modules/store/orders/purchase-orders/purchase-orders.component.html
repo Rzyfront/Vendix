@@ -5,18 +5,10 @@
   </div>
 
   <!-- Purchase Orders List (owns search, filters, loading, empty state) -->
+  <!-- "Ver" / row-click navigate to the dedicated purchase-orders/:id view. -->
   <app-purchase-order-list
-    (viewOrder)="viewOrderDetails($event)"
     (create)="createOrder()"
     (refresh)="onOrderUpdated()"
     (statsUpdated)="onStatsUpdated($any($event))"
   ></app-purchase-order-list>
-
-  <!-- Detail Modal with tabs (Detalle, Recepciones, Pagos, Adjuntos, Historial) -->
-  <app-po-detail-modal
-    [isOpen]="isDetailModalOpen()"
-    [order]="selectedOrder()"
-    (close)="closeDetailModal()"
-    (orderUpdated)="onOrderUpdated()"
-  ></app-po-detail-modal>
 </div>

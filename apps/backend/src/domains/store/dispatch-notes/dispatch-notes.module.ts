@@ -16,6 +16,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 // the dependency and is harmless.)
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
+import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.m
     InventoryModule,
     InventorySerialNumbersModule,
     OrderStockCommitModule,
+    PurchaseOrdersModule,
   ],
   controllers: [DispatchNotesController],
   providers: [

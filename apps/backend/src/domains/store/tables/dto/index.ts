@@ -14,6 +14,8 @@ export {
 
 export { AssignCustomerDto } from './assign-customer.dto';
 
+export { ConfirmTablePaymentDto } from './confirm-payment.dto';
+
 export {
   SplitByItemsDto,
   SplitByAmountDto,

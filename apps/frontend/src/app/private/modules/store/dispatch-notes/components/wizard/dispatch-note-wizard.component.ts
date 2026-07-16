@@ -20,15 +20,19 @@ import {
 } from '../../../../../../shared/components';
 
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
+import type { WizardTerminalAction } from '../../services/dispatch-note-wizard.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
 import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 
 import { OrderStepComponent } from './order-step.component';
 import { OrderItemsStepComponent } from './order-items-step.component';
+import { PartyStepComponent } from './party-step.component';
+import { ItemPickerStepComponent } from './item-picker-step.component';
 import { DetailsStepComponent } from './details-step.component';
 import { RouteStepComponent } from './route-step.component';
 import { ReviewStepComponent } from './review-step.component';
+import { TypeStepComponent } from './type-step.component';
 import {
   DispatchNoteSerialsModalComponent,
   DispatchNoteSerialLine,
@@ -50,8 +54,11 @@ import {
     ButtonComponent,
     IconComponent,
     StepsLineComponent,
+    TypeStepComponent,
     OrderStepComponent,
     OrderItemsStepComponent,
+    PartyStepComponent,
+    ItemPickerStepComponent,
     DetailsStepComponent,
     RouteStepComponent,
     ReviewStepComponent,
@@ -78,11 +85,32 @@ import {
         ></app-steps-line>
         <p class="text-xs text-[var(--color-text-muted)] mt-1.5 mb-0.5">
           @switch (wizardService.currentStep()) {
-            @case (0) { Selecciona la orden a despachar }
-            @case (1) { Ajusta las cantidades a despachar }
-            @case (2) { Configura bodega, fecha y notas }
-            @case (3) { Asigna la remisión a una ruta (opcional) }
-            @case (4) { Revisa y elige la acción terminal }
+            @case (0) { Selecciona el tipo de remisión }
+            @case (1) {
+              @switch (wizardService.subtype()) {
+                @case ('customer_delivery') { Selecciona la orden a despachar }
+                @case ('transfer_out') { Selecciona bodega origen y destino }
+                @case ('transfer_in') { Selecciona bodega origen y destino }
+                @case ('purchase_receipt') { Selecciona el proveedor }
+                @case ('customer_return') { Selecciona el cliente y remisión original }
+              }
+            }
+            @case (2) {
+              @if (wizardService.subtype() === 'customer_delivery') {
+                Ajusta las cantidades a despachar
+              } @else {
+                Busca y agrega los productos a despachar
+              }
+            }
+            @case (3) { Configura bodega, fecha y notas }
+            @case (4) {
+              @if (wizardService.subtype() === 'customer_delivery') {
+                Asigna la remisión a una ruta (opcional)
+              } @else {
+                Revisa y elige la acción terminal
+              }
+            }
+            @case (5) { Revisa y elige la acción terminal }
           }
         </p>
       </div>
@@ -90,15 +118,44 @@ import {
       <!-- Step Content -->
       <div class="p-4 max-h-[55vh] overflow-y-auto">
         @switch (wizardService.currentStep()) {
-          @case (0) { <app-dispatch-wizard-order-step /> }
-          @case (1) { <app-dispatch-wizard-order-items-step /> }
-          @case (2) { <app-dispatch-wizard-details-step /> }
-          @case (3) { <app-dispatch-wizard-route-step /> }
+          @case (0) { <app-dispatch-wizard-type-step /> }
+          @case (1) {
+            @if (wizardService.subtype() === 'customer_delivery') {
+              <app-dispatch-wizard-order-step />
+            } @else {
+              <app-dispatch-wizard-party-step />
+            }
+          }
+          @case (2) {
+            @if (wizardService.subtype() === 'customer_delivery') {
+              <app-dispatch-wizard-order-items-step />
+            } @else {
+              <app-dispatch-wizard-item-picker-step />
+            }
+          }
+          @case (3) { <app-dispatch-wizard-details-step /> }
           @case (4) {
+            @if (wizardService.subtype() === 'customer_delivery') {
+              <app-dispatch-wizard-route-step />
+            } @else {
+              <app-dispatch-wizard-review-step
+                [created]="isCreated()"
+                [createdNote]="createdNote()"
+                [completedAction]="completedAction()"
+                [goToStepOffset]="1"
+                (goToStep)="wizardService.goToStep($event)"
+                (viewDetail)="onViewDetail($event)"
+                (createAnother)="onCreateAnother()"
+                (printNote)="onPrint($event)"
+              />
+            }
+          }
+          @case (5) {
             <app-dispatch-wizard-review-step
               [created]="isCreated()"
               [createdNote]="createdNote()"
               [completedAction]="completedAction()"
+              [goToStepOffset]="1"
               (goToStep)="wizardService.goToStep($event)"
               (viewDetail)="onViewDetail($event)"
               (createAnother)="onCreateAnother()"
@@ -123,7 +180,7 @@ import {
             <div></div>
           }
 
-          @if (wizardService.currentStep() < 4 && !isCreated()) {
+          @if (wizardService.currentStep() < wizardService.lastStepIndex() && !isCreated()) {
             <app-button
               variant="primary"
               (clicked)="wizardService.nextStep()"
@@ -184,7 +241,7 @@ export class DispatchNoteWizardComponent {
   readonly showSerialsModal = signal(false);
   readonly serialLines = signal<DispatchNoteSerialLine[]>([]);
   private pendingSerialNote: DispatchNote | null = null;
-  private pendingSerialAction: 'confirm_route' | 'deliver' | null = null;
+  private pendingSerialAction: WizardTerminalAction | null = null;
 
   readonly createActionLabel = computed(() => {
     switch (this.wizardService.terminalAction()) {
@@ -192,6 +249,10 @@ export class DispatchNoteWizardComponent {
         return 'Confirmar y Asignar a Ruta';
       case 'deliver':
         return 'Confirmar y Entregar';
+      case 'confirm':
+        return 'Confirmar';
+      case 'receive':
+        return 'Confirmar y Recibir';
       default:
         return 'Crear como Borrador';
     }
@@ -206,16 +267,11 @@ export class DispatchNoteWizardComponent {
   onCreate(): void {
     this.isSubmitting.set(true);
 
-    const order = this.wizardService.selectedOrder();
+    const sub = this.wizardService.subtype();
     const items = this.wizardService.items();
     const details = this.wizardService.details();
     const terminal = this.wizardService.terminalAction();
 
-    if (!order) {
-      this.toast.error('Debes seleccionar una orden');
-      this.isSubmitting.set(false);
-      return;
-    }
     if (items.length === 0) {
       this.toast.error('Debes despachar al menos un ítem');
       this.isSubmitting.set(false);
@@ -227,6 +283,37 @@ export class DispatchNoteWizardComponent {
       return;
     }
 
+    // Branch by subtype — each builds a different DTO and calls a different endpoint.
+    switch (sub) {
+      case 'customer_delivery':
+        this._submitCustomerDelivery(items, details, terminal);
+        break;
+      case 'transfer_out':
+      case 'transfer_in':
+        this._submitTransfer(sub, items, details, terminal);
+        break;
+      case 'customer_return':
+        this._submitReturn(items, details, terminal);
+        break;
+      case 'purchase_receipt':
+        this._submitPurchaseReceipt(items, details, terminal);
+        break;
+      default:
+        this.toast.error('Tipo de remisión no soportado');
+        this.isSubmitting.set(false);
+        break;
+    }
+  }
+
+  // --- customer_delivery: existing order-first flow (createFromOrder) ---
+
+  private _submitCustomerDelivery(items: any[], details: any, terminal: WizardTerminalAction): void {
+    const order = this.wizardService.selectedOrder();
+    if (!order) {
+      this.toast.error('Debes seleccionar una orden');
+      this.isSubmitting.set(false);
+      return;
+    }
     const dto: any = {
       target_status: 'draft',
       dispatch_location_id: details.dispatch_location_id,
@@ -239,7 +326,6 @@ export class DispatchNoteWizardComponent {
         location_id: i.location_id || undefined,
       })),
     };
-
     this.dispatchNotesService
       .createFromOrder(order.id, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -249,14 +335,130 @@ export class DispatchNoteWizardComponent {
       });
   }
 
-  private _afterCreate(note: DispatchNote, terminal: 'draft' | 'confirm_route' | 'deliver'): void {
+  // --- transfer_out / transfer_in: createTransfer ---
+
+  private _submitTransfer(sub: 'transfer_out' | 'transfer_in', items: any[], details: any, terminal: WizardTerminalAction): void {
+    const fromId = this.wizardService.fromLocationId();
+    const toId = this.wizardService.toLocationId();
+    if (!fromId || !toId) {
+      this.toast.error('Selecciona las bodegas de origen y destino');
+      this.isSubmitting.set(false);
+      return;
+    }
+    const dto: any = {
+      direction: this.wizardService.direction(),
+      subtype: sub,
+      reason: this.wizardService.reason() || undefined,
+      from_location_id: fromId,
+      to_location_id: toId,
+      dispatch_location_id: details.dispatch_location_id,
+      notes: details.notes || undefined,
+      internal_notes: details.internal_notes || undefined,
+      currency: details.currency,
+      target_status: 'draft',
+      items: items.map((i) => ({
+        product_id: i.product_id,
+        product_variant_id: i.product_variant_id || undefined,
+        location_id: i.location_id || details.dispatch_location_id,
+        ordered_quantity: i.dispatched_quantity,
+        dispatched_quantity: i.dispatched_quantity,
+        unit_price: i.unit_price || undefined,
+        lot_serial: i.lot_serial || undefined,
+      })),
+    };
+    this.dispatchNotesService
+      .createTransfer(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => this._afterCreate(note, terminal),
+        error: (err) => this._onCreateError(err),
+      });
+  }
+
+  // --- customer_return: createReturn ---
+
+  private _submitReturn(items: any[], details: any, terminal: WizardTerminalAction): void {
+    const customerId = this.wizardService.customerId();
+    if (!customerId) {
+      this.toast.error('Selecciona un cliente');
+      this.isSubmitting.set(false);
+      return;
+    }
+    const dto: any = {
+      direction: 'inbound',
+      subtype: 'customer_return',
+      reason: this.wizardService.reason() || undefined,
+      customer_id: customerId,
+      related_dispatch_id: this.wizardService.relatedDispatchId() || undefined,
+      dispatch_location_id: details.dispatch_location_id,
+      notes: details.notes || undefined,
+      internal_notes: details.internal_notes || undefined,
+      currency: details.currency,
+      target_status: 'draft',
+      items: items.map((i) => ({
+        product_id: i.product_id,
+        product_variant_id: i.product_variant_id || undefined,
+        location_id: i.location_id || details.dispatch_location_id,
+        ordered_quantity: i.dispatched_quantity,
+        dispatched_quantity: i.dispatched_quantity,
+        unit_price: i.unit_price || undefined,
+      })),
+    };
+    this.dispatchNotesService
+      .createReturn(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => this._afterCreate(note, terminal),
+        error: (err) => this._onCreateError(err),
+      });
+  }
+
+  // --- purchase_receipt: createPurchaseReceipt ---
+
+  private _submitPurchaseReceipt(items: any[], details: any, terminal: WizardTerminalAction): void {
+    const supplierId = this.wizardService.supplierId();
+    if (!supplierId) {
+      this.toast.error('Selecciona un proveedor');
+      this.isSubmitting.set(false);
+      return;
+    }
+    const dto: any = {
+      direction: 'inbound',
+      subtype: 'purchase_receipt',
+      reason: this.wizardService.reason() || undefined,
+      supplier_id: supplierId,
+      purchase_order_id: this.wizardService.purchaseOrderId() || undefined,
+      dispatch_location_id: details.dispatch_location_id,
+      notes: details.notes || undefined,
+      internal_notes: details.internal_notes || undefined,
+      currency: details.currency,
+      target_status: 'draft',
+      items: items.map((i) => ({
+        product_id: i.product_id,
+        product_variant_id: i.product_variant_id || undefined,
+        location_id: i.location_id || details.dispatch_location_id,
+        ordered_quantity: i.dispatched_quantity,
+        dispatched_quantity: i.dispatched_quantity,
+        unit_price: i.unit_price || undefined,
+      })),
+    };
+    this.dispatchNotesService
+      .createPurchaseReceipt(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => this._afterCreate(note, terminal),
+        error: (err) => this._onCreateError(err),
+      });
+  }
+
+  private _afterCreate(note: DispatchNote, terminal: WizardTerminalAction): void {
     if (terminal === 'draft') {
       this._onCreateSuccess(note, 'draft');
       this.toast.success('Remisión creada como borrador');
       return;
     }
 
-    // Build serial lines (reused from the previous wizard version).
+    // Build serial lines (serialized products require serial selection before confirm).
     const lines = this._buildSerialLines(note);
     if (lines.length > 0) {
       this.pendingSerialNote = note;
@@ -297,7 +499,7 @@ export class DispatchNoteWizardComponent {
 
   private _continueAfterCreate(
     note: DispatchNote,
-    action: 'confirm_route' | 'deliver',
+    action: WizardTerminalAction,
     body: { item_serials: any[] },
   ): void {
     this.dispatchNotesService
@@ -309,6 +511,12 @@ export class DispatchNoteWizardComponent {
               .deliver(confirmed.id, { actual_delivery_date: new Date().toISOString() })
               .pipe(switchMap((delivered) => of(delivered)));
           }
+          if (action === 'receive') {
+            return this.dispatchNotesService
+              .receive(confirmed.id)
+              .pipe(switchMap((received) => of(received)));
+          }
+          // confirm_route and confirm: stop after confirm.
           return of(confirmed);
         }),
         takeUntilDestroyed(this.destroyRef),
@@ -332,7 +540,7 @@ export class DispatchNoteWizardComponent {
       }));
   }
 
-  private _onCreateSuccess(note: DispatchNote, action: 'draft' | 'confirm_route' | 'deliver'): void {
+  private _onCreateSuccess(note: DispatchNote, action: WizardTerminalAction): void {
     this.isSubmitting.set(false);
     this.isCreated.set(true);
     this.createdNote.set(note);
@@ -341,15 +549,19 @@ export class DispatchNoteWizardComponent {
       draft: 'Remisión creada',
       confirm_route: 'Remisión confirmada y asignada a la ruta',
       deliver: 'Remisión entregada',
+      confirm: 'Remisión confirmada',
+      receive: 'Remisión recibida',
     };
     this.toast.success(messages[action] ?? 'Remisión creada');
   }
 
-  private _onCreateError(err: unknown, reachedAction?: 'confirm_route' | 'deliver'): void {
+  private _onCreateError(err: unknown, reachedAction?: WizardTerminalAction): void {
     this.isSubmitting.set(false);
     const messages: Record<string, string> = {
       confirm_route: 'Remisión creada, pero falló la confirmación',
       deliver: 'Remisión confirmada, pero falló la entrega',
+      confirm: 'Remisión creada, pero falló la confirmación',
+      receive: 'Remisión confirmada, pero falló la recepción',
     };
     const msg = reachedAction
       ? messages[reachedAction]

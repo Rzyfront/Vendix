@@ -3,8 +3,10 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Logger,
   MessageEvent,
   Param,
+  ParseIntPipe,
   Post,
   Query,
   Req,
@@ -12,6 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { randomUUID } from 'crypto';
 import { Observable, Subject, defer, from, interval, merge } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { EcommerceTablesService } from './ecommerce-tables.service';
@@ -23,6 +26,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
   CallWaiterDto,
+  PayTableDto,
   RequestBillDto,
   RequestSplitDto,
   SetGuestCountDto,
@@ -66,6 +70,8 @@ const DINER_KDS_MAP: Record<string, string> = {
 @Controller('ecommerce/tables')
 @UseGuards(JwtAuthGuard)
 export class EcommerceTablesController {
+  private readonly logger = new Logger(EcommerceTablesController.name);
+
   constructor(
     private readonly service: EcommerceTablesService,
     private readonly sseService: NotificationsSseService,
@@ -149,12 +155,42 @@ export class EcommerceTablesController {
   }
 
   /**
+   * Lists payment methods enabled for the current store, scoped to the
+   * table-token request. Public — diners use this to render the payment
+   * sheet. Filters out methods that should never surface to the mesa
+   * checkout flow (e.g. credit-on-account, layaway) by reusing the
+   * existing StorePaymentMethodsService.getEnabledForStore() allowlist.
+   */
+  @Get(':token/payment-methods')
+  @OptionalAuth()
+  async getPaymentMethods(@Param('token') token: string) {
+    const data = await this.service.getTablePaymentMethods(token);
+    return { success: true, data };
+  }
+
+  /**
    * GAP-3 — Real-time diner stream. Emits:
-   *   1) A one-shot `{ type: 'snapshot', bill }` warm-up (bill=null when
-   *      no open check yet, so the banner can still attach).
-   *   2) Live diner-safe events (`kitchen.fired|preparing|ready|delivered`
-   *      + `bill.requested`) filtered to THIS table's bound order/session.
+   *   1) A one-shot `{ type: 'snapshot', bill, active_devices }` warm-up
+   *      (bill=null when no open check yet, so the banner can still attach).
+   *   2) Live diner-safe events:
+   *      - `kitchen.fired|preparing|ready|delivered` (filtered to bound order).
+   *      - `bill.requested` (filtered to bound session).
+   *      - `comensal_joined` / `comensal_left` / `item_added` /
+   *        `guest_count_changed` (filtered to bound session).
    *   3) A heartbeat comment every 30s.
+   *
+   * Device lifecycle (GAP-7):
+   *   - On connect, a `device_id` is taken from `?device_id=` query (raw
+   *     — `@Query()` DTOs are forbidden by `forbidNonWhitelisted` for SSE)
+   *     or generated with `randomUUID()`.
+   *   - Once the server-side binding resolves, the device is registered in
+   *     Redis (`registerDevice`). If the SET did not contain it before
+   *     (`added === 1`), a `comensal_joined` event is broadcast to other
+   *     diners on the same store SSE subject.
+   *   - On `req.close`, the device is removed via `unregisterDevice`. If
+   *     the SET contained it (`removed === 1`), a `comensal_left` event
+   *     is broadcast. Reconnexion flaps (same `device_id` rejoins) suppress
+   *     duplicated join/leave pings.
    *
    * Security (default-deny): `boundOrderId`/`boundSessionId` are derived
    * SERVER-SIDE from the `public_token`, never from the client. The
@@ -163,10 +199,10 @@ export class EcommerceTablesController {
    * table's kitchen activity.
    *
    * ALS caveat: the request context is captured SYNCHRONOUSLY and every
-   * deferred DB read (binding + snapshot) is re-wrapped in
-   * `RequestContextService.run(...)`; otherwise `StorePrismaService` would
-   * see no `store_id` (AsyncLocalStorage already unwound) and throw
-   * STORE_CONTEXT_001.
+   * deferred DB read (binding + snapshot + device lifecycle) is re-wrapped
+   * in `RequestContextService.run(...)`; otherwise `StorePrismaService` /
+   * the Redis-backed device helpers would see no `store_id` (AsyncLocalStorage
+   * already unwound) and throw STORE_CONTEXT_001.
    */
   @Sse(':token/stream')
   @OptionalAuth()
@@ -181,6 +217,23 @@ export class EcommerceTablesController {
       throw new ForbiddenException('Store context required');
     }
 
+    // 1.5) device_id — read from raw query, generate if absent.
+    //      SSE cannot send `Authorization` header, so the frontend must
+    //      pass `device_id` as a query param. We DO NOT use `@Query()`
+    //      with a DTO (forbidNonWhitelisted would 400 on `device_id`).
+    //      Generated UUID is per-tab anonymous — never tied to a customer.
+    const rawDeviceId = (req.query?.device_id ?? req.query?.deviceId) as
+      | string
+      | undefined;
+    const deviceId =
+      typeof rawDeviceId === 'string' && rawDeviceId.length > 0
+        ? rawDeviceId
+        : randomUUID();
+
+    // Capture for the close handler. Set once the binding resolves.
+    let capturedSessionId: number | null = null;
+    let capturedDeviceId: string | null = null;
+
     // 2) Resolve the diner binding (order_id + session_id) SERVER-SIDE
     //    from the token. Async, so we hold it in a mutable closure var
     //    and default-deny live events until it resolves (or stays null
@@ -189,8 +242,56 @@ export class EcommerceTablesController {
     void RequestContextService.run(requestContext, () =>
       this.service.resolveDinerBinding(token),
     )
-      .then((b) => {
+      .then(async (b) => {
         binding = b;
+        if (!b) return;
+        capturedSessionId = b.session_id;
+        capturedDeviceId = deviceId;
+        // Register this diner device in the per-session Redis set. If it
+        // was NOT in the set before (`added === 1`), broadcast the join
+        // event so other diners see the counter bump live.
+        try {
+          const added = await RequestContextService.run(requestContext, () =>
+            (
+              this.service as unknown as {
+                registerDevice: (
+                  sessionId: number,
+                  uuid: string,
+                ) => Promise<number>;
+              }
+            ).registerDevice(b.session_id, deviceId),
+          );
+          if (added === 1) {
+            const count = await RequestContextService.run(
+              requestContext,
+              () =>
+                (
+                  this.service as unknown as {
+                    getActiveDevicesCount: (
+                      sessionId: number,
+                    ) => Promise<number>;
+                  }
+                ).getActiveDevicesCount(b.session_id),
+            );
+            this.sseService.push(storeId, {
+              type: 'comensal_joined',
+              data: {
+                table_session_id: b.session_id,
+                active_devices: count,
+                device_id: deviceId,
+              },
+              ts: Date.now(),
+            } as unknown as Parameters<
+              typeof this.sseService.push
+            >[1]);
+          }
+        } catch (err) {
+          this.logger.warn(
+            `registerDevice failed for token=${token}: ${
+              (err as Error).message
+            }`,
+          );
+        }
       })
       .catch(() => {
         binding = null;
@@ -200,26 +301,102 @@ export class EcommerceTablesController {
     const subject = this.sseService.getOrCreate(storeId);
     req.on('close', () => {
       this.sseService.unsubscribe(storeId);
+      // Best-effort: only run if the binding had resolved (otherwise the
+      // device was never registered). Use the captured session_id/deviceId
+      // because `binding` may already have been GC'd by the time this
+      // fires.
+      const sessionIdToUnregister = capturedSessionId;
+      const deviceIdToUnregister = capturedDeviceId;
+      if (sessionIdToUnregister == null || !deviceIdToUnregister) {
+        return;
+      }
+      // Fire-and-forget — pushing `comensal_left` is best-effort. Wrap
+      // the SREM in ALS so Redis-backed services still see store context.
+      void RequestContextService.run(requestContext, async () => {
+        try {
+          const removed = await (
+            this.service as unknown as {
+              unregisterDevice: (
+                sessionId: number,
+                uuid: string,
+              ) => Promise<number>;
+            }
+          ).unregisterDevice(
+            sessionIdToUnregister,
+            deviceIdToUnregister,
+          );
+          if (removed === 1) {
+            const count = await (
+              this.service as unknown as {
+                getActiveDevicesCount: (
+                  sessionId: number,
+                ) => Promise<number>;
+              }
+            ).getActiveDevicesCount(sessionIdToUnregister);
+            this.sseService.push(storeId, {
+              type: 'comensal_left',
+              data: {
+                table_session_id: sessionIdToUnregister,
+                active_devices: count,
+                device_id: deviceIdToUnregister,
+              },
+              ts: Date.now(),
+            } as unknown as Parameters<
+              typeof this.sseService.push
+            >[1]);
+          }
+        } catch (err) {
+          this.logger.warn(
+            `unregisterDevice failed for token=${token}: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      });
     });
 
     // 4) Snapshot — resolved lazily inside the captured ALS context.
+    //    Includes `active_devices` so the storefront can render an
+    //    accurate comensal counter from the first frame.
     const snapshot$ = defer(() =>
       from(
-        RequestContextService.run(requestContext, () =>
-          this.service.getBill(token),
-        )
-          .then(
-            (bill) =>
-              ({
-                data: JSON.stringify({ type: 'snapshot', bill }),
-              }) as MessageEvent,
-          )
-          .catch(
-            () =>
-              ({
-                data: JSON.stringify({ type: 'snapshot', bill: null }),
-              }) as MessageEvent,
-          ),
+        (async () => {
+          try {
+            const bill = await RequestContextService.run(requestContext, () =>
+              this.service.getBill(token),
+            );
+            let activeDevices: number | null = null;
+            if (bill?.session_id != null) {
+              try {
+                activeDevices = await RequestContextService.run(
+                  requestContext,
+                  () =>
+                    (
+                      this.service as unknown as {
+                        getActiveDevicesCount: (
+                          sessionId: number,
+                        ) => Promise<number>;
+                      }
+                    ).getActiveDevicesCount(bill.session_id),
+                );
+              } catch {
+                activeDevices = null;
+              }
+            }
+            const payload: Record<string, unknown> = {
+              type: 'snapshot',
+              bill,
+            };
+            if (activeDevices !== null) {
+              payload.active_devices = activeDevices;
+            }
+            return { data: JSON.stringify(payload) } as MessageEvent;
+          } catch {
+            return {
+              data: JSON.stringify({ type: 'snapshot', bill: null }),
+            } as MessageEvent;
+          }
+        })(),
       ),
     );
 
@@ -292,12 +469,90 @@ export class EcommerceTablesController {
     return { success: true, data };
   }
 
+  /**
+   * C2 — Diner initiates payment of the open session's bill. Honors the
+   * `restaurant.enable_table_checkout` gate (see `EcommerceTablesService.
+   * payTable`); flows:
+   *   - `cash` / `bank_transfer` → returns `{ payment_id, state:
+   *     'pending' }` + pushes `payment.pending` onto the diner stream.
+   *   - `wompi` → returns the same shape but adds `next: 'wompi_widget'`
+   *     and the `wompi_data` payload the storefront renders.
+   *
+   * Auth: `@OptionalAuth` — anonymous comensales are the common case,
+   * but a mesero who logged into the storefront can also fire this
+   * (the QR token is the implicit auth). Store context is resolved
+   * by `DomainResolverMiddleware`.
+   */
+  @Post(':token/pay')
+  @OptionalAuth()
+  async pay(
+    @Param('token') token: string,
+    @Body() dto: PayTableDto,
+  ) {
+    const userId = RequestContextService.getUserId() ?? undefined;
+    const data = await this.service.payTable(token, dto, userId);
+    return { success: true, data };
+  }
+
+  /**
+   * C2 — Diner re-enters from the Wompi widget callback and wants the
+   * canonical terminal state. Mirrors `CheckoutService.confirmWompiPayment`
+   * but scoped to the table-pay flow; on `succeeded`/`captured` also
+   * pushes `payment.confirmed` onto the diner stream + fires the staff
+   * notification.
+   *
+   * Idempotent — calling twice on a terminal payment just returns the
+   * persisted state.
+   */
+  @Post(':token/pay/confirm')
+  @OptionalAuth()
+  async confirmPay(
+    @Param('token') token: string,
+    @Body() body: { payment_id: number },
+  ) {
+    const data = await this.service.confirmWompiTablePayment(
+      token,
+      body.payment_id,
+    );
+    return { success: true, data };
+  }
+
   // -------------------------------------------------- diner projection
+  /**
+   * Whitelist of diner-side lifecycle event types (these are NOT KDS
+   * events — they describe the comensal's view: who's at the table, what
+   * was added, party size changes, payment state). Each event is
+   * filtered by `data.table_session_id === binding.session_id` (with a
+   * fallback to `data.session_id` for the `comensal_*` pair — producer
+   * may emit either field name).
+   *
+   * `payment.pending` / `payment.confirmed` are added in C5 so the
+   * banner can flip to "Pago pendiente" / "Pago confirmado" without a
+   * refetch (see `payTable` / `confirmWompiTablePayment`).
+   */
+  private static readonly DINER_LIFECYCLE_EVENTS: ReadonlySet<string> =
+    new Set([
+      'comensal_joined',
+      'comensal_left',
+      'item_added',
+      'guest_count_changed',
+      'payment.pending',
+      'payment.confirmed',
+      // Mesa cerrada por el staff (POS efectivo/tarjeta), el cierre canónico
+      // o la reconciliación de un pago digital (Wompi/wallet). El comensal
+      // recibe el evento y muestra la despedida / resumen de compra.
+      'session_closed',
+    ]);
+
   /**
    * Default-deny filter for the diner stream. Accepts ONLY:
    *   - KDS lifecycle events (whitelisted in `DINER_KDS_MAP`) whose
    *     `ticket.order_id` equals the bound order.
    *   - `bill.requested` events whose `data.table_session_id` equals the
+   *     bound session.
+   *   - Diner-side lifecycle events (`comensal_joined|left`, `item_added`,
+   *     `guest_count_changed`, `payment.pending`, `payment.confirmed`)
+   *     whose `data.table_session_id` (or `data.session_id`) equals the
    *     bound session.
    * Everything else — including all other notification types and any
    * event for a different table — is dropped.
@@ -318,6 +573,14 @@ export class EcommerceTablesController {
       const data = ev.data as { table_session_id?: number } | undefined;
       return data?.table_session_id === binding.session_id;
     }
+    if (EcommerceTablesController.DINER_LIFECYCLE_EVENTS.has(type)) {
+      const data = ev.data as
+        | { table_session_id?: number; session_id?: number }
+        | undefined;
+      const sid =
+        data?.table_session_id ?? data?.session_id ?? undefined;
+      return sid === binding.session_id;
+    }
     return false;
   }
 
@@ -325,6 +588,15 @@ export class EcommerceTablesController {
    * Projects a raw per-store SSE event to a diner-safe payload. STRIPS
    * COGS / cost snapshots / recipe / sku and any store-internal ids —
    * the diner only receives presentational dish state.
+   *
+   * For diner-side lifecycle events (`comensal_joined|left`,
+   * `item_added`, `guest_count_changed`, `payment.pending`,
+   * `payment.confirmed`) only fields present in `ev.data` are
+   * forwarded; absent fields are simply omitted (no `null` padding).
+   * The projected payload is intentionally minimal:
+   *   `{ type, table_session_id, active_devices?, device_id?,
+   *      item_count?, subtotal?, guest_count?, payment_state?,
+   *      payment_id?, amount?, method?, ts }`
    */
   private projectForDiner(ev: Record<string, unknown>): Record<string, unknown> {
     const type = typeof ev?.type === 'string' ? (ev.type as string) : '';
@@ -336,6 +608,31 @@ export class EcommerceTablesController {
         body: (ev.body as string) ?? '',
         ts: Date.now(),
       };
+    }
+
+    if (EcommerceTablesController.DINER_LIFECYCLE_EVENTS.has(type)) {
+      const raw = (ev.data ?? {}) as Record<string, unknown>;
+      const projected: Record<string, unknown> = { type };
+      // Whitelist field-by-field — any unknown producer field is dropped.
+      const allowedKeys = [
+        'table_session_id',
+        'active_devices',
+        'device_id',
+        'item_count',
+        'subtotal',
+        'guest_count',
+        'payment_state',
+        'payment_id',
+        'amount',
+        'method',
+      ];
+      for (const key of allowedKeys) {
+        if (raw[key] !== undefined) {
+          projected[key] = raw[key];
+        }
+      }
+      projected.ts = (ev.ts as number) ?? Date.now();
+      return projected;
     }
 
     const dinerType = DINER_KDS_MAP[type] ?? 'kitchen.update';
