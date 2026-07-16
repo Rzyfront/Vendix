@@ -530,6 +530,8 @@ export const Endpoints = {
       GET: '/organization/settings',
       UPDATE: '/organization/settings',
       OPERATING_SCOPE: '/organization/settings/operating-scope',
+      OPERATING_SCOPE_PREVIEW: '/organization/settings/operating-scope/preview',
+      OPERATING_SCOPE_APPLY: '/organization/settings/operating-scope/apply',
       FISCAL_SCOPE: '/organization/settings/fiscal-scope',
       FISCAL_DATA: '/organization/settings/fiscal-scope/fiscal-data',
       FISCAL_STATUS: '/organization/settings/fiscal-status',
