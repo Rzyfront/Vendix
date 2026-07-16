@@ -541,6 +541,114 @@ export class TableSessionsService {
     return this.findOne(sessionId);
   }
 
+  // ------------------------------------------------------ active sessions
+  /**
+   * Snapshot-friendly list of every OPEN (`closed_at IS NULL`)
+   * table_session for the current store, resolved against the scoped
+   * Prisma client. Used by the SSE staff stream to send a hydrated
+   * initial payload so a freshly connected client doesn't render a
+   * blank room map.
+   *
+   * Shape is intentionally compact (no `order_items` lines, no per-dish
+   * KDS state) — the staff dashboard only needs the headline fields
+   * to know which tables are currently occupied and by whom.
+   * Per-session detail is fetched on demand via `findOne(id)`.
+   */
+  async listActiveSessions(): Promise<
+    Array<{
+      id: number;
+      store_id: number;
+      table_id: number;
+      order_id: number;
+      opened_at: Date;
+      guest_count: number | null;
+      table: {
+        id: number;
+        name: string;
+        zone: string | null;
+        status: string;
+      } | null;
+      order: {
+        id: number;
+        state: string;
+        grand_total: Prisma.Decimal | number;
+        customer: {
+          id: number;
+          first_name: string;
+          last_name: string;
+        } | null;
+      };
+    }>
+  > {
+    const { storeId } = this.requireStoreContext();
+    return this.prisma.table_sessions.findMany({
+      where: { store_id: storeId, closed_at: null },
+      orderBy: { opened_at: 'asc' },
+      select: {
+        id: true,
+        store_id: true,
+        table_id: true,
+        order_id: true,
+        opened_at: true,
+        guest_count: true,
+        table: {
+          select: {
+            id: true,
+            name: true,
+            zone: true,
+            status: true,
+          },
+        },
+        order: {
+          select: {
+            id: true,
+            state: true,
+            grand_total: true,
+            users: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
+      },
+      // The Prisma `users` relation on `orders.customer_id` is renamed
+      // below to match the public `customer` field (same pattern as
+      // `findOne`).
+    }).then((rows) =>
+      rows.map((r) => ({
+        id: r.id,
+        store_id: r.store_id,
+        table_id: r.table_id,
+        order_id: r.order_id,
+        opened_at: r.opened_at,
+        guest_count: r.guest_count,
+        table: r.table
+          ? {
+              id: r.table.id,
+              name: r.table.name,
+              zone: r.table.zone,
+              status: r.table.status,
+            }
+          : null,
+        order: {
+          id: r.order.id,
+          state: r.order.state,
+          grand_total: r.order.grand_total,
+          customer: r.order.users
+            ? {
+                id: r.order.users.id,
+                first_name: r.order.users.first_name,
+                last_name: r.order.users.last_name,
+              }
+            : null,
+        },
+      })),
+    );
+  }
+
   // ---------------------------------------------------------------- read
   async findOne(id: number): Promise<TableSessionView> {
     const session = await this.prisma.table_sessions.findFirst({
