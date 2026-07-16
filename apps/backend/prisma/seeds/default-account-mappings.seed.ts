@@ -51,6 +51,14 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'payroll.paid.bank': '1110',
   'order.completed.cogs': '6135',
   'order.completed.inventory': '1435',
+  // Remisiones bidireccionales (Fase 4) — mismas cuentas PUC que
+  // order.completed / purchase_order.received, mapping key separada.
+  'dispatch_note.delivered.cogs': '6135',
+  'dispatch_note.delivered.inventory': '1435',
+  'dispatch_note.received.inventory': '1435',
+  'dispatch_note.received.accounts_payable': '2205',
+  'dispatch_note.return.inventory': '1435',
+  'dispatch_note.return.cogs': '6135',
   'refund.completed.revenue': '4135',
   'refund.completed.cash': '1105',
   'purchase_order.received.inventory': '1435',

@@ -1,12 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import {
   serial_status_enum,
   sales_document_item_type_enum,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import {
+  StockLevelManager,
+  UpdateStockParams,
+} from '../../inventory/shared/services/stock-level-manager.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 
@@ -49,7 +52,32 @@ export class DispatchNoteEventsListener {
     // QUI-431 — optional so the existing unit spec (2-arg construction) keeps
     // compiling/working: when absent (tests), the serial side-effects no-op.
     private readonly serials?: InventorySerialNumbersService,
+    // Fase 4 — optional (mismo motivo que `serials`): cuando falta (tests) los
+    // eventos contables `dispatch_note.accounting.*` simplemente no se emiten.
+    // En producción lo inyecta el EventEmitterModule global. Los nombres de
+    // evento contable son DISTINTOS de dispatch_note.delivered/received/voided
+    // para NO re-disparar estos mismos handlers de stock (evita bucle).
+    private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  /**
+   * Resuelve el organization_id del contexto de request; si falta (p.ej. un
+   * re-disparo fuera de request), cae a leer store.organization_id. Devuelve
+   * null cuando no hay forma de resolverlo (el emisor contable se omite).
+   */
+  private async resolveOrgId(store_id: number): Promise<number | null> {
+    const fromCtx = RequestContextService.getOrganizationId();
+    if (fromCtx) return fromCtx;
+    try {
+      const store = await this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      return store?.organization_id ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   // ─── CONFIRMED ──────────────────────────────────────────────
   @OnEvent('dispatch_note.confirmed')
@@ -245,6 +273,30 @@ export class DispatchNoteEventsListener {
         event.dispatch_number,
       );
 
+      // Fase 4 — COGS contable SOLO para customer_delivery STANDALONE (sin
+      // order_id ni sales_order_id). Las remisiones ligadas a orden/SO ya
+      // reconocen COGS vía `order.completed` — postear aquí sería doble COGS.
+      // Los traslados (transfer_out) NO son venta → sin COGS. Usa el costo REAL
+      // devuelto por commitDispatchDelivery (iguala el movimiento de inventario).
+      if (
+        dispatch_note.subtype === 'customer_delivery' &&
+        !dispatch_note.sales_order_id &&
+        !dispatch_note.order_id &&
+        Number(res.totalCost) > 0
+      ) {
+        const organization_id = await this.resolveOrgId(dispatch_note.store_id);
+        if (organization_id && this.eventEmitter) {
+          this.eventEmitter.emit('dispatch_note.accounting.cogs', {
+            dispatch_note_id: dispatch_note.id,
+            dispatch_number: dispatch_note.dispatch_number,
+            organization_id,
+            store_id: dispatch_note.store_id,
+            total_cost: Number(res.totalCost),
+            user_id: userId ?? undefined,
+          });
+        }
+      }
+
       this.logger.log(
         `[delivered] Dispatch note #${event.dispatch_number} processed — ${res.committedItemCount} item(s) deducted (stock_out)`,
       );
@@ -274,9 +326,12 @@ export class DispatchNoteEventsListener {
         return;
       }
 
-      // Only release reservations if the dispatch was confirmed but NOT delivered.
-      // Per the state machine: delivered -> voided is NOT a valid transition,
-      // but we add a safety check.
+      // Dos ramas mutuamente excluyentes por el sello temporal:
+      //  - was_confirmed (confirmada, NO entregada): sólo libera reservas +
+      //    devuelve seriales (aún no hubo movimiento de stock que revertir).
+      //  - delivered_at != null (ya materializada): reversión completa de stock
+      //    (Fase 2). Desde Fase 2 `delivered→voided` y `received→voided` SON
+      //    transiciones válidas (ver dispatch-note-flow.service.ts).
       const was_confirmed =
         dispatch_note.confirmed_at != null &&
         dispatch_note.delivered_at == null;
@@ -312,12 +367,30 @@ export class DispatchNoteEventsListener {
       }
 
       if (dispatch_note.delivered_at != null) {
-        // Safety: delivered dispatch notes should not be voidable per state machine.
-        // If this somehow runs, log a critical warning.
-        this.logger.warn(
-          `[voided] CRITICAL: Dispatch note #${event.dispatch_number} was voided after delivery. ` +
-            `Stock was already deducted and will NOT be automatically reversed. Manual intervention required.`,
+        // Fase 2 (P0): la remisión ya se materializó (outbound entregada o
+        // inbound recibida — `receive()` reutiliza delivered_at como sello de
+        // recepción). Anularla revierte el movimiento de stock de forma
+        // simétrica, devuelve los seriales al pool y libera el flag
+        // inventory_committed de la orden ligada.
+        await this.reverseStockOnVoid(dispatch_note, event.dispatch_number);
+
+        // Seriales: sold/reserved → in_stock + desvincular (funciona desde
+        // cualquier estado de origen). Cubre el caso post-entrega que la rama
+        // was_confirmed no alcanza (delivered_at != null).
+        await this.revertDispatchSerialsToStock(
+          dispatch_note.dispatch_note_items.map((i) => i.id),
+          event.dispatch_number,
         );
+
+        // Liberar inventory_committed sólo para remisiones outbound ligadas a
+        // una orden (el claim atómico lo puso commitDispatchDelivery). Así la
+        // orden puede volver a despacharse tras la anulación.
+        if (
+          dispatch_note.direction === 'outbound' &&
+          dispatch_note.order_id
+        ) {
+          await this.releaseCommittedOrderItems(dispatch_note);
+        }
       }
 
       this.logger.log(
@@ -388,6 +461,11 @@ export class DispatchNoteEventsListener {
         `[received] Processing dispatch note #${event.dispatch_number} — subtype: ${subtype}`,
       );
 
+      // Fase 4 — costo real acumulado de la entrada (suma de cost_snapshot de
+      // cada updateStock). Alimenta el asiento contable para que el valor del
+      // asiento iguale exactamente el movimiento de inventario.
+      let receivedCost = 0;
+
       if (subtype === 'purchase_receipt') {
         // Standalone purchase receipt (no PO — PO delegation path doesn't
         // reach here). Stock-in with movement_unit_cost = item unit_price.
@@ -396,7 +474,7 @@ export class DispatchNoteEventsListener {
           if (!location_id) continue;
 
           try {
-            await this.stockLevelManager.updateStock({
+            const r = await this.stockLevelManager.updateStock({
               product_id: item.product_id,
               variant_id: item.product_variant_id ?? undefined,
               location_id,
@@ -407,6 +485,7 @@ export class DispatchNoteEventsListener {
               movement_unit_cost: Number(item.unit_price) || undefined,
               create_movement: true,
             });
+            receivedCost += Number(r.cost_snapshot?.total_cost || 0);
           } catch (err) {
             this.logger.error(
               `[received] Failed to stock_in for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
@@ -447,7 +526,7 @@ export class DispatchNoteEventsListener {
           if (!location_id) continue;
 
           try {
-            await this.stockLevelManager.updateStock({
+            const r = await this.stockLevelManager.updateStock({
               product_id: item.product_id,
               variant_id: item.product_variant_id ?? undefined,
               location_id,
@@ -457,6 +536,7 @@ export class DispatchNoteEventsListener {
               user_id: userId ?? undefined,
               create_movement: true,
             });
+            receivedCost += Number(r.cost_snapshot?.total_cost || 0);
           } catch (err) {
             this.logger.error(
               `[received] Failed to restock return for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
@@ -467,6 +547,53 @@ export class DispatchNoteEventsListener {
         this.logger.warn(
           `[received] Dispatch note #${event.dispatch_number}: unhandled subtype '${subtype}' — no stock movement`,
         );
+      }
+
+      // Fase 4 — asiento contable de entrada SOLO para purchase_receipt
+      // (DR inventario / CR proveedores) y customer_return (DR inventario /
+      // CR reversa COGS). transfer_in se DIFIERE (requiere cuenta de tránsito
+      // para balancear entre las dos notas separadas — gap documentado).
+      if (
+        (subtype === 'purchase_receipt' || subtype === 'customer_return') &&
+        receivedCost > 0
+      ) {
+        const organization_id = await this.resolveOrgId(dispatch_note.store_id);
+        if (organization_id && this.eventEmitter) {
+          // Snapshot de proveedor para la línea CxP (purchase_receipt). Se
+          // adjunta en el payload — PROHIBIDO resolverlo en AutoEntryService.
+          let supplier:
+            | { id: number; name?: string; tax_id?: string }
+            | undefined;
+          if (subtype === 'purchase_receipt' && dispatch_note.supplier_id) {
+            try {
+              const s = await this.prisma.withoutScope().suppliers.findUnique({
+                where: { id: dispatch_note.supplier_id },
+                select: { id: true, name: true, tax_id: true },
+              });
+              if (s) {
+                supplier = {
+                  id: s.id,
+                  name: s.name ?? undefined,
+                  tax_id: s.tax_id ?? undefined,
+                };
+              }
+            } catch {
+              // Snapshot best-effort: si falla, la línea CxP se postea sin
+              // tercero (sin regresión — third_party es opcional).
+            }
+          }
+
+          this.eventEmitter.emit('dispatch_note.accounting.received', {
+            dispatch_note_id: dispatch_note.id,
+            dispatch_number: dispatch_note.dispatch_number,
+            organization_id,
+            store_id: dispatch_note.store_id,
+            subtype,
+            total_cost: receivedCost,
+            user_id: userId ?? undefined,
+            supplier,
+          });
+        }
       }
 
       this.logger.log(
@@ -672,6 +799,284 @@ export class DispatchNoteEventsListener {
           `[checkOrderStatus] Order #${order_id} marked as shipped`,
         );
       }
+    }
+  }
+
+  // ─── REVERSIÓN AL ANULAR (Fase 2) ───────────────────────────
+
+  /**
+   * Reversión de stock al anular una remisión ya materializada
+   * (outbound entregada / inbound recibida). Simétrica al movimiento original:
+   *
+   *   outbound customer_delivery : stock_out -qty  →  return   +qty (reingreso vendible)
+   *   outbound transfer_out      : stock_out -qty  →  transfer +qty (reingreso al origen)
+   *   inbound  purchase_receipt  : stock_in  +qty  →  stock_out -qty
+   *   inbound  transfer_in       : transfer  +qty  →  transfer -qty (destino)
+   *   inbound  customer_return   : return    +qty  →  stock_out -qty
+   *
+   * Idempotente: si ya existe un movimiento de reversa para esta remisión
+   * (`notes` contiene `VOID-REV #{id}`) no hace nada.
+   *
+   * Precondición: sólo revierte si EXISTE el movimiento original que ESTE
+   * listener creó (`Despacho remisión #{id}` para outbound, `remisión #{id}`
+   * para inbound). Evita reversar recepciones delegadas a PurchaseOrdersService
+   * (que llevan otra glosa) o líneas de servicio que nunca movieron stock —
+   * disparar un stock_out sin entrada previa corrompería el inventario.
+   *
+   * Aislado: los fallos por línea se loguean, nunca re-lanzan (el estado del
+   * documento ya es `voided`).
+   */
+  private async reverseStockOnVoid(
+    dispatch_note: any,
+    dispatch_number: string,
+  ): Promise<void> {
+    const id: number = dispatch_note.id;
+    const direction: string = dispatch_note.direction;
+    const subtype: string = dispatch_note.subtype;
+    const userId = RequestContextService.getUserId();
+
+    // Idempotencia: ¿ya se revirtió? Token con delimitadores `[VOID-REV#N]`
+    // para evitar colisión de substring (`#1` vs `#12`) — un falso positivo
+    // aquí saltaría la reversa y perdería el reingreso/salida de stock.
+    const alreadyReversed = await this.prisma
+      .withoutScope()
+      .inventory_movements.findFirst({
+        where: { notes: { contains: `[VOID-REV#${id}]` } },
+        select: { id: true },
+      });
+    if (alreadyReversed) {
+      this.logger.warn(
+        `[voided] Remisión #${dispatch_number}: reversa ya aplicada (VOID-REV existe) — se omite`,
+      );
+      return;
+    }
+
+    // Precondición: el movimiento original debe existir (lo creó este listener).
+    const originalMarker =
+      direction === 'outbound'
+        ? `Despacho remisión #${id}`
+        : `remisión #${id}`;
+    const originalMovement = await this.prisma
+      .withoutScope()
+      .inventory_movements.findFirst({
+        where: { notes: { contains: originalMarker } },
+        select: { id: true },
+      });
+    if (!originalMovement) {
+      this.logger.warn(
+        `[voided] Remisión #${dispatch_number}: sin movimiento original (${originalMarker}) — ` +
+          `stock no movido por este listener (recepción delegada a PO o líneas de servicio); no se revierte stock`,
+      );
+      return;
+    }
+
+    const reason = `Reversa anulación [VOID-REV#${id}]`;
+
+    // Resolutor de ubicación por dirección (mirror de handleDelivered /
+    // handleReceived).
+    const resolveLoc = (item: { location_id: number | null }): number | null =>
+      direction === 'outbound'
+        ? item.location_id ?? dispatch_note.dispatch_location_id ?? null
+        : dispatch_note.to_location_id ??
+          item.location_id ??
+          dispatch_note.dispatch_location_id ??
+          null;
+
+    let reversedLines = 0;
+    let reversedCost = 0;
+    for (const item of dispatch_note.dispatch_note_items) {
+      const location_id = resolveLoc(item);
+      if (!location_id) continue;
+      const qty = item.dispatched_quantity;
+      if (!qty || qty <= 0) continue;
+
+      // Construir el movimiento de reversa por caso.
+      let params: UpdateStockParams;
+      if (direction === 'outbound') {
+        // Reingreso a la ubicación desde donde salió (+qty).
+        if (subtype === 'transfer_out') {
+          params = {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id,
+            quantity_change: qty,
+            movement_type: 'transfer',
+            reason,
+            user_id: userId ?? undefined,
+            from_location_id: dispatch_note.to_location_id ?? undefined,
+            to_location_id: location_id,
+            create_movement: true,
+          };
+        } else {
+          // customer_delivery → reingreso vendible.
+          params = {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id,
+            quantity_change: qty,
+            movement_type: 'return',
+            reason,
+            user_id: userId ?? undefined,
+            create_movement: true,
+          };
+        }
+      } else {
+        // inbound → salida que reversa la entrada (-qty).
+        if (subtype === 'transfer_in') {
+          params = {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id,
+            quantity_change: -qty,
+            movement_type: 'transfer',
+            reason,
+            user_id: userId ?? undefined,
+            from_location_id: location_id,
+            to_location_id: dispatch_note.from_location_id ?? undefined,
+            create_movement: true,
+          };
+        } else {
+          // purchase_receipt / customer_return → stock_out.
+          params = {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id,
+            quantity_change: -qty,
+            movement_type: 'stock_out',
+            reason,
+            user_id: userId ?? undefined,
+            create_movement: true,
+          };
+        }
+      }
+
+      try {
+        const r = await this.stockLevelManager.updateStock(params);
+        reversedCost += Number(r.cost_snapshot?.total_cost || 0);
+        reversedLines++;
+      } catch (err: any) {
+        this.logger.error(
+          `[voided] Falló reversa de stock para producto ${item.product_id} en remisión #${dispatch_number}: ${err.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[voided] Remisión #${dispatch_number}: stock revertido (${direction}/${subtype}) — ${reversedLines} línea(s)`,
+    );
+
+    // Fase 4 — reversa CONTABLE de la anulación. Sólo para los casos cuyo
+    // asiento original posteó ESTE módulo (mismos gates que cogs/received):
+    //  - outbound customer_delivery STANDALONE (posteó dispatch_note.delivered)
+    //  - inbound purchase_receipt / customer_return (posteó dispatch_note.received)
+    // Los traslados y las remisiones ligadas a orden/SO NO postearon asiento
+    // propio → no se reversa contablemente (su contabilidad la maneja el
+    // ciclo de la orden / no existe).
+    const shouldReverseAccounting =
+      (direction === 'outbound' &&
+        subtype === 'customer_delivery' &&
+        !dispatch_note.sales_order_id &&
+        !dispatch_note.order_id) ||
+      (direction === 'inbound' &&
+        (subtype === 'purchase_receipt' || subtype === 'customer_return'));
+
+    if (shouldReverseAccounting && reversedCost > 0) {
+      const organization_id = await this.resolveOrgId(dispatch_note.store_id);
+      if (organization_id && this.eventEmitter) {
+        let supplier:
+          | { id: number; name?: string; tax_id?: string }
+          | undefined;
+        if (subtype === 'purchase_receipt' && dispatch_note.supplier_id) {
+          try {
+            const s = await this.prisma.withoutScope().suppliers.findUnique({
+              where: { id: dispatch_note.supplier_id },
+              select: { id: true, name: true, tax_id: true },
+            });
+            if (s) {
+              supplier = {
+                id: s.id,
+                name: s.name ?? undefined,
+                tax_id: s.tax_id ?? undefined,
+              };
+            }
+          } catch {
+            // best-effort (ver handleReceived)
+          }
+        }
+
+        this.eventEmitter.emit('dispatch_note.accounting.void', {
+          dispatch_note_id: id,
+          dispatch_number,
+          organization_id,
+          store_id: dispatch_note.store_id,
+          direction,
+          subtype,
+          total_cost: reversedCost,
+          user_id: userId ?? undefined,
+          supplier,
+        });
+      }
+    }
+  }
+
+  /**
+   * Libera el flag `inventory_committed` de los `order_items` de la orden
+   * ligada, invirtiendo el claim atómico que hizo `commitDispatchDelivery` al
+   * entregar. Usa un match claim-once (producto + variante) para liberar UN
+   * order_item por línea de la remisión, evitando liberar de más cuando la
+   * orden tiene varias líneas del mismo producto. Aislado: los fallos se
+   * loguean, no re-lanzan.
+   */
+  private async releaseCommittedOrderItems(dispatch_note: any): Promise<void> {
+    if (!dispatch_note.order_id) return;
+    try {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: dispatch_note.order_id },
+        include: {
+          order_items: {
+            select: {
+              id: true,
+              product_id: true,
+              product_variant_id: true,
+              inventory_committed: true,
+            },
+          },
+        },
+      });
+      if (!order) return;
+
+      // Claim-once inverso: por cada línea de la remisión libera un order_item
+      // committed que haga match por producto + variante.
+      const available = (order.order_items ?? []).filter(
+        (oi) => oi.inventory_committed,
+      );
+      const toRelease: number[] = [];
+      for (const line of dispatch_note.dispatch_note_items) {
+        const idx = available.findIndex(
+          (oi) =>
+            oi.product_id === line.product_id &&
+            (oi.product_variant_id ?? null) ===
+              (line.product_variant_id ?? null),
+        );
+        if (idx >= 0) {
+          toRelease.push(available[idx].id);
+          available.splice(idx, 1);
+        }
+      }
+      if (toRelease.length === 0) return;
+
+      await this.prisma.order_items.updateMany({
+        where: { id: { in: toRelease }, inventory_committed: true },
+        data: { inventory_committed: false, inventory_committed_at: null },
+      });
+
+      this.logger.log(
+        `[voided] Remisión #${dispatch_note.dispatch_number}: ${toRelease.length} order_item(s) liberados (inventory_committed=false)`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[voided] Falló liberar inventory_committed para remisión #${dispatch_note.dispatch_number}: ${err.message}`,
+      );
     }
   }
 

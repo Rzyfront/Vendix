@@ -131,6 +131,33 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'payroll.paid.bank': { code: '1110', description: 'Banco' },
   'order.completed.cogs': { code: '6135', description: 'Costo de Ventas' },
   'order.completed.inventory': { code: '1435', description: 'Inventario' },
+  // Remisiones bidireccionales (Fase 4). Reutilizan las mismas cuentas PUC que
+  // order.completed / purchase_order.received; separadas por mapping key para
+  // permitir override por tienda sin tocar los flujos existentes.
+  'dispatch_note.delivered.cogs': {
+    code: '6135',
+    description: 'Costo de ventas (remisión)',
+  },
+  'dispatch_note.delivered.inventory': {
+    code: '1435',
+    description: 'Inventario (remisión entregada)',
+  },
+  'dispatch_note.received.inventory': {
+    code: '1435',
+    description: 'Inventario (recepción remisión)',
+  },
+  'dispatch_note.received.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (recepción remisión)',
+  },
+  'dispatch_note.return.inventory': {
+    code: '1435',
+    description: 'Inventario (devolución de cliente)',
+  },
+  'dispatch_note.return.cogs': {
+    code: '6135',
+    description: 'Reversa costo de ventas (devolución)',
+  },
   'refund.completed.revenue': {
     code: '4135',
     description: 'Ingresos (reversa)',

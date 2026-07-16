@@ -36,18 +36,23 @@ const VALID_TRANSITIONS_BY_DIRECTION: Record<
   Record<DispatchNoteStatus, DispatchNoteStatus[]>
 > = {
   outbound: {
+    // delivered → voided is now VALID (Fase 2): voiding a delivered remisión
+    // triggers the symmetric stock reversal in the listener. Once invoiced,
+    // void is blocked (invoiced: []) — that requires a credit note.
     draft: ['confirmed', 'voided'],
     confirmed: ['delivered', 'voided'],
-    delivered: ['invoiced'],
+    delivered: ['invoiced', 'voided'],
     received: [],
     invoiced: [],
     voided: [],
   },
   inbound: {
+    // received → voided is now VALID (Fase 2): voiding a received inbound
+    // remisión reverses the stock-in via the listener (stock_out -qty).
     draft: ['confirmed', 'voided'],
     confirmed: ['received', 'voided'],
     delivered: [],
-    received: [],
+    received: ['voided'],
     invoiced: [],
     voided: [],
   },
@@ -393,16 +398,12 @@ export class DispatchNoteFlowService {
   async void(id: number, dto: VoidDispatchNoteDto) {
     const dispatch_note = await this.getDispatchNote(id);
 
-    // Block void on received inbound notes: stock was already restocked, so
-    // voiding requires a reversal (credit note / stock_adjustment). That
-    // reversal flow is Fase 2 / R3. For now, reject with the credit-note code.
-    if (dispatch_note.status === 'received') {
-      throw new VendixHttpException(
-        ErrorCodes.DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE,
-        'Cannot void a received inbound dispatch note directly; reverse the stock movement via a stock adjustment or return_orders (Fase 2)',
-      );
-    }
-
+    // Fase 2: voiding a delivered (outbound) or received (inbound) remisión is
+    // now allowed. The listener's `dispatch_note.voided` handler performs the
+    // symmetric stock reversal (return/+qty for outbound, stock_out/-qty for
+    // inbound), reverts serials, and releases order_items.inventory_committed.
+    // Invoiced notes stay non-voidable (invoiced: [] in the transition map) —
+    // those require a credit note via the return_orders flow.
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'voided',
