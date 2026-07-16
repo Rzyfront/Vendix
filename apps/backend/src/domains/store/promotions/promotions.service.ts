@@ -447,10 +447,10 @@ export class PromotionsService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    if (promotion.state !== 'draft') {
+    if (!['draft', 'cancelled'].includes(promotion.state)) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
-        'Solo se pueden eliminar promociones en estado borrador',
+        'Solo se pueden eliminar promociones en estado borrador o cancelada',
       );
     }
 
