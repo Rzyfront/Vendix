@@ -385,11 +385,17 @@ export class RecipeFormPageComponent implements OnInit {
       .subscribe({
         next: (recipe) => {
           clearTimeout(safetyTimer);
-          const recipeId = recipe.id ?? this.recipeId();
-          if (recipeId == null) {
+          // Defensive: a malformed response (e.g. HTTP 200 with {success:false}
+          // instead of 409) bypasses catchError and reaches `next` with
+          // `recipe` undefined. Treat it as an error.
+          if (!recipe || recipe.id == null) {
+            const msg = 'Respuesta inválida del servidor. Intentá de nuevo.';
+            this.submitError.set(msg);
+            this.toastService.error(msg, 'No se pudo guardar la receta', 6000);
             this.isSubmitting.set(false);
             return;
           }
+          const recipeId = recipe.id;
           this.syncItems(recipeId).then(() => {
             this.isSubmitting.set(false);
             this.toastService.success(
