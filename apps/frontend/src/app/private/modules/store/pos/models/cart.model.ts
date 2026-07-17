@@ -80,6 +80,12 @@ export interface CartDiscount {
    * only — the discount amount is already computed. Undefined for flat promos.
    */
   badge_label?: string;
+  /**
+   * Backend-defined promotion priority that determined this promo as the
+   * winner. With the winner-takes-all engine, the cart has at most one
+   * applied discount. Surfaced for the operator audit trail.
+   */
+  priority?: number;
 }
 
 export interface CartSummary {
