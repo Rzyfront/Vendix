@@ -115,34 +115,44 @@ export default function CategoriesListScreen() {
           <OptionsDropdown
             filters={[
               {
+                key: 'state',
                 label: 'Estado',
+                type: 'select',
                 options: [
-                  { label: 'Todas', value: 'all', active: (stateFilter ?? 'all') === 'all' },
-                  { label: 'Activas', value: 'active', active: stateFilter === 'active' },
-                  { label: 'Inactivas', value: 'inactive', active: stateFilter === 'inactive' },
+                  { value: 'all', label: 'Todas' },
+                  { value: 'active', label: 'Activas' },
+                  { value: 'inactive', label: 'Inactivas' },
                 ],
-                onSelect: (value) => {
-                  setStateFilter(
-                    !value || value === 'all' ? undefined : (value as CategoryState),
-                  );
-                  setPage(1);
-                },
               },
               {
+                key: 'featured',
                 label: 'Destacadas',
+                type: 'select',
                 options: [
-                  { label: 'Todas', value: 'all', active: featuredFilter === undefined },
-                  { label: 'Destacadas', value: 'true', active: featuredFilter === true },
-                  { label: 'No destacadas', value: 'false', active: featuredFilter === false },
+                  { value: 'all', label: 'Todas' },
+                  { value: 'true', label: 'Destacadas' },
+                  { value: 'false', label: 'No destacadas' },
                 ],
-                onSelect: (value) => {
-                  setFeaturedFilter(
-                    !value || value === 'all' ? undefined : value === 'true',
-                  );
-                  setPage(1);
-                },
               },
             ]}
+            filterValues={{
+              state: stateFilter ?? 'all',
+              featured:
+                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
+            }}
+            onFilterChange={(values: { state?: string; featured?: string }) => {
+              const stateVal = values.state;
+              const featuredVal = values.featured;
+              setStateFilter(
+                !stateVal || stateVal === 'all' ? undefined : (stateVal as CategoryState),
+              );
+              setFeaturedFilter(
+                !featuredVal || featuredVal === 'all'
+                  ? undefined
+                  : featuredVal === 'true',
+              );
+              setPage(1);
+            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Categoría',
