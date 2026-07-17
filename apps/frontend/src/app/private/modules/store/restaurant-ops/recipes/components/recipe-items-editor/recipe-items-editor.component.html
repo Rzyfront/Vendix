@@ -98,7 +98,7 @@
             [error]="
               row.get('quantity')?.touched && row.get('quantity')?.invalid
                 ? 'Ingresá la cantidad del componente (debe ser mayor a 0).'
-                : null
+                : undefined
             "
           >
             @if (unit) {
