@@ -634,6 +634,18 @@
   </div>
 </aside>
 
+<!-- QR-de-mesa welcome wizard (Step 6/7): shown after resolve when a table is
+     active and the diner has not settled an identity yet. Mounted BEFORE the
+     auth-modal so the auth-modal paints above it when the diner picks login. -->
+@if (table_context.isActive() && !table_context.identityChosen()) {
+<app-table-welcome-wizard
+  [storeLogo]="store_logo()"
+  [storeName]="store_name()"
+  [isAuthenticated]="is_authenticated()"
+  [authName]="user_name()"
+  (loginRequested)="onWizardLoginRequested()"></app-table-welcome-wizard>
+}
+
 <app-auth-modal [isOpen]="is_auth_modal_open()" [initialMode]="auth_modal_mode()" [storeLogo]="store_logo()"
   [storeName]="store_name()" (closed)="closeAuthModal()"></app-auth-modal>
 

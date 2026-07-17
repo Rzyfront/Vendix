@@ -564,6 +564,16 @@ export class TableContextService {
   }
 
   /**
+   * Menu-only welcome dismiss: mark the wizard seen per-device without an HTTP
+   * identify (no tab to attach identity to). Persists so a re-scan of the same
+   * QR does not re-prompt the welcome wizard.
+   */
+  markWelcomeSeen(): void {
+    this.identityChosen.set(true);
+    this.persist();
+  }
+
+  /**
    * Adds items to the running table tab/order. Only valid when
    * `behavior === 'open_tab'` (or `require_staff` confirmed by staff).
    * Backend returns 409 for `menu_only` / `mark_occupied`.
@@ -625,14 +635,28 @@ export class TableContextService {
 
   /**
    * Notifies staff that the table needs a waiter. Toggles `calling_waiter`.
+   *
+   * `customer` is an optional identity hint (from the welcome-wizard choice —
+   * `chosenCustomer()`) so the staff can see WHO is ringing in modes without a
+   * server-side session (`mark_occupied` / `require_staff`). Omitted →
+   * unchanged legacy body (`{ note }` only), so existing callers keep working.
    */
-  callWaiter(note?: string): Observable<TableActionResponse> {
+  callWaiter(
+    note?: string,
+    customer?: { id?: number; name?: string },
+  ): Observable<TableActionResponse> {
     const token = this.requireToken();
     this.calling_waiter.set(true);
+    const body: { note?: string; customer?: { id?: number; name?: string } } = {
+      note,
+    };
+    if (customer) {
+      body.customer = customer;
+    }
     return this.http
       .post<TableActionResponse>(
         `${this.api_url}/${token}/call-waiter`,
-        { note },
+        body,
         { headers: this.getHeaders() },
       )
       .pipe(finalize(() => this.calling_waiter.set(false)));

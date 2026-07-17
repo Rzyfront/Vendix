@@ -26,6 +26,7 @@ import {
   PaymentTablePendingView,
 } from '../../modules/ecommerce/services/table-context.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
+import { TableWelcomeWizardComponent } from '../../modules/ecommerce/components/table-welcome-wizard/table-welcome-wizard.component';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
 import { QuantityControlComponent } from '../../../shared/components/quantity-control/quantity-control.component';
@@ -87,6 +88,7 @@ interface FooterSettings {
   imports: [
     RouterModule,
     SearchAutocompleteComponent,
+    TableWelcomeWizardComponent,
     IconComponent,
     AuthModalComponent,
     QuantityControlComponent,
@@ -188,6 +190,12 @@ export class StoreEcommerceLayoutComponent {
   readonly guest_count = signal(1);
   // QR dine-in — bottom-sheet de acciones (móvil). Sólo activo en flujo de mesa.
   readonly is_actions_sheet_open = signal(false);
+
+  // QR dine-in — welcome wizard (Step 6/7). One-shot guard: true while the
+  // diner triggered login FROM the wizard, so the auth effect only
+  // auto-identifies as `authenticated` for that intent — never for a user who
+  // was already logged in on load or who logged in for another reason.
+  readonly pendingIdentityAuth = signal(false);
 
   // Cart animation and tooltip state
   readonly is_animating = signal(false);
@@ -386,6 +394,27 @@ export class StoreEcommerceLayoutComponent {
     // doesn't fire a stale toast against a fresh table.
     this.destroy_ref.onDestroy(() => {
       if (this.join_toast_timer) clearTimeout(this.join_toast_timer);
+    });
+
+    // Welcome wizard (Step 7) — auto-identify as `authenticated` after the
+    // diner logs in FROM the wizard. The `pendingIdentityAuth` guard is the
+    // whole point: without it, ANY diner who happens to be logged in (on load
+    // or via a later login for other reasons) would be silently attached to
+    // the table. We only fire when the diner explicitly asked to log in from
+    // the wizard, is still on an active table, and has no settled identity yet.
+    effect(() => {
+      if (!this.is_authenticated()) return;
+      if (!this.pendingIdentityAuth()) return;
+      if (!this.table_context_service.isActive()) return;
+      if (this.table_context_service.identityChosen()) return;
+      // Consume the one-shot guard synchronously so this effect cannot re-fire
+      // the identify while the POST is in flight.
+      this.pendingIdentityAuth.set(false);
+      void this.table_context_service
+        .identify('authenticated')
+        .catch((err) =>
+          this.toast_service.error(parseApiError(err).userMessage),
+        );
     });
   }
 
@@ -593,13 +622,26 @@ export class StoreEcommerceLayoutComponent {
 
   /** Notify staff that the table needs a waiter. */
   callWaiter(): void {
+    // Attach the diner's chosen identity (welcome wizard) so staff see WHO is
+    // ringing in session-less modes. `null` → legacy body (no customer hint).
+    const customer = this.table_context_service.chosenCustomer();
     this.table_context_service
-      .callWaiter()
+      .callWaiter(undefined, customer ?? undefined)
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: () => this.toast_service.success('El mesero fue notificado'),
         error: (err) => this.toast_service.error(parseApiError(err).userMessage),
       });
+  }
+
+  /**
+   * Welcome-wizard (Step 7) requested login. Arm the one-shot guard so the
+   * auth effect auto-identifies as `authenticated` once the diner logs in, then
+   * open the shared auth-modal (reuses the existing `login()` mechanism).
+   */
+  onWizardLoginRequested(): void {
+    this.pendingIdentityAuth.set(true);
+    this.login();
   }
 
   /** Ask staff to bring the bill to the table. */
