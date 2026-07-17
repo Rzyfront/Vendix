@@ -286,7 +286,10 @@ export class EcommerceTablesService {
       case 'require_staff':
         // Do NOT open a session. Notify store staff via SSE so a mesero
         // can approach the table and confirm (POST /:token/confirm).
-        this.notifyStaffTableScan(table.id, table.name);
+        // The QR `token` is forwarded so the bell payload includes
+        // `public_token` (Step 4b, QR-mesa require_staff — POS approval
+        // modal in Step 10 calls /confirm directly from the notif row).
+        this.notifyStaffTableScan(table.id, table.name, token);
         break;
 
       default:
@@ -1522,7 +1525,21 @@ export class EcommerceTablesService {
     title: string,
     body: string,
     data: Record<string, any>,
+    publicToken?: string,
   ): Promise<void> {
+    // Step 4b (QR-mesa require_staff) — guarantee the per-table handle
+    // (`public_token`) and `table_id` are always present in the payload
+    // so the POS approval modal (Step 10) can call
+    // `POST /ecommerce/tables/:token/confirm` directly from the
+    // notification's `data` row without an extra table lookup. The token
+    // is already public via the physical QR print, so it is not a
+    // sensitive field.
+    const enrichedData: Record<string, any> = {
+      ...data,
+      table_id: data.table_id ?? tableId,
+      ...(publicToken ? { public_token: publicToken } : {}),
+    };
+
     const waiterIds =
       await this.tablesService.getAssignedWaiterUserIds(tableId);
     if (waiterIds.length === 0) {
@@ -1531,7 +1548,7 @@ export class EcommerceTablesService {
         type,
         title,
         body,
-        data,
+        enrichedData,
       );
       return;
     }
@@ -1542,7 +1559,7 @@ export class EcommerceTablesService {
         type,
         title,
         body,
-        data,
+        enrichedData,
       );
     }
   }
@@ -1562,7 +1579,11 @@ export class EcommerceTablesService {
    * waiting for the notification write — same pattern as
    * `createAndBroadcast` (which is non-throwing by design).
    */
-  private notifyStaffTableScan(tableId: number, tableName: string): void {
+  private notifyStaffTableScan(
+    tableId: number,
+    tableName: string,
+    publicToken?: string,
+  ): void {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) return;
 
@@ -1573,6 +1594,7 @@ export class EcommerceTablesService {
       'Mesa escaneada',
       `Un cliente escaneó el QR de la mesa ${tableName} y solicita confirmación`,
       { table_id: tableId, table_name: tableName },
+      publicToken,
     );
   }
 
