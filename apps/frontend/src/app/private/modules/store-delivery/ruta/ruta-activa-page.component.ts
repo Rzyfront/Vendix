@@ -328,8 +328,8 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
           <app-empty-state
             icon="truck"
             title="No tienes una ruta activa"
-            description="Toma pedidos del pool para armar tu ruta y empezar a repartir."
-            actionButtonText="Ir al pool"
+            description="Toma pedidos disponibles para armar tu ruta y empezar a repartir."
+            actionButtonText="Ir a pedidos disponibles"
             actionButtonIcon="package"
             [showActionButton]="true"
             (actionClick)="goToPool()"
@@ -679,6 +679,9 @@ export class RutaActivaPageComponent {
           this.actionLoading.set(false);
           this.store.refresh();
           this.toast.success('Recorrido iniciado');
+          // Al iniciar ruta, salta al mapa para que el conductor vea por dónde ir
+          // (el mapa es la vista útil ahora; el trazo por calles lo trae route-map-view).
+          this.router.navigate(['/repartos/mapa']);
         },
         error: (e) => {
           this.actionLoading.set(false);
