@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { isPlatformBrowser } from '@angular/common';
-import { Observable, finalize, map, tap } from 'rxjs';
+import { Observable, finalize, firstValueFrom, map, tap } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 import { QrScanBehavior } from '../../../../core/models/store-settings.interface';
@@ -27,6 +27,49 @@ interface PersistedTableContext {
   autoFire: boolean;
   sessionId: number | null;
   storeId: number | null;
+  /**
+   * Diner identity decision, remembered per-device (Step 5 — welcome wizard)
+   * so a re-scan of the same QR does not re-prompt. `allow_anonymous` /
+   * `anonymous_default` are intentionally NOT persisted — they always come
+   * fresh from `resolve()`.
+   */
+  identityChosen: boolean;
+  chosenCustomer: TableIdentityCustomer | null;
+}
+
+/**
+ * Identity assigned to the active table session. `null` = the session has no
+ * diner identity yet. Shared by `resolve` (`customer`), the `identityChosen`
+ * state, and the `identify` result.
+ */
+export interface TableIdentityCustomer {
+  id: number;
+  name: string;
+}
+
+/** Identity mode the diner picks in the welcome wizard (Step 5). */
+export type TableIdentifyMode = 'anonymous' | 'guest' | 'authenticated';
+
+/** Guest details captured when the diner chooses the `guest` identity mode. */
+export interface TableGuestIdentity {
+  first_name: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  document_type?: string;
+  document_number?: string;
+}
+
+/** Result of `POST /api/ecommerce/tables/:token/identify` (inside `data`). */
+export interface TableIdentifyResult {
+  ok: boolean;
+  customer: TableIdentityCustomer | null;
+  session_id: number | null;
+}
+
+interface TableIdentifyResponse {
+  success: boolean;
+  data: TableIdentifyResult;
 }
 
 /**
@@ -35,6 +78,11 @@ interface PersistedTableContext {
  * `enable_table_checkout` is the per-store flag from
  * `store_settings.restaurant.enable_table_checkout` (gate for the diner
  * self-checkout C2 flow). When `false`, the diner cannot call `payTable`.
+ *
+ * `allow_anonymous` / `anonymous_default` drive the welcome wizard (Step 5):
+ * whether the store permits an anonymous diner identity and whether anonymous
+ * is the default choice. `customer` is the identity already attached to the
+ * active session (if any) — when present, the wizard is skipped.
  */
 interface ResolveTableResponse {
   success: boolean;
@@ -45,6 +93,9 @@ interface ResolveTableResponse {
     auto_fire: boolean;
     session_id?: number | null;
     enable_table_checkout?: boolean;
+    allow_anonymous: boolean;
+    anonymous_default: boolean;
+    customer: TableIdentityCustomer | null;
   };
 }
 
@@ -245,6 +296,22 @@ export class TableContextService {
   /** Store the table belongs to — needed by the diner SSE `?store_id=`. */
   readonly storeId = signal<number | null>(null);
 
+  // ── Diner identity (Step 5 — welcome wizard) ────────────────────
+  /**
+   * True once an identity is settled for this table: either the diner picked
+   * one on THIS device (`identify()`), or the resolved session already carries
+   * a `customer`. Remembered per-device in localStorage so a re-scan of the
+   * same QR does not re-prompt the wizard. Reset on `clear()` / `leaveTable()`
+   * (the diner left the table → ask again on the next scan).
+   */
+  readonly identityChosen = signal(false);
+  /** Identity attached to the session (from `resolve`/`identify`), or null. */
+  readonly chosenCustomer = signal<TableIdentityCustomer | null>(null);
+  /** Store permits an anonymous diner identity (from `resolve` — not persisted). */
+  readonly allowAnonymous = signal(false);
+  /** Anonymous is the store's default identity (from `resolve` — not persisted). */
+  readonly anonymousDefault = signal(false);
+
   // ── Device identity (D1) ───────────────────────────────────────
   /**
    * Per-tab device identifier. Lives in `sessionStorage`, NOT `localStorage`,
@@ -438,6 +505,21 @@ export class TableContextService {
     this.storeId.set(data.store_id ?? null);
     this.enableTableCheckout.set(!!data.enable_table_checkout);
 
+    // Identity (Step 5). `allow_anonymous` / `anonymous_default` always come
+    // fresh from the server. The identity decision is remembered per-device:
+    //  - If the session already carries a `customer`, the identity is settled
+    //    server-side → mark it chosen so the wizard is skipped.
+    //  - If `customer` is null, do NOT force `identityChosen` back to false:
+    //    a decision already hydrated on THIS device must be respected. So
+    //    `identityChosen` ends up true when (locally hydrated) OR (customer
+    //    present); the reset only happens on `clear()` / `leaveTable()`.
+    this.allowAnonymous.set(!!data.allow_anonymous);
+    this.anonymousDefault.set(!!data.anonymous_default);
+    if (data.customer) {
+      this.identityChosen.set(true);
+      this.chosenCustomer.set(data.customer);
+    }
+
     // Reset diner-payment + presence state for the new table.
     this.paymentPending.set(null);
     this.paymentConfirmed.set(null);
@@ -445,6 +527,40 @@ export class TableContextService {
     this.activeDevicesCount.set(1);
     this.lastJoinEvent.set(null);
     this.sessionClosed.set(false);
+  }
+
+  /**
+   * Assigns an identity to the active table session (Step 5 — welcome wizard):
+   *  - `anonymous`     → the session stays anonymous (no customer).
+   *  - `guest`         → a lightweight guest customer is created/attached.
+   *  - `authenticated` → the logged-in customer is attached server-side.
+   *
+   * `POST /api/ecommerce/tables/:token/identify` with `{ mode, guest }`, using
+   * the same HttpClient/headers pattern as `resolve()`. On success the choice
+   * is remembered on THIS device (`identityChosen` + `chosenCustomer` +
+   * `persist()`) so a re-scan of the same QR does not re-prompt.
+   *
+   * Throws when there is no active table token (mirrors `requireToken()`), and
+   * propagates any HTTP error to the caller (the component shows the toast) —
+   * never swallowed silently.
+   */
+  async identify(
+    mode: TableIdentifyMode,
+    guest?: TableGuestIdentity,
+  ): Promise<TableIdentifyResult> {
+    const token = this.requireToken();
+    const response = await firstValueFrom(
+      this.http.post<TableIdentifyResponse>(
+        `${this.api_url}/${token}/identify`,
+        { mode, guest },
+        { headers: this.getHeaders() },
+      ),
+    );
+    const data = response.data;
+    this.identityChosen.set(true);
+    this.chosenCustomer.set(data.customer);
+    this.persist();
+    return data;
   }
 
   /**
@@ -590,6 +706,9 @@ export class TableContextService {
       this.autoFire.set(!!ctx.autoFire);
       this.sessionId.set(ctx.sessionId ?? null);
       this.storeId.set(ctx.storeId ?? null);
+      // Identity decision remembered per-device (Step 5).
+      this.identityChosen.set(!!ctx.identityChosen);
+      this.chosenCustomer.set(ctx.chosenCustomer ?? null);
     } catch {
       // Corrupted entry — remove it silently.
       localStorage.removeItem(this.storage_key);
@@ -607,6 +726,13 @@ export class TableContextService {
     this.sessionId.set(null);
     this.storeId.set(null);
     this.enableTableCheckout.set(false);
+    // Identity (Step 5): leaving the table forgets the per-device decision so
+    // the next scan re-prompts the wizard. `allowAnonymous` / `anonymousDefault`
+    // are reset too — they are repopulated on the next `resolve()`.
+    this.identityChosen.set(false);
+    this.chosenCustomer.set(null);
+    this.allowAnonymous.set(false);
+    this.anonymousDefault.set(false);
     this.bill.set(null);
     this.loading_bill.set(false);
     this.calling_waiter.set(false);
@@ -858,6 +984,8 @@ export class TableContextService {
       autoFire: this.autoFire(),
       sessionId: this.sessionId(),
       storeId: this.storeId(),
+      identityChosen: this.identityChosen(),
+      chosenCustomer: this.chosenCustomer(),
     };
     localStorage.setItem(this.storage_key, JSON.stringify(payload));
   }
