@@ -13,6 +13,17 @@ import {
   Role,
 } from '../interfaces/store-user.interface';
 
+/**
+ * Tarifa de reparto por repartidor (Vendix Repartos F9 / backend B8). Se
+ * persiste bajo `user_settings.config.carrier_tariff` vía merge. `amount` es
+ * SIEMPRE un Decimal string (nunca float); `currency` la fija el backend a 'COP'.
+ */
+export interface CarrierTariff {
+  mode: 'per_stop' | 'per_route';
+  amount: string;
+  currency?: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -113,6 +124,23 @@ export class StoreUsersManagementService {
   updateUserPanelUI(id: number, panel_ui: Record<string, Record<string, boolean>>): Observable<StoreUserDetail> {
     return this.http
       .patch<{ data: StoreUserDetail }>(`${this.baseUrl}/${id}/panel-ui`, { panel_ui })
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => throwError(() => error)),
+      );
+  }
+
+  /**
+   * `PATCH management/:id/carrier-tariff` — fija la tarifa de reparto del
+   * usuario (rol `carrier`). Persiste en `user_settings.config.carrier_tariff`
+   * (merge). `amount` debe ir como Decimal string (ej. "1500.00").
+   */
+  setCarrierTariff(
+    id: number,
+    data: { mode: 'per_stop' | 'per_route'; amount: string },
+  ): Observable<CarrierTariff> {
+    return this.http
+      .patch<{ data: CarrierTariff }>(`${this.baseUrl}/${id}/carrier-tariff`, data)
       .pipe(
         map((response) => response.data),
         catchError((error) => throwError(() => error)),

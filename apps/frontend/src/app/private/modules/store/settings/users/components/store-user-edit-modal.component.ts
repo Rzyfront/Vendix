@@ -9,7 +9,9 @@ import {
   signal,
   computed,
   effect,
+  DestroyRef,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import {
@@ -28,14 +30,21 @@ import {
   SettingToggleComponent,
   BadgeComponent,
   PanelUiModulesEditorComponent,
+  SelectorComponent,
+  ToastService,
 } from '../../../../../../shared/components/index';
-import type { BadgeVariant } from '../../../../../../shared/components/index';
+import type { BadgeVariant, SelectorOption } from '../../../../../../shared/components/index';
 import {
   ScrollableTabsComponent,
   ScrollableTab,
 } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { getModulesHiddenByIndustries } from '../../../../../../shared/constants/industry-modules.constant';
-import { StoreUser } from '../interfaces/store-user.interface';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { StoreUser, StoreUserDetail } from '../interfaces/store-user.interface';
+import {
+  StoreUsersManagementService,
+  CarrierTariff,
+} from '../services/store-users-management.service';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import {
   selectUserDetail,
@@ -56,6 +65,7 @@ import {
     ScrollableTabsComponent,
     PanelUiModulesEditorComponent,
     BadgeComponent,
+    SelectorComponent,
   ],
   template: `
     @if (isOpen()) {
@@ -83,7 +93,7 @@ import {
           <!-- Tabs -->
           <div class="bg-surface/50 rounded-lg p-1 mb-4">
             <app-scrollable-tabs
-              [tabs]="tabItems"
+              [tabs]="tabItems()"
               [activeTab]="activeTab()"
               size="sm"
               (tabChange)="activeTab.set($event)"
@@ -432,6 +442,57 @@ import {
                   </form>
                 </div>
               }
+
+              <!-- ── Tarifa de reparto (rol carrier) ─────────────── -->
+              @case ('carrier_tariff') {
+                <div class="space-y-4">
+                  <div class="flex items-center gap-2.5">
+                    <div class="p-1.5 bg-primary/10 rounded-lg">
+                      <app-icon
+                        name="coins"
+                        [size]="16"
+                        class="text-primary"
+                      />
+                    </div>
+                    <div>
+                      <h4 class="text-sm font-semibold text-text-primary">
+                        Tarifa de reparto
+                      </h4>
+                      <p class="text-[10px] text-text-secondary">
+                        Cuanto gana este repartidor por sus entregas
+                      </p>
+                    </div>
+                  </div>
+
+                  <form [formGroup]="carrierTariffForm" class="space-y-3">
+                    <app-selector
+                      formControlName="mode"
+                      label="Modo de tarifa"
+                      [options]="carrierTariffModeOptions"
+                    />
+                    <app-input
+                      formControlName="amount"
+                      label="Monto"
+                      [currency]="true"
+                      placeholder="0"
+                    />
+                  </form>
+
+                  <div
+                    class="flex items-start gap-2 px-3 py-2 rounded-lg border border-border bg-surface/50"
+                  >
+                    <app-icon
+                      name="info"
+                      [size]="14"
+                      class="text-text-secondary mt-0.5 shrink-0"
+                    />
+                    <p class="text-[11px] text-text-secondary">
+                      Si no configuras una tarifa, se usa el default de la
+                      tienda.
+                    </p>
+                  </div>
+                </div>
+              }
             }
           </div>
         }
@@ -449,7 +510,7 @@ import {
               size="sm"
               (clicked)="saveCurrentTab()"
               [disabled]="isSaveDisabled()"
-              [loading]="detailLoading()"
+              [loading]="detailLoading() || savingTariff()"
               >{{ getSaveLabel() }}</app-button
             >
           }
@@ -474,6 +535,9 @@ export class StoreUserEditModalComponent implements OnChanges {
   private store = inject(Store);
   private fb = inject(FormBuilder);
   private authFacade = inject(AuthFacade);
+  private destroyRef = inject(DestroyRef);
+  private storeUsersService = inject(StoreUsersManagementService);
+  private toast = inject(ToastService);
 
   userDetail = this.store.selectSignal(selectUserDetail);
   detailLoading = this.store.selectSignal(selectDetailLoading);
@@ -491,11 +555,44 @@ export class StoreUserEditModalComponent implements OnChanges {
   originalPanelUI = signal<Record<string, Record<string, boolean>>>({});
   activePanelUITab = signal('STORE_ADMIN');
 
-  tabItems: ScrollableTab[] = [
-    { id: 'info', label: 'General', icon: 'user' },
-    { id: 'roles', label: 'Roles', icon: 'shield' },
-    { id: 'panel_ui', label: 'Modulos', icon: 'layout-dashboard' },
-    { id: 'security', label: 'Seguridad', icon: 'lock' },
+  /** Loading flag for the carrier-tariff save (direct HTTP, no NgRx action). */
+  savingTariff = signal(false);
+
+  /**
+   * True when the edited user has the `carrier` role — derived from the roles
+   * currently toggled in the Roles tab (`selectedRoleIds` ∩ `availableRoles`)
+   * OR from the loaded detail. Gates the "Tarifa" tab (Vendix Repartos F9).
+   */
+  readonly isCarrierUser = computed<boolean>(() => {
+    const byId = new Map(
+      this.availableRoles().map((r) => [r.id, r.name.toLowerCase()]),
+    );
+    const fromAssigned = Array.from(this.selectedRoleIds()).some(
+      (id) => byId.get(id) === 'carrier',
+    );
+    const fromDetail = (this.userDetail()?.roles ?? []).some(
+      (r) => r.name.toLowerCase() === 'carrier',
+    );
+    return fromAssigned || fromDetail;
+  });
+
+  /** Tabs of the modal; the "Tarifa" tab appears only for carrier users. */
+  readonly tabItems = computed<ScrollableTab[]>(() => {
+    const base: ScrollableTab[] = [
+      { id: 'info', label: 'General', icon: 'user' },
+      { id: 'roles', label: 'Roles', icon: 'shield' },
+      { id: 'panel_ui', label: 'Modulos', icon: 'layout-dashboard' },
+      { id: 'security', label: 'Seguridad', icon: 'lock' },
+    ];
+    if (this.isCarrierUser()) {
+      base.push({ id: 'carrier_tariff', label: 'Tarifa', icon: 'coins' });
+    }
+    return base;
+  });
+
+  readonly carrierTariffModeOptions: SelectorOption[] = [
+    { value: 'per_stop', label: 'Por parada' },
+    { value: 'per_route', label: 'Por ruta' },
   ];
 
   panelUIAppTabs = [
@@ -505,6 +602,7 @@ export class StoreUserEditModalComponent implements OnChanges {
 
   infoForm: FormGroup;
   passwordForm: FormGroup;
+  carrierTariffForm: FormGroup;
 
   private readonly IMMUTABLE_ROLES = ['owner', 'super_admin'];
 
@@ -603,6 +701,11 @@ export class StoreUserEditModalComponent implements OnChanges {
       { validators: this.passwordMatchValidator },
     );
 
+    this.carrierTariffForm = this.fb.group({
+      mode: ['per_stop' as 'per_stop' | 'per_route', [Validators.required]],
+      amount: [0, [Validators.required, Validators.min(0)]],
+    });
+
     effect(() => {
       const detail = this.userDetail();
       if (detail) {
@@ -619,6 +722,18 @@ export class StoreUserEditModalComponent implements OnChanges {
           : {};
         this.localPanelUI.set(snapshot);
         this.originalPanelUI.set(JSON.parse(JSON.stringify(snapshot)));
+
+        // Preload the carrier tariff from the detail when present; fall back to
+        // per_stop + 0 so a carrier without a tariff yet does not break.
+        const tariff = (
+          detail as StoreUserDetail & {
+            user_settings?: { config?: { carrier_tariff?: CarrierTariff } };
+          }
+        )?.user_settings?.config?.carrier_tariff;
+        this.carrierTariffForm.patchValue({
+          mode: tariff?.mode ?? 'per_stop',
+          amount: tariff ? Number(tariff.amount) || 0 : 0,
+        });
       }
     });
   }
@@ -746,6 +861,36 @@ export class StoreUserEditModalComponent implements OnChanges {
     this.passwordForm.reset();
   }
 
+  // ── Tarifa de reparto (carrier) ────────────────────────────────
+
+  /**
+   * Persiste la tarifa de reparto del usuario vía HTTP directo (no NgRx). El
+   * `amount` viaja como Decimal string con 2 decimales (contrato B8). Toast de
+   * exito/error con `parseApiError` para el mensaje UX.
+   */
+  private saveCarrierTariff(): void {
+    const currentUser = this.user();
+    if (!currentUser || this.carrierTariffForm.invalid) return;
+    const { mode, amount } = this.carrierTariffForm.value;
+    this.savingTariff.set(true);
+    this.storeUsersService
+      .setCarrierTariff(currentUser.id, {
+        mode: mode as 'per_stop' | 'per_route',
+        amount: (Number(amount) || 0).toFixed(2),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingTariff.set(false);
+          this.toast.success('Tarifa de reparto guardada');
+        },
+        error: (err) => {
+          this.savingTariff.set(false);
+          this.toast.error(parseApiError(err).userMessage);
+        },
+      });
+  }
+
   // ── Footer ─────────────────────────────────────────────────────
 
   saveCurrentTab(): void {
@@ -762,6 +907,9 @@ export class StoreUserEditModalComponent implements OnChanges {
       case 'security':
         this.resetPassword();
         break;
+      case 'carrier_tariff':
+        this.saveCarrierTariff();
+        break;
     }
   }
 
@@ -771,6 +919,7 @@ export class StoreUserEditModalComponent implements OnChanges {
       roles: 'Guardar roles',
       panel_ui: 'Guardar modulos',
       security: 'Restablecer contrasena',
+      carrier_tariff: 'Guardar tarifa',
     };
     return labels[this.activeTab()] || 'Guardar';
   }
@@ -785,6 +934,12 @@ export class StoreUserEditModalComponent implements OnChanges {
         return this.infoForm.invalid || this.detailLoading();
       case 'security':
         return this.passwordForm.invalid || this.detailLoading();
+      case 'carrier_tariff':
+        return (
+          this.carrierTariffForm.invalid ||
+          this.savingTariff() ||
+          this.detailLoading()
+        );
       default:
         return this.detailLoading();
     }

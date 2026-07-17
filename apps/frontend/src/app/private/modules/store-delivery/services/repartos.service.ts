@@ -148,6 +148,23 @@ export class RepartosService {
       );
   }
 
+  /**
+   * `POST /store/carrier/route/reorder` — reordena las paradas pending de MI
+   * ruta activa (resuelta por JWT). Body `{ order: [{ stopId, sequence }] }`
+   * (DTO `ReorderStopsDto`). Devuelve la ruta fresca; el store igual hace
+   * `refresh()` tras el éxito, así que la forma exacta no se consume aquí.
+   */
+  reorderStops(
+    order: Array<{ stopId: number; sequence: number }>,
+  ): Observable<DispatchRoute> {
+    return this.http
+      .post<any>(`${this.apiUrl}/store/carrier/route/reorder`, { order })
+      .pipe(
+        map((r) => r.data as DispatchRoute),
+        catchError((e) => this.handleError(e)),
+      );
+  }
+
   // ── Cierre y cuadre ───────────────────────────────────────────────────────
 
   /**

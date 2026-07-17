@@ -2,19 +2,25 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   inject,
+  signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import {
   EmptyStateComponent,
   IconComponent,
+  ToastService,
 } from '../../../../shared/components/index';
 import {
   RouteMapViewComponent,
   RouteMapStop,
   RouteMapUnlocatedStop,
+  RouteMapReorderEntry,
 } from '../../../../shared/components/route-map-view/route-map-view.component';
 import { ActiveRouteStore } from '../state/active-route.store';
+import { RepartosService } from '../services/repartos.service';
 import type { DispatchRouteStop } from '../interfaces/repartos.interface';
 import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interfaces/planilla.interface';
 
@@ -41,12 +47,12 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
  * el aviso ámbar cuando el GPS está denegado / en contexto inseguro (HTTPS
  * obligatorio) y la "Próxima parada" del recorrido óptimo.
  *
- * ## Reordenar (tech-debt, fuera de F5)
- * El botón "Aplicar orden óptimo" queda DESACTIVADO en el lado carrier: no
- * existe todavía un endpoint carrier de reordenamiento (`RepartosService` no
- * expone `reorderStops` ni hay `/store/carrier/route/reorder`). El mapa sí
- * muestra el orden sugerido y la próxima parada como guía visual; persistir el
- * reorden requiere el endpoint carrier (queda como seguimiento).
+ * ## Reordenar (Vendix Repartos F9)
+ * El botón "Aplicar orden óptimo" está HABILITADO en el lado carrier: el
+ * backend B7/B8 expone `POST /store/carrier/route/reorder` (resuelto por JWT)
+ * y `RepartosService.reorderStops` lo consume. Al confirmar, el motor emite el
+ * orden sugerido (`RouteMapReorderEntry[]`), esta página lo persiste y refresca
+ * el `ActiveRouteStore` para reflejar el nuevo `stop_sequence` en todo `/repartos`.
  *
  * Zoneless-safe: todo el estado observado por la plantilla vive en signals del
  * `ActiveRouteStore`; los derivados de mapa son `computed`.
@@ -96,7 +102,9 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
             [origin]="null"
             [fill]="true"
             [readonly]="true"
-            [showApplyOrder]="false"
+            [showApplyOrder]="true"
+            [applying]="applying()"
+            (applyOrder)="onApplyOrder($event)"
           ></app-route-map-view>
         </div>
       }
@@ -129,11 +137,17 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
 export class MapaPageComponent {
   private readonly store = inject(ActiveRouteStore);
   private readonly router = inject(Router);
+  private readonly repartosService = inject(RepartosService);
+  private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
 
   // ── Estado leído del store (single source of truth) ────────────────────────
   readonly route = this.store.activeRoute;
   readonly stops = this.store.stops;
   readonly loading = this.store.loading;
+
+  /** Guardando el reorden (deshabilita/gira el botón "Aplicar orden óptimo"). */
+  readonly applying = signal(false);
 
   ngOnInit(): void {
     // Resolución perezosa idempotente: si el shell ya cargó la ruta esto es un
@@ -182,6 +196,31 @@ export class MapaPageComponent {
 
   goToPool(): void {
     this.router.navigate(['/repartos/pool']);
+  }
+
+  /**
+   * Persiste el orden sugerido del mapa (Vendix Repartos F9). Reordena SOLO las
+   * paradas pending de mi ruta activa vía `reorderStops`; al éxito refresca el
+   * store para que el nuevo `stop_sequence` se refleje en todas las páginas de
+   * `/repartos`. Guard anti-doble-tap con el signal `applying`.
+   */
+  onApplyOrder(entries: RouteMapReorderEntry[]): void {
+    if (this.applying()) return;
+    this.applying.set(true);
+    this.repartosService
+      .reorderStops(entries)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.applying.set(false);
+          this.store.refresh();
+          this.toast.success('Paradas reordenadas');
+        },
+        error: (err) => {
+          this.applying.set(false);
+          this.toast.error(err?.message ?? 'No se pudo reordenar la ruta');
+        },
+      });
   }
 
   // ── Helpers de dirección/coordenadas ────────────────────────────────────────
