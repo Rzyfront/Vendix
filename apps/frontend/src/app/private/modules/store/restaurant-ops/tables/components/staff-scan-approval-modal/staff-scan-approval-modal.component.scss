@@ -1,0 +1,66 @@
+/* Step 10 — QR-mesa staff approval modal.
+ * Mobile-first, functional — no need to be fancy; this is an action prompt.
+ * Styling follows the global color tokens (var(--color-*)) so it sits
+ * cleanly on both light and dark themes.
+ */
+
+.staff-scan-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--color-primary, #6366f1);
+  color: var(--color-primary-foreground, #fff);
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.headline {
+  margin: 0 0 0.25rem 0;
+  font-size: var(--fs-base, 0.95rem);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.body {
+  margin: 0;
+  font-size: var(--fs-sm, 0.85rem);
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.warn {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-md, 8px);
+  font-size: var(--fs-sm, 0.85rem);
+  background: color-mix(in srgb, var(--color-warning, #f59e0b) 15%, transparent);
+  color: var(--color-text-primary);
+  border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 40%, transparent);
+}
+
+.footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
