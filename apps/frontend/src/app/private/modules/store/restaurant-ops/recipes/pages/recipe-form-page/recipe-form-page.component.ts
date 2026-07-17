@@ -116,7 +116,7 @@ export class RecipeFormPageComponent implements OnInit {
 
   readonly itemsArray = this.fb.nonNullable.array<
     FormGroup<RecipeItemFormControls>
-  >([]);
+  >([], { validators: [Validators.minLength(1)] });
 
   readonly form: FormGroup<RecipeFormShape> = this.fb.nonNullable.group<
     RecipeFormShape
@@ -322,6 +322,18 @@ export class RecipeFormPageComponent implements OnInit {
     this.form.markAllAsTouched();
     this.itemsArray.markAllAsTouched();
     if (this.form.invalid || this.itemsArray.invalid) {
+      // Compose a specific inline message that names the actual problem
+      // rather than a generic "review the fields" hint.
+      const errors: string[] = [];
+      if (this.itemsArray.length === 0) {
+        errors.push('Agregá al menos un componente a la receta.');
+      } else if (this.itemsArray.invalid) {
+        errors.push('Revisá los componentes: cada uno necesita un insumo y cantidad mayor a 0.');
+      }
+      if (this.form.invalid) {
+        errors.push('Completá los campos obligatorios del encabezado.');
+      }
+      this.submitError.set(errors.join(' '));
       this.toastService.warning('Revisa los campos marcados antes de guardar');
       return;
     }
