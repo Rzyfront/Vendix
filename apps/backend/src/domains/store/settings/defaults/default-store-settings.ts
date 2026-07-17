@@ -384,6 +384,7 @@ export function getDefaultStoreSettings(): StoreSettings {
     membership: {
       ambient_access_enabled: false,
       qr_kiosk_mode: false,
+      qr_scanner_default_mode: 'fullscreen',
       capacity_control_enabled: false,
       max_capacity: 0,
       turnstile_mode: false,

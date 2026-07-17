@@ -856,6 +856,17 @@ export class MembershipSettingsDto {
   qr_kiosk_mode?: boolean;
 
   @ApiProperty({
+    example: 'fullscreen',
+    required: false,
+    enum: ['fullscreen', 'floating'],
+    description:
+      'Default display mode for the Aforo QR scanner: fullscreen overlay or a movable floating window (bubble).',
+  })
+  @IsOptional()
+  @IsIn(['fullscreen', 'floating'])
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
+
+  @ApiProperty({
     example: false,
     required: false,
     description: 'Enables capacity (aforo) control for the membership area.',

@@ -622,6 +622,12 @@ export interface MembershipSettings {
    */
   qr_kiosk_mode?: boolean;
   /**
+   * Default display mode for the Aforo QR scanner on open. `fullscreen`
+   * (default) shows the full overlay; `floating` opens a movable window/bubble.
+   * Per-device overrides are remembered client-side in localStorage.
+   */
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
+  /**
    * Enables capacity (aforo) control for the membership area.
    * When false (default), capacity control is disabled.
    */

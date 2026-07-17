@@ -175,6 +175,13 @@ export interface MembershipSettings {
    * scan. Mirrors backend `store_settings.settings.membership.qr_kiosk_mode`.
    */
   qr_kiosk_mode?: boolean;
+  /**
+   * Default display mode for the Aforo QR scanner. `fullscreen` (default) or
+   * `floating` (movable window/bubble). Mirrors backend
+   * `store_settings.settings.membership.qr_scanner_default_mode`. Per-device
+   * position/size/mode overrides live in localStorage.
+   */
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
 }
 
 /**
