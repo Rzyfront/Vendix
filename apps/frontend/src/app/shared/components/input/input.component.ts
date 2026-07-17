@@ -477,6 +477,17 @@ export class InputComponent implements ControlValueAccessor {
       }
       return 'El formato es inválido.';
     }
+    if (errors['min']) {
+      const min = errors['min'].min;
+      // Friendly wording for the common "quantity must be > 0" case.
+      if (min === 0 || min === 0.0001) {
+        return 'Debe ser mayor a 0.';
+      }
+      return `El valor mínimo es ${min}.`;
+    }
+    if (errors['max']) {
+      return `El valor máximo es ${errors['max'].max}.`;
+    }
 
     // Fallback para otros errores
     return 'El valor es inválido.';
