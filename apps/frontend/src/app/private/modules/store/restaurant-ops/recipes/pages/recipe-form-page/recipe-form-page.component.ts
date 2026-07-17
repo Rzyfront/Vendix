@@ -389,6 +389,8 @@ export class RecipeFormPageComponent implements OnInit {
               (this.isEditMode()
                 ? 'Error al actualizar la receta'
                 : 'Error al crear la receta'),
+            'No se pudo guardar la receta',
+            6000, // 6s so the user has time to read the API message
           );
         },
       });
