@@ -116,7 +116,21 @@ export class PromotionEngineService {
       });
     }
 
-    return eligible;
+    // WINNER-TAKES-ALL: return only the single highest-priority eligible
+    // promotion (ties broken by lowest id). Mirrors the rule used in
+    // quoteDiscounts so /check-eligibility and the POS payments snapshot
+    // stay consistent.
+    if (eligible.length === 0) return eligible;
+    const winner = eligible.reduce((best, current) => {
+      if (
+        current.priority > best.priority ||
+        (current.priority === best.priority && current.id < best.id)
+      ) {
+        return current;
+      }
+      return best;
+    });
+    return [winner];
   }
 
   /**
@@ -361,7 +375,26 @@ export class PromotionEngineService {
       orderBy: { priority: 'desc' },
     })) as unknown as PromotionRecord[];
 
-    const appliedPromotions: PromotionQuoteApplied[] = [];
+    /**
+     * WINNER-TAKES-ALL policy (per Edward's design):
+     *   An order should only have ONE active promotion. Among all eligible
+     *   candidates, the engine picks the single one with the highest priority
+     *   (lowest id as tiebreaker) and discards all others — even if they
+     *   apply to non-overlapping products.
+     *
+     * Implementation: we evaluate each candidate (run guards, compute its
+     * potential discount) and remember the best one so far. Per-line share
+     * math is deferred until we know the winner; the per-line breakdown is
+     * applied exactly ONCE for the winner.
+     */
+    let winner:
+      | {
+          promo: PromotionRecord;
+          applicableIndexes: number[];
+          discountAmount: number;
+          perLineShares: Map<number, number>;
+        }
+      | null = null;
 
     for (const promo of candidates) {
       const isManual = !promo.is_auto_apply;
@@ -401,6 +434,16 @@ export class PromotionEngineService {
         subtotal < Number(promo.min_purchase_amount)
       )
         continue;
+
+      // Evaluate this candidate's potential discount. We compute per-line
+      // shares so we can apply them later if this promo wins the
+      // "winner-takes-all" comparison below.
+      let candidateResult:
+        | {
+            discountAmount: number;
+            perLineShares: Map<number, number>;
+          }
+        | null = null;
 
       // ---------------------------------------------------------------
       // quantity_tiered branch: resolve ONE tier from the AGGREGATED scope
@@ -477,7 +520,7 @@ export class PromotionEngineService {
         // percentage tiers apply per line; fixed_amount tiers apply a single
         // flat amount across the scope (capped at applicableTotal) split
         // proportionally across lines — see computeTierDiscountForResolvedTier.
-        const perLineDiscount = new Map<number, number>();
+        const perLineShares = new Map<number, number>();
         let rawTotal = 0;
         for (const idx of applicableIndexes) {
           const item = items[idx];
@@ -487,7 +530,7 @@ export class PromotionEngineService {
             matchedTier,
             applicableTotal,
           );
-          perLineDiscount.set(idx, lineDiscount);
+          perLineShares.set(idx, lineDiscount);
           rawTotal = this.roundMoney(rawTotal + lineDiscount);
         }
 
@@ -504,80 +547,82 @@ export class PromotionEngineService {
         discountAmount = this.roundMoney(discountAmount);
         if (discountAmount <= 0) continue;
 
-        // Proportionally scale per-line discounts to match the capped total
-        // so the persisted snapshot matches the per-item breakdown exactly.
+        // Rescale the per-line shares so the SUM of shares matches the capped
+        // `discountAmount` exactly. The proportional split preserves the
+        // tier's intent (heavier discount on higher-priced lines) while the
+        // cap respects the global promotion limit.
         const scale = rawTotal > 0 ? discountAmount / rawTotal : 0;
         let assigned = 0;
-        applicableIndexes.forEach((idx, i) => {
-          const item = items[idx];
-          const lineTotal = Number(item.unit_price) * Number(item.quantity);
+        for (let i = 0; i < applicableIndexes.length; i++) {
+          const idx = applicableIndexes[i];
           const isLast = i === applicableIndexes.length - 1;
-          const rawShare = perLineDiscount.get(idx) ?? 0;
+          const rawShare = perLineShares.get(idx) ?? 0;
           const proportionalShare = this.roundMoney(rawShare * scale);
           const share = isLast
             ? this.roundMoney(discountAmount - assigned)
             : proportionalShare;
+          perLineShares.set(idx, share);
           assigned = this.roundMoney(assigned + share);
+        }
 
-          const current = itemBreakdownMap.get(idx);
-          if (!current) return;
-          const nextDiscount = this.roundMoney(current.promotion_discount + share);
-          // Cap discount per line at the line total so final_unit_price >= 0.
-          const cappedDiscount = Math.min(nextDiscount, lineTotal);
-          const remainingLineTotal = this.roundMoney(lineTotal - cappedDiscount);
-          const nextUnitPrice =
-            item.quantity > 0
-              ? this.roundMoney(remainingLineTotal / Number(item.quantity))
-              : current.original_unit_price;
+        candidateResult = { discountAmount, perLineShares };
+      } else {
+        // flat (default) branch
+        const discountAmount = this.computeDiscountAmount(
+          promo,
+          applicableTotal,
+        );
+        if (discountAmount <= 0) continue;
 
-          itemBreakdownMap.set(idx, {
-            ...current,
-            promotion_discount: cappedDiscount,
-            final_unit_price: Math.max(0, nextUnitPrice),
-            final_line_total: Math.max(0, remainingLineTotal),
-            promotion_ids: current.promotion_ids.includes(promo.id)
-              ? current.promotion_ids
-              : [...current.promotion_ids, promo.id],
-          });
-        });
+        // Compute per-line shares proportional to line total so the
+        // breakdown is exact once we apply the winner. We track the running
+        // remainder and assign it to the last line to avoid rounding drift.
+        const perLineShares = new Map<number, number>();
+        let assigned = 0;
+        for (let i = 0; i < applicableIndexes.length; i++) {
+          const idx = applicableIndexes[i];
+          const item = items[idx];
+          const lineTotal = Number(item.unit_price) * Number(item.quantity);
+          const isLast = i === applicableIndexes.length - 1;
+          const share = isLast
+            ? this.roundMoney(discountAmount - assigned)
+            : this.roundMoney((lineTotal / applicableTotal) * discountAmount);
+          perLineShares.set(idx, share);
+          assigned = this.roundMoney(assigned + share);
+        }
 
-        appliedPromotions.push({
-          promotion_id: promo.id,
-          name: promo.name,
-          code: promo.code ?? null,
-          type: promo.type,
-          scope: promo.scope,
-          value: Number(promo.value),
-          is_auto_apply: promo.is_auto_apply,
-          discount_amount: this.roundMoney(discountAmount),
-          applicable_item_ids: applicableIndexes
-            .map((idx) => itemBreakdownMap.get(idx)?.line_id)
-            .filter((lineId): lineId is string | number => lineId !== undefined),
-        });
-        continue;
+        candidateResult = { discountAmount, perLineShares };
       }
 
-      const discountAmount = this.computeDiscountAmount(promo, applicableTotal);
-      if (discountAmount <= 0) continue;
+      if (!candidateResult) continue;
 
-      // Prorate the discount across applicable items proportional to their
-      // line total so per-item breakdown stays accurate. We track the running
-      // remainder and assign it to the last item to avoid rounding drift.
-      let assigned = 0;
-      applicableIndexes.forEach((idx, i) => {
+      // Compare to the current winner. Highest priority wins. Ties broken by
+      // lowest promotion_id (deterministic, stable across runs).
+      if (
+        winner === null ||
+        promo.priority > winner.promo.priority ||
+        (promo.priority === winner.promo.priority && promo.id < winner.promo.id)
+      ) {
+        winner = {
+          promo,
+          applicableIndexes,
+          discountAmount: candidateResult.discountAmount,
+          perLineShares: candidateResult.perLineShares,
+        };
+      }
+    }
+
+    // Apply ONLY the winner (if any) to the per-item breakdown. All other
+    // candidates were evaluated but discarded by the "highest priority wins"
+    // rule.
+    const appliedPromotions: PromotionQuoteApplied[] = [];
+    if (winner) {
+      for (const [idx, share] of winner.perLineShares.entries()) {
+        const current = itemBreakdownMap.get(idx);
+        if (!current) continue;
         const item = items[idx];
         const lineTotal = Number(item.unit_price) * Number(item.quantity);
-        const isLast = i === applicableIndexes.length - 1;
-        const share = isLast
-          ? this.roundMoney(discountAmount - assigned)
-          : this.roundMoney((lineTotal / applicableTotal) * discountAmount);
-        assigned = this.roundMoney(assigned + share);
-
-        const current = itemBreakdownMap.get(idx);
-        if (!current) return;
-        const nextDiscount = this.roundMoney(current.promotion_discount + share);
-        // Cap discount per line at the line total so final_unit_price >= 0.
-        const cappedDiscount = Math.min(nextDiscount, lineTotal);
+        const cappedDiscount = Math.min(share, lineTotal);
         const remainingLineTotal = this.roundMoney(lineTotal - cappedDiscount);
         const nextUnitPrice =
           item.quantity > 0
@@ -589,22 +634,23 @@ export class PromotionEngineService {
           promotion_discount: cappedDiscount,
           final_unit_price: Math.max(0, nextUnitPrice),
           final_line_total: Math.max(0, remainingLineTotal),
-          promotion_ids: current.promotion_ids.includes(promo.id)
+          promotion_ids: current.promotion_ids.includes(winner.promo.id)
             ? current.promotion_ids
-            : [...current.promotion_ids, promo.id],
+            : [...current.promotion_ids, winner.promo.id],
         });
-      });
+      }
 
       appliedPromotions.push({
-        promotion_id: promo.id,
-        name: promo.name,
-        code: promo.code ?? null,
-        type: promo.type,
-        scope: promo.scope,
-        value: Number(promo.value),
-        is_auto_apply: promo.is_auto_apply,
-        discount_amount: this.roundMoney(discountAmount),
-        applicable_item_ids: applicableIndexes
+        promotion_id: winner.promo.id,
+        name: winner.promo.name,
+        code: winner.promo.code ?? null,
+        type: winner.promo.type,
+        scope: winner.promo.scope,
+        value: Number(winner.promo.value),
+        is_auto_apply: winner.promo.is_auto_apply,
+        priority: winner.promo.priority,
+        discount_amount: this.roundMoney(winner.discountAmount),
+        applicable_item_ids: winner.applicableIndexes
           .map((idx) => itemBreakdownMap.get(idx)?.line_id)
           .filter((lineId): lineId is string | number => lineId !== undefined),
       });

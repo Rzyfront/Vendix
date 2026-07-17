@@ -108,6 +108,14 @@ import {
                   >
                     {{ promo.typeLabel }}
                   </app-badge>
+                  <app-badge
+                    variant="success"
+                    size="xs"
+                    badgeStyle="solid"
+                    title="Esta es la promoción aplicada. El motor descartó las demás promos elegibles porque solo se permite una promoción por orden."
+                  >
+                    Aplicada
+                  </app-badge>
                 </div>
                 <span
                   class="shrink-0 font-semibold text-green-600"
