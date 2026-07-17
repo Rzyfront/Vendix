@@ -153,6 +153,8 @@ model users {
   dispatch_routes_as_voided_by       dispatch_routes[]             @relation("dispatch_routes_voided_by")
   dispatch_routes_as_closed_by       dispatch_routes[]             @relation("dispatch_routes_closed_by")
   dispatch_routes_as_released_by     dispatch_route_stop_history[] @relation("dispatch_route_stop_history_released_by")
+  // Carrier Pool (Repartos Fase B4) — órdenes reclamadas por este repartidor.
+  orders_claimed_by_carrier          orders[]                      @relation("orders_claimed_by_carrier")
   vehicles_as_primary_driver         vehicles[]                    @relation("vehicles_primary_driver")
   vehicles_as_created_by             vehicles[]                    @relation("vehicles_created_by")
   dispatch_route_stops_settled_by    dispatch_route_stops[]        @relation("dispatch_route_stops_settled_by")
@@ -1222,9 +1224,18 @@ model orders {
   // Dispatch (remisión) back-relation
   dispatch_notes dispatch_notes[] @relation("orders_dispatch_notes")
 
+  // Carrier Pool (Repartos Fase B4) — orden liberada al pool de repartidores.
+  // dispatch_pool_at: instante en que entró al pool (nullable → no está en el pool).
+  // claimed_by_carrier_user_id: repartidor (rol carrier) que la reclamó.
+  // Ambos nullable; sin efecto sobre filas existentes.
+  dispatch_pool_at           DateTime? @db.Timestamp(6)
+  claimed_by_carrier_user_id Int?
+  claimed_by_carrier         users?    @relation("orders_claimed_by_carrier", fields: [claimed_by_carrier_user_id], references: [id], onDelete: SetNull)
+
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
   @@index([store_id, channel])
+  @@index([store_id, dispatch_pool_at])
 }
 
 model order_installments {
@@ -8803,6 +8814,9 @@ model dispatch_routes {
   external_driver_name         String?                    @db.VarChar(255)
   external_driver_id_number    String?                    @db.VarChar(50)
   is_primary_driver_external   Boolean                    @default(false)
+  // Carrier Pool (Repartos Fase B4) — distingue rutas de repartidor (rol carrier)
+  // de las planillas de despacho DSD tradicionales. Filas existentes = false.
+  is_carrier_route             Boolean                    @default(false)
   assistants                   Json?
   origin_location_id           Int?
   planned_date                 DateTime                   @db.Timestamp(6)
