@@ -551,6 +551,14 @@ export class DispatchNotesService {
           state_province?: string | null;
           country_code?: string | null;
           postal_code?: string | null;
+          /**
+           * GPS coordinates persisted on the `addresses` table. Captured by
+           * the checkout map-picker; copied into the snapshot so the carrier
+           * route-map can geolocate stops without a geocoding round-trip.
+           * Optional because legacy addresses may have null coords.
+           */
+          latitude?: number | string | null;
+          longitude?: number | string | null;
         }
       | null
       | undefined,
@@ -564,8 +572,13 @@ export class DispatchNotesService {
       }
     }
 
-    // (2) Fall back to the relation row, projected to column-name keys.
+    // (2) Fall back to the relation row, projected to column-name keys. Lat/Lng
+    // are projected when finite — we use a NUMBER not a string (Prisma returns
+    // numerics as strings by default, but the frontend `DispatchDeliveryAddress`
+    // type expects `number`).
     if (relation && relation.address_line1 && relation.address_line1.trim()) {
+      const lat = this.toFiniteNumber(relation.latitude);
+      const lng = this.toFiniteNumber(relation.longitude);
       return {
         address_line1: relation.address_line1,
         address_line2: relation.address_line2 ?? null,
@@ -573,10 +586,26 @@ export class DispatchNotesService {
         state_province: relation.state_province ?? null,
         country_code: relation.country_code ?? null,
         postal_code: relation.postal_code ?? null,
+        ...(lat !== null ? { latitude: lat } : {}),
+        ...(lng !== null ? { longitude: lng } : {}),
       };
     }
 
     return null;
+  }
+
+  /**
+   * Coerce a Prisma numeric/string to a finite `number`, or `null` if not
+   * representable. Used to project optional `addresses.latitude/longitude`
+   * (Prisma returns `Decimal` as string) into the JSON snapshot the carrier
+   * route-map reads.
+   */
+  private toFiniteNumber(
+    value: number | string | null | undefined,
+  ): number | null {
+    if (value === null || value === undefined) return null;
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? n : null;
   }
 
   /** True when the order's snapshot JSON carries a usable address line. */
@@ -1433,6 +1462,11 @@ export class DispatchNotesService {
             state_province: true,
             country_code: true,
             postal_code: true,
+            // Captured by the checkout map-picker; copied into the snapshot
+            // so the carrier route-map can geolocate stops without a
+            // geocoding round-trip. See `buildCustomerAddressSnapshot`.
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -1600,6 +1634,11 @@ export class DispatchNotesService {
             state_province: true,
             country_code: true,
             postal_code: true,
+            // Captured by the checkout map-picker; copied into the snapshot
+            // so the carrier route-map can geolocate stops without a
+            // geocoding round-trip. See `buildCustomerAddressSnapshot`.
+            latitude: true,
+            longitude: true,
           },
         },
       },
