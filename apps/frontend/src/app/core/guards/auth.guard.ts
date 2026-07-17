@@ -128,6 +128,27 @@ export class AuthGuard implements CanActivate {
       return userRoles.includes('carrier');
     }
 
+    // Carrier-only: confinado a /repartos (+ /account, ya resuelto arriba).
+    // Un intento de forzar /admin, /store o /superadmin se deniega y el guard
+    // lo rebota a /repartos vía getDashboardUrl(). Un usuario híbrido
+    // admin+carrier NO se ve afectado (mantiene su acceso admin).
+    const ADMIN_TYPE_ROLES = [
+      'super_admin',
+      'admin',
+      'owner',
+      'manager',
+      'supervisor',
+      'employee',
+      'cashier',
+      'fiscal_supervisor',
+    ];
+    const isCarrierOnly =
+      userRoles.includes('carrier') &&
+      !userRoles.some((r) => ADMIN_TYPE_ROLES.includes(r));
+    if (isCarrierOnly) {
+      return false;
+    }
+
     // Admin & Store routes
     if (path.startsWith('/admin') || path.startsWith('/store')) {
       const env =
