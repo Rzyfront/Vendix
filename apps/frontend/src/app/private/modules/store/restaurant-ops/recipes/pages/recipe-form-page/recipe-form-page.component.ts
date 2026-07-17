@@ -148,7 +148,10 @@ export class RecipeFormPageComponent implements OnInit {
         id: 'cancel',
         label: 'Cancelar',
         variant: 'outline',
-        disabled: this.isSubmitting(),
+        // No longer tied to isSubmitting: if the user is stuck waiting for
+        // a 4xx/5xx response, they MUST be able to leave the form.
+        // takeUntilDestroyed will cancel the in-flight request on unmount.
+        disabled: false,
       },
       {
         id: 'save',
@@ -318,6 +321,18 @@ export class RecipeFormPageComponent implements OnInit {
       return;
     }
 
+    // Safety net: if the request hangs forever (network stalled, server
+    // crashed mid-response) the user is stuck looking at a spinner. After
+    // 30s we force-reset isSubmitting so the form becomes usable again.
+    const safetyTimer = setTimeout(() => {
+      if (this.isSubmitting()) {
+        this.isSubmitting.set(false);
+        this.toastService.warning(
+          'La solicitud tardó demasiado. Verificá tu conexión e intentá de nuevo.',
+        );
+      }
+    }, 30000);
+
     const raw = this.form.getRawValue();
     // Campos mutables compartidos. product_id NO va aquí: es inmutable tras crear
     // (el backend recipes.service.update lo ignora y el whitelist del DTO lo
@@ -342,6 +357,7 @@ export class RecipeFormPageComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (recipe) => {
+          clearTimeout(safetyTimer);
           const recipeId = recipe.id ?? this.recipeId();
           if (recipeId == null) {
             this.isSubmitting.set(false);
@@ -358,13 +374,21 @@ export class RecipeFormPageComponent implements OnInit {
           });
         },
         error: (err: unknown) => {
+          clearTimeout(safetyTimer);
           this.isSubmitting.set(false);
-          this.toastService.error(
+          // The recipes service transforms HttpErrorResponse into a plain
+          // string message; for 409 it includes the backend's exact text
+          // (e.g. "Ya existe una receta para este producto en la tienda").
+          // Fall back to a clear generic only if no message arrived.
+          const apiMessage =
             typeof err === 'string'
               ? err
-              : this.isEditMode()
+              : (err as { error?: { message?: string } })?.error?.message;
+          this.toastService.error(
+            apiMessage ??
+              (this.isEditMode()
                 ? 'Error al actualizar la receta'
-                : 'Error al crear la receta',
+                : 'Error al crear la receta'),
           );
         },
       });
