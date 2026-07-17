@@ -616,6 +616,12 @@ export interface MembershipSettings {
    */
   ambient_access_enabled: boolean;
   /**
+   * Kiosk mode: keeps the QR scanner always-on (continuous loop) on the Aforo
+   * tab for an unattended reception tablet. When false (default), the scanner
+   * opens on demand and closes after a single decode.
+   */
+  qr_kiosk_mode?: boolean;
+  /**
    * Enables capacity (aforo) control for the membership area.
    * When false (default), capacity control is disabled.
    */

@@ -848,6 +848,16 @@ export class MembershipSettingsDto {
   @ApiProperty({
     example: false,
     required: false,
+    description:
+      'Kiosk mode: keeps the QR scanner always-on (continuous loop) on the Aforo tab for an unattended reception tablet.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  qr_kiosk_mode?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
     description: 'Enables capacity (aforo) control for the membership area.',
   })
   @IsOptional()

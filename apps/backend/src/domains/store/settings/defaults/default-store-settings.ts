@@ -383,6 +383,7 @@ export function getDefaultStoreSettings(): StoreSettings {
     // Capacity (aforo) control and its auto-leveling are also opt-in.
     membership: {
       ambient_access_enabled: false,
+      qr_kiosk_mode: false,
       capacity_control_enabled: false,
       max_capacity: 0,
       turnstile_mode: false,
