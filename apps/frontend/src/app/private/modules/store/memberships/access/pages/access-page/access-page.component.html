@@ -193,7 +193,7 @@
 
       <!-- ─── Configuración de aforo (inline) ─── -->
       @if (showConfig()) {
-        <app-card [responsive]="true">
+        <app-card [responsive]="true" #aforoConfigCard>
           <div class="aforo-config">
             <header class="aforo-config-head">
               <div class="aforo-block-title">

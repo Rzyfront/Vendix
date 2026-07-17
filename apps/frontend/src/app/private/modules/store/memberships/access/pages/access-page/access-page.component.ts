@@ -2,9 +2,12 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
+  ElementRef,
   inject,
   OnInit,
   signal,
+  viewChild,
 } from '@angular/core';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -268,6 +271,25 @@ export class MembershipAccessPageComponent implements OnInit {
   // ─── Aforo config (persisted in store_settings.settings.membership) ─────────
   readonly showConfig = signal(false);
   readonly savingConfig = signal(false);
+
+  /**
+   * The inline aforo-config card lives at the bottom of the Aforo tab, inside the
+   * admin layout's own `overflow-y-auto` <main> (the window itself does not
+   * scroll). Toggling `showConfig` on renders it below the fold with no visual
+   * cue, so "Configurar aforo" felt like it did nothing. `viewChild` is a signal:
+   * when `@if (showConfig())` mounts the card, this ref resolves and the effect
+   * below re-runs, scrolling the panel into view. No fragile setTimeout.
+   */
+  private readonly configPanelRef = viewChild('aforoConfigCard', {
+    read: ElementRef,
+  });
+  private readonly revealConfigEffect = effect(() => {
+    if (!this.showConfig()) return;
+    const el = this.configPanelRef();
+    if (el) {
+      el.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
   readonly cfgCapacityControl = signal(false);
   readonly cfgMaxCapacity = signal(0);
   readonly cfgTurnstile = signal(false);
