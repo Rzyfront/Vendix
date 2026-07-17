@@ -519,6 +519,7 @@ export class AuthService {
       'STORE_ADMIN',
       'ORG_ADMIN',
       'STORE_ECOMMERCE',
+      'STORE_DELIVERY',
       'VENDIX_LANDING',
       'VENDIX_ADMIN',
     ];
@@ -3199,7 +3200,8 @@ export class AuthService {
         | 'ORG_ADMIN'
         | 'STORE_LANDING'
         | 'STORE_ADMIN'
-        | 'STORE_ECOMMERCE';
+        | 'STORE_ECOMMERCE'
+        | 'STORE_DELIVERY';
     },
   ): Promise<{
     access_token: string;

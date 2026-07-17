@@ -3539,6 +3539,7 @@ enum app_type_enum {
   STORE_LANDING // Landing de tienda
   STORE_ADMIN // Admin de tienda
   STORE_ECOMMERCE // Ecommerce de tienda
+  STORE_DELIVERY // App interna de delivery (carrier / Vendix Repartos)
 }
 
 enum domain_status_enum {

@@ -18,6 +18,7 @@ export class MarkPanelUiSeenDto {
     'STORE_ADMIN',
     'ORG_ADMIN',
     'STORE_ECOMMERCE',
+    'STORE_DELIVERY',
     'VENDIX_LANDING',
     'VENDIX_ADMIN',
   ])

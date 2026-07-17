@@ -3,11 +3,28 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UserConfigDto {
   @ApiProperty({
-    enum: ['ORG_ADMIN', 'STORE_ADMIN', 'STORE_ECOMMERCE', 'VENDIX_LANDING'],
+    enum: [
+      'ORG_ADMIN',
+      'STORE_ADMIN',
+      'STORE_ECOMMERCE',
+      'STORE_DELIVERY',
+      'VENDIX_LANDING',
+    ],
     description: 'Application assigned to the user',
   })
-  @IsEnum(['ORG_ADMIN', 'STORE_ADMIN', 'STORE_ECOMMERCE', 'VENDIX_LANDING'])
-  app: 'ORG_ADMIN' | 'STORE_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
+  @IsEnum([
+    'ORG_ADMIN',
+    'STORE_ADMIN',
+    'STORE_ECOMMERCE',
+    'STORE_DELIVERY',
+    'VENDIX_LANDING',
+  ])
+  app:
+    | 'ORG_ADMIN'
+    | 'STORE_ADMIN'
+    | 'STORE_ECOMMERCE'
+    | 'STORE_DELIVERY'
+    | 'VENDIX_LANDING';
 
   @ApiPropertyOptional({
     type: [Number],
