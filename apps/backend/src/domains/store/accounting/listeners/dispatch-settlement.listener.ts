@@ -83,12 +83,15 @@ export class DispatchSettlementListener implements OnModuleInit {
       }
 
       // Idempotencia: ¿ya existe CxP para esta ruta?
+      // Solo se usa `id` (el bloque de abajo loguea y retorna); un select de
+      // más campos disparaba `Unknown field paid` (el campo real es
+      // `paid_amount`) y el catch lo tragaba, dejando la CxP sin crear.
       const existing_ap = await this.prisma.accounts_payable.findFirst({
         where: {
           source_type: 'dispatch_route',
           source_id: data.route_id,
         },
-        select: { id: true, original_amount: true, paid: true },
+        select: { id: true },
       });
       if (existing_ap) {
         this.logger.log(
@@ -98,8 +101,17 @@ export class DispatchSettlementListener implements OnModuleInit {
       }
 
       // 1. Resolver el supplier (con su snapshot) y la retención de transporte.
+      // Scope tenant-safe tolerante al operating scope: en orgs con scope
+      // ORGANIZATION los suppliers viven con store_id=null (ver
+      // suppliers.service getSupplierScopeWhere); un filtro fijo `store_id:
+      // ctx_store` nunca los encuentra. Guardamos por organization_id y
+      // aceptamos tanto el supplier de esta tienda como el org-level.
       const supplier = await this.prisma.suppliers.findFirst({
-        where: { id: data.transporter_supplier_id, store_id: ctx_store },
+        where: {
+          id: data.transporter_supplier_id,
+          organization_id: ctx_org,
+          OR: [{ store_id: ctx_store }, { store_id: null }],
+        },
       });
       if (!supplier) {
         this.logger.warn(
