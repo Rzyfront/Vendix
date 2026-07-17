@@ -362,16 +362,17 @@ export class StoreEcommerceLayoutComponent {
 
     // Auto-load the running table bill so the fixed mobile bar can surface the
     // amount due without forcing the diner to open the "Mi cuenta" modal first.
-    // Fires once per (token, kitchen-status) tick: orderStatus advancing is a
-    // cheap proxy for "the order changed", so the bar total stays fresh as
-    // items are fired. Read-only (getMyBill); errors are swallowed so the bar
-    // simply omits the amount instead of surfacing a toast on a background poll.
+    // Fires once per (token, billLastUpdated) tick: billLastUpdated is bumped
+    // by the SSE `item_added` handler (D2), so the bill stays fresh as soon
+    // as another comensal — or this one — adds an item. Read-only (getMyBill);
+    // errors are swallowed so the bar simply omits the amount instead of
+    // surfacing a toast on a background poll.
     effect(() => {
       if (!this.is_browser) return;
       if (!this.table_context_service.isOpenTab()) return;
       const token = this.table_context_service.tableToken();
       if (!token) return;
-      const tick = this.table_sse_service.orderStatus() ?? 'init';
+      const tick = this.table_sse_service.billLastUpdated() ?? 0;
       const key = `${token}::${tick}`;
       if (key === this.bill_autoload_key) return;
       this.bill_autoload_key = key;

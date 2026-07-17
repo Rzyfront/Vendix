@@ -796,9 +796,18 @@ export class ProductCardComponent {
       this.qtyToAdd(),
     );
     if (result && this.tableContext.isOpenTab()) {
-      // mesa path: addProduct returns the addOrder observable; reset stepper
-      // on success (the chokepoint already toasted the mesa success).
+      // Mesa path: addProduct routes to tableContext.addOrder. We do NOT emit
+      // `add_to_cart` upstream — the parent container would otherwise call
+      // `cartService.addProduct` again, dispatching a SECOND POST and adding
+      // the dish twice to the bill (BUG A — Step 8 single-dispatch cure).
       result.subscribe(() => this.qtyToAdd.set(1));
+      return;
+    }
+    // Non-mesa path: emit `add_to_cart` for any parent listeners (e.g. cart
+    // animation trigger). The chokepoint already added the item, so the
+    // container's handler is a no-op via the mesa-guard below.
+    if (result) {
+      result.subscribe();
     }
     this.add_to_cart.emit(this.product());
   }

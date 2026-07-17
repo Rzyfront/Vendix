@@ -276,6 +276,14 @@ export class TableContextService {
   readonly calling_waiter = signal(false);
   readonly requesting_bill = signal(false);
 
+  /**
+   * In-flight guard for `addOrder`. While a POST is pending, additional
+   * calls short-circuit (no duplicate POST). Belt-and-suspenders alongside
+   * the upstream single-dispatch in product-card.onAddToCart (Step 8).
+   */
+  private readonly addingOrderInFlight = signal(false);
+  readonly isAddingOrder = computed(() => this.addingOrderInFlight());
+
   // ── Payment state (D1 — diner self-checkout C2) ─────────────────
   /** Payment methods the diner can choose from for the table pay flow. */
   private readonly _paymentMethods = signal<PaymentMethodView[]>([]);
@@ -443,12 +451,26 @@ export class TableContextService {
    * Adds items to the running table tab/order. Only valid when
    * `behavior === 'open_tab'` (or `require_staff` confirmed by staff).
    * Backend returns 409 for `menu_only` / `mark_occupied`.
+   *
+   * In-flight guard (Step 8 — BUG A cure): a single diner click must equal a
+   * single POST. While one request is pending, additional clicks are dropped
+   * here so duplicate dispatch upstream (rapid click, re-emit) can never
+   * double the items on the bill. The returned Observable for a guarded
+   * call completes immediately with no emission so qty-stepper resets don't
+   * false-trigger for ignored clicks.
    */
   addOrder(items: TableOrderItem[]): Observable<AddTableOrderResponse> {
+    if (this.addingOrderInFlight()) {
+      // Drop the click — another POST is already in flight.
+      return new Observable<AddTableOrderResponse>((observer) => {
+        observer.complete();
+      });
+    }
     const token = this.tableToken();
     if (!token) {
       throw new Error('TableContextService.addOrder: no active table token');
     }
+    this.addingOrderInFlight.set(true);
     return this.http
       .post<AddTableOrderResponse>(
         `${this.api_url}/${token}/order`,
@@ -462,6 +484,7 @@ export class TableContextService {
             this.persist();
           }
         }),
+        finalize(() => this.addingOrderInFlight.set(false)),
       );
   }
 
