@@ -94,7 +94,17 @@ export class RecipesService {
     return this.http
       .post<ApiResponse<Recipe>>(`${this.apiUrl}${this.basePath}`, dto)
       .pipe(
-        map((res) => res.data),
+        // Some backend endpoints return HTTP 200 with {success: false, message}
+        // instead of a proper 4xx. Map that case to an error so callers see
+        // the same shape regardless of how the backend reports failure.
+        map((res) => {
+          if (res?.success === false) {
+            const message =
+              (res as { message?: string }).message ?? 'Error desconocido';
+            throw new Error(message);
+          }
+          return res.data;
+        }),
         catchError(this.handleError),
       );
   }
