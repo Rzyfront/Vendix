@@ -210,10 +210,12 @@ export class TablesService {
    *
    * IMPORTANT: the caller MUST have already verified that the table
    * belongs to this store (via `tables.findFirst`) before opening the
-   * transaction. `table_waiters` is intentionally NOT registered in
-   * the StorePrisma relational scope map (it would require editing
-   * the shared prisma service — out of scope for this step); the
-   * transitive trust on `table_id` is what enforces isolation.
+   * transaction. `table_waiters` is ALSO registered in the StorePrisma
+   * relational scope map (`table: { store_id }`), so direct read/update/
+   * delete operations are tenant-filtered defensively; the transitive
+   * trust on `table_id` here is a second layer, not the only one. Note
+   * `createMany` is intentionally NOT store-injected (relational models
+   * skip the create branch), so the insert below still works as written.
    */
   private async syncTableWaiters(
     tx: Prisma.TransactionClient,

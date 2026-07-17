@@ -322,6 +322,7 @@ export class StorePrismaService extends BasePrismaService {
       'recipe_items', // Relational (via recipe.store_id)
       'kitchen_ticket_items', // Relational (via kitchen_ticket.store_id)
       'menu_section_items', // Relational (via menu_section.store_id)
+      'table_waiters', // Relational (via tables.store_id)
     ];
 
     for (const model of all_scoped_models) {
@@ -543,6 +544,13 @@ export class StorePrismaService extends BasePrismaService {
         kitchen_ticket: { store_id: context.store_id },
       },
       menu_section_items: { menu_section: { store_id: context.store_id } },
+      // table_waiters is the N:M pivot (table_id ↔ user_id) with no direct
+      // store_id column. Scope it via its parent `tables` so a direct query
+      // like `table_waiters.findMany({ where: { user_id } })` (the reverse
+      // lookup that the @@index([user_id]) invites) cannot leak assignments
+      // across tenants. create/createMany fall through unmodified (relational
+      // models are not in store_scoped_models), so syncTableWaiters still works.
+      table_waiters: { table: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
