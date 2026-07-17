@@ -596,11 +596,13 @@ export class PromotionEngineService {
 
       if (!candidateResult) continue;
 
-      // Compare to the current winner. Highest priority wins. Ties broken by
-      // lowest promotion_id (deterministic, stable across runs).
+      // Compare to the current winner. LOWER priority number = HIGHER
+      // importance (per Edward's design — priority 1 is the "first" promo
+      // to apply, like a priority queue). Ties broken by lowest
+      // promotion_id (the older one wins on tie).
       if (
         winner === null ||
-        promo.priority > winner.promo.priority ||
+        promo.priority < winner.promo.priority ||
         (promo.priority === winner.promo.priority && promo.id < winner.promo.id)
       ) {
         winner = {

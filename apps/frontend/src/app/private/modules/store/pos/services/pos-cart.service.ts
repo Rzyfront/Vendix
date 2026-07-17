@@ -627,7 +627,7 @@ export class PosCartService {
             };
             if (
               winner === null ||
-              Number(promo.priority ?? 0) > winner.priority ||
+              Number(promo.priority ?? 0) < winner.priority ||
               (Number(promo.priority ?? 0) === winner.priority &&
                 Number(promo.id) < winner.id)
             ) {
@@ -665,7 +665,7 @@ export class PosCartService {
           };
           if (
             winner === null ||
-            Number(promo.priority ?? 0) > winner.priority ||
+            Number(promo.priority ?? 0) < winner.priority ||
             (Number(promo.priority ?? 0) === winner.priority &&
               Number(promo.id) < winner.id)
           ) {
