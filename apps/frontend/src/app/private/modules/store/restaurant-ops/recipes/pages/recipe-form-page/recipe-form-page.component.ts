@@ -321,19 +321,29 @@ export class RecipeFormPageComponent implements OnInit {
     this.submitError.set(null); // clear any previous inline error
     this.form.markAllAsTouched();
     this.itemsArray.markAllAsTouched();
-    if (this.form.invalid || this.itemsArray.invalid) {
+    const formInvalid = this.form.invalid;
+    const itemsInvalid = this.itemsArray.invalid;
+    const itemsCount = this.itemsArray.length;
+    console.debug('[recipe-form] submit() called', {
+      formInvalid,
+      itemsInvalid,
+      itemsCount,
+    });
+    if (formInvalid || itemsInvalid) {
       // Compose a specific inline message that names the actual problem
       // rather than a generic "review the fields" hint.
       const errors: string[] = [];
-      if (this.itemsArray.length === 0) {
+      if (itemsCount === 0) {
         errors.push('Agregá al menos un componente a la receta.');
-      } else if (this.itemsArray.invalid) {
+      } else if (itemsInvalid) {
         errors.push('Revisá los componentes: cada uno necesita un insumo y cantidad mayor a 0.');
       }
-      if (this.form.invalid) {
+      if (formInvalid) {
         errors.push('Completá los campos obligatorios del encabezado.');
       }
-      this.submitError.set(errors.join(' '));
+      const composedMessage = errors.join(' ');
+      console.debug('[recipe-form] setting submitError:', composedMessage);
+      this.submitError.set(composedMessage);
       this.toastService.warning('Revisa los campos marcados antes de guardar');
       return;
     }
