@@ -18,7 +18,7 @@ export class UpdateRecipeItemDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
   @Type(() => Number)
-  @Min(0)
+  @Min(0.0001, { message: 'La cantidad del sub-componente debe ser mayor a 0' })
   quantity?: number;
 
   @IsOptional()

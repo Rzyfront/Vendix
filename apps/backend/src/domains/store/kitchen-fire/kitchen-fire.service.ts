@@ -468,7 +468,15 @@ export class KitchenFireService {
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
       for (const line of bomLines) {
         const consumedQty = Math.round(line.quantity * orderQty);
-        if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
+        if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
+          // Defensive: this should never happen if the recipe items have
+          // valid quantities. Warn loudly so the data-integrity issue is
+          // visible in ops rather than silently dropping the line.
+          this.logger.warn(
+            `Skipping zero/invalid BOM line in recipe for order item ${orderItem.id}: component=${line.component_product_id} qty=${line.quantity}`,
+          );
+          continue;
+        }
 
         const locationId = locationByProduct.get(
           line.component_product_id,
