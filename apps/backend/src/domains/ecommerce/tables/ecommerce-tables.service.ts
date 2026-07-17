@@ -13,6 +13,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { TablesService } from '../../store/tables/tables.service';
 import { TableSessionsService } from '../../store/tables/table-sessions.service';
 import { SettingsService } from '../../store/settings/settings.service';
+import { CustomersService } from '../../store/customers/customers.service';
 import { KitchenFireService } from '../../store/kitchen-fire/kitchen-fire.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { NotificationsSseService } from '../../store/notifications/notifications-sse.service';
@@ -27,6 +28,7 @@ import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
   CallWaiterDto,
+  IdentifyTableDto,
   PayTableDto,
   RequestBillDto,
   RequestSplitDto,
@@ -50,6 +52,32 @@ export interface ResolveByTokenResult {
   auto_fire: boolean;
   enable_table_checkout: boolean;
   session_id?: number;
+  /**
+   * Welcome-wizard gates (Step 4). Both are read from `pos.*` in the same
+   * `store_settings` row `getQrSettings` already loads (single read), so the
+   * storefront can offer/skip the anonymous option without a second request.
+   */
+  allow_anonymous: boolean;
+  anonymous_default: boolean;
+  /**
+   * Identity currently attached to the table's active session (if any),
+   * resolved SERVER-SIDE from `orders.customer_id`. `null` when the session
+   * is anonymous or no session is open. The full `store_settings` object is
+   * never exposed — only these derived flags.
+   */
+  customer: { id: number; name: string } | null;
+}
+
+/**
+ * Result of the welcome-wizard identify endpoint (Step 3). `customer` is
+ * `null` for the anonymous mode; `session_id` echoes the active session the
+ * identity was attached to (null in pre-session modes where no tab exists
+ * yet — the client persists the identity and re-sends it on `call-waiter`).
+ */
+export interface IdentifyTableResult {
+  ok: true;
+  customer: { id: number; name: string } | null;
+  session_id: number | null;
 }
 
 export interface AddOrderItemsResult {
@@ -179,6 +207,7 @@ export class EcommerceTablesService {
     private readonly tablesService: TablesService,
     private readonly tableSessionsService: TableSessionsService,
     private readonly settingsService: SettingsService,
+    private readonly customersService: CustomersService,
     private readonly kitchenFireService: KitchenFireService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     private readonly sseService: NotificationsSseService,
@@ -203,6 +232,8 @@ export class EcommerceTablesService {
     behavior: QrScanBehavior;
     auto_fire: boolean;
     enable_table_checkout: boolean;
+    allow_anonymous_sales: boolean;
+    anonymous_sales_as_default: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -214,11 +245,16 @@ export class EcommerceTablesService {
       select: { settings: true },
     });
     const restaurant = (row?.settings as any)?.restaurant ?? {};
+    // `pos.*` gates the welcome wizard's anonymous option (Step 3/4). Read
+    // from the SAME settings row so resolve + identify stay single-read.
+    const pos = (row?.settings as any)?.pos ?? {};
 
     return {
       behavior: (restaurant.qr_scan_behavior as QrScanBehavior) ?? 'menu_only',
       auto_fire: !!restaurant.qr_auto_fire,
       enable_table_checkout: !!restaurant.enable_table_checkout,
+      allow_anonymous_sales: pos.allow_anonymous_sales === true,
+      anonymous_sales_as_default: pos.anonymous_sales_as_default === true,
     };
   }
 
@@ -255,8 +291,13 @@ export class EcommerceTablesService {
       throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
     }
 
-    const { behavior, auto_fire, enable_table_checkout } =
-      await this.getQrSettings();
+    const {
+      behavior,
+      auto_fire,
+      enable_table_checkout,
+      allow_anonymous_sales,
+      anonymous_sales_as_default,
+    } = await this.getQrSettings();
 
     let session_id: number | undefined;
 
@@ -297,13 +338,175 @@ export class EcommerceTablesService {
         break;
     }
 
+    // Step 4 — resolve the identity attached to the table's active session
+    // (if any) so the welcome wizard can pre-fill / skip the identity step.
+    // Works for every mode: `open_tab` just opened one; the others may still
+    // have a POS-opened session. Derived SERVER-SIDE from `orders.customer_id`.
+    let customer: { id: number; name: string } | null = null;
+    const activeSession = await this.tablesService.getActiveSession(table.id);
+    if (activeSession) {
+      customer = await this.resolveOrderCustomer(activeSession.order_id);
+    }
+
     return {
       store_id,
       table: { id: table.id, name: table.name },
       behavior,
       auto_fire,
       enable_table_checkout,
+      allow_anonymous: allow_anonymous_sales,
+      anonymous_default: anonymous_sales_as_default,
+      customer,
       ...(session_id !== undefined && { session_id }),
+    };
+  }
+
+  // ------------------------------------------------------------- identify
+  /**
+   * Step 3 — Welcome-wizard identity. A single `@OptionalAuth` endpoint that
+   * centralizes the three diner identity modes:
+   *
+   *   - `anonymous`     → no identity is created. Only allowed when the store
+   *                       enables `pos.allow_anonymous_sales`; otherwise the
+   *                       SAME `TABLE_SESSION_CUSTOMER_REQUIRED` error that
+   *                       `TableSessionsService.openSession` throws for a
+   *                       disallowed anonymous open is reused (no new code).
+   *   - `guest`         → resolves/creates a "cliente presentado" via
+   *                       `CustomersService.resolveTableGuestCustomer`.
+   *   - `authenticated` → attaches the logged-in customer (`req.user`).
+   *
+   * Session assignment happens ONLY when a tab is already open
+   * (`open_tab` auto-opened it in `resolveByToken`, or a POS-opened session
+   * exists). In `mark_occupied` / `require_staff` there is no session yet, so
+   * the resolved identity is returned to the client to persist and re-attach
+   * later (e.g. on `call-waiter`).
+   */
+  async identify(
+    token: string,
+    dto: IdentifyTableDto,
+    userId?: number,
+  ): Promise<IdentifyTableResult> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!token || typeof token !== 'string') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Token de mesa requerido',
+      );
+    }
+
+    const table = await this.prisma.tables.findFirst({
+      where: { public_token: token },
+      select: { id: true, name: true },
+    });
+    if (!table) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+    }
+
+    // May be null in the pre-session window (menu_only / mark_occupied /
+    // require_staff before the mesero confirms). Assignment is a no-op then.
+    const session = await this.tablesService.getActiveSession(table.id);
+
+    switch (dto.mode) {
+      case 'anonymous': {
+        // Gate ONLY the explicit anonymous choice — reuse the exact
+        // ErrorCode `openSession` throws for a disallowed anonymous open.
+        const { allow_anonymous_sales } = await this.getQrSettings();
+        if (allow_anonymous_sales !== true) {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_CUSTOMER_REQUIRED,
+          );
+        }
+        // No mutation — an already-open session simply stays anonymous.
+        return { ok: true, customer: null, session_id: session?.id ?? null };
+      }
+
+      case 'guest': {
+        if (!dto.guest?.first_name) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_VALIDATION_001,
+            'El nombre del comensal es requerido para identificarse',
+          );
+        }
+        const c = await this.customersService.resolveTableGuestCustomer(
+          store_id,
+          dto.guest,
+        );
+        if (session) {
+          await this.tableSessionsService.assignCustomer(
+            session.id,
+            c.customer_id,
+          );
+        }
+        return {
+          ok: true,
+          customer: { id: c.customer_id, name: c.name },
+          session_id: session?.id ?? null,
+        };
+      }
+
+      case 'authenticated': {
+        if (!userId) {
+          throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+        }
+        const name = await this.resolveCustomerName(userId);
+        if (session) {
+          await this.tableSessionsService.assignCustomer(session.id, userId);
+        }
+        return {
+          ok: true,
+          customer: { id: userId, name },
+          session_id: session?.id ?? null,
+        };
+      }
+
+      default:
+        // Unreachable — `mode` is enum-validated by the DTO.
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Modo de identificación inválido',
+        );
+    }
+  }
+
+  // --------------------------------------------------- customer resolution
+  /**
+   * Resolve a diner's display name from `users` (scope-safe: the `users`
+   * getter is unscoped, so a findFirst by id carries no AND-wrap caveat).
+   * Returns an empty string when the user row is missing.
+   */
+  private async resolveCustomerName(userId: number): Promise<string> {
+    const user = await this.prisma.users.findFirst({
+      where: { id: userId },
+      select: { first_name: true, last_name: true },
+    });
+    if (!user) return '';
+    return [user.first_name, user.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  }
+
+  /**
+   * Resolve the identity attached to an order (via `orders.customer_id`),
+   * returning `{ id, name }` or `null` for an anonymous order. `orders` is
+   * store-scoped (StorePrismaService), and the `order_id` always originates
+   * from a store-scoped table + active-session lookup — so this stays
+   * tenant-safe.
+   */
+  private async resolveOrderCustomer(
+    orderId: number,
+  ): Promise<{ id: number; name: string } | null> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: { customer_id: true },
+    });
+    if (!order?.customer_id) return null;
+    return {
+      id: order.customer_id,
+      name: await this.resolveCustomerName(order.customer_id),
     };
   }
 
@@ -722,7 +925,11 @@ export class EcommerceTablesService {
    * (`open_tab`). Unlike `requestBill`/`requestSplit`, which genuinely need an
    * open tab, calling a waiter is valid at any point once the table resolves.
    */
-  async callWaiter(token: string, note?: string): Promise<{ ok: true }> {
+  async callWaiter(
+    token: string,
+    note?: string,
+    customer?: { id?: number; name?: string },
+  ): Promise<{ ok: true }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -745,6 +952,22 @@ export class EcommerceTablesService {
     // May be null in the pre-session window (mark_occupied / require_staff).
     const session = await this.tablesService.getActiveSession(table.id);
 
+    // Step 3 — identity for the staff notification. Prefer the identity
+    // already attached to the active session (canonical); fall back to the
+    // client hint for pre-session modes where no tab exists yet. When
+    // neither is present the fields stay null (behaviour unchanged).
+    let customerId: number | null = customer?.id ?? null;
+    let customerName: string | null = customer?.name ?? null;
+    if (session) {
+      const sessionCustomer = await this.resolveOrderCustomer(
+        session.order_id,
+      );
+      if (sessionCustomer) {
+        customerId = sessionCustomer.id;
+        customerName = sessionCustomer.name;
+      }
+    }
+
     await this.dispatchStaffNotification(
       store_id,
       table.id,
@@ -757,6 +980,8 @@ export class EcommerceTablesService {
         table_session_id: session?.id ?? null,
         order_id: session?.order_id ?? null,
         note: note ?? null,
+        customer_id: customerId,
+        customer_name: customerName,
       },
       token,
     );

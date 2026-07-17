@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { TablesModule } from '../../store/tables/tables.module';
 import { SettingsModule } from '../../store/settings/settings.module';
+import { CustomersModule } from '../../store/customers/customers.module';
 import { MenusModule } from '../../store/menus/menus.module';
 import { KitchenFireModule } from '../../store/kitchen-fire/kitchen-fire.module';
 import { NotificationsModule } from '../../store/notifications/notifications.module';
@@ -19,6 +20,8 @@ import { EcommerceTablesService } from './ecommerce-tables.service';
  *   - TablesModule:           TablesService (getActiveSession, update),
  *                             TableSessionsService (openTableSessionPublic, addItems)
  *   - SettingsModule:         SettingsService (store currency fallback)
+ *   - CustomersModule:        CustomersService (resolveTableGuestCustomer —
+ *                             welcome-wizard "cliente presentado")
  *   - MenusModule:            MenuAvailabilityCheckerService (carta window gating)
  *   - KitchenFireModule:      KitchenFireService (prepareFireContext, fireOrderItemsInTx,
  *                             emitKitchenFiredAfterCommit — auto-fire path)
@@ -41,6 +44,7 @@ import { EcommerceTablesService } from './ecommerce-tables.service';
     PrismaModule,
     TablesModule,
     SettingsModule,
+    CustomersModule,
     MenusModule,
     KitchenFireModule,
     NotificationsModule,

@@ -26,6 +26,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
   CallWaiterDto,
+  IdentifyTableDto,
   PayTableDto,
   RequestBillDto,
   RequestSplitDto,
@@ -126,6 +127,25 @@ export class EcommerceTablesController {
       throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     const data = await this.service.confirmStaff(token, userId);
+    return { success: true, data };
+  }
+
+  /**
+   * Step 3 — Welcome-wizard identity. `@OptionalAuth` — an authenticated
+   * diner brings `req.user` (mode `authenticated`); anonymous/guest diners
+   * do not. Centralizes the three identity modes (anonymous / guest /
+   * authenticated); the service gates the anonymous option on
+   * `pos.allow_anonymous_sales` and attaches the identity to the active
+   * session when a tab is already open.
+   */
+  @Post(':token/identify')
+  @OptionalAuth()
+  async identify(
+    @Param('token') token: string,
+    @Body() dto: IdentifyTableDto,
+  ) {
+    const userId = RequestContextService.getUserId() ?? undefined;
+    const data = await this.service.identify(token, dto, userId);
     return { success: true, data };
   }
 
@@ -445,7 +465,7 @@ export class EcommerceTablesController {
     @Param('token') token: string,
     @Body() dto: CallWaiterDto,
   ) {
-    const data = await this.service.callWaiter(token, dto.note);
+    const data = await this.service.callWaiter(token, dto.note, dto.customer);
     return { success: true, data };
   }
 
