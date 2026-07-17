@@ -2901,6 +2901,7 @@ enum notification_type_enum {
   table_request_split
   table_payment_pending
   table_payment_confirmed
+  qr_table_scan
 }
 
 model notifications {
