@@ -66,6 +66,7 @@
           [actionInFlight]="actionInFlight()"
           [lastResult]="lastCheckin()"
           [kiosk]="kioskMode()"
+          [scannerDefaultMode]="scannerDefaultMode()"
           (validate)="onCheckin($event)"
         />
       </div>
@@ -449,6 +450,29 @@
           [ngModel]="cfgQrKioskMode()"
           (changed)="cfgQrKioskMode.set($event)"
         />
+      </div>
+
+      <div class="access-kiosk-toggle">
+        <label class="aforo-field-label">Modo del escáner por defecto</label>
+        <p class="aforo-field-hint">Cómo se abre el escáner QR: a pantalla completa o como ventana flotante que se puede mover, escalar y minimizar. Cada dispositivo recuerda su última posición.</p>
+        <div class="aforo-interval">
+          <button
+            type="button"
+            class="aforo-chip"
+            [class.active]="cfgQrScannerDefaultMode() === 'fullscreen'"
+            (click)="cfgQrScannerDefaultMode.set('fullscreen')"
+          >
+            Pantalla completa
+          </button>
+          <button
+            type="button"
+            class="aforo-chip"
+            [class.active]="cfgQrScannerDefaultMode() === 'floating'"
+            (click)="cfgQrScannerDefaultMode.set('floating')"
+          >
+            Ventana flotante
+          </button>
+        </div>
       </div>
 
       <div class="form-grid">

@@ -201,3 +201,57 @@
     top: 50%;
   }
 }
+
+/* ── Floating window mode ────────────────────────────────────────────── */
+.scanner-overlay.is-floating {
+  inset: auto;
+  border-radius: 1rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  z-index: 10001;
+}
+.scanner-overlay.is-floating .scanner-topbar {
+  justify-content: space-between;
+  align-items: center;
+  cursor: grab;
+  touch-action: none;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
+  padding: 0.5rem 0.5rem 0.75rem;
+}
+.scanner-overlay.is-floating .scanner-topbar:active { cursor: grabbing; }
+.scanner-overlay.is-floating .scanner-frame { width: 62%; max-width: 200px; }
+
+.scanner-grip { display: inline-flex; color: rgba(255, 255, 255, 0.7); }
+.scanner-topbar-actions { display: inline-flex; gap: 0.4rem; }
+.scanner-ctl {
+  width: 2.25rem; height: 2.25rem; border: none; border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.5); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; backdrop-filter: blur(6px); transition: background-color 160ms ease;
+}
+.scanner-ctl:hover { background: rgba(0, 0, 0, 0.7); }
+
+/* ── Minimized bubble ────────────────────────────────────────────────── */
+.scanner-overlay.is-minimized {
+  border-radius: 9999px;
+  border: 2px solid var(--color-primary, #16a34a);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  cursor: grab;
+  touch-action: none;
+}
+.scanner-overlay.is-minimized:active { cursor: grabbing; }
+.scanner-overlay.is-minimized .scanner-topbar { display: none; }
+.scanner-overlay.is-minimized .scanner-video { border-radius: 9999px; }
+
+/* ── Resize handle (bottom-right) ────────────────────────────────────── */
+.scanner-resize {
+  position: absolute; right: 0; bottom: 0; width: 1.5rem; height: 1.5rem;
+  z-index: 15; cursor: nwse-resize; touch-action: none;
+  background: linear-gradient(135deg,
+    transparent 0 55%,
+    rgba(255, 255, 255, 0.55) 55% 62%,
+    transparent 62% 72%,
+    rgba(255, 255, 255, 0.55) 72% 79%,
+    transparent 79%);
+}

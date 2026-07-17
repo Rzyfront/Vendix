@@ -28,7 +28,7 @@ import {
   GymAccessResult,
   GymCredentialType,
 } from '../../interfaces';
-import { AforoQrScannerComponent } from '../aforo-qr-scanner/aforo-qr-scanner.component';
+import { AforoQrScannerComponent, ScannerViewMode } from '../aforo-qr-scanner/aforo-qr-scanner.component';
 
 /** Normalized shape rendered by the result pill (QR/PIN or fingerprint). */
 interface CheckinResultView {
@@ -218,6 +218,7 @@ interface CheckinResultView {
     <app-aforo-qr-scanner
       [isOpen]="scannerOpen()"
       [continuous]="kiosk()"
+      [defaultMode]="scannerDefaultMode()"
       (scanned)="onQrScanned($event)"
       (closed)="scannerOpen.set(false)"
     />
@@ -236,6 +237,8 @@ export class AforoCheckinPanelComponent {
    * unattended reception tablet grants access on each read.
    */
   readonly kiosk = input<boolean>(false);
+  /** Store default display mode for the QR scanner (fullscreen | floating). */
+  readonly scannerDefaultMode = input<ScannerViewMode>('fullscreen');
 
   /** Emitted when the operator submits a credential to validate. */
   readonly validate = output<{

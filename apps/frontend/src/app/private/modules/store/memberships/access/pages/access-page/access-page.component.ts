@@ -51,6 +51,7 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { MembershipCredentialFormModalComponent } from '../../components/credential-form-modal/credential-form-modal.component';
 import { AforoGaugeComponent } from '../../components/aforo-gauge/aforo-gauge.component';
 import { AforoCheckinPanelComponent } from '../../components/aforo-checkin-panel/aforo-checkin-panel.component';
+import type { ScannerViewMode } from '../../components/aforo-qr-scanner/aforo-qr-scanner.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
@@ -278,9 +279,16 @@ export class MembershipAccessPageComponent implements OnInit {
   /** QR scanner kiosk mode (always-on continuous scanner on the Aforo tab). */
   readonly cfgQrKioskMode = signal(false);
   private cfgKioskPersisted = signal(false);
+  /** QR scanner default display mode (store setting). */
+  readonly cfgQrScannerDefaultMode = signal<ScannerViewMode>('fullscreen');
+  private cfgScannerModePersisted = signal<ScannerViewMode>('fullscreen');
   /** Effective kiosk flag from persisted settings (drives the live scanner). */
   readonly kioskMode = computed(
     () => this.membershipSettings?.qr_kiosk_mode ?? false,
+  );
+  /** Effective scanner default mode from persisted settings (feeds the panel). */
+  readonly scannerDefaultMode = computed<ScannerViewMode>(
+    () => this.membershipSettings?.qr_scanner_default_mode ?? 'fullscreen',
   );
   readonly cfgFingerprintReaderType = signal<'id_wrapper' | 'template_sdk'>('id_wrapper');
   readonly cfgFingerprintSdkProvider = signal<'zkteco' | 'digitalpersona' | 'generic_http' | null>(null);
@@ -320,10 +328,12 @@ export class MembershipAccessPageComponent implements OnInit {
   });
   readonly cfgConfigDirty = computed(() => {
     const kioskDirty = this.cfgQrKioskMode() !== this.cfgKioskPersisted();
+    const modeDirty = this.cfgQrScannerDefaultMode() !== this.cfgScannerModePersisted();
     const p = this.cfgFingerprintPersisted();
-    if (!p) return kioskDirty || this.cfgFingerprintReaderType() !== 'id_wrapper';
+    if (!p) return kioskDirty || modeDirty || this.cfgFingerprintReaderType() !== 'id_wrapper';
     return (
       kioskDirty ||
+      modeDirty ||
       p.reader_type !== this.cfgFingerprintReaderType() ||
       p.sdk_provider !== this.cfgFingerprintSdkProvider() ||
       p.endpoint !== this.cfgFingerprintEndpoint().trim() ||
@@ -894,6 +904,11 @@ export class MembershipAccessPageComponent implements OnInit {
     const kiosk = m?.qr_kiosk_mode ?? false;
     this.cfgQrKioskMode.set(kiosk);
     this.cfgKioskPersisted.set(kiosk);
+
+    // QR scanner default display mode (fullscreen | floating).
+    const scannerMode: ScannerViewMode = m?.qr_scanner_default_mode ?? 'fullscreen';
+    this.cfgQrScannerDefaultMode.set(scannerMode);
+    this.cfgScannerModePersisted.set(scannerMode);
   }
 
   onCapacityControlToggle(enabled: boolean): void {
@@ -1022,6 +1037,7 @@ export class MembershipAccessPageComponent implements OnInit {
       ...current,
       ambient_access_enabled: current?.ambient_access_enabled ?? false,
       qr_kiosk_mode: this.cfgQrKioskMode(),
+      qr_scanner_default_mode: this.cfgQrScannerDefaultMode(),
       fingerprint_device: fingerprint_device as MembershipSettings['fingerprint_device'],
     };
 
@@ -1041,6 +1057,7 @@ export class MembershipAccessPageComponent implements OnInit {
             verify_timeout_ms: fingerprint_device.verify_timeout_ms ?? null,
           });
           this.cfgKioskPersisted.set(this.cfgQrKioskMode());
+          this.cfgScannerModePersisted.set(this.cfgQrScannerDefaultMode());
           this.toastService.success('Configuración guardada');
         },
         error: (err: unknown) => {
