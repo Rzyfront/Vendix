@@ -77,7 +77,9 @@ export class MenusPageComponent implements OnInit {
   private readonly cartService = inject(CartService);
   private readonly wishlistService = inject(WishlistService);
   private readonly storeUiService = inject(StoreUiService);
-  private readonly tableContext = inject(TableContextService);
+  /** QR-mode-aware visibility (Step 7) — consumed by the dish-quick-btn
+   *  template to hide purchase CTAs when the active scan mode forbids it. */
+  protected readonly tableContext = inject(TableContextService);
   private readonly authFacade = inject(AuthFacade);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);

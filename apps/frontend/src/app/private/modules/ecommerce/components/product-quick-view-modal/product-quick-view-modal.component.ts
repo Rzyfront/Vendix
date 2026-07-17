@@ -20,6 +20,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { TableContextService } from '../../services/table-context.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
 
 @Component({
@@ -183,38 +184,40 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             </div>
 
             <!-- Actions -->
-            <div class="quick-view-actions">
+            @if (!hideDineInPurchase()) {
+              <div class="quick-view-actions">
+                <app-button
+                  variant="secondary"
+                  size="sm"
+                  [fullWidth]="true"
+                  [disabled]="purchaseDisabled()"
+                  (clicked)="onAddToCart()"
+                >
+                  <app-icon slot="icon" name="shopping-cart" [size]="18" />
+                  Agregar al carrito
+                </app-button>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  customClasses="share-btn"
+                  (clicked)="onShareClick()"
+                >
+                  <app-icon slot="icon" name="share" [size]="18" />
+                </app-button>
+              </div>
+
+              <!-- Buy Now -->
               <app-button
-                variant="secondary"
-                size="sm"
+                variant="primary"
+                size="md"
                 [fullWidth]="true"
                 [disabled]="purchaseDisabled()"
-                (clicked)="onAddToCart()"
+                (clicked)="onBuyNow()"
               >
-                <app-icon slot="icon" name="shopping-cart" [size]="18" />
-                Agregar al carrito
+                <app-icon slot="icon" [name]="prod.requires_booking && prod.product_type === 'service' ? 'calendar-check' : 'shopping-bag'" [size]="18" />
+                {{ prod.requires_booking && prod.product_type === 'service' ? 'Agendar ahora' : 'Comprar ahora' }}
               </app-button>
-              <app-button
-                variant="outline"
-                size="sm"
-                customClasses="share-btn"
-                (clicked)="onShareClick()"
-              >
-                <app-icon slot="icon" name="share" [size]="18" />
-              </app-button>
-            </div>
-
-            <!-- Buy Now -->
-            <app-button
-              variant="primary"
-              size="md"
-              [fullWidth]="true"
-              [disabled]="purchaseDisabled()"
-              (clicked)="onBuyNow()"
-            >
-              <app-icon slot="icon" [name]="prod.requires_booking && prod.product_type === 'service' ? 'calendar-check' : 'shopping-bag'" [size]="18" />
-              {{ prod.requires_booking && prod.product_type === 'service' ? 'Agendar ahora' : 'Comprar ahora' }}
-            </app-button>
+            }
 
             <!-- View Full Details Link -->
             <a class="view-details-link" [routerLink]="['/catalog', prod.slug]" (click)="onClose()">
@@ -647,6 +650,13 @@ export class ProductQuickViewModalComponent {
     return !this.isOnDemand() && this.displayStock() === 0;
   });
 
+  /** True when the QR-mode forbids ordering right now — keeps the
+   *  quick-view CTAs gated by the same rule as the other 4 surfaces.
+   *  The template hides them outright (UX decision: ocultar > bloquear). */
+  readonly hideDineInPurchase = computed(
+    () => this.tableContext.hideDineInPurchase(),
+  );
+
   /** Short "Disponible Vie 08:00" label for the off-schedule badge. */
   formatNextAvailable(): string {
     return formatMenuNextAvailable(this.product()?.next_available ?? null);
@@ -693,6 +703,10 @@ export class ProductQuickViewModalComponent {
   private catalogService = inject(CatalogService);
   private cartService = inject(CartService);
   private router = inject(Router);
+  /** QR-mode-aware visibility (Step 7) — Hides purchase CTAs when the
+   *  active scan mode (`menu_only` / pre-session `mark_occupied` /
+   *  pre-session `require_staff`) forbids ordering right now. */
+  protected readonly tableContext = inject(TableContextService);
 
   constructor() {
     effect(() => {

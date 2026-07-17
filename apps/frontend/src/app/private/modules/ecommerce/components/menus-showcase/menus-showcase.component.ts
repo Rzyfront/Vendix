@@ -152,7 +152,11 @@ interface CartaBlock {
                 </app-button>
               </div>
 
-              @if (dish.is_available_now && !dish.is_sold_out) {
+              @if (
+                dish.is_available_now &&
+                !dish.is_sold_out &&
+                !tableContext.hideDineInPurchase()
+              ) {
                 <button
                   type="button"
                   class="dish-quick-btn"
@@ -597,7 +601,9 @@ export class MenusShowcaseComponent implements OnInit {
 
   private readonly catalogService = inject(CatalogService);
   private readonly cartService = inject(CartService);
-  private readonly tableContext = inject(TableContextService);
+  /** QR-mode-aware visibility (Step 7) — consumed by the dish-quick-btn
+   *  template to hide purchase CTAs when the active scan mode forbids it. */
+  protected readonly tableContext = inject(TableContextService);
   private readonly wishlistService = inject(WishlistService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);

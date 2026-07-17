@@ -696,14 +696,15 @@ export class CartService {
         );
     }
 
-    // (2) QR dine-in — table active but NOT in open_tab mode. Reserved enum
-    // values (`menu_only` / `mark_occupied`) without a UI driver today;
-    // suppressing `addToCart` here is a no-op + feedback (the dish CANNOT
-    // land in the cart while a mesa is "occupying" the diner's session).
+    // (2) QR dine-in — table active but NOT in open_tab mode.
+    // (Step 7) The purchase CTAs are now hidden at the surface level via
+    // `tableContext.hideDineInPurchase()`, so this branch is unreachable
+    // from the UI in `menu_only` / pre-session `mark_occupied` /
+    // pre-session `require_staff`. Defensive guard retained: if a
+    // programmatic caller reaches here (e.g. test, future surface that
+    // forgets to gate), silently no-op rather than spilling the dish
+    // into the regular cart while the diner is "occupying" the mesa.
     if (this.tableContext.isActive()) {
-      this.toastService.warning(
-        'Sal de la mesa para pedir para llevar. Para agregar a la cuenta, escanea el QR de tu mesa.',
-      );
       return;
     }
 

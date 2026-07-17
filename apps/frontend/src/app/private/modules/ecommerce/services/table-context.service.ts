@@ -323,6 +323,36 @@ export class TableContextService {
     () => this.enableTableCheckout() && this.isOpenTab() && this.sessionId() != null,
   );
 
+  /**
+   * True when the storefront should HIDE purchase CTAs (add-to-cart /
+   * buy-now / quick-add) because the QR-mode forbids ordering right now.
+   *
+   * Rules (single source of truth — consumed by all 5 storefront surfaces):
+   *  - No active table context (`behavior === null`) → never hide. The
+   *    diner is browsing the regular ecommerce catalog.
+   *  - `menu_only` → always hide (the QR is a digital menu, no orders).
+   *  - `mark_occupied` / `require_staff` → hide UNTIL the staff opens a
+   *    session for the table (pre-session state). Once `sessionId` is
+   *    set, the diner can order — this flips the same way the SSE
+   *    `session_opened` handler will populate `sessionId` once Step 4c
+   *    lands.
+   *  - `open_tab` → never hide (the whole point of the mode is ordering
+   *    straight from the QR).
+   */
+  readonly hideDineInPurchase = computed<boolean>(() => {
+    const mode = this.behavior();
+    if (mode === null) return false;
+    if (mode === 'menu_only') return true;
+    if (mode === 'mark_occupied' || mode === 'require_staff') {
+      return this.sessionId() === null;
+    }
+    return false;
+  });
+
+  /** Inverse of `hideDineInPurchase` — exposed for template clarity at the
+   *  call site (`@if (canOrderToTab())` reads better than `!hideDineInPurchase()`). */
+  readonly canOrderToTab = computed<boolean>(() => !this.hideDineInPurchase());
+
   constructor() {
     // Lazy init — sessionStorage only exists in the browser.
     if (this.is_browser) {

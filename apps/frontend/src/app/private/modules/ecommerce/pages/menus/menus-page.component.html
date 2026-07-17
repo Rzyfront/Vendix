@@ -121,7 +121,11 @@
                       </app-button>
                     </div>
 
-                    @if (item.is_available_now && !item.is_sold_out) {
+                    @if (
+                      item.is_available_now &&
+                      !item.is_sold_out &&
+                      !tableContext.hideDineInPurchase()
+                    ) {
                       <button
                         type="button"
                         class="dish-quick-btn"

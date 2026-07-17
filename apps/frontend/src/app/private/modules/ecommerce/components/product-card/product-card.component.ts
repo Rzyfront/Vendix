@@ -100,7 +100,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           </app-button>
         </div>
 
-        @if (!isUnavailable() && !tableContext.isRequireStaff()) {
+        @if (!isUnavailable() && !tableContext.hideDineInPurchase()) {
           <button
             class="quick-cart-btn"
             type="button"
