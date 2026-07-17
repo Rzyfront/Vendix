@@ -70,6 +70,13 @@ export class StoreUserManagementService {
       dto.username ||
       `${formatted_first_name.toLowerCase()}_${formatted_last_name.toLowerCase()}_${Date.now()}`;
 
+    // Fase B2: el rol es parametrizable (default `employee`, preservando el
+    // comportamiento previo). Regla adoptada: `carrier` (Vendix Repartos)
+    // fuerza app_type=STORE_DELIVERY; el resto opera bajo STORE_ADMIN.
+    const roleName = dto.role ?? 'employee';
+    const appType: 'STORE_ADMIN' | 'STORE_DELIVERY' =
+      roleName === 'carrier' ? 'STORE_DELIVERY' : 'STORE_ADMIN';
+
     // Create the user and provision its staff membership atomically. The
     // StaffProvisioningService handles store_users + user_roles + user_settings
     // (default panel_ui) + users.main_store_id, satisfying CD7 (role +
@@ -101,8 +108,8 @@ export class StoreUserManagementService {
         userId: user.id,
         storeId: store_id,
         organizationId: organization_id,
-        roleName: 'employee',
-        appType: 'STORE_ADMIN',
+        roleName,
+        appType,
         setMainStore: true,
       });
 
@@ -396,7 +403,71 @@ export class StoreUserManagementService {
       });
     }
 
+    // Fase B2: mantener user_settings.app_type coherente con el rol `carrier`.
+    // Regla adoptada: rol `carrier` (Vendix Repartos) ⇒ app_type=STORE_DELIVERY.
+    // Al quitarlo degradamos SOLO a un carrier "puro" (app_type actual
+    // STORE_DELIVERY y sin rol de alto privilegio); nunca degradamos a un
+    // admin/owner (owner/admin/super_admin conservan su app_type intacto).
+    await this.syncCarrierAppType(userId);
+
     return this.findOne(userId);
+  }
+
+  /**
+   * Sincroniza `user_settings.app_type` con la presencia del rol `carrier`
+   * tras un cambio de roles (Fase B2 — Vendix Repartos).
+   *
+   * - Añadir/conservar `carrier` ⇒ fuerza `STORE_DELIVERY`, salvo que el
+   *   usuario conserve un rol de alto privilegio (owner/admin/super_admin),
+   *   en cuyo caso NO se toca su app_type para no romper su acceso admin.
+   * - Quitar `carrier` a un carrier puro (app_type actual `STORE_DELIVERY`
+   *   y sin alto privilegio) ⇒ degrada a `STORE_ADMIN`.
+   * - En cualquier otro caso, `app_type` se deja intacto.
+   */
+  private async syncCarrierAppType(userId: number): Promise<void> {
+    const finalRoles = await this.prisma.user_roles.findMany({
+      where: { user_id: userId },
+      select: { roles: { select: { name: true } } },
+    });
+    const finalRoleNames = finalRoles.map((r) => r.roles.name.toLowerCase());
+    const willHaveCarrier = finalRoleNames.includes('carrier');
+    const isHighPrivilege =
+      StaffProvisioningService.hasHighPrivilege(finalRoleNames);
+
+    const settings = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId },
+      select: { app_type: true },
+    });
+
+    let nextAppType: 'STORE_DELIVERY' | 'STORE_ADMIN' | null = null;
+    if (willHaveCarrier) {
+      // No degradar a un admin de alto privilegio hacia la app de reparto.
+      if (!isHighPrivilege) nextAppType = 'STORE_DELIVERY';
+    } else if (settings?.app_type === 'STORE_DELIVERY' && !isHighPrivilege) {
+      // Carrier puro que pierde el rol: recupera acceso al panel de tienda.
+      nextAppType = 'STORE_ADMIN';
+    }
+
+    if (!nextAppType) return;
+    if (settings && settings.app_type === nextAppType) return;
+
+    if (settings) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { app_type: nextAppType as any, updated_at: new Date() },
+      });
+    } else {
+      // Caso legacy sin user_settings: crear con el app_type derivado.
+      const defaultConfig =
+        await this.defaultPanelUIService.generatePanelUI(nextAppType);
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: nextAppType as any,
+          config: defaultConfig as any,
+        },
+      });
+    }
   }
 
   async updatePanelUI(userId: number, dto: UpdateUserPanelUIDto) {
