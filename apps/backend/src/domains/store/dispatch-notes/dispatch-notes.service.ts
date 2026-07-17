@@ -2076,10 +2076,12 @@ export class DispatchNotesService {
     }
 
     // State gate: only "hot" routes (draft / dispatched) accept new stops.
-    const EDITABLE_STATES: dispatch_route_status_enum[] = [
-      'draft',
-      'dispatched',
-    ];
+    // Vendix Repartos (B7): las rutas CARRIER admiten además `in_transit`
+    // (tomar-en-recorrido: el repartidor reclama otra orden mientras ya está en
+    // ruta). Las rutas admin conservan el gate original (draft/dispatched).
+    const EDITABLE_STATES: dispatch_route_status_enum[] = route.is_carrier_route
+      ? ['draft', 'dispatched', 'in_transit']
+      : ['draft', 'dispatched'];
     if (!EDITABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001);
     }

@@ -1,11 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { Prisma, dispatch_route_status_enum } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
+import { RouteFlowService } from '../dispatch-routes/route-flow/route-flow.service';
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { CreateFromOrderDto } from '../dispatch-notes/dto/create-from-order.dto';
+import {
+  SettleStopDto,
+  ReleaseStopDto,
+  CloseDispatchRouteDto,
+  ReorderStopsDto,
+} from '../dispatch-routes/dto';
 import { PoolQueryDto } from './dto/pool-query.dto';
 
 /**
@@ -32,6 +40,16 @@ export interface CarrierPayout {
   currency: string;
   estimated?: string;
   earned?: string;
+}
+
+/**
+ * Configurable carrier tariff (Fase B8). Money is always a Decimal string,
+ * never a float. Resolved via cascade: user_settings → store default → zero.
+ */
+export interface CarrierTariff {
+  mode: 'per_stop' | 'per_route';
+  amount: string;
+  currency: string;
 }
 
 /**
@@ -64,6 +82,8 @@ export class CarrierDeliveryService {
     private readonly prisma: StorePrismaService,
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly routeNumberGenerator: RouteNumberGenerator,
+    private readonly routeFlowService: RouteFlowService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ── Context helper ──────────────────────────────────────────────────────
@@ -104,23 +124,308 @@ export class CarrierDeliveryService {
 
   /**
    * `GET /store/carrier/route` — active route + stops + informative payout.
-   * Payout is a B6 placeholder that Fase B8 refines.
+   *
+   * Fase B8: `estimated` se calcula con la tarifa resuelta (cascada
+   * user_settings → store default → cero). `per_stop` → amount × nº de paradas
+   * planificadas; `per_route` → amount. Meramente informativo (no persiste ni
+   * emite eventos contables).
    */
   async getActiveRouteWithPayout() {
+    const { store_id, user_id } = this.requireContext();
     const route = await this.getMyActiveRoute();
-    // B8 refina: resuelve tarifa (per_stop|per_route) desde
-    // user_settings.config.carrier_tariff → store default → {per_stop,'0'}.
+    const tariff = await this.resolveTariff(user_id, store_id);
+    const plannedStops = route?.stops?.length ?? 0;
+    const estimated =
+      tariff.mode === 'per_route'
+        ? tariff.amount
+        : this.multiplyMoney(tariff.amount, plannedStops);
     const payout: CarrierPayout = {
-      mode: 'per_stop',
-      amount: '0',
-      currency: route?.currency ?? 'COP',
-      estimated: '0',
+      mode: tariff.mode,
+      amount: tariff.amount,
+      currency: tariff.currency,
+      estimated,
     };
     return {
       route,
       stops: route?.stops ?? [],
       payout,
     };
+  }
+
+  // ── Ejecución de ruta (Fase B7) — delegan en RouteFlowService ─────────────
+
+  /**
+   * Despachar MI ruta activa (draft → dispatched). Reuso: delega en el motor
+   * `RouteFlowService.dispatch` tras resolver la ruta desde el JWT.
+   */
+  async dispatch() {
+    const route = await this.requireMyActiveRoute();
+    return this.routeFlowService.dispatch(route.id);
+  }
+
+  /** Iniciar una parada de MI ruta (pending → in_progress). */
+  async startStop(stopId: number) {
+    const route = await this.requireMyActiveRoute();
+    this.assertStopBelongsToRoute(route, stopId);
+    return this.routeFlowService.startStop(route.id, stopId);
+  }
+
+  /**
+   * Liquidar una parada de MI ruta. El motor emite los eventos contables
+   * (payment/credit/refund/withholding) vía CashSettlementService — aquí NO se
+   * duplica contabilidad, sólo se delega.
+   */
+  async settleStop(stopId: number, dto: SettleStopDto) {
+    const route = await this.requireMyActiveRoute();
+    this.assertStopBelongsToRoute(route, stopId);
+    return this.routeFlowService.settleStop(route.id, stopId, dto);
+  }
+
+  /**
+   * Liberar una parada de MI ruta y, si la orden estaba en el pool,
+   * reexponerla: suelta el claim (CONSERVA `dispatch_pool_at`) para que la
+   * orden REAPAREZCA en el pool y re-emite `order.awaiting_carrier` para
+   * re-notificar a los carriers (mismo shape que B5).
+   */
+  async releaseStop(stopId: number, dto: ReleaseStopDto) {
+    const { store_id } = this.requireContext();
+    const route = await this.requireMyActiveRoute();
+    this.assertStopBelongsToRoute(route, stopId);
+
+    const result = await this.routeFlowService.releaseStop(route.id, stopId, dto);
+
+    // Efecto de facade (NO en el motor): reexponer la orden al pool.
+    await this.reexposeReleasedPoolOrder(route.id, stopId, store_id);
+
+    return result;
+  }
+
+  /**
+   * Reordenar las paradas de MI ruta ("Aplicar orden óptimo" del mapa del
+   * repartidor). Valida que TODAS las paradas del payload pertenezcan a mi ruta
+   * antes de delegar en el motor.
+   */
+  async reorderStops(dto: ReorderStopsDto) {
+    const route = await this.requireMyActiveRoute();
+    const stopIds = dto.order.map((o) => o.stopId);
+    const routeStopIds = new Set(route.stops.map((s) => s.id));
+    const foreign = stopIds.filter((sid) => !routeStopIds.has(sid));
+    if (foreign.length > 0) {
+      throw new ForbiddenException(
+        `Las paradas ${foreign.join(', ')} no pertenecen a tu ruta activa`,
+      );
+    }
+    return this.routeFlowService.reorderStops(route.id, dto);
+  }
+
+  /**
+   * Cerrar MI ruta (cuadre de caja) + payout informativo DEVENGADO.
+   *
+   * Fase B8: `earned` = `per_stop` → amount × paradas delivered; `per_route` →
+   * amount si la ruta cerró con ≥1 entrega, si no '0'. `variance` se toma del
+   * `cash_variance` que calcula el motor. El payout NO se persiste ni emite
+   * eventos contables (sólo informativo).
+   */
+  async close(dto: CloseDispatchRouteDto) {
+    const { store_id, user_id } = this.requireContext();
+    const route = await this.requireMyActiveRoute();
+
+    const closed = await this.routeFlowService.close(route.id, dto);
+
+    const tariff = await this.resolveTariff(user_id, store_id);
+    const deliveredCount = (closed.stops ?? []).filter(
+      (s) => s.result === 'delivered',
+    ).length;
+    const earned =
+      tariff.mode === 'per_route'
+        ? deliveredCount >= 1
+          ? tariff.amount
+          : '0'
+        : this.multiplyMoney(tariff.amount, deliveredCount);
+
+    const variance =
+      closed.cash_variance == null ? null : closed.cash_variance.toString();
+
+    return {
+      route: closed,
+      variance,
+      payout: {
+        mode: tariff.mode,
+        amount: tariff.amount,
+        currency: tariff.currency,
+        earned,
+      } as CarrierPayout,
+    };
+  }
+
+  // ── Helpers de ejecución (Fase B7) ────────────────────────────────────────
+
+  /** Resolver MI ruta activa o lanzar CARRIER_NO_ACTIVE_ROUTE (404). */
+  private async requireMyActiveRoute() {
+    const route = await this.getMyActiveRoute();
+    if (!route) {
+      throw new VendixHttpException(ErrorCodes.CARRIER_NO_ACTIVE_ROUTE);
+    }
+    return route;
+  }
+
+  /** Validar que la parada pertenece a MI ruta (aislamiento por construcción). */
+  private assertStopBelongsToRoute(
+    route: { stops: Array<{ id: number }> },
+    stopId: number,
+  ): void {
+    if (!route.stops.some((s) => s.id === stopId)) {
+      throw new ForbiddenException(
+        `La parada #${stopId} no pertenece a tu ruta activa`,
+      );
+    }
+  }
+
+  /**
+   * Tras liberar una parada, si su orden estaba publicada en el pool
+   * (`dispatch_pool_at != null`), suelta el claim CONSERVANDO
+   * `dispatch_pool_at` (reaparece en el pool) y re-emite
+   * `order.awaiting_carrier`. Best-effort: un fallo aquí NO revierte la
+   * liberación ya efectuada por el motor.
+   */
+  private async reexposeReleasedPoolOrder(
+    route_id: number,
+    stopId: number,
+    store_id: number,
+  ): Promise<void> {
+    try {
+      const stop = await this.prisma.dispatch_route_stops.findFirst({
+        where: { id: stopId, route_id },
+        select: { dispatch_note: { select: { order_id: true } } },
+      });
+      const order_id = stop?.dispatch_note?.order_id ?? null;
+      if (!order_id) return;
+
+      // Sólo reexponer si la orden vino del pool de repartidores.
+      const order = await this.prisma.orders.findFirst({
+        where: { id: order_id },
+        select: { dispatch_pool_at: true },
+      });
+      if (!order?.dispatch_pool_at) return;
+
+      await this.prisma.orders.updateMany({
+        where: { id: order_id, store_id },
+        data: { claimed_by_carrier_user_id: null },
+      });
+
+      // Re-notificar a los carriers (mismo shape que B5).
+      this.eventEmitter.emit('order.awaiting_carrier', { order_id, store_id });
+    } catch (e) {
+      this.logger.error(
+        `[carrier.releaseStop] no se pudo reexponer la orden de la parada #${stopId} al pool: ${String(
+          e,
+        )}`,
+      );
+    }
+  }
+
+  // ── Tarifa configurable + payout (Fase B8) ────────────────────────────────
+
+  /**
+   * Resolver la tarifa del repartidor por cascada:
+   *   1. `user_settings.config.carrier_tariff` (por user_id — user_settings NO
+   *      es store-scoped).
+   *   2. `store_settings.settings.carrier.default_tariff` (por store_id).
+   *   3. `{ mode:'per_stop', amount:'0', currency:'COP' }`.
+   * `amount` ausente/malformado se trata como '0' (nunca lanza). Dinero SIEMPRE
+   * string, nunca float.
+   */
+  private async resolveTariff(
+    user_id: number,
+    store_id: number,
+  ): Promise<CarrierTariff> {
+    const fromUser = await this.readUserTariff(user_id);
+    if (fromUser) return fromUser;
+    const fromStore = await this.readStoreTariff(store_id);
+    if (fromStore) return fromStore;
+    return { mode: 'per_stop', amount: '0', currency: 'COP' };
+  }
+
+  /** Lee `user_settings.config.carrier_tariff` por user_id (no store-scoped). */
+  private async readUserTariff(user_id: number): Promise<CarrierTariff | null> {
+    try {
+      const row = await this.prisma.user_settings.findFirst({
+        where: { user_id },
+        select: { config: true },
+      });
+      const config = this.asObject(row?.config);
+      return this.parseTariff(config['carrier_tariff']);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Lee `store_settings.settings.carrier.default_tariff` por store_id. */
+  private async readStoreTariff(store_id: number): Promise<CarrierTariff | null> {
+    try {
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+      const settings = this.asObject(row?.settings);
+      const carrier = this.asObject(settings['carrier']);
+      return this.parseTariff(carrier['default_tariff']);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Parse un blob JSON como CarrierTariff. Devuelve null cuando NO hay un `mode`
+   * válido (⇒ el nivel de la cascada se considera "ausente"). Un `mode` válido
+   * con `amount` ausente/malformado produce una tarifa con `amount:'0'`.
+   */
+  private parseTariff(raw: unknown): CarrierTariff | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const obj = raw as Record<string, unknown>;
+    const mode =
+      obj.mode === 'per_route'
+        ? 'per_route'
+        : obj.mode === 'per_stop'
+          ? 'per_stop'
+          : null;
+    if (!mode) return null;
+    const currency =
+      typeof obj.currency === 'string' && obj.currency.trim().length > 0
+        ? obj.currency
+        : 'COP';
+    return { mode, amount: this.normalizeAmount(obj.amount), currency };
+  }
+
+  /** Dinero como string; ausente/malformado ⇒ '0'. Nunca lanza, nunca float. */
+  private normalizeAmount(value: unknown): string {
+    if (value === null || value === undefined) return '0';
+    if (typeof value === 'string') {
+      const t = value.trim();
+      if (t.length === 0 || Number.isNaN(Number(t))) return '0';
+      return t;
+    }
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? String(value) : '0';
+    }
+    return '0';
+  }
+
+  /** Multiplica dinero (string) por un contador entero vía Decimal (no float). */
+  private multiplyMoney(amount: string, count: number): string {
+    try {
+      return new Prisma.Decimal(amount).mul(count).toString();
+    } catch {
+      return '0';
+    }
+  }
+
+  /** Coacciona un JsonValue a objeto plano ({} si no es objeto). */
+  private asObject(value: unknown): Record<string, unknown> {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return {};
   }
 
   // ── Pool ────────────────────────────────────────────────────────────────

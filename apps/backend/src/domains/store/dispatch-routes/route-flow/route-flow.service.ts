@@ -997,15 +997,18 @@ export class RouteFlowService {
 
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, is_carrier_route: true },
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    // State guard: only "hot" routes (draft / dispatched) accept a reorder.
-    const REORDERABLE_STATES: dispatch_route_status_enum[] = [
-      'draft',
-      'dispatched',
-    ];
+    // State guard: draft / dispatched siempre. Vendix Repartos (B7): las rutas
+    // CARRIER admiten además `in_transit` (el repartidor reordena sus paradas
+    // en recorrido, "Aplicar orden óptimo" del mapa). Las rutas admin conservan
+    // el gate original (draft/dispatched).
+    const REORDERABLE_STATES: dispatch_route_status_enum[] =
+      route.is_carrier_route
+        ? ['draft', 'dispatched', 'in_transit']
+        : ['draft', 'dispatched'];
     if (!REORDERABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(
         ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001,
