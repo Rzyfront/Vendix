@@ -275,11 +275,6 @@
   line-height: 1.35;
 }
 
-.ag-help app-icon {
-  color: var(--color-primary);
-  flex: 0 0 auto;
-}
-
 /* ---------- Desktop layout: gauge left, meta right ---------- */
 @media (min-width: 768px) {
   .ag-hero {
@@ -293,6 +288,23 @@
   .ag-gauge {
     width: 12rem;
     height: 12rem;
+  }
+}
+
+/* ---------- Side-by-side layout (≥1024px): compact gauge that matches the
+   Ingreso card height. The card uses app-card [fullHeight], so the hero grows
+   (flex:1) to fill the stretched row and its content stays vertically centered.
+   A smaller gauge keeps the gauge card shorter than Ingreso → Ingreso stays the
+   compact reference and the gauge fills up to it. ---------- */
+@media (min-width: 1024px) {
+  .ag-hero {
+    flex: 1;
+    padding: 1.25rem;
+  }
+
+  .ag-gauge {
+    width: 9rem;
+    height: 9rem;
   }
 }
 

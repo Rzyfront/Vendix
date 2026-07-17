@@ -68,7 +68,12 @@ interface CheckinResultView {
   ],
   styleUrl: './aforo-checkin-panel.component.css',
   template: `
-    <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+    <app-card
+      [shadow]="'sm'"
+      [responsivePadding]="true"
+      [showHeader]="true"
+      [fullHeight]="true"
+    >
       <div slot="header" class="ci-header">
         <span class="ci-header-icon">
           <app-icon name="log-in" [size]="18" />

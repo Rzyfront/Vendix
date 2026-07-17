@@ -29,7 +29,9 @@
   .aforo-top {
     grid-template-columns: 2fr 3fr;
     gap: 16px;
-    align-items: start;
+    /* Equal-height siblings: both cards stretch to the tallest (Ingreso is the
+       compact reference; the gauge fills to match via app-card [fullHeight]). */
+    align-items: stretch;
   }
 }
 
