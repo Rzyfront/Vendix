@@ -24,6 +24,7 @@ import {
   ModalComponent,
   SelectorComponent,
   SelectorOption,
+  StoreUserMultiSelectComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import {
@@ -48,6 +49,14 @@ interface TableForm {
   status: FormControl<TableStatus>;
   pos_x: FormControl<number | null>;
   pos_y: FormControl<number | null>;
+  /**
+   * Staff user ids assigned as waiters for this table. Mirrors the
+   * optional `waiter_user_ids` field on CreateTableDto / UpdateTableDto;
+   * `[]` means "no waiters assigned" on create and "clear all" on update.
+   * The shared `app-store-user-multi-select` CVA binds directly to this
+   * control and emits `number[]` on change.
+   */
+  waiter_user_ids: FormControl<number[]>;
 }
 
 /**
@@ -72,6 +81,7 @@ interface TableForm {
     InputComponent,
     SelectorComponent,
     IconComponent,
+    StoreUserMultiSelectComponent,
   ],
   templateUrl: './table-form-modal.component.html',
   styleUrl: './table-form-modal.component.scss',
@@ -109,6 +119,7 @@ export class TableFormModalComponent {
     status: this.fb.nonNullable.control<TableStatus>('available'),
     pos_x: this.fb.control<number | null>(null),
     pos_y: this.fb.control<number | null>(null),
+    waiter_user_ids: this.fb.nonNullable.control<number[]>([]),
   });
 
   readonly statusOptions: SelectorOption[] = STATUS_OPTIONS;
@@ -138,6 +149,7 @@ export class TableFormModalComponent {
         status: t.status,
         pos_x: t.pos_x,
         pos_y: t.pos_y,
+        waiter_user_ids: t.waiter_user_ids ?? [],
       });
     } else {
       this.form.reset({
@@ -147,6 +159,7 @@ export class TableFormModalComponent {
         status: 'available',
         pos_x: null,
         pos_y: null,
+        waiter_user_ids: [],
       });
     }
   }
@@ -170,6 +183,7 @@ export class TableFormModalComponent {
         status: raw.status,
         pos_x: raw.pos_x ?? undefined,
         pos_y: raw.pos_y ?? undefined,
+        waiter_user_ids: raw.waiter_user_ids,
       };
       this.internalLoading.set(true);
       this.tablesService
@@ -198,6 +212,7 @@ export class TableFormModalComponent {
       status: raw.status,
       pos_x: raw.pos_x ?? undefined,
       pos_y: raw.pos_y ?? undefined,
+      waiter_user_ids: raw.waiter_user_ids,
     };
     this.internalLoading.set(true);
     this.tablesService

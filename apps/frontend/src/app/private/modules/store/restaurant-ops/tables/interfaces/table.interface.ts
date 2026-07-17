@@ -42,6 +42,13 @@ export interface Table {
    * embebido en `public_url`.
    */
   public_token?: string;
+  /**
+   * Staff user ids assigned as waiters for this table (mirrors the
+   * `table_waiters` pivot populated by the backend). Populated by
+   * `GET /store/tables/:id` so the form can pre-fill the multi-select
+   * in edit mode. Empty array means "no waiters assigned".
+   */
+  waiter_user_ids?: number[];
 }
 
 /**
@@ -176,6 +183,13 @@ export interface CreateTableDto {
   status?: TableStatus;
   pos_x?: number;
   pos_y?: number;
+  /**
+   * Staff users assigned as waiters for this table. STAFF-only on the
+   * backend (rejects `customer`-role users); omit/empty to clear.
+   * Backend mirrors the input verbatim into `table_waiters` inside the
+   * create transaction (Step 2 / commit 038b7ade3).
+   */
+  waiter_user_ids?: number[];
 }
 
 export type UpdateTableDto = Partial<CreateTableDto>;
