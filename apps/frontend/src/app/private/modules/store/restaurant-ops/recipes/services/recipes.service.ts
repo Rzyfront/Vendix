@@ -186,7 +186,15 @@ export class RecipesService {
     // eslint-disable-next-line no-console
     console.error('RecipesService Error:', error);
     let message = 'Error al procesar la solicitud';
-    const apiMessage = error?.error?.message;
+    // Defensive: extract the API message from multiple possible paths.
+    // 1) HttpErrorResponse body (HTTP 4xx/5xx): error.error.message
+    // 2) Regular Error thrown by our own map() when HTTP 200 + success:false
+    // 3) Top-level error.message (some libs)
+    const apiMessage =
+      error?.error?.message ??
+      (error instanceof Error ? error.message : undefined) ??
+      error?.message;
+    if (apiMessage) {
     if (apiMessage) {
       message =
         typeof apiMessage === 'string'
