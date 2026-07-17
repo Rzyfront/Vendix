@@ -78,6 +78,7 @@
           id="waiter-user-ids"
           formControlName="waiter_user_ids"
           placeholder="Buscar usuarios..."
+          [excludeRole]="'customer'"
         />
         <p class="mt-1 text-xs text-[var(--color-text-secondary)]">
           Opcional. Solo usuarios staff de la tienda. Vacío = sin meseros asignados.
