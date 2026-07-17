@@ -22,6 +22,7 @@ import { PaymentEncryptionService } from '../../store/payments/services/payment-
 import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
 import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
+import { S3Service } from '@common/services/s3.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
@@ -77,8 +78,12 @@ export interface BillItemView {
   /**
    * Diner-facing thumbnail: the variant's denormalized image when the line
    * is a variant, else the product's primary image (lowest `sort_order`),
-   * else `null`. Returned as the persisted S3 key/URL — never signed —
-   * matching the catalog/cart contract.
+   * else `null`.
+   *
+   * Returned as a SIGNED S3 URL (24h) — matches the catalog/cart/account
+   * contract (vendix-s3-storage). The DB stores raw S3 keys; signing happens
+   * on read inside `getBill`. Already-signed (HTTP-with-query-string) values
+   * are passed through untouched to avoid double-signing.
    */
   image_url: string | null;
 }
@@ -122,13 +127,24 @@ export interface PayTableResult {
 }
 
 /**
- * Server-derived binding for the diner SSE stream. Both ids are resolved
- * from the `public_token` (never from the client), so a diner can only
- * ever see KDS/bill events for their own table's active order.
+ * Server-derived binding for the diner SSE stream. Always includes the
+ * resolved `table_id` (from the `public_token`) so the stream filter can
+ * receive `session_opened` events before a session is actually open —
+ * otherwise the comensal in `menu_only` / `mark_occupied` / `require_staff`
+ * modes would be deaf to the table transitioning into a tab they can join.
+ *
+ * `session_id` / `order_id` are nullable for the pre-session window; once a
+ * session opens, the SSE handler can re-resolve the binding with all three
+ * fields populated (typically the comensal reconnects after seeing
+ * `session_opened`).
+ *
+ * All ids are derived SERVER-SIDE from the token — a diner can only ever
+ * see KDS/bill events for their own table.
  */
 export interface DinerStreamBinding {
-  order_id: number;
-  session_id: number;
+  table_id: number;
+  session_id: number | null;
+  order_id: number | null;
 }
 
 /**
@@ -170,6 +186,7 @@ export class EcommerceTablesService {
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
     private readonly paymentEncryptionService: PaymentEncryptionService,
     private readonly wompiClientFactory: WompiClientFactory,
+    private readonly s3Service: S3Service,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -497,12 +514,19 @@ export class EcommerceTablesService {
   }
 
   /**
-   * Non-throwing variant used by the diner SSE stream (GAP-3). Returns
-   * `null` when there is no store context, unknown token, or no active
-   * session — the stream still connects (empty snapshot + heartbeat) so
-   * the storefront banner can attach the moment the QR is scanned, even
-   * before a tab is open. The returned ids are derived SERVER-SIDE from
-   * the token and used as the default-deny filter key for live events.
+   * Non-throwing variant used by the diner SSE stream (GAP-3). Always
+   * returns a binding (never `null`) as long as the token resolves to a
+   * table — even when no session is open yet. The returned `table_id`
+   * lets the stream filter accept `session_opened` events for the comensal's
+   * table before a tab exists; `session_id` / `order_id` are `null` in that
+   * pre-session window and the comensal reconnects after seeing
+   * `session_opened` to receive the post-session deltas.
+   *
+   * Returns `null` only when there is no store context or the token does
+   * not resolve — those cases are hard connection denials.
+   *
+   * The returned ids are derived SERVER-SIDE from the token and used as
+   * the default-deny filter key for live events.
    */
   async resolveDinerBinding(
     token: string,
@@ -520,9 +544,16 @@ export class EcommerceTablesService {
     }
     const session = await this.tablesService.getActiveSession(table.id);
     if (!session) {
-      return null;
+      // Pre-session binding — table_id is enough for `session_opened`
+      // matching (comensal in menu_only/mark_occupied/require_staff
+      // already attached to the stream).
+      return { table_id: table.id, session_id: null, order_id: null };
     }
-    return { order_id: session.order_id, session_id: session.id };
+    return {
+      table_id: table.id,
+      session_id: session.id,
+      order_id: session.order_id,
+    };
   }
 
   // ------------------------------------------------------------- guests
@@ -628,16 +659,30 @@ export class EcommerceTablesService {
       orderBy: { id: 'asc' },
     });
 
-    const items: BillItemView[] = lines.map((it) => ({
-      name: it.product_name,
-      quantity: it.quantity,
-      unit_price: Number(it.unit_price),
-      total: Number(it.total_price),
-      image_url:
-        it.variant_image_url ??
-        it.products?.product_images?.[0]?.image_url ??
-        null,
-    }));
+    // BUG B — sign each line's `image_url` with the 24h presigner so the
+    // storefront "Mi cuenta" panel renders thumbnails without 403s. Mirrors
+    // cart/account/catalog (vendix-s3-storage contract: keys in DB, signed
+    // on read). `signUrl` is itself defensive — it returns the value
+    // untouched when it's already an absolute HTTP(S) URL, so we don't
+    // double-sign anything that somehow already came in pre-signed.
+    const items: BillItemView[] = await Promise.all(
+      lines.map(async (it): Promise<BillItemView> => {
+        const rawImageUrl =
+          it.variant_image_url ??
+          it.products?.product_images?.[0]?.image_url ??
+          null;
+        const signedImageUrl = rawImageUrl
+          ? ((await this.s3Service.signUrl(rawImageUrl)) ?? null)
+          : null;
+        return {
+          name: it.product_name,
+          quantity: it.quantity,
+          unit_price: Number(it.unit_price),
+          total: Number(it.total_price),
+          image_url: signedImageUrl,
+        };
+      }),
+    );
 
     const grandTotal = Number(orderRow?.grand_total ?? order?.grand_total ?? 0);
     const totalPaid = Number(orderRow?.total_paid ?? 0);

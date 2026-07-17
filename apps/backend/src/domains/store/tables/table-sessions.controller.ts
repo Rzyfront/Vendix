@@ -57,6 +57,9 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   // Mesa cerrada (POS close-out o cierre canónico / reconciliación Wompi) —
   // el dashboard refresca la mesa a `cleaning` / libre.
   if (type === 'session_closed') return true;
+  // Mesa abierta (POS open / QR `open_tab` / `confirmStaff`) — el floor-map
+  // refresca la mesa a `occupied` con sesión activa en vivo.
+  if (type === 'session_opened') return true;
   if (type.startsWith('kitchen.')) return true;
   // The synthetic channels emitted by THIS SSE (snapshot / heartbeat) are
   // allowed through here too — they're emitted as their own typed
