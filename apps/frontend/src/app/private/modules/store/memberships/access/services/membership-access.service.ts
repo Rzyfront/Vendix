@@ -133,6 +133,23 @@ export class MembershipAccessService {
       );
   }
 
+  /**
+   * Archive a credential (soft-delete). Unlike `deactivateCredential` — which
+   * only flips `is_active` — this removes it from the listing entirely. The
+   * member can no longer use it to enter.
+   */
+  archiveCredential(id: number): Observable<{ archived: boolean; id: number }> {
+    return this.http
+      .post<ApiResponse<{ archived: boolean; id: number }>>(
+        `${this.apiUrl}${this.basePath}/credentials/${id}/archive`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   // ─── Validate (reception) ────────────────────────────────────────────────
   validate(dto: ValidateAccessDto): Observable<AccessValidationResult> {
     return this.http

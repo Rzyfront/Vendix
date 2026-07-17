@@ -168,6 +168,13 @@ export interface MembershipSettings {
    * Default: `{ reader_type: 'id_wrapper' }`.
    */
   fingerprint_device?: FingerprintDeviceConfig;
+  /**
+   * When `true`, the QR scanner runs in kiosk mode: it auto-opens on the Aforo
+   * tab and stays on in a continuous decode loop (for a fixed reception tablet).
+   * When `false` (default), the scanner is opened manually and closes after each
+   * scan. Mirrors backend `store_settings.settings.membership.qr_kiosk_mode`.
+   */
+  qr_kiosk_mode?: boolean;
 }
 
 /**

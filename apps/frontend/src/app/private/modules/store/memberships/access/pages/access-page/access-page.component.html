@@ -45,28 +45,75 @@
   <!-- ══════════════════ Aforo ══════════════════ -->
   @if (activeTab() === 'aforo') {
     <div class="aforo-wrap">
-      <!-- ─── Hero: contador en vivo (SVG gauge) ─── -->
-      <app-aforo-gauge
-        [count]="occupancy()?.current_count ?? 0"
-        [maxCapacity]="occupancy()?.max_capacity ?? 0"
-        [pct]="occupancyPct()"
-        [color]="occupancyColor()"
-        [availableSpots]="availableSpots()"
-        [grantedToday]="grantedToday()"
-        [capacityControlEnabled]="occupancy()?.capacity_control_enabled ?? false"
-        [isFull]="isFull()"
-        [live]="liveConnected()"
-        [syncing]="occupancyLoading()"
-      />
+      <!-- ─── Top: aforo (2/5) + ingreso (3/5) ─── -->
+      <div class="aforo-top">
+        <!-- Hero: contador en vivo (SVG gauge) -->
+        <app-aforo-gauge
+          [count]="occupancy()?.current_count ?? 0"
+          [maxCapacity]="occupancy()?.max_capacity ?? 0"
+          [pct]="occupancyPct()"
+          [color]="occupancyColor()"
+          [availableSpots]="availableSpots()"
+          [grantedToday]="grantedToday()"
+          [capacityControlEnabled]="occupancy()?.capacity_control_enabled ?? false"
+          [isFull]="isFull()"
+          [live]="liveConnected()"
+          [syncing]="occupancyLoading()"
+        />
 
-      <!-- ─── Ingreso + Salida/Ajuste ─── -->
-      <div class="aforo-grid">
         <!-- Ingreso (valida credencial → +1) -->
         <app-aforo-checkin-panel
           [actionInFlight]="actionInFlight()"
           [lastResult]="lastCheckin()"
+          [kiosk]="kioskMode()"
           (validate)="onCheckin($event)"
         />
+      </div>
+
+      <!-- ─── Membresías por vencer + Salida/Ajuste ─── -->
+      <div class="aforo-grid">
+        <!-- Membresías por vencer / vencidas -->
+        <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+          <div slot="header" class="aforo-panel-header">
+            <span class="aforo-panel-icon">
+              <app-icon name="calendar-clock" [size]="18" />
+            </span>
+            <div class="aforo-panel-text">
+              <h3>Membresías por vencer</h3>
+              <p>Vencidas y próximas a vencer (7 días)</p>
+            </div>
+            @if (expiring().length) {
+              <span class="aforo-tag">{{ expiring().length }}</span>
+            }
+          </div>
+
+          @if (expiringLoading()) {
+            <div class="expiring-loading">
+              <div
+                class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+              ></div>
+            </div>
+          } @else if (expiringRows().length === 0) {
+            <app-empty-state
+              icon="calendar-check"
+              title="Todo al día"
+              description="No hay membresías vencidas ni próximas a vencer."
+              [showActionButton]="false"
+              [showRefreshButton]="false"
+            />
+          } @else {
+            <app-responsive-data-view
+              [data]="expiringRows()"
+              [columns]="expiringColumns"
+              [cardConfig]="expiringCardConfig"
+              [sortable]="false"
+              [hoverable]="true"
+              emptyMessage="Sin membresías por vencer"
+              emptyIcon="calendar-check"
+              (rowClick)="goToMembership($event)"
+            />
+          }
+        </app-card>
 
         <div class="aforo-side">
           <!-- Salida (−1) -->
@@ -395,6 +442,15 @@
   <!-- ══════════════════ Configuración de acceso (dispositivo huella) ══════════════════ -->
   @if (activeTab() === 'configuracion') {
     <app-card title="Configuración de acceso" subtitle="Dispositivo de huella">
+      <div class="access-kiosk-toggle">
+        <app-setting-toggle
+          label="Escáner QR siempre activo (kiosko)"
+          description="Al abrir la pestaña Aforo, la cámara se mantiene encendida en bucle para escanear credenciales una tras otra sin volver a pulsar. Ideal para una tablet fija en recepción."
+          [ngModel]="cfgQrKioskMode()"
+          (changed)="cfgQrKioskMode.set($event)"
+        />
+      </div>
+
       <div class="form-grid">
         <label class="aforo-field-label">Tipo de lector</label>
         <div class="aforo-interval">

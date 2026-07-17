@@ -87,10 +87,21 @@ import type { BrowserQRCodeReader, IScannerControls } from '@zxing/browser';
   `,
 })
 export class AforoQrScannerComponent implements OnDestroy {
+  /** Anti double-read window (ms) for kiosk mode: same code is ignored within it. */
+  private static readonly CONTINUOUS_COOLDOWN_MS = 2500;
+
   /** Drives the whole camera lifecycle: true opens + scans, false releases. */
   readonly isOpen = input<boolean>(false);
+  /**
+   * Kiosk / continuous mode. When `true`, the overlay does NOT auto-close after
+   * a decode: it emits `scanned` and keeps the decode loop alive so a reception
+   * tablet can scan member after member. The same code is not re-emitted within
+   * `CONTINUOUS_COOLDOWN_MS` (anti double-read). Default `false` keeps the
+   * original single-shot behavior (decode once → close) fully intact.
+   */
+  readonly continuous = input<boolean>(false);
 
-  /** Raw text of the first decoded QR code. */
+  /** Raw text of the first decoded QR code (each decode in continuous mode). */
   readonly scanned = output<string>();
   /** Fired when the overlay closes (auto-close after scan, X, or error). */
   readonly closed = output<void>();
@@ -105,6 +116,24 @@ export class AforoQrScannerComponent implements OnDestroy {
   private starting = false;
   private decoded = false;
   private startAttempts = 0;
+  /** Last code emitted + its timestamp — used to debounce repeats in kiosk mode. */
+  private lastDecodedText: string | null = null;
+  private lastDecodedAt = 0;
+
+  /**
+   * Page Visibility handler: release the camera while the tab is hidden (saves
+   * battery) and resume the decode loop when it becomes visible again.
+   */
+  private readonly onVisibilityChange = (): void => {
+    if (typeof document === 'undefined') return;
+    if (document.hidden) {
+      // Pause: drop the camera but keep `isOpen` so we can resume seamlessly.
+      this.stop();
+    } else if (this.isOpen()) {
+      this.startAttempts = 0;
+      queueMicrotask(() => this.start());
+    }
+  };
 
   constructor() {
     // React to open/close transitions. On open, defer the start so the @if view
@@ -113,15 +142,24 @@ export class AforoQrScannerComponent implements OnDestroy {
       if (this.isOpen()) {
         this.decoded = false;
         this.startAttempts = 0;
+        this.lastDecodedText = null;
+        this.lastDecodedAt = 0;
         this.errorMessage.set(null);
         queueMicrotask(() => this.start());
       } else {
         this.stop();
       }
     });
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.onVisibilityChange);
+    }
   }
 
   ngOnDestroy(): void {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    }
     this.stop();
   }
 
@@ -159,8 +197,18 @@ export class AforoQrScannerComponent implements OnDestroy {
         video,
         (result, _error, ctrls) => {
           // `_error` is a NotFoundException for frames without a QR — expected,
-          // ignored. Act only on the first real decode.
-          if (!result || this.decoded) return;
+          // ignored. Act only on a real decode.
+          if (!result) return;
+          const text = result.getText();
+
+          // Kiosk / continuous: emit and keep scanning (debounced), never close.
+          if (this.continuous()) {
+            this.handleContinuousDecode(text);
+            return;
+          }
+
+          // Single-shot (original behavior): decode once → stop → close.
+          if (this.decoded) return;
           this.decoded = true;
           try {
             ctrls.stop();
@@ -168,12 +216,12 @@ export class AforoQrScannerComponent implements OnDestroy {
             /* already stopped */
           }
           this.controls = null;
-          this.emitDecoded(result.getText());
+          this.emitDecoded(text);
         },
       );
 
-      // If a decode fired or we were closed during setup, stop the freshly
-      // created controls immediately; otherwise keep them for later cleanup.
+      // If a single-shot decode fired or we were closed during setup, stop the
+      // freshly created controls immediately; otherwise keep them for cleanup.
       if (this.decoded || !this.isOpen()) {
         try {
           controls.stop();
@@ -194,6 +242,28 @@ export class AforoQrScannerComponent implements OnDestroy {
   private emitDecoded(text: string): void {
     this.scanned.emit(text);
     this.closed.emit();
+  }
+
+  /**
+   * Continuous (kiosk) decode: emit `scanned` for a fresh code, keep the camera
+   * running, and debounce repeats of the SAME code within the cooldown window so
+   * a QR held in frame is not read many times per second. A different code is
+   * emitted immediately.
+   */
+  private handleContinuousDecode(text: string): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const now = Date.now();
+    if (
+      trimmed === this.lastDecodedText &&
+      now - this.lastDecodedAt < AforoQrScannerComponent.CONTINUOUS_COOLDOWN_MS
+    ) {
+      return;
+    }
+    this.lastDecodedText = trimmed;
+    this.lastDecodedAt = now;
+    // Do NOT emit `closed`: the overlay stays open and the loop keeps decoding.
+    this.scanned.emit(trimmed);
   }
 
   private stop(): void {

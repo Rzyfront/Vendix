@@ -67,6 +67,28 @@ export class MembershipsService {
       .pipe(catchError(this.handleError));
   }
 
+  /**
+   * Memberships that are expired (period_end < now) or about to expire
+   * (period_end <= now + `days`). NOT paginated: the backend returns a plain
+   * array ordered by `period_end asc`, capped at `limit`. Each item carries the
+   * `plan` + `customer` snapshots.
+   */
+  listExpiring(days = 7, limit = 15): Observable<GymMembership[]> {
+    const params = new HttpParams()
+      .set('days', String(days))
+      .set('limit', String(limit));
+
+    return this.http
+      .get<ApiResponse<GymMembership[]>>(
+        `${this.apiUrl}${this.basePath}/expiring`,
+        { params },
+      )
+      .pipe(
+        map((res) => res.data ?? []),
+        catchError(this.handleError),
+      );
+  }
+
   getById(id: number): Observable<GymMembership> {
     return this.http
       .get<ApiResponse<GymMembership>>(`${this.apiUrl}${this.basePath}/${id}`)
