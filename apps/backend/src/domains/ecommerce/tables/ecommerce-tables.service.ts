@@ -703,16 +703,19 @@ export class EcommerceTablesService {
 
   // ------------------------------------------------------- call waiter
   /**
-   * GAP-5 (write) — the diner requests attention. Persists + broadcasts a
+   * GAP-5 (write) — the diner requests attention. Persists + dispatches a
    * `table_call_waiter` notification (bell + SSE + web push) to the
-   * store's staff. No table/order mutation.
+   * waiters assigned to this table (Step 3, QR-mesa); falls back to a
+   * store-wide broadcast when the table has no assigned waiters. No
+   * table/order mutation.
    */
   async callWaiter(token: string, note?: string): Promise<{ ok: true }> {
     const { store_id, table, session } =
       await this.resolveActiveSessionByToken(token);
 
-    await this.notificationsService.createAndBroadcast(
+    await this.dispatchStaffNotification(
       store_id,
+      table.id,
       'table_call_waiter',
       'Llamado de mesero',
       `Mesa ${table.name} solicita atención`,
@@ -733,10 +736,11 @@ export class EcommerceTablesService {
 
   // ------------------------------------------------------- request bill
   /**
-   * GAP-5 (write) — the diner requests the bill. Persists + broadcasts a
-   * `table_request_bill` staff notification AND pushes a lightweight
-   * `bill.requested` event onto the per-store SSE subject so the diner's
-   * own stream (GAP-3) reflects the request immediately. No mutation.
+   * GAP-5 (write) — the diner requests the bill. Persists + dispatches a
+   * `table_request_bill` staff notification (per waiter with broadcast
+   * fallback — Step 3) AND pushes a lightweight `bill.requested` event
+   * onto the per-store SSE subject so the diner's own stream (GAP-3)
+   * reflects the request immediately. No mutation.
    */
   async requestBill(
     token: string,
@@ -748,8 +752,9 @@ export class EcommerceTablesService {
     const title = 'Solicitud de cuenta';
     const body = `Mesa ${table.name} solicita la cuenta`;
 
-    await this.notificationsService.createAndBroadcast(
+    await this.dispatchStaffNotification(
       store_id,
+      table.id,
       'table_request_bill',
       title,
       body,
@@ -788,8 +793,9 @@ export class EcommerceTablesService {
   /**
    * GAP-8 (conservative) — the diner asks to split the bill. This does
    * NOT mutate anything and does NOT call `SplitOrderService`. It only
-   * persists + broadcasts a `table_request_split` staff notification so a
-   * mesero can execute the real split from the staff panel.
+   * persists + dispatches a `table_request_split` staff notification
+   * (per waiter with broadcast fallback — Step 3) so a mesero can
+   * execute the real split from the staff panel.
    */
   async requestSplit(
     token: string,
@@ -798,8 +804,9 @@ export class EcommerceTablesService {
     const { store_id, table, session } =
       await this.resolveActiveSessionByToken(token);
 
-    await this.notificationsService.createAndBroadcast(
+    await this.dispatchStaffNotification(
       store_id,
+      table.id,
       'table_request_split',
       'Solicitud de división de cuenta',
       `Mesa ${table.name} pide dividir en ${dto.n_splits}`,
@@ -1491,25 +1498,82 @@ export class EcommerceTablesService {
     }
   }
 
+  // --------------------------------------------- dispatchStaffNotification
+  /**
+   * Step 3 (QR-mesa) — per-user delivery helper. Resolves the waiters
+   * assigned to `tableId` via `TablesService.getAssignedWaiterUserIds`
+   * (Step 2) and emits ONE `sendToUser` per waiter with
+   * `data.target_user_id` baked in. Falls back to a store-wide
+   * `createAndBroadcast` when the table has NO assigned waiters, so
+   * legacy tables and stores that never opt into the assignment
+   * pivot keep working.
+   *
+   * The bell filter in `NotificationsService.findAll` honours
+   * `data.target_user_id` and hides the row from non-recipient users,
+   * so a mesero who is NOT assigned to the table does not see the
+   * notification in their bell — only the assigned meseros do (plus
+   * the diner-facing SSE channel, which is keyed off
+   * `table_session_id` and unaffected).
+   */
+  private async dispatchStaffNotification(
+    store_id: number,
+    tableId: number,
+    type: string,
+    title: string,
+    body: string,
+    data: Record<string, any>,
+  ): Promise<void> {
+    const waiterIds =
+      await this.tablesService.getAssignedWaiterUserIds(tableId);
+    if (waiterIds.length === 0) {
+      await this.notificationsService.createAndBroadcast(
+        store_id,
+        type,
+        title,
+        body,
+        data,
+      );
+      return;
+    }
+    for (const uid of waiterIds) {
+      await this.notificationsService.sendToUser(
+        store_id,
+        uid,
+        type,
+        title,
+        body,
+        data,
+      );
+    }
+  }
+
   // ------------------------------------------------------- notify staff
   /**
-   * Pushes an SSE notification to the store's staff channel so a mesero
-   * sees that a diner scanned the QR at `tableId` and is waiting for
-   * confirmation. Uses `NotificationsSseService.push` (per-store
-   * broadcast) — same channel the KDS and order-created events use.
+   * Step 3 (QR-mesa) — A diner scanning the QR under `require_staff`
+   * behaviour now produces a persisted + bell + web push notification
+   * routed through `dispatchStaffNotification` (per-waiter with
+   * broadcast fallback) so the assigned mesero sees the request in
+   * their bell. Previously this method only pushed an ephemeral SSE
+   * tick on the store-wide channel — there was no DB row, so the
+   * bell could not show it after a page reload.
+   *
+   * Fire-and-forget: the helper is awaited internally but the
+   * surrounding `resolveByToken` returns its HTTP response without
+   * waiting for the notification write — same pattern as
+   * `createAndBroadcast` (which is non-throwing by design).
    */
   private notifyStaffTableScan(tableId: number, tableName: string): void {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) return;
 
-    this.sseService.push(store_id, {
-      id: Date.now(),
-      type: 'qr_table_scan',
-      title: 'Mesa escaneada',
-      body: `Un cliente escaneó el QR de la mesa ${tableName} y solicita confirmación`,
-      data: { table_id: tableId, table_name: tableName },
-      created_at: new Date().toISOString(),
-    });
+    void this.dispatchStaffNotification(
+      store_id,
+      tableId,
+      'qr_table_scan',
+      'Mesa escaneada',
+      `Un cliente escaneó el QR de la mesa ${tableName} y solicita confirmación`,
+      { table_id: tableId, table_name: tableName },
+    );
   }
 
   // --------------------------------------------------- active_devices (Redis)

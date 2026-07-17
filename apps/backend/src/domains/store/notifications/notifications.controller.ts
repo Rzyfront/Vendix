@@ -36,7 +36,14 @@ export class NotificationsController {
 
   @Get()
   async findAll(@Query() query_dto: NotificationQueryDto) {
-    const result = await this.notifications_service.findAll(query_dto);
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    if (!user_id) throw new ForbiddenException('User context required');
+
+    const result = await this.notifications_service.findAll(
+      user_id,
+      query_dto,
+    );
     return this.response_service.success(
       result.data,
       'Notifications retrieved',
@@ -49,7 +56,11 @@ export class NotificationsController {
 
   @Get('unread-count')
   async unreadCount() {
-    const result = await this.notifications_service.getUnreadCount();
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    if (!user_id) throw new ForbiddenException('User context required');
+
+    const result = await this.notifications_service.getUnreadCount(user_id);
     return this.response_service.success(result);
   }
 
