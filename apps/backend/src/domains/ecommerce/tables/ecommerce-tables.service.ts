@@ -711,10 +711,39 @@ export class EcommerceTablesService {
    * waiters assigned to this table (Step 3, QR-mesa); falls back to a
    * store-wide broadcast when the table has no assigned waiters. No
    * table/order mutation.
+   *
+   * IMPORTANT — call-waiter is a PRE-session escalation. In `mark_occupied`
+   * (and `require_staff`) the diner occupies/scans the table and summons a
+   * mesero BEFORE any tab exists (precisely to have staff open it). It must
+   * therefore NOT require an active session — doing so threw
+   * TABLE_SESSION_NOT_FOUND and blocked the diner from calling the waiter on
+   * a table they just occupied. We resolve the table by token directly and
+   * only enrich the payload with session ids when a tab already exists
+   * (`open_tab`). Unlike `requestBill`/`requestSplit`, which genuinely need an
+   * open tab, calling a waiter is valid at any point once the table resolves.
    */
   async callWaiter(token: string, note?: string): Promise<{ ok: true }> {
-    const { store_id, table, session } =
-      await this.resolveActiveSessionByToken(token);
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!token || typeof token !== 'string') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Token de mesa requerido',
+      );
+    }
+
+    const table = await this.prisma.tables.findFirst({
+      where: { public_token: token },
+      select: { id: true, name: true },
+    });
+    if (!table) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+    }
+
+    // May be null in the pre-session window (mark_occupied / require_staff).
+    const session = await this.tablesService.getActiveSession(table.id);
 
     await this.dispatchStaffNotification(
       store_id,
@@ -725,14 +754,15 @@ export class EcommerceTablesService {
       {
         table_id: table.id,
         table_name: table.name,
-        table_session_id: session.id,
-        order_id: session.order_id,
+        table_session_id: session?.id ?? null,
+        order_id: session?.order_id ?? null,
         note: note ?? null,
       },
+      token,
     );
 
     this.logger.log(
-      `QR call-waiter: table=${table.id} session=${session.id}`,
+      `QR call-waiter: table=${table.id} session=${session?.id ?? 'none'}`,
     );
     return { ok: true };
   }
