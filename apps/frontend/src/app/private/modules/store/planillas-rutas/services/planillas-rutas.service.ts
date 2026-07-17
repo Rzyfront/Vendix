@@ -15,6 +15,7 @@ import {
   DispatchRouteStop,
   MapStopsResponse,
   PaginatedDispatchRoutesResponse,
+  PaginatedMonitorResponse,
   ReleaseStopDto,
   ReorderStopEntry,
   RouteSheetMatchResult,
@@ -43,6 +44,30 @@ export class PlanillasRutasService {
       .get<any>(`${this.apiUrl}/store/dispatch-routes?${params.toString()}`)
       .pipe(
         map((r) => r.data as PaginatedDispatchRoutesResponse),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Fetches the shipping mini-P&L monitor slice (recaudo, freight revenue,
+   * transport cost, freight margin and settlement status per route). Same
+   * unwrap pattern as the other reads — `ResponseService` wraps the body as
+   * `{ success, message, data: { data, pagination } }`, so we `map(r => r.data)`.
+   * `GET /store/dispatch-routes/monitor` accepts only `page` / `limit`.
+   */
+  getMonitor(
+    query: { page?: number; limit?: number } = {},
+  ): Observable<PaginatedMonitorResponse> {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) {
+        params.append(k, String(v));
+      }
+    });
+    return this.http
+      .get<any>(`${this.apiUrl}/store/dispatch-routes/monitor?${params.toString()}`)
+      .pipe(
+        map((r) => r.data as PaginatedMonitorResponse),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }

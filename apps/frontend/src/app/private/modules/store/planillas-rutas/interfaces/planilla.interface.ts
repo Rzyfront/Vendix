@@ -213,6 +213,48 @@ export interface PaginatedDispatchRoutesResponse {
   pagination: { total: number; page: number; limit: number; totalPages: number };
 }
 
+// ============================================================================
+// Dispatch monitor (GET /store/dispatch-routes/monitor)
+// ============================================================================
+
+/**
+ * One row of the shipping mini-P&L monitor. Mirrors EXACTLY the backend
+ * `data.data[]` shape returned by `GET /store/dispatch-routes/monitor`.
+ *
+ * The four economic fields are pre-aggregated by the backend as plain numbers:
+ * - `recaudo`         — cash collected on the route (COD).
+ * - `ingreso_flete`   — freight revenue charged to the customer.
+ * - `costo_transporte`— transport cost incurred (own fleet or external carrier).
+ * - `margen_flete`    — `ingreso_flete - costo_transporte` (can be NEGATIVE).
+ *
+ * `ejecutor` is the human-readable executor label (driver / carrier) or null,
+ * and `estado_liquidacion` reflects whether the route freight is settled.
+ * The endpoint accepts only `page` / `limit` (no `search`).
+ */
+export interface DispatchRouteMonitorRow {
+  id: number;
+  route_number: string;
+  store_id: number;
+  status: DispatchRouteStatus;
+  planned_date: string;
+  closed_at: string | null;
+  shipping_method: { id: number; name: string } | null;
+  external_carrier_supplier_id: number | null;
+  vehicle_id: number | null;
+  recaudo: number;
+  ingreso_flete: number;
+  costo_transporte: number;
+  margen_flete: number;
+  ejecutor: string | null;
+  estado_liquidacion: 'paid' | 'pending';
+}
+
+/** `GET /store/dispatch-routes/monitor` → unwrapped `data`. */
+export interface PaginatedMonitorResponse {
+  data: DispatchRouteMonitorRow[];
+  pagination: { total: number; page: number; limit: number; totalPages: number };
+}
+
 export interface SettleStopDto {
   result: DispatchRouteStopResult;
   collected_amount?: number;

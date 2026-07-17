@@ -9,6 +9,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from './services/planillas-rutas.service';
 import { PlanillasListComponent } from './components/planillas-list/planillas-list.component';
+import { PlanillaMonitorComponent } from './components/planilla-monitor/planilla-monitor.component';
 import { PlanillaStatsComponent } from './components/planilla-stats/planilla-stats.component';
 import { PlanillaWizardComponent } from './components/planilla-wizard/planilla-wizard.component';
 import { ShippingMethodsService } from '../settings/shipping/services/shipping-methods.service';
@@ -20,27 +21,61 @@ import { DispatchRoute, DispatchRouteStats } from './interfaces/planilla.interfa
   standalone: true,
   imports: [
     PlanillasListComponent,
+    PlanillaMonitorComponent,
     PlanillaStatsComponent,
     PlanillaWizardComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- Stats: Sticky on mobile, static on desktop -->
+      <!-- Stats: Sticky on mobile, static on desktop. Only on the Lista tab —
+           the Monitor tab has its own margin table and does not reuse these KPIs. -->
+      @if (activeTab() === 'lista') {
+        <div
+          class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        >
+          <app-planilla-stats
+            [stats]="stats()"
+            [loading]="statsLoading()"
+          ></app-planilla-stats>
+        </div>
+      }
+
+      <!-- Tab switcher: Lista (default) | Monitor -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="flex items-center gap-2 px-2 pb-2 pt-1 md:px-0 md:pt-0 md:mb-3"
+        role="tablist"
+        aria-label="Vistas de planillas"
       >
-        <app-planilla-stats
-          [stats]="stats()"
-          [loading]="statsLoading()"
-        ></app-planilla-stats>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'lista'"
+          [class]="tabClass('lista')"
+          (click)="setTab('lista')"
+        >
+          Lista
+        </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'monitor'"
+          [class]="tabClass('monitor')"
+          (click)="setTab('monitor')"
+        >
+          Monitor
+        </button>
       </div>
 
-      <!-- List Component -->
-      <app-planillas-list
-        (viewDetail)="onViewDetail($event)"
-        (create)="openCreateModal()"
-        (refresh)="refresh()"
-      ></app-planillas-list>
+      <!-- Active tab content -->
+      @if (activeTab() === 'lista') {
+        <app-planillas-list
+          (viewDetail)="onViewDetail($event)"
+          (create)="openCreateModal()"
+          (refresh)="refresh()"
+        ></app-planillas-list>
+      } @else {
+        <app-planilla-monitor></app-planilla-monitor>
+      }
     </div>
 
     @if (showWizard()) {
@@ -65,6 +100,10 @@ export class PlanillasRutasComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly planillasList = viewChild<PlanillasListComponent>(PlanillasListComponent);
+
+  /** Active sub-view: 'lista' (default) shows the routes list + stats + wizard;
+   * 'monitor' shows the shipping mini-P&L table. */
+  readonly activeTab = signal<'lista' | 'monitor'>('lista');
 
   readonly stats = signal<DispatchRouteStats | null>(null);
   readonly statsLoading = signal(false);
@@ -129,6 +168,20 @@ export class PlanillasRutasComponent {
         // Si falla, el wizard ya está abierto en modo manual.
         error: () => {},
       });
+  }
+
+  /** Switches the active sub-view between the routes list and the P&L monitor. */
+  setTab(tab: 'lista' | 'monitor'): void {
+    this.activeTab.set(tab);
+  }
+
+  /** Tailwind classes for a tab pill, derived reactively from `activeTab()`. */
+  tabClass(tab: 'lista' | 'monitor'): string {
+    const base =
+      'px-4 py-1.5 rounded-full text-sm font-medium transition-colors';
+    return this.activeTab() === tab
+      ? `${base} bg-primary text-white`
+      : `${base} bg-background text-text-secondary border border-border hover:text-text-primary`;
   }
 
   refresh() {
