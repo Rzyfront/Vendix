@@ -1,14 +1,18 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnDestroy,
   OnInit,
   computed,
+  effect,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
+import { Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../icon/icon.component';
 import { ButtonComponent } from '../button/button.component';
 import {
@@ -26,6 +30,7 @@ import {
   OptimizedRoute,
   RouteOptimizerService,
 } from '../../../private/modules/store/planillas-rutas/services/route-optimizer.service';
+import { RoutingService } from '../../../private/modules/ecommerce/services/routing.service';
 
 /** Highlight color for the NEXT stop pin (distinct from map-view STATE_COLORS). */
 const NEXT_STOP_COLOR = '#7c3aed';
@@ -67,23 +72,33 @@ export interface RouteMapReorderEntry {
  * It owns the reusable, non-trivial parts that used to live in the modal:
  * building numbered markers, running {@link RouteOptimizerService} to suggest a
  * shortest-first visiting order, highlighting the NEXT stop, tracking the
- * driver's live position via `navigator.geolocation.watchPosition`, and drawing
+ * driver's live position via `navigator.geolocation.watchPosition`, drawing the
+ * route **por calles** (geometría OSRM vía el backend proxy) with an elegant
+ * fallback to a straight polyline when the proxy is unavailable, and drawing
  * everything through {@link MapViewComponent} (reused as-is).
  *
  * It is fully data-driven: the host supplies the located pending `stops`, the
  * `delivered` leg, the `unlocated` list and an optional `origin`; this component
- * never fetches. The optimizer anchors on the live driver location when
+ * never fetches (except the OSRM directions proxy, which is presentation-only
+ * route geometry). The optimizer anchors on the live driver location when
  * available (so "next stop" is relative to the driver) and degrades to `origin`
  * — or to nothing — when GPS is denied / unsupported / on an insecure context,
- * surfacing an amber notice and keeping the unlocated stops visible.
+ * surfacing an animated GPS panel with a retry button instead of a static
+ * notice.
  *
  * The optional "Aplicar orden óptimo" action is enabled with `showApplyOrder`;
  * the component emits the optimized 1-based order through `(applyOrder)` and the
  * HOST persists it (the admin modal → `reorderStops`). This keeps the component
- * presentation-only (no HTTP, no service persistence of its own).
+ * presentation-only (no HTTP persistence of its own beyond route geometry).
+ *
+ * `fullscreen` mode drops the top summary bar and the unlocated list so the map
+ * owns the whole viewport (carrier inmersivo), keeping only a compact floating
+ * overlay with the next stop + ETA.
  *
  * Zoneless-clean: signal inputs/outputs, computed derived state, GPS readings
- * mirrored into signals (writes schedule change detection with no NgZone), and
+ * mirrored into signals (writes schedule change detection with no NgZone), the
+ * OSRM fetch driven from an `effect` (dependencias estables: stops + origin, NO
+ * `userLocation`, para no re-llamar al proxy en cada tick del GPS), and
  * `clearWatch` on destroy so switching tabs / closing the modal never leaks the
  * watch.
  */
@@ -94,159 +109,351 @@ export interface RouteMapReorderEntry {
   imports: [IconComponent, ButtonComponent, MapViewComponent],
   template: `
     <!-- Flex column: summary bar (shrink) + map (grow) + unlocated (shrink).
-         Fills the host's height so the map is the protagonist. -->
-    <div class="flex h-full flex-col gap-3">
-      <!-- Suggested-route summary (top bar) -->
-      <div class="shrink-0 space-y-2 rounded-xl border border-border bg-surface p-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2 text-sm">
-            <app-icon name="navigation" [size]="16" class="text-primary-600"></app-icon>
-            <span class="font-semibold text-text-primary">
-              Recorrido sugerido: {{ distanceLabel() }}
-            </span>
-          </div>
-          <span class="text-xs text-text-secondary">
-            {{ stopCount() }}
-            {{ stopCount() === 1 ? 'parada pendiente' : 'paradas pendientes' }}
-          </span>
-          @if (deliveredStops().length > 0) {
-            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700">
-              <app-icon name="check-circle" [size]="12" class="text-green-600"></app-icon>
-              {{ deliveredStops().length }}
-              {{ deliveredStops().length === 1 ? 'entregada' : 'entregadas' }}
-            </span>
-          }
+         Fills the host's height so the map is the protagonist.
+         In fullscreen mode the map owns everything; the summary/unlocated blocks
+         are replaced by a compact floating overlay on top of the map. -->
+    <div class="flex h-full flex-col gap-3 relative">
+      @if (fullscreen()) {
+        <!-- Fullscreen: solo mapa + overlay flotante -->
+        <div class="min-h-0 flex-1">
+          <app-map-view
+            class="block h-full"
+            [markers]="markers()"
+            [route]="drawnRoute()"
+            [completedRoute]="completedRoute()"
+            [origin]="mapOrigin()"
+            [userLocation]="userLocation()"
+            [fill]="true"
+            [readonly]="readonly()"
+          ></app-map-view>
         </div>
 
-        <!-- Next stop (first in the optimized order) -->
+        <!-- Overlay flotante: próxima parada + ETA -->
         @if (nextStop(); as next) {
-          <div class="flex items-center gap-2 text-xs">
-            <span
-              class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide text-white"
-              [style.background]="nextStopColor"
-            >
-              <app-icon name="map-pin" [size]="12"></app-icon>
-              Próxima
-            </span>
-            <span class="min-w-0 truncate text-text-primary">
-              #{{ next.sequence }} · {{ next.customerName || '(Cliente)' }}
-              @if (next.addressText) {
-                <span class="text-text-secondary"> · {{ next.addressText }}</span>
-              }
-            </span>
+          <div class="fs-overlay">
+            <div class="fs-overlay-row">
+              <span
+                class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide text-white text-[11px]"
+                [style.background]="nextStopColor"
+              >
+                <app-icon name="map-pin" [size]="12"></app-icon>
+                Próxima
+              </span>
+              <span class="min-w-0 truncate text-text-primary text-sm font-semibold">
+                #{{ next.sequence }} · {{ next.customerName || '(Cliente)' }}
+              </span>
+            </div>
+            @if (etaLabel(); as eta) {
+              <div class="fs-overlay-meta">
+                <app-icon name="navigation" [size]="13" class="text-primary-600"></app-icon>
+                <span class="text-xs text-text-secondary">{{ eta }}</span>
+              </div>
+            }
           </div>
         }
 
-        <!-- GPS fallback notice -->
-        @if (locationUnavailable()) {
-          <div class="flex items-center gap-1.5 text-[11px] text-amber-700">
-            <app-icon name="alert-triangle" [size]="12" class="text-amber-600"></app-icon>
-            {{ locationNotice() }}
+        <!-- Panel GPS (fullscreen) -->
+        @if (showGpsPanel()) {
+          <div class="gps-panel">
+            <div class="gps-halo">
+              <app-icon name="map-pin" [size]="28" class="gps-pin-icon"></app-icon>
+            </div>
+            <p class="gps-title">Necesitamos tu ubicación</p>
+            <p class="gps-desc">{{ gpsHelpText() }}</p>
+            <div class="gps-actions">
+              <app-button variant="primary" size="sm" (clicked)="retry()">{{ retryLabel() }}</app-button>
+            </div>
           </div>
         }
-      </div>
+      } @else {
+        <!-- Modo normal: summary bar + mapa + unlocated -->
 
-      <!-- Map: fills the remaining height. min-h-0 is REQUIRED so this flex-1
-           child can shrink instead of overflowing. -->
-      <div class="min-h-0 flex-1">
-        <app-map-view
-          class="block h-full"
-          [markers]="markers()"
-          [route]="routeLine()"
-          [completedRoute]="completedRoute()"
-          [origin]="mapOrigin()"
-          [userLocation]="userLocation()"
-          [fill]="fill()"
-          [readonly]="readonly()"
-        ></app-map-view>
-      </div>
-
-      <!-- Optional "apply optimal order" action (host persists on (applyOrder)). -->
-      @if (showApplyOrder()) {
-        <div class="shrink-0 flex flex-col gap-2">
-          @if (confirming()) {
-            <div
-              class="rounded-md border border-border bg-surface px-3 py-2 text-xs text-text-secondary"
-            >
-              ¿Aplicar el orden sugerido a
+        <!-- Suggested-route summary (top bar) -->
+        <div class="shrink-0 space-y-2 rounded-xl border border-border bg-surface p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2 text-sm">
+              <app-icon name="navigation" [size]="16" class="text-primary-600"></app-icon>
+              <span class="font-semibold text-text-primary">
+                Recorrido sugerido: {{ distanceLabel() }}
+              </span>
+            </div>
+            <span class="text-xs text-text-secondary">
               {{ stopCount() }}
-              {{ stopCount() === 1 ? 'parada' : 'paradas' }}? Esto reordenará las
-              paradas pendientes.
+              {{ stopCount() === 1 ? 'parada pendiente' : 'paradas pendientes' }}
+            </span>
+            @if (etaLabel(); as eta) {
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-primary-700">
+                <app-icon name="clock" [size]="12"></app-icon>
+                {{ eta }}
+              </span>
+            }
+            @if (deliveredStops().length > 0) {
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+                <app-icon name="check-circle" [size]="12" class="text-green-600"></app-icon>
+                {{ deliveredStops().length }}
+                {{ deliveredStops().length === 1 ? 'entregada' : 'entregadas' }}
+              </span>
+            }
+          </div>
+
+          <!-- Next stop (first in the optimized order) -->
+          @if (nextStop(); as next) {
+            <div class="flex items-center gap-2 text-xs">
+              <span
+                class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide text-white"
+                [style.background]="nextStopColor"
+              >
+                <app-icon name="map-pin" [size]="12"></app-icon>
+                Próxima
+              </span>
+              <span class="min-w-0 truncate text-text-primary">
+                #{{ next.sequence }} · {{ next.customerName || '(Cliente)' }}
+                @if (next.addressText) {
+                  <span class="text-text-secondary"> · {{ next.addressText }}</span>
+                }
+              </span>
             </div>
-            <div class="flex items-center justify-end gap-2">
-              <app-button
-                variant="outline"
-                size="sm"
-                [disabled]="applying()"
-                (clicked)="confirming.set(false)"
-              >
-                Cancelar
-              </app-button>
-              <app-button
-                variant="primary"
-                size="sm"
-                [loading]="applying()"
-                (clicked)="apply()"
-              >
-                Confirmar orden
-              </app-button>
-            </div>
-          } @else {
-            <div class="flex items-center justify-end">
-              <app-button
-                variant="primary"
-                size="sm"
-                [loading]="applying()"
-                [disabled]="!canApply()"
-                (clicked)="confirming.set(true)"
-              >
-                <app-icon slot="icon" name="navigation" [size]="16"></app-icon>
-                Aplicar orden óptimo
-              </app-button>
+          }
+
+          <!-- Panel GPS animado + reintentar (reemplaza el aviso ámbar estático) -->
+          @if (showGpsPanel()) {
+            <div class="gps-panel gps-panel--inline">
+              <div class="gps-halo">
+                <app-icon name="map-pin" [size]="24" class="gps-pin-icon"></app-icon>
+              </div>
+              <div class="gps-body">
+                <p class="gps-title">Necesitamos tu ubicación</p>
+                <p class="gps-desc">{{ gpsHelpText() }}</p>
+              </div>
+              <div class="gps-actions">
+                <app-button variant="primary" size="sm" (clicked)="retry()">{{ retryLabel() }}</app-button>
+              </div>
             </div>
           }
         </div>
-      }
 
-      <!-- Stops without coordinates (capped so it never steals the map height). -->
-      @if (unlocated().length > 0) {
-        <div
-          class="shrink-0 max-h-[28vh] overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-3"
-        >
-          <div class="flex items-center gap-1.5 mb-2">
-            <app-icon name="map-pin" [size]="14" class="text-amber-600"></app-icon>
-            <span class="text-[11px] font-bold uppercase tracking-wide text-amber-800">
-              Sin ubicación ({{ unlocated().length }})
-            </span>
-          </div>
-          <ul class="space-y-1">
-            @for (u of unlocated(); track u.stopId) {
-              <li class="flex items-start gap-2 text-xs text-amber-900">
-                <span class="font-mono font-semibold shrink-0">#{{ u.sequence }}</span>
-                <span class="min-w-0">
-                  {{ u.customerName || '(Cliente)' }}
-                  @if (u.addressText) {
-                    <span class="text-amber-700"> · {{ u.addressText }}</span>
-                  }
-                </span>
-              </li>
-            }
-          </ul>
-          <p class="mt-2 text-[11px] text-amber-700">
-            Estas paradas no tienen coordenadas y no se pueden dibujar en el mapa
-            ni incluir en el recorrido sugerido.
-          </p>
+        <!-- Map: fills the remaining height. min-h-0 is REQUIRED so this flex-1
+             child can shrink instead of overflowing. -->
+        <div class="min-h-0 flex-1">
+          <app-map-view
+            class="block h-full"
+            [markers]="markers()"
+            [route]="drawnRoute()"
+            [completedRoute]="completedRoute()"
+            [origin]="mapOrigin()"
+            [userLocation]="userLocation()"
+            [fill]="fill()"
+            [readonly]="readonly()"
+          ></app-map-view>
         </div>
+
+        <!-- Optional "apply optimal order" action (host persists on (applyOrder)). -->
+        @if (showApplyOrder()) {
+          <div class="shrink-0 flex flex-col gap-2">
+            @if (confirming()) {
+              <div
+                class="rounded-md border border-border bg-surface px-3 py-2 text-xs text-text-secondary"
+              >
+                ¿Aplicar el orden sugerido a
+                {{ stopCount() }}
+                {{ stopCount() === 1 ? 'parada' : 'paradas' }}? Esto reordenará las
+                paradas pendientes.
+              </div>
+              <div class="flex items-center justify-end gap-2">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [disabled]="applying()"
+                  (clicked)="confirming.set(false)"
+                >
+                  Cancelar
+                </app-button>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [loading]="applying()"
+                  (clicked)="apply()"
+                >
+                  Confirmar orden
+                </app-button>
+              </div>
+            } @else {
+              <div class="flex items-center justify-end">
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [loading]="applying()"
+                  [disabled]="!canApply()"
+                  (clicked)="confirming.set(true)"
+                >
+                  <app-icon slot="icon" name="navigation" [size]="16"></app-icon>
+                  Aplicar orden óptimo
+                </app-button>
+              </div>
+            }
+          </div>
+        }
+
+        <!-- Stops without coordinates (capped so it never steals the map height). -->
+        @if (unlocated().length > 0) {
+          <div
+            class="shrink-0 max-h-[28vh] overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-3"
+          >
+            <div class="flex items-center gap-1.5 mb-2">
+              <app-icon name="map-pin" [size]="14" class="text-amber-600"></app-icon>
+              <span class="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                Sin ubicación ({{ unlocated().length }})
+              </span>
+            </div>
+            <ul class="space-y-1">
+              @for (u of unlocated(); track u.stopId) {
+                <li class="flex items-start gap-2 text-xs text-amber-900">
+                  <span class="font-mono font-semibold shrink-0">#{{ u.sequence }}</span>
+                  <span class="min-w-0">
+                    {{ u.customerName || '(Cliente)' }}
+                    @if (u.addressText) {
+                      <span class="text-amber-700"> · {{ u.addressText }}</span>
+                    }
+                  </span>
+                </li>
+              }
+            </ul>
+            <p class="mt-2 text-[11px] text-amber-700">
+              Estas paradas no tienen coordenadas y no se pueden dibujar en el mapa
+              ni incluir en el recorrido sugerido.
+            </p>
+          </div>
+        }
       }
     </div>
   `,
+  styles: [
+    `
+      /* ── Fullscreen overlay (próxima parada + ETA flotante) ── */
+      .fs-overlay {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 10px 12px;
+        border-radius: var(--radius-lg, 12px);
+        background: var(--color-surface, #ffffff);
+        border: 1px solid var(--color-border, #e5e7eb);
+        box-shadow: var(--shadow-md, 0 4px 6px -1px rgb(0 0 0 / 0.1));
+        pointer-events: none;
+      }
+      .fs-overlay-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .fs-overlay-meta {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding-left: 28px;
+      }
+
+      /* ── Panel GPS animado (permiso denegado / prompt) ── */
+      .gps-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        padding: 20px 16px;
+        border-radius: var(--radius-lg, 12px);
+        background: var(--color-surface, #ffffff);
+        border: 1px solid var(--color-border, #e5e7eb);
+        text-align: center;
+      }
+      .gps-panel--inline {
+        flex-direction: row;
+        align-items: center;
+        text-align: left;
+        gap: 14px;
+      }
+      .gps-panel--inline .gps-body {
+        flex: 1;
+        min-width: 0;
+      }
+      /* Halo animado: anillo que pulsa alrededor del icono (respeto prefers-reduced-motion
+         vía la regla global de styles.scss, que reduce la duración a ~0). */
+      .gps-halo {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        flex-shrink: 0;
+        color: var(--color-primary, #2ecc71);
+      }
+      .gps-halo::before,
+      .gps-halo::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 9999px;
+        background: var(--color-primary, #2ecc71);
+        opacity: 0.25;
+        animation: gps-halo-pulse 2.2s ease-out infinite;
+      }
+      .gps-halo::after {
+        animation-delay: 1.1s;
+      }
+      .gps-pin-icon {
+        position: relative;
+        z-index: 1;
+      }
+      .gps-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--color-text-primary, #111827);
+      }
+      .gps-desc {
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--color-text-secondary, #6b7280);
+        max-width: 320px;
+      }
+      .gps-actions {
+        display: flex;
+        justify-content: center;
+      }
+      .gps-panel--inline .gps-actions {
+        justify-content: flex-end;
+      }
+      @keyframes gps-halo-pulse {
+        0% {
+          transform: scale(0.6);
+          opacity: 0.45;
+        }
+        70% {
+          transform: scale(1.6);
+          opacity: 0;
+        }
+        100% {
+          transform: scale(1.6);
+          opacity: 0;
+        }
+      }
+    `,
+  ],
 })
 export class RouteMapViewComponent implements OnInit, OnDestroy {
   private readonly optimizer = inject(RouteOptimizerService);
   private readonly geo = inject(GeolocationService);
+  private readonly routing = inject(RoutingService);
+  private readonly destroyRef = inject(DestroyRef);
 
   /** Active `watchPosition` id, cleared on destroy. `null` when not watching. */
   private watchId: number | null = null;
+  /** In-flight OSRM subscription, cancelled on re-fetch + destroy. */
+  private routeSub: Subscription | null = null;
 
   /** Located pending stops — the optimizer input (numbered, next highlighted). */
   readonly stops = input<RouteMapStop[]>([]);
@@ -260,6 +467,8 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   readonly readonly = input<boolean>(true);
   /** Passthrough to map-view: `true` fills the host height (immersive hosts). */
   readonly fill = input<boolean>(false);
+  /** Fullscreen inmersivo: oculta summary/unlocated, el mapa llena todo + overlay. */
+  readonly fullscreen = input<boolean>(false);
   /** Renders the "Aplicar orden óptimo" action (host persists on emit). */
   readonly showApplyOrder = input<boolean>(false);
   /** Host-driven loading of the persist call — spins/disables the apply button. */
@@ -279,6 +488,20 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   readonly locationUnavailable = signal(false);
   /** Inline confirm state for the "apply order" action (no separate dialog). */
   readonly confirming = signal(false);
+
+  /** Estado del permiso de geolocalización (granted/denied/prompt/unsupported). */
+  readonly permissionState = signal<
+    PermissionState | 'unsupported' | 'unknown'
+  >('unknown');
+  /** Muestra las instrucciones para habilitar el permiso (hard-denied / HTTPS). */
+  readonly deniedHelp = signal(false);
+
+  /** Geometría por calles (OSRM) mapeada a LatLng[]. Vacía → fallback a recto. */
+  readonly streetRoute = signal<LatLng[]>([]);
+  /** ETA en segundos desde la geometría OSRM. `null` si no hay trazo por calles. */
+  readonly streetEta = signal<number | null>(null);
+  /** `true` mientras se espera la geometría OSRM. */
+  readonly streetLoading = signal(false);
 
   /**
    * Start of the route: the live driver location when available, otherwise the
@@ -370,6 +593,16 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
     return points;
   });
 
+  /**
+   * Ruta dibujada: geometría por calles (OSRM) si está disponible, si no cae a la
+   * línea recta {@link routeLine}. Nunca vacía cuando hay paradas (degradación
+   * elegante: si el proxy OSRM falla, el mapa sigue mostrando la ruta recta).
+   */
+  readonly drawnRoute = computed<LatLng[]>(() => {
+    const street = this.streetRoute();
+    return street.length >= 2 ? street : this.routeLine();
+  });
+
   /** Green completed-route polyline: the delivered stops in their given order. */
   readonly completedRoute = computed<LatLng[]>(() =>
     this.deliveredStops().map((s) => ({ lat: s.lat, lng: s.lng })),
@@ -383,6 +616,21 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
     () => `${this.optimized().totalDistanceKm.toFixed(1)} km`,
   );
 
+  /**
+   * ETA legible desde la geometría OSRM. `null` cuando no hay trazo por calles
+   * (fallback a recto, sin ETA confiable).
+   */
+  readonly etaLabel = computed<string | null>(() => {
+    const s = this.streetEta();
+    if (s == null || s <= 0) return null;
+    if (s < 60) return `${Math.round(s)} seg`;
+    const min = Math.round(s / 60);
+    if (min < 60) return `${min} min`;
+    const h = Math.floor(min / 60);
+    const rest = min % 60;
+    return rest ? `${h} h ${rest} min` : `${h} h`;
+  });
+
   /** "Apply" is available only with enough located stops and no in-flight work. */
   readonly canApply = computed<boolean>(
     () =>
@@ -391,19 +639,158 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
       this.stopCount() >= this.minStopsToApply(),
   );
 
-  /** GPS fallback copy — adapts to whether a route origin is available. */
+  /** GPS fallback copy — adapts a si hay origen de la ruta. */
   readonly locationNotice = computed<string>(() =>
     this.origin()
       ? 'Ubicación no disponible — usando origen de la ruta.'
       : 'Ubicación no disponible — mostrando solo las paradas.',
   );
 
+  /** ¿Mostrar el panel GPS animado? Solo si GPS no está disponible y no concedido. */
+  readonly showGpsPanel = computed<boolean>(
+    () =>
+      this.locationUnavailable() &&
+      this.permissionState() !== 'granted' &&
+      this.permissionState() !== 'unknown',
+  );
+
+  /** Copy del panel GPS según el estado del permiso. */
+  readonly gpsHelpText = computed<string>(() => {
+    const state = this.permissionState();
+    if (this.deniedHelp()) {
+      return 'El navegador bloqueó la ubicación. Habilítala en los permisos del sitio (icono de candado en la barra de direcciones) y vuelve a intentar.';
+    }
+    if (state === 'denied') {
+      return 'El navegador bloqueó la ubicación. Toca «Reintentar» para ver cómo habilitarla.';
+    }
+    if (state === 'unsupported') {
+      return 'Tu navegador no soporta geolocalización. Usa un navegador moderno para trazar la ruta.';
+    }
+    return 'Toca «Reintentar» para permitir el acceso a tu ubicación y trazar la ruta por calles.';
+  });
+
+  /** Label del botón según el estado. */
+  readonly retryLabel = computed<string>(() => {
+    const state = this.permissionState();
+    if (this.deniedHelp() || state === 'denied' || state === 'unsupported') {
+      return 'Cómo habilitar';
+    }
+    return 'Reintentar';
+  });
+
+  constructor() {
+    // Fetch de la geometría por calles (OSRM). Dependencias ESTABLES: stops +
+    // origin. NO userLocation → evita re-llamar al proxy en cada tick del GPS
+    // (cada tick movería el primer waypoint y haría cache-miss siempre). El
+    // conductor se ve como punto vivo; la ruta por calles va origin → paradas y
+    // se recalcula solo cuando las paradas u origin cambian.
+    effect(() => {
+      const stopsInput = this.stops();
+      const origin = this.origin();
+      const geo = stopsInput.map((s) => ({
+        stopId: s.stopId,
+        sequence: s.sequence,
+        lat: s.lat,
+        lng: s.lng,
+      }));
+      // Orden optimizado anclado en el origen (estable), NO en userLocation.
+      const ordered = this.optimizer.optimize(origin, geo).orderedStops;
+      const waypoints: LatLng[] = [];
+      if (origin) waypoints.push(origin);
+      for (const s of ordered) waypoints.push({ lat: s.lat, lng: s.lng });
+      this.fetchStreetRoute(waypoints);
+    });
+  }
+
   ngOnInit(): void {
     this.startLocationWatch();
+    this.refreshPermissionState();
   }
 
   ngOnDestroy(): void {
     this.stopLocationWatch();
+    this.routeSub?.unsubscribe();
+  }
+
+  /**
+   * Reintenta el permiso de GPS. Si el estado es `prompt` dispara la solicitud
+   * nativa (getCurrentPosition); al conceder, reanuda el watch. Si está `denied`
+   * (hard-denied — el navegador NO re-dispara el prompt nativo) muestra las
+   * instrucciones para habilitarlo en ajustes del sitio. Nunca deja al conductor
+   * en un estado muerto.
+   */
+  async retry(): Promise<void> {
+    const state = await this.geo.getPermissionState();
+    this.permissionState.set(state);
+
+    if (state === 'unsupported') {
+      this.deniedHelp.set(true);
+      return;
+    }
+    if (state === 'denied') {
+      // Hard-denied: el navegador no re-dispara el prompt. Solo podemos guiar.
+      this.deniedHelp.set(true);
+      return;
+    }
+    // state === 'prompt' (o desconocido): dispara la solicitud nativa.
+    this.deniedHelp.set(false);
+    try {
+      const coords = await this.geo.getCurrentPosition();
+      this.userLocation.set({ lat: coords.lat, lng: coords.lng });
+      this.locationUnavailable.set(false);
+      // Reanuda el watch continuo ahora que el permiso está concedido.
+      this.stopLocationWatch();
+      this.startLocationWatch();
+    } catch (err) {
+      // Si el usuario niega en el prompt, el estado pasa a denied.
+      this.permissionState.set('denied');
+      this.deniedHelp.set(true);
+    }
+  }
+
+  /** Consulta el estado del permiso async y lo refleja en el signal. */
+  private async refreshPermissionState(): Promise<void> {
+    const state = await this.geo.getPermissionState();
+    this.permissionState.set(state);
+  }
+
+  /**
+   * Traza la ruta por calles (OSRM) para los waypoints dados. Cancela la
+   * suscripción previa (evita acumularlas al re-correr el effect). Si hay <2 pts
+   * o el proxy falla, limpia la geometría → el template cae a la línea recta.
+   */
+  private fetchStreetRoute(waypoints: LatLng[]): void {
+    this.routeSub?.unsubscribe();
+    if (waypoints.length < 2) {
+      this.streetRoute.set([]);
+      this.streetEta.set(null);
+      this.streetLoading.set(false);
+      return;
+    }
+    this.streetLoading.set(true);
+    this.routeSub = this.routing
+      .getDirections(waypoints)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (r) => {
+          this.streetLoading.set(false);
+          if (r.geometry && r.geometry.coordinates.length >= 2) {
+            this.streetRoute.set(
+              r.geometry.coordinates.map(([lng, lat]) => ({ lat, lng })),
+            );
+            this.streetEta.set(r.duration_s);
+          } else {
+            this.streetRoute.set([]);
+            this.streetEta.set(null);
+          }
+        },
+        error: () => {
+          // Degradación elegante: el template cae a la línea recta.
+          this.streetLoading.set(false);
+          this.streetRoute.set([]);
+          this.streetEta.set(null);
+        },
+      });
   }
 
   /**

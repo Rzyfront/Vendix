@@ -70,13 +70,13 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
           <span class="text-sm">Cargando tu ruta…</span>
         </div>
       } @else if (!route()) {
-        <!-- Sin ruta activa → CTA al pool -->
+        <!-- Sin ruta activa → CTA a pedidos disponibles -->
         <div class="flex-1 flex items-center justify-center p-4">
           <app-empty-state
             icon="map-pin"
             title="No tienes una ruta activa"
-            description="Toma pedidos del pool para armar tu ruta y ver el mapa de tu recorrido."
-            actionButtonText="Ir al pool"
+            description="Toma pedidos disponibles para armar tu ruta y ver el mapa de tu recorrido."
+            actionButtonText="Ir a pedidos disponibles"
             actionButtonIcon="package"
             [showActionButton]="true"
             (actionClick)="goToPool()"
@@ -101,6 +101,7 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
             [unlocated]="mapUnlocated()"
             [origin]="null"
             [fill]="true"
+            [fullscreen]="true"
             [readonly]="true"
             [showApplyOrder]="true"
             [applying]="applying()"
@@ -123,13 +124,16 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
         flex-direction: column;
         flex: 1 1 auto;
         min-height: 0;
-        padding: 12px;
+        /* Fullscreen: el mapa llena todo el viewport del shell (menos header +
+           bottom-nav), sin padding que le quite espacio al trazo por calles. */
+        padding: 0;
       }
-      /* Floor via dvh so the map is usable even if the height:100% chain from
-         the delivery shell does not resolve; flex-grow expands it when it does. */
       .map-wrap {
         flex: 1 1 auto;
-        min-height: 60dvh;
+        min-height: 0;
+        /* Ocupa todo el alto disponible; el route-map-view en fullscreen llena
+           este contenedor sin scroll horizontal en móvil ni desktop. */
+        height: 100%;
       }
     `,
   ],

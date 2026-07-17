@@ -6,13 +6,16 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
  * Bottom-nav fijo de la cáscara de reparto (Vendix Repartos, STORE_DELIVERY).
  *
  * 100% presentacional: recibe `activeRouteId` y `pendingStops` como inputs y
- * pinta 4 tabs (Pool / Mi Ruta / Mapa / Sesión) con `routerLink` +
+ * pinta 4 tabs (Disponibles / Mi Ruta / Mapa / Sesión) con `routerLink` +
  * `routerLinkActive`. Sin estado propio ni HTTP.
  *
- * Mobile-first: cada tab tiene área táctil ≥44px y la barra respeta el
+ * Accesibilidad: el tab activo NO se comunica solo por color — un indicador
+ * superior aparece con `transform` (scaleX) + `opacity` y el icono se eleva
+ * ligeramente, además del cambio de color y peso. Cada tab tiene área táctil
+ * ≥44px y estado `:focus-visible` visible. La barra respeta el
  * `env(safe-area-inset-bottom)` de los dispositivos con notch/home-indicator.
  * En "Mi Ruta" se pinta un badge con `pendingStops` cuando hay paradas por
- * atender (> 0).
+ * atender (> 0), resuelto vía el token `--color-danger`.
  */
 @Component({
   selector: 'app-delivery-bottom-nav',
@@ -20,15 +23,22 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RouterLink, RouterLinkActive, IconComponent],
   template: `
-    <nav class="delivery-bottom-nav" role="navigation" aria-label="Navegación de reparto">
+    <nav
+      class="delivery-bottom-nav"
+      role="navigation"
+      aria-label="Navegación de reparto"
+    >
       <a
         class="nav-tab"
         routerLink="/repartos/pool"
         routerLinkActive="active"
-        aria-label="Pool"
+        aria-label="Pedidos disponibles"
       >
-        <app-icon name="inbox" [size]="22" />
-        <span class="nav-label">Pool</span>
+        <span class="nav-indicator" aria-hidden="true"></span>
+        <span class="nav-icon-wrap">
+          <app-icon name="inbox" [size]="22" />
+        </span>
+        <span class="nav-label">Disponibles</span>
       </a>
 
       <a
@@ -37,6 +47,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Mi Ruta"
       >
+        <span class="nav-indicator" aria-hidden="true"></span>
         <span class="nav-icon-wrap">
           <app-icon name="truck" [size]="22" />
           @if (pendingStops() > 0) {
@@ -54,7 +65,10 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Mapa"
       >
-        <app-icon name="map-pin" [size]="22" />
+        <span class="nav-indicator" aria-hidden="true"></span>
+        <span class="nav-icon-wrap">
+          <app-icon name="map-pin" [size]="22" />
+        </span>
         <span class="nav-label">Mapa</span>
       </a>
 
@@ -64,7 +78,10 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Sesión"
       >
-        <app-icon name="user" [size]="22" />
+        <span class="nav-indicator" aria-hidden="true"></span>
+        <span class="nav-icon-wrap">
+          <app-icon name="user" [size]="22" />
+        </span>
         <span class="nav-label">Sesión</span>
       </a>
     </nav>
@@ -84,44 +101,84 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         align-items: stretch;
-        background: var(--color-surface, #ffffff);
-        border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
-        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+        background: var(--color-surface);
+        border-top: 1px solid var(--color-border);
+        box-shadow: 0 -4px 16px rgba(var(--color-secondary-rgb), 0.08);
         padding-bottom: env(safe-area-inset-bottom, 0px);
       }
 
       .nav-tab {
+        position: relative;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 2px;
+        gap: 4px;
         /* Área táctil >= 44px (WCAG / iOS HIG). */
-        min-height: 56px;
-        padding: 6px 4px;
+        min-height: 58px;
+        padding: 8px 4px;
         text-decoration: none;
-        color: var(--color-text-secondary, #6b7280);
-        transition: color 0.15s ease;
+        color: var(--color-text-secondary);
+        transition: color var(--transition-fast) ease;
         -webkit-tap-highlight-color: transparent;
       }
 
       .nav-tab:active {
-        background: var(--color-background, rgba(0, 0, 0, 0.03));
+        background: var(--color-background);
+      }
+
+      .nav-tab:focus-visible {
+        outline: 2px solid var(--color-ring);
+        outline-offset: -3px;
+        border-radius: var(--radius-sm);
       }
 
       .nav-tab.active {
-        color: var(--color-primary, #3b82f6);
-        font-weight: 600;
+        color: var(--color-primary);
       }
 
-      .nav-label {
-        font-size: 11px;
-        line-height: 1;
+      /* Indicador superior: comunica el tab activo con movimiento (transform +
+         opacity), no solo con color. */
+      .nav-indicator {
+        position: absolute;
+        top: 0;
+        left: 50%;
+        width: 28px;
+        height: 3px;
+        border-radius: var(--radius-pill);
+        background: var(--color-primary);
+        opacity: 0;
+        transform: translateX(-50%) scaleX(0);
+        transform-origin: center;
+        transition:
+          transform var(--transition-fast) ease,
+          opacity var(--transition-fast) ease;
+      }
+
+      .nav-tab.active .nav-indicator {
+        opacity: 1;
+        transform: translateX(-50%) scaleX(1);
       }
 
       .nav-icon-wrap {
         position: relative;
         display: inline-flex;
+        transition: transform var(--transition-fast) ease;
+      }
+
+      .nav-tab.active .nav-icon-wrap {
+        transform: translateY(-2px);
+      }
+
+      .nav-label {
+        font-size: 11px;
+        line-height: 1;
+        font-weight: 500;
+        transition: font-weight var(--transition-fast) ease;
+      }
+
+      .nav-tab.active .nav-label {
+        font-weight: 700;
       }
 
       .nav-badge {
@@ -131,9 +188,9 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         min-width: 16px;
         height: 16px;
         padding: 0 4px;
-        border-radius: 9999px;
-        background: var(--color-danger, #ef4444);
-        color: #ffffff;
+        border-radius: var(--radius-pill);
+        background: var(--color-danger);
+        color: var(--color-text-on-primary, #ffffff);
         font-size: 10px;
         font-weight: 700;
         line-height: 16px;

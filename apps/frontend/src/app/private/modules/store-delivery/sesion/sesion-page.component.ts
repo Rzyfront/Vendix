@@ -130,7 +130,7 @@ import { ActiveRouteStore } from '../state/active-route.store';
             class="text-text-secondary mt-0.5 shrink-0"
           ></app-icon>
           <p class="text-sm text-text-secondary">
-            No tienes una ruta activa. Toma pedidos del pool para empezar a
+            No tienes una ruta activa. Toma pedidos disponibles para empezar a
             repartir.
           </p>
         </div>

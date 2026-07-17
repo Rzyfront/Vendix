@@ -70,7 +70,7 @@ import type { PoolItem } from '../interfaces/repartos.interface';
             <h2
               class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
             >
-              Pool de reparto ({{ totalItems() }})
+              Pedidos disponibles ({{ totalItems() }})
             </h2>
 
             <app-inputsearch
@@ -90,7 +90,7 @@ import type { PoolItem } from '../interfaces/repartos.interface';
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
-            <p class="mt-2 text-text-secondary">Cargando pool...</p>
+            <p class="mt-2 text-text-secondary">Cargando pedidos disponibles...</p>
           </div>
         }
 
@@ -250,7 +250,7 @@ export class PoolPageComponent implements OnInit {
         },
         error: (err: RepartosApiError) => {
           this.loading.set(false);
-          this.toast.error(err?.message ?? 'No se pudo cargar el pool');
+          this.toast.error(err?.message ?? 'No se pudieron cargar los pedidos disponibles');
         },
       });
   }
@@ -316,8 +316,8 @@ export class PoolPageComponent implements OnInit {
 
   emptyStateTitle(): string {
     return this.hasFilters()
-      ? 'Sin resultados en el pool'
-      : 'No hay órdenes en el pool';
+      ? 'Sin resultados en pedidos disponibles'
+      : 'No hay pedidos disponibles';
   }
 
   emptyStateDescription(): string {
