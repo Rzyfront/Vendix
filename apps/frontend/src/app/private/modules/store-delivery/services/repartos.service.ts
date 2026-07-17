@@ -55,7 +55,9 @@ export class RepartosService {
     return this.http
       .get<any>(`${this.apiUrl}/store/carrier/pool${qs ? `?${qs}` : ''}`)
       .pipe(
-        map((r) => r.data as PoolResponse),
+        // La envelope estándar (responseService.paginated) trae `data` (lista)
+        // y `meta` (total/page/limit/totalPages) como hermanos de nivel superior.
+        map((r) => ({ data: r.data, meta: r.meta }) as PoolResponse),
         catchError((e) => this.handleError(e)),
       );
   }

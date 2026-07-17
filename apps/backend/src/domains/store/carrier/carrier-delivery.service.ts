@@ -117,7 +117,13 @@ export class CarrierDeliveryService {
         status: { in: CarrierDeliveryService.ACTIVE_ROUTE_STATES },
       },
       include: {
-        stops: { orderBy: { stop_sequence: 'asc' } },
+        // La UI de Mi Ruta (F4) lee cliente/dirección/remisión/total de la
+        // remisión asociada a cada parada; sin este include las celdas quedan
+        // vacías y el gate de "parada sin dirección" da falso positivo.
+        stops: {
+          orderBy: { stop_sequence: 'asc' },
+          include: { dispatch_note: true },
+        },
       },
     });
   }
