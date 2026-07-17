@@ -142,6 +142,22 @@ export class DispatchNotesController {
   }
 
   /**
+   * Vendix Repartos — Fase B5. Admin publica una orden al pool de repartidores
+   * (carriers) de la tienda. Marca la orden como disponible (dispatch_pool_at)
+   * y emite `order.awaiting_carrier` → notifica a los carriers. Idempotente.
+   */
+  @Post('orders/:orderId/send-to-dispatch')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_notes:create')
+  async sendToDispatch(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.dispatchNotesService.sendToDispatchPool(order_id);
+    return this.responseService.success(
+      result,
+      'Orden enviada al pool de despacho exitosamente',
+    );
+  }
+
+  /**
    * Plan Despacho Economía — FASE 7 paso 23.
    * Crea remisiones en lote desde N órdenes con resultado parcial por orden.
    */

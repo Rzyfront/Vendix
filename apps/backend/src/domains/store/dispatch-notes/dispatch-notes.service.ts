@@ -2631,6 +2631,93 @@ export class DispatchNotesService {
     return dispatch_notes;
   }
 
+  /**
+   * Vendix Repartos — Fase B5. Publica una orden al pool de repartidores.
+   *
+   * Valida la orden (store-scoped) y la marca como disponible poniendo
+   * `dispatch_pool_at = now()` de forma IDEMPOTENTE (guard `dispatch_pool_at
+   * IS NULL`): si ya estaba en el pool, devuelve el estado actual sin error y
+   * sin re-notificar. En la transición real emite `order.awaiting_carrier`
+   * ({ order_id, store_id }) para que el listener notifique a los carriers.
+   *
+   * Reglas de dominio (reusan los códigos DSP_ORDER_* del flujo createFromOrder):
+   * - state ∈ {processing, pending_payment}
+   * - delivery_type != 'direct_delivery'
+   * - dispatch_fulfillment != 'full'
+   * - sin remisión ACTIVA (dispatch_notes no anuladas) → evita doble despacho.
+   */
+  async sendToDispatchPool(order_id: number) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    // orders es auto-scoped por StorePrismaService → findFirst basta.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      select: {
+        id: true,
+        state: true,
+        delivery_type: true,
+        dispatch_fulfillment: true,
+        dispatch_pool_at: true,
+      },
+    });
+
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_FIND_001);
+    }
+
+    // Sólo órdenes en curso de fulfillment pueden ir al pool. `processing`
+    // (stock reservado) y `pending_payment` (COD, se cobra al entregar).
+    if (order.state !== 'processing' && order.state !== 'pending_payment') {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    }
+
+    // Envío directo se entrega en el mostrador; no pasa por el ciclo remisión.
+    if (order.delivery_type === 'direct_delivery') {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_DELIVERY_001);
+    }
+
+    // Ya despachada completamente → no tiene sentido enviarla al pool.
+    if (order.dispatch_fulfillment === 'full') {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    }
+
+    // Rechazo si la orden ya tiene una remisión ACTIVA (no anulada): evita
+    // que un admin la mande al pool mientras otro flujo ya la está despachando.
+    const activeNotes = await this.prisma.dispatch_notes.count({
+      where: { order_id, status: { not: 'voided' } },
+    });
+    if (activeNotes > 0) {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    }
+
+    // Inserción idempotente en el pool: sólo si aún no está pooleada.
+    const now = new Date();
+    const updated = await this.prisma.orders.updateMany({
+      where: { id: order_id, store_id, dispatch_pool_at: null },
+      data: { dispatch_pool_at: now },
+    });
+
+    let pooled_at = now;
+    if (updated.count === 0) {
+      // Ya estaba en el pool → devolvemos el estado actual sin re-notificar.
+      const existing = await this.prisma.orders.findFirst({
+        where: { id: order_id },
+        select: { dispatch_pool_at: true },
+      });
+      pooled_at = existing?.dispatch_pool_at ?? now;
+    } else {
+      // Transición real → notificar a los carriers de la tienda.
+      this.eventEmitter.emit('order.awaiting_carrier', {
+        order_id,
+        store_id,
+      });
+    }
+
+    return { order_id, pooled_at: pooled_at.toISOString() };
+  }
+
   async getByOrder(order_id: number) {
     const dispatch_notes = await this.prisma.dispatch_notes.findMany({
       // Excluye remisiones anuladas: no consumen el pendiente por ítem
