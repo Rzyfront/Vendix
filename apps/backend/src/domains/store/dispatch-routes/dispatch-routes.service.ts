@@ -1094,16 +1094,18 @@ export class DispatchRoutesService {
         Array.from(note_ids_by_route.values()).flat(),
       ),
     );
+    // El ingreso de flete vive en `invoices.shipping_amount` (FASE 4 paso 13),
+    // no en dispatch_notes. Lo leemos vía la relación dispatch_note.invoice.
     const notes =
       all_note_ids.length === 0
         ? []
         : await this.prisma.dispatch_notes.findMany({
             where: { id: { in: all_note_ids } },
-            select: { id: true, shipping_amount: true },
+            select: { id: true, invoice: { select: { shipping_amount: true } } },
           });
     const shipping_by_note = new Map<number, number>();
     notes.forEach((n) =>
-      shipping_by_note.set(n.id, Number(n.shipping_amount || 0)),
+      shipping_by_note.set(n.id, Number(n.invoice?.shipping_amount || 0)),
     );
     const shipping_by_route = new Map<number, number>();
     for (const [route_id, ids] of note_ids_by_route) {
@@ -1194,7 +1196,9 @@ export class DispatchRoutesService {
         status: true,
         needs_collection: true,
         customer_address: true,
-        order: { select: { shipping_address_snapshot: true } },
+        order: {
+          select: { shipping_address_snapshot: true, shipping_method_id: true },
+        },
       },
     });
     return notes
@@ -1208,6 +1212,7 @@ export class DispatchRoutesService {
         needs_collection: n.needs_collection,
         customer_address: n.customer_address,
         shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
+        shipping_method_id: n.order?.shipping_method_id ?? null,
       }));
   }
 

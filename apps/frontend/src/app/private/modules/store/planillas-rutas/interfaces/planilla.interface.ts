@@ -243,6 +243,14 @@ export interface CreateDispatchRouteDto {
   currency?: string;
   notes?: string;
   stops: CreateStopDto[];
+  /**
+   * Método de envío elegido para la ruta. Dispara el auto-config de ejecutor
+   * (vehículo/conductor/carrier) en el backend a partir de la política del
+   * método. Plan Despacho Economía — FASE 3 paso 12.
+   */
+  shipping_method_id?: number;
+  /** Proveedor transportador externo (tercero de la CxP — FASE 5). */
+  external_carrier_supplier_id?: number;
 }
 
 export interface CloseDispatchRouteDto {

@@ -53,6 +53,7 @@ import {
   VALID_SUBTYPES_BY_DIRECTION,
   VALID_REASONS_BY_SUBTYPE,
 } from './types/dispatch-note-direction.type';
+import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
 import sharp = require('sharp');
 
 const DISPATCH_NOTE_INCLUDE = {
@@ -148,6 +149,11 @@ export class DispatchNotesService {
     // AIEngineService is provided by the @Global() AIEngineModule, so it is
     // injectable here without importing the module (used by scanReceipt — R4c).
     private readonly aiEngine: AIEngineService,
+    // Bug C — recompute orders.dispatch_fulfillment inline for the createFromOrder
+    // 'draft' path, which does NOT emit an event but whose draft note already
+    // counts toward the rollup. Same module provider (only depends on prisma —
+    // no DI cycle).
+    private readonly dispatchFulfillment: DispatchFulfillmentListener,
     // Injected for createPurchaseReceipt delegation when purchase_order_id is
     // present. Optional so the module can boot without the PurchaseOrdersModule
     // if that dependency is not wired yet (defensive — the module imports it).
@@ -1804,6 +1810,26 @@ export class DispatchNotesService {
         sales_order_id: dispatch_note.sales_order_id,
         order_id: dispatch_note.order_id,
       });
+    }
+
+    // Bug C — recompute orders.dispatch_fulfillment inline. The DEFAULT 'draft'
+    // path emits NO event, yet its non-voided draft note already counts in the
+    // rollup (status <> 'voided'), so the column must be refreshed here or the
+    // order keeps showing as despachable. Awaited so the value is fresh the
+    // moment this call returns (the confirmed path also fires the event listener
+    // — the recompute is idempotent, so the overlap is harmless). Isolated: a
+    // failure must not fail an already-committed remisión.
+    if (dispatch_note.order_id) {
+      try {
+        await this.dispatchFulfillment.recomputeOrderFulfillment(
+          dispatch_note.order_id,
+          dispatch_note.store_id,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `[createFromOrder] Failed to recompute dispatch_fulfillment for order #${dispatch_note.order_id}: ${err?.message}`,
+        );
+      }
     }
 
     return dispatch_note;

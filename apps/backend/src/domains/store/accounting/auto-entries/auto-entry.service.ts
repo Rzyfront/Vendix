@@ -1399,6 +1399,13 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4. Flete de la venta a crédito. En crédito
+     * `subtotal_amount` YA excluye el flete y `total_amount` lo incluye, por lo
+     * que el flete se acredita como línea separada (414505) SIN restarlo del
+     * revenue; así CR (subtotal + IVA + flete) = DR CxC (grand_total).
+     */
+    shipping_amount?: number;
     total_amount: number;
     user_id?: number;
     /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
@@ -1462,6 +1469,24 @@ export class AutoEntryService {
         data.store_id,
       ),
     );
+
+    // Plan Despacho Economía — FASE 4. Línea separada de flete (414505). En
+    // crédito, `subtotal_amount` YA excluye el flete y `total_amount` (=DR CxC)
+    // lo incluye; SOLO se añade la línea CR de flete (no se resta del revenue),
+    // de lo contrario el asiento no cuadra cuando `shipping_amount > 0`.
+    const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
+    if (shipping_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'credit_sale.created.shipping_income',
+          `Ingreso por flete${order_ref}`,
+          0,
+          shipping_amount,
+          data.store_id,
+        ),
+      );
+    }
 
     lines.push(
       ...(await this.resolveTaxLines({

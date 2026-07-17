@@ -33,6 +33,8 @@ import { AutoEntryService } from './auto-entries/auto-entry.service';
 import { AccountingEventsListener } from './auto-entries/accounting-events.listener';
 // Plan Despacho Economía — FASE 5 paso 17. Listener de liquidación de ruta.
 import { DispatchSettlementListener } from './listeners/dispatch-settlement.listener';
+// AccountsPayableService lo consume DispatchSettlementListener (CxP transportador).
+import { AccountsPayableModule } from '../accounts-payable/accounts-payable.module';
 import {
   AccountingEntryFailureService,
   ACCOUNTING_ENTRY_RETRY_QUEUE,
@@ -80,6 +82,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     ResponseModule,
     PrismaModule,
     S3Module,
+    AccountsPayableModule,
     BullModule.registerQueue({ name: ACCOUNTING_ENTRY_RETRY_QUEUE }),
   ],
   controllers: [

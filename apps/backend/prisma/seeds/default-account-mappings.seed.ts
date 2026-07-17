@@ -98,6 +98,7 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Phase 1: Credit sales
   'credit_sale.created.accounts_receivable': '1305',
   'credit_sale.created.revenue': '4135',
+  'credit_sale.created.shipping_income': '414505',
   'credit_sale.created.vat_payable': '2408',
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': '2408',

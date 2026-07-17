@@ -253,6 +253,12 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4. Monto del flete de la venta a crédito.
+     * En crédito, `subtotal_amount` YA excluye el flete y `total_amount` lo
+     * incluye; sin esta línea CR el asiento no cuadra (DR CxC = grand_total).
+     */
+    shipping_amount?: number;
     total_amount: number;
     user_id?: number;
   }) {
@@ -271,6 +277,7 @@ export class AccountingEventsListener {
           event.discount_amount != null
             ? Number(event.discount_amount)
             : undefined,
+        shipping_amount: Number(event.shipping_amount ?? 0),
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
       });
