@@ -14,6 +14,7 @@ import {
   DispatchNoteQueryDto,
   CreateFromSalesOrderDto,
   CreateFromOrderDto,
+  CreateFromOrdersBatchDto,
   CreateTransferDispatchDto,
   CreateReturnDispatchDto,
   CreatePurchaseReceiptDispatchDto,
@@ -52,6 +53,7 @@ import {
   VALID_SUBTYPES_BY_DIRECTION,
   VALID_REASONS_BY_SUBTYPE,
 } from './types/dispatch-note-direction.type';
+import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
 import sharp = require('sharp');
 
 const DISPATCH_NOTE_INCLUDE = {
@@ -147,6 +149,11 @@ export class DispatchNotesService {
     // AIEngineService is provided by the @Global() AIEngineModule, so it is
     // injectable here without importing the module (used by scanReceipt — R4c).
     private readonly aiEngine: AIEngineService,
+    // Bug C — recompute orders.dispatch_fulfillment inline for the createFromOrder
+    // 'draft' path, which does NOT emit an event but whose draft note already
+    // counts toward the rollup. Same module provider (only depends on prisma —
+    // no DI cycle).
+    private readonly dispatchFulfillment: DispatchFulfillmentListener,
     // Injected for createPurchaseReceipt delegation when purchase_order_id is
     // present. Optional so the module can boot without the PurchaseOrdersModule
     // if that dependency is not wired yet (defensive — the module imports it).
@@ -1805,7 +1812,206 @@ export class DispatchNotesService {
       });
     }
 
+    // Bug C — recompute orders.dispatch_fulfillment inline. The DEFAULT 'draft'
+    // path emits NO event, yet its non-voided draft note already counts in the
+    // rollup (status <> 'voided'), so the column must be refreshed here or the
+    // order keeps showing as despachable. Awaited so the value is fresh the
+    // moment this call returns (the confirmed path also fires the event listener
+    // — the recompute is idempotent, so the overlap is harmless). Isolated: a
+    // failure must not fail an already-committed remisión.
+    if (dispatch_note.order_id) {
+      try {
+        await this.dispatchFulfillment.recomputeOrderFulfillment(
+          dispatch_note.order_id,
+          dispatch_note.store_id,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `[createFromOrder] Failed to recompute dispatch_fulfillment for order #${dispatch_note.order_id}: ${err?.message}`,
+        );
+      }
+    }
+
     return dispatch_note;
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 7 paso 23.
+   * Crea remisiones en lote a partir de múltiples órdenes con resultado
+   * parcial por orden.
+   *
+   * - `atomic=false` (default): cada orden se procesa independientemente;
+   *   las válidas se crean y las inválidas se reportan con código.
+   * - `atomic=true`: rollback total si cualquier orden falla.
+   * - Idempotencia: `batch_key` deduplica reintentos (búsqueda por notes JSON
+   *   que contiene el batch_key; sin tabla adicional en v1).
+   */
+  async createFromOrdersBatch(dto: CreateFromOrdersBatchDto): Promise<{
+    results: Array<
+      | { status: 'created'; order_id: number; dispatch_note_id: number; dispatch_number: string }
+      | { status: 'failed'; order_id: number; error_code: string; message: string }
+      | { status: 'skipped'; order_id: number; reason: string }
+    >;
+    route_id?: number | null;
+    partial: boolean;
+  }> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    if (!dto.orders || dto.orders.length === 0) {
+      throw new BadRequestException('DSP_BATCH_EMPTY_001: orders[] no puede estar vacío');
+    }
+    if (dto.orders.length > 100) {
+      throw new BadRequestException('DSP_BATCH_TOO_LARGE_001: máximo 100 órdenes por batch');
+    }
+
+    const atomic = dto.atomic ?? false;
+    const batch_key = dto.batch_key ?? null;
+    const results: Array<any> = [];
+
+    if (batch_key) {
+      const existing = await this.prisma.dispatch_notes.findFirst({
+        where: {
+          store_id,
+          notes: { contains: `"batch_key":"${batch_key}"` },
+        },
+        select: { id: true, dispatch_number: true, order_id: true },
+      });
+      if (existing) {
+        return {
+          results: dto.orders.map((oid) => ({
+            status: 'skipped' as const,
+            order_id: oid,
+            reason: `batch_key ya aplicado (note #${existing.id})`,
+          })),
+          route_id: null,
+          partial: false,
+        };
+      }
+    }
+
+    if (atomic) {
+      try {
+        await this.prisma.$transaction(async () => {
+          for (const oid of dto.orders) {
+            try {
+              const note = await this.createFromOrder(oid, {
+                target_status: dto.target_status ?? 'confirmed',
+                items: dto.items_by_order?.[oid],
+                route_assignment: dto.route_assignment,
+              } as any);
+              results.push({
+                status: 'created',
+                order_id: oid,
+                dispatch_note_id: note.id,
+                dispatch_number: note.dispatch_number,
+              });
+            } catch (e: any) {
+              throw new BadRequestException(
+                `atomic-batch abort en orden ${oid}: ${e?.message ?? e}`,
+              );
+            }
+          }
+        });
+        return { results, route_id: null, partial: false };
+      } catch (err: any) {
+        throw new BadRequestException(
+          `atomic-batch failed: ${err?.message ?? err}`,
+        );
+      }
+    }
+
+    let partial = false;
+    for (const oid of dto.orders) {
+      try {
+        const note = await this.createFromOrder(oid, {
+          target_status: dto.target_status ?? 'confirmed',
+          items: dto.items_by_order?.[oid],
+          route_assignment: dto.route_assignment,
+        } as any);
+        results.push({
+          status: 'created',
+          order_id: oid,
+          dispatch_note_id: note.id,
+          dispatch_number: note.dispatch_number,
+        });
+      } catch (e: any) {
+        partial = true;
+        results.push({
+          status: 'failed',
+          order_id: oid,
+          error_code: e?.code ?? 'DSP_BATCH_ORDER_FAIL',
+          message: e?.message ?? String(e),
+        });
+      }
+    }
+
+    return { results, route_id: null, partial };
+  }
+
+  /**
+   * Validación en lote (sin crear): agrega stock disponible vs pendiente
+   * por SKU en 2 consultas agregadas (no N×M).
+   * Plan Despacho Economía — FASE 7 paso 23.
+   */
+  async validateFromOrdersBatch(order_ids: number[]): Promise<{
+    ok: boolean;
+    issues: Array<{
+      order_id: number;
+      product_id: number;
+      missing_units: number;
+      reason: 'no_stock' | 'no_location';
+    }>;
+  }> {
+    const orders = await this.prisma.orders.findMany({
+      where: { id: { in: order_ids } },
+      select: {
+        id: true,
+        order_items: { select: { product_id: true, quantity: true } },
+      },
+    });
+
+    // 2 agregaciones totales por SKU: sum(stock) - sum(reserved)
+    const all_product_ids = Array.from(
+      new Set(
+        orders.flatMap((o) =>
+          (o.order_items ?? []).map((l) => l.product_id),
+        ),
+      ),
+    );
+
+    const stock_aggregate =
+      all_product_ids.length === 0
+        ? []
+        : await this.prisma.stock_levels.groupBy({
+            by: ['product_id'],
+            where: { product_id: { in: all_product_ids } },
+            _sum: { quantity: true, reserved_quantity: true },
+          });
+    const available_by_product = new Map<number, number>();
+    for (const row of stock_aggregate) {
+      const q = Number(row._sum.quantity || 0);
+      const r = Number(row._sum.reserved_quantity || 0);
+      available_by_product.set(Number(row.product_id), q - r);
+    }
+
+    const issues: Array<any> = [];
+    for (const o of orders) {
+      for (const line of o.order_items ?? []) {
+        const available = available_by_product.get(Number(line.product_id)) ?? 0;
+        const need = Number(line.quantity);
+        if (available < need) {
+          issues.push({
+            order_id: o.id,
+            product_id: Number(line.product_id),
+            missing_units: need - available,
+            reason: 'no_stock' as const,
+          });
+        }
+      }
+    }
+    return { ok: issues.length === 0, issues };
   }
 
   /**

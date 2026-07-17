@@ -5,6 +5,8 @@
 // SUPPLIER INTERFACES
 // ============================================================
 
+export type SupplierCategory = 'goods' | 'carrier' | 'service';
+
 export interface Supplier {
   id: number;
   organization_id?: number;
@@ -25,6 +27,13 @@ export interface Supplier {
   lead_time_days?: number;
   notes?: string;
   is_active: boolean;
+  // Plan Despacho Economía — FASE 1 paso 7. `carrier` enables AP+withholding
+  // on route close (paso 17). Bank columns are required when supplier_category
+  // is `carrier` (ap-bank-export.service.ts ya las lee).
+  supplier_category?: SupplierCategory;
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_account_type?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -48,6 +57,10 @@ export interface CreateSupplierDto {
   lead_time_days?: number;
   notes?: string;
   is_active?: boolean;
+  supplier_category?: SupplierCategory;
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_account_type?: string;
 }
 
 export interface UpdateSupplierDto extends Partial<CreateSupplierDto> {}

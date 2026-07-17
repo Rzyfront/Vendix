@@ -7,6 +7,7 @@ import {
   output,
   signal,
   computed,
+  effect,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -418,6 +419,14 @@ export class PlanillaWizardComponent {
   /** Contexto precargado al llegar desde un método de envío (atajo). */
   readonly prefillNote = input<string | null>(null);
 
+  // Plan Despacho Economía — FASE 3 paso 12. Prefill estructurado (no
+  // cosmético) desde la política efectiva del método. Se aplican al iniciar
+  // el wizard si están presentes; permanecen editables para granular control.
+  readonly prefillShippingMethodId = input<number | null>(null);
+  readonly prefillVehicleId = input<number | null>(null);
+  readonly prefillDriverUserId = input<number | null>(null);
+  readonly prefillCarrierSupplierId = input<number | null>(null);
+
   readonly close = output<void>();
   readonly created = output<DispatchRoute>();
 
@@ -438,6 +447,11 @@ export class PlanillaWizardComponent {
   readonly extName = signal('');
   readonly extId = signal('');
   readonly vehicleId = signal<number | null>(null);
+  /**
+   * Transportadora externa (supplier) que ejecuta la ruta, prellenada desde la
+   * política efectiva del método de envío. Editable; se envía en `submit()`.
+   */
+  readonly carrierSupplierId = signal<number | null>(null);
 
   /** Término de búsqueda para filtrar remisiones disponibles en el paso 2. */
   readonly noteSearch = signal('');
@@ -506,9 +520,44 @@ export class PlanillaWizardComponent {
     [...this.stops()].sort((a, b) => a.stop_sequence - b.stop_sequence),
   );
 
+  /**
+   * Guard idempotente para el prefill. El padre setea los inputs de política
+   * de forma asíncrona (tras `getEffectivePolicy`), por lo que el `effect` corre
+   * una primera vez con valores nulos y luego con los reales. Se marca aplicado
+   * SOLO cuando llega al menos un valor de prefill, para no pisar ediciones
+   * manuales posteriores si el input reemite. Campo plano (no signal): leerlo en
+   * el effect NO crea dependencia reactiva.
+   */
+  private prefillApplied = false;
+
   constructor() {
     this.loadAvailableNotes();
     this.loadVehicles();
+
+    // Plan Despacho Economía — FASE 3 paso 12. Aplica el prefill estructurado a
+    // los signals editables. LEE los inputs de prefill y ESCRIBE signals
+    // distintos (vehicleId, driverUserId, carrierSupplierId) — nunca escribe lo
+    // que lee, así se evita el bucle. Zoneless-safe: solo signals + effect, sin
+    // markForCheck/detectChanges.
+    effect(() => {
+      const shippingMethodId = this.prefillShippingMethodId();
+      const vehicleId = this.prefillVehicleId();
+      const driverUserId = this.prefillDriverUserId();
+      const carrierSupplierId = this.prefillCarrierSupplierId();
+
+      if (this.prefillApplied) return;
+      const hasAnyPrefill =
+        shippingMethodId != null ||
+        vehicleId != null ||
+        driverUserId != null ||
+        carrierSupplierId != null;
+      if (!hasAnyPrefill) return;
+
+      this.prefillApplied = true;
+      if (vehicleId != null) this.vehicleId.set(vehicleId);
+      if (driverUserId != null) this.driverUserId.set(driverUserId);
+      if (carrierSupplierId != null) this.carrierSupplierId.set(carrierSupplierId);
+    });
   }
 
   goToStep(step: number): void {
@@ -703,6 +752,9 @@ export class PlanillaWizardComponent {
     const assistants = isExternal
       ? undefined
       : this.assistantIds().map((id) => ({ user_id: id }));
+    // El backend (`create()`) sólo dispara el auto-config de vehículo/conductor/
+    // transportadora si recibe `shipping_method_id` (FASE 3 paso 12). Ambos
+    // campos ya están declarados en `CreateDispatchRouteDto`.
     const dto: CreateDispatchRouteDto = {
       route_code: this.routeCode() || undefined,
       vehicle_id: this.vehicleId() ?? undefined,
@@ -714,6 +766,8 @@ export class PlanillaWizardComponent {
       assistants: assistants && assistants.length > 0 ? assistants : undefined,
       currency: 'COP',
       notes: this.prefillNote() || undefined,
+      shipping_method_id: this.prefillShippingMethodId() ?? undefined,
+      external_carrier_supplier_id: this.carrierSupplierId() ?? undefined,
       stops: this.orderedStops(),
     };
     this.service

@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -18,6 +19,7 @@ import {
   FilterValues,
   IconComponent,
   ItemListCardConfig,
+  ModalComponent,
   OptionsDropdownComponent,
   PaginationComponent,
   QuantityControlComponent,
@@ -44,9 +46,13 @@ import {
   GYM_CREDENTIAL_TYPE_LABELS,
 } from '../../interfaces';
 import { MembershipAccessService } from '../../services';
+import { MembershipsService } from '../../../members/services';
+import type { GymMembership } from '../../../members/interfaces';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { MembershipCredentialFormModalComponent } from '../../components/credential-form-modal/credential-form-modal.component';
 import { AforoGaugeComponent } from '../../components/aforo-gauge/aforo-gauge.component';
 import { AforoCheckinPanelComponent } from '../../components/aforo-checkin-panel/aforo-checkin-panel.component';
+import type { ScannerViewMode } from '../../components/aforo-qr-scanner/aforo-qr-scanner.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
@@ -57,6 +63,33 @@ import type {
 } from '../../../../../../../core/models/store-settings.interface';
 
 type AccessTab = 'aforo' | 'logs' | 'credentials' | 'configuracion';
+
+/** Urgency bucket driving the "días restantes" badge color. */
+type ExpiringUrgency = 'expired' | 'soon' | 'ok';
+
+/** Precomputed view row for the "Membresías por vencer" card. */
+interface ExpiringRow {
+  id: number;
+  memberName: string;
+  planName: string;
+  venceLabel: string;
+  daysLabel: string;
+  urgency: ExpiringUrgency;
+}
+
+const MS_PER_DAY = 86_400_000;
+
+const EXPIRING_URGENCY_COLORS: Record<ExpiringUrgency, string> = {
+  expired: '#dc2626',
+  soon: '#d97706',
+  ok: '#6b7280',
+};
+
+const EXPIRING_URGENCY_LABELS: Record<ExpiringUrgency, string> = {
+  expired: 'Vencida',
+  soon: 'Por vencer',
+  ok: 'Vigente',
+};
 
 @Component({
   selector: 'app-membership-access-page',
@@ -78,12 +111,15 @@ type AccessTab = 'aforo' | 'logs' | 'credentials' | 'configuracion';
     AforoGaugeComponent,
     AforoCheckinPanelComponent,
     InputComponent,
+    ModalComponent,
   ],
   templateUrl: './access-page.component.html',
   styleUrl: './access-page.component.css',
 })
 export class MembershipAccessPageComponent implements OnInit {
   private readonly accessService = inject(MembershipAccessService);
+  private readonly membershipsService = inject(MembershipsService);
+  private readonly router = inject(Router);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -155,7 +191,84 @@ export class MembershipAccessPageComponent implements OnInit {
     () => this.ambient.connectionState() === 'open',
   );
 
+  // ─── Expiring memberships (vencidas + por vencer) ───────────────────────────
+  /** Raw list from `GET /store/memberships/expiring` (already ordered asc). */
+  readonly expiring = signal<GymMembership[]>([]);
+  readonly expiringLoading = signal(false);
+
+  /**
+   * Precomputed rows so the table/card never depend on `transform` gating
+   * (app-table skips transforms when the raw cell value is falsy — e.g. 0 days).
+   */
+  readonly expiringRows = computed<ExpiringRow[]>(() =>
+    this.expiring().map((m) => {
+      const days = this.calendarDaysUntil(m.period_end);
+      const urgency: ExpiringUrgency =
+        days === null || days < 0 ? 'expired' : days <= 3 ? 'soon' : 'ok';
+      return {
+        id: m.id,
+        memberName: this.membershipMemberName(m),
+        planName: m.plan?.name ?? `Plan #${m.plan_id}`,
+        venceLabel: m.period_end ? formatDateOnlyUTC(m.period_end) : 'Sin definir',
+        daysLabel: this.expiringDaysLabel(days),
+        urgency,
+      };
+    }),
+  );
+
+  // Pagination exception: the "expiring" endpoint is a bounded dashboard widget
+  // (backend caps the slice server-side and returns a plain array, not a
+  // paginated envelope). No client-side pagination by design.
+  readonly expiringColumns: TableColumn[] = [
+    {
+      key: 'memberName',
+      label: 'Socio',
+      sortable: false,
+      priority: 1,
+    },
+    {
+      key: 'planName',
+      label: 'Plan',
+      sortable: false,
+      priority: 2,
+    },
+    {
+      key: 'venceLabel',
+      label: 'Vence',
+      sortable: false,
+      priority: 1,
+    },
+    {
+      key: 'urgency',
+      label: 'Días restantes',
+      priority: 1,
+      transform: (_: ExpiringUrgency, row: ExpiringRow) => row.daysLabel,
+      badge: true,
+      badgeConfig: { type: 'custom', colorMap: EXPIRING_URGENCY_COLORS },
+    },
+  ];
+
+  readonly expiringCardConfig: ItemListCardConfig = {
+    titleKey: 'memberName',
+    subtitleKey: 'planName',
+    avatarFallbackIcon: 'user',
+    avatarShape: 'circle',
+    badgeKey: 'urgency',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: EXPIRING_URGENCY_COLORS,
+    },
+    badgeTransform: (val: ExpiringUrgency) =>
+      EXPIRING_URGENCY_LABELS[val] ?? String(val),
+    detailKeys: [
+      { key: 'venceLabel', label: 'Vence', icon: 'calendar' },
+      { key: 'daysLabel', label: 'Restan', icon: 'clock' },
+    ],
+  };
+
   // ─── Aforo config (persisted in store_settings.settings.membership) ─────────
+  /** Drives the "Configuración de aforo" modal (app-modal [(isOpen)]). */
   readonly showConfig = signal(false);
   readonly savingConfig = signal(false);
   readonly cfgCapacityControl = signal(false);
@@ -166,6 +279,20 @@ export class MembershipAccessPageComponent implements OnInit {
 
   // ─── Access config (fingerprint device) ────────────────────────────────────
   readonly savingAccessConfig = signal(false);
+  /** QR scanner kiosk mode (always-on continuous scanner on the Aforo tab). */
+  readonly cfgQrKioskMode = signal(false);
+  private cfgKioskPersisted = signal(false);
+  /** QR scanner default display mode (store setting). */
+  readonly cfgQrScannerDefaultMode = signal<ScannerViewMode>('fullscreen');
+  private cfgScannerModePersisted = signal<ScannerViewMode>('fullscreen');
+  /** Effective kiosk flag from persisted settings (drives the live scanner). */
+  readonly kioskMode = computed(
+    () => this.membershipSettings?.qr_kiosk_mode ?? false,
+  );
+  /** Effective scanner default mode from persisted settings (feeds the panel). */
+  readonly scannerDefaultMode = computed<ScannerViewMode>(
+    () => this.membershipSettings?.qr_scanner_default_mode ?? 'fullscreen',
+  );
   readonly cfgFingerprintReaderType = signal<'id_wrapper' | 'template_sdk'>('id_wrapper');
   readonly cfgFingerprintSdkProvider = signal<'zkteco' | 'digitalpersona' | 'generic_http' | null>(null);
   readonly cfgFingerprintEndpoint = signal<string>('');
@@ -203,9 +330,13 @@ export class MembershipAccessPageComponent implements OnInit {
     return t == null || (Number.isFinite(t) && t >= 100 && t <= 30_000);
   });
   readonly cfgConfigDirty = computed(() => {
+    const kioskDirty = this.cfgQrKioskMode() !== this.cfgKioskPersisted();
+    const modeDirty = this.cfgQrScannerDefaultMode() !== this.cfgScannerModePersisted();
     const p = this.cfgFingerprintPersisted();
-    if (!p) return this.cfgFingerprintReaderType() !== 'id_wrapper';
+    if (!p) return kioskDirty || modeDirty || this.cfgFingerprintReaderType() !== 'id_wrapper';
     return (
+      kioskDirty ||
+      modeDirty ||
       p.reader_type !== this.cfgFingerprintReaderType() ||
       p.sdk_provider !== this.cfgFingerprintSdkProvider() ||
       p.endpoint !== this.cfgFingerprintEndpoint().trim() ||
@@ -354,6 +485,24 @@ export class MembershipAccessPageComponent implements OnInit {
 
   readonly logsColumns: TableColumn[] = [
     {
+      key: 'customer_id',
+      label: 'Socio',
+      sortable: false,
+      priority: 1,
+      // `defaultValue` covers the transform-gating case: app-table skips the
+      // transform when the raw cell value is falsy (denied events with a null
+      // customer_id), so a dash is shown instead of a blank cell.
+      defaultValue: '—',
+      transform: (_: number | null, row: GymAccessLog) => {
+        // Logs may carry `customer_id = null` for denied events where the
+        // credential was never resolved. The customer relation is the
+        // preferred label; we still have to fall back to the FK for cases
+        // where the backend did not attach a relation.
+        if (row.customer) return this.customerName(row);
+        return row.customer_id == null ? '—' : `Socio #${row.customer_id}`;
+      },
+    },
+    {
       key: 'access_at',
       label: 'Fecha / hora',
       sortable: true,
@@ -375,20 +524,6 @@ export class MembershipAccessPageComponent implements OnInit {
       sortable: false,
       priority: 2,
       transform: (value: string | null) => value ?? '—',
-    },
-    {
-      key: 'customer_id',
-      label: 'Socio',
-      sortable: false,
-      priority: 3,
-      transform: (_: number | null, row: GymAccessLog) => {
-        // Logs may carry `customer_id = null` for denied events where the
-        // credential was never resolved. The customer relation is the
-        // preferred label; we still have to fall back to the FK for cases
-        // where the backend did not attach a relation.
-        if (row.customer) return this.customerName(row);
-        return row.customer_id == null ? '—' : `Socio #${row.customer_id}`;
-      },
     },
     {
       key: 'device_id',
@@ -476,6 +611,12 @@ export class MembershipAccessPageComponent implements OnInit {
       show: (item: GymAccessCredential) => item.is_active,
       action: (item: GymAccessCredential) => this.confirmDeactivate(item),
     },
+    {
+      label: 'Eliminar',
+      icon: 'trash-2',
+      variant: 'danger',
+      action: (item: GymAccessCredential) => this.confirmArchive(item),
+    },
   ]);
 
   readonly credsCardConfig: ItemListCardConfig = {
@@ -504,6 +645,7 @@ export class MembershipAccessPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadOccupancy();
+    this.loadExpiring();
     this.hydrateConfigFromSettings();
     this.loadLogs();
   }
@@ -543,6 +685,7 @@ export class MembershipAccessPageComponent implements OnInit {
     this.activeTab.set(tabId as AccessTab);
     if (tabId === 'aforo') {
       this.loadOccupancy();
+      this.loadExpiring();
       this.hydrateConfigFromSettings();
     }
     if (tabId === 'credentials' && !this.credentialsLoaded) {
@@ -558,7 +701,7 @@ export class MembershipAccessPageComponent implements OnInit {
     if (actionId === 'refresh') this.loadLogs();
     else if (actionId === 'new-credential') this.newCredential();
     else if (actionId === 'refresh-aforo') this.loadOccupancy();
-    else if (actionId === 'config-aforo') this.toggleConfig();
+    else if (actionId === 'config-aforo') this.openConfig();
     else if (actionId === 'save-access-config') this.saveAccessConfig();
   }
 
@@ -667,10 +810,62 @@ export class MembershipAccessPageComponent implements OnInit {
       });
   }
 
+  // ─── Expiring memberships (vencidas + por vencer) ───────────────────────────
+  loadExpiring(): void {
+    this.expiringLoading.set(true);
+    this.membershipsService
+      .listExpiring(7, 15)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          this.expiring.set(list);
+          this.expiringLoading.set(false);
+        },
+        error: () => {
+          // Non-fatal: the widget simply renders its empty state.
+          this.expiring.set([]);
+          this.expiringLoading.set(false);
+        },
+      });
+  }
+
+  goToMembership(row: ExpiringRow): void {
+    this.router.navigate(['/admin/memberships/members', row.id]);
+  }
+
+  /** Calendar days from today (UTC) until a date-only `period_end`. */
+  private calendarDaysUntil(end?: string | null): number | null {
+    if (!end) return null;
+    const now = new Date();
+    const a = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const e = new Date(end);
+    if (Number.isNaN(e.getTime())) return null;
+    const b = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate());
+    return Math.round((b - a) / MS_PER_DAY);
+  }
+
+  private expiringDaysLabel(days: number | null): string {
+    if (days === null) return 'Sin definir';
+    if (days < 0) return `Venció hace ${Math.abs(days)} d`;
+    if (days === 0) return 'Vence hoy';
+    if (days === 1) return '1 día';
+    return `${days} días`;
+  }
+
+  private membershipMemberName(m: GymMembership): string {
+    const c = m.customer;
+    if (!c) return `Socio #${m.customer_id}`;
+    const name = [c.first_name, c.last_name]
+      .filter((p): p is string => !!p && p.trim().length > 0)
+      .join(' ')
+      .trim();
+    return name || c.email || `Socio #${m.customer_id}`;
+  }
+
   // ─── Aforo: config ────────────────────────────────────────────────────────
-  toggleConfig(): void {
+  openConfig(): void {
     this.hydrateConfigFromSettings();
-    this.showConfig.update((v) => !v);
+    this.showConfig.set(true);
   }
 
   private hydrateConfigFromSettings(): void {
@@ -707,6 +902,16 @@ export class MembershipAccessPageComponent implements OnInit {
       timeout_ms: timeoutMs,
       verify_timeout_ms: verifyTimeoutMs,
     });
+
+    // Kiosk mode (QR scanner always-on on the Aforo tab).
+    const kiosk = m?.qr_kiosk_mode ?? false;
+    this.cfgQrKioskMode.set(kiosk);
+    this.cfgKioskPersisted.set(kiosk);
+
+    // QR scanner default display mode (fullscreen | floating).
+    const scannerMode: ScannerViewMode = m?.qr_scanner_default_mode ?? 'fullscreen';
+    this.cfgQrScannerDefaultMode.set(scannerMode);
+    this.cfgScannerModePersisted.set(scannerMode);
   }
 
   onCapacityControlToggle(enabled: boolean): void {
@@ -834,6 +1039,8 @@ export class MembershipAccessPageComponent implements OnInit {
     const membership: MembershipSettings = {
       ...current,
       ambient_access_enabled: current?.ambient_access_enabled ?? false,
+      qr_kiosk_mode: this.cfgQrKioskMode(),
+      qr_scanner_default_mode: this.cfgQrScannerDefaultMode(),
       fingerprint_device: fingerprint_device as MembershipSettings['fingerprint_device'],
     };
 
@@ -852,6 +1059,8 @@ export class MembershipAccessPageComponent implements OnInit {
             timeout_ms: fingerprint_device.timeout_ms ?? null,
             verify_timeout_ms: fingerprint_device.verify_timeout_ms ?? null,
           });
+          this.cfgKioskPersisted.set(this.cfgQrKioskMode());
+          this.cfgScannerModePersisted.set(this.cfgQrScannerDefaultMode());
           this.toastService.success('Configuración guardada');
         },
         error: (err: unknown) => {
@@ -993,6 +1202,37 @@ export class MembershipAccessPageComponent implements OnInit {
         error: (err: unknown) => {
           this.toastService.error(
             typeof err === 'string' ? err : 'Error al dar de baja la credencial',
+          );
+        },
+      });
+  }
+
+  confirmArchive(credential: GymAccessCredential): void {
+    this.dialogService
+      .confirm({
+        title: 'Eliminar credencial',
+        message: `Esta credencial se archivará y dejará de aparecer en el listado. El socio no podrá usarla para ingresar. ¿Deseas continuar?`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed: boolean) => {
+        if (confirmed) this.archiveCredential(credential);
+      });
+  }
+
+  private archiveCredential(credential: GymAccessCredential): void {
+    this.accessService
+      .archiveCredential(credential.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Credencial eliminada');
+          this.loadCredentials();
+        },
+        error: (err: unknown) => {
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al eliminar la credencial',
           );
         },
       });

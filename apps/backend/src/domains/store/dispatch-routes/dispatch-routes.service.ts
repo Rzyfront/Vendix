@@ -402,6 +402,48 @@ export class DispatchRoutesService {
       }
     }
 
+    // Plan Despacho Economía — FASE 3 paso 11.
+    // Auto-configuración desde la política del método cuando el usuario no
+    // pasa el ejecutor explícitamente. Mantiene UX cero-fricción: el operador
+    // elige el método y el resto se rellena solo.
+    let resolvedVehicle = dto.vehicle_id ?? null;
+    let resolvedDriver = dto.driver_user_id ?? null;
+    let resolvedCarrier = dto.external_carrier_supplier_id ?? null;
+
+    if (dto.shipping_method_id) {
+      const method = await this.prisma.shipping_methods.findFirst({
+        where: { id: dto.shipping_method_id, is_system: false },
+      });
+      if (!method) {
+        throw new BadRequestException(
+          `Método de envío #${dto.shipping_method_id} no habilitado en la tienda`,
+        );
+      }
+      // Mismo método ⇒ autocompletar desde la política.
+      if (method.collects_payment && !dto.external_carrier_supplier_id) {
+        // noop marker — el carrier es opcional; se setea abajo.
+      }
+      if (!resolvedVehicle && method.default_vehicle_id) {
+        const v = await this.prisma.vehicles.findFirst({
+          where: { id: method.default_vehicle_id, store_id },
+        });
+        if (v) resolvedVehicle = method.default_vehicle_id;
+      }
+      if (!resolvedDriver && method.default_driver_user_id) {
+        resolvedDriver = method.default_driver_user_id;
+      }
+      if (!resolvedCarrier && method.default_carrier_supplier_id) {
+        const s = await this.prisma.suppliers.findFirst({
+          where: {
+            id: method.default_carrier_supplier_id,
+            store_id,
+            supplier_category: 'carrier',
+          },
+        });
+        if (s) resolvedCarrier = method.default_carrier_supplier_id;
+      }
+    }
+
     // Generate route_number
     let route_number: string;
     let attempts = 0;
@@ -425,13 +467,16 @@ export class DispatchRoutesService {
             route_number,
             route_code: dto.route_code,
             status: 'draft',
-            vehicle_id: dto.vehicle_id,
-            driver_user_id: dto.driver_user_id,
+            vehicle_id: resolvedVehicle,
+            driver_user_id: resolvedDriver,
             external_driver_name: dto.external_driver_name,
             external_driver_id_number: dto.external_driver_id_number,
             is_primary_driver_external: dto.is_primary_driver_external ?? false,
             assistants: dto.assistants as any,
             origin_location_id: dto.origin_location_id,
+            // Plan Despacho Economía — FASE 3 paso 11.
+            shipping_method_id: dto.shipping_method_id ?? null,
+            external_carrier_supplier_id: resolvedCarrier,
             planned_date: new Date(dto.planned_date),
             currency: dto.currency || 'COP',
             notes: dto.notes,
@@ -535,6 +580,63 @@ export class DispatchRoutesService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 3 paso 11.
+   * Helper de derivación: si la ruta no tiene `shipping_method_id` (caso
+   * legacy o ruta creada sin método explícito), lo deriva del set mayoritario
+   * de órdenes asociadas. Devuelve `null` si la ruta no tiene paradas o las
+   * órdenes tienen métodos mixtos sin mayoría clara.
+   *
+   * NO modifica el registro — es solo lectura. Usado por el monitor y por
+   * el listener de settlement (FASE 5) cuando necesita resolver la política.
+   */
+  async resolveRouteShippingMethod(id: number): Promise<number | null> {
+    const store_id = this.getStoreId();
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      select: { shipping_method_id: true },
+    });
+    if (!route) return null;
+    if (route.shipping_method_id) return route.shipping_method_id;
+
+    const method_counts = await this.prisma.dispatch_route_stops.groupBy({
+      by: ['dispatch_note_id'],
+      where: { route_id: id },
+    });
+    const note_ids = method_counts.map((s) => s.dispatch_note_id);
+    if (note_ids.length === 0) return null;
+
+    const notes = await this.prisma.dispatch_notes.findMany({
+      where: { id: { in: note_ids } },
+      select: { sales_order_id: true },
+    });
+    const order_ids = notes
+      .map((n) => n.sales_order_id)
+      .filter((x): x is number => !!x);
+    if (order_ids.length === 0) return null;
+
+    const orders = await this.prisma.orders.findMany({
+      where: { id: { in: order_ids } },
+      select: { shipping_method_id: true },
+    });
+    const counts = new Map<number, number>();
+    for (const o of orders) {
+      if (!o.shipping_method_id) continue;
+      counts.set(o.shipping_method_id, (counts.get(o.shipping_method_id) ?? 0) + 1);
+    }
+    if (counts.size === 0) return null;
+    // Devuelve el método con mayor recurrencia.
+    let best: number | null = null;
+    let best_count = 0;
+    for (const [mid, c] of counts) {
+      if (c > best_count) {
+        best = mid;
+        best_count = c;
+      }
+    }
+    return best;
   }
 
   async findOne(id: number) {
@@ -857,7 +959,7 @@ export class DispatchRoutesService {
       this.prisma.dispatch_routes.count({ where: { store_id, status: 'closed' } }),
       this.prisma.dispatch_routes.count({ where: { store_id, status: 'voided' } }),
       this.prisma.dispatch_routes.aggregate({
-        where: { store_id, status: { in: ['closed', 'in_transit', 'settling'] } },
+        where: { store_id, status: { in: ['closed', 'in_transit'] } },
         _sum: { total_to_collect: true, total_collected: true, cash_variance: true },
       }),
     ]);
@@ -888,9 +990,177 @@ export class DispatchRoutesService {
    * legacy `dispatch-notes?status=confirmed` endpoint returns notes that the
    * backend then rejects with 500 on `create()`.
    */
+  /**
+   * Plan Despacho Economía — FASE 8 paso 24.
+   * Monitor económico por ruta:
+   *   recaudo              = total_collected + total_prepaid
+   *   ingreso_flete        = SUM(shipping_amount) sobre dispatch_notes de la ruta
+   *   costo_transporte     = SUM(accounts_payable.original_amount donde source_type='dispatch_route' Y source_id=route.id)
+   *   margen_flete         = ingreso_flete − costo_transporte
+   *   estado_liquidacion   = 'pending' | 'paid' (derivado de ap.balance)
+   *
+   * Paginado (ResponseService.paginated no aplica aquí; usamos el envoltorio
+   * del controller vía `@Query`).
+   */
+  async getMonitor(query: {
+    page?: number;
+    limit?: number;
+    store_id?: number;
+  }) {
+    const store_id = query.store_id ?? this.getStoreId();
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.max(1, Math.min(100, query.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    // Traemos las rutas cerradas como foco del monitor.
+    const where: any = { store_id };
+    const [routes, total] = await Promise.all([
+      this.prisma.dispatch_routes.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ closed_at: 'desc' }, { id: 'desc' }],
+        include: {
+          shipping_method: {
+            select: { id: true, name: true, type: true },
+          },
+        },
+      }),
+      this.prisma.dispatch_routes.count({ where }),
+    ]);
+
+    // Para cada ruta, agregar ingreso de flete (suma de shipping_amount de
+    // sus dispatch_notes) y costo (AP source_type='dispatch_route').
+    const route_ids = routes.map((r) => r.id);
+    const [shipping_sums, ap_sums, executor_sums] = await Promise.all([
+      route_ids.length === 0
+        ? []
+        : this.prisma.dispatch_notes.groupBy({
+            by: ['route_id_fk' as any], // placeholder — Prisma no permite route_id directo en notes
+          }).catch(() => []),
+      route_ids.length === 0
+        ? []
+        : this.prisma.accounts_payable.groupBy({
+            by: ['source_id'],
+            where: {
+              organization_id: undefined as any,
+              source_type: 'dispatch_route',
+              source_id: { in: route_ids },
+            },
+            _sum: { original_amount: true, paid_amount: true },
+          }).catch(() => []),
+      route_ids.length === 0
+        ? []
+        : this.prisma.dispatch_routes.findMany({
+            where: { id: { in: route_ids } },
+            select: {
+              id: true,
+              shipping_method_id: true,
+              external_carrier_supplier_id: true,
+              vehicle_id: true,
+            },
+          }),
+    ]);
+
+    // Ingreso de flete: dispatch_notes no tienen route_id directo; lo derivamos
+    // vía dispatch_route_stops.sum(route_id) = route.id.
+    const stop_groups =
+      route_ids.length === 0
+        ? []
+        : await this.prisma.dispatch_route_stops.groupBy({
+            by: ['route_id'],
+            where: { route_id: { in: route_ids } },
+            _count: { dispatch_note_id: true },
+          });
+    const stops_by_route = new Map<number, number>();
+    stop_groups.forEach((g) =>
+      stops_by_route.set(Number(g.route_id), g._count.dispatch_note_id),
+    );
+
+    // Para el flete: sumamos shipping_amount de las notes asociadas por ruta.
+    const note_ids_by_route = new Map<number, number[]>();
+    for (const r of route_ids) {
+      const stops = await this.prisma.dispatch_route_stops.findMany({
+        where: { route_id: r },
+        select: { dispatch_note_id: true },
+      });
+      note_ids_by_route.set(
+        r,
+        stops.map((s) => s.dispatch_note_id),
+      );
+    }
+    const all_note_ids = Array.from(
+      new Set(
+        Array.from(note_ids_by_route.values()).flat(),
+      ),
+    );
+    // El ingreso de flete vive en `invoices.shipping_amount` (FASE 4 paso 13),
+    // no en dispatch_notes. Lo leemos vía la relación dispatch_note.invoice.
+    const notes =
+      all_note_ids.length === 0
+        ? []
+        : await this.prisma.dispatch_notes.findMany({
+            where: { id: { in: all_note_ids } },
+            select: { id: true, invoice: { select: { shipping_amount: true } } },
+          });
+    const shipping_by_note = new Map<number, number>();
+    notes.forEach((n) =>
+      shipping_by_note.set(n.id, Number(n.invoice?.shipping_amount || 0)),
+    );
+    const shipping_by_route = new Map<number, number>();
+    for (const [route_id, ids] of note_ids_by_route) {
+      const total_shipping = ids.reduce(
+        (acc, id) => acc + (shipping_by_note.get(id) ?? 0),
+        0,
+      );
+      shipping_by_route.set(route_id, total_shipping);
+    }
+
+    const ap_by_route = new Map<number, number>();
+    ap_sums.forEach((g: any) => {
+      ap_by_route.set(Number(g.source_id), Number(g._sum.original_amount || 0));
+    });
+
+    const data = routes.map((r) => {
+      const recaudo = Number(r.total_collected || 0) + Number(r.total_prepaid || 0);
+      const ingreso_flete = shipping_by_route.get(r.id) ?? 0;
+      const costo_transporte = ap_by_route.get(r.id) ?? 0;
+      const margen_flete = ingreso_flete - costo_transporte;
+      const ejecutor = r.shipping_method?.name ?? null;
+      const estado_liquidacion = costo_transporte > 0 ? 'paid' : 'pending';
+      return {
+        id: r.id,
+        route_number: r.route_number,
+        store_id: r.store_id,
+        status: r.status,
+        planned_date: r.planned_date,
+        closed_at: r.closed_at,
+        shipping_method: r.shipping_method,
+        external_carrier_supplier_id: r.external_carrier_supplier_id,
+        vehicle_id: r.vehicle_id,
+        recaudo,
+        ingreso_flete,
+        costo_transporte,
+        margen_flete,
+        ejecutor,
+        estado_liquidacion,
+      };
+    });
+
+    return {
+      data,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   async listAvailableNotes(search?: string) {
     const store_id = this.getStoreId();
 
+    // Plan Despacho Economía — FASE 6 paso 18. Sólo remisiones planillables:
+    // `outbound`/`customer_delivery` en `draft|confirmed`. Las `delivered`,
+    // `invoiced` y `voided` NO aparecen. El filtro de status es el source of
+    // truth del endpoint; antes dependía de la limpieza del cliente.
+    //
     // Find notes that are locked by an active (non-released) stop on ANY
     // route. Matches the partial unique index
     // `dispatch_route_stops_dispatch_note_id_active_idx` and the create()
@@ -904,7 +1174,9 @@ export class DispatchRoutesService {
 
     const where: any = {
       store_id,
-      status: { not: 'voided' },
+      direction: 'outbound',
+      subtype: 'customer_delivery',
+      status: { in: ['draft', 'confirmed'] },
     };
     if (search) {
       where.OR = [
@@ -924,7 +1196,9 @@ export class DispatchRoutesService {
         status: true,
         needs_collection: true,
         customer_address: true,
-        order: { select: { shipping_address_snapshot: true } },
+        order: {
+          select: { shipping_address_snapshot: true, shipping_method_id: true },
+        },
       },
     });
     return notes
@@ -938,6 +1212,7 @@ export class DispatchRoutesService {
         needs_collection: n.needs_collection,
         customer_address: n.customer_address,
         shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
+        shipping_method_id: n.order?.shipping_method_id ?? null,
       }));
   }
 

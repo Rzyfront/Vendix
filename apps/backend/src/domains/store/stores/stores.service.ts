@@ -354,6 +354,11 @@ export class StoresService {
       // en sitio y no generan remisión — e incluye home_delivery, pickup y other.
       // Coincide con el filtro "Por enviar" del frontend.
       delivery_type: { notIn: ['direct_delivery', 'dine_in'] },
+      // Bug C — excluir las órdenes totalmente remitidas, igual que
+      // orders.service.ts:396. Antes el comentario decía "alineado" pero el
+      // filtro faltaba, así que el dashboard contaba como despachables órdenes
+      // ya 100% remitidas.
+      dispatch_fulfillment: { not: 'full' },
     };
 
     const [

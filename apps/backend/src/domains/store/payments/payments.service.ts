@@ -1183,6 +1183,9 @@ export class PaymentsService {
               amount: payment.amount,
               subtotal_amount: Number(order.subtotal_amount || 0),
               tax_amount: Number(order.tax_amount || 0),
+              // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
+              // separado en cuenta 414505 al pagar un POS directo con flete.
+              shipping_amount: Number(order.shipping_cost || 0),
               tax_breakdown,
               withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),
@@ -1245,6 +1248,9 @@ export class PaymentsService {
               order_number: order.order_number,
               subtotal_amount: Number(order.subtotal_amount || 0),
               tax_amount: Number(order.tax_amount || 0),
+              // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →
+              // se reconoce también ingreso de flete en cuenta 414505.
+              shipping_amount: Number(order.shipping_cost || 0),
               tax_breakdown,
               withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),

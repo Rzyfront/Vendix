@@ -22,6 +22,25 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Cuentas por Cobrar',
   },
   'invoice.validated.revenue': { code: '4135', description: 'Ingresos' },
+  // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado
+  // en 414505 "Transporte Terrestre". Se reconoce al validar la factura
+  // (shipping_amount > 0) y al recibir un pago POS con flete sin factura.
+  'invoice.validated.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'payment.received.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'credit_sale.created.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'refund.completed.shipping_income_reversal': {
+    code: '414505',
+    description: 'Transporte Terrestre (Reversión Ingresos por Fletes)',
+  },
   'invoice.validated.vat_payable': {
     code: '2408',
     description: 'IVA por Pagar',
@@ -894,6 +913,16 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'dispatch_route.closed.shortage_receivable': {
     code: '1365',
     description: 'Cuentas por Cobrar a Trabajadores (faltante de ruta, conductor)',
+  },
+  // Plan Despacho Economía — FASE 5 paso 17. Costo del transportador al
+  // liquidar la ruta. DR 523550 (gross), CR 2205→banco (pago neto).
+  'dispatch_route.settlement.transport_cost': {
+    code: '523550',
+    description: 'Servicio de Transporte (costo de la ruta)',
+  },
+  'dispatch_route.settlement.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (transportador por pagar)',
   },
   'cash_register.movement.cash': {
     code: '1105',

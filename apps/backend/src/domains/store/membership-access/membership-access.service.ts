@@ -30,23 +30,35 @@ import {
 } from './dto';
 
 /**
- * Live SSE event pushed on EVERY access decision (granted or denied) so an
- * ambient-access screen can react in real time. Reuses the per-store hub
- * (`NotificationsSseService`); it does not conform to the bell's
- * `SseNotificationPayload` shape (this is a domain event), so it is cast at the
- * push site — the hub only `JSON.stringify`s the payload.
+ * Live SSE events pushed to the per-store hub. Reuses
+ * (`NotificationsSseService`); they do not conform to the bell's
+ * `SseNotificationPayload` shape (these are domain events), so they are cast at
+ * the push site — the hub only `JSON.stringify`s the payload.
+ *
+ *   - `membership-access`: pushed on EVERY access decision (granted or denied).
+ *   - `enrollment`: fanned out when the biometric device (or stub integration)
+ *     reads a raw fingerprint via `POST /store/memberships/access/enrollment-ping`.
+ *     No validation against credentials — this is live enrollment only, the
+ *     credential-creation modal captures the `external_ref` in real time.
  */
-export interface MembershipAccessSseEvent {
-  type: 'membership-access';
-  granted: boolean;
-  result: membership_access_result_enum;
-  customer_name: string | null;
-  status: membership_status_enum | null;
-  days_remaining: number | null;
-  period_end: string | null;
-  membership_id: number | null;
-  at: string;
-}
+export type MembershipAccessSseEvent =
+  | {
+      type: 'membership-access';
+      granted: boolean;
+      result: membership_access_result_enum;
+      customer_name: string | null;
+      status: membership_status_enum | null;
+      days_remaining: number | null;
+      period_end: string | null;
+      membership_id: number | null;
+      at: string;
+    }
+  | {
+      type: 'enrollment';
+      external_ref: string;
+      device_id: string | null;
+      at: string;
+    };
 
 export interface AccessValidationResult {
   granted: boolean;
@@ -794,8 +806,23 @@ export class MembershipAccessService {
       credentialValue,
     });
 
+    // Privacy: mask the raw `credential_value` for `external_ref` (biometric
+    // device fingerprint ref) so it NEVER leaks in the HTTP response. The DB
+    // row keeps the value untouched. For `qr` and `pin` the raw value is
+    // intentionally returned ONE-SHOT so the operator can confirm/display
+    // it on the same screen (per DTO Anotación 2b). The masking policy
+    // mirrors `maskCredentialValue()` used by `listCredentials`.
+    let responseCredentialValue: string | null = created.credential_value;
+    if (dto.credential_type === membership_credential_type_enum.external_ref) {
+      responseCredentialValue = this.maskCredentialValue(
+        dto.credential_type,
+        created.credential_value,
+      );
+    }
+
     return {
       ...created,
+      credential_value: responseCredentialValue,
       // The raw value is one-shot — the list endpoint masks it. Frontend
       // uses it to confirm/display the generated QR/PIN or the fingerprint
       // reference on the same screen.
@@ -810,6 +837,7 @@ export class MembershipAccessService {
 
     const where: Prisma.membership_access_credentialsWhereInput = {
       store_id: storeId,
+      deleted_at: null,
       ...(customer_id !== undefined && { customer_id }),
       ...(is_active !== undefined && { is_active }),
     };
@@ -908,6 +936,41 @@ export class MembershipAccessService {
       data: { is_active: false },
     });
     return { deactivated: true };
+  }
+
+  /**
+   * Soft-archive a credential (HIDE from listings + free the partial unique
+   * slot for re-use). Atomic single UPDATE that flips BOTH:
+   *   - `deleted_at = now()`  → excluded from `listCredentials` (filters
+   *                              `deleted_at IS NULL`) and excluded from any
+   *                              future "not archived" partial index.
+   *   - `is_active = false`   → excluded from the partial unique index
+   *                              `membership_access_cred_active_uq`
+   *                              (WHERE is_active = true), freeing the slot
+   *                              so the operator can re-issue a credential with
+   *                              the same `(store, customer, type)` tuple
+   *                              without manual DB cleanup.
+   *
+   * Both changes ride the same `updateMany` so they commit atomically — there
+   * is no observable state where the credential is half-archived.
+   *
+   * The `deleted_at: null` predicate in the where clause makes the operation
+   * IDEMPOTENT: archiving an already-archived credential returns NOT_FOUND
+   * instead of silently re-stamping `deleted_at`.
+   */
+  async archiveCredential(id: number) {
+    const storeId = this.requireStoreId();
+    const result = await this.credentials.updateMany({
+      where: { id, store_id: storeId, deleted_at: null },
+      data: { deleted_at: new Date(), is_active: false },
+    });
+    if (result.count === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Credencial no encontrada o ya archivada',
+      );
+    }
+    return { archived: true, id };
   }
 
   // ------------------------------------------------------------------ Logs
@@ -1187,6 +1250,34 @@ export class MembershipAccessService {
       select: { current_count: true, updated_at: true },
     });
     this.pushOccupancy(storeId, row, cfg);
+  }
+
+  /**
+   * Fan out an `enrollment` SSE event so a listening credential-creation modal
+   * can capture a live fingerprint `external_ref` from the biometric device.
+   *
+   * Enrollment is intentionally NOT validated against any credential — it is a
+   * raw read, the user decides later which credential receives it. Never
+   * throws: a broken hub must not block the device's enrollment pings.
+   */
+  async publishEnrollment(
+    storeId: number,
+    externalRef: string,
+    deviceId?: string,
+  ): Promise<void> {
+    try {
+      const event: MembershipAccessSseEvent = {
+        type: 'enrollment',
+        external_ref: externalRef,
+        device_id: deviceId ?? null,
+        at: new Date().toISOString(),
+      };
+      this.sseService.push(storeId, event as unknown as SseNotificationPayload);
+    } catch (err) {
+      this.logger.warn(
+        `membership-access enrollment SSE push failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /** Current occupancy snapshot for the store. */

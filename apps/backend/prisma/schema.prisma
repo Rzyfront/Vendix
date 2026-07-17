@@ -156,6 +156,9 @@ model users {
   vehicles_as_primary_driver      vehicles[]                    @relation("vehicles_primary_driver")
   vehicles_as_created_by          vehicles[]                    @relation("vehicles_created_by")
   dispatch_route_stops_settled_by dispatch_route_stops[]        @relation("dispatch_route_stops_settled_by")
+  // Plan Despacho Economía — FASE 2 paso 8. Contraparte de
+  // shipping_methods.default_driver_user_id → users.id.
+  shipping_methods_as_default_driver shipping_methods[]         @relation("shipping_methods_default_driver")
 
   // Accounts Receivable
   accounts_receivable_as_customer accounts_receivable[] @relation("ar_customer")
@@ -1155,6 +1158,10 @@ model orders {
   tax_amount                                      Decimal                   @default(0.00) @db.Decimal(12, 2)
   shipping_cost                                   Decimal                   @default(0.00) @db.Decimal(12, 2)
   grand_total                                     Decimal                   @default(0.00) @db.Decimal(12, 2)
+  // Plan Despacho Economía — FASE 6 paso 19. Estado de cumplimiento del
+  // despacho (sin envío parcial del flujo de remisión). Mantenido por
+  // listeners event-driven; el frontend lo usa para filtrar `?dispatchable=true`.
+  dispatch_fulfillment                           dispatch_fulfillment_enum  @default(none)
   state                                           order_state_enum          @default(created)
   channel                                         order_channel_enum        @default(pos)
   delivery_type                                   order_delivery_type_enum  @default(direct_delivery)
@@ -1933,30 +1940,40 @@ model sales_document_serials {
 }
 
 model suppliers {
-  id                       Int                        @id @default(autoincrement())
+  id                       Int                       @id @default(autoincrement())
   organization_id          Int
   store_id                 Int?
-  name                     String                     @db.VarChar(255)
-  code                     String                     @db.VarChar(50)
-  contact_person           String?                    @db.VarChar(255)
-  mobile                   String?                    @db.VarChar(50)
-  email                    String?                    @db.VarChar(255)
-  phone                    String?                    @db.VarChar(50)
-  website                  String?                    @db.VarChar(255)
-  tax_id                   String?                    @db.VarChar(50)
-  tax_regime               String?                    @db.VarChar(50)
-  person_type              String?                    @db.VarChar(20)
-  is_self_withholder       Boolean                    @default(false)
-  document_type            String?                    @db.VarChar(10)
-  verification_digit       String?                    @db.VarChar(1)
-  payment_terms            String?                    @db.VarChar(255)
-  currency                 String?                    @db.VarChar(10)
+  name                     String                    @db.VarChar(255)
+  code                     String                    @db.VarChar(50)
+  contact_person           String?                   @db.VarChar(255)
+  mobile                   String?                   @db.VarChar(50)
+  email                    String?                   @db.VarChar(255)
+  phone                    String?                   @db.VarChar(50)
+  website                  String?                   @db.VarChar(255)
+  tax_id                   String?                   @db.VarChar(50)
+  tax_regime               String?                   @db.VarChar(50)
+  person_type              String?                   @db.VarChar(20)
+  is_self_withholder       Boolean                   @default(false)
+  document_type            String?                   @db.VarChar(10)
+  verification_digit       String?                   @db.VarChar(1)
+  payment_terms            String?                   @db.VarChar(255)
+  currency                 String?                   @db.VarChar(10)
   notes                    String?
   lead_time_days           Int?
-  is_active                Boolean                    @default(true)
+  is_active                Boolean                   @default(true)
+  // Plan Despacho Economía — FASE 1 paso 7. Categoría distingue al proveedor
+  // de transporte (carrier) que se usa como ejecutor externo de la ruta y
+  // dispara AP+retención. `goods` preserva el comportamiento actual por backfill.
+  supplier_category        supplier_category_enum    @default(goods)
+  // Banco destino del pago inmediato al carrier (paso 17). Las 3 columnas
+  // cierran el bug latente de `ap-bank-export.service.ts:39-41` que las
+  // seleccionaba sin que existieran en la tabla.
+  bank_name                String?                   @db.VarChar(120)
+  bank_account_number      String?                   @db.VarChar(60)
+  bank_account_type        String?                   @db.VarChar(20)
   address_id               Int?
-  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  created_at               DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                 @default(now()) @db.Timestamp(6)
   purchase_orders          purchase_orders[]
   supplier_products        supplier_products[]
   dispatch_notes           dispatch_notes[]           @relation("dispatch_notes_supplier")
@@ -1966,6 +1983,12 @@ model suppliers {
   invoices                 invoices[]
   withholding_calculations withholding_calculations[]
   accounts_payable         accounts_payable[]         @relation("supplier_accounts_payable")
+  // Plan Despacho Economía — FASE 2 paso 8. Contraparte de
+  // shipping_methods.default_carrier_supplier_id → suppliers.id.
+  shipping_methods_as_default_carrier shipping_methods[]  @relation("shipping_methods_default_carrier")
+  // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
+  // dispatch_routes.external_carrier_supplier_id → suppliers.id.
+  dispatch_routes_as_external_carrier dispatch_routes[] @relation("dispatch_routes_external_carrier")
 
   @@index([organization_id, name])
   @@index([organization_id, store_id, code])
@@ -2453,37 +2476,54 @@ model shipping_zones {
 }
 
 model shipping_methods {
-  id                           Int                       @id @default(autoincrement())
+  id                           Int                            @id @default(autoincrement())
   store_id                     Int?
-  name                         String                    @db.VarChar(100)
-  code                         String?                   @db.VarChar(50)
+  name                         String                         @db.VarChar(100)
+  code                         String?                        @db.VarChar(50)
   description                  String?
   logo_url                     String?
-  type                         shipping_method_type_enum @default(custom)
-  provider_name                String?                   @db.VarChar(50) // e.g., "fedex", "uber"
+  type                         shipping_method_type_enum      @default(custom)
+  provider_name                String?                        @db.VarChar(50) // e.g., "fedex", "uber"
   tracking_url                 String?
   min_days                     Int?
   max_days                     Int?
-  transit_time_minutes         Int                       @default(0)
-  is_active                    Boolean                   @default(true)
-  is_system                    Boolean                   @default(false)
-  display_order                Int                       @default(0)
+  transit_time_minutes         Int                            @default(0)
+  is_active                    Boolean                        @default(true)
+  is_system                    Boolean                        @default(false)
+  display_order                Int                            @default(0)
   custom_config                Json?
-  min_order_amount             Decimal?                  @db.Decimal(12, 2)
-  max_order_amount             Decimal?                  @db.Decimal(12, 2)
+  min_order_amount             Decimal?                       @db.Decimal(12, 2)
+  max_order_amount             Decimal?                       @db.Decimal(12, 2)
   copied_from_system_method_id Int?
-  created_at                   DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at                   DateTime?                 @default(now()) @db.Timestamp(6)
+  // Plan Despacho Economía — FASE 2 paso 8. Política tipada por método
+  // (recaudo, costo del transportador, ejecutor por defecto, timing).
+  collects_payment             Boolean                        @default(false)
+  payment_timing               dispatch_payment_timing_enum?  @default(on_delivery)
+  generates_transport_cost     settlement_type_enum           @default(none)
+  default_vehicle_id           Int?
+  default_driver_user_id       Int?
+  default_carrier_supplier_id  Int?
+  cost_settlement_timing       cost_settlement_timing_enum?   @default(immediate_on_close)
+  created_at                   DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime?                      @default(now()) @db.Timestamp(6)
 
-  store              stores?            @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  shipping_rates     shipping_rates[]
-  orders             orders[]
-  copied_from_method shipping_methods?  @relation("MethodCopies", fields: [copied_from_system_method_id], references: [id], onDelete: SetNull)
-  copied_methods     shipping_methods[] @relation("MethodCopies")
+  store                    stores?               @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates           shipping_rates[]
+  orders                   orders[]
+  copied_from_method       shipping_methods?     @relation("MethodCopies", fields: [copied_from_system_method_id], references: [id], onDelete: SetNull)
+  copied_methods           shipping_methods[]    @relation("MethodCopies")
+  default_vehicle          vehicles?             @relation("shipping_methods_default_vehicle", fields: [default_vehicle_id], references: [id], onDelete: SetNull)
+  default_driver_user      users?                @relation("shipping_methods_default_driver", fields: [default_driver_user_id], references: [id], onDelete: SetNull)
+  default_carrier_supplier suppliers?            @relation("shipping_methods_default_carrier", fields: [default_carrier_supplier_id], references: [id], onDelete: SetNull)
+  // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
+  // dispatch_routes.shipping_method_id → shipping_methods.id.
+  dispatch_routes_using_method dispatch_routes[]   @relation("dispatch_routes_shipping_method")
 
   @@index([store_id])
   @@index([is_system])
   @@index([copied_from_system_method_id])
+  @@index([default_vehicle_id])
+  @@index([default_carrier_supplier_id])
 }
 
 model shipping_rates {
@@ -3432,6 +3472,7 @@ model membership_access_credentials {
   credential_type  membership_credential_type_enum
   credential_value String                           @db.VarChar(255)
   is_active        Boolean                          @default(true)
+  deleted_at       DateTime?
   created_at       DateTime                         @default(now())
   updated_at       DateTime                         @updatedAt
 
@@ -3748,6 +3789,22 @@ enum shipping_method_type_enum {
   third_party_provider
 }
 
+/// Plan Despacho Economía — FASE 2 paso 8.
+/// Política de pago del envío al cerrar la ruta.
+/// `prepaid`     ⇒ el cliente ya pagó el flete antes de la entrega (no se recauda en ruta).
+/// `on_delivery` ⇒ el transportador cobra al cliente al entregar.
+enum dispatch_payment_timing_enum {
+  prepaid
+  on_delivery
+}
+
+/// Plan Despacho Economía — FASE 2 paso 8.
+/// Cuándo se liquida el costo del transportador al cerrar la ruta.
+/// v1: solo `immediate_on_close` (decisión #3 — pago inmediato).
+enum cost_settlement_timing_enum {
+  immediate_on_close
+}
+
 enum shipping_rate_type_enum {
   flat
   weight_based
@@ -3991,6 +4048,22 @@ enum settlement_status_enum {
   approved
   paid
   cancelled
+}
+
+/// Plan Despacho Economía (FASE 1) — costo del ejecutor.
+/// none        → costo 0 (conductor interno con sueldo; nóminas fuera del modelo)
+/// per_delivery → `settlement_rate × paradas que cuentan`
+/// per_route   → `settlement_rate` (monto fijo por ruta cerrada)
+enum settlement_type_enum {
+  none
+  per_delivery
+  per_route
+}
+
+enum supplier_category_enum {
+  goods
+  carrier
+  service
 }
 
 enum employee_advance_status_enum {
@@ -4596,6 +4669,11 @@ model invoices {
   subtotal_amount      Decimal                         @default(0) @db.Decimal(12, 2)
   discount_amount      Decimal                         @default(0) @db.Decimal(12, 2)
   tax_amount           Decimal                         @default(0) @db.Decimal(12, 2)
+  // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado en
+  // cuenta 414505 "Transporte Terrestre". Persistido desde order.shipping_cost
+  // en invoicing.service.ts:590. Excluido de IVA (tax_amount sólo cubre
+  // producto). shipping_amount = 0 ⇒ comportamiento legacy (sin línea extra).
+  shipping_amount      Decimal                         @default(0) @db.Decimal(12, 2)
   withholding_amount   Decimal                         @default(0) @db.Decimal(12, 2)
   total_amount         Decimal                         @default(0) @db.Decimal(12, 2)
   currency             String?                         @db.VarChar(10)
@@ -8612,9 +8690,23 @@ enum dispatch_route_status_enum {
   draft
   dispatched
   in_transit
-  settling
   closed
   voided
+}
+
+/// Plan Despacho Economía — FASE 6 paso 19.
+/// Estado de cumplimiento del despacho para una orden:
+///   none    → aún no tiene remisiones.
+///   partial → al menos una línea está total o parcialmente remitida
+///             (quedan unidades pendientes). Aparece con `remaining_units > 0`.
+///   full    → todas las líneas están totalmente remitidas (no es despachable).
+/// Mantenido por listener en `dispatch_note.confirmed/voided/delivered`.
+/// El valor `settling` queda como `reserved` en este enum sólo por
+/// consistencia histórica; nunca se escribe.
+enum dispatch_fulfillment_enum {
+  none
+  partial
+  full
 }
 
 enum dispatch_route_stop_status_enum {
@@ -8643,25 +8735,34 @@ enum vehicle_type_enum {
 }
 
 model vehicles {
-  id                 Int               @id @default(autoincrement())
+  id                 Int                   @id @default(autoincrement())
   store_id           Int
-  plate              String            @db.VarChar(20)
-  type               vehicle_type_enum @default(truck)
-  brand              String?           @db.VarChar(80)
-  model_name         String?           @db.VarChar(80)
-  capacity_kg        Decimal?          @db.Decimal(10, 2)
+  plate              String                @db.VarChar(20)
+  type               vehicle_type_enum     @default(truck)
+  brand              String?               @db.VarChar(80)
+  model_name         String?               @db.VarChar(80)
+  capacity_kg        Decimal?              @db.Decimal(10, 2)
   capacity_units     Int?
   primary_driver_id  Int?
-  is_active          Boolean           @default(true)
-  notes              String?           @db.Text
+  is_active          Boolean               @default(true)
+  notes              String?               @db.Text
+  // Plan Despacho Economía — costo del ejecutor (FASE 1 paso 6).
+  // `none` ⇒ costo 0 (sueldo interno, nóminas fuera del modelo).
+  // `per_delivery` ⇒ settlement_rate × paradas que cuentan.
+  // `per_route` ⇒ settlement_rate fijo por ruta cerrada.
+  settlement_type    settlement_type_enum  @default(none)
+  settlement_rate    Decimal?              @db.Decimal(12, 2)
   created_by_user_id Int?
-  created_at         DateTime?         @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?         @default(now()) @db.Timestamp(6)
+  created_at         DateTime?             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?             @default(now()) @db.Timestamp(6)
 
   store           stores            @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   primary_driver  users?            @relation("vehicles_primary_driver", fields: [primary_driver_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   created_by_user users?            @relation("vehicles_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   dispatch_routes dispatch_routes[]
+  // Plan Despacho Economía — FASE 2 paso 8. Contraparte de la relación
+  // shipping_methods.default_vehicle_id → vehicles.id.
+  default_for_methods shipping_methods[] @relation("shipping_methods_default_vehicle")
 
   @@unique([store_id, plate])
   @@index([store_id, is_active])
@@ -8700,6 +8801,16 @@ model dispatch_routes {
   scan_confidence            Decimal?                   @db.Decimal(5, 4)
   notes                      String?                    @db.Text
   void_reason                String?                    @db.Text
+  // Plan Despacho Economía — FASE 3 paso 11.
+  // El método de envío es la "política" que gobierna la ruta. La fuente de
+  // verdad final es `stops→dispatch_notes.order_id→orders.shipping_method_id`,
+  // pero este FK permite override explícito (recomendado: una ruta agrupa
+  // remisiones del mismo método).
+  shipping_method_id         Int?
+  // Transportista externo (supplier carrier). Usado por el settlement del
+  // FASE 5 cuando `generates_transport_cost` ≠ 'none' y el ejecutor no es
+  // propio (carrier | third_party_provider).
+  external_carrier_supplier_id Int?
   dispatched_by_user_id      Int?
   closed_by_user_id          Int?
   voided_by_user_id          Int?
@@ -8714,6 +8825,8 @@ model dispatch_routes {
   closed_by_user     users?                 @relation("dispatch_routes_closed_by", fields: [closed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   voided_by_user     users?                 @relation("dispatch_routes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   origin_location    inventory_locations?   @relation("dispatch_routes_origin_location", fields: [origin_location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  shipping_method    shipping_methods?      @relation("dispatch_routes_shipping_method", fields: [shipping_method_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  external_carrier   suppliers?             @relation("dispatch_routes_external_carrier", fields: [external_carrier_supplier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   stops              dispatch_route_stops[]
 
   @@unique([store_id, route_number])
@@ -8721,12 +8834,20 @@ model dispatch_routes {
   @@index([store_id, planned_date])
   @@index([vehicle_id])
   @@index([driver_user_id])
+  @@index([shipping_method_id])
+  @@index([external_carrier_supplier_id])
 }
 
 model dispatch_route_stops {
   id                    Int                              @id @default(autoincrement())
   route_id              Int
-  dispatch_note_id      Int                              @unique
+  // Plan Despacho Economía — FASE 6 paso 18. La unicidad activa en BD la da
+  // el índice PARCIAL `dispatch_route_stops_dispatch_note_id_active_idx` (creado
+  // en la migración 20260618200000_dispatch_routes) que aplica sólo cuando
+  // `status <> 'released'`. Mantenemos la columna sin `@unique` para no
+  // invitar a `prisma migrate diff` a recrear un índice total que rompería
+  // la reasignación de remisiones liberadas.
+  dispatch_note_id      Int
   stop_sequence         Int
   status                dispatch_route_stop_status_enum  @default(pending)
   result                dispatch_route_stop_result_enum?

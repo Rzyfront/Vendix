@@ -856,6 +856,12 @@ export class AutoEntryService {
   /**
    * Fiscal invoice acceptance: Debit Accounts Receivable, Credit Revenue + VAT Payable.
    * Mapping/source keys keep the legacy invoice.validated name for compatibility.
+   *
+   * TODO[FASE-4 plan despacho-economia]: split `subtotal` between product income
+   * (`4135`) and shipping income (`414505` — Transporte Terrestre) when
+   * `shipping_amount > 0`. Flete excluido de IVA por defecto (tax_amount=0).
+   * Ver plan paso 14 — el fix cablea `shipping_amount` desde
+   * `invoicing.service.ts:590` y emite dos líneas en este método.
    */
   async onInvoiceValidated(data: {
     invoice_id: number;
@@ -863,6 +869,13 @@ export class AutoEntryService {
     store_id?: number;
     subtotal: number;
     tax_amount: number;
+    /**
+     * Plan Despacho Economía — FASE 4 paso 14. Monto del flete facturado (excluido
+     * de IVA, separado en cuenta 414505). Cuando > 0 se desdobla la línea de
+     * ingresos: subtotal_producto = subtotal - shipping_amount → 4135,
+     * shipping_amount → 414505. shipping_amount = 0 ⇒ comportamiento legacy.
+     */
+    shipping_amount?: number;
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     total: number;
@@ -892,6 +905,13 @@ export class AutoEntryService {
       0,
     );
     const accounts_receivable = Math.max(0, Number(data.total || 0) - wh_total);
+
+    // Plan Despacho Economía — FASE 4 paso 14. Split del ingreso:
+    //   subtotal_producto = subtotal − shipping_amount → 4135 (revenue)
+    //   shipping_amount                  → 414505 (shipping_income)
+    const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
+    const product_revenue = Math.max(0, Number(data.subtotal || 0) - shipping_amount);
+
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -907,9 +927,23 @@ export class AutoEntryService {
         'invoice.validated.revenue',
         'Revenue',
         0,
-        data.subtotal,
+        product_revenue,
         data.store_id,
       ),
+      // Plan Despacho Economía — FASE 4 paso 14. Línea de flete separada.
+      // Solo se materializa si shipping_amount > 0 (idempotente con el legacy).
+      ...(shipping_amount > 0
+        ? [
+            this.resolveAccountLine(
+              data.organization_id,
+              'invoice.validated.shipping_income',
+              'Shipping Income (Transporte Terrestre)',
+              0,
+              shipping_amount,
+              data.store_id,
+            ),
+          ]
+        : []),
     ]);
 
     lines.push(
@@ -1134,7 +1168,12 @@ export class AutoEntryService {
   /**
    * payment.received:
    * - WITH invoice: Debit Cash/Bank, Credit Accounts Receivable (invoice already recognized revenue)
-   * - WITHOUT invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT if applicable
+   * - WITHOUT invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT + Shipping Income if applicable
+   *
+   * Plan Despacho Economía — FASE 4 paso 15. Cierra el gap diagnosticado en el
+   * comentario previo: cuando el pago POS directo tiene `shipping_cost > 0` y
+   * SIN factura, se acredita también el ingreso de flete en cuenta 414505
+   * para que el guard de balance cuadre.
    */
   async onPaymentReceived(data: {
     payment_id: number;
@@ -1146,6 +1185,12 @@ export class AutoEntryService {
     amount: number;
     subtotal_amount?: number;
     tax_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4 paso 15. Monto del flete. Se acredita
+     * como CR separado en 414505 cuando NO hay factura asociada (POS directo
+     * con `order.shipping_cost > 0`).
+     */
+    shipping_amount?: number;
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
@@ -1214,13 +1259,16 @@ export class AutoEntryService {
         ),
       ]);
     } else {
-      // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT
+      // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT + Shipping Income.
       const tax = Number(data.tax_amount || 0);
       const discount = Number(data.discount_amount || 0);
+      // Plan Despacho Economía — FASE 4 paso 15. El subtotal ya viene sin flete;
+      // el flete se acredita como línea separada en 414505.
+      const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
       const subtotal =
         data.subtotal_amount != null
           ? Number(data.subtotal_amount)
-          : data.amount + discount - tax; // fallback: derive subtotal from amount + discount - tax
+          : data.amount + discount - tax - shipping_amount; // fallback
 
       lines = [
         await this.resolveAccountLine(
@@ -1257,6 +1305,22 @@ export class AutoEntryService {
           data.store_id,
         ),
       );
+
+      // Plan Despacho Economía — FASE 4 paso 15. Línea separada de flete
+      // (414505). Sin esta línea el asiento NO cuadraría cuando
+      // `order.shipping_cost > 0` (POS directo sin factura).
+      if (shipping_amount > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            'payment.received.shipping_income',
+            `Ingreso por flete${order_ref}`,
+            0,
+            shipping_amount,
+            data.store_id,
+          ),
+        );
+      }
 
       // Separate tax lines per fiscal type (IVA→2408, INC→2436, ICA→241205)
       lines.push(
@@ -1335,6 +1399,13 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4. Flete de la venta a crédito. En crédito
+     * `subtotal_amount` YA excluye el flete y `total_amount` lo incluye, por lo
+     * que el flete se acredita como línea separada (414505) SIN restarlo del
+     * revenue; así CR (subtotal + IVA + flete) = DR CxC (grand_total).
+     */
+    shipping_amount?: number;
     total_amount: number;
     user_id?: number;
     /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
@@ -1398,6 +1469,24 @@ export class AutoEntryService {
         data.store_id,
       ),
     );
+
+    // Plan Despacho Economía — FASE 4. Línea separada de flete (414505). En
+    // crédito, `subtotal_amount` YA excluye el flete y `total_amount` (=DR CxC)
+    // lo incluye; SOLO se añade la línea CR de flete (no se resta del revenue),
+    // de lo contrario el asiento no cuadra cuando `shipping_amount > 0`.
+    const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
+    if (shipping_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'credit_sale.created.shipping_income',
+          `Ingreso por flete${order_ref}`,
+          0,
+          shipping_amount,
+          data.store_id,
+        ),
+      );
+    }
 
     lines.push(
       ...(await this.resolveTaxLines({
@@ -5126,5 +5215,80 @@ export class AutoEntryService {
     }
 
     return lines;
+  }
+
+  // ===================================================================
+  // Plan Despacho Economía — FASE 5 paso 17.
+  // dispatch_route.settlement: reconocimiento del costo del transportador.
+  // Se ejecuta DESPUÉS de que el listener externo (settle-listener.ts) haya
+  // creado la CxP y la CxP haya disparado `ap.payment_registered` para
+  // contabilizar el pago. Aquí sólo se reconoce el devengo del costo
+  // (DR 523550 / CR 2205 — neto de retención).
+  // ===================================================================
+  async onDispatchRouteSettlement(data: {
+    route_id: number;
+    route_number?: string;
+    organization_id: number;
+    store_id: number;
+    transporter_supplier_id: number | null;
+    gross_cost: number;
+    /** Importe ya pagado (neto) — persistido por el listener externo. */
+    net_amount?: number;
+    settlement_type: 'per_delivery' | 'per_route';
+    user_id?: number;
+    /** Snapshot del proveedor para el asiento. */
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : data.transporter_supplier_id
+        ? {
+            id: data.transporter_supplier_id,
+            type: 'supplier',
+          }
+        : undefined;
+
+    const gross = Math.max(0, Number(data.gross_cost || 0));
+    const net = Math.max(0, Number(data.net_amount ?? gross));
+
+    const lines: (AutoEntryLine | null)[] = await Promise.all([
+      // DR: costo del transporte (523550) por el gross.
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_route.settlement.transport_cost',
+        `Costo transporte${data.route_number ? ` - Ruta ${data.route_number}` : ''}`,
+        gross,
+        0,
+        data.store_id,
+      ),
+      // CR: CxP al transportador por el neto (gross - retención, ya gestionada
+      // por el listener externo que ejecuta la CxP completa). En el FASE 5 v1
+      // emitimos el evento y la CxP se paga de inmediato vía
+      // ap.payment.registered (CR 2205). Aquí sólo dejamos el devengo.
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_route.settlement.accounts_payable',
+        `CXP transportador${data.route_number ? ` - Ruta ${data.route_number}` : ''}`,
+        0,
+        net,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_route.settlement',
+      source_id: data.route_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Liquidación transporte - Ruta ${data.route_number ?? data.route_id}`,
+      lines,
+      user_id: data.user_id,
+    });
   }
 }

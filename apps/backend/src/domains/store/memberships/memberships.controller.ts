@@ -18,6 +18,7 @@ import {
   CreateMembershipDto,
   UpdateMembershipDto,
   MembershipQueryDto,
+  ExpiringQueryDto,
   RenewMembershipDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -86,6 +87,20 @@ export class MembershipsController {
       );
     } catch (error: any) {
       return this.fail(error, 'Error al obtener las membresías');
+    }
+  }
+
+  @Get('expiring')
+  @Permissions('store:memberships:read')
+  async findExpiring(@Query() query: ExpiringQueryDto) {
+    try {
+      const result = await this.service.findExpiring(query);
+      return this.responseService.success(
+        result,
+        'Membresías por vencer/vencidas obtenidas exitosamente',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al obtener las membresías por vencer');
     }
   }
 

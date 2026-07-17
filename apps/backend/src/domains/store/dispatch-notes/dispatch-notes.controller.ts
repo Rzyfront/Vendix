@@ -27,6 +27,7 @@ import {
   DispatchNoteQueryDto,
   CreateFromSalesOrderDto,
   CreateFromOrderDto,
+  CreateFromOrdersBatchDto,
   VoidDispatchNoteDto,
   DeliverDispatchNoteDto,
   ConfirmDispatchNoteDto,
@@ -137,6 +138,39 @@ export class DispatchNotesController {
     return this.responseService.created(
       result,
       'Remisión creada desde orden exitosamente',
+    );
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 7 paso 23.
+   * Crea remisiones en lote desde N órdenes con resultado parcial por orden.
+   */
+  @Post('from-orders')
+  @Permissions('store:dispatch_notes:create')
+  async createFromOrdersBatch(@Body() dto: CreateFromOrdersBatchDto) {
+    const result = await this.dispatchNotesService.createFromOrdersBatch(dto);
+    return this.responseService.success(
+      result,
+      result.partial
+        ? 'Batch procesado con resultados parciales'
+        : 'Batch procesado completamente',
+    );
+  }
+
+  /**
+   * Validación en lote sin crear (2 agregaciones, no N×M).
+   */
+  @Post('from-orders/validate')
+  @Permissions('store:dispatch_notes:read')
+  async validateFromOrdersBatch(@Body() body: { order_ids: number[] }) {
+    const result = await this.dispatchNotesService.validateFromOrdersBatch(
+      body?.order_ids ?? [],
+    );
+    return this.responseService.success(
+      result,
+      result.ok
+        ? 'Todas las órdenes tienen stock suficiente'
+        : 'Hay órdenes con problemas de stock',
     );
   }
 

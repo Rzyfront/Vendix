@@ -43,6 +43,13 @@ export class VehiclesService {
             primary_driver_id: dto.primary_driver_id,
             is_active: dto.is_active ?? true,
             notes: dto.notes,
+            // Plan Despacho Economía — FASE 1 paso 6.
+            // Si settlement_type=none/null, no persistimos la tarifa.
+            settlement_type: dto.settlement_type ?? 'none',
+            settlement_rate:
+              dto.settlement_type && dto.settlement_type !== 'none'
+                ? dto.settlement_rate
+                : null,
             created_by_user_id: user_id,
           },
         });
@@ -120,6 +127,17 @@ export class VehiclesService {
     });
     if (!vehicle) throw new NotFoundException(`Vehículo #${id} no encontrado`);
 
+    // Regla cruzada: si el dto cambia el settlement_type a per_delivery/per_route
+    // sin settlement_rate > 0, exigirlo explícitamente.
+    const next_type = dto.settlement_type ?? vehicle.settlement_type;
+    const next_rate =
+      dto.settlement_rate !== undefined ? dto.settlement_rate : vehicle.settlement_rate;
+    if (next_type && next_type !== 'none' && (next_rate === null || Number(next_rate) <= 0)) {
+      throw new BadRequestException(
+        `El campo settlement_rate es obligatorio cuando settlement_type='${next_type}'`,
+      );
+    }
+
     return this.prisma.vehicles.update({
       where: { id },
       data: {
@@ -132,6 +150,17 @@ export class VehiclesService {
         ...(dto.primary_driver_id !== undefined && { primary_driver_id: dto.primary_driver_id }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
+        // Plan Despacho Economía — FASE 1 paso 6.
+        // settlement_type se acepta en el DTO aunque no venga: si no se manda,
+        // preserva el actual (no se sobreescribe con undefined para evitar
+        // pisar accidentalmente con 'none').
+        ...(dto.settlement_type !== undefined && { settlement_type: dto.settlement_type }),
+        ...(dto.settlement_rate !== undefined && {
+          settlement_rate:
+            dto.settlement_type === 'none' || dto.settlement_rate === null
+              ? null
+              : dto.settlement_rate,
+        }),
         updated_at: new Date(),
       },
     });

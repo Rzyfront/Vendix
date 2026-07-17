@@ -120,6 +120,9 @@ export class AccountingEventsListener {
         accounting_entity_id: event.accounting_entity_id,
         subtotal: event.subtotal_amount,
         tax_amount: event.tax_amount,
+        // Plan Despacho Economía — FASE 4 paso 14. Propagar el monto del flete
+        // para que el split producto/flete se contabilice correctamente.
+        shipping_amount: (event as any).shipping_amount ?? 0,
         tax_breakdown: event.tax_breakdown,
         withholding_breakdown: event.withholding_breakdown,
         total: event.total_amount,
@@ -250,6 +253,12 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4. Monto del flete de la venta a crédito.
+     * En crédito, `subtotal_amount` YA excluye el flete y `total_amount` lo
+     * incluye; sin esta línea CR el asiento no cuadra (DR CxC = grand_total).
+     */
+    shipping_amount?: number;
     total_amount: number;
     user_id?: number;
   }) {
@@ -268,6 +277,7 @@ export class AccountingEventsListener {
           event.discount_amount != null
             ? Number(event.discount_amount)
             : undefined,
+        shipping_amount: Number(event.shipping_amount ?? 0),
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
       });

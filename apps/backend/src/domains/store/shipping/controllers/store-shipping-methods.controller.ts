@@ -163,6 +163,40 @@ export class StoreShippingMethodsController {
     }
   }
 
+  /**
+   * Plan Despacho Economía — FASE 2 paso 8.
+   * Política efectiva del método (merge método + defaults globales de la tienda).
+   */
+  @Get(':methodId/policy')
+  @ApiOperation({
+    summary: 'Get effective shipping method policy (method + store defaults)',
+  })
+  async getPolicy(@Param('methodId') methodId: string) {
+    try {
+      const method_id_num = parseInt(methodId);
+      if (!method_id_num || isNaN(method_id_num)) {
+        return this.responseService.error(
+          'Invalid shipping method ID',
+          '',
+          400,
+        );
+      }
+      const policy =
+        await this.storeShippingMethodsService.getEffectivePolicy(
+          method_id_num,
+        );
+      return this.responseService.success(
+        policy,
+        'Shipping method policy resolved',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to resolve shipping method policy',
+        error,
+      );
+    }
+  }
+
   @Post('enable/:systemMethodId')
   @ApiOperation({ summary: 'Enable a system shipping method for this store' })
   @ApiResponse({

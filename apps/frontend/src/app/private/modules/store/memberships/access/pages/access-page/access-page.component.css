@@ -19,7 +19,23 @@
   }
 }
 
-/* ─── Ingreso + Salida/Ajuste grid ─── */
+/* ─── Aforo (2/5) + Ingreso (3/5) grid ─── */
+.aforo-top {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@media (min-width: 1024px) {
+  .aforo-top {
+    grid-template-columns: 2fr 3fr;
+    gap: 16px;
+    /* Equal-height siblings: both cards stretch to the tallest (Ingreso is the
+       compact reference; the gauge fills to match via app-card [fullHeight]). */
+    align-items: stretch;
+  }
+}
+
+/* ─── Membresías por vencer + Salida/Ajuste grid ─── */
 .aforo-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -31,6 +47,20 @@
     gap: 16px;
     align-items: start;
   }
+}
+
+/* Loading spinner inside the "por vencer" card. */
+.expiring-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+/* Kiosk toggle sits above the fingerprint device form, visually separated. */
+.access-kiosk-toggle {
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border, #eceef1);
 }
 .aforo-side {
   display: flex;
@@ -93,18 +123,7 @@
   border-radius: 9999px;
 }
 
-/* ─── Config: section titles reused by the inline config header ─── */
-.aforo-block-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text-primary, #111827);
-}
-.aforo-block-title app-icon {
-  color: var(--color-primary, #2f6f4e);
-}
+/* ─── Config: description text at the top of the aforo config modal ─── */
 .aforo-block-desc {
   font-size: 12.5px;
   color: var(--color-text-secondary, #6b7280);
@@ -210,11 +229,6 @@
   flex-direction: column;
   gap: 16px;
 }
-.aforo-config-head {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 .aforo-config-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -284,12 +298,12 @@
   flex: 0 0 auto;
   color: #d97706;
 }
+/* Buttons live in the modal footer slot, which already provides the
+   border-top + padding chrome — so this only handles alignment. */
 .aforo-config-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  border-top: 1px solid var(--color-border, #eceef1);
-  padding-top: 14px;
 }
 
 /* ─── Anot 4: polish fingerprint config shell ───────────────────────────── */

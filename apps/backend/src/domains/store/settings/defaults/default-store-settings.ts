@@ -360,6 +360,12 @@ export function getDefaultStoreSettings(): StoreSettings {
     // is closed. Set to `live` to reflect delivery in real time on each settle.
     dispatch: {
       order_state_update_mode: 'on_close',
+      // Plan Despacho Economía — FASE 2 paso 9. Defaults globales; los métodos
+      // de envío pueden sobreescribir en su política tipada.
+      default_payment_timing: 'on_delivery',
+      default_settlement_type: 'none',
+      default_cost_settlement_timing: 'immediate_on_close',
+      requires_dispatch_address: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is
@@ -377,6 +383,8 @@ export function getDefaultStoreSettings(): StoreSettings {
     // Capacity (aforo) control and its auto-leveling are also opt-in.
     membership: {
       ambient_access_enabled: false,
+      qr_kiosk_mode: false,
+      qr_scanner_default_mode: 'fullscreen',
       capacity_control_enabled: false,
       max_capacity: 0,
       turnstile_mode: false,

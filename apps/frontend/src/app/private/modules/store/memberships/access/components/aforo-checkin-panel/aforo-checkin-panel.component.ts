@@ -28,7 +28,7 @@ import {
   GymAccessResult,
   GymCredentialType,
 } from '../../interfaces';
-import { AforoQrScannerComponent } from '../aforo-qr-scanner/aforo-qr-scanner.component';
+import { AforoQrScannerComponent, ScannerViewMode } from '../aforo-qr-scanner/aforo-qr-scanner.component';
 
 /** Normalized shape rendered by the result pill (QR/PIN or fingerprint). */
 interface CheckinResultView {
@@ -68,7 +68,12 @@ interface CheckinResultView {
   ],
   styleUrl: './aforo-checkin-panel.component.css',
   template: `
-    <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+    <app-card
+      [shadow]="'sm'"
+      [responsivePadding]="true"
+      [showHeader]="true"
+      [fullHeight]="true"
+    >
       <div slot="header" class="ci-header">
         <span class="ci-header-icon">
           <app-icon name="log-in" [size]="18" />
@@ -217,6 +222,8 @@ interface CheckinResultView {
 
     <app-aforo-qr-scanner
       [isOpen]="scannerOpen()"
+      [continuous]="kiosk()"
+      [defaultMode]="scannerDefaultMode()"
       (scanned)="onQrScanned($event)"
       (closed)="scannerOpen.set(false)"
     />
@@ -229,6 +236,14 @@ export class AforoCheckinPanelComponent {
   readonly actionInFlight = input<boolean>(false);
   /** QR/PIN validation result computed by the host page. */
   readonly lastResult = input<AccessValidationResult | null>(null);
+  /**
+   * Kiosk mode (store setting `qr_kiosk_mode`). When true, the QR scanner is
+   * auto-opened and kept scanning continuously (member after member) so an
+   * unattended reception tablet grants access on each read.
+   */
+  readonly kiosk = input<boolean>(false);
+  /** Store default display mode for the QR scanner (fullscreen | floating). */
+  readonly scannerDefaultMode = input<ScannerViewMode>('fullscreen');
 
   /** Emitted when the operator submits a credential to validate. */
   readonly validate = output<{
@@ -284,6 +299,15 @@ export class AforoCheckinPanelComponent {
       this.fingerResult.set(ev);
       this.fingerScanning.set(false);
     });
+
+    // Kiosk mode: keep the QR scanner open whenever the active method is QR so a
+    // reception tablet scans member after member unattended. Reads kiosk()+
+    // method() and writes scannerOpen — no cycle (it never reads scannerOpen).
+    effect(() => {
+      if (this.kiosk() && this.method() === 'qr') {
+        this.scannerOpen.set(true);
+      }
+    });
   }
 
   onMethod(value: string): void {
@@ -301,7 +325,8 @@ export class AforoCheckinPanelComponent {
   }
 
   onQrScanned(code: string): void {
-    this.scannerOpen.set(false);
+    // Kiosk mode keeps the overlay open (continuous loop); single-shot closes.
+    if (!this.kiosk()) this.scannerOpen.set(false);
     const value = code.trim();
     if (!value) return;
     this.validate.emit({ credential_type: 'qr', credential_value: value });

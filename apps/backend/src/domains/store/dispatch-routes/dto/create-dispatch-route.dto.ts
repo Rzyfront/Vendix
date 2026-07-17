@@ -106,6 +106,21 @@ export class CreateDispatchRouteDto {
   @Min(1)
   origin_location_id?: number;
 
+  // Plan Despacho Economía — FASE 3 paso 11.
+  // FK opcional al método de envío. Si se omite, el método se deriva de las
+  // órdenes asociadas a las paradas (orders.shipping_method_id).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  shipping_method_id?: number;
+
+  // Transportista externo (supplier carrier) cuando el método es carrier/
+  // third_party_provider. Se usa como tercero de la CxP del FASE 5.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  external_carrier_supplier_id?: number;
+
   @IsDateString()
   planned_date: string;
 

@@ -94,6 +94,12 @@ export class DispatchNoteWizardService {
 
   readonly terminalAction = signal<WizardTerminalAction>('draft');
 
+  // Plan Despacho Economía — FASE 7 paso 20.
+  // Modo dual quick-accept: si está activo (default), `dispatched_quantity`
+  // se autocompleta con `pending_quantity` en cada nuevo ítem / nueva orden.
+  // El usuario puede editar manualmente y el modo se preserva (no se revierte
+  // al cambiar una línea individual).
+  readonly quickAcceptEnabled = signal<boolean>(true);
   // --- Party signals (step 1 for non-customer_delivery subtypes) ---
   // transfer_out/in: from_location_id / to_location_id
   readonly fromLocationId = signal<number | null>(null);
@@ -402,6 +408,10 @@ export class DispatchNoteWizardService {
       const product: Product | undefined = oi.products;
       const already = existingDispatchedByItem.get(oi.id) ?? 0;
       const pending = Math.max(0, oi.quantity - already);
+      // Plan Despacho Economía — FASE 7 paso 20. Quick-accept:
+      // si el modo está activo, autocompletamos dispatched_quantity con
+      // pending; el usuario puede editar después sin perder el modo.
+      const dispatched = this.quickAcceptEnabled() ? pending : 0;
       return {
         order_item_id: oi.id,
         product_id: oi.product_id,
@@ -414,7 +424,7 @@ export class DispatchNoteWizardService {
         unit_price: oi.unit_price,
         ordered_quantity: oi.quantity,
         pending_quantity: pending,
-        dispatched_quantity: 0,
+        dispatched_quantity: dispatched,
         tax_amount: oi.tax_amount_item ?? 0,
         discount_amount: 0,
       };
@@ -450,6 +460,29 @@ export class DispatchNoteWizardService {
     return clamped;
   }
 
+  /**
+   * Plan Despacho Economía — FASE 7 paso 20. Quick-accept masivo:
+   * pone `dispatched_quantity = pending_quantity` en todas las líneas
+   * (excepto las que ya tienen `pending = 0`, que se mantienen en 0).
+   */
+  quickAcceptAll(): void {
+    this.items.update((current) =>
+      current.map((item) => ({
+        ...item,
+        dispatched_quantity: Math.max(0, item.pending_quantity ?? 0),
+      })),
+    );
+  }
+
+  /**
+   * Limpia todas las cantidades (modo granular). Complementa
+   * `quickAcceptEnabled=false` para que el usuario pueda resetear.
+   */
+  clearQuantities(): void {
+    this.items.update((current) =>
+      current.map((item) => ({ ...item, dispatched_quantity: 0 })),
+    );
+  }
   setDetails(partial: Partial<WizardDetails>): void {
     this.details.update((d) => ({ ...d, ...partial }));
   }
