@@ -331,8 +331,12 @@ export class TableSessionsService {
    *   - `user_id` is NOT required in the request context. Only `store_id`
    *     is needed (the store is encoded in the QR payload / route).
    *   - `opened_by` is null (no authenticated opener).
-   *   - `customer_id` is null (anonymous check; a real customer can be
-   *     attached later via `assignCustomer`).
+   *   - `customer_id` is optional: null for an anonymous check (default),
+   *     or a resolved diner (guest/registered) when the comensal
+   *     identified before opening the tab. A customer can still be
+   *     attached later via `assignCustomer`. No `allow_anonymous_sales`
+   *     gate lives here — the anonymous auto-open (open_tab) must keep
+   *     working; that gate belongs to the explicit "identify" flow.
    *   - The draft order is created with `channel: 'ecommerce'` and
    *     `delivery_type: 'dine_in'` so downstream reporting/filters can
    *     distinguish QR-initiated checks from POS-initiated ones.
@@ -345,6 +349,7 @@ export class TableSessionsService {
     tableId: number,
     openedByUserId?: number | null,
     guestCount?: number | null,
+    customerId?: number | null,
   ): Promise<TableSessionView> {
     const { storeId } = this.requireStoreContext();
 
@@ -360,15 +365,19 @@ export class TableSessionsService {
     //    table_session (opened_by null) + flip table to 'occupied'.
     //    `guestCount` is optional (GAP-10): the QR scan may not know the
     //    party size yet — the diner can set it later via `setGuestCount`.
+    const resolvedCustomerId = customerId ?? null;
     const session = await this.createOpenSession({
       tableId,
       storeId,
       openedBy: openedByUserId ?? null,
-      customerId: null,
+      customerId: resolvedCustomerId,
       channel: 'ecommerce',
       deliveryType: 'dine_in',
       guestCount: guestCount ?? null,
-      internalNotes: 'Mesa abierta vía QR — cuenta anónima',
+      internalNotes:
+        resolvedCustomerId == null
+          ? 'Mesa abierta vía QR — cuenta anónima'
+          : 'Mesa abierta vía QR — comensal identificado',
     });
 
     this.logger.log(
