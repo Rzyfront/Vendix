@@ -2,12 +2,9 @@ import {
   Component,
   computed,
   DestroyRef,
-  effect,
-  ElementRef,
   inject,
   OnInit,
   signal,
-  viewChild,
 } from '@angular/core';
 import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -22,6 +19,7 @@ import {
   FilterValues,
   IconComponent,
   ItemListCardConfig,
+  ModalComponent,
   OptionsDropdownComponent,
   PaginationComponent,
   QuantityControlComponent,
@@ -113,6 +111,7 @@ const EXPIRING_URGENCY_LABELS: Record<ExpiringUrgency, string> = {
     AforoGaugeComponent,
     AforoCheckinPanelComponent,
     InputComponent,
+    ModalComponent,
   ],
   templateUrl: './access-page.component.html',
   styleUrl: './access-page.component.css',
@@ -269,27 +268,9 @@ export class MembershipAccessPageComponent implements OnInit {
   };
 
   // ─── Aforo config (persisted in store_settings.settings.membership) ─────────
+  /** Drives the "Configuración de aforo" modal (app-modal [(isOpen)]). */
   readonly showConfig = signal(false);
   readonly savingConfig = signal(false);
-
-  /**
-   * The inline aforo-config card lives at the bottom of the Aforo tab, inside the
-   * admin layout's own `overflow-y-auto` <main> (the window itself does not
-   * scroll). Toggling `showConfig` on renders it below the fold with no visual
-   * cue, so "Configurar aforo" felt like it did nothing. `viewChild` is a signal:
-   * when `@if (showConfig())` mounts the card, this ref resolves and the effect
-   * below re-runs, scrolling the panel into view. No fragile setTimeout.
-   */
-  private readonly configPanelRef = viewChild('aforoConfigCard', {
-    read: ElementRef,
-  });
-  private readonly revealConfigEffect = effect(() => {
-    if (!this.showConfig()) return;
-    const el = this.configPanelRef();
-    if (el) {
-      el.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  });
   readonly cfgCapacityControl = signal(false);
   readonly cfgMaxCapacity = signal(0);
   readonly cfgTurnstile = signal(false);
@@ -720,7 +701,7 @@ export class MembershipAccessPageComponent implements OnInit {
     if (actionId === 'refresh') this.loadLogs();
     else if (actionId === 'new-credential') this.newCredential();
     else if (actionId === 'refresh-aforo') this.loadOccupancy();
-    else if (actionId === 'config-aforo') this.toggleConfig();
+    else if (actionId === 'config-aforo') this.openConfig();
     else if (actionId === 'save-access-config') this.saveAccessConfig();
   }
 
@@ -882,9 +863,9 @@ export class MembershipAccessPageComponent implements OnInit {
   }
 
   // ─── Aforo: config ────────────────────────────────────────────────────────
-  toggleConfig(): void {
+  openConfig(): void {
     this.hydrateConfigFromSettings();
-    this.showConfig.update((v) => !v);
+    this.showConfig.set(true);
   }
 
   private hydrateConfigFromSettings(): void {

@@ -191,22 +191,19 @@
         </div>
       </div>
 
-      <!-- ─── Configuración de aforo (inline) ─── -->
-      @if (showConfig()) {
-        <app-card [responsive]="true" #aforoConfigCard>
-          <div class="aforo-config">
-            <header class="aforo-config-head">
-              <div class="aforo-block-title">
-                <app-icon name="gauge" />
-                <span>Configuración de aforo</span>
-              </div>
-              <p class="aforo-block-desc">
-                Define la capacidad, la nivelación automática y el modo torniquete.
-                El horario de atención se toma del horario del Punto de Venta.
-              </p>
-            </header>
+      <!-- ─── Configuración de aforo (modal) ─── -->
+      <app-modal
+        [(isOpen)]="showConfig"
+        title="Configuración de aforo"
+        size="lg"
+      >
+        <div class="aforo-config">
+          <p class="aforo-block-desc">
+            Define la capacidad, la nivelación automática y el modo torniquete.
+            El horario de atención se toma del horario del Punto de Venta.
+          </p>
 
-            <div class="aforo-config-grid">
+          <div class="aforo-config-grid">
               <app-setting-toggle
                 label="Control de aforo"
                 description="Cuenta los ingresos y bloquea al alcanzar la capacidad."
@@ -269,35 +266,34 @@
               </div>
             </div>
 
-            <div class="aforo-schedule-note">
-              <app-icon name="alert-triangle" />
-              <span>
-                El aforo se reinicia a 0 al cerrar el horario de atención y cada
-                día. El horario se configura en el Punto de Venta (Ajustes → Horario).
-              </span>
-            </div>
-
-            <div class="aforo-config-footer">
-              <button
-                type="button"
-                class="aforo-btn ghost"
-                [disabled]="savingConfig()"
-                (click)="showConfig.set(false)"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                class="aforo-btn primary"
-                [disabled]="savingConfig()"
-                (click)="saveConfig()"
-              >
-                {{ savingConfig() ? 'Guardando…' : 'Guardar configuración' }}
-              </button>
-            </div>
+          <div class="aforo-schedule-note">
+            <app-icon name="alert-triangle" />
+            <span>
+              El aforo se reinicia a 0 al cerrar el horario de atención y cada
+              día. El horario se configura en el Punto de Venta (Ajustes → Horario).
+            </span>
           </div>
-        </app-card>
-      }
+        </div>
+
+        <div slot="footer" class="aforo-config-footer">
+          <button
+            type="button"
+            class="aforo-btn ghost"
+            [disabled]="savingConfig()"
+            (click)="showConfig.set(false)"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            class="aforo-btn primary"
+            [disabled]="savingConfig()"
+            (click)="saveConfig()"
+          >
+            {{ savingConfig() ? 'Guardando…' : 'Guardar configuración' }}
+          </button>
+        </div>
+      </app-modal>
     </div>
   }
 
