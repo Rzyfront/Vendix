@@ -40,6 +40,7 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
 import { DispatchNotesModule } from './dispatch-notes/dispatch-notes.module';
 import { DispatchRoutesModule } from './dispatch-routes/dispatch-routes.module';
+import { CarrierModule } from './carrier/carrier.module';
 import { McpModule } from './mcp/mcp.module';
 import { AccountsReceivableModule } from './accounts-receivable/accounts-receivable.module';
 import { WalletModule } from './wallet/wallet.module';
@@ -107,6 +108,7 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     AIChatModule,
     DispatchNotesModule,
     DispatchRoutesModule,
+    CarrierModule,
     McpModule,
     AccountsReceivableModule,
     WalletModule,
