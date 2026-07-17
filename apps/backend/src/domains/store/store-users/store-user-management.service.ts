@@ -15,6 +15,7 @@ import {
   ResetPasswordStoreUserDto,
   UpdateUserRolesDto,
   UpdateUserPanelUIDto,
+  SetCarrierTariffDto,
 } from './dto';
 import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
@@ -495,6 +496,52 @@ export class StoreUserManagementService {
         data: {
           user_id: userId,
           app_type: 'STORE_ADMIN',
+          config: newConfig,
+        },
+      });
+    }
+
+    return this.findOne(userId);
+  }
+
+  /**
+   * Vendix Repartos (B8): setear la tarifa configurable de un repartidor.
+   *
+   * MERGE en `user_settings.config` (upsert por user_id): NO sobreescribe el
+   * resto del JSON de config, sólo la clave `carrier_tariff`. Dinero SIEMPRE
+   * string (nunca float); `currency` fijado a 'COP'. `findOne` valida que el
+   * usuario pertenece a la tienda del contexto (lanza 404 si no).
+   */
+  async setCarrierTariff(userId: number, dto: SetCarrierTariffDto) {
+    // Verify user belongs to this store (404 si no pertenece).
+    await this.findOne(userId);
+
+    const existing = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId },
+    });
+
+    const existingConfig = (existing?.config as Record<string, any>) || {};
+    const newConfig = {
+      ...existingConfig,
+      carrier_tariff: {
+        mode: dto.mode,
+        amount: dto.amount,
+        currency: 'COP',
+      },
+    };
+
+    if (existing) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { config: newConfig, updated_at: new Date() },
+      });
+    } else {
+      // Legacy sin user_settings: crear con app_type carrier (STORE_DELIVERY),
+      // coherente con que la tarifa es propia del rol de reparto.
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: 'STORE_DELIVERY',
           config: newConfig,
         },
       });
