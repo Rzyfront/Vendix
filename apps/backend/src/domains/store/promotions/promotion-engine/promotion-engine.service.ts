@@ -74,7 +74,10 @@ export class PromotionEngineService {
         promotion_categories: true,
         promotion_quantity_tiers: true,
       },
-      orderBy: { priority: 'desc' },
+      // Priority follows the "1 = highest" convention (ranking-style, intuitive
+      // for UI). Lower number wins. Promos with the same priority keep their
+      // insertion order (id desc as tiebreaker).
+      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
     });
 
     const eligible: any[] = [];

@@ -407,6 +407,7 @@ interface NormalizedTier {
             formControlName="priority"
             placeholder="0"
             [min]="0"
+            tooltipText="Menor número = mayor prioridad. 0 es la más alta, 1 la siguiente, etc. Si dos promos tienen la misma prioridad, gana la más reciente."
           ></app-input>
         </div>
 
