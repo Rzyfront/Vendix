@@ -263,6 +263,26 @@ export class RecipeItemsEditorComponent implements OnInit {
           this.unitCache.set(id, label);
           this.unitCacheTick.update((v) => v + 1);
         },
+      });
+  }
+
+  /**
+   * Toast feedback when the user leaves the quantity field with an invalid
+   * value (zero or null). Per UX request: error is shown as a top-right
+   * toast, not as inline text below the field.
+   */
+  onQuantityBlur(control: FormControl<number | null> | AbstractControl | null): void {
+    if (!control) return;
+    const v = control.value;
+    if (v == null || Number(v) <= 0) {
+      this.toastService.error(
+        'La cantidad del componente debe ser mayor a 0.',
+        'Cantidad inválida',
+        5000,
+      );
+    }
+  }
+}
         error: () => {
           // Swallow: missing unit must not block the form; the input simply
           // shows no suffix.

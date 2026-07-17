@@ -95,11 +95,7 @@
             step="0.0001"
             tooltipText="Cuánto de este insumo lleva la receta, en su unidad de medida."
             [suffixIcon]="!!unit"
-            [error]="
-              row.get('quantity')?.touched && row.get('quantity')?.invalid
-                ? 'Ingresá la cantidad del componente (debe ser mayor a 0).'
-                : undefined
-            "
+            (blur)="onQuantityBlur(row.get('quantity'))"
           >
             @if (unit) {
               <span
