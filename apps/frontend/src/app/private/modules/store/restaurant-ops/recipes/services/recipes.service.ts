@@ -195,7 +195,6 @@ export class RecipesService {
       (error instanceof Error ? error.message : undefined) ??
       error?.message;
     if (apiMessage) {
-    if (apiMessage) {
       message =
         typeof apiMessage === 'string'
           ? apiMessage

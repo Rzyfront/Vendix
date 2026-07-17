@@ -476,6 +476,11 @@ export class PosCartService {
         // Calculate cart total for order-level eligibility
         const subtotal = this.calculateSubtotal(currentState.items);
 
+        // Discounts evaluated this pass — only the single winner (highest
+        // priority, lowest id on ties) ends up in `promoDiscounts`. All
+        // other candidates are discarded. See the comment block below.
+        const promoDiscounts: CartDiscount[] = [];
+
         // ---------------------------------------------------------------
         // WINNER-TAKES-ALL: an order has at most ONE active promotion.
         // Mirrors the backend engine rule (PromotionEngineService.
