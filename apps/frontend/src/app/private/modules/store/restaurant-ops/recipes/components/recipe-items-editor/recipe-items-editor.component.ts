@@ -153,8 +153,8 @@ export class RecipeItemsEditorComponent implements OnInit {
       component_product_id: this.fb.nonNullable.control<number | null>(null, {
         validators: [Validators.required],
       }),
-      quantity: this.fb.nonNullable.control<number | null>(0, {
-        validators: [Validators.required, Validators.min(0)],
+      quantity: this.fb.nonNullable.control<number | null>(1, {
+        validators: [Validators.required, Validators.min(0.0001)],
       }),
       waste_percent: this.fb.nonNullable.control<number | null>(0, {
         validators: [Validators.min(0), Validators.max(100)],
