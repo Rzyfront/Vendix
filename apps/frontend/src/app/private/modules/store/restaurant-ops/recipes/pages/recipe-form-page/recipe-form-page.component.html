@@ -14,6 +14,20 @@
   (ngSubmit)="submit()"
   class="space-y-4 md:space-y-6 px-2 pb-4 md:px-0 md:pb-6"
 >
+  <!-- Inline error banner: backup to the toast, ALWAYS visible. -->
+  @if (submitError(); as err) {
+    <div
+      role="alert"
+      aria-live="assertive"
+      class="flex items-start gap-2 p-3 rounded-md border border-red-200 bg-red-50 text-red-900 text-sm"
+    >
+      <app-icon name="x-circle" [size]="18" class="text-red-600 mt-0.5 shrink-0" />
+      <div>
+        <p class="font-semibold">No se pudo guardar la receta</p>
+        <p class="text-red-700 mt-0.5">{{ err }}</p>
+      </div>
+    </div>
+  }
   <!-- overflow visible so the searchable selector dropdown (yield_unit)
        is not clipped by the card's md:overflow-hidden. -->
   <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">

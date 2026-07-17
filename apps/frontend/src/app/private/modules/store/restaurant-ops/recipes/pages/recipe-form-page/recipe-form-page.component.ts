@@ -82,6 +82,10 @@ export class RecipeFormPageComponent implements OnInit {
 
   readonly isEditMode = signal(false);
   readonly recipeId = signal<number | null>(null);
+  // Inline error message displayed at the top of the form. Acts as a
+  // fallback to the toast (which the user reported was not always visible).
+  // Persists until the next submit attempt.
+  readonly submitError = signal<string | null>(null);
   readonly isLoadingRecipe = signal(false);
   readonly isSubmitting = signal(false);
   readonly isLoadingProducts = signal(false);
@@ -314,6 +318,7 @@ export class RecipeFormPageComponent implements OnInit {
   }
 
   submit(): void {
+    this.submitError.set(null); // clear any previous inline error
     this.form.markAllAsTouched();
     this.itemsArray.markAllAsTouched();
     if (this.form.invalid || this.itemsArray.invalid) {
@@ -384,11 +389,16 @@ export class RecipeFormPageComponent implements OnInit {
             typeof err === 'string'
               ? err
               : (err as { error?: { message?: string } })?.error?.message;
-          this.toastService.error(
+          const finalMessage =
             apiMessage ??
-              (this.isEditMode()
-                ? 'Error al actualizar la receta'
-                : 'Error al crear la receta'),
+            (this.isEditMode()
+              ? 'Error al actualizar la receta'
+              : 'Error al crear la receta');
+          // Inline error banner — always visible regardless of toast
+          // rendering, stacking, or auto-dismiss timing.
+          this.submitError.set(finalMessage);
+          this.toastService.error(
+            finalMessage,
             'No se pudo guardar la receta',
             6000, // 6s so the user has time to read the API message
           );
