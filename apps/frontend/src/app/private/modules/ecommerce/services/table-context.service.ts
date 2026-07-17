@@ -776,6 +776,51 @@ export class TableContextService {
   }
 
   /**
+   * Applies a `session_opened` SSE event to the live signals. Called by
+   * `TableSessionSseService` (Step 4c) when the staff opens a session for
+   * this table while the diner is already browsing the storefront — e.g.
+   * `mark_occupied` flipped to `open_tab`, or `require_waiter` was
+   * confirmed by the mesero.
+   *
+   * Step 4c contract:
+   *  - Diner was bound server-side to `{table_id, session_id:null,
+   *    order_id:null}` (anonymous pre-session window — matchesDiner still
+   *    delivers `session_opened` because the filter keys on `table_id`).
+   *  - The `session_opened` event carries the new `session_id` (and
+   *    optionally `order_id`, `opened_at`, `opened_by`).
+   *  - This method writes `sessionId` here so `hideDineInPurchase()`
+   *    (Step 7) flips to `false` and the diner's purchase CTAs unlock.
+   *  - The SSE handler then reconnects the stream — on reconnect the
+   *    server resolves a fresh binding `{table_id, session_id:<id>,
+   *    order_id:null|order_id}` and subsequent `item_added` /
+   *    `session_closed` events match the new connection.
+   *
+   * Also resets `sessionClosed` (a freshly opened session is the active
+   * one — `sessionClosed` only flips true after `session_closed`) and
+   * persists to localStorage so a page reload keeps the binding.
+   *
+   * `billLastUpdated` is intentionally NOT touched here — that signal
+   * lives on `TableSessionSseService` (see Step 8) and the SSE handler
+   * bumps it right after this call so any `effect(() => billLastUpdated())`
+   * consumer refetches against the freshly opened session.
+   */
+  applySessionOpened(payload: {
+    session_id: number;
+    session_token?: string;
+    order_id?: number;
+    opened_at?: string;
+    opened_by?: number;
+  }): void {
+    if (typeof payload?.session_id !== 'number') return;
+    this.sessionId.set(payload.session_id);
+    // A freshly opened session is the active one — clear any stale
+    // "Mesa cerrada" flag so the banner doesn't read farewell copy.
+    this.sessionClosed.set(false);
+    // Persist so a reload keeps the binding (table_token + sessionId).
+    this.persist();
+  }
+
+  /**
    * Reads / mints the per-tab device UUID. Persisted in `sessionStorage`
    * (NOT localStorage) so two tabs on the same browser see distinct ids.
    */
