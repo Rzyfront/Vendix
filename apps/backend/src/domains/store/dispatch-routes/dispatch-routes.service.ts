@@ -222,6 +222,10 @@ export interface MapStopUnlocated {
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id of the dispatch note backing the stop, if any (drives the "Fijar en mapa" flow). */
+  dispatchNoteId: number | null;
+  /** Raw customer_address JSON snapshot from the dispatch note (AddressPayload | null). */
+  customerAddress: Prisma.JsonValue | null;
 }
 
 /** Full response body of `GET /store/dispatch-routes/:id/map-stops`. */
@@ -1369,6 +1373,8 @@ export class DispatchRoutesService {
           sequence: stop.stop_sequence,
           customerName,
           addressText: resolved.addressText,
+          dispatchNoteId: stop.dispatch_note?.id ?? null,
+          customerAddress: stop.dispatch_note?.customer_address ?? null,
         });
       }
     }

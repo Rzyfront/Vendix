@@ -361,6 +361,10 @@ export interface MapStopUnlocated {
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id of the backing dispatch note; when present the UI offers "Fijar en mapa". */
+  dispatchNoteId?: number | null;
+  /** Raw customer_address snapshot (AddressPayload | null) from the dispatch note. */
+  customerAddress?: any | null;
 }
 
 /**
