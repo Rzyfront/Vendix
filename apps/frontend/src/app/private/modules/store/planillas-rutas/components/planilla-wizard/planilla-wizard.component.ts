@@ -9,7 +9,6 @@ import {
   computed,
   effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -37,6 +36,13 @@ import {
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import {
+  InputButtonsComponent,
+  InputButtonOption,
+} from '../../../../../../shared/components/input-buttons/input-buttons.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 
 interface AvailableNote {
   id: number;
@@ -60,7 +66,6 @@ interface AvailableNote {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     SelectorComponent,
@@ -71,6 +76,10 @@ interface AvailableNote {
     StepsLineComponent,
     InputComponent,
     InputsearchComponent,
+    ButtonComponent,
+    InputButtonsComponent,
+    EmptyStateComponent,
+    BadgeComponent,
   ],
   template: `
     <app-modal
@@ -90,7 +99,8 @@ interface AvailableNote {
       <div class="space-y-4">
         @if (prefillNote()) {
           <div
-            class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-[var(--color-text-primary)]"
+            class="rounded-lg p-3 text-sm text-[var(--color-text-secondary)]"
+            style="background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));"
           >
             {{ prefillNote() }}
           </div>
@@ -104,12 +114,10 @@ interface AvailableNote {
             <div class="space-y-5">
               <!-- Sección: Datos de la ruta -->
               <section class="space-y-3">
-                <h3
-                  class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                >
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
                   Datos de la ruta
                 </h3>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <app-input
                     label="Código de ruta"
                     placeholder="RI02"
@@ -134,55 +142,32 @@ interface AvailableNote {
               </section>
 
               <!-- Sección: Conductor y equipo -->
-              <section class="space-y-3">
-                <h3
-                  class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]"
-                >
+              <section
+                class="space-y-3 pt-4 border-t border-[var(--color-border)]"
+              >
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
                   Conductor y equipo
                 </h3>
 
-                <div>
-                  <label class="block text-sm font-medium mb-2"
-                    >Tipo de conductor</label
-                  >
-                  <div
-                    class="grid grid-cols-2 rounded-md border border-border overflow-hidden"
-                  >
-                    <button
-                      type="button"
-                      (click)="setDriverExternal(false)"
-                      [attr.aria-pressed]="!driverIsExternal()"
-                      [ngClass]="
-                        !driverIsExternal()
-                          ? 'bg-primary-600 text-white'
-                          : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
-                      "
-                      class="min-h-[44px] px-4 text-sm font-medium transition-colors"
-                    >
-                      Interno
-                    </button>
-                    <button
-                      type="button"
-                      (click)="setDriverExternal(true)"
-                      [attr.aria-pressed]="driverIsExternal()"
-                      [ngClass]="
-                        driverIsExternal()
-                          ? 'bg-primary-600 text-white'
-                          : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
-                      "
-                      class="min-h-[44px] px-4 text-sm font-medium transition-colors border-l border-border"
-                    >
-                      Externo
-                    </button>
-                  </div>
-                </div>
+                <app-input-buttons
+                  label="Tipo de conductor"
+                  [options]="driverTypeOptions"
+                  [equalWidth]="true"
+                  [ngModel]="driverIsExternal() ? 'external' : 'internal'"
+                  [ngModelOptions]="{ standalone: true }"
+                  (valueChange)="setDriverExternal($event === 'external')"
+                ></app-input-buttons>
 
                 @if (!driverIsExternal()) {
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label class="block text-sm font-medium mb-1">
+                      <label
+                        class="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                      >
                         Conductor
-                        <span class="text-red-500" aria-label="obligatorio"
+                        <span
+                          class="text-[var(--color-danger)]"
+                          aria-label="obligatorio"
                           >*</span
                         >
                       </label>
@@ -192,13 +177,14 @@ interface AvailableNote {
                         (ngModelChange)="driverUserId.set($event)"
                       ></app-store-user-select>
                       @if (driverUserId() == null) {
-                        <p class="text-xs text-amber-700 mt-1">
+                        <p class="text-xs text-[var(--color-text-muted)] mt-1">
                           Selecciona un conductor de tu tienda.
                         </p>
                       }
                     </div>
                     <div>
-                      <label class="block text-sm font-medium mb-1"
+                      <label
+                        class="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
                         >Auxiliares</label
                       >
                       <app-store-user-multi-select
@@ -210,7 +196,7 @@ interface AvailableNote {
                     </div>
                   </div>
                 } @else {
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <app-input
                       label="Nombre externo"
                       placeholder="Nombre completo"
@@ -236,9 +222,10 @@ interface AvailableNote {
           <!-- ============================================================= -->
           @case (2) {
             <div class="space-y-4">
-              <!-- Tarjeta-resumen -->
+              <!-- Tarjeta-resumen / total (compacta, superficie suave) -->
               <div
-                class="flex items-center justify-between gap-3 rounded-lg border border-border bg-[var(--color-surface)] p-3"
+                class="flex items-center justify-between gap-3 rounded-lg p-3"
+                style="background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));"
               >
                 <p class="text-sm text-[var(--color-text-secondary)]">
                   <strong class="text-[var(--color-text-primary)]">{{
@@ -251,10 +238,12 @@ interface AvailableNote {
                   seleccionadas
                 </p>
                 <div class="text-right shrink-0">
-                  <p class="text-xs text-[var(--color-text-secondary)]">
+                  <p class="text-xs text-[var(--color-text-muted)]">
                     Total a recaudar
                   </p>
-                  <p class="text-base font-semibold tabular-nums">
+                  <p
+                    class="text-base font-semibold tabular-nums text-[var(--color-text-primary)]"
+                  >
                     {{ stopsTotal() | currency }}
                   </p>
                 </div>
@@ -270,65 +259,72 @@ interface AvailableNote {
               <!-- Remisiones disponibles -->
               <div>
                 <h3
-                  class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2"
+                  class="text-sm font-semibold text-[var(--color-text-primary)] mb-2"
                 >
                   Disponibles ({{ availableForPicking().length }})
                 </h3>
                 <div
-                  class="max-h-56 overflow-y-auto rounded-lg border border-border p-1.5 bg-[var(--color-surface)] space-y-1.5"
+                  class="max-h-64 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 space-y-1"
                 >
                   @for (note of availableForPicking(); track note.id) {
-                    <div
-                      class="flex items-center gap-2 p-2 rounded-md hover:bg-muted/40 transition-colors"
+                    <button
+                      type="button"
+                      (click)="addNote(note.id)"
+                      class="w-full text-left flex items-center gap-3 p-2 rounded-md hover:bg-[var(--color-primary-light)] transition-colors min-h-[44px]"
                     >
                       <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">
+                        <p
+                          class="text-sm font-medium text-[var(--color-text-primary)] truncate"
+                        >
                           {{ note.dispatch_number }}
                           <span class="text-[var(--color-text-secondary)]"
                             >· {{ note.customer_name || 'Sin cliente' }}</span
                           >
                         </p>
-                        <!-- Dirección de entrega (📍) o aviso de remisión no despachable -->
+                        <!-- Dirección de entrega o aviso de remisión no despachable -->
                         @if (noteHasAddress(note)) {
                           <p
-                            class="mt-0.5 text-xs text-[var(--color-text-secondary)] flex items-center gap-1 truncate"
+                            class="mt-0.5 text-xs text-[var(--color-text-muted)] flex items-center gap-1 truncate"
                           >
-                            <app-icon name="map-pin" [size]="12" class="shrink-0" />
-                            <span class="truncate">{{ noteAddressText(note) }}</span>
+                            <app-icon
+                              name="map-pin"
+                              [size]="12"
+                              class="shrink-0"
+                            />
+                            <span class="truncate">{{
+                              noteAddressText(note)
+                            }}</span>
                           </p>
                         } @else if (noteAddressKnown(note)) {
-                          <p
-                            class="mt-0.5 text-xs text-amber-700 flex items-center gap-1"
-                          >
-                            <app-icon name="alert-triangle" [size]="12" class="shrink-0" />
-                            <span>Sin dirección — no podrá despacharse</span>
-                          </p>
+                          <div class="mt-1">
+                            <app-badge variant="warning" size="xs"
+                              >Sin dirección</app-badge
+                            >
+                          </div>
                         }
                       </div>
                       <span
-                        class="text-sm font-semibold tabular-nums shrink-0"
+                        class="text-sm font-semibold tabular-nums text-[var(--color-text-primary)] shrink-0"
                         >{{ +note.grand_total | currency }}</span
                       >
-                      <button
-                        type="button"
-                        (click)="addNote(note.id)"
-                        class="shrink-0 inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] rounded-md bg-secondary text-secondary-foreground px-3 text-sm"
-                        aria-label="Agregar remisión"
-                      >
-                        <app-icon name="plus" [size]="16" />
-                        <span class="hidden sm:inline">Agregar</span>
-                      </button>
-                    </div>
+                      <app-icon
+                        name="plus"
+                        [size]="18"
+                        class="shrink-0 text-[var(--color-primary)]"
+                      />
+                    </button>
                   } @empty {
-                    <div
-                      class="text-sm text-[var(--color-text-secondary)] text-center py-4"
-                    >
-                      @if (noteSearch()) {
-                        No hay remisiones que coincidan con la búsqueda.
-                      } @else {
-                        No hay remisiones disponibles para agregar.
-                      }
-                    </div>
+                    <app-empty-state
+                      size="sm"
+                      icon="package"
+                      title="Sin remisiones"
+                      [description]="
+                        noteSearch()
+                          ? 'No hay coincidencias.'
+                          : 'No hay remisiones disponibles.'
+                      "
+                      [showActionButton]="false"
+                    ></app-empty-state>
                   }
                 </div>
               </div>
@@ -336,21 +332,22 @@ interface AvailableNote {
               <!-- Paradas seleccionadas -->
               <div>
                 <h3
-                  class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2"
+                  class="text-sm font-semibold text-[var(--color-text-primary)] mb-2"
                 >
                   En la ruta ({{ stops().length }})
                 </h3>
                 <div class="space-y-1.5">
                   @for (stop of orderedStops(); track stop.dispatch_note_id; let i = $index) {
                     <div
-                      class="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30"
+                      class="flex items-center gap-3 p-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
                     >
-                      <span
-                        class="flex items-center justify-center w-6 h-6 rounded-full bg-primary-600 text-white text-xs font-semibold shrink-0"
-                        >{{ i + 1 }}</span
-                      >
+                      <app-badge variant="primary" size="xs">{{
+                        i + 1
+                      }}</app-badge>
                       <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">
+                        <p
+                          class="text-sm font-medium text-[var(--color-text-primary)] truncate"
+                        >
                           {{ stopNote(stop.dispatch_note_id)?.dispatch_number }}
                           <span class="text-[var(--color-text-secondary)]"
                             >·
@@ -362,7 +359,7 @@ interface AvailableNote {
                         </p>
                       </div>
                       <span
-                        class="text-sm font-semibold tabular-nums shrink-0"
+                        class="text-sm font-semibold tabular-nums text-[var(--color-text-primary)] shrink-0"
                         >{{
                           +(stopNote(stop.dispatch_note_id)?.grand_total || 0)
                             | currency
@@ -373,7 +370,7 @@ interface AvailableNote {
                           type="button"
                           (click)="moveStopUp(i)"
                           [disabled]="i === 0"
-                          class="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md text-[var(--color-text-primary)] disabled:opacity-30"
+                          class="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:opacity-30 min-h-[40px] min-w-[40px]"
                           aria-label="Subir entrega"
                         >
                           <app-icon name="arrow-up" [size]="18" />
@@ -382,7 +379,7 @@ interface AvailableNote {
                           type="button"
                           (click)="moveStopDown(i)"
                           [disabled]="i === stops().length - 1"
-                          class="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md text-[var(--color-text-primary)] disabled:opacity-30"
+                          class="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:opacity-30 min-h-[40px] min-w-[40px]"
                           aria-label="Bajar entrega"
                         >
                           <app-icon name="arrow-down" [size]="18" />
@@ -390,7 +387,7 @@ interface AvailableNote {
                         <button
                           type="button"
                           (click)="removeStop(i)"
-                          class="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md text-[var(--color-destructive)]"
+                          class="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-danger)] min-h-[40px] min-w-[40px]"
                           aria-label="Quitar entrega"
                         >
                           <app-icon name="trash-2" [size]="18" />
@@ -398,11 +395,13 @@ interface AvailableNote {
                       </div>
                     </div>
                   } @empty {
-                    <div
-                      class="text-sm text-[var(--color-text-secondary)] text-center py-4"
-                    >
-                      Agrega al menos una remisión desde la lista superior.
-                    </div>
+                    <app-empty-state
+                      size="sm"
+                      icon="map-pin"
+                      title="Ruta vacía"
+                      description="Agrega remisiones desde la lista de arriba."
+                      [showActionButton]="false"
+                    ></app-empty-state>
                   }
                 </div>
               </div>
@@ -413,45 +412,43 @@ interface AvailableNote {
 
       <!-- Footer Paso 1 -->
       @if (currentStep() === 1) {
-        <div slot="footer" class="flex gap-2 w-full">
-          <button
-            (click)="close.emit()"
-            type="button"
-            class="flex-1 rounded-md border border-border bg-[var(--color-surface)] px-4 py-2 text-sm min-h-[44px]"
+        <div
+          slot="footer"
+          class="flex items-center justify-end gap-3 px-4 py-2.5 bg-[var(--color-surface-elevated)] border-t border-[var(--color-border)]"
+        >
+          <app-button variant="ghost" (clicked)="close.emit()"
+            >Cancelar</app-button
           >
-            Cancelar
-          </button>
-          <button
-            (click)="next()"
-            type="button"
+          <app-button
+            variant="primary"
             [disabled]="!canProceedStep1()"
-            class="flex-1 inline-flex items-center justify-center gap-1 rounded-md bg-primary-600 text-white px-4 py-2 text-sm font-medium min-h-[44px] disabled:opacity-50"
+            (clicked)="next()"
           >
             Siguiente
-            <app-icon name="arrow-right" [size]="16" />
-          </button>
+            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+          </app-button>
         </div>
       }
 
       <!-- Footer Paso 2 -->
       @if (currentStep() === 2) {
-        <div slot="footer" class="flex gap-2 w-full">
-          <button
-            (click)="back()"
-            type="button"
-            class="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface)] px-4 py-2 text-sm min-h-[44px]"
-          >
-            <app-icon name="arrow-left" [size]="16" />
+        <div
+          slot="footer"
+          class="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-elevated)] border-t border-[var(--color-border)]"
+        >
+          <app-button variant="outline" (clicked)="back()">
+            <app-icon name="arrow-left" [size]="16" slot="icon"></app-icon>
             Atrás
-          </button>
-          <button
-            (click)="submit()"
-            type="button"
-            [disabled]="submitting() || !canSubmit()"
-            class="flex-1 rounded-md bg-primary-600 text-white px-4 py-2 text-sm font-medium min-h-[44px] disabled:opacity-50"
+          </app-button>
+          <app-button
+            variant="primary"
+            [disabled]="!canSubmit()"
+            [loading]="submitting()"
+            [showTextWhileLoading]="true"
+            (clicked)="submit()"
           >
-            {{ submitting() ? 'Creando...' : 'Crear planilla' }}
-          </button>
+            Crear planilla
+          </app-button>
         </div>
       }
     </app-modal>
@@ -481,6 +478,12 @@ export class PlanillaWizardComponent {
   readonly steps: StepsLineItem[] = [
     { label: 'Información básica del despacho' },
     { label: 'Entregas' },
+  ];
+
+  /** Opciones del segmentado tipo-de-conductor (app-input-buttons). */
+  readonly driverTypeOptions: InputButtonOption[] = [
+    { value: 'internal', label: 'Interno' },
+    { value: 'external', label: 'Externo' },
   ];
 
   /** Paso activo del wizard (1 = datos básicos, 2 = entregas). */
