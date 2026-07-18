@@ -267,6 +267,7 @@ import {
       [title]="edit_mode() ? 'Editar ' + (editing_store_method?.display_name || config_method?.display_name || '') : 'Configurar ' + (config_method?.display_name || '')"
       [subtitle]="edit_mode() ? 'Actualiza la configuración de este método de pago' : 'Ingresa las credenciales para este método de pago'"
       size="md"
+      [canClose]="canCloseConfigModal"
       (closed)="closeConfigModal()"
     >
       <div slot="header">
@@ -384,8 +385,13 @@ import {
 
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="ghost" (clicked)="closeConfigModal()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="config_saving()" (clicked)="edit_mode() ? saveEdit() : saveConfigAndEnable()">
-          {{ edit_mode() ? 'Guardar Cambios' : 'Configurar y Agregar' }}
+        <app-button
+          variant="primary"
+          [loading]="config_saving()"
+          [disabled]="!edit_mode() && (config_form?.invalid === true)"
+          (clicked)="edit_mode() ? saveEdit() : saveConfigAndEnable()"
+        >
+          {{ edit_mode() ? 'Guardar Cambios' : 'Guardar y Confirmar' }}
         </app-button>
       </div>
     </app-modal>
@@ -944,7 +950,18 @@ onSearchChange(term: string): void {
   }
 
   saveConfigAndEnable(): void {
-    if (!this.config_method || !this.config_form.valid) return;
+    if (!this.config_method) return;
+
+    // QUI-455: feedback explícito si el form es inválido. Antes solo salía
+    // silenciosamente, dejando al usuario sin indicación de por qué
+    // "Guardar y Confirmar" no funcionaba.
+    if (this.config_form.invalid) {
+      this.toast_service.warning(
+        'Completa los campos requeridos antes de guardar el método de pago.',
+      );
+      this.config_form.markAllAsTouched();
+      return;
+    }
 
     // Validate required fields
     const required = this.config_method.config_schema?.['required'] || [];
@@ -976,6 +993,15 @@ onSearchChange(term: string): void {
           this.config_saving.set(false);
         }});
   }
+
+  // QUI-438: confirma antes de descartar cambios sin guardar en el modal
+  // de configuración de métodos de pago.
+  canCloseConfigModal = (): boolean => {
+    if (this.config_form.pristine) return true;
+    return window.confirm(
+      'Tienes cambios sin guardar. ¿Cerrar y descartarlos?',
+    );
+  };
 
   closeConfigModal(): void {
     this.show_config_modal.set(false);

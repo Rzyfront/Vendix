@@ -195,7 +195,8 @@ loadStats(): void {
             arr.map((l) => ({ value: l.id, label: l.name })),
           );
         },
-        error: () => {}});
+        error: (err) => this.toastService.error('Error al cargar ubicaciones: ' + (err?.error?.message || err?.message || err)),
+      });
   }
 
   onSearch(term: string): void {
