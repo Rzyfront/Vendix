@@ -599,6 +599,11 @@ export class OnboardingWizardService {
       data: {
         hostname,
         store_id: storeId,
+        // app_type EXPLÍCITO: dominio `-store` → STORE_LANDING. Sin esto caería
+        // en el default VENDIX_LANDING del schema (reservado a dominios core).
+        app_type: this.domainGeneratorHelper.appTypeForContext(
+          DomainContext.STORE,
+        ),
         domain_type: 'store',
         is_primary: true,
         ownership: 'vendix_subdomain',
@@ -1861,6 +1866,11 @@ export class OnboardingWizardService {
       data: {
         hostname,
         store_id: storeId,
+        // app_type EXPLÍCITO: dominio `-shop` → STORE_ECOMMERCE. Sin esto caería
+        // en el default VENDIX_LANDING del schema (reservado a dominios core).
+        app_type: this.domainGeneratorHelper.appTypeForContext(
+          DomainContext.ECOMMERCE,
+        ),
         domain_type: 'ecommerce',
         is_primary: false, // E-commerce domains are not primary (store domain is primary)
         ownership: 'vendix_subdomain',

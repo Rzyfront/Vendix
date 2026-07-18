@@ -1,5 +1,12 @@
 import { isPlatformBrowser } from '@angular/common';
-import { Component, PLATFORM_ID, effect, inject } from '@angular/core';
+import {
+  Component,
+  PLATFORM_ID,
+  afterNextRender,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { ConfigFacade } from './core/store/config';
@@ -30,10 +37,18 @@ import { StoreAvailabilityService } from './core/services/store-availability.ser
   //   3. otherwise         → neutral Vendix splash (initial boot AND retry).
   // The pre-Angular gate in index.html keeps <app-root> hidden until we reach a
   // DECIDED state (error or success), so the prerendered Landing never flashes.
+  //
+  // HYDRATION PARITY: every branch is gated behind `hydrated()`, which is FALSE
+  // on the server AND on the client's first (hydration) render, and only flips
+  // to TRUE via afterNextRender (browser-only, post-hydration). The prerendered
+  // '/' document serializes the @else branch (<app-loading>); the client hydrates
+  // the SAME <app-loading> branch, so there is no root-@if mismatch even though
+  // the client's blocking APP_INITIALIZER has already made routesConfigured true.
+  // The swap to the resolved app happens as a normal post-hydration update.
   template: `
-    @if (resolutionError(); as err) {
+    @if (hydrated() && resolutionError(); as err) {
       <app-domain-resolution-error [kind]="err.kind" (retry)="onRetry()" />
-    } @else if (routesConfigured()) {
+    } @else if (hydrated() && routesConfigured()) {
       <main>
         <router-outlet></router-outlet>
       </main>
@@ -74,13 +89,27 @@ export class AppComponent {
     initialValue: false,
   });
 
+  /**
+   * FALSE on the server and on the client's first (hydration) render; flipped to
+   * TRUE by afterNextRender AFTER hydration has settled (browser-only — it never
+   * runs during SSR). Gating the root @if behind this guarantees server/client
+   * render the identical <app-loading> branch at the hydration instant, so the
+   * neutral prerendered '/' never causes a root-@if mismatch. The swap to the
+   * resolved view is then a normal post-hydration change-detection update.
+   */
+  protected readonly hydrated = signal(false);
+
   constructor() {
-    // Reveal <app-root> ONLY once the bootstrap reaches a decided state — a
-    // resolution error OR successfully configured routes. Never during the
-    // loading/retry phase, so the prerendered Vendix Landing stays hidden under
-    // the splash and can never flash on a tenant domain.
+    // Flip to the resolved view only AFTER hydration is complete, so the root
+    // @if matches the prerendered <app-loading> branch during hydration.
+    afterNextRender(() => this.hydrated.set(true));
+
+    // Reveal <app-root> ONLY once hydration has settled AND the bootstrap reached
+    // a decided state — a resolution error OR successfully configured routes.
+    // The `hydrated` guard keeps the neutral <app-loading> hidden under the gate
+    // while it is swapped for the resolved app, so nothing flashes on any host.
     effect(() => {
-      if (this.resolutionError() || this.routesConfigured()) {
+      if (this.hydrated() && (this.resolutionError() || this.routesConfigured())) {
         this.removePrerenderGate();
       }
     });
