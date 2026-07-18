@@ -1,0 +1,91 @@
+<div class="business-hours">
+  <header class="business-hours__header">
+    <h2>
+      <app-icon name="clock"></app-icon>
+      Horario de la tienda
+    </h2>
+    <p class="business-hours__subtitle">
+      Ventana maestra que la reserva consulta al generar slots. Los proveedores no podrán ser agendados fuera de este horario.
+    </p>
+  </header>
+
+  <section class="business-hours__stats">
+    <app-stats-card
+      label="Días activos"
+      [value]="activeDays().toString()"
+      icon="calendar-check"
+    ></app-stats-card>
+    <app-stats-card
+      label="Días cerrados"
+      [value]="(7 - activeDays()).toString()"
+      icon="calendar-x"
+    ></app-stats-card>
+  </section>
+
+  @if (loading()) {
+    <div class="business-hours__loading">Cargando horario...</div>
+  } @else {
+    <app-card>
+      <ul class="days">
+        @for (day of dayLabels; track day.dow) {
+          @if (row(day.dow); as r) {
+            <li class="days__row" [class.days__row--closed]="!r.is_active">
+              <div class="days__name">
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    [checked]="r.is_active"
+                    (change)="toggleDay(day.dow)"
+                  />
+                  <span class="toggle__label">{{ day.label }}</span>
+                </label>
+              </div>
+              <div class="days__inputs">
+                <input
+                  type="time"
+                  [disabled]="!r.is_active"
+                  [value]="r.start_time"
+                  (input)="updateField(day.dow, 'start_time', $any($event.target).value)"
+                />
+                <span class="days__sep">a</span>
+                <input
+                  type="time"
+                  [disabled]="!r.is_active"
+                  [value]="r.end_time"
+                  (input)="updateField(day.dow, 'end_time', $any($event.target).value)"
+                />
+              </div>
+              <div class="days__status">
+                @if (r.is_active) {
+                  <app-icon name="check" variant="success"></app-icon>
+                  <span>Abierto</span>
+                } @else {
+                  <app-icon name="x" variant="muted"></app-icon>
+                  <span>Cerrado</span>
+                }
+              </div>
+            </li>
+          }
+        }
+      </ul>
+    </app-card>
+  }
+
+  <footer class="business-hours__footer">
+    @if (errorMsg()) {
+      <div class="business-hours__error">{{ errorMsg() }}</div>
+    }
+    @if (successMsg()) {
+      <div class="business-hours__success">{{ successMsg() }}</div>
+    }
+    <app-button
+      variant="primary"
+      [loading]="saving()"
+      [disabled]="loading() || saving()"
+      (clicked)="save()"
+    >
+      <app-icon name="save"></app-icon>
+      Guardar horario
+    </app-button>
+  </footer>
+</div>

@@ -53,6 +53,18 @@
           <app-badge [variant]="getStatusBadgeVariant(booking.status)" size="sm">
             {{ getStatusLabel(booking.status) }}
           </app-badge>
+          <!-- Quick check-in (only visible for confirmed/arriving) -->
+          @if (canCheckIn(booking)) {
+            <button
+              type="button"
+              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md bg-[var(--color-success)] text-white hover:opacity-90 transition-opacity"
+              (click)="quickCheckIn(booking, $event)"
+              title="Marcar check-in"
+            >
+              <span aria-hidden="true">✓</span>
+              Check-in
+            </button>
+          }
         </button>
       }
     </div>

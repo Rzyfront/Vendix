@@ -1,10 +1,11 @@
-import { Component, computed, input, output, signal } from '@angular/core';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
 
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent } from '../../../../../../shared/components';
 import { BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
+import { ReservationsService } from '../../services/reservations.service';
 
 const SPANISH_MONTHS = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
@@ -19,6 +20,8 @@ const SPANISH_MONTHS = [
   styleUrls: ['./today-reservations-panel.component.scss'],
 })
 export class TodayReservationsPanelComponent {
+  private readonly reservations = inject(ReservationsService);
+
   bookings = input<Booking[]>([]);
   readonly loadingInput = input(false, { alias: 'loading' });
   private readonly internalLoading = signal(false);
@@ -26,6 +29,7 @@ export class TodayReservationsPanelComponent {
 
   bookingClicked = output<Booking>();
   viewAllClicked = output<void>();
+  checkedIn = output<Booking>();
 
   todayLabel = computed(() => {
     const now = new Date();
@@ -64,12 +68,30 @@ export class TodayReservationsPanelComponent {
     const map: Record<BookingStatus, string> = {
       pending: 'Pendiente',
       confirmed: 'Confirmada',
+      arriving: 'En sala',
+      attending: 'Atendiendo',
       in_progress: 'En progreso',
       completed: 'Completada',
       cancelled: 'Cancelada',
       no_show: 'No show',
     };
     return map[status] ?? status;
+  }
+
+  /**
+   * Quick check-in from the Today panel. Posts `PATCH /:id/check-in`
+   * and emits the updated booking so the parent can refresh.
+   */
+  quickCheckIn(booking: Booking, event: Event): void {
+    event.stopPropagation();
+    if (!this.canCheckIn(booking)) return;
+    this.reservations.checkInReservation(booking.id).subscribe({
+      next: (updated) => this.checkedIn.emit(updated),
+    });
+  }
+
+  canCheckIn(booking: Booking): boolean {
+    return booking.status === 'confirmed' || booking.status === 'arriving';
   }
 
   formatTime(time: string): string {
