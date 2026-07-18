@@ -1,5 +1,4 @@
 import {
-  AbstractControl,
   Component,
   computed,
   DestroyRef,
@@ -7,17 +6,18 @@ import {
   inject,
   OnInit,
   signal,
-  ValidationErrors,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs/operators';
 import {
+  AbstractControl,
   FormArray,
   FormBuilder,
   FormControl,
   FormGroup,
   ReactiveFormsModule,
+  ValidationErrors,
   Validators,
 } from '@angular/forms';
 
@@ -55,6 +55,19 @@ interface RecipeFormShape {
   is_active: FormControl<boolean>;
 }
 
+/**
+ * Custom FormArray validator. Validators.minLength(1) does NOT work on
+ * FormArrays in Angular (limitation: it only checks string length on
+ * FormControl<string>). Use this to require at least one element in a
+ * FormArray — e.g. a recipe's BOM must have ≥1 component.
+ */
+function atLeastOneItemValidator(control: AbstractControl): ValidationErrors | null {
+  if (control instanceof FormArray) {
+    return control.length > 0 ? null : { minItems: true };
+  }
+  return null;
+}
+
 @Component({
   selector: 'app-recipe-form-page',
   standalone: true,
@@ -72,19 +85,6 @@ interface RecipeFormShape {
   templateUrl: './recipe-form-page.component.html',
   styleUrl: './recipe-form-page.component.scss',
 })
-/**
- * Custom FormArray validator. Validators.minLength(1) does NOT work on
- * FormArrays in Angular (limitation: it only checks string length on
- * FormControl<string>). Use this to require at least one element in a
- * FormArray — e.g. a recipe's BOM must have ≥1 component.
- */
-function atLeastOneItemValidator(control: AbstractControl): ValidationErrors | null {
-  if (control instanceof FormArray) {
-    return control.length > 0 ? null : { minItems: true };
-  }
-  return null;
-}
-
 export class RecipeFormPageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly recipesService = inject(RecipesService);
