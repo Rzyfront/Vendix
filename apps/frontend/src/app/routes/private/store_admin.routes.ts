@@ -6,6 +6,7 @@ import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard
 import { onboardingGuard } from '../../core/guards/onboarding.guard';
 import { subscriptionManagementGuard } from '../../core/guards/subscription-management.guard';
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
+import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
@@ -46,6 +47,7 @@ export const storeAdminRoutes: Routes = [
       },
       {
         path: 'dashboard',
+        canActivate: [storeDashboardGuard], // QUI-418
         loadComponent: () =>
           import('../../private/modules/store/dashboard/dashboard.component').then(
             (c) => c.DashboardComponent,

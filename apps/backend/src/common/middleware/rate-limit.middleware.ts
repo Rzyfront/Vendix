@@ -67,7 +67,7 @@ export const RateLimitMiddleware = createRateLimitMiddleware({
 export const LoginRateLimitMiddleware = createRateLimitMiddleware({
   prefix: 'rl:login',
   windowSeconds: 15 * 60, // 15 minutes
-  maxAttempts: 10,
+  maxAttempts: 30, // FIX QUI-489: 10→30 to accommodate demo retry patterns and frontend re-requests
   message: 'Too many login attempts from this IP, please try again later.',
   errorLabel: 'Too Many Login Attempts',
 });

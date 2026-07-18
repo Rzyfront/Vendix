@@ -1,0 +1,3 @@
+services:
+  backend:
+    command: sh -c "npx prisma generate && node dist/src/main.js"

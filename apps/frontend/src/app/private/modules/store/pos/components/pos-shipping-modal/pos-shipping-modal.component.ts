@@ -799,6 +799,11 @@ export type ShippingView = 'overview' | 'method' | 'address';
   ] })
 export class PosShippingModalComponent {
   private destroyRef = inject(DestroyRef);
+
+  // FIX QUI-482: idempotency guard for the open-effect that calls resetState().
+  // Reset only on the first transition to open; close→open cycle re-arms it.
+  private hasResetWhileOpen = false;
+
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
   readonly closed = output<void>();
@@ -969,9 +974,17 @@ export class PosShippingModalComponent {
     this.setDefaultCreditFirstDate();
 
     effect(() => {
-      if (this.isOpen() === true) {
+      // FIX QUI-482: idempotent reset — only reset on the first transition
+      // to open. In zoneless, isOpen can briefly oscillate during component
+      // creation and mount; without this guard, the cashier loses all
+      // captured shipping + payment data if the modal re-opens mid-flow.
+      if (this.isOpen() === true && !this.hasResetWhileOpen) {
+        this.hasResetWhileOpen = true;
         this.resetState();
         void this.loadAddressesForCartCustomer();
+      }
+      if (this.isOpen() === false) {
+        this.hasResetWhileOpen = false; // allow next intentional open to reset
       }
     });
   }
@@ -1351,7 +1364,9 @@ export class PosShippingModalComponent {
         this.calculateShippingCost();
       }
     } else {
-      this.addressForm.reset();
+      // FIX QUI-482: do NOT reset the addressForm here — the cashier may have
+      // already typed a manual address before picking this customer. Only
+      // clear the selectors that are tied to the previous customer's address.
       this.selectedCustomerAddressId.set(null);
       this.selectedDepartmentId.set(null);
       this.selectedCityId.set(null);

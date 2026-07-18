@@ -32,6 +32,8 @@ import {
   EmptyStateComponent,
   CardComponent,
   ImageLightboxComponent,
+  ButtonComponent, // FIX QUI-503
+  IconComponent,  // FIX QUI-503
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -51,6 +53,8 @@ import './product-list.component.css';
     PaginationComponent,
     CardComponent,
     ImageLightboxComponent,
+    ButtonComponent, // FIX QUI-503
+    IconComponent,   // FIX QUI-503
   ],
   templateUrl: './product-list.component.html',
 })
@@ -62,6 +66,9 @@ export class ProductListComponent {
   readonly categories = input<ProductCategory[]>([]);
   readonly brands = input<Brand[]>([]);
   readonly paginationData = input({ page: 1, limit: 10, total: 0, totalPages: 0 });
+
+  /** Granular permission flag driven by the parent page (FIX QUI-503). */
+  readonly canCreate = input(false);
 
   readonly refresh = output<void>();
   readonly search = output<string>();

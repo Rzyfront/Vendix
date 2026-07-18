@@ -222,8 +222,10 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
         display: block;
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        // QUI-405: show full image instead of cropping to square.
+        object-fit: contain;
         object-position: center;
+        padding: 0.5rem;
         transition: transform 0.35s ease;
       }
 

@@ -113,11 +113,16 @@ export class StoreRolesService {
       throw new ForbiddenException('Organization context required');
     }
 
-    // Check name uniqueness within organization
+    // Check name uniqueness within organization. QUI-473: preserve the
+    // collision guard against GLOBAL system roles (organization_id IS NULL)
+    // while letting different orgs share the same role name.
     const existing = await this.prisma.roles.findFirst({
       where: {
         name: dto.name,
-        OR: [{ organization_id }, { is_system_role: true }],
+        OR: [
+          { organization_id },
+          { is_system_role: true, organization_id: null },
+        ],
       },
     });
 
@@ -157,7 +162,7 @@ export class StoreRolesService {
       throw new ForbiddenException('System roles cannot be modified');
     }
 
-    // Check name uniqueness if changing
+    // Check name uniqueness if changing. QUI-473: same fix as in create().
     if (dto.name && dto.name !== role.name) {
       const context = RequestContextService.getContext();
       const existing = await this.prisma.roles.findFirst({
@@ -165,7 +170,7 @@ export class StoreRolesService {
           name: dto.name,
           OR: [
             { organization_id: context?.organization_id },
-            { is_system_role: true },
+            { is_system_role: true, organization_id: null },
           ],
         },
       });
