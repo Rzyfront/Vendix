@@ -22,6 +22,8 @@ import {
   MapMarker,
   LatLng,
 } from '../map-view/map-view.component';
+import { DispatchNoteAddressEditorComponent } from '../dispatch-note-address-editor/dispatch-note-address-editor.component';
+import type { AddressPayload } from '../address-form-fields/address-form-fields.component';
 // Reuse (no duplication): the live GPS watch degradation checks and the pure
 // nearest-neighbor optimizer already live in the app. They are `providedIn:
 // 'root'` singletons, so importing them here is a token/type import only —
@@ -72,12 +74,23 @@ export interface RouteMapStop {
   lng: number;
 }
 
-/** A stop WITHOUT resolvable coordinates — listed under the map, never painted. */
+/**
+ * A stop WITHOUT resolvable coordinates — listed under the map, never painted.
+ *
+ * `dispatchNoteId` y `customerAddress` son opcionales: el backend los emite
+ * cuando quiere habilitar el flujo "Fijar en mapa" (PATCH
+ * `/store/dispatch-notes/:id/address`). Cuando no vienen, el botón "Fijar en
+ * mapa" se oculta — no hay nada que editar sin el id de la remisión.
+ */
 export interface RouteMapUnlocatedStop {
   stopId: number;
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id de la remisión (`dispatch_notes.id`) — requerido para editar la dirección. */
+  dispatchNoteId?: number | null;
+  /** Snapshot `customer_address` de la remisión (JSON blob). */
+  customerAddress?: AddressPayload | null;
 }
 
 /** One entry of the reorder payload emitted by `(applyOrder)`. */
@@ -127,7 +140,13 @@ export interface RouteMapReorderEntry {
   selector: 'app-route-map-view',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, ButtonComponent, MapViewComponent, NgTemplateOutlet],
+  imports: [
+    IconComponent,
+    ButtonComponent,
+    MapViewComponent,
+    NgTemplateOutlet,
+    DispatchNoteAddressEditorComponent,
+  ],
   template: `
     <!-- Flex column: summary bar (shrink) + map (grow) + unlocated (shrink).
          Fills the host's height so the map is the protagonist.
@@ -389,7 +408,7 @@ export interface RouteMapReorderEntry {
         <!-- Stops without coordinates (capped so it never steals the map height). -->
         @if (unlocated().length > 0) {
           <div
-            class="shrink-0 max-h-[28vh] overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-3"
+            class="shrink-0 max-h-[40vh] overflow-y-auto rounded-xl border border-amber-200 bg-amber-50 p-3"
           >
             <div class="flex items-center gap-1.5 mb-2">
               <app-icon name="map-pin" [size]="14" class="text-amber-600"></app-icon>
@@ -399,14 +418,40 @@ export interface RouteMapReorderEntry {
             </div>
             <ul class="space-y-1">
               @for (u of unlocated(); track u.stopId) {
-                <li class="flex items-start gap-2 text-xs text-amber-900">
-                  <span class="font-mono font-semibold shrink-0">#{{ u.sequence }}</span>
-                  <span class="min-w-0">
-                    {{ u.customerName || '(Cliente)' }}
-                    @if (u.addressText) {
-                      <span class="text-amber-700"> · {{ u.addressText }}</span>
+                <li class="space-y-1.5">
+                  <div class="flex items-start gap-2 text-xs text-amber-900">
+                    <span class="font-mono font-semibold shrink-0">#{{ u.sequence }}</span>
+                    <span class="min-w-0 flex-1">
+                      {{ u.customerName || '(Cliente)' }}
+                      @if (u.addressText) {
+                        <span class="text-amber-700"> · {{ u.addressText }}</span>
+                      }
+                    </span>
+                    @if (u.dispatchNoteId != null) {
+                      <button
+                        type="button"
+                        class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-amber-500"
+                        (click)="onFijarEnMapaClick(u)"
+                        [attr.aria-label]="'Fijar en mapa la parada ' + u.sequence"
+                      >
+                        <app-icon name="map-pin" [size]="12"></app-icon>
+                        @if (editingNoteId() === u.stopId) {
+                          Cerrar
+                        } @else {
+                          Fijar en mapa
+                        }
+                      </button>
                     }
-                  </span>
+                  </div>
+                  @if (editingNoteId() === u.stopId && u.dispatchNoteId != null) {
+                    <div class="rounded-lg border border-amber-200 bg-white p-2">
+                      <app-dispatch-note-address-editor
+                        [noteId]="u.dispatchNoteId"
+                        [address]="u.customerAddress ?? null"
+                        (saved)="onAddressSaved(u)"
+                      ></app-dispatch-note-address-editor>
+                    </div>
+                  }
                 </li>
               }
             </ul>
@@ -667,6 +712,14 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
    */
   readonly manageNext = output<number>();
 
+  /**
+   * Emite el `dispatchNoteId` de la remisión cuya dirección fue corregida vía
+   * el editor "Fijar en mapa" en un stop `unlocated`. El host debe refrescar
+   * `getMapStops` para que el stop deje de ser `unlocated` y aparezca como
+   * marcador pintado. Solo se emite cuando el stop trae `dispatchNoteId`.
+   */
+  readonly addressFixed = output<number>();
+
   /** Highlight color for the "Próxima" badge (kept in sync with the map pin). */
   readonly nextStopColor = NEXT_STOP_COLOR;
   /** Color de la tarjeta/badge cuando el conductor está cerca (verde entrega). */
@@ -685,6 +738,15 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   readonly locationUnavailable = signal(false);
   /** Inline confirm state for the "apply order" action (no separate dialog). */
   readonly confirming = signal(false);
+
+  /**
+   * Id del stop unlocated cuyo editor "Fijar en mapa" está abierto. `null`
+   * cuando ningún editor está visible. Se togglear con {@link onFijarEnMapaClick}
+   * y se limpia al guardar ({@link onAddressSaved}). Es un signal (no un
+   * boolean) porque solo un editor puede estar abierto a la vez — abrir otro
+   * cierra el anterior implcitamente.
+   */
+  readonly editingNoteId = signal<number | null>(null);
 
   /** Estado del permiso de geolocalización (granted/denied/prompt/unsupported). */
   readonly permissionState = signal<
@@ -1114,6 +1176,33 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
     if (!this.manageableNext()) return;
     const next = this.nextStop();
     if (next) this.manageNext.emit(next.stopId);
+  }
+
+  /**
+   * Togglea el editor "Fijar en mapa" para un stop unlocated. Solo procede si el
+   * stop trae `dispatchNoteId` (sin l no hay nada que PATCHear). Abrir un editor
+   * cierra cualquier otro que estuviera abierto (estado singleton vía signal).
+   */
+  onFijarEnMapaClick(stop: RouteMapUnlocatedStop): void {
+    if (stop.dispatchNoteId == null) return;
+    const current = this.editingNoteId();
+    if (current === stop.stopId) {
+      this.editingNoteId.set(null);
+    } else {
+      this.editingNoteId.set(stop.stopId);
+    }
+  }
+
+  /**
+   * Tras guardar exitosamente la dirección de la remisión (el editor emite
+   * `saved`): cierra el editor, emite `addressFixed` con el `dispatchNoteId` para
+   * que el host refresque `getMapStops` (el stop deja de ser `unlocated` y se
+   * convierte en marcador pintado).
+   */
+  onAddressSaved(stop: RouteMapUnlocatedStop): void {
+    this.editingNoteId.set(null);
+    const noteId = stop.dispatchNoteId;
+    if (noteId != null) this.addressFixed.emit(noteId);
   }
 
   /**
