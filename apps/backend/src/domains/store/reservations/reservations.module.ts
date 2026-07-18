@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AvailabilityService } from './availability.service';
 import { BookingConfirmationService } from './booking-confirmation.service';
+import { AppointmentQueueService } from './appointment-queue.service';
 import { ReservationsController } from './reservations.controller';
 import { ProvidersService } from './providers/providers.service';
 import { ProvidersController } from './providers/providers.controller';
@@ -21,6 +22,7 @@ import { TablesModule } from '../tables/tables.module';
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
+    AppointmentQueueService,
     ProvidersService,
     ProviderScheduleService,
     ProviderAvailabilityService,
@@ -29,6 +31,7 @@ import { TablesModule } from '../tables/tables.module';
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
+    AppointmentQueueService,
     ProvidersService,
     ProviderAvailabilityService,
   ],
