@@ -21,8 +21,17 @@ import {
 } from '../../../../shared/components/route-map-view/route-map-view.component';
 import { ActiveRouteStore } from '../state/active-route.store';
 import { RepartosService } from '../services/repartos.service';
-import type { DispatchRouteStop } from '../interfaces/repartos.interface';
+import type {
+  DispatchRouteStop,
+  SettleStopDto,
+} from '../interfaces/repartos.interface';
 import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interfaces/planilla.interface';
+
+// Sub-componentes admin de planillas REUSADOS TAL CUAL — la gestión de entrega
+// desde el mapa abre exactamente los mismos modales que "Mi Ruta" (settle =
+// entregar/cobrar/rechazar; detail = solo lectura), sin duplicar UI.
+import { StopSettleModalComponent } from '../../store/planillas-rutas/components/stop-settle-modal/stop-settle-modal.component';
+import { StopDetailModalComponent } from '../../store/planillas-rutas/components/stop-detail-modal/stop-detail-modal.component';
 
 /**
  * Fase F5 — Mapa (`/repartos/mapa`), pestaña 3 de Vendix Repartos.
@@ -61,7 +70,13 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
   selector: 'app-mapa-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [EmptyStateComponent, IconComponent, RouteMapViewComponent],
+  imports: [
+    EmptyStateComponent,
+    IconComponent,
+    RouteMapViewComponent,
+    StopSettleModalComponent,
+    StopDetailModalComponent,
+  ],
   template: `
     <div class="mapa-shell">
       @if (loading() && !route()) {
@@ -103,20 +118,45 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
             [fill]="true"
             [fullscreen]="true"
             [readonly]="true"
+            [autoOrient]="true"
+            [manageableNext]="true"
             [showApplyOrder]="true"
             [applying]="applying()"
             (applyOrder)="onApplyOrder($event)"
+            (manageNext)="onManageNext($event)"
           ></app-route-map-view>
         </div>
       }
     </div>
+
+    <!-- Gestión de entrega desde el mapa: mismos modales que "Mi Ruta". -->
+    @if (settleStop(); as s) {
+      <app-stop-settle-modal
+        [stop]="s"
+        [grandTotal]="+(s.dispatch_note?.grand_total || 0)"
+        [isPrepaid]="!!s.is_prepaid"
+        (close)="settleStop.set(null)"
+        (submitted)="onSettle($event)"
+      ></app-stop-settle-modal>
+    }
+
+    @if (detailStop(); as s) {
+      <app-stop-detail-modal
+        [stop]="s"
+        (close)="detailStop.set(null)"
+        (goToNote)="detailStop.set(null)"
+      ></app-stop-detail-modal>
+    }
   `,
   styles: [
     `
       :host {
         display: flex;
         flex-direction: column;
-        height: 100%;
+        /* flex:1 (no height:100%) para llenar el .delivery-content del shell:
+           en una cadena flex anidada el porcentaje de alto no resuelve, pero
+           flex-grow desde basis 0 sí. Es lo que evita el mapa gris colapsado. */
+        flex: 1 1 0;
         min-height: 0;
       }
       .mapa-shell {
@@ -152,6 +192,11 @@ export class MapaPageComponent {
 
   /** Guardando el reorden (deshabilita/gira el botón "Aplicar orden óptimo"). */
   readonly applying = signal(false);
+
+  /** Parada en gestión (entregar/cobrar/rechazar) — abre el settle modal. */
+  readonly settleStop = signal<DispatchRouteStop | null>(null);
+  /** Parada en vista de detalle (solo lectura) — abre el detail modal. */
+  readonly detailStop = signal<DispatchRouteStop | null>(null);
 
   ngOnInit(): void {
     // Resolución perezosa idempotente: si el shell ya cargó la ruta esto es un
@@ -200,6 +245,60 @@ export class MapaPageComponent {
 
   goToPool(): void {
     this.router.navigate(['/repartos/pool']);
+  }
+
+  // ── Gestión de entrega desde la tarjeta flotante del mapa ────────────────────
+
+  /**
+   * El conductor tocó la tarjeta "Próxima" del mapa. Resuelve el
+   * `DispatchRouteStop` completo por id y abre el flujo de gestión: si la parada
+   * es accionable (ruta despachada/en ruta y no finalizada) abre el settle modal
+   * (entregar/cobrar/rechazar); si no, abre el detalle en solo lectura. Mismo
+   * comportamiento que la vista "Mi Ruta".
+   */
+  onManageNext(stopId: number): void {
+    const stop = this.stops().find((s) => s.id === stopId);
+    if (!stop) return;
+    if (this.canActOnStop(stop)) {
+      this.settleStop.set(stop);
+    } else {
+      this.detailStop.set(stop);
+    }
+  }
+
+  /**
+   * Liquida la parada en gestión (delivered | rejected). Al éxito refresca el
+   * store (el nuevo estado se refleja en mapa/ruta/header) y cierra el modal.
+   * Espejo de `RutaActivaPageComponent.onSettle`.
+   */
+  onSettle(dto: SettleStopDto): void {
+    const stop = this.settleStop();
+    if (!stop) return;
+    this.repartosService
+      .settleStop(stop.id, dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.settleStop.set(null);
+          this.store.refresh();
+          this.toast.success('Parada liquidada');
+        },
+        error: (e) => {
+          this.toast.error(e?.message ?? 'No se pudo liquidar la parada');
+        },
+      });
+  }
+
+  /**
+   * Parada accionable: ruta en curso (despachada / en ruta) y parada no
+   * finalizada. Mirror de `RutaActivaPageComponent.canActOnStop`.
+   */
+  private canActOnStop(stop: DispatchRouteStop): boolean {
+    const rs = this.route()?.status;
+    return (
+      (rs === 'dispatched' || rs === 'in_transit') &&
+      !['delivered', 'released', 'rejected', 'partial'].includes(stop.status)
+    );
   }
 
   /**

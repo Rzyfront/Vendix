@@ -87,15 +87,34 @@ export class RoutingService {
    * query contract are identical).
    */
   private static readonly OSRM_BASE = 'https://router.project-osrm.org';
-  /** Redis key prefix for cached directions payloads. */
-  private static readonly CACHE_PREFIX = 'routing:directions:';
+  /**
+   * Public keyless Valhalla demo (FOSSGIS, same operator family as the OSRM
+   * demo). PRIMARY provider: unlike OSRM, Valhalla supports TRUE shortest-
+   * distance routing (`costing_options.auto.shortest: true`), which is what
+   * urban delivery wants — OSRM only optimizes by time and favours main roads.
+   */
+  private static readonly VALHALLA_BASE = 'https://valhalla1.openstreetmap.de';
+  /**
+   * Redis key prefix for cached directions payloads. `v2` = shortest-distance
+   * era (Valhalla primary); the bump orphans pre-shortest fastest-route entries
+   * so they age out via TTL instead of serving stale main-road geometry.
+   */
+  private static readonly CACHE_PREFIX = 'routing:directions:v2:';
   /** Redis key prefix for the single-flight lock. */
   private static readonly LOCK_PREFIX = 'routing:lock:';
 
   constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
 
   /**
-   * Resolve street-following directions for an ordered list of waypoints.
+   * Resolve street-following directions for an ordered list of waypoints,
+   * favouring the SHORTEST route (min distance), not OSRM's default fastest.
+   *
+   * OSRM only returns alternative routes for 2-point requests (no via
+   * waypoints), so multi-stop routes are resolved LEG BY LEG (each consecutive
+   * pair) and stitched: per leg we ask for alternatives and keep the one with
+   * the smallest distance. Legs are cached individually, which also improves
+   * reuse — when the driver advances, only the first leg changes; the
+   * stop→stop legs stay cached.
    *
    * @param coords OSRM-native `<lng>,<lat>;<lng>,<lat>;...` string (≥2 points),
    *   already shape-validated by the DTO. Ranges are re-validated here.
@@ -106,17 +125,39 @@ export class RoutingService {
    */
   async directions(coords: string): Promise<DirectionsResult> {
     const normalized = this.normalizeCoords(coords);
-    const cacheKey = `${RoutingService.CACHE_PREFIX}${this.hash(normalized)}`;
+    const points = normalized.split(';');
+
+    const legCoords: string[] = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      legCoords.push(`${points[i]};${points[i + 1]}`);
+    }
+
+    const legs = await Promise.all(
+      legCoords.map((leg) => this.resolveLeg(leg)),
+    );
+
+    const allCached = legs.every((l) => l.cached);
+    return { ...this.stitchLegs(legs.map((l) => l.result)), cached: allCached };
+  }
+
+  /**
+   * Resolve ONE leg (exactly 2 waypoints) through the Redis cache + best-effort
+   * single-flight lock, falling through to OSRM on a miss.
+   */
+  private async resolveLeg(
+    coords: string,
+  ): Promise<{ result: RoutingDirections; cached: boolean }> {
+    const cacheKey = `${RoutingService.CACHE_PREFIX}${this.hash(coords)}`;
 
     const cached = await this.readCache(cacheKey);
     if (cached) {
       this.logger.debug(`directions cache HIT ${cacheKey}`);
-      return { ...cached, cached: true };
+      return { result: cached, cached: true };
     }
     this.logger.debug(`directions cache MISS ${cacheKey}`);
 
     // Best-effort single-flight: if another request already holds the lock for
-    // this route, wait briefly and re-check the cache before falling through to
+    // this leg, wait briefly and re-check the cache before falling through to
     // our own OSRM call (never block indefinitely).
     const gotLock = await this.acquireLock(cacheKey);
     if (!gotLock) {
@@ -124,13 +165,52 @@ export class RoutingService {
       const retry = await this.readCache(cacheKey);
       if (retry) {
         this.logger.debug(`directions cache HIT (after lock wait) ${cacheKey}`);
-        return { ...retry, cached: true };
+        return { result: retry, cached: true };
       }
     }
 
-    const result = await this.fetchFromOsrm(normalized);
+    const result = await this.fetchLeg(coords);
     await this.writeCache(cacheKey, result);
-    return { ...result, cached: false };
+    return { result, cached: false };
+  }
+
+  /**
+   * Fetch one leg from the routing providers: Valhalla `shortest: true` first
+   * (true min-distance routing), falling back to OSRM (fastest, min-distance
+   * alternative picked) only if Valhalla is unreachable or errors.
+   */
+  private async fetchLeg(coords: string): Promise<RoutingDirections> {
+    try {
+      return await this.fetchFromValhalla(coords);
+    } catch (err) {
+      this.logger.warn(
+        `Valhalla failed for "${coords}" (${err instanceof Error ? err.message : err}); falling back to OSRM`,
+      );
+      return this.fetchFromOsrm(coords);
+    }
+  }
+
+  /**
+   * Concatenate per-leg geometries into one continuous LineString (dropping the
+   * duplicated joint point between consecutive legs) and sum distance/ETA.
+   */
+  private stitchLegs(legs: RoutingDirections[]): RoutingDirections {
+    if (legs.length === 1) return legs[0];
+
+    const coordinates: [number, number][] = [];
+    let distance = 0;
+    let duration = 0;
+    for (const leg of legs) {
+      const start = coordinates.length > 0 ? 1 : 0;
+      coordinates.push(...leg.geometry.coordinates.slice(start));
+      distance += leg.distance_m;
+      duration += leg.duration_s;
+    }
+    return {
+      geometry: { type: 'LineString', coordinates },
+      distance_m: distance,
+      duration_s: duration,
+    };
   }
 
   /**
@@ -167,11 +247,129 @@ export class RoutingService {
     return normalizedPoints.join(';');
   }
 
+  // ------------------------------------------------------------- Valhalla
+  /**
+   * Resolve one leg via Valhalla with `shortest: true` — routing weighted by
+   * DISTANCE, not time. This is the only public keyless provider that honours
+   * "always take the shortest path" instead of preferring main roads.
+   */
+  private async fetchFromValhalla(coords: string): Promise<RoutingDirections> {
+    const locations = coords.split(';').map((point) => {
+      const [lng, lat] = point.split(',');
+      return { lat: Number(lat), lon: Number(lng) };
+    });
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      RoutingService.FETCH_TIMEOUT_MS,
+    );
+
+    let response: Response;
+    try {
+      response = await fetch(`${RoutingService.VALHALLA_BASE}/route`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Vendix/1.0 (soporte@vendix.online)',
+        },
+        body: JSON.stringify({
+          locations,
+          costing: 'auto',
+          costing_options: { auto: { shortest: true } },
+          units: 'kilometers',
+        }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Valhalla HTTP ${response.status}`);
+    }
+
+    const json = (await response.json()) as {
+      trip?: {
+        summary?: { length?: number; time?: number };
+        legs?: { shape?: string }[];
+      };
+    };
+
+    const summary = json.trip?.summary;
+    const legs = json.trip?.legs ?? [];
+    if (
+      typeof summary?.length !== 'number' ||
+      typeof summary?.time !== 'number' ||
+      legs.length === 0 ||
+      legs.some((l) => typeof l.shape !== 'string')
+    ) {
+      throw new Error('Valhalla returned an incomplete route');
+    }
+
+    // Un request puede traer varios legs (si hubiera >2 locations); se
+    // concatenan quitando el punto de unión duplicado.
+    const coordinates: [number, number][] = [];
+    for (const leg of legs) {
+      const decoded = this.decodePolyline6(leg.shape as string);
+      const start = coordinates.length > 0 ? 1 : 0;
+      coordinates.push(...decoded.slice(start));
+    }
+    if (coordinates.length < 2) {
+      throw new Error('Valhalla returned an empty geometry');
+    }
+
+    return {
+      geometry: { type: 'LineString', coordinates },
+      distance_m: Math.round(summary.length * 1000),
+      duration_s: summary.time,
+    };
+  }
+
+  /**
+   * Decode a Valhalla encoded polyline (precision 6) into GeoJSON `[lng, lat]`
+   * pairs. Standard Google polyline algorithm with a 1e6 factor.
+   */
+  private decodePolyline6(encoded: string): [number, number][] {
+    const factor = 1e6;
+    const coordinates: [number, number][] = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+
+    while (index < encoded.length) {
+      let result = 1;
+      let shift = 0;
+      let byte: number;
+      do {
+        byte = encoded.charCodeAt(index++) - 63 - 1;
+        result += byte << shift;
+        shift += 5;
+      } while (byte >= 0x1f);
+      lat += result & 1 ? ~(result >> 1) : result >> 1;
+
+      result = 1;
+      shift = 0;
+      do {
+        byte = encoded.charCodeAt(index++) - 63 - 1;
+        result += byte << shift;
+        shift += 5;
+      } while (byte >= 0x1f);
+      lng += result & 1 ? ~(result >> 1) : result >> 1;
+
+      coordinates.push([lng / factor, lat / factor]);
+    }
+    return coordinates;
+  }
+
   // ----------------------------------------------------------------- OSRM
   private async fetchFromOsrm(coords: string): Promise<RoutingDirections> {
+    // `alternatives=true` (válido solo en requests de 2 puntos — por eso el
+    // ruteo por tramos de `directions()`): OSRM ordena por DURACIÓN y favorece
+    // vías principales; pidiendo alternativas podemos elegir la MÁS CORTA.
     const url =
       `${RoutingService.OSRM_BASE}/route/v1/driving/${coords}` +
-      `?overview=full&geometries=geojson`;
+      `?overview=full&geometries=geojson&alternatives=true`;
 
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -217,26 +415,31 @@ export class RoutingService {
       );
     }
 
-    const route = json.routes?.[0];
-    const geometry = route?.geometry;
-    if (
-      !route ||
-      !geometry ||
-      geometry.type !== 'LineString' ||
-      !Array.isArray(geometry.coordinates) ||
-      typeof route.distance !== 'number' ||
-      typeof route.duration !== 'number'
-    ) {
+    // Entre las rutas válidas devueltas (principal + alternativas), elige la de
+    // MENOR DISTANCIA — no la más rápida. El reparto urbano quiere el camino
+    // más corto, no la vía principal que OSRM prefiere por defecto.
+    const candidates = (json.routes ?? []).filter(
+      (r): r is Required<OsrmRoute> =>
+        !!r.geometry &&
+        r.geometry.type === 'LineString' &&
+        Array.isArray(r.geometry.coordinates) &&
+        typeof r.distance === 'number' &&
+        typeof r.duration === 'number',
+    );
+    if (candidates.length === 0) {
       this.logger.warn(`OSRM returned a malformed route for "${coords}"`);
       throw new ServiceUnavailableException(
         'Routing provider returned an incomplete route',
       );
     }
+    const route = candidates.reduce((best, r) =>
+      r.distance < best.distance ? r : best,
+    );
 
     return {
       geometry: {
         type: 'LineString',
-        coordinates: geometry.coordinates,
+        coordinates: route.geometry.coordinates,
       },
       distance_m: route.distance,
       duration_s: route.duration,

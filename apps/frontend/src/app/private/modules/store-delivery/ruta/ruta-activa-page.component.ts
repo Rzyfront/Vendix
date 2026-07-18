@@ -157,54 +157,50 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
               </div>
             }
 
-            <!-- Resumen del recorrido -->
-            <app-card shadow="sm" [responsivePadding]="true">
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-4 items-start">
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs text-text-secondary uppercase tracking-wide"
-                    >Paradas</span
-                  >
-                  <span class="text-lg font-black text-gray-900">
-                    {{ stops().length }}
-                  </span>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs text-text-secondary uppercase tracking-wide"
-                    >Pendientes</span
-                  >
-                  <span class="text-lg font-black text-amber-600">
-                    {{ pendingCount() }}
-                  </span>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs text-text-secondary uppercase tracking-wide"
-                    >Total a recaudar</span
-                  >
-                  <span class="text-lg font-black text-gray-900">
-                    {{ +r.total_to_collect | currency }}
-                  </span>
-                </div>
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs text-text-secondary uppercase tracking-wide"
-                    >Recaudado</span
-                  >
-                  <span class="text-lg font-black text-green-600">
-                    {{ +r.total_collected | currency }}
-                  </span>
-                </div>
-              </div>
+            <!-- Resumen del recorrido (hero con gradiente de marca) -->
+            <div class="route-hero">
+              <span class="route-hero-blob route-hero-blob--1" aria-hidden="true"></span>
+              <span class="route-hero-blob route-hero-blob--2" aria-hidden="true"></span>
+              <app-icon
+                name="truck"
+                [size]="128"
+                class="route-hero-ghost"
+                aria-hidden="true"
+              ></app-icon>
 
-              @if (payoutEstimated() != null) {
-                <div
-                  class="mt-3 pt-3 border-t border-border flex justify-between items-center text-sm"
-                >
-                  <span class="text-text-secondary">Tu pago estimado</span>
-                  <span class="font-semibold text-gray-900">
-                    {{ payoutEstimated()! | currency }}
-                  </span>
+              <div class="route-hero-content">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                  <div class="route-hero-chip">
+                    <span class="route-hero-chip-label">Paradas</span>
+                    <span class="route-hero-chip-value">{{ stops().length }}</span>
+                  </div>
+                  <div class="route-hero-chip">
+                    <span class="route-hero-chip-label">Pendientes</span>
+                    <span class="route-hero-chip-value">{{ pendingCount() }}</span>
+                  </div>
+                  <div class="route-hero-chip">
+                    <span class="route-hero-chip-label">A recaudar</span>
+                    <span class="route-hero-chip-value">{{ +r.total_to_collect | currency }}</span>
+                  </div>
+                  <div class="route-hero-chip">
+                    <span class="route-hero-chip-label">Recaudado</span>
+                    <span class="route-hero-chip-value">{{ +r.total_collected | currency }}</span>
+                  </div>
                 </div>
-              }
-            </app-card>
+
+                @if (payoutEstimated() != null) {
+                  <div class="route-hero-payout">
+                    <span class="inline-flex items-center gap-1.5">
+                      <app-icon name="hand-coins" [size]="15"></app-icon>
+                      Tu pago estimado
+                    </span>
+                    <span class="font-extrabold">
+                      {{ payoutEstimated()! | currency }}
+                    </span>
+                  </div>
+                }
+              </div>
+            </div>
 
             <!-- Análisis de cierre (ruta cerrada, read-only) -->
             @if (r.status === 'closed') {
@@ -316,6 +312,7 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
                 [columns]="stopColumns"
                 [actions]="stopActions"
                 [cardConfig]="stopCardConfig"
+                [rowClass]="stopRowClass"
                 actionsDisplay="buttons"
                 emptyMessage="Tu ruta no tiene paradas."
                 emptyIcon="map-pin"
@@ -373,6 +370,139 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
       ></app-stop-detail-modal>
     }
   `,
+  styles: [
+    `
+      /* ── Hero "Resumen del recorrido": gradiente de marca tokenizado ──
+         Usa --color-primary-rgb / --color-secondary-rgb (ThemeService los
+         recalcula por tienda → white-label correcto). */
+      .route-hero {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1rem;
+        padding: 1.15rem 1.15rem 1.25rem;
+        color: #ffffff;
+        background: linear-gradient(
+          135deg,
+          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 62%,
+          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 70%, black) 100%
+        );
+        box-shadow: 0 16px 34px -14px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.6);
+      }
+      .route-hero-blob {
+        position: absolute;
+        border-radius: 9999px;
+        background: #ffffff;
+        opacity: 0.1;
+        filter: blur(30px);
+        pointer-events: none;
+      }
+      .route-hero-blob--1 {
+        width: 160px;
+        height: 160px;
+        top: -70px;
+        right: -40px;
+      }
+      .route-hero-blob--2 {
+        width: 120px;
+        height: 120px;
+        bottom: -60px;
+        left: -30px;
+        opacity: 0.08;
+      }
+      .route-hero-ghost {
+        position: absolute;
+        right: -18px;
+        bottom: -22px;
+        color: #ffffff;
+        opacity: 0.14;
+        pointer-events: none;
+      }
+      .route-hero-content {
+        position: relative;
+        z-index: 1;
+      }
+      /* Chips glass: translúcidos con blur sobre el gradiente. */
+      .route-hero-chip {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 9px 11px;
+        border-radius: 0.75rem;
+        background: rgba(255, 255, 255, 0.15);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        backdrop-filter: blur(6px);
+      }
+      .route-hero-chip-label {
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      .route-hero-chip-value {
+        font-size: 18px;
+        font-weight: 800;
+        line-height: 1.1;
+        color: #ffffff;
+      }
+      .route-hero-payout {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 0.85rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.22);
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      /* Nota: el stepper (app-steps-line) ya usa el color de marca (primary)
+         para el círculo activo + halo y los completados vía inline styles, así
+         que no requiere restyle aquí (un ::ng-deep de clase no ganaría sobre
+         los inline styles del componente). Se deja tal cual. */
+
+      /* ── Cards de parada: barra de acento lateral por estado + botones más
+         grandes. La clase stop-row--{status} viene de rowClass y se aplica al
+         propio .item-card. Acotado a esta página; no toca item-list.scss. ── */
+      :host ::ng-deep .item-card {
+        position: relative;
+        overflow: hidden;
+      }
+      :host ::ng-deep .item-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 3px;
+        background: transparent;
+        transition: background var(--transition-fast, 0.15s) ease;
+      }
+      :host ::ng-deep .item-card.stop-row--pending::before {
+        background: #4b5563;
+      }
+      :host ::ng-deep .item-card.stop-row--in_progress::before {
+        background: #ea580c;
+      }
+      :host ::ng-deep .item-card.stop-row--delivered::before {
+        background: #16a34a;
+      }
+      :host ::ng-deep .item-card.stop-row--partial::before {
+        background: #ca8a04;
+      }
+      :host ::ng-deep .item-card.stop-row--rejected::before {
+        background: #dc2626;
+      }
+      :host ::ng-deep .item-card.stop-row--released::before {
+        background: #9333ea;
+      }
+      :host ::ng-deep .footer-action-btn {
+        width: 40px;
+        height: 40px;
+      }
+    `,
+  ],
 })
 export class RutaActivaPageComponent {
   private readonly store = inject(ActiveRouteStore);
@@ -415,7 +545,7 @@ export class RutaActivaPageComponent {
         return 'gray';
       case 'dispatched':
       case 'in_transit':
-        return 'blue';
+        return 'gray';
       case 'closed':
         return 'green';
       case 'voided':
@@ -513,7 +643,7 @@ export class RutaActivaPageComponent {
   readonly varianceClass = computed(() => {
     const v = Number(this.route()?.cash_variance || 0);
     if (v === 0) return 'bg-green-50 text-green-800 border border-green-200';
-    if (v > 0) return 'bg-blue-50 text-blue-800 border border-blue-200';
+    if (v > 0) return 'bg-gray-50 text-gray-700 border border-gray-200';
     return 'bg-red-50 text-red-800 border border-red-200';
   });
 
@@ -536,7 +666,7 @@ export class RutaActivaPageComponent {
   /** Estado de la parada → color hex del badge custom (7-char inline). */
   private readonly STOP_STATUS_COLORS: Record<string, string> = {
     pending: '#4b5563',
-    in_progress: '#2563eb',
+    in_progress: '#ea580c',
     delivered: '#16a34a',
     partial: '#ca8a04',
     rejected: '#dc2626',
@@ -599,7 +729,7 @@ export class RutaActivaPageComponent {
     {
       label: 'Ver detalle',
       icon: 'eye',
-      variant: 'info',
+      variant: 'ghost',
       action: (row: DispatchRouteStop) => this.openStopDetail(row),
     },
     {
@@ -658,6 +788,14 @@ export class RutaActivaPageComponent {
 
   /** Paradas del store, expuestas como filas del data-view. */
   readonly stopRows = computed<DispatchRouteStop[]>(() => this.stops());
+
+  /**
+   * Clase CSS por card de parada según su estado — pinta la barra de acento
+   * lateral (ver `styles`). Arrow property para preservar `this` al pasarla
+   * como `[rowClass]` al data-view.
+   */
+  readonly stopRowClass = (item: DispatchRouteStop): string =>
+    `stop-row--${item.status}`;
 
   // ── Acciones de ruta ──────────────────────────────────────────────────────
 

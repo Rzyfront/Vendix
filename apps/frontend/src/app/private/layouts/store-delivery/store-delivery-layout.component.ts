@@ -211,6 +211,7 @@ import { DeliveryBottomNavComponent } from './components/delivery-bottom-nav.com
         background: var(--color-success-light);
         color: var(--color-success);
         border-color: transparent;
+        box-shadow: 0 0 0 3px rgba(var(--color-success-rgb, 34, 197, 94), 0.14);
       }
 
       .route-dot {
@@ -286,7 +287,11 @@ import { DeliveryBottomNavComponent } from './components/delivery-bottom-nav.com
         inset: 0;
         transform-origin: left center;
         border-radius: var(--radius-pill);
-        background: var(--color-primary);
+        background: linear-gradient(
+          90deg,
+          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 100%
+        );
         transition: transform var(--transition-fast) ease;
         will-change: transform;
       }
@@ -294,6 +299,15 @@ import { DeliveryBottomNavComponent } from './components/delivery-bottom-nav.com
       /* ── Contenido ── */
       .delivery-content {
         flex: 1 1 auto;
+        min-height: 0; /* Fix para mapa fullscreen: permite que flex-1 children (ej. mapa) se encojan sin overflow. */
+        /* Contenedor flex-column: da contexto de alto resoluble a la página
+           enrutada. El mapa (app-mapa-page) usa flex:1 para llenar; las páginas
+           de contenido (pool/ruta/sesión) no declaran flex-grow, así que se
+           dimensionan por contenido y el body scrollea como siempre. Sin esto,
+           el height:100% de la cadena del mapa no resuelve (block + height auto)
+           y el canvas de MapLibre colapsa a ~18px (mapa gris). */
+        display: flex;
+        flex-direction: column;
         /* Deja espacio para el bottom-nav fijo + safe-area. */
         padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
       }

@@ -10,7 +10,9 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../icon/icon.component';
@@ -34,6 +36,25 @@ import { RoutingService } from '../../../private/modules/ecommerce/services/rout
 
 /** Highlight color for the NEXT stop pin (distinct from map-view STATE_COLORS). */
 const NEXT_STOP_COLOR = '#7c3aed';
+
+/** Color de la próxima parada cuando el conductor está CERCA (verde entrega). */
+const NEAR_STOP_COLOR = '#16a34a';
+
+/**
+ * Distancia (metros) bajo la cual la próxima parada se considera «al alcance»:
+ * la tarjeta flotante se pone verde y el CTA de gestión se resalta. ~120 m cubre
+ * el error típico del GPS urbano + la última cuadra sin marcar «llegaste» de más
+ * lejos. El host puede ajustarlo vía `proximityThresholdM`.
+ */
+const NEAR_STOP_THRESHOLD_M = 120;
+
+/**
+ * Umbral (metros) para re-anclar el ruteo por calles en la posición del
+ * conductor. El punto vivo del GPS se mueve suave en cada tick, pero el trazo
+ * OSRM solo se recalcula cuando el conductor se aleja > este umbral del último
+ * ancla — así el primer tramo sale «desde mí» sin re-llamar al proxy por tick.
+ */
+const ROUTE_ANCHOR_THRESHOLD_M = 40;
 
 /**
  * A located stop the map can paint. Structurally compatible with the planilla
@@ -106,7 +127,7 @@ export interface RouteMapReorderEntry {
   selector: 'app-route-map-view',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, ButtonComponent, MapViewComponent],
+  imports: [IconComponent, ButtonComponent, MapViewComponent, NgTemplateOutlet],
   template: `
     <!-- Flex column: summary bar (shrink) + map (grow) + unlocated (shrink).
          Fills the host's height so the map is the protagonist.
@@ -125,31 +146,92 @@ export interface RouteMapReorderEntry {
             [userLocation]="userLocation()"
             [fill]="true"
             [readonly]="readonly()"
+            [bearing]="headingToNext()"
+            [(followUser)]="followUser"
+            [showRecenterControl]="autoOrient()"
           ></app-map-view>
         </div>
 
-        <!-- Overlay flotante: próxima parada + ETA -->
-        @if (nextStop(); as next) {
-          <div class="fs-overlay">
-            <div class="fs-overlay-row">
-              <span
-                class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide text-white text-[11px]"
-                [style.background]="nextStopColor"
-              >
-                <app-icon name="map-pin" [size]="12"></app-icon>
-                Próxima
-              </span>
-              <span class="min-w-0 truncate text-text-primary text-sm font-semibold">
-                #{{ next.sequence }} · {{ next.customerName || '(Cliente)' }}
-              </span>
-            </div>
-            @if (etaLabel(); as eta) {
-              <div class="fs-overlay-meta">
-                <app-icon name="navigation" [size]="13" class="text-primary-600"></app-icon>
-                <span class="text-xs text-text-secondary">{{ eta }}</span>
-              </div>
+        <!-- Contenido de la tarjeta flotante (compartido botón/tarjeta).
+             Declarado ANTES de su uso para que la referencia sea visible desde
+             los bloques @if hermanos del overlay. -->
+        <ng-template #overlayInner let-next>
+          <div class="fs-overlay-row">
+            <span
+              class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wide text-white text-[11px]"
+              [style.background]="isNearNextStop() ? nearStopColor : nextStopColor"
+            >
+              <app-icon
+                [name]="isNearNextStop() ? 'navigation' : 'map-pin'"
+                [size]="12"
+              ></app-icon>
+              {{ isNearNextStop() ? 'Estás cerca' : 'Próxima' }}
+            </span>
+            <span class="min-w-0 truncate text-text-primary text-sm font-semibold">
+              #{{ next.sequence }} · {{ next.customerName || '(Cliente)' }}
+            </span>
+            @if (manageableNext()) {
+              <app-icon
+                name="chevron-right"
+                [size]="18"
+                class="fs-overlay-chevron"
+              ></app-icon>
             }
           </div>
+          @if (streetLoading()) {
+            <div class="fs-overlay-meta">
+              <app-icon name="loader-2" [size]="13" [spin]="true" class="text-primary-600"></app-icon>
+              <span class="text-xs text-text-secondary">Calculando ruta…</span>
+            </div>
+          } @else if (etaLabel(); as eta) {
+            <div class="fs-overlay-meta">
+              <app-icon name="navigation" [size]="13" class="text-primary-600"></app-icon>
+              <span class="text-xs text-text-secondary">{{ eta }}</span>
+            </div>
+          } @else if (showApproxRouteBadge()) {
+            <div class="fs-overlay-meta">
+              <app-icon name="git-branch" [size]="13" class="text-text-muted"></app-icon>
+              <span class="text-xs text-text-secondary">Ruta aproximada</span>
+            </div>
+          }
+          @if (manageableNext() && isNearNextStop()) {
+            <div class="fs-overlay-cta">
+              <app-icon name="hand-coins" [size]="13"></app-icon>
+              <span>Toca para gestionar la entrega</span>
+            </div>
+          }
+        </ng-template>
+
+        <!-- Overlay flotante: próxima parada + ETA. En el lado carrier
+             (manageableNext) es un botón accionable que abre la gestión de
+             entrega; se pone verde cuando el conductor está cerca. En el modal
+             admin (default) queda como tarjeta informativa (no interactiva). -->
+        @if (nextStop(); as next) {
+          @if (manageableNext()) {
+            <button
+              type="button"
+              class="fs-overlay fs-overlay--btn"
+              [class.fs-overlay--near]="isNearNextStop()"
+              (click)="onManageNextClick()"
+              [attr.aria-label]="
+                'Gestionar entrega de la parada ' +
+                next.sequence +
+                (isNearNextStop() ? ' — estás cerca' : '')
+              "
+            >
+              <ng-container
+                [ngTemplateOutlet]="overlayInner"
+                [ngTemplateOutletContext]="{ $implicit: next }"
+              ></ng-container>
+            </button>
+          } @else {
+            <div class="fs-overlay">
+              <ng-container
+                [ngTemplateOutlet]="overlayInner"
+                [ngTemplateOutletContext]="{ $implicit: next }"
+              ></ng-container>
+            </div>
+          }
         }
 
         <!-- Panel GPS (fullscreen) -->
@@ -181,10 +263,20 @@ export interface RouteMapReorderEntry {
               {{ stopCount() }}
               {{ stopCount() === 1 ? 'parada pendiente' : 'paradas pendientes' }}
             </span>
-            @if (etaLabel(); as eta) {
+            @if (streetLoading()) {
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-primary-700">
+                <app-icon name="loader-2" [size]="12" [spin]="true"></app-icon>
+                Calculando ruta…
+              </span>
+            } @else if (etaLabel(); as eta) {
               <span class="inline-flex items-center gap-1 text-xs font-medium text-primary-700">
                 <app-icon name="clock" [size]="12"></app-icon>
                 {{ eta }}
+              </span>
+            } @else if (showApproxRouteBadge()) {
+              <span class="inline-flex items-center gap-1 text-xs font-medium text-text-secondary">
+                <app-icon name="git-branch" [size]="12"></app-icon>
+                Ruta aproximada
               </span>
             }
             @if (deliveredStops().length > 0) {
@@ -329,21 +421,28 @@ export interface RouteMapReorderEntry {
   `,
   styles: [
     `
-      /* ── Fullscreen overlay (próxima parada + ETA flotante) ── */
+      /* ── Fullscreen overlay (próxima parada + ETA flotante) ──
+         Glass: flota sobre el mapa (siempre claro), translúcido con blur. */
       .fs-overlay {
         position: absolute;
         top: 12px;
         left: 12px;
-        right: 12px;
+        /* Tarjeta compacta anclada a la izquierda: NO se extiende hasta el borde
+           derecho para no tapar la columna de controles del mapa (zoom +/- y
+           fullscreen viven en top-right). El tope deja ~76px libres a la derecha. */
+        right: auto;
+        max-width: min(460px, calc(100% - 50px));
         z-index: 5;
         display: flex;
         flex-direction: column;
         gap: 4px;
-        padding: 10px 12px;
-        border-radius: var(--radius-lg, 12px);
-        background: var(--color-surface, #ffffff);
-        border: 1px solid var(--color-border, #e5e7eb);
-        box-shadow: var(--shadow-md, 0 4px 6px -1px rgb(0 0 0 / 0.1));
+        padding: 11px 14px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.22);
         pointer-events: none;
       }
       .fs-overlay-row {
@@ -358,16 +457,69 @@ export interface RouteMapReorderEntry {
         padding-left: 28px;
       }
 
+      /* ── Variante accionable (carrier): la tarjeta es un botón ──
+         Recupera pointer-events (la base los apaga para dejar pasar el gesto al
+         mapa) y añade affordances de toque: hover/active/focus. */
+      .fs-overlay--btn {
+        pointer-events: auto;
+        cursor: pointer;
+        width: auto;
+        text-align: left;
+        font: inherit;
+        -webkit-appearance: none;
+        appearance: none;
+        transition:
+          transform 140ms ease,
+          box-shadow 140ms ease,
+          background 140ms ease,
+          border-color 140ms ease;
+      }
+      .fs-overlay--btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 34px -8px rgba(0, 0, 0, 0.28);
+      }
+      .fs-overlay--btn:active {
+        transform: translateY(0);
+      }
+      .fs-overlay--btn:focus-visible {
+        outline: 2px solid var(--color-ring, #2563eb);
+        outline-offset: 2px;
+      }
+      /* Verde «entrega» cuando el conductor está cerca de la próxima parada. */
+      .fs-overlay--near {
+        background: rgba(240, 253, 244, 0.94);
+        border-color: rgba(22, 163, 74, 0.55);
+        box-shadow: 0 12px 32px -8px rgba(22, 163, 74, 0.42);
+      }
+      .fs-overlay-chevron {
+        margin-left: auto;
+        flex-shrink: 0;
+        color: var(--color-text-muted, #9ca3af);
+      }
+      .fs-overlay--near .fs-overlay-chevron {
+        color: #16a34a;
+      }
+      .fs-overlay-cta {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 2px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #15803d;
+      }
+
       /* ── Panel GPS animado (permiso denegado / prompt) ── */
       .gps-panel {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 12px;
-        padding: 20px 16px;
-        border-radius: var(--radius-lg, 12px);
+        gap: 14px;
+        padding: 26px 20px;
+        border-radius: 18px;
         background: var(--color-surface, #ffffff);
         border: 1px solid var(--color-border, #e5e7eb);
+        box-shadow: 0 14px 34px -12px rgba(0, 0, 0, 0.2);
         text-align: center;
       }
       .gps-panel--inline {
@@ -387,10 +539,17 @@ export interface RouteMapReorderEntry {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 56px;
-        height: 56px;
+        width: 64px;
+        height: 64px;
         flex-shrink: 0;
-        color: var(--color-primary, #2ecc71);
+        border-radius: 9999px;
+        color: #ffffff;
+        background: linear-gradient(
+          135deg,
+          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 100%
+        );
+        box-shadow: 0 10px 24px -8px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.55);
       }
       .gps-halo::before,
       .gps-halo::after {
@@ -398,9 +557,10 @@ export interface RouteMapReorderEntry {
         position: absolute;
         inset: 0;
         border-radius: 9999px;
-        background: var(--color-primary, #2ecc71);
+        background: rgb(var(--color-primary-rgb, 126, 215, 165));
         opacity: 0.25;
         animation: gps-halo-pulse 2.2s ease-out infinite;
+        z-index: 0;
       }
       .gps-halo::after {
         animation-delay: 1.1s;
@@ -469,6 +629,14 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   readonly fill = input<boolean>(false);
   /** Fullscreen inmersivo: oculta summary/unlocated, el mapa llena todo + overlay. */
   readonly fullscreen = input<boolean>(false);
+  /**
+   * Auto-orientación (solo lado carrier inmersivo): cuando `true`, el mapa gira
+   * para que la próxima parada quede «hacia arriba» (bearing = azimut
+   * conductor→próxima) y expone el control flotante de recentrado. El modal admin
+   * NO lo pasa → `false` → norte-arriba + fitBounds, sin control (comportamiento
+   * idéntico al actual).
+   */
+  readonly autoOrient = input<boolean>(false);
   /** Renders the "Aplicar orden óptimo" action (host persists on emit). */
   readonly showApplyOrder = input<boolean>(false);
   /** Host-driven loading of the persist call — spins/disables the apply button. */
@@ -476,14 +644,43 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   /** Minimum located stops required before "apply order" is available. */
   readonly minStopsToApply = input<number>(2);
 
+  /**
+   * Habilita que la tarjeta flotante "Próxima" del modo fullscreen sea un botón
+   * accionable (lado carrier). El modal admin la deja en `false` → sigue siendo
+   * una tarjeta puramente informativa (sin clic, sin verde de proximidad).
+   */
+  readonly manageableNext = input<boolean>(false);
+  /**
+   * Distancia (m) bajo la cual la próxima parada se considera «al alcance»: la
+   * tarjeta se pone verde y aparece el CTA de gestión. Default
+   * {@link NEAR_STOP_THRESHOLD_M}.
+   */
+  readonly proximityThresholdM = input<number>(NEAR_STOP_THRESHOLD_M);
+
   /** Emitted (1-based order) when the user confirms "apply optimal order". */
   readonly applyOrder = output<RouteMapReorderEntry[]>();
 
+  /**
+   * Emite el `stopId` de la próxima parada cuando el conductor toca la tarjeta
+   * flotante (solo con `manageableNext`). El host abre el flujo de gestión de
+   * entrega — mismo que la vista de rutas — con el `DispatchRouteStop` completo.
+   */
+  readonly manageNext = output<number>();
+
   /** Highlight color for the "Próxima" badge (kept in sync with the map pin). */
   readonly nextStopColor = NEXT_STOP_COLOR;
+  /** Color de la tarjeta/badge cuando el conductor está cerca (verde entrega). */
+  readonly nearStopColor = NEAR_STOP_COLOR;
 
   /** Live driver position (updated on every GPS reading). `null` until a fix. */
   readonly userLocation = signal<LatLng | null>(null);
+  /**
+   * "Seguirme" en el mapa (two-way con map-view). Arranca en `false`: el mapa
+   * encuadra todas las paradas orientado hacia la próxima. Al tocar el control de
+   * recentrado pasa a `true` y la cámara sigue al conductor; un gesto manual de
+   * pan/rotación lo apaga de nuevo (map-view lo escribe de vuelta por el binding).
+   */
+  readonly followUser = signal<boolean>(false);
   /** True once GPS is known to be unavailable (denied / unsupported / insecure). */
   readonly locationUnavailable = signal(false);
   /** Inline confirm state for the "apply order" action (no separate dialog). */
@@ -502,6 +699,15 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   readonly streetEta = signal<number | null>(null);
   /** `true` mientras se espera la geometría OSRM. */
   readonly streetLoading = signal(false);
+
+  /**
+   * Ancla de ruteo por calles: la posición del conductor «congelada» hasta que
+   * se aleja > {@link ROUTE_ANCHOR_THRESHOLD_M}. Es lo que usa el effect de OSRM
+   * como PRIMER waypoint (el trazo arranca desde el conductor, no desde la
+   * parada 1), sin re-llamar al proxy en cada tick del GPS. `null` hasta el
+   * primer fix; entonces el effect cae a `origin`.
+   */
+  private readonly routedFrom = signal<LatLng | null>(null);
 
   /**
    * Start of the route: the live driver location when available, otherwise the
@@ -582,6 +788,36 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
     return first ? (this.stopsById().get(first.stopId) ?? null) : null;
   });
 
+  /**
+   * ¿El conductor está «al alcance» de la próxima parada? True solo en modo
+   * accionable (`manageableNext`) cuando hay GPS + próxima parada y la distancia
+   * haversine es ≤ `proximityThresholdM`. Dispara el verde + el CTA de gestión.
+   */
+  readonly isNearNextStop = computed<boolean>(() => {
+    if (!this.manageableNext()) return false;
+    const u = this.userLocation();
+    const next = this.nextStop();
+    if (!u || !next) return false;
+    return (
+      this.haversineMeters(u, { lat: next.lat, lng: next.lng }) <=
+      this.proximityThresholdM()
+    );
+  });
+
+  /**
+   * Azimut (grados, horario desde el norte) del conductor hacia la próxima
+   * parada, para orientar el mapa «hacia adelante». `null` cuando `autoOrient`
+   * está apagado o falta GPS/próxima parada → map-view cae a norte-arriba. Solo
+   * el lado carrier (autoOrient) lo consume; el modal admin recibe siempre null.
+   */
+  readonly headingToNext = computed<number | null>(() => {
+    if (!this.autoOrient()) return null;
+    const u = this.userLocation();
+    const next = this.nextStop();
+    if (!u || !next) return null;
+    return this.bearingTo(u, { lat: next.lat, lng: next.lng });
+  });
+
   /** Polyline points: the start (driver or route origin) then the ordered stops. */
   readonly routeLine = computed<LatLng[]>(() => {
     const points: LatLng[] = [];
@@ -631,6 +867,18 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
     return rest ? `${h} h ${rest} min` : `${h} h`;
   });
 
+  /**
+   * ¿Mostrar el badge "Ruta aproximada"? True cuando hay una ruta dibujada pero
+   * NO se obtuvo geometría por calles (OSRM falló → se cayó a la línea recta),
+   * y no está en curso el cálculo. Da feedback visible en vez del silencio actual.
+   */
+  readonly showApproxRouteBadge = computed<boolean>(
+    () =>
+      !this.streetLoading() &&
+      this.streetRoute().length < 2 &&
+      this.drawnRoute().length >= 2,
+  );
+
   /** "Apply" is available only with enough located stops and no in-flight work. */
   readonly canApply = computed<boolean>(
     () =>
@@ -679,27 +927,77 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
+    // Re-ancla el ruteo en la posición del conductor con HISTÉRESIS: sigue a
+    // `userLocation` pero solo mueve `routedFrom` cuando el conductor se aleja
+    // > UMBRAL. Así el trazo por calles arranca «desde mí» y se recalcula al
+    // avanzar, pero NO en cada tick del GPS (que dispararía cache-miss constante
+    // en el proxy OSRM). `untracked` evita que leer `routedFrom` re-dispare
+    // este mismo effect.
+    effect(() => {
+      const u = this.userLocation();
+      if (!u) return;
+      const prev = untracked(this.routedFrom);
+      if (!prev || this.haversineMeters(prev, u) > ROUTE_ANCHOR_THRESHOLD_M) {
+        this.routedFrom.set(u);
+      }
+    });
+
     // Fetch de la geometría por calles (OSRM). Dependencias ESTABLES: stops +
-    // origin. NO userLocation → evita re-llamar al proxy en cada tick del GPS
-    // (cada tick movería el primer waypoint y haría cache-miss siempre). El
-    // conductor se ve como punto vivo; la ruta por calles va origin → paradas y
-    // se recalcula solo cuando las paradas u origin cambian.
+    // ancla de ruteo (`routedFrom`, con histéresis) u `origin`. NO lee
+    // `userLocation` crudo → no re-llama al proxy en cada tick del GPS. El
+    // conductor se ve como punto vivo; la ruta por calles va conductor → paradas
+    // y se recalcula solo cuando las paradas cambian o el conductor avanza.
     effect(() => {
       const stopsInput = this.stops();
-      const origin = this.origin();
+      const anchor = this.routedFrom() ?? this.origin();
       const geo = stopsInput.map((s) => ({
         stopId: s.stopId,
         sequence: s.sequence,
         lat: s.lat,
         lng: s.lng,
       }));
-      // Orden optimizado anclado en el origen (estable), NO en userLocation.
-      const ordered = this.optimizer.optimize(origin, geo).orderedStops;
+      // Orden optimizado anclado en la posición del conductor (o el origen si aún
+      // no hay GPS), consistente con el primer waypoint del trazo.
+      const ordered = this.optimizer.optimize(anchor, geo).orderedStops;
       const waypoints: LatLng[] = [];
-      if (origin) waypoints.push(origin);
+      if (anchor) waypoints.push(anchor);
       for (const s of ordered) waypoints.push({ lat: s.lat, lng: s.lng });
       this.fetchStreetRoute(waypoints);
     });
+  }
+
+  /**
+   * Azimut inicial (grados 0–360, horario desde el norte) del punto `from` al
+   * punto `to`. Fórmula de rumbo en gran círculo — suficiente y estable para
+   * orientar la cámara hacia la próxima parada.
+   */
+  private bearingTo(
+    from: { lat: number; lng: number },
+    to: { lat: number; lng: number },
+  ): number {
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const φ1 = toRad(from.lat);
+    const φ2 = toRad(to.lat);
+    const Δλ = toRad(to.lng - from.lng);
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x =
+      Math.cos(φ1) * Math.sin(φ2) -
+      Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  }
+
+  /** Distancia haversine en metros entre dos coordenadas. */
+  private haversineMeters(a: LatLng, b: LatLng): number {
+    const R = 6_371_000; // radio terrestre (m)
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
   }
 
   ngOnInit(): void {
@@ -805,6 +1103,17 @@ export class RouteMapViewComponent implements OnInit, OnDestroy {
     );
     this.applyOrder.emit(order);
     this.confirming.set(false);
+  }
+
+  /**
+   * Toca la tarjeta flotante "Próxima" (solo con `manageableNext`) → emite el
+   * `stopId` para que el host abra la gestión de entrega de esa parada. No-op si
+   * no hay próxima parada o el modo no es accionable.
+   */
+  onManageNextClick(): void {
+    if (!this.manageableNext()) return;
+    const next = this.nextStop();
+    if (next) this.manageNext.emit(next.stopId);
   }
 
   /**

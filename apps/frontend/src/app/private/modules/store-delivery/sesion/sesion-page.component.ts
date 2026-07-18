@@ -51,38 +51,28 @@ import { ActiveRouteStore } from '../state/active-route.store';
   ],
   template: `
     <div class="w-full min-h-screen p-3 md:p-4 space-y-4">
-      <!-- Identidad del repartidor -->
-      <app-card shadow="sm" [responsivePadding]="true">
-        <div class="flex items-center gap-3">
-          <span
-            class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-blue-50 border border-blue-200 text-blue-600"
-          >
-            <app-icon name="user" [size]="24"></app-icon>
+      <!-- Identidad del repartidor (hero con gradiente de marca) -->
+      <div class="identity-hero">
+        <span class="identity-hero-blob identity-hero-blob--1" aria-hidden="true"></span>
+        <span class="identity-hero-blob identity-hero-blob--2" aria-hidden="true"></span>
+        <div class="identity-hero-content">
+          <span class="identity-hero-avatar">
+            <app-icon name="user" [size]="26"></app-icon>
           </span>
           <div class="min-w-0">
-            <p class="text-base font-bold text-gray-900 truncate">
-              {{ carrierName() }}
-            </p>
+            <p class="identity-hero-name">{{ carrierName() }}</p>
             @if (storeName()) {
-              <p
-                class="mt-0.5 flex items-center gap-1 text-sm text-text-secondary truncate"
-              >
-                <app-icon
-                  name="store"
-                  [size]="14"
-                  class="shrink-0"
-                ></app-icon>
+              <p class="identity-hero-store">
+                <app-icon name="store" [size]="14" class="shrink-0"></app-icon>
                 <span class="truncate">{{ storeName() }}</span>
               </p>
             }
             @if (userEmail()) {
-              <p class="text-xs text-text-secondary truncate">
-                {{ userEmail() }}
-              </p>
+              <p class="identity-hero-email">{{ userEmail() }}</p>
             }
           </div>
         </div>
-      </app-card>
+      </div>
 
       <!-- KPIs de la ruta -->
       <div>
@@ -191,6 +181,93 @@ import { ActiveRouteStore } from '../state/active-route.store';
       </app-button>
     </div>
   `,
+  styles: [
+    `
+      /* ── Hero de identidad: gradiente de marca tokenizado por tienda ── */
+      .identity-hero {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1rem;
+        padding: 1.15rem 1.25rem;
+        color: #ffffff;
+        background: linear-gradient(
+          135deg,
+          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 62%,
+          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 70%, black) 100%
+        );
+        box-shadow: 0 16px 34px -14px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.6);
+      }
+      .identity-hero-blob {
+        position: absolute;
+        border-radius: 9999px;
+        background: #ffffff;
+        pointer-events: none;
+        filter: blur(28px);
+      }
+      .identity-hero-blob--1 {
+        width: 150px;
+        height: 150px;
+        top: -70px;
+        right: -40px;
+        opacity: 0.12;
+      }
+      .identity-hero-blob--2 {
+        width: 110px;
+        height: 110px;
+        bottom: -60px;
+        left: -20px;
+        opacity: 0.08;
+      }
+      .identity-hero-content {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      /* Avatar glass translúcido sobre el gradiente. */
+      .identity-hero-avatar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        flex-shrink: 0;
+        border-radius: 9999px;
+        color: #ffffff;
+        background: rgba(255, 255, 255, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        backdrop-filter: blur(6px);
+      }
+      .identity-hero-name {
+        font-size: 18px;
+        font-weight: 800;
+        line-height: 1.2;
+        color: #ffffff;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .identity-hero-store {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 3px;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.9);
+        overflow: hidden;
+      }
+      .identity-hero-email {
+        margin-top: 2px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.75);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    `,
+  ],
 })
 export class SesionPageComponent {
   private readonly authFacade = inject(AuthFacade);

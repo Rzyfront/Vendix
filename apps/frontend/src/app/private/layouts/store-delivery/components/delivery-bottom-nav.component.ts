@@ -9,10 +9,10 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
  * pinta 4 tabs (Disponibles / Mi Ruta / Mapa / Sesión) con `routerLink` +
  * `routerLinkActive`. Sin estado propio ni HTTP.
  *
- * Accesibilidad: el tab activo NO se comunica solo por color — un indicador
- * superior aparece con `transform` (scaleX) + `opacity` y el icono se eleva
- * ligeramente, además del cambio de color y peso. Cada tab tiene área táctil
- * ≥44px y estado `:focus-visible` visible. La barra respeta el
+ * Accesibilidad: el tab activo NO se comunica solo por color — recibe un
+ * tinte de fondo suave (relleno presente/ausente) además del cambio de color,
+ * de modo que la señal no dependa únicamente del matiz. Cada tab tiene área
+ * táctil ≥44px y estado `:focus-visible` visible. La barra respeta el
  * `env(safe-area-inset-bottom)` de los dispositivos con notch/home-indicator.
  * En "Mi Ruta" se pinta un badge con `pendingStops` cuando hay paradas por
  * atender (> 0), resuelto vía el token `--color-danger`.
@@ -34,7 +34,6 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Pedidos disponibles"
       >
-        <span class="nav-indicator" aria-hidden="true"></span>
         <span class="nav-icon-wrap">
           <app-icon name="inbox" [size]="22" />
         </span>
@@ -47,7 +46,6 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Mi Ruta"
       >
-        <span class="nav-indicator" aria-hidden="true"></span>
         <span class="nav-icon-wrap">
           <app-icon name="truck" [size]="22" />
           @if (pendingStops() > 0) {
@@ -65,7 +63,6 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Mapa"
       >
-        <span class="nav-indicator" aria-hidden="true"></span>
         <span class="nav-icon-wrap">
           <app-icon name="map-pin" [size]="22" />
         </span>
@@ -78,7 +75,6 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         routerLinkActive="active"
         aria-label="Sesión"
       >
-        <span class="nav-indicator" aria-hidden="true"></span>
         <span class="nav-icon-wrap">
           <app-icon name="user" [size]="22" />
         </span>
@@ -135,29 +131,8 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 
       .nav-tab.active {
         color: var(--color-primary);
-      }
-
-      /* Indicador superior: comunica el tab activo con movimiento (transform +
-         opacity), no solo con color. */
-      .nav-indicator {
-        position: absolute;
-        top: 0;
-        left: 50%;
-        width: 28px;
-        height: 3px;
-        border-radius: var(--radius-pill);
-        background: var(--color-primary);
-        opacity: 0;
-        transform: translateX(-50%) scaleX(0);
-        transform-origin: center;
-        transition:
-          transform var(--transition-fast) ease,
-          opacity var(--transition-fast) ease;
-      }
-
-      .nav-tab.active .nav-indicator {
-        opacity: 1;
-        transform: translateX(-50%) scaleX(1);
+        background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.1);
+        border-radius: var(--radius-md);
       }
 
       .nav-icon-wrap {
@@ -166,19 +141,16 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         transition: transform var(--transition-fast) ease;
       }
 
-      .nav-tab.active .nav-icon-wrap {
-        transform: translateY(-2px);
+      /* El ícono siempre por encima del halo. */
+      .nav-icon-wrap > * {
+        position: relative;
+        z-index: 1;
       }
 
       .nav-label {
         font-size: 11px;
         line-height: 1;
         font-weight: 500;
-        transition: font-weight var(--transition-fast) ease;
-      }
-
-      .nav-tab.active .nav-label {
-        font-weight: 700;
       }
 
       .nav-badge {

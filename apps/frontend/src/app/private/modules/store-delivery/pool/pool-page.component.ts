@@ -26,6 +26,7 @@ import {
   RepartosService,
   type RepartosApiError,
 } from '../services/repartos.service';
+import { PoolEmptyStateComponent } from './components/pool-empty-state.component';
 import { ActiveRouteStore } from '../state/active-route.store';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
@@ -55,6 +56,7 @@ import type { PoolItem } from '../interfaces/repartos.interface';
     InputsearchComponent,
     PaginationComponent,
     EmptyStateComponent,
+    PoolEmptyStateComponent,
     CardComponent,
   ],
   template: `
@@ -96,14 +98,24 @@ import type { PoolItem } from '../interfaces/repartos.interface';
 
         <!-- Vacío -->
         @if (!loading() && poolItems().length === 0) {
-          <app-empty-state
-            icon="package"
-            [title]="emptyStateTitle()"
-            [description]="emptyStateDescription()"
-            [showActionButton]="false"
-            [showClearFilters]="hasFilters()"
-            (clearFiltersClick)="clearFilters()"
-          ></app-empty-state>
+          @if (hasFilters()) {
+            <!-- Con filtros: caso neutro, empty-state estándar con "limpiar filtros". -->
+            <app-empty-state
+              icon="package"
+              [title]="emptyStateTitle()"
+              [description]="emptyStateDescription()"
+              [showActionButton]="false"
+              [showClearFilters]="true"
+              (clearFiltersClick)="clearFilters()"
+            ></app-empty-state>
+          } @else {
+            <!-- Sin pedidos reales: empty-state animado y "precioso". -->
+            <app-pool-empty-state
+              [title]="emptyStateTitle()"
+              [description]="emptyStateDescription()"
+              (refresh)="load()"
+            ></app-pool-empty-state>
+          }
         }
 
         <!-- Lista -->

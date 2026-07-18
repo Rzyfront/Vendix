@@ -143,6 +143,64 @@
   color: #fff;
 }
 
+/* Floating "center on my location" control. Global class (ViewEncapsulation.None).
+   Sits above the bottom-right attribution pill. Rendered only when the host opts
+   in via `showRecenterControl`, so the admin modal never gets it. */
+.mv-recenter {
+  position: absolute;
+  bottom: 84px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-primary, #111827);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 9999px;
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.15));
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.mv-recenter:hover {
+  transform: translateY(-1px);
+}
+
+.mv-recenter:active {
+  transform: translateY(0);
+}
+
+.mv-recenter:focus-visible {
+  outline: 2px solid var(--color-primary, #2563eb);
+  outline-offset: 2px;
+}
+
+.mv-recenter svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Active = "following": the control reads as engaged. */
+.mv-recenter--active {
+  color: var(--color-primary, #2563eb);
+  border-color: var(--color-primary, #2563eb);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-recenter {
+    transition: none;
+  }
+}
+
 /* OSM/OpenFreeMap attribution is REQUIRED by the ODbL license; kept subtle. */
 :where(.mv-map) .maplibregl-ctrl-attrib {
   opacity: 0.7;
