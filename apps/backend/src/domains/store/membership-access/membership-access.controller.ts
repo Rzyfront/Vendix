@@ -243,6 +243,29 @@ export class MembershipAccessController {
     }
   }
 
+  /**
+   * POST /store/memberships/access/credentials/:id/resend-email
+   *
+   * Re-send the credential notification email for an existing credential.
+   * Reuses `sendCredentialEmail` so the `external_ref` (biometric) branch
+   * sends the enrollment notice ONLY — the device reference is never leaked.
+   * Same permission as the create endpoint: a re-send is a re-issuance of the
+   * credential notification.
+   */
+  @Post('credentials/:id/resend-email')
+  @Permissions('store:membership_access:create')
+  async resendCredentialEmail(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.service.resendCredentialEmail(id);
+      return this.responseService.success(
+        result,
+        'Correo de credencial reenviado',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al reenviar el correo de la credencial');
+    }
+  }
+
   @Patch('credentials/:id')
   @Permissions('store:membership_access:update')
   async updateCredential(
