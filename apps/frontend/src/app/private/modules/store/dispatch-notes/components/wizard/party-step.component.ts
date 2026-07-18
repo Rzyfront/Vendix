@@ -8,11 +8,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
-  EmptyStateComponent,
   IconComponent,
   InputsearchComponent,
 } from '../../../../../../shared/components';
 
+import { WizardStepSectionComponent } from './wizard-step-section.component';
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { LocationsService } from '../../../inventory/services/locations.service';
@@ -21,7 +21,6 @@ import {
   PurchaseOrdersService,
 } from '../../../inventory/services/purchase-orders.service';
 import { PosCustomerService } from '../../../pos/services/pos-customer.service';
-import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
 
 /**
  * Party step (step 1 for non-customer_delivery subtypes — ref R4a).
@@ -37,21 +36,23 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
   selector: 'app-dispatch-wizard-party-step',
   standalone: true,
   imports: [
-    EmptyStateComponent,
     IconComponent,
     InputsearchComponent,
+    WizardStepSectionComponent,
   ],
   template: `
-    <div class="space-y-3">
+    <app-wizard-step-section
+      [icon]="sectionIcon()"
+      [title]="sectionTitle()"
+      [subtitle]="sectionSubtitle()"
+      [dense]="true"
+    >
       @switch (wizardService.subtype()) {
         @case ('transfer_out') {
           <section class="space-y-3">
-            <p class="text-xs text-[var(--color-text-muted)]">
-              Selecciona el origen (esta tienda) y el destino (otra tienda).
-            </p>
             <!-- Origin -->
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                 Bodega origen
               </p>
               <app-inputsearch
@@ -71,7 +72,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                       <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">{{ loc.name }}</p>
                         @if (loc.code) {
-                          <p class="text-[11px] text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
+                          <p class="text-xs text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
                         }
                       </div>
                       @if (wizardService.fromLocationId() === loc.id) {
@@ -84,7 +85,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
             </div>
             <!-- Destination -->
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                 Bodega destino (otra tienda)
               </p>
               <app-inputsearch
@@ -104,7 +105,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                       <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">{{ loc.name }}</p>
                         @if (loc.code) {
-                          <p class="text-[11px] text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
+                          <p class="text-xs text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
                         }
                       </div>
                       @if (wizardService.toLocationId() === loc.id) {
@@ -120,11 +121,8 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
 
         @case ('transfer_in') {
           <section class="space-y-3">
-            <p class="text-xs text-[var(--color-text-muted)]">
-              Selecciona el origen (otra tienda) y el destino (esta tienda).
-            </p>
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                 Bodega origen (otra tienda)
               </p>
               <app-inputsearch
@@ -144,7 +142,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                       <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">{{ loc.name }}</p>
                         @if (loc.code) {
-                          <p class="text-[11px] text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
+                          <p class="text-xs text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
                         }
                       </div>
                       @if (wizardService.fromLocationId() === loc.id) {
@@ -156,7 +154,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
               }
             </div>
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                 Bodega destino (esta tienda)
               </p>
               <app-inputsearch
@@ -176,7 +174,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                       <div class="flex-1 min-w-0">
                         <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">{{ loc.name }}</p>
                         @if (loc.code) {
-                          <p class="text-[11px] text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
+                          <p class="text-xs text-[var(--color-text-muted)] truncate">{{ loc.code }}</p>
                         }
                       </div>
                       @if (wizardService.toLocationId() === loc.id) {
@@ -194,7 +192,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
           <section class="space-y-3">
             <!-- Supplier search -->
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                 Proveedor
               </p>
               @if (wizardService.supplierId(); as sid) {
@@ -235,7 +233,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                         <div class="flex-1 min-w-0">
                           <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">{{ sup.name }}</p>
                           @if (sup.code) {
-                            <p class="text-[11px] text-[var(--color-text-muted)] truncate">{{ sup.code }}</p>
+                            <p class="text-xs text-[var(--color-text-muted)] truncate">{{ sup.code }}</p>
                           }
                         </div>
                         <app-icon name="plus" [size]="14" color="var(--color-primary)"></app-icon>
@@ -250,7 +248,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
             @if (wizardService.supplierId()) {
               <div>
                 <div class="flex items-center gap-1.5 mb-1.5">
-                  <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                  <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
                     Orden de compra (opcional)
                   </p>
                 </div>
@@ -277,7 +275,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                           <span class="text-sm font-medium text-[var(--color-text-primary)]">
                             #{{ po.order_number || po.id }}
                           </span>
-                          <span class="text-[11px] text-[var(--color-text-muted)]">
+                          <span class="text-xs text-[var(--color-text-muted)]">
                             {{ po.status }}
                           </span>
                         </div>
@@ -294,7 +292,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
           <section class="space-y-3">
             <!-- Customer search -->
             <div>
-              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                 Cliente
               </p>
               @if (wizardService.customerId(); as cid) {
@@ -337,7 +335,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                             {{ cust.first_name }} {{ cust.last_name }}
                           </p>
                           @if (cust.document_number) {
-                            <p class="text-[11px] text-[var(--color-text-muted)] truncate">Doc: {{ cust.document_number }}</p>
+                            <p class="text-xs text-[var(--color-text-muted)] truncate">Doc: {{ cust.document_number }}</p>
                           }
                         </div>
                         <app-icon name="plus" [size]="14" color="var(--color-primary)"></app-icon>
@@ -351,7 +349,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
             <!-- Related dispatch selector -->
             @if (wizardService.customerId()) {
               <div>
-                <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
+                <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1.5">
                   Remisión original (opcional)
                 </p>
                 @if (dispatchLoading()) {
@@ -377,7 +375,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
                           <span class="text-sm font-medium text-[var(--color-text-primary)]">
                             #{{ dn.dispatch_number }}
                           </span>
-                          <span class="text-[11px] text-[var(--color-text-muted)]">
+                          <span class="text-xs text-[var(--color-text-muted)]">
                             {{ dn.emission_date }}
                           </span>
                         </div>
@@ -390,7 +388,7 @@ import { DispatchNoteSubtype } from '../../interfaces/dispatch-note.interface';
           </section>
         }
       }
-    </div>
+    </app-wizard-step-section>
   `,
 })
 export class PartyStepComponent {
@@ -401,6 +399,50 @@ export class PartyStepComponent {
   private readonly customerService = inject(PosCustomerService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
   private readonly destroyRef = inject(DestroyRef);
+
+  // --- Shell header (icon/title/subtitle derived from subtype) ---
+  readonly sectionIcon = computed<string>(() => {
+    switch (this.wizardService.subtype()) {
+      case 'transfer_out':
+      case 'transfer_in':
+        return 'arrow-right-left';
+      case 'purchase_receipt':
+        return 'truck';
+      case 'customer_return':
+        return 'user';
+      default:
+        return 'user';
+    }
+  });
+
+  readonly sectionTitle = computed<string>(() => {
+    switch (this.wizardService.subtype()) {
+      case 'transfer_out':
+      case 'transfer_in':
+        return 'Origen y destino';
+      case 'purchase_receipt':
+        return 'Proveedor';
+      case 'customer_return':
+        return 'Cliente y remisión';
+      default:
+        return 'Contraparte';
+    }
+  });
+
+  readonly sectionSubtitle = computed<string>(() => {
+    switch (this.wizardService.subtype()) {
+      case 'transfer_out':
+        return 'Bodega origen (esta tienda) y destino (otra tienda)';
+      case 'transfer_in':
+        return 'Bodega origen (otra tienda) y destino (esta tienda)';
+      case 'purchase_receipt':
+        return 'Selecciona el proveedor y, opcionalmente, la orden de compra';
+      case 'customer_return':
+        return 'Selecciona el cliente y, opcionalmente, la remisión original';
+      default:
+        return '';
+    }
+  });
 
   // --- Location search (transfer_out / transfer_in) ---
   readonly allLocations = signal<any[]>([]);
