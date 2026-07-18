@@ -34,6 +34,7 @@ import {
   CreateTransferDispatchDto,
   CreateReturnDispatchDto,
   CreatePurchaseReceiptDispatchDto,
+  UpdateDispatchNoteAddressDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -327,6 +328,25 @@ export class DispatchNotesController {
     return this.responseService.updated(
       result,
       'Remisión actualizada exitosamente',
+    );
+  }
+
+  /**
+   * Re-snapshotear la dirección de entrega de una remisión. Independiente
+   * del status: `customer_address` es solo display+mapa (no afecta inventario
+   * ni contabilidad). Ver `updateCustomerAddressSnapshot` en el service.
+   */
+  @Patch(':id/address')
+  @Permissions('store:dispatch_notes:update')
+  async updateAddressSnapshot(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateDispatchNoteAddressDto,
+  ) {
+    const result =
+      await this.dispatchNotesService.updateCustomerAddressSnapshot(id, dto);
+    return this.responseService.updated(
+      result,
+      'Dirección de remisión actualizada',
     );
   }
 

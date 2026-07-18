@@ -18,6 +18,7 @@ import {
   CreateTransferDispatchDto,
   CreateReturnDispatchDto,
   CreatePurchaseReceiptDispatchDto,
+  UpdateDispatchNoteAddressDto,
 } from './dto';
 import {
   ScanReceiptResult,
@@ -2606,6 +2607,44 @@ export class DispatchNotesService {
         agreed_delivery_date: update_data.agreed_delivery_date
           ? new Date(update_data.agreed_delivery_date)
           : undefined,
+        updated_at: new Date(),
+      },
+      include: DISPATCH_NOTE_INCLUDE,
+    });
+  }
+
+  /**
+   * Re-snapshotea la dirección de entrega de una remisión.
+   *
+   * Independiente del status: `customer_address` es solo display+mapa, no
+   * afecta inventario ni contabilidad. El snapshot se construye con las
+   * mismas claves que usa `buildCustomerAddressSnapshot` (columnas de la
+   * tabla `addresses`), mapeando `address_line_1` (DTO) → `address_line1`
+   * (snapshot). Las coords opcionales se persisten como números.
+   */
+  async updateCustomerAddressSnapshot(
+    id: number,
+    dto: UpdateDispatchNoteAddressDto,
+  ) {
+    // Verifica existencia; lanza NotFoundException si no existe (patrón findOne).
+    await this.findOne(id);
+
+    const snapshot: Prisma.InputJsonValue = {
+      address_line1: dto.address_line_1,
+      address_line2: dto.address_line_2 ?? null,
+      city: dto.city,
+      state_province: dto.state_province ?? null,
+      country_code: dto.country_code ?? null,
+      postal_code: dto.postal_code ?? null,
+      phone_number: dto.phone_number ?? null,
+      ...(dto.latitude !== undefined ? { latitude: dto.latitude } : {}),
+      ...(dto.longitude !== undefined ? { longitude: dto.longitude } : {}),
+    };
+
+    return this.prisma.dispatch_notes.update({
+      where: { id },
+      data: {
+        customer_address: snapshot,
         updated_at: new Date(),
       },
       include: DISPATCH_NOTE_INCLUDE,
