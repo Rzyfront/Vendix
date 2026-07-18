@@ -23,11 +23,16 @@ export interface BreadcrumbRoute {
 export class BreadcrumbService {
   private destroyRef = inject(DestroyRef);
   readonly breadcrumb = signal<{
+    /** Cadena completa de padres, desde el más externo al más cercano. */
+    parents?: BreadcrumbItem[];
+    /** Último padre (= parents[parents.length - 1]). Backward compat. */
     parent?: BreadcrumbItem;
     current: BreadcrumbItem;
     title: string;
   }>({
     title: 'Panel Principal',
+    parents: [],
+    parent: undefined,
     current: { label: 'Dashboard' },
   });
 
@@ -1416,9 +1421,12 @@ export class BreadcrumbService {
       // Guard: no pisar el título del layout público store-ecommerce
       if (crumb.current.label === 'Dashboard' && !crumb.parent) return;
 
-      const segments = [crumb.parent?.label, crumb.current.label].filter(
-        Boolean,
-      ) as string[];
+      // Une TODA la cadena de padres para el formato 3+ niveles
+      // (ej. "Analíticas > Ventas > Por Producto | Vendix").
+      const parentLabels = (crumb.parents ?? []).map(
+        (p: BreadcrumbItem) => p.label,
+      );
+      const segments = [...parentLabels, crumb.current.label];
       const fullTitle = segments.length
         ? `${segments.join(' > ')} | Vendix`
         : 'Vendix';
@@ -1443,15 +1451,12 @@ export class BreadcrumbService {
     const routeData = this.findRouteMatch(cleanUrl);
 
     if (routeData) {
+      const parents = this.resolveParentChain(routeData);
       const breadcrumb = {
         title: routeData.title,
-        parent: routeData.parent
-          ? {
-              label: routeData.parent,
-              url: this.getParentUrl(routeData),
-              icon: this.getParentIcon(routeData),
-            }
-          : undefined,
+        parents,
+        // Mantener `parent` como el más cercano para backward compat con header
+        parent: parents.length ? parents[parents.length - 1] : undefined,
         current: {
           label: routeData.title,
           icon: routeData.icon,
@@ -1463,6 +1468,7 @@ export class BreadcrumbService {
       // Breadcrumb por defecto si no hay coincidencia
       const defaultBreadcrumb = {
         title: 'Panel Principal',
+        parents: [],
         parent: undefined,
         current: {
           label: 'Dashboard',
@@ -1499,6 +1505,35 @@ export class BreadcrumbService {
     return patternParts.every((part, index) => {
       return part.startsWith(':') || part === urlParts[index];
     });
+  }
+
+  /**
+   * Camina la cadena de `parent` desde una ruta hasta la raíz, devolviendo
+   * los `BreadcrumbItem` ordenados del más externo al más cercano.
+   * Límite de profundidad 5 como red de seguridad contra ciclos en datos.
+   *
+   * Para `/admin/analytics/sales/by-product` con la tabla estática actual:
+   *   Por Producto → Ventas (padre inmediato) → Analíticas (abuelo) → Tienda
+   * Produce:  [Analíticas, Ventas]
+   */
+  private resolveParentChain(route: BreadcrumbRoute): BreadcrumbItem[] {
+    const chain: BreadcrumbItem[] = [];
+    let cursor: BreadcrumbRoute | undefined = route;
+    const visited = new Set<string>([route.path]);
+    let depth = 0;
+    while (cursor?.parent && depth < 5) {
+      const parentRoute = this.routes.find((r) => r.title === cursor!.parent);
+      if (!parentRoute || visited.has(parentRoute.path)) break;
+      visited.add(parentRoute.path);
+      chain.unshift({
+        label: parentRoute.title,
+        url: this.getParentUrl(parentRoute),
+        icon: parentRoute.icon,
+      });
+      cursor = parentRoute;
+      depth++;
+    }
+    return chain;
   }
 
   private getParentUrl(route: BreadcrumbRoute): string | undefined {
