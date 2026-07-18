@@ -162,7 +162,11 @@ export class DispatchNotesService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el `HttpErrorResponse` crudo (NO lo aplastamos a `new Error(msg)`):
+      // ambos consumidores del wizard (dispatch-note-wizard + generate-dispatch-wizard)
+      // discriminan por `err.error.error_code` (p.ej. DISPATCH_NOTE_NO_SHIPPING_ADDRESS)
+      // para mostrar un diálogo/mensaje accionable. Aplastarlo destruía el `error_code`.
+      catchError((error) => throwError(() => error)),
     );
   }
 

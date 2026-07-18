@@ -552,9 +552,17 @@ export class DispatchNoteWizardComponent {
    * Angular ("Http failure response for ..."), que no le dice nada al usuario.
    */
   private _extractApiError(err: unknown): { code?: string; message?: string } {
-    const body = (err as { error?: { error_code?: string; message?: string } })
-      ?.error;
-    return { code: body?.error_code, message: body?.message };
+    // Robusto ante dos formas: el `HttpErrorResponse` crudo (`err.error.*`, del
+    // que sacamos el `error_code`) y un `Error` plano aplastado por métodos del
+    // servicio que aún envuelven en `new Error(msg)` (sólo trae `err.message`).
+    const e = err as {
+      error?: { error_code?: string; message?: string };
+      message?: string;
+    };
+    return {
+      code: e?.error?.error_code,
+      message: e?.error?.message ?? e?.message,
+    };
   }
 
   private _onCreateError(err: unknown): void {
