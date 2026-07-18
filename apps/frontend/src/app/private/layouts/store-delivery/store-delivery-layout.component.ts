@@ -109,6 +109,28 @@ import { DeliveryBottomNavComponent } from './components/delivery-bottom-nav.com
       }
 
       .delivery-shell {
+        /* ── Identidad de MARCA Vendix (white-label OFF) ──────────────────
+           Vendix Repartos es una app operativa INTERNA de Vendix (rol
+           carrier), NO un storefront white-label. Por eso NO debe heredar el
+           branding del tenant (que puede ser azul u otro matiz ajeno a la
+           marca). Aquí redefinimos los tokens de marca a la paleta fija de
+           Vendix (verde + menta); como .delivery-shell es el ancestro común
+           de TODO /repartos, sus descendientes (botones, sticky-header,
+           stepper, chips, badges, halos) resuelven estos valores por herencia
+           CSS y quedan inmunes al override inline que ThemeService aplica en
+           <html>. Los neutros (background/surface/text) se dejan del tenant. */
+        --color-primary: #2ecc71;
+        --color-primary-rgb: 126, 215, 165;
+        --color-secondary: #2f6f4e;
+        --color-secondary-rgb: 47, 111, 78;
+        --color-accent: #a1f4d9;
+        --color-accent-rgb: 161, 244, 217;
+        --color-ring: rgba(46, 204, 113, 0.28);
+
+        /* Tokens neón de marca para la capa "AI Style" (halos/destellos). */
+        --vx-neon: 46, 204, 113; /* #2ecc71 núcleo neón */
+        --vx-mint: 161, 244, 217; /* #a1f4d9 menta */
+
         min-height: 100dvh;
         display: flex;
         flex-direction: column;
@@ -275,13 +297,15 @@ import { DeliveryBottomNavComponent } from './components/delivery-bottom-nav.com
 
       .progress {
         position: relative;
-        height: 6px;
-        margin-top: 4px;
+        height: 7px;
+        margin-top: 6px;
         border-radius: var(--radius-pill);
-        background: var(--color-border);
+        background: rgba(var(--color-secondary-rgb, 47, 111, 78), 0.14);
         overflow: hidden;
       }
 
+      /* Relleno neón de marca: menta → neón → verde profundo, con glow suave
+         (capa "AI Style", solo colores Vendix). */
       .progress-fill {
         position: absolute;
         inset: 0;
@@ -289,9 +313,13 @@ import { DeliveryBottomNavComponent } from './components/delivery-bottom-nav.com
         border-radius: var(--radius-pill);
         background: linear-gradient(
           90deg,
-          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
+          rgb(var(--vx-mint, 161, 244, 217)) 0%,
+          rgb(var(--vx-neon, 46, 204, 113)) 48%,
           rgb(var(--color-secondary-rgb, 47, 111, 78)) 100%
         );
+        box-shadow:
+          0 0 8px rgba(var(--vx-neon, 46, 204, 113), 0.55),
+          0 0 2px rgba(var(--vx-mint, 161, 244, 217), 0.9);
         transition: transform var(--transition-fast) ease;
         will-change: transform;
       }

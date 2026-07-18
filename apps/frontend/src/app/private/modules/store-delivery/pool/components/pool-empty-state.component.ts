@@ -38,8 +38,10 @@ import {
   template: `
     <div class="pool-empty">
       <div class="pool-empty-stage">
+        <span class="pool-empty-aura" aria-hidden="true"></span>
         <span class="pool-empty-blob" aria-hidden="true"></span>
         <span class="pool-empty-radar" aria-hidden="true"></span>
+        <span class="pool-empty-radar pool-empty-radar--mid" aria-hidden="true"></span>
         <span class="pool-empty-radar pool-empty-radar--delayed" aria-hidden="true"></span>
         <span class="pool-empty-badge">
           <app-icon name="package" [size]="34" class="pool-empty-icon"></app-icon>
@@ -80,6 +82,22 @@ import {
         margin-bottom: 10px;
       }
 
+      /* Aura ambiental grande y muy suave (capa "AI Style"): resplandor de
+         marca que rebasa el escenario para un efecto amplio y etéreo. */
+      .pool-empty-aura {
+        position: absolute;
+        inset: -70px;
+        border-radius: 9999px;
+        background: radial-gradient(
+          circle at 50% 45%,
+          rgba(var(--vx-neon, 46, 204, 113), 0.35) 0%,
+          rgba(var(--vx-mint, 161, 244, 217), 0.18) 38%,
+          transparent 70%
+        );
+        filter: blur(26px);
+        animation: pool-empty-aura-pulse 5.5s ease-in-out infinite;
+      }
+
       /* Blob de gradiente difuminado que respira detrás de todo. */
       .pool-empty-blob {
         position: absolute;
@@ -87,30 +105,34 @@ import {
         border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
         background: linear-gradient(
           135deg,
-          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
-          rgb(var(--color-secondary-rgb, 47, 111, 78)) 65%,
-          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 70%, black) 100%
+          rgb(var(--vx-mint, 161, 244, 217)) 0%,
+          rgb(var(--vx-neon, 46, 204, 113)) 45%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 100%
         );
-        opacity: 0.16;
+        opacity: 0.22;
         filter: blur(14px);
         animation: pool-empty-breathe 4.5s ease-in-out infinite;
       }
 
-      /* Anillos radar concéntricos que pulsan hacia afuera. */
+      /* Anillos radar concéntricos que pulsan hacia afuera (neón de marca). */
       .pool-empty-radar {
         position: absolute;
         width: 88px;
         height: 88px;
         border-radius: 9999px;
-        background: rgb(var(--color-primary-rgb, 126, 215, 165));
-        opacity: 0.22;
+        border: 1.5px solid rgba(var(--vx-neon, 46, 204, 113), 0.55);
+        background: rgba(var(--vx-neon, 46, 204, 113), 0.14);
+        opacity: 0.5;
         animation: pool-empty-radar 2.8s ease-out infinite;
       }
+      .pool-empty-radar--mid {
+        animation-delay: 0.9s;
+      }
       .pool-empty-radar--delayed {
-        animation-delay: 1.4s;
+        animation-delay: 1.8s;
       }
 
-      /* Círculo central con gradiente de marca + glow, ícono flotante. */
+      /* Círculo central con gradiente neón de marca + glow de color, flotante. */
       .pool-empty-badge {
         position: relative;
         z-index: 1;
@@ -123,10 +145,14 @@ import {
         color: #ffffff;
         background: linear-gradient(
           135deg,
-          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
+          rgb(var(--vx-neon, 46, 204, 113)) 0%,
           rgb(var(--color-secondary-rgb, 47, 111, 78)) 100%
         );
-        box-shadow: 0 12px 28px -8px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.55);
+        border: 1px solid rgba(var(--vx-mint, 161, 244, 217), 0.7);
+        box-shadow:
+          0 12px 30px -8px rgba(var(--vx-neon, 46, 204, 113), 0.6),
+          0 0 22px rgba(var(--vx-neon, 46, 204, 113), 0.45),
+          inset 0 1px 2px rgba(255, 255, 255, 0.4);
         animation: pool-empty-float 3.4s ease-in-out infinite;
       }
       .pool-empty-icon {
@@ -150,6 +176,17 @@ import {
         margin-top: 14px;
       }
 
+      @keyframes pool-empty-aura-pulse {
+        0%,
+        100% {
+          transform: scale(1);
+          opacity: 0.65;
+        }
+        50% {
+          transform: scale(1.1);
+          opacity: 0.95;
+        }
+      }
       @keyframes pool-empty-breathe {
         0%,
         100% {

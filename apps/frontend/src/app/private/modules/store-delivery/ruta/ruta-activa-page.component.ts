@@ -383,11 +383,46 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
         color: #ffffff;
         background: linear-gradient(
           135deg,
-          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
-          rgb(var(--color-secondary-rgb, 47, 111, 78)) 62%,
-          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 70%, black) 100%
+          rgb(var(--vx-neon, 46, 204, 113)) 0%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 60%,
+          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 68%, black) 100%
         );
-        box-shadow: 0 16px 34px -14px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.6);
+        border: 1px solid rgba(var(--vx-mint, 161, 244, 217), 0.28);
+        box-shadow:
+          0 16px 34px -14px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.6),
+          0 0 30px -6px rgba(var(--vx-neon, 46, 204, 113), 0.45);
+      }
+      /* Auroras neón que derivan lento detrás del contenido (capa "AI Style").
+         Recortadas por el overflow:hidden del hero; mix-blend screen para que
+         solo aporten luz de marca (menta/neón), nunca oscurezcan. */
+      .route-hero::before {
+        content: '';
+        position: absolute;
+        inset: -30%;
+        background:
+          radial-gradient(
+            32% 42% at 18% 20%,
+            rgba(var(--vx-mint, 161, 244, 217), 0.55) 0%,
+            transparent 70%
+          ),
+          radial-gradient(
+            36% 46% at 82% 78%,
+            rgba(var(--vx-neon, 46, 204, 113), 0.5) 0%,
+            transparent 72%
+          );
+        mix-blend-mode: screen;
+        pointer-events: none;
+        animation: route-hero-aurora 12s ease-in-out infinite alternate;
+      }
+      @keyframes route-hero-aurora {
+        0% {
+          transform: translate3d(-4%, -3%, 0) scale(1);
+          opacity: 0.85;
+        }
+        100% {
+          transform: translate3d(5%, 4%, 0) scale(1.12);
+          opacity: 1;
+        }
       }
       .route-hero-blob {
         position: absolute;

@@ -106,6 +106,14 @@ import { ActiveRouteStore } from '../state/active-route.store';
             iconBgColor="bg-amber-100"
             iconColor="text-amber-500"
           />
+          <app-stats
+            title="Avance"
+            [value]="progressLabel()"
+            smallText="Ruta completada"
+            iconName="gauge"
+            iconBgColor="bg-teal-100"
+            iconColor="text-teal-600"
+          />
         </div>
       </div>
 
@@ -192,11 +200,45 @@ import { ActiveRouteStore } from '../state/active-route.store';
         color: #ffffff;
         background: linear-gradient(
           135deg,
-          rgb(var(--color-primary-rgb, 126, 215, 165)) 0%,
-          rgb(var(--color-secondary-rgb, 47, 111, 78)) 62%,
-          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 70%, black) 100%
+          rgb(var(--vx-neon, 46, 204, 113)) 0%,
+          rgb(var(--color-secondary-rgb, 47, 111, 78)) 60%,
+          color-mix(in srgb, rgb(var(--color-secondary-rgb, 47, 111, 78)) 68%, black) 100%
         );
-        box-shadow: 0 16px 34px -14px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.6);
+        border: 1px solid rgba(var(--vx-mint, 161, 244, 217), 0.28);
+        box-shadow:
+          0 16px 34px -14px rgba(var(--color-secondary-rgb, 47, 111, 78), 0.6),
+          0 0 30px -6px rgba(var(--vx-neon, 46, 204, 113), 0.45);
+      }
+      /* Auroras neón que derivan lento detrás del contenido (capa "AI Style"),
+         recortadas por overflow:hidden; screen para sumar solo luz de marca. */
+      .identity-hero::before {
+        content: '';
+        position: absolute;
+        inset: -30%;
+        background:
+          radial-gradient(
+            32% 42% at 16% 18%,
+            rgba(var(--vx-mint, 161, 244, 217), 0.55) 0%,
+            transparent 70%
+          ),
+          radial-gradient(
+            36% 46% at 84% 82%,
+            rgba(var(--vx-neon, 46, 204, 113), 0.5) 0%,
+            transparent 72%
+          );
+        mix-blend-mode: screen;
+        pointer-events: none;
+        animation: identity-hero-aurora 12s ease-in-out infinite alternate;
+      }
+      @keyframes identity-hero-aurora {
+        0% {
+          transform: translate3d(-4%, -3%, 0) scale(1);
+          opacity: 0.85;
+        }
+        100% {
+          transform: translate3d(5%, 4%, 0) scale(1.12);
+          opacity: 1;
+        }
       }
       .identity-hero-blob {
         position: absolute;
@@ -303,6 +345,24 @@ export class SesionPageComponent {
       .filter((s) => s.status === 'delivered')
       .reduce((sum, s) => sum + (Number(s.collected_amount) || 0), 0),
   );
+
+  /** Total de paradas de la ruta (base del cálculo de avance). */
+  readonly totalStops = computed(() => this.routeStore.stops().length);
+
+  /**
+   * Avance de la ruta en porcentaje (entregadas / total). Cae a 0% de forma
+   * natural cuando no hay ruta activa (stops = []). Cuarta KPI para completar
+   * la cuadrícula simétrica de 4 columnas del `stats-container`.
+   */
+  readonly progressPct = computed(() => {
+    const total = this.totalStops();
+    return total > 0
+      ? Math.round((this.deliveredCount() / total) * 100)
+      : 0;
+  });
+
+  /** Etiqueta lista para la stat card (`"80%"`). */
+  readonly progressLabel = computed(() => `${this.progressPct()}%`);
 
   // ─── Payout informativo (read-only) ────────────────────────────────────────
   readonly payout = this.routeStore.payout;
