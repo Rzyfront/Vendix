@@ -4,6 +4,7 @@ import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
+  AddStopDto,
   CloseDispatchRouteDto,
   ConfirmRouteSheetDto,
   ConfirmRouteSheetResult,
@@ -148,10 +149,12 @@ export class PlanillasRutasService {
    * Append stops (dispatch notes) to an existing route.
    * `POST /store/dispatch-routes/:id/stops`.
    * Used by the "Generar Remisión" wizard when assigning a freshly-created
-   * dispatch note to an already-existing route. The backend de-duplicates and
-   * appends to the tail of the stop sequence.
+   * dispatch note to an already-existing route, and by the "Agregar remisiones"
+   * modal on the planilla detail. The backend de-duplicates and appends to the
+   * tail of the stop sequence, so callers may omit `stop_sequence`
+   * (`AddStopDto`); `CreateStopDto` is still assignable for legacy callers.
    */
-  addStops(routeId: number, dto: { stops: CreateStopDto[] }): Observable<DispatchRouteStop[]> {
+  addStops(routeId: number, dto: { stops: AddStopDto[] }): Observable<DispatchRouteStop[]> {
     return this.http
       .post<any>(`${this.apiUrl}/store/dispatch-routes/${routeId}/stops`, dto)
       .pipe(

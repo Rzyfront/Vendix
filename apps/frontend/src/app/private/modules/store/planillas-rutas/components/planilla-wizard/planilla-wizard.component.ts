@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -415,6 +416,7 @@ export class PlanillaWizardComponent {
   private readonly service = inject(PlanillasRutasService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly activatedRoute = inject(ActivatedRoute);
 
   /** Contexto precargado al llegar desde un método de envío (atajo). */
   readonly prefillNote = input<string | null>(null);
@@ -530,7 +532,18 @@ export class PlanillaWizardComponent {
    */
   private prefillApplied = false;
 
+  /**
+   * Ids de dispatch_note precargados desde el query param `prefillNotes`
+   * (CONTRATO con el flujo "crear ruta nueva desde una remisión" del módulo
+   * dispatch-notes: ids separados por coma, p.ej. `?prefillNotes=12,34`). Se
+   * leen del snapshot en el constructor y se aplican como paradas EN CUANTO
+   * cargan las remisiones elegibles (por eso se difieren hasta el callback de
+   * `loadAvailableNotes`). Campo plano (no signal): se consume una sola vez.
+   */
+  private pendingPrefillNoteIds: number[] = [];
+
   constructor() {
+    this.readPrefillNotesFromQuery();
     this.loadAvailableNotes();
     this.loadVehicles();
 
@@ -608,8 +621,40 @@ export class PlanillaWizardComponent {
         next: (res) => {
           const notes = (res?.data ?? []) as AvailableNote[];
           this.availableNotes.set(notes);
+          this.applyPrefillNotes();
         },
       });
+  }
+
+  /**
+   * Lee el query param `prefillNotes` del snapshot (el repo NO usa
+   * `withComponentInputBinding`, así que los params se leen vía `ActivatedRoute`)
+   * y deja los ids válidos pendientes de aplicar. Idempotente: si no viene el
+   * param, no hace nada y el flujo normal del wizard queda intacto.
+   */
+  private readPrefillNotesFromQuery(): void {
+    const raw = this.activatedRoute.snapshot.queryParamMap.get('prefillNotes');
+    if (!raw) return;
+    this.pendingPrefillNoteIds = raw
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+  }
+
+  /**
+   * Aplica el prefill de remisiones (query param `prefillNotes`) una vez
+   * cargadas las elegibles: agrega como parada cada id que exista en
+   * `availableNotes`. Se ejecuta una sola vez (vacía la lista pendiente). Un id
+   * que no esté entre las elegibles (ya asignado a otra ruta / no confirmado) se
+   * ignora en silencio para no crear paradas fantasma sin datos.
+   */
+  private applyPrefillNotes(): void {
+    if (this.pendingPrefillNoteIds.length === 0) return;
+    const availableIds = new Set(this.availableNotes().map((n) => n.id));
+    for (const id of this.pendingPrefillNoteIds) {
+      if (availableIds.has(id)) this.addNote(id);
+    }
+    this.pendingPrefillNoteIds = [];
   }
 
   private loadVehicles(): void {
