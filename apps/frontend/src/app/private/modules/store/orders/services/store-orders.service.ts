@@ -48,6 +48,29 @@ export interface CreateAddressPayload {
   delivery_instructions?: string;
 }
 
+/**
+ * Payload para editar una dirección store-side (`PATCH /store/addresses/:id`).
+ * `UpdateAddressDto = PartialType(CreateAddressDto)` en el backend: todas las
+ * claves son opcionales. Mismas claves que `CreateAddressPayload` salvo
+ * `customer_id` (no se muta al editar) y `delivery_instructions` (la dirección
+ * de envío no las expone en el editor — viven en la orden). `latitude`/`longitude`
+ * van como `string` porque el DTO backend usa `@IsString() @IsLatLong()`.
+ * `phone_number` NO está en el DTO (vive en la columna Prisma pero el backend
+ * no lo expone para escritura), así que se omite aquí.
+ */
+export interface UpdateAddressPayload {
+  address_line_1?: string;
+  address_line_2?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+  type?: string;
+  is_primary?: boolean;
+  latitude?: string;
+  longitude?: string;
+}
+
 // Caché estático global (persiste entre instancias del servicio)
 interface CacheEntry<T> {
   observable: T;
@@ -652,5 +675,26 @@ export class StoreOrdersService {
           return throwError(() => new Error(this.extractErrorMessage(error)));
         }),
       );
+  }
+
+  /**
+   * PATCH /store/addresses/:id
+   * Edita una dirección existente (ej. la dirección de envío ya asignada a
+   * una orden). El backend (`addresses.controller.update`) requiere permiso
+   * `store:addresses:update` y acepta `UpdateAddressDto = PartialType(CreateAddressDto)`.
+   * Devuelve la dirección actualizada.
+   */
+  updateAddress(
+    addressId: number,
+    payload: UpdateAddressPayload,
+  ): Observable<{ id: number } & Record<string, unknown>> {
+    const url = `${this.apiUrl}/store/addresses/${addressId}`;
+    return this.http.patch<any>(url, payload).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error updating address:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
   }
 }

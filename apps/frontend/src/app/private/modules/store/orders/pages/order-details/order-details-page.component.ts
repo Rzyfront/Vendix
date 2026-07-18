@@ -9,7 +9,9 @@ import { switchMap } from 'rxjs/operators';
 import {
   StoreOrdersService,
   CreateAddressPayload,
+  UpdateAddressPayload,
 } from '../../services/store-orders.service';
+import { AddressPayload } from '../../../../../../shared/components';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
@@ -189,6 +191,17 @@ export class OrderDetailsPageComponent {
   showShippingAddressModal = signal(false);
   /** True mientras se persiste la dirección (POST address + PATCH order). */
   savingShippingAddress = signal(false);
+  /**
+   * ID de la dirección en edición. `null` = modo crear (POST). No-null = modo
+   * editar (`PATCH /store/addresses/:id`). Alimenta el binding `[addressId]`
+   * del modal y disambigua el output a escuchar.
+   */
+  editingAddressId = signal<number | null>(null);
+  /**
+   * Dirección existente mapeada a `AddressPayload` para prefill el modal en
+   * modo editar. `null` en modo crear.
+   */
+  editingInitialAddress = signal<AddressPayload | null>(null);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -1403,7 +1416,78 @@ export class OrderDetailsPageComponent {
    */
   promptAddShippingAddress(): void {
     if (!this.order()) return;
+    // Reset a modo crear: sin addressId, sin prefill.
+    this.editingAddressId.set(null);
+    this.editingInitialAddress.set(null);
     this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Abre el modal de dirección en modo **editar** a partir de la dirección de
+   * envío ya asignada a la orden. Mapea la relación
+   * `addresses_orders_shipping_address_idToaddresses` (claves Prisma:
+   * `address_line1`, `state_province`, `country_code`, `postal_code`,
+   * `phone_number`, `latitude`, `longitude` — Decimal llega como string|number)
+   * a `AddressPayload` para prefill el formulario hijo.
+   */
+  promptEditShippingAddress(addr: {
+    id?: number | string;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state_province?: string | null;
+    country_code?: string | null;
+    postal_code?: string | null;
+    phone_number?: string | null;
+    latitude?: string | number | null;
+    longitude?: string | number | null;
+  }): void {
+    const id = addr.id != null ? Number(addr.id) : null;
+    if (id == null || isNaN(id)) return;
+    const lat = addr.latitude != null ? Number(addr.latitude) : null;
+    const lng = addr.longitude != null ? Number(addr.longitude) : null;
+    this.editingAddressId.set(id);
+    this.editingInitialAddress.set({
+      address_line1: addr.address_line1 ?? null,
+      address_line2: addr.address_line2 ?? null,
+      city: addr.city ?? null,
+      state_province: addr.state_province ?? null,
+      country_code: addr.country_code ?? null,
+      postal_code: addr.postal_code ?? null,
+      phone_number: addr.phone_number ?? null,
+      latitude: lat != null && !isNaN(lat) ? lat : null,
+      longitude: lng != null && !isNaN(lng) ? lng : null,
+    });
+    this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Persiste la edición de la dirección de envío: `PATCH /store/addresses/:id`
+   * con el payload mapeado, y refretea la orden para que el detalle read-only
+   * refleje los cambios. A diferencia del modo crear, NO hace
+   * `PATCH /store/orders/:id` (la relación ya existe — solo mutamos la address).
+   */
+  onShippingAddressEdit(event: { addressId: number; payload: UpdateAddressPayload }): void {
+    const order = this.order();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.ordersService
+      .updateAddress(event.addressId, event.payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.refreshOrder();
+          this.toastService.success('Dirección de entrega actualizada');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          const message =
+            err instanceof Error ? err.message : 'No se pudo actualizar la dirección';
+          this.toastService.error(message);
+        },
+      });
   }
 
   /**
