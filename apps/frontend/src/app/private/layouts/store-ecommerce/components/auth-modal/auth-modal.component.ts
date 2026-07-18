@@ -25,6 +25,7 @@ import { StoreAvailabilityService } from '../../../../../core/services/store-ava
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { RateLimitLockModalComponent } from '../../../../../shared/components/rate-limit-lock-modal/rate-limit-lock-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
@@ -44,6 +45,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
     InputComponent,
     IconComponent,
     LegalPreviewModalComponent,
+    RateLimitLockModalComponent,
   ],
   template: `
     <app-modal
@@ -360,6 +362,15 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
       [content]="previewDoc().content"
       [version]="previewDoc().version"
     ></app-legal-preview-modal>
+
+    <!-- Rate limit lock modal (HTTP 429) — countdown + soporte -->
+    <app-rate-limit-lock-modal
+      [(isOpen)]="rateLimitOpen"
+      [retrySeconds]="rateLimitSeconds()"
+      [attemptedEmail]="authForm.get('email')?.value"
+      context="ecommerce"
+      (closed)="rateLimitOpen.set(false)"
+    ></app-rate-limit-lock-modal>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -378,6 +389,16 @@ export class AuthModalComponent {
   readonly isForgot = computed(() => this.mode() === 'forgot');
   readonly errorMessage = signal<string | null>(null);
   readonly errorTitle = signal('Error de autenticación');
+
+  /**
+   * Rate limit (HTTP 429) lock modal state. When the backend rejects a login
+   * attempt with 429, the shared RateLimitLockModalComponent (real countdown +
+   * mailto soporte) replaces the generic "demasiados intentos" toast. The
+   * seconds come from the normalized payload `retryAfter` (see
+   * normalizeApiPayload); defaults to 900s (15 min) when absent.
+   */
+  readonly rateLimitOpen = signal(false);
+  readonly rateLimitSeconds = signal(0);
 
   /**
    * Set when the backend returns AUTH_CUSTOMER_CLAIMABLE_001 — the email
@@ -465,6 +486,22 @@ export class AuthModalComponent {
       const open = this.isOpen();
       if (error && open) {
         untracked(() => {
+          // Rate limit (HTTP 429): intercept the raw normalized payload BEFORE
+          // the generic message. loginCustomerFailure dispatches
+          // normalizeApiPayload(error), which carries statusCode + retryAfter,
+          // so the shared lock modal (countdown + soporte) replaces the toast.
+          // The substring branch in mapErrorToUserFriendly stays as a fallback.
+          const err = error as any;
+          if (
+            err?.statusCode === 429 ||
+            err?.status === 429 ||
+            typeof err?.retryAfter === 'number'
+          ) {
+            this.rateLimitSeconds.set(err.retryAfter ?? 900);
+            this.rateLimitOpen.set(true);
+            return;
+          }
+
           const rawMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
           const { title, message } = this.mapErrorToUserFriendly(
