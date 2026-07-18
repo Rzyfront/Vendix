@@ -282,24 +282,6 @@ export class RecipeItemsEditorComponent implements OnInit {
       );
     }
   }
-        error: () => {
-          // Swallow: missing unit must not block the form; the input simply
-          // shows no suffix.
-          this.unitCache.set(id, '');
-          this.unitCacheTick.update((v) => v + 1);
-        },
-      );
-  }
-
-  private resolveProductUnitLabel(product: any): string {
-        error: () => {
-          // Swallow: missing unit must not block the form; the input simply
-          // shows no suffix.
-          this.unitCache.set(id, '');
-          this.unitCacheTick.update((v) => v + 1);
-        },
-      });
-  }
 
   private resolveProductUnitLabel(product: any): string {
     const legacy = (product?.stock_unit ?? '').toString().trim();
