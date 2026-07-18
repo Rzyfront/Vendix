@@ -641,7 +641,7 @@ export class MembershipAccessPageComponent implements OnInit {
       icon: 'mail',
       variant: 'ghost',
       tooltip: 'Reenviar email de la credencial al socio',
-      disabled: (item: GymAccessCredential) => this.resendingCredentialId() === item.id,
+      disabled: () => this.resendingCredentialId() !== null,
       action: (item: GymAccessCredential) => this.resendCredentialEmail(item),
     },
     {
