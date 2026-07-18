@@ -28,6 +28,7 @@ import {
 import type { SelectorOption } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { extractApiError } from '../../../../../../shared/utils/http-error.util';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { PosProductService, Product } from '../../../pos/services/pos-product.service';
 import { LocationsService } from '../../../inventory/services/locations.service';
 import type {
@@ -712,15 +713,22 @@ export class ItemPickerStepComponent {
 
   private seedDetailsForm(): void {
     const d = this.wizardService.details();
+    // Default HOY (fecha LOCAL) cuando aún no hay fecha acordada.
+    const agreedDeliveryDate = d.agreed_delivery_date ?? toLocalDateString();
     this.detailsForm.patchValue(
       {
-        agreed_delivery_date: d.agreed_delivery_date ?? '',
+        agreed_delivery_date: agreedDeliveryDate,
         dispatch_location_id: d.dispatch_location_id ?? null,
         notes: d.notes ?? '',
         internal_notes: d.internal_notes ?? '',
       },
       { emitEvent: false },
     );
+    // Empuja el default al servicio (el seed usa emitEvent:false, así que
+    // syncFormToService no lo propagaría) para que review-step concuerde.
+    if (!d.agreed_delivery_date) {
+      this.wizardService.setDetails({ agreed_delivery_date: agreedDeliveryDate });
+    }
   }
 
   private loadLocations(): void {

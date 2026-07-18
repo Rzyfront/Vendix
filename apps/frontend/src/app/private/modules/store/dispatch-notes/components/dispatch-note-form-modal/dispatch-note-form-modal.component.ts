@@ -67,7 +67,7 @@ export class DispatchNoteFormModalComponent {
       customer_id: [null, Validators.required],
       dispatch_location_id: [null],
       emission_date: [toLocalDateString()],
-      agreed_delivery_date: [null],
+      agreed_delivery_date: [toLocalDateString()],
       notes: [''],
       internal_notes: [''],
       currency: ['COP'],

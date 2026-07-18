@@ -17,6 +17,7 @@ import {
 } from '../../interfaces/planilla.interface';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 /** Address blob may arrive as a JSON object or a pre-formatted string. */
 type AddressLike = DispatchDeliveryAddress | string;
@@ -247,7 +248,8 @@ export class StopDetailModalComponent {
   readonly deliveryDate = computed<string>(() => {
     const raw = this.note()?.agreed_delivery_date;
     if (!raw) return '—';
-    return new Date(raw).toLocaleDateString();
+    // date-only field → format en UTC para evitar el corrimiento de un día.
+    return formatDateOnlyUTC(raw);
   });
 
   readonly itemCount = computed<number>(() => this.note()?.dispatch_note_items?.length ?? 0);

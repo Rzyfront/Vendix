@@ -31,6 +31,7 @@ import type {
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { WizardStepSectionComponent } from './wizard-step-section.component';
 
 /**
@@ -368,15 +369,22 @@ export class OrderItemsStepComponent {
 
   private seedDetailsForm(): void {
     const d = this.wizardService.details();
+    // Default HOY (fecha LOCAL) cuando la orden no trae fecha acordada.
+    const agreedDeliveryDate = d.agreed_delivery_date ?? toLocalDateString();
     this.detailsForm.patchValue(
       {
-        agreed_delivery_date: d.agreed_delivery_date ?? '',
+        agreed_delivery_date: agreedDeliveryDate,
         dispatch_location_id: d.dispatch_location_id ?? null,
         notes: d.notes ?? '',
         internal_notes: d.internal_notes ?? '',
       },
       { emitEvent: false },
     );
+    // Empuja el default al servicio para que review-step concuerde y para que el
+    // effect syncOrderDateToForm no borre el valor sembrado (details() vacío → '').
+    if (!d.agreed_delivery_date) {
+      this.wizardService.setDetails({ agreed_delivery_date: agreedDeliveryDate });
+    }
   }
 
   private loadLocations(): void {

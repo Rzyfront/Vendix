@@ -11,6 +11,7 @@ import {
   IconComponent,
   InputsearchComponent,
 } from '../../../../../../shared/components';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 import { WizardStepSectionComponent } from './wizard-step-section.component';
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
@@ -376,7 +377,7 @@ import { PosCustomerService } from '../../../pos/services/pos-customer.service';
                             #{{ dn.dispatch_number }}
                           </span>
                           <span class="text-xs text-[var(--color-text-muted)]">
-                            {{ dn.emission_date }}
+                            {{ formatEmissionDate(dn.emission_date) }}
                           </span>
                         </div>
                       </button>
@@ -610,5 +611,13 @@ export class PartyStepComponent {
 
   selectRelatedDispatch(dn: any): void {
     this.wizardService.setRelatedDispatchId(dn.id);
+  }
+
+  /**
+   * Formatea la fecha de emisión (campo date-only del backend) en UTC para
+   * evitar el corrimiento de un día en zonas UTC-negativas. Guarda contra null.
+   */
+  formatEmissionDate(value?: string | null): string {
+    return value ? formatDateOnlyUTC(value) : '—';
   }
 }
