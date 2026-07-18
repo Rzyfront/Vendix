@@ -222,7 +222,10 @@ export class HomeComponent implements OnInit {
   }
 
   loadFeaturedProducts(limit = this.featured_section().limit || 16): void {
-    if (this.featured_section().enabled === false) {
+    // Fallback: even if featured_products section is disabled, load products
+    // when there are NO other sections to render — prevents blank homepage.
+    const isFallback = this.ordered_home_sections().length === 0;
+    if (this.featured_section().enabled === false && !isFallback) {
       this.featured_products.set([]);
       this.is_loading_featured.set(false);
       return;
