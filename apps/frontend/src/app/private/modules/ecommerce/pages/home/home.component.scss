@@ -232,3 +232,26 @@
     opacity: 0.6;
   }
 }
+
+// Fallback section shown when all homepage modules are disabled —
+// reuses the same .products-grid / .loading-grid / .empty-state /
+// .view-more-container styles from .products-section above. Only
+// .home-fallback-specific styles (title + subtitle) live here.
+.home-fallback {
+  padding: 3rem 1rem;
+  max-width: 1280px;
+  margin: 0 auto;
+
+  &__title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+    color: var(--color-text-primary);
+  }
+
+  &__subtitle {
+    font-size: 0.95rem;
+    color: var(--color-text-secondary);
+    margin: 0 0 1.5rem;
+  }
+}
