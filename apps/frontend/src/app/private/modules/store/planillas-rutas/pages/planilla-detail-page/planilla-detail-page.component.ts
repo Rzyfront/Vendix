@@ -352,6 +352,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         [loading]="detailLoading()"
         (close)="closeStopDetail()"
         (goToNote)="goToDispatchNote($event)"
+        (refresh)="onStopAddressRefresh()"
       ></app-stop-detail-modal>
     }
 
@@ -927,6 +928,30 @@ export class PlanillaDetailPageComponent {
     this.detailStop.set(null);
     this.detailNote.set(null);
     this.detailLoading.set(false);
+  }
+
+  /**
+   * The stop-detail modal persisted a delivery address for the linked remisión
+   * (`onAddressSaved` → `refresh.emit()`). Reload the route so the stops table,
+   * the "dirección de entrega" column and the dispatch-block banner all reflect
+   * the new address snapshot. We also refresh the in-modal `detailNote` so the
+   * operator sees the updated address without reopening the modal.
+   */
+  onStopAddressRefresh(): void {
+    this.load();
+    const stop = this.detailStop();
+    const noteId = stop?.dispatch_note_id;
+    if (noteId) {
+      this.dispatchNotesService
+        .getDispatchNote(noteId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (note) => this.detailNote.set(note),
+          error: () => {
+            /* keep the existing snapshot; the route reload already happened */
+          },
+        });
+    }
   }
 
   goToDispatchNote(id: number) {

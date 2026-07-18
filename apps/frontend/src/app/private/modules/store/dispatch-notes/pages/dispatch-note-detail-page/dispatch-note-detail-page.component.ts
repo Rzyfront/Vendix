@@ -51,6 +51,7 @@ import {
           (voidAction)="openVoidModal($event)"
           (invoiceAction)="openInvoiceModal($event)"
           (printAction)="handlePrint($event)"
+          (addressSaved)="onAddressSaved()"
         ></app-dispatch-note-detail>
       }
 
@@ -290,5 +291,16 @@ export class DispatchNoteDetailPageComponent {
   handlePrint(dn: DispatchNote): void {
     this.pdfNoteId.set(dn.id);
     this.showPdfViewer.set(true);
+  }
+
+  /**
+   * The dispatch-note-detail child persisted a delivery address via its inline
+   * `<app-dispatch-note-address-editor (saved)>` → refetch the remision so the
+   * address snapshot, the "dirección de entrega" chip and the dispatch-block
+   * banner all reflect the new state.
+   */
+  onAddressSaved(): void {
+    const dn = this.dispatch_note();
+    if (dn) this.loadDispatchNote(dn.id);
   }
 }
