@@ -339,11 +339,6 @@ export class RecipeFormPageComponent implements OnInit {
     const formInvalid = this.form.invalid;
     const itemsInvalid = this.itemsArray.invalid;
     const itemsCount = this.itemsArray.length;
-    console.debug('[recipe-form] submit() called', {
-      formInvalid,
-      itemsInvalid,
-      itemsCount,
-    });
     if (formInvalid || itemsInvalid) {
       // Compose a specific inline message that names the actual problem
       // rather than a generic "review the fields" hint.
@@ -357,7 +352,6 @@ export class RecipeFormPageComponent implements OnInit {
         errors.push('Completá los campos obligatorios del encabezado.');
       }
       const composedMessage = errors.join(' ');
-      console.debug('[recipe-form] setting submitError:', composedMessage);
       this.submitError.set(composedMessage);
       this.toastService.warning('Revisa los campos marcados antes de guardar');
       return;
