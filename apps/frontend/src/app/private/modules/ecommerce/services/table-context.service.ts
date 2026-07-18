@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { isPlatformBrowser } from '@angular/common';
-import { Observable, finalize, map, tap } from 'rxjs';
+import { Observable, finalize, firstValueFrom, map, tap } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 import { QrScanBehavior } from '../../../../core/models/store-settings.interface';
@@ -27,6 +27,49 @@ interface PersistedTableContext {
   autoFire: boolean;
   sessionId: number | null;
   storeId: number | null;
+  /**
+   * Diner identity decision, remembered per-device (Step 5 — welcome wizard)
+   * so a re-scan of the same QR does not re-prompt. `allow_anonymous` /
+   * `anonymous_default` are intentionally NOT persisted — they always come
+   * fresh from `resolve()`.
+   */
+  identityChosen: boolean;
+  chosenCustomer: TableIdentityCustomer | null;
+}
+
+/**
+ * Identity assigned to the active table session. `null` = the session has no
+ * diner identity yet. Shared by `resolve` (`customer`), the `identityChosen`
+ * state, and the `identify` result.
+ */
+export interface TableIdentityCustomer {
+  id: number;
+  name: string;
+}
+
+/** Identity mode the diner picks in the welcome wizard (Step 5). */
+export type TableIdentifyMode = 'anonymous' | 'guest' | 'authenticated';
+
+/** Guest details captured when the diner chooses the `guest` identity mode. */
+export interface TableGuestIdentity {
+  first_name: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  document_type?: string;
+  document_number?: string;
+}
+
+/** Result of `POST /api/ecommerce/tables/:token/identify` (inside `data`). */
+export interface TableIdentifyResult {
+  ok: boolean;
+  customer: TableIdentityCustomer | null;
+  session_id: number | null;
+}
+
+interface TableIdentifyResponse {
+  success: boolean;
+  data: TableIdentifyResult;
 }
 
 /**
@@ -35,6 +78,11 @@ interface PersistedTableContext {
  * `enable_table_checkout` is the per-store flag from
  * `store_settings.restaurant.enable_table_checkout` (gate for the diner
  * self-checkout C2 flow). When `false`, the diner cannot call `payTable`.
+ *
+ * `allow_anonymous` / `anonymous_default` drive the welcome wizard (Step 5):
+ * whether the store permits an anonymous diner identity and whether anonymous
+ * is the default choice. `customer` is the identity already attached to the
+ * active session (if any) — when present, the wizard is skipped.
  */
 interface ResolveTableResponse {
   success: boolean;
@@ -45,6 +93,9 @@ interface ResolveTableResponse {
     auto_fire: boolean;
     session_id?: number | null;
     enable_table_checkout?: boolean;
+    allow_anonymous: boolean;
+    anonymous_default: boolean;
+    customer: TableIdentityCustomer | null;
   };
 }
 
@@ -245,6 +296,22 @@ export class TableContextService {
   /** Store the table belongs to — needed by the diner SSE `?store_id=`. */
   readonly storeId = signal<number | null>(null);
 
+  // ── Diner identity (Step 5 — welcome wizard) ────────────────────
+  /**
+   * True once an identity is settled for this table: either the diner picked
+   * one on THIS device (`identify()`), or the resolved session already carries
+   * a `customer`. Remembered per-device in localStorage so a re-scan of the
+   * same QR does not re-prompt the wizard. Reset on `clear()` / `leaveTable()`
+   * (the diner left the table → ask again on the next scan).
+   */
+  readonly identityChosen = signal(false);
+  /** Identity attached to the session (from `resolve`/`identify`), or null. */
+  readonly chosenCustomer = signal<TableIdentityCustomer | null>(null);
+  /** Store permits an anonymous diner identity (from `resolve` — not persisted). */
+  readonly allowAnonymous = signal(false);
+  /** Anonymous is the store's default identity (from `resolve` — not persisted). */
+  readonly anonymousDefault = signal(false);
+
   // ── Device identity (D1) ───────────────────────────────────────
   /**
    * Per-tab device identifier. Lives in `sessionStorage`, NOT `localStorage`,
@@ -275,6 +342,14 @@ export class TableContextService {
   readonly loading_bill = signal(false);
   readonly calling_waiter = signal(false);
   readonly requesting_bill = signal(false);
+
+  /**
+   * In-flight guard for `addOrder`. While a POST is pending, additional
+   * calls short-circuit (no duplicate POST). Belt-and-suspenders alongside
+   * the upstream single-dispatch in product-card.onAddToCart (Step 8).
+   */
+  private readonly addingOrderInFlight = signal(false);
+  readonly isAddingOrder = computed(() => this.addingOrderInFlight());
 
   // ── Payment state (D1 — diner self-checkout C2) ─────────────────
   /** Payment methods the diner can choose from for the table pay flow. */
@@ -322,6 +397,36 @@ export class TableContextService {
   readonly canCheckout = computed(
     () => this.enableTableCheckout() && this.isOpenTab() && this.sessionId() != null,
   );
+
+  /**
+   * True when the storefront should HIDE purchase CTAs (add-to-cart /
+   * buy-now / quick-add) because the QR-mode forbids ordering right now.
+   *
+   * Rules (single source of truth — consumed by all 5 storefront surfaces):
+   *  - No active table context (`behavior === null`) → never hide. The
+   *    diner is browsing the regular ecommerce catalog.
+   *  - `menu_only` → always hide (the QR is a digital menu, no orders).
+   *  - `mark_occupied` / `require_staff` → hide UNTIL the staff opens a
+   *    session for the table (pre-session state). Once `sessionId` is
+   *    set, the diner can order — this flips the same way the SSE
+   *    `session_opened` handler will populate `sessionId` once Step 4c
+   *    lands.
+   *  - `open_tab` → never hide (the whole point of the mode is ordering
+   *    straight from the QR).
+   */
+  readonly hideDineInPurchase = computed<boolean>(() => {
+    const mode = this.behavior();
+    if (mode === null) return false;
+    if (mode === 'menu_only') return true;
+    if (mode === 'mark_occupied' || mode === 'require_staff') {
+      return this.sessionId() === null;
+    }
+    return false;
+  });
+
+  /** Inverse of `hideDineInPurchase` — exposed for template clarity at the
+   *  call site (`@if (canOrderToTab())` reads better than `!hideDineInPurchase()`). */
+  readonly canOrderToTab = computed<boolean>(() => !this.hideDineInPurchase());
 
   constructor() {
     // Lazy init — sessionStorage only exists in the browser.
@@ -400,6 +505,21 @@ export class TableContextService {
     this.storeId.set(data.store_id ?? null);
     this.enableTableCheckout.set(!!data.enable_table_checkout);
 
+    // Identity (Step 5). `allow_anonymous` / `anonymous_default` always come
+    // fresh from the server. The identity decision is remembered per-device:
+    //  - If the session already carries a `customer`, the identity is settled
+    //    server-side → mark it chosen so the wizard is skipped.
+    //  - If `customer` is null, do NOT force `identityChosen` back to false:
+    //    a decision already hydrated on THIS device must be respected. So
+    //    `identityChosen` ends up true when (locally hydrated) OR (customer
+    //    present); the reset only happens on `clear()` / `leaveTable()`.
+    this.allowAnonymous.set(!!data.allow_anonymous);
+    this.anonymousDefault.set(!!data.anonymous_default);
+    if (data.customer) {
+      this.identityChosen.set(true);
+      this.chosenCustomer.set(data.customer);
+    }
+
     // Reset diner-payment + presence state for the new table.
     this.paymentPending.set(null);
     this.paymentConfirmed.set(null);
@@ -410,15 +530,73 @@ export class TableContextService {
   }
 
   /**
+   * Assigns an identity to the active table session (Step 5 — welcome wizard):
+   *  - `anonymous`     → the session stays anonymous (no customer).
+   *  - `guest`         → a lightweight guest customer is created/attached.
+   *  - `authenticated` → the logged-in customer is attached server-side.
+   *
+   * `POST /api/ecommerce/tables/:token/identify` with `{ mode, guest }`, using
+   * the same HttpClient/headers pattern as `resolve()`. On success the choice
+   * is remembered on THIS device (`identityChosen` + `chosenCustomer` +
+   * `persist()`) so a re-scan of the same QR does not re-prompt.
+   *
+   * Throws when there is no active table token (mirrors `requireToken()`), and
+   * propagates any HTTP error to the caller (the component shows the toast) —
+   * never swallowed silently.
+   */
+  async identify(
+    mode: TableIdentifyMode,
+    guest?: TableGuestIdentity,
+  ): Promise<TableIdentifyResult> {
+    const token = this.requireToken();
+    const response = await firstValueFrom(
+      this.http.post<TableIdentifyResponse>(
+        `${this.api_url}/${token}/identify`,
+        { mode, guest },
+        { headers: this.getHeaders() },
+      ),
+    );
+    const data = response.data;
+    this.identityChosen.set(true);
+    this.chosenCustomer.set(data.customer);
+    this.persist();
+    return data;
+  }
+
+  /**
+   * Menu-only welcome dismiss: mark the wizard seen per-device without an HTTP
+   * identify (no tab to attach identity to). Persists so a re-scan of the same
+   * QR does not re-prompt the welcome wizard.
+   */
+  markWelcomeSeen(): void {
+    this.identityChosen.set(true);
+    this.persist();
+  }
+
+  /**
    * Adds items to the running table tab/order. Only valid when
    * `behavior === 'open_tab'` (or `require_staff` confirmed by staff).
    * Backend returns 409 for `menu_only` / `mark_occupied`.
+   *
+   * In-flight guard (Step 8 — BUG A cure): a single diner click must equal a
+   * single POST. While one request is pending, additional clicks are dropped
+   * here so duplicate dispatch upstream (rapid click, re-emit) can never
+   * double the items on the bill. The returned Observable for a guarded
+   * call completes immediately with no emission so qty-stepper resets don't
+   * false-trigger for ignored clicks.
    */
   addOrder(items: TableOrderItem[]): Observable<AddTableOrderResponse> {
+    if (this.addingOrderInFlight()) {
+      // Drop the click — another POST is already in flight.
+      return new Observable<AddTableOrderResponse>((observer) => {
+        observer.complete();
+      });
+    }
     const token = this.tableToken();
     if (!token) {
       throw new Error('TableContextService.addOrder: no active table token');
     }
+    this.addingOrderInFlight.set(true);
     return this.http
       .post<AddTableOrderResponse>(
         `${this.api_url}/${token}/order`,
@@ -432,6 +610,7 @@ export class TableContextService {
             this.persist();
           }
         }),
+        finalize(() => this.addingOrderInFlight.set(false)),
       );
   }
 
@@ -456,14 +635,28 @@ export class TableContextService {
 
   /**
    * Notifies staff that the table needs a waiter. Toggles `calling_waiter`.
+   *
+   * `customer` is an optional identity hint (from the welcome-wizard choice —
+   * `chosenCustomer()`) so the staff can see WHO is ringing in modes without a
+   * server-side session (`mark_occupied` / `require_staff`). Omitted →
+   * unchanged legacy body (`{ note }` only), so existing callers keep working.
    */
-  callWaiter(note?: string): Observable<TableActionResponse> {
+  callWaiter(
+    note?: string,
+    customer?: { id?: number; name?: string },
+  ): Observable<TableActionResponse> {
     const token = this.requireToken();
     this.calling_waiter.set(true);
+    const body: { note?: string; customer?: { id?: number; name?: string } } = {
+      note,
+    };
+    if (customer) {
+      body.customer = customer;
+    }
     return this.http
       .post<TableActionResponse>(
         `${this.api_url}/${token}/call-waiter`,
-        { note },
+        body,
         { headers: this.getHeaders() },
       )
       .pipe(finalize(() => this.calling_waiter.set(false)));
@@ -537,6 +730,9 @@ export class TableContextService {
       this.autoFire.set(!!ctx.autoFire);
       this.sessionId.set(ctx.sessionId ?? null);
       this.storeId.set(ctx.storeId ?? null);
+      // Identity decision remembered per-device (Step 5).
+      this.identityChosen.set(!!ctx.identityChosen);
+      this.chosenCustomer.set(ctx.chosenCustomer ?? null);
     } catch {
       // Corrupted entry — remove it silently.
       localStorage.removeItem(this.storage_key);
@@ -554,6 +750,13 @@ export class TableContextService {
     this.sessionId.set(null);
     this.storeId.set(null);
     this.enableTableCheckout.set(false);
+    // Identity (Step 5): leaving the table forgets the per-device decision so
+    // the next scan re-prompts the wizard. `allowAnonymous` / `anonymousDefault`
+    // are reset too — they are repopulated on the next `resolve()`.
+    this.identityChosen.set(false);
+    this.chosenCustomer.set(null);
+    this.allowAnonymous.set(false);
+    this.anonymousDefault.set(false);
     this.bill.set(null);
     this.loading_bill.set(false);
     this.calling_waiter.set(false);
@@ -723,6 +926,51 @@ export class TableContextService {
   }
 
   /**
+   * Applies a `session_opened` SSE event to the live signals. Called by
+   * `TableSessionSseService` (Step 4c) when the staff opens a session for
+   * this table while the diner is already browsing the storefront — e.g.
+   * `mark_occupied` flipped to `open_tab`, or `require_waiter` was
+   * confirmed by the mesero.
+   *
+   * Step 4c contract:
+   *  - Diner was bound server-side to `{table_id, session_id:null,
+   *    order_id:null}` (anonymous pre-session window — matchesDiner still
+   *    delivers `session_opened` because the filter keys on `table_id`).
+   *  - The `session_opened` event carries the new `session_id` (and
+   *    optionally `order_id`, `opened_at`, `opened_by`).
+   *  - This method writes `sessionId` here so `hideDineInPurchase()`
+   *    (Step 7) flips to `false` and the diner's purchase CTAs unlock.
+   *  - The SSE handler then reconnects the stream — on reconnect the
+   *    server resolves a fresh binding `{table_id, session_id:<id>,
+   *    order_id:null|order_id}` and subsequent `item_added` /
+   *    `session_closed` events match the new connection.
+   *
+   * Also resets `sessionClosed` (a freshly opened session is the active
+   * one — `sessionClosed` only flips true after `session_closed`) and
+   * persists to localStorage so a page reload keeps the binding.
+   *
+   * `billLastUpdated` is intentionally NOT touched here — that signal
+   * lives on `TableSessionSseService` (see Step 8) and the SSE handler
+   * bumps it right after this call so any `effect(() => billLastUpdated())`
+   * consumer refetches against the freshly opened session.
+   */
+  applySessionOpened(payload: {
+    session_id: number;
+    session_token?: string;
+    order_id?: number;
+    opened_at?: string;
+    opened_by?: number;
+  }): void {
+    if (typeof payload?.session_id !== 'number') return;
+    this.sessionId.set(payload.session_id);
+    // A freshly opened session is the active one — clear any stale
+    // "Mesa cerrada" flag so the banner doesn't read farewell copy.
+    this.sessionClosed.set(false);
+    // Persist so a reload keeps the binding (table_token + sessionId).
+    this.persist();
+  }
+
+  /**
    * Reads / mints the per-tab device UUID. Persisted in `sessionStorage`
    * (NOT localStorage) so two tabs on the same browser see distinct ids.
    */
@@ -760,6 +1008,8 @@ export class TableContextService {
       autoFire: this.autoFire(),
       sessionId: this.sessionId(),
       storeId: this.storeId(),
+      identityChosen: this.identityChosen(),
+      chosenCustomer: this.chosenCustomer(),
     };
     localStorage.setItem(this.storage_key, JSON.stringify(payload));
   }

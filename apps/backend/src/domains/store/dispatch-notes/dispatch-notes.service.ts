@@ -551,21 +551,35 @@ export class DispatchNotesService {
           state_province?: string | null;
           country_code?: string | null;
           postal_code?: string | null;
+          /**
+           * GPS coordinates persisted on the `addresses` table. Captured by
+           * the checkout map-picker; copied into the snapshot so the carrier
+           * route-map can geolocate stops without a geocoding round-trip.
+           * Optional because legacy addresses may have null coords.
+           */
+          latitude?: number | string | null;
+          longitude?: number | string | null;
         }
       | null
       | undefined,
   ): Prisma.InputJsonValue | null {
-    // (1) Prefer the order's own snapshot when it actually carries a line.
+    // (1) Prefer the order's own snapshot when it actually carries a line,
+    // pero inyecta lat/lng si faltan (fallback a relation).
     if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
       const s = snapshot as Record<string, unknown>;
       const line1 = s.address_line1 ?? s.line1 ?? s.address;
       if (typeof line1 === 'string' && line1.trim().length > 0) {
-        return snapshot as Prisma.InputJsonValue;
+        return this.withCoordsFallback(s, relation);
       }
     }
 
-    // (2) Fall back to the relation row, projected to column-name keys.
+    // (2) Fall back to the relation row, projected to column-name keys. Lat/Lng
+    // are projected when finite — we use a NUMBER not a string (Prisma returns
+    // numerics as strings by default, but the frontend `DispatchDeliveryAddress`
+    // type expects `number`).
     if (relation && relation.address_line1 && relation.address_line1.trim()) {
+      const lat = this.toFiniteNumber(relation.latitude);
+      const lng = this.toFiniteNumber(relation.longitude);
       return {
         address_line1: relation.address_line1,
         address_line2: relation.address_line2 ?? null,
@@ -573,10 +587,57 @@ export class DispatchNotesService {
         state_province: relation.state_province ?? null,
         country_code: relation.country_code ?? null,
         postal_code: relation.postal_code ?? null,
+        ...(lat !== null ? { latitude: lat } : {}),
+        ...(lng !== null ? { longitude: lng } : {}),
       };
     }
 
     return null;
+  }
+
+  /**
+   * Shallow-mergea lat/lng de `relation` en el snapshot dict `s` si el snapshot
+   * no los trae pero relation sí. Preserva todas las claves originales del snapshot.
+   */
+  private withCoordsFallback(
+    s: Record<string, unknown>,
+    relation:
+      | {
+          latitude?: number | string | null;
+          longitude?: number | string | null;
+        }
+      | null
+      | undefined,
+  ): Prisma.InputJsonValue {
+    // Si el snapshot ya tiene coords finitas, devolver intacto.
+    const hasLat = this.toFiniteNumber(s.latitude as any) !== null;
+    const hasLng = this.toFiniteNumber(s.longitude as any) !== null;
+    if (hasLat && hasLng) {
+      return s as Prisma.InputJsonValue;
+    }
+
+    // Intentar inyectar coords de relation.
+    const lat = this.toFiniteNumber(relation?.latitude);
+    const lng = this.toFiniteNumber(relation?.longitude);
+    return {
+      ...s,
+      ...(lat !== null ? { latitude: lat } : {}),
+      ...(lng !== null ? { longitude: lng } : {}),
+    } as Prisma.InputJsonValue;
+  }
+
+  /**
+   * Coerce a Prisma numeric/string to a finite `number`, or `null` if not
+   * representable. Used to project optional `addresses.latitude/longitude`
+   * (Prisma returns `Decimal` as string) into the JSON snapshot the carrier
+   * route-map reads.
+   */
+  private toFiniteNumber(
+    value: number | string | null | undefined,
+  ): number | null {
+    if (value === null || value === undefined) return null;
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) ? n : null;
   }
 
   /** True when the order's snapshot JSON carries a usable address line. */
@@ -1433,6 +1494,11 @@ export class DispatchNotesService {
             state_province: true,
             country_code: true,
             postal_code: true,
+            // Captured by the checkout map-picker; copied into the snapshot
+            // so the carrier route-map can geolocate stops without a
+            // geocoding round-trip. See `buildCustomerAddressSnapshot`.
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -1600,6 +1666,11 @@ export class DispatchNotesService {
             state_province: true,
             country_code: true,
             postal_code: true,
+            // Captured by the checkout map-picker; copied into the snapshot
+            // so the carrier route-map can geolocate stops without a
+            // geocoding round-trip. See `buildCustomerAddressSnapshot`.
+            latitude: true,
+            longitude: true,
           },
         },
       },
@@ -2076,10 +2147,12 @@ export class DispatchNotesService {
     }
 
     // State gate: only "hot" routes (draft / dispatched) accept new stops.
-    const EDITABLE_STATES: dispatch_route_status_enum[] = [
-      'draft',
-      'dispatched',
-    ];
+    // Vendix Repartos (B7): las rutas CARRIER admiten además `in_transit`
+    // (tomar-en-recorrido: el repartidor reclama otra orden mientras ya está en
+    // ruta). Las rutas admin conservan el gate original (draft/dispatched).
+    const EDITABLE_STATES: dispatch_route_status_enum[] = route.is_carrier_route
+      ? ['draft', 'dispatched', 'in_transit']
+      : ['draft', 'dispatched'];
     if (!EDITABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001);
     }
@@ -2629,6 +2702,93 @@ export class DispatchNotesService {
     });
 
     return dispatch_notes;
+  }
+
+  /**
+   * Vendix Repartos — Fase B5. Publica una orden al pool de repartidores.
+   *
+   * Valida la orden (store-scoped) y la marca como disponible poniendo
+   * `dispatch_pool_at = now()` de forma IDEMPOTENTE (guard `dispatch_pool_at
+   * IS NULL`): si ya estaba en el pool, devuelve el estado actual sin error y
+   * sin re-notificar. En la transición real emite `order.awaiting_carrier`
+   * ({ order_id, store_id }) para que el listener notifique a los carriers.
+   *
+   * Reglas de dominio (reusan los códigos DSP_ORDER_* del flujo createFromOrder):
+   * - state ∈ {processing, pending_payment}
+   * - delivery_type != 'direct_delivery'
+   * - dispatch_fulfillment != 'full'
+   * - sin remisión ACTIVA (dispatch_notes no anuladas) → evita doble despacho.
+   */
+  async sendToDispatchPool(order_id: number) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    // orders es auto-scoped por StorePrismaService → findFirst basta.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      select: {
+        id: true,
+        state: true,
+        delivery_type: true,
+        dispatch_fulfillment: true,
+        dispatch_pool_at: true,
+      },
+    });
+
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_FIND_001);
+    }
+
+    // Sólo órdenes en curso de fulfillment pueden ir al pool. `processing`
+    // (stock reservado) y `pending_payment` (COD, se cobra al entregar).
+    if (order.state !== 'processing' && order.state !== 'pending_payment') {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    }
+
+    // Envío directo se entrega en el mostrador; no pasa por el ciclo remisión.
+    if (order.delivery_type === 'direct_delivery') {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_DELIVERY_001);
+    }
+
+    // Ya despachada completamente → no tiene sentido enviarla al pool.
+    if (order.dispatch_fulfillment === 'full') {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    }
+
+    // Rechazo si la orden ya tiene una remisión ACTIVA (no anulada): evita
+    // que un admin la mande al pool mientras otro flujo ya la está despachando.
+    const activeNotes = await this.prisma.dispatch_notes.count({
+      where: { order_id, status: { not: 'voided' } },
+    });
+    if (activeNotes > 0) {
+      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    }
+
+    // Inserción idempotente en el pool: sólo si aún no está pooleada.
+    const now = new Date();
+    const updated = await this.prisma.orders.updateMany({
+      where: { id: order_id, store_id, dispatch_pool_at: null },
+      data: { dispatch_pool_at: now },
+    });
+
+    let pooled_at = now;
+    if (updated.count === 0) {
+      // Ya estaba en el pool → devolvemos el estado actual sin re-notificar.
+      const existing = await this.prisma.orders.findFirst({
+        where: { id: order_id },
+        select: { dispatch_pool_at: true },
+      });
+      pooled_at = existing?.dispatch_pool_at ?? now;
+    } else {
+      // Transición real → notificar a los carriers de la tienda.
+      this.eventEmitter.emit('order.awaiting_carrier', {
+        order_id,
+        store_id,
+      });
+    }
+
+    return { order_id, pooled_at: pooled_at.toISOString() };
   }
 
   async getByOrder(order_id: number) {

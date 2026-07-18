@@ -25,6 +25,7 @@ import * as AuthActions from '../auth/auth.actions';
 import { AppNotification } from './notifications.actions';
 import { AuthFacade } from '../auth/auth.facade';
 import { StoreSettingsFacade } from '../store-settings/store-settings.facade';
+import { StaffScanApprovalService } from '../../../private/modules/store/restaurant-ops/tables/services/staff-scan-approval.service';
 
 @Injectable()
 export class NotificationsEffects {
@@ -36,7 +37,21 @@ export class NotificationsEffects {
   private soundPlayer = inject(NotificationSoundPlayerService);
   private soundsCatalog = inject(NotificationSoundsCatalogService);
   private storeSettingsFacade = inject(StoreSettingsFacade);
+  private staffScanApproval = inject(StaffScanApprovalService);
   private eventSource: EventSource | null = null;
+
+  /**
+   * Vendix Repartos: la app del transportador (app_type `STORE_DELIVERY`) está
+   * confinada al namespace `/store/carrier/*` por el `DomainScopeGuard` del
+   * backend. Los endpoints admin `/store/notifications` y `.../stream` le
+   * responden 403, así que NO arrancamos el servicio global de notificaciones en
+   * ese shell: son llamadas condenadas al fallo (ruido de consola) y el shell
+   * carrier no monta campana. El pool de reparto es pull-based. Una campana push
+   * para el carrier requeriría endpoints bajo `/store/carrier/*` (follow-up).
+   */
+  private notificationsAvailableForApp(): boolean {
+    return this.authFacade.selectedAppType() !== 'STORE_DELIVERY';
+  }
 
   /**
    * Fires once when NgRx effects initialize.
@@ -48,7 +63,7 @@ export class NotificationsEffects {
       ofType(ROOT_EFFECTS_INIT),
       switchMap(() => {
         const isAuth = this.authFacade.isAuthenticated();
-        if (!isAuth) return EMPTY;
+        if (!isAuth || !this.notificationsAvailableForApp()) return EMPTY;
         return [
           NotificationsActions.loadNotifications(),
           NotificationsActions.connectSse(),
@@ -167,6 +182,8 @@ export class NotificationsEffects {
         AuthActions.loginCustomerSuccess,
         AuthActions.restoreAuthState,
       ),
+      // Repartos: no arrancar notificaciones admin en el shell carrier (403).
+      filter(() => this.notificationsAvailableForApp()),
       switchMap(() => [
         NotificationsActions.loadNotifications(),
         NotificationsActions.connectSse(),
@@ -219,6 +236,33 @@ export class NotificationsEffects {
           } catch {
             // Silent fail — never break notification flow because of audio
           }
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  /**
+   * Step 10 (QR-mesa `require_staff`) — open the staff approval modal
+   * whenever a `qr_table_scan` notification arrives.
+   *
+   * The notification's `data` row carries the `public_token` +
+   * `table_id` (Step 4b), so the modal can call
+   * `POST /ecommerce/tables/:token/confirm` directly without an extra
+   * table lookup. Per-user delivery (Step 3) guarantees only the
+   * assigned mesero sees the bell row, so this effect only fires for
+   * the right waiter.
+   *
+   * The `StaffScanApprovalService` is the bridge: it's a signal-based
+   * service that mounts a standalone `StaffScanApprovalModalComponent`
+   * on `document.body` and tears it down when the modal closes.
+   */
+  openStaffScanApproval$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(NotificationsActions.receivedNotification),
+        filter(({ notification }) => notification.type === 'qr_table_scan'),
+        tap(({ notification }) => {
+          this.staffScanApproval.show(notification);
         }),
       ),
     { dispatch: false },

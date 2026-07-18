@@ -13,6 +13,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { TablesService } from '../../store/tables/tables.service';
 import { TableSessionsService } from '../../store/tables/table-sessions.service';
 import { SettingsService } from '../../store/settings/settings.service';
+import { CustomersService } from '../../store/customers/customers.service';
 import { KitchenFireService } from '../../store/kitchen-fire/kitchen-fire.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { NotificationsSseService } from '../../store/notifications/notifications-sse.service';
@@ -22,10 +23,12 @@ import { PaymentEncryptionService } from '../../store/payments/services/payment-
 import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
 import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
+import { S3Service } from '@common/services/s3.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
   CallWaiterDto,
+  IdentifyTableDto,
   PayTableDto,
   RequestBillDto,
   RequestSplitDto,
@@ -49,6 +52,32 @@ export interface ResolveByTokenResult {
   auto_fire: boolean;
   enable_table_checkout: boolean;
   session_id?: number;
+  /**
+   * Welcome-wizard gates (Step 4). Both are read from `pos.*` in the same
+   * `store_settings` row `getQrSettings` already loads (single read), so the
+   * storefront can offer/skip the anonymous option without a second request.
+   */
+  allow_anonymous: boolean;
+  anonymous_default: boolean;
+  /**
+   * Identity currently attached to the table's active session (if any),
+   * resolved SERVER-SIDE from `orders.customer_id`. `null` when the session
+   * is anonymous or no session is open. The full `store_settings` object is
+   * never exposed — only these derived flags.
+   */
+  customer: { id: number; name: string } | null;
+}
+
+/**
+ * Result of the welcome-wizard identify endpoint (Step 3). `customer` is
+ * `null` for the anonymous mode; `session_id` echoes the active session the
+ * identity was attached to (null in pre-session modes where no tab exists
+ * yet — the client persists the identity and re-sends it on `call-waiter`).
+ */
+export interface IdentifyTableResult {
+  ok: true;
+  customer: { id: number; name: string } | null;
+  session_id: number | null;
 }
 
 export interface AddOrderItemsResult {
@@ -77,8 +106,12 @@ export interface BillItemView {
   /**
    * Diner-facing thumbnail: the variant's denormalized image when the line
    * is a variant, else the product's primary image (lowest `sort_order`),
-   * else `null`. Returned as the persisted S3 key/URL — never signed —
-   * matching the catalog/cart contract.
+   * else `null`.
+   *
+   * Returned as a SIGNED S3 URL (24h) — matches the catalog/cart/account
+   * contract (vendix-s3-storage). The DB stores raw S3 keys; signing happens
+   * on read inside `getBill`. Already-signed (HTTP-with-query-string) values
+   * are passed through untouched to avoid double-signing.
    */
   image_url: string | null;
 }
@@ -122,13 +155,24 @@ export interface PayTableResult {
 }
 
 /**
- * Server-derived binding for the diner SSE stream. Both ids are resolved
- * from the `public_token` (never from the client), so a diner can only
- * ever see KDS/bill events for their own table's active order.
+ * Server-derived binding for the diner SSE stream. Always includes the
+ * resolved `table_id` (from the `public_token`) so the stream filter can
+ * receive `session_opened` events before a session is actually open —
+ * otherwise the comensal in `menu_only` / `mark_occupied` / `require_staff`
+ * modes would be deaf to the table transitioning into a tab they can join.
+ *
+ * `session_id` / `order_id` are nullable for the pre-session window; once a
+ * session opens, the SSE handler can re-resolve the binding with all three
+ * fields populated (typically the comensal reconnects after seeing
+ * `session_opened`).
+ *
+ * All ids are derived SERVER-SIDE from the token — a diner can only ever
+ * see KDS/bill events for their own table.
  */
 export interface DinerStreamBinding {
-  order_id: number;
-  session_id: number;
+  table_id: number;
+  session_id: number | null;
+  order_id: number | null;
 }
 
 /**
@@ -163,6 +207,7 @@ export class EcommerceTablesService {
     private readonly tablesService: TablesService,
     private readonly tableSessionsService: TableSessionsService,
     private readonly settingsService: SettingsService,
+    private readonly customersService: CustomersService,
     private readonly kitchenFireService: KitchenFireService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     private readonly sseService: NotificationsSseService,
@@ -170,6 +215,7 @@ export class EcommerceTablesService {
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
     private readonly paymentEncryptionService: PaymentEncryptionService,
     private readonly wompiClientFactory: WompiClientFactory,
+    private readonly s3Service: S3Service,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -186,6 +232,8 @@ export class EcommerceTablesService {
     behavior: QrScanBehavior;
     auto_fire: boolean;
     enable_table_checkout: boolean;
+    allow_anonymous_sales: boolean;
+    anonymous_sales_as_default: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -197,11 +245,16 @@ export class EcommerceTablesService {
       select: { settings: true },
     });
     const restaurant = (row?.settings as any)?.restaurant ?? {};
+    // `pos.*` gates the welcome wizard's anonymous option (Step 3/4). Read
+    // from the SAME settings row so resolve + identify stay single-read.
+    const pos = (row?.settings as any)?.pos ?? {};
 
     return {
       behavior: (restaurant.qr_scan_behavior as QrScanBehavior) ?? 'menu_only',
       auto_fire: !!restaurant.qr_auto_fire,
       enable_table_checkout: !!restaurant.enable_table_checkout,
+      allow_anonymous_sales: pos.allow_anonymous_sales === true,
+      anonymous_sales_as_default: pos.anonymous_sales_as_default === true,
     };
   }
 
@@ -238,8 +291,13 @@ export class EcommerceTablesService {
       throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
     }
 
-    const { behavior, auto_fire, enable_table_checkout } =
-      await this.getQrSettings();
+    const {
+      behavior,
+      auto_fire,
+      enable_table_checkout,
+      allow_anonymous_sales,
+      anonymous_sales_as_default,
+    } = await this.getQrSettings();
 
     let session_id: number | undefined;
 
@@ -269,12 +327,25 @@ export class EcommerceTablesService {
       case 'require_staff':
         // Do NOT open a session. Notify store staff via SSE so a mesero
         // can approach the table and confirm (POST /:token/confirm).
-        this.notifyStaffTableScan(table.id, table.name);
+        // The QR `token` is forwarded so the bell payload includes
+        // `public_token` (Step 4b, QR-mesa require_staff — POS approval
+        // modal in Step 10 calls /confirm directly from the notif row).
+        this.notifyStaffTableScan(table.id, table.name, token);
         break;
 
       default:
         // Unknown behavior — fall back to menu_only (safest).
         break;
+    }
+
+    // Step 4 — resolve the identity attached to the table's active session
+    // (if any) so the welcome wizard can pre-fill / skip the identity step.
+    // Works for every mode: `open_tab` just opened one; the others may still
+    // have a POS-opened session. Derived SERVER-SIDE from `orders.customer_id`.
+    let customer: { id: number; name: string } | null = null;
+    const activeSession = await this.tablesService.getActiveSession(table.id);
+    if (activeSession) {
+      customer = await this.resolveOrderCustomer(activeSession.order_id);
     }
 
     return {
@@ -283,7 +354,159 @@ export class EcommerceTablesService {
       behavior,
       auto_fire,
       enable_table_checkout,
+      allow_anonymous: allow_anonymous_sales,
+      anonymous_default: anonymous_sales_as_default,
+      customer,
       ...(session_id !== undefined && { session_id }),
+    };
+  }
+
+  // ------------------------------------------------------------- identify
+  /**
+   * Step 3 — Welcome-wizard identity. A single `@OptionalAuth` endpoint that
+   * centralizes the three diner identity modes:
+   *
+   *   - `anonymous`     → no identity is created. Only allowed when the store
+   *                       enables `pos.allow_anonymous_sales`; otherwise the
+   *                       SAME `TABLE_SESSION_CUSTOMER_REQUIRED` error that
+   *                       `TableSessionsService.openSession` throws for a
+   *                       disallowed anonymous open is reused (no new code).
+   *   - `guest`         → resolves/creates a "cliente presentado" via
+   *                       `CustomersService.resolveTableGuestCustomer`.
+   *   - `authenticated` → attaches the logged-in customer (`req.user`).
+   *
+   * Session assignment happens ONLY when a tab is already open
+   * (`open_tab` auto-opened it in `resolveByToken`, or a POS-opened session
+   * exists). In `mark_occupied` / `require_staff` there is no session yet, so
+   * the resolved identity is returned to the client to persist and re-attach
+   * later (e.g. on `call-waiter`).
+   */
+  async identify(
+    token: string,
+    dto: IdentifyTableDto,
+    userId?: number,
+  ): Promise<IdentifyTableResult> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!token || typeof token !== 'string') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Token de mesa requerido',
+      );
+    }
+
+    const table = await this.prisma.tables.findFirst({
+      where: { public_token: token },
+      select: { id: true, name: true },
+    });
+    if (!table) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+    }
+
+    // May be null in the pre-session window (menu_only / mark_occupied /
+    // require_staff before the mesero confirms). Assignment is a no-op then.
+    const session = await this.tablesService.getActiveSession(table.id);
+
+    switch (dto.mode) {
+      case 'anonymous': {
+        // Gate ONLY the explicit anonymous choice — reuse the exact
+        // ErrorCode `openSession` throws for a disallowed anonymous open.
+        const { allow_anonymous_sales } = await this.getQrSettings();
+        if (allow_anonymous_sales !== true) {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_CUSTOMER_REQUIRED,
+          );
+        }
+        // No mutation — an already-open session simply stays anonymous.
+        return { ok: true, customer: null, session_id: session?.id ?? null };
+      }
+
+      case 'guest': {
+        if (!dto.guest?.first_name) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_VALIDATION_001,
+            'El nombre del comensal es requerido para identificarse',
+          );
+        }
+        const c = await this.customersService.resolveTableGuestCustomer(
+          store_id,
+          dto.guest,
+        );
+        if (session) {
+          await this.tableSessionsService.assignCustomer(
+            session.id,
+            c.customer_id,
+          );
+        }
+        return {
+          ok: true,
+          customer: { id: c.customer_id, name: c.name },
+          session_id: session?.id ?? null,
+        };
+      }
+
+      case 'authenticated': {
+        if (!userId) {
+          throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+        }
+        const name = await this.resolveCustomerName(userId);
+        if (session) {
+          await this.tableSessionsService.assignCustomer(session.id, userId);
+        }
+        return {
+          ok: true,
+          customer: { id: userId, name },
+          session_id: session?.id ?? null,
+        };
+      }
+
+      default:
+        // Unreachable — `mode` is enum-validated by the DTO.
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Modo de identificación inválido',
+        );
+    }
+  }
+
+  // --------------------------------------------------- customer resolution
+  /**
+   * Resolve a diner's display name from `users` (scope-safe: the `users`
+   * getter is unscoped, so a findFirst by id carries no AND-wrap caveat).
+   * Returns an empty string when the user row is missing.
+   */
+  private async resolveCustomerName(userId: number): Promise<string> {
+    const user = await this.prisma.users.findFirst({
+      where: { id: userId },
+      select: { first_name: true, last_name: true },
+    });
+    if (!user) return '';
+    return [user.first_name, user.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  }
+
+  /**
+   * Resolve the identity attached to an order (via `orders.customer_id`),
+   * returning `{ id, name }` or `null` for an anonymous order. `orders` is
+   * store-scoped (StorePrismaService), and the `order_id` always originates
+   * from a store-scoped table + active-session lookup — so this stays
+   * tenant-safe.
+   */
+  private async resolveOrderCustomer(
+    orderId: number,
+  ): Promise<{ id: number; name: string } | null> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: { customer_id: true },
+    });
+    if (!order?.customer_id) return null;
+    return {
+      id: order.customer_id,
+      name: await this.resolveCustomerName(order.customer_id),
     };
   }
 
@@ -497,12 +720,19 @@ export class EcommerceTablesService {
   }
 
   /**
-   * Non-throwing variant used by the diner SSE stream (GAP-3). Returns
-   * `null` when there is no store context, unknown token, or no active
-   * session — the stream still connects (empty snapshot + heartbeat) so
-   * the storefront banner can attach the moment the QR is scanned, even
-   * before a tab is open. The returned ids are derived SERVER-SIDE from
-   * the token and used as the default-deny filter key for live events.
+   * Non-throwing variant used by the diner SSE stream (GAP-3). Always
+   * returns a binding (never `null`) as long as the token resolves to a
+   * table — even when no session is open yet. The returned `table_id`
+   * lets the stream filter accept `session_opened` events for the comensal's
+   * table before a tab exists; `session_id` / `order_id` are `null` in that
+   * pre-session window and the comensal reconnects after seeing
+   * `session_opened` to receive the post-session deltas.
+   *
+   * Returns `null` only when there is no store context or the token does
+   * not resolve — those cases are hard connection denials.
+   *
+   * The returned ids are derived SERVER-SIDE from the token and used as
+   * the default-deny filter key for live events.
    */
   async resolveDinerBinding(
     token: string,
@@ -520,9 +750,16 @@ export class EcommerceTablesService {
     }
     const session = await this.tablesService.getActiveSession(table.id);
     if (!session) {
-      return null;
+      // Pre-session binding — table_id is enough for `session_opened`
+      // matching (comensal in menu_only/mark_occupied/require_staff
+      // already attached to the stream).
+      return { table_id: table.id, session_id: null, order_id: null };
     }
-    return { order_id: session.order_id, session_id: session.id };
+    return {
+      table_id: table.id,
+      session_id: session.id,
+      order_id: session.order_id,
+    };
   }
 
   // ------------------------------------------------------------- guests
@@ -628,16 +865,30 @@ export class EcommerceTablesService {
       orderBy: { id: 'asc' },
     });
 
-    const items: BillItemView[] = lines.map((it) => ({
-      name: it.product_name,
-      quantity: it.quantity,
-      unit_price: Number(it.unit_price),
-      total: Number(it.total_price),
-      image_url:
-        it.variant_image_url ??
-        it.products?.product_images?.[0]?.image_url ??
-        null,
-    }));
+    // BUG B — sign each line's `image_url` with the 24h presigner so the
+    // storefront "Mi cuenta" panel renders thumbnails without 403s. Mirrors
+    // cart/account/catalog (vendix-s3-storage contract: keys in DB, signed
+    // on read). `signUrl` is itself defensive — it returns the value
+    // untouched when it's already an absolute HTTP(S) URL, so we don't
+    // double-sign anything that somehow already came in pre-signed.
+    const items: BillItemView[] = await Promise.all(
+      lines.map(async (it): Promise<BillItemView> => {
+        const rawImageUrl =
+          it.variant_image_url ??
+          it.products?.product_images?.[0]?.image_url ??
+          null;
+        const signedImageUrl = rawImageUrl
+          ? ((await this.s3Service.signUrl(rawImageUrl)) ?? null)
+          : null;
+        return {
+          name: it.product_name,
+          quantity: it.quantity,
+          unit_price: Number(it.unit_price),
+          total: Number(it.total_price),
+          image_url: signedImageUrl,
+        };
+      }),
+    );
 
     const grandTotal = Number(orderRow?.grand_total ?? order?.grand_total ?? 0);
     const totalPaid = Number(orderRow?.total_paid ?? 0);
@@ -658,40 +909,96 @@ export class EcommerceTablesService {
 
   // ------------------------------------------------------- call waiter
   /**
-   * GAP-5 (write) — the diner requests attention. Persists + broadcasts a
+   * GAP-5 (write) — the diner requests attention. Persists + dispatches a
    * `table_call_waiter` notification (bell + SSE + web push) to the
-   * store's staff. No table/order mutation.
+   * waiters assigned to this table (Step 3, QR-mesa); falls back to a
+   * store-wide broadcast when the table has no assigned waiters. No
+   * table/order mutation.
+   *
+   * IMPORTANT — call-waiter is a PRE-session escalation. In `mark_occupied`
+   * (and `require_staff`) the diner occupies/scans the table and summons a
+   * mesero BEFORE any tab exists (precisely to have staff open it). It must
+   * therefore NOT require an active session — doing so threw
+   * TABLE_SESSION_NOT_FOUND and blocked the diner from calling the waiter on
+   * a table they just occupied. We resolve the table by token directly and
+   * only enrich the payload with session ids when a tab already exists
+   * (`open_tab`). Unlike `requestBill`/`requestSplit`, which genuinely need an
+   * open tab, calling a waiter is valid at any point once the table resolves.
    */
-  async callWaiter(token: string, note?: string): Promise<{ ok: true }> {
-    const { store_id, table, session } =
-      await this.resolveActiveSessionByToken(token);
+  async callWaiter(
+    token: string,
+    note?: string,
+    customer?: { id?: number; name?: string },
+  ): Promise<{ ok: true }> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!token || typeof token !== 'string') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Token de mesa requerido',
+      );
+    }
 
-    await this.notificationsService.createAndBroadcast(
+    const table = await this.prisma.tables.findFirst({
+      where: { public_token: token },
+      select: { id: true, name: true },
+    });
+    if (!table) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+    }
+
+    // May be null in the pre-session window (mark_occupied / require_staff).
+    const session = await this.tablesService.getActiveSession(table.id);
+
+    // Step 3 — identity for the staff notification. Prefer the identity
+    // already attached to the active session (canonical); fall back to the
+    // client hint for pre-session modes where no tab exists yet. When
+    // neither is present the fields stay null (behaviour unchanged).
+    let customerId: number | null = customer?.id ?? null;
+    let customerName: string | null = customer?.name ?? null;
+    if (session) {
+      const sessionCustomer = await this.resolveOrderCustomer(
+        session.order_id,
+      );
+      if (sessionCustomer) {
+        customerId = sessionCustomer.id;
+        customerName = sessionCustomer.name;
+      }
+    }
+
+    await this.dispatchStaffNotification(
       store_id,
+      table.id,
       'table_call_waiter',
       'Llamado de mesero',
       `Mesa ${table.name} solicita atención`,
       {
         table_id: table.id,
         table_name: table.name,
-        table_session_id: session.id,
-        order_id: session.order_id,
+        table_session_id: session?.id ?? null,
+        order_id: session?.order_id ?? null,
         note: note ?? null,
+        customer_id: customerId,
+        customer_name: customerName,
       },
+      token,
     );
 
     this.logger.log(
-      `QR call-waiter: table=${table.id} session=${session.id}`,
+      `QR call-waiter: table=${table.id} session=${session?.id ?? 'none'}`,
     );
     return { ok: true };
   }
 
   // ------------------------------------------------------- request bill
   /**
-   * GAP-5 (write) — the diner requests the bill. Persists + broadcasts a
-   * `table_request_bill` staff notification AND pushes a lightweight
-   * `bill.requested` event onto the per-store SSE subject so the diner's
-   * own stream (GAP-3) reflects the request immediately. No mutation.
+   * GAP-5 (write) — the diner requests the bill. Persists + dispatches a
+   * `table_request_bill` staff notification (per waiter with broadcast
+   * fallback — Step 3) AND pushes a lightweight `bill.requested` event
+   * onto the per-store SSE subject so the diner's own stream (GAP-3)
+   * reflects the request immediately. No mutation.
    */
   async requestBill(
     token: string,
@@ -703,8 +1010,9 @@ export class EcommerceTablesService {
     const title = 'Solicitud de cuenta';
     const body = `Mesa ${table.name} solicita la cuenta`;
 
-    await this.notificationsService.createAndBroadcast(
+    await this.dispatchStaffNotification(
       store_id,
+      table.id,
       'table_request_bill',
       title,
       body,
@@ -743,8 +1051,9 @@ export class EcommerceTablesService {
   /**
    * GAP-8 (conservative) — the diner asks to split the bill. This does
    * NOT mutate anything and does NOT call `SplitOrderService`. It only
-   * persists + broadcasts a `table_request_split` staff notification so a
-   * mesero can execute the real split from the staff panel.
+   * persists + dispatches a `table_request_split` staff notification
+   * (per waiter with broadcast fallback — Step 3) so a mesero can
+   * execute the real split from the staff panel.
    */
   async requestSplit(
     token: string,
@@ -753,8 +1062,9 @@ export class EcommerceTablesService {
     const { store_id, table, session } =
       await this.resolveActiveSessionByToken(token);
 
-    await this.notificationsService.createAndBroadcast(
+    await this.dispatchStaffNotification(
       store_id,
+      table.id,
       'table_request_split',
       'Solicitud de división de cuenta',
       `Mesa ${table.name} pide dividir en ${dto.n_splits}`,
@@ -1446,25 +1756,101 @@ export class EcommerceTablesService {
     }
   }
 
+  // --------------------------------------------- dispatchStaffNotification
+  /**
+   * Step 3 (QR-mesa) — per-user delivery helper. Resolves the waiters
+   * assigned to `tableId` via `TablesService.getAssignedWaiterUserIds`
+   * (Step 2) and emits ONE `sendToUser` per waiter with
+   * `data.target_user_id` baked in. Falls back to a store-wide
+   * `createAndBroadcast` when the table has NO assigned waiters, so
+   * legacy tables and stores that never opt into the assignment
+   * pivot keep working.
+   *
+   * The bell filter in `NotificationsService.findAll` honours
+   * `data.target_user_id` and hides the row from non-recipient users,
+   * so a mesero who is NOT assigned to the table does not see the
+   * notification in their bell — only the assigned meseros do (plus
+   * the diner-facing SSE channel, which is keyed off
+   * `table_session_id` and unaffected).
+   */
+  private async dispatchStaffNotification(
+    store_id: number,
+    tableId: number,
+    type: string,
+    title: string,
+    body: string,
+    data: Record<string, any>,
+    publicToken?: string,
+  ): Promise<void> {
+    // Step 4b (QR-mesa require_staff) — guarantee the per-table handle
+    // (`public_token`) and `table_id` are always present in the payload
+    // so the POS approval modal (Step 10) can call
+    // `POST /ecommerce/tables/:token/confirm` directly from the
+    // notification's `data` row without an extra table lookup. The token
+    // is already public via the physical QR print, so it is not a
+    // sensitive field.
+    const enrichedData: Record<string, any> = {
+      ...data,
+      table_id: data.table_id ?? tableId,
+      ...(publicToken ? { public_token: publicToken } : {}),
+    };
+
+    const waiterIds =
+      await this.tablesService.getAssignedWaiterUserIds(tableId);
+    if (waiterIds.length === 0) {
+      await this.notificationsService.createAndBroadcast(
+        store_id,
+        type,
+        title,
+        body,
+        enrichedData,
+      );
+      return;
+    }
+    for (const uid of waiterIds) {
+      await this.notificationsService.sendToUser(
+        store_id,
+        uid,
+        type,
+        title,
+        body,
+        enrichedData,
+      );
+    }
+  }
+
   // ------------------------------------------------------- notify staff
   /**
-   * Pushes an SSE notification to the store's staff channel so a mesero
-   * sees that a diner scanned the QR at `tableId` and is waiting for
-   * confirmation. Uses `NotificationsSseService.push` (per-store
-   * broadcast) — same channel the KDS and order-created events use.
+   * Step 3 (QR-mesa) — A diner scanning the QR under `require_staff`
+   * behaviour now produces a persisted + bell + web push notification
+   * routed through `dispatchStaffNotification` (per-waiter with
+   * broadcast fallback) so the assigned mesero sees the request in
+   * their bell. Previously this method only pushed an ephemeral SSE
+   * tick on the store-wide channel — there was no DB row, so the
+   * bell could not show it after a page reload.
+   *
+   * Fire-and-forget: the helper is awaited internally but the
+   * surrounding `resolveByToken` returns its HTTP response without
+   * waiting for the notification write — same pattern as
+   * `createAndBroadcast` (which is non-throwing by design).
    */
-  private notifyStaffTableScan(tableId: number, tableName: string): void {
+  private notifyStaffTableScan(
+    tableId: number,
+    tableName: string,
+    publicToken?: string,
+  ): void {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) return;
 
-    this.sseService.push(store_id, {
-      id: Date.now(),
-      type: 'qr_table_scan',
-      title: 'Mesa escaneada',
-      body: `Un cliente escaneó el QR de la mesa ${tableName} y solicita confirmación`,
-      data: { table_id: tableId, table_name: tableName },
-      created_at: new Date().toISOString(),
-    });
+    void this.dispatchStaffNotification(
+      store_id,
+      tableId,
+      'qr_table_scan',
+      'Mesa escaneada',
+      `Un cliente escaneó el QR de la mesa ${tableName} y solicita confirmación`,
+      { table_id: tableId, table_name: tableName },
+      publicToken,
+    );
   }
 
   // --------------------------------------------------- active_devices (Redis)

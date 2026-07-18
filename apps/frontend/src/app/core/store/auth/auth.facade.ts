@@ -487,6 +487,20 @@ export class AuthFacade {
     return roles.some((role) => currentRoles.includes(role));
   }
 
+  /**
+   * True si el usuario tiene el rol `carrier` (repartidor de la app interna
+   * Vendix Repartos, app_type STORE_DELIVERY). Signal-derived — reactivo en
+   * plantillas y consumible de forma síncrona por guards (`carrierGuard`).
+   */
+  readonly isCarrierFlag = computed(() => this.userRoles().includes('carrier'));
+
+  /**
+   * Getter síncrono para guards/servicios. Espeja `isCarrierFlag()`.
+   */
+  isCarrier(): boolean {
+    return this.isCarrierFlag();
+  }
+
   getPermissions(): string[] {
     return this.userPermissions();
   }

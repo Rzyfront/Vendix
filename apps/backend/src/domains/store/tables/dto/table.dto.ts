@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsIn,
   IsInt,
   IsOptional,
@@ -56,6 +57,19 @@ export class CreateTableDto {
   @IsInt()
   @Type(() => Number)
   pos_y?: number;
+
+  /**
+   * Optional list of staff users assigned as waiters for this table.
+   * Staff-only: the service rejects any `user_id` that is not a store
+   * member or that carries the `customer` role. Omitting the field
+   * (or sending an empty array) is treated as "no change" on update,
+   * and "no waiters assigned" on create.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  waiter_user_ids?: number[];
 }
 
 /**
@@ -95,6 +109,19 @@ export class UpdateTableDto {
   @IsInt()
   @Type(() => Number)
   pos_y?: number;
+
+  /**
+   * Optional list of staff users assigned as waiters for this table.
+   * Staff-only: the service rejects any `user_id` that is not a store
+   * member or that carries the `customer` role. On update, if the
+   * field is omitted (undefined), the existing waiter assignment is
+   * preserved; if an empty array is sent, all waiters are cleared.
+   */
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  waiter_user_ids?: number[];
 }
 
 /**

@@ -22,6 +22,7 @@ export enum AppType {
   STORE_LANDING = 'STORE_LANDING',     // Landing de tienda
   STORE_ADMIN = 'STORE_ADMIN',         // Admin de tienda
   STORE_ECOMMERCE = 'STORE_ECOMMERCE', // Ecommerce de tienda
+  STORE_DELIVERY = 'STORE_DELIVERY',   // App interna de reparto (rol carrier)
 }
 
 // ============================================================================

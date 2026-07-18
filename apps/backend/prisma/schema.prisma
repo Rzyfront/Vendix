@@ -148,17 +148,19 @@ model users {
   dispatch_notes_voided_by    dispatch_notes[] @relation("dispatch_notes_voided_by")
 
   // Dispatch Routes (Planillas de Despacho)
-  dispatch_routes_as_driver       dispatch_routes[]             @relation("dispatch_routes_driver")
-  dispatch_routes_as_dispatcher   dispatch_routes[]             @relation("dispatch_routes_dispatcher")
-  dispatch_routes_as_voided_by    dispatch_routes[]             @relation("dispatch_routes_voided_by")
-  dispatch_routes_as_closed_by    dispatch_routes[]             @relation("dispatch_routes_closed_by")
-  dispatch_routes_as_released_by  dispatch_route_stop_history[] @relation("dispatch_route_stop_history_released_by")
-  vehicles_as_primary_driver      vehicles[]                    @relation("vehicles_primary_driver")
-  vehicles_as_created_by          vehicles[]                    @relation("vehicles_created_by")
-  dispatch_route_stops_settled_by dispatch_route_stops[]        @relation("dispatch_route_stops_settled_by")
+  dispatch_routes_as_driver          dispatch_routes[]             @relation("dispatch_routes_driver")
+  dispatch_routes_as_dispatcher      dispatch_routes[]             @relation("dispatch_routes_dispatcher")
+  dispatch_routes_as_voided_by       dispatch_routes[]             @relation("dispatch_routes_voided_by")
+  dispatch_routes_as_closed_by       dispatch_routes[]             @relation("dispatch_routes_closed_by")
+  dispatch_routes_as_released_by     dispatch_route_stop_history[] @relation("dispatch_route_stop_history_released_by")
+  // Carrier Pool (Repartos Fase B4) — órdenes reclamadas por este repartidor.
+  orders_claimed_by_carrier          orders[]                      @relation("orders_claimed_by_carrier")
+  vehicles_as_primary_driver         vehicles[]                    @relation("vehicles_primary_driver")
+  vehicles_as_created_by             vehicles[]                    @relation("vehicles_created_by")
+  dispatch_route_stops_settled_by    dispatch_route_stops[]        @relation("dispatch_route_stops_settled_by")
   // Plan Despacho Economía — FASE 2 paso 8. Contraparte de
   // shipping_methods.default_driver_user_id → users.id.
-  shipping_methods_as_default_driver shipping_methods[]         @relation("shipping_methods_default_driver")
+  shipping_methods_as_default_driver shipping_methods[]            @relation("shipping_methods_default_driver")
 
   // Accounts Receivable
   accounts_receivable_as_customer accounts_receivable[] @relation("ar_customer")
@@ -195,6 +197,7 @@ model users {
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   table_sessions_opened table_sessions[] @relation("table_sessions_opened_by")
+  table_waiters         table_waiters[]
 
   @@index([email_verified])
   @@index([state])
@@ -1161,7 +1164,7 @@ model orders {
   // Plan Despacho Economía — FASE 6 paso 19. Estado de cumplimiento del
   // despacho (sin envío parcial del flujo de remisión). Mantenido por
   // listeners event-driven; el frontend lo usa para filtrar `?dispatchable=true`.
-  dispatch_fulfillment                           dispatch_fulfillment_enum  @default(none)
+  dispatch_fulfillment                            dispatch_fulfillment_enum @default(none)
   state                                           order_state_enum          @default(created)
   channel                                         order_channel_enum        @default(pos)
   delivery_type                                   order_delivery_type_enum  @default(direct_delivery)
@@ -1221,9 +1224,18 @@ model orders {
   // Dispatch (remisión) back-relation
   dispatch_notes dispatch_notes[] @relation("orders_dispatch_notes")
 
+  // Carrier Pool (Repartos Fase B4) — orden liberada al pool de repartidores.
+  // dispatch_pool_at: instante en que entró al pool (nullable → no está en el pool).
+  // claimed_by_carrier_user_id: repartidor (rol carrier) que la reclamó.
+  // Ambos nullable; sin efecto sobre filas existentes.
+  dispatch_pool_at           DateTime? @db.Timestamp(6)
+  claimed_by_carrier_user_id Int?
+  claimed_by_carrier         users?    @relation("orders_claimed_by_carrier", fields: [claimed_by_carrier_user_id], references: [id], onDelete: SetNull)
+
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
   @@index([store_id, channel])
+  @@index([store_id, dispatch_pool_at])
 }
 
 model order_installments {
@@ -1940,55 +1952,55 @@ model sales_document_serials {
 }
 
 model suppliers {
-  id                       Int                       @id @default(autoincrement())
-  organization_id          Int
-  store_id                 Int?
-  name                     String                    @db.VarChar(255)
-  code                     String                    @db.VarChar(50)
-  contact_person           String?                   @db.VarChar(255)
-  mobile                   String?                   @db.VarChar(50)
-  email                    String?                   @db.VarChar(255)
-  phone                    String?                   @db.VarChar(50)
-  website                  String?                   @db.VarChar(255)
-  tax_id                   String?                   @db.VarChar(50)
-  tax_regime               String?                   @db.VarChar(50)
-  person_type              String?                   @db.VarChar(20)
-  is_self_withholder       Boolean                   @default(false)
-  document_type            String?                   @db.VarChar(10)
-  verification_digit       String?                   @db.VarChar(1)
-  payment_terms            String?                   @db.VarChar(255)
-  currency                 String?                   @db.VarChar(10)
-  notes                    String?
-  lead_time_days           Int?
-  is_active                Boolean                   @default(true)
+  id                                  Int                        @id @default(autoincrement())
+  organization_id                     Int
+  store_id                            Int?
+  name                                String                     @db.VarChar(255)
+  code                                String                     @db.VarChar(50)
+  contact_person                      String?                    @db.VarChar(255)
+  mobile                              String?                    @db.VarChar(50)
+  email                               String?                    @db.VarChar(255)
+  phone                               String?                    @db.VarChar(50)
+  website                             String?                    @db.VarChar(255)
+  tax_id                              String?                    @db.VarChar(50)
+  tax_regime                          String?                    @db.VarChar(50)
+  person_type                         String?                    @db.VarChar(20)
+  is_self_withholder                  Boolean                    @default(false)
+  document_type                       String?                    @db.VarChar(10)
+  verification_digit                  String?                    @db.VarChar(1)
+  payment_terms                       String?                    @db.VarChar(255)
+  currency                            String?                    @db.VarChar(10)
+  notes                               String?
+  lead_time_days                      Int?
+  is_active                           Boolean                    @default(true)
   // Plan Despacho Economía — FASE 1 paso 7. Categoría distingue al proveedor
   // de transporte (carrier) que se usa como ejecutor externo de la ruta y
   // dispara AP+retención. `goods` preserva el comportamiento actual por backfill.
-  supplier_category        supplier_category_enum    @default(goods)
+  supplier_category                   supplier_category_enum     @default(goods)
   // Banco destino del pago inmediato al carrier (paso 17). Las 3 columnas
   // cierran el bug latente de `ap-bank-export.service.ts:39-41` que las
   // seleccionaba sin que existieran en la tabla.
-  bank_name                String?                   @db.VarChar(120)
-  bank_account_number      String?                   @db.VarChar(60)
-  bank_account_type        String?                   @db.VarChar(20)
-  address_id               Int?
-  created_at               DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at               DateTime?                 @default(now()) @db.Timestamp(6)
-  purchase_orders          purchase_orders[]
-  supplier_products        supplier_products[]
-  dispatch_notes           dispatch_notes[]           @relation("dispatch_notes_supplier")
-  organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store                    stores?                    @relation(fields: [store_id], references: [id], onDelete: SetNull)
-  addresses                addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  invoices                 invoices[]
-  withholding_calculations withholding_calculations[]
-  accounts_payable         accounts_payable[]         @relation("supplier_accounts_payable")
+  bank_name                           String?                    @db.VarChar(120)
+  bank_account_number                 String?                    @db.VarChar(60)
+  bank_account_type                   String?                    @db.VarChar(20)
+  address_id                          Int?
+  created_at                          DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at                          DateTime?                  @default(now()) @db.Timestamp(6)
+  purchase_orders                     purchase_orders[]
+  supplier_products                   supplier_products[]
+  dispatch_notes                      dispatch_notes[]           @relation("dispatch_notes_supplier")
+  organizations                       organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                               stores?                    @relation(fields: [store_id], references: [id], onDelete: SetNull)
+  addresses                           addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoices                            invoices[]
+  withholding_calculations            withholding_calculations[]
+  accounts_payable                    accounts_payable[]         @relation("supplier_accounts_payable")
   // Plan Despacho Economía — FASE 2 paso 8. Contraparte de
   // shipping_methods.default_carrier_supplier_id → suppliers.id.
-  shipping_methods_as_default_carrier shipping_methods[]  @relation("shipping_methods_default_carrier")
+  shipping_methods_as_default_carrier shipping_methods[]         @relation("shipping_methods_default_carrier")
   // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
   // dispatch_routes.external_carrier_supplier_id → suppliers.id.
-  dispatch_routes_as_external_carrier dispatch_routes[] @relation("dispatch_routes_external_carrier")
+  dispatch_routes_as_external_carrier dispatch_routes[]          @relation("dispatch_routes_external_carrier")
 
   @@index([organization_id, name])
   @@index([organization_id, store_id, code])
@@ -2136,69 +2148,69 @@ model stock_reservations {
 }
 
 model purchase_orders {
-  id                    Int                                @id @default(autoincrement())
-  organization_id       Int
-  supplier_id           Int
-  location_id           Int
-  order_number          String                             @db.VarChar(50)
-  status                purchase_order_status_enum         @default(draft)
+  id                      Int                                @id @default(autoincrement())
+  organization_id         Int
+  supplier_id             Int
+  location_id             Int
+  order_number            String                             @db.VarChar(50)
+  status                  purchase_order_status_enum         @default(draft)
   /// Fase 2: primary order type (retail | ingredient). Nullable for
   /// backward compatibility — legacy orders have `null` and behave as
   /// `retail`. New orders from the POP modal always carry a value.
-  order_type            purchase_order_type_enum?          @default(retail)
-  order_date            DateTime?                          @default(now()) @db.Timestamp(6)
-  expected_date         DateTime?                          @db.Timestamp(6)
-  received_date         DateTime?                          @db.Timestamp(6)
-  subtotal_amount       Decimal                            @default(0.00) @db.Decimal(12, 2)
-  tax_amount            Decimal                            @default(0.00) @db.Decimal(12, 2)
-  total_amount          Decimal                            @default(0.00) @db.Decimal(12, 2)
-  discount_amount       Decimal                            @default(0.00) @db.Decimal(12, 2)
-  shipping_cost         Decimal                            @default(0.00) @db.Decimal(12, 2)
-  payment_terms         String?                            @db.VarChar(255)
-  shipping_method       String?                            @db.VarChar(100)
-  notes                 String?
-  internal_notes        String?
-  created_by_user_id    Int?
-  approved_by_user_id   Int?
-  created_at            DateTime?                          @default(now()) @db.Timestamp(6)
-  updated_at            DateTime?                          @default(now()) @db.Timestamp(6)
-  payment_status        purchase_order_payment_status_enum @default(unpaid)
-  payment_due_date      DateTime?                          @db.Timestamp(6)
+  order_type              purchase_order_type_enum?          @default(retail)
+  order_date              DateTime?                          @default(now()) @db.Timestamp(6)
+  expected_date           DateTime?                          @db.Timestamp(6)
+  received_date           DateTime?                          @db.Timestamp(6)
+  subtotal_amount         Decimal                            @default(0.00) @db.Decimal(12, 2)
+  tax_amount              Decimal                            @default(0.00) @db.Decimal(12, 2)
+  total_amount            Decimal                            @default(0.00) @db.Decimal(12, 2)
+  discount_amount         Decimal                            @default(0.00) @db.Decimal(12, 2)
+  shipping_cost           Decimal                            @default(0.00) @db.Decimal(12, 2)
+  payment_terms           String?                            @db.VarChar(255)
+  shipping_method         String?                            @db.VarChar(100)
+  notes                   String?
+  internal_notes          String?
+  created_by_user_id      Int?
+  approved_by_user_id     Int?
+  created_at              DateTime?                          @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?                          @default(now()) @db.Timestamp(6)
+  payment_status          purchase_order_payment_status_enum @default(unpaid)
+  payment_due_date        DateTime?                          @db.Timestamp(6)
   /// F1 IVA lifecycle: dominant tax mode for the whole invoice. When true,
   /// line `unit_price` is understood as tax-INCLUSIVE (gross); when false the
   /// tax is ADDED on top. Individual lines may override via
   /// `purchase_order_items.prices_include_tax` to support mixed invoices.
-  prices_include_tax    Boolean                            @default(false)
+  prices_include_tax      Boolean                            @default(false)
   /// F2 IVA lifecycle: supplier's own invoice reference for the purchase.
   /// `supplier_invoice_number` becomes the `invoice_number` of the fiscal
   /// document materialized to recognize the deductible VAT (240804). When the
   /// supplier number is absent the recognition falls back to `order_number`.
-  supplier_invoice_number String?                          @db.VarChar(50)
-  supplier_invoice_date   DateTime?                        @db.Date
-  purchase_order_items  purchase_order_items[]
-  users                 users?                             @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users1                users?                             @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  location              inventory_locations                @relation(fields: [location_id], references: [id], onUpdate: NoAction)
-  organizations         organizations                      @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  suppliers             suppliers                          @relation(fields: [supplier_id], references: [id], onUpdate: NoAction)
-  inventory_cost_layers inventory_cost_layers[]
-  attachments           purchase_order_attachments[]
-  payments              purchase_order_payments[]
-  receptions            purchase_order_receptions[]
-  dispatch_notes        dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
+  supplier_invoice_number String?                            @db.VarChar(50)
+  supplier_invoice_date   DateTime?                          @db.Date
+  purchase_order_items    purchase_order_items[]
+  users                   users?                             @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users1                  users?                             @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  location                inventory_locations                @relation(fields: [location_id], references: [id], onUpdate: NoAction)
+  organizations           organizations                      @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  suppliers               suppliers                          @relation(fields: [supplier_id], references: [id], onUpdate: NoAction)
+  inventory_cost_layers   inventory_cost_layers[]
+  attachments             purchase_order_attachments[]
+  payments                purchase_order_payments[]
+  receptions              purchase_order_receptions[]
+  dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
 
   @@unique([organization_id, order_number])
 }
 
 model purchase_order_items {
-  id                 Int                              @id @default(autoincrement())
-  purchase_order_id  Int
-  product_id         Int
-  product_variant_id Int?
-  quantity_ordered   Int
-  quantity_received  Int                              @default(0)
-  unit_cost          Decimal?                         @db.Decimal(12, 4)
-  total_cost         Decimal?                         @db.Decimal(12, 2)
+  id                     Int                              @id @default(autoincrement())
+  purchase_order_id      Int
+  product_id             Int
+  product_variant_id     Int?
+  quantity_ordered       Int
+  quantity_received      Int                              @default(0)
+  unit_cost              Decimal?                         @db.Decimal(12, 4)
+  total_cost             Decimal?                         @db.Decimal(12, 2)
   /// F1 IVA lifecycle — VAT capture per line.
   /// `tax_rate`        : percentage (e.g. 19 for 19%).
   /// `tax_type`        : fiscal classification, defaults to iva.
@@ -2207,29 +2219,29 @@ model purchase_order_items {
   /// `tax_amount`      : total VAT captured for the line (per-unit tax × qty).
   /// `deductible_tax_amount`  : VAT sealed as descontable (O-48 responsible).
   /// `capitalized_tax_amount` : VAT sealed into inventory cost (O-49 non-responsible).
-  tax_rate               Decimal?      @db.Decimal(5, 2)
-  tax_type               tax_type_enum? @default(iva)
+  tax_rate               Decimal?                         @db.Decimal(5, 2)
+  tax_type               tax_type_enum?                   @default(iva)
   prices_include_tax     Boolean?
-  unit_price_net         Decimal?      @db.Decimal(12, 4)
-  tax_amount             Decimal?      @db.Decimal(12, 2)
-  deductible_tax_amount  Decimal?      @db.Decimal(12, 2)
-  capitalized_tax_amount Decimal?      @db.Decimal(12, 2)
+  unit_price_net         Decimal?                         @db.Decimal(12, 4)
+  tax_amount             Decimal?                         @db.Decimal(12, 2)
+  deductible_tax_amount  Decimal?                         @db.Decimal(12, 2)
+  capitalized_tax_amount Decimal?                         @db.Decimal(12, 2)
   /// Fase 2: UoM FKs the receiving engine uses to derive the
   /// `purchase_to_stock_factor` for ingredient orders. Optional because
   /// retail orders keep factor=1 and do not need them. When
   /// `purchase_orders.order_type = 'ingredient'`, both FKs SHOULD be set;
   /// the receive() flow validates this.
-  purchase_uom_id    Int?
-  stock_uom_id       Int?
-  notes              String?
-  batch_number       String?                          @db.VarChar(100)
-  manufacturing_date DateTime?                        @db.Timestamp(6)
-  expiration_date    DateTime?                        @db.Timestamp(6)
-  created_at         DateTime?                        @default(now()) @db.Timestamp(6)
-  products           products                         @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  product_variants   product_variants?                @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
-  purchase_orders    purchase_orders                  @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  reception_items    purchase_order_reception_items[]
+  purchase_uom_id        Int?
+  stock_uom_id           Int?
+  notes                  String?
+  batch_number           String?                          @db.VarChar(100)
+  manufacturing_date     DateTime?                        @db.Timestamp(6)
+  expiration_date        DateTime?                        @db.Timestamp(6)
+  created_at             DateTime?                        @default(now()) @db.Timestamp(6)
+  products               products                         @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  product_variants       product_variants?                @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
+  purchase_orders        purchase_orders                  @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  reception_items        purchase_order_reception_items[]
 
   @@index([purchase_order_id])
   @@index([product_id, purchase_order_id])
@@ -2407,21 +2419,21 @@ model stock_transfer_items {
 }
 
 model return_orders {
-  id                 Int                      @id @default(autoincrement())
-  organization_id    Int
-  related_order_id   Int?
-  related_order_type related_order_type_enum?
+  id                  Int                      @id @default(autoincrement())
+  organization_id     Int
+  related_order_id    Int?
+  related_order_type  related_order_type_enum?
   related_dispatch_id Int?
-  partner_id         Int?
-  partner_type       partner_type_enum?
-  type               return_order_type_enum
-  status             return_order_status_enum @default(draft)
-  reason_id          Int?
-  created_at         DateTime?                @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?                @default(now()) @db.Timestamp(6)
-  return_order_items return_order_items[]
-  organizations      organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  related_dispatch   dispatch_notes?          @relation("return_orders_related_dispatch", fields: [related_dispatch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  partner_id          Int?
+  partner_type        partner_type_enum?
+  type                return_order_type_enum
+  status              return_order_status_enum @default(draft)
+  reason_id           Int?
+  created_at          DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                @default(now()) @db.Timestamp(6)
+  return_order_items  return_order_items[]
+  organizations       organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  related_dispatch    dispatch_notes?          @relation("return_orders_related_dispatch", fields: [related_dispatch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([organization_id, type, status])
   @@index([related_dispatch_id])
@@ -2476,48 +2488,48 @@ model shipping_zones {
 }
 
 model shipping_methods {
-  id                           Int                            @id @default(autoincrement())
+  id                           Int                           @id @default(autoincrement())
   store_id                     Int?
-  name                         String                         @db.VarChar(100)
-  code                         String?                        @db.VarChar(50)
+  name                         String                        @db.VarChar(100)
+  code                         String?                       @db.VarChar(50)
   description                  String?
   logo_url                     String?
-  type                         shipping_method_type_enum      @default(custom)
-  provider_name                String?                        @db.VarChar(50) // e.g., "fedex", "uber"
+  type                         shipping_method_type_enum     @default(custom)
+  provider_name                String?                       @db.VarChar(50) // e.g., "fedex", "uber"
   tracking_url                 String?
   min_days                     Int?
   max_days                     Int?
-  transit_time_minutes         Int                            @default(0)
-  is_active                    Boolean                        @default(true)
-  is_system                    Boolean                        @default(false)
-  display_order                Int                            @default(0)
+  transit_time_minutes         Int                           @default(0)
+  is_active                    Boolean                       @default(true)
+  is_system                    Boolean                       @default(false)
+  display_order                Int                           @default(0)
   custom_config                Json?
-  min_order_amount             Decimal?                       @db.Decimal(12, 2)
-  max_order_amount             Decimal?                       @db.Decimal(12, 2)
+  min_order_amount             Decimal?                      @db.Decimal(12, 2)
+  max_order_amount             Decimal?                      @db.Decimal(12, 2)
   copied_from_system_method_id Int?
   // Plan Despacho Economía — FASE 2 paso 8. Política tipada por método
   // (recaudo, costo del transportador, ejecutor por defecto, timing).
-  collects_payment             Boolean                        @default(false)
-  payment_timing               dispatch_payment_timing_enum?  @default(on_delivery)
-  generates_transport_cost     settlement_type_enum           @default(none)
+  collects_payment             Boolean                       @default(false)
+  payment_timing               dispatch_payment_timing_enum? @default(on_delivery)
+  generates_transport_cost     settlement_type_enum          @default(none)
   default_vehicle_id           Int?
   default_driver_user_id       Int?
   default_carrier_supplier_id  Int?
-  cost_settlement_timing       cost_settlement_timing_enum?   @default(immediate_on_close)
-  created_at                   DateTime?                      @default(now()) @db.Timestamp(6)
-  updated_at                   DateTime?                      @default(now()) @db.Timestamp(6)
+  cost_settlement_timing       cost_settlement_timing_enum?  @default(immediate_on_close)
+  created_at                   DateTime?                     @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime?                     @default(now()) @db.Timestamp(6)
 
-  store                    stores?               @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  shipping_rates           shipping_rates[]
-  orders                   orders[]
-  copied_from_method       shipping_methods?     @relation("MethodCopies", fields: [copied_from_system_method_id], references: [id], onDelete: SetNull)
-  copied_methods           shipping_methods[]    @relation("MethodCopies")
-  default_vehicle          vehicles?             @relation("shipping_methods_default_vehicle", fields: [default_vehicle_id], references: [id], onDelete: SetNull)
-  default_driver_user      users?                @relation("shipping_methods_default_driver", fields: [default_driver_user_id], references: [id], onDelete: SetNull)
-  default_carrier_supplier suppliers?            @relation("shipping_methods_default_carrier", fields: [default_carrier_supplier_id], references: [id], onDelete: SetNull)
+  store                        stores?            @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates               shipping_rates[]
+  orders                       orders[]
+  copied_from_method           shipping_methods?  @relation("MethodCopies", fields: [copied_from_system_method_id], references: [id], onDelete: SetNull)
+  copied_methods               shipping_methods[] @relation("MethodCopies")
+  default_vehicle              vehicles?          @relation("shipping_methods_default_vehicle", fields: [default_vehicle_id], references: [id], onDelete: SetNull)
+  default_driver_user          users?             @relation("shipping_methods_default_driver", fields: [default_driver_user_id], references: [id], onDelete: SetNull)
+  default_carrier_supplier     suppliers?         @relation("shipping_methods_default_carrier", fields: [default_carrier_supplier_id], references: [id], onDelete: SetNull)
   // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
   // dispatch_routes.shipping_method_id → shipping_methods.id.
-  dispatch_routes_using_method dispatch_routes[]   @relation("dispatch_routes_shipping_method")
+  dispatch_routes_using_method dispatch_routes[]  @relation("dispatch_routes_shipping_method")
 
   @@index([store_id])
   @@index([is_system])
@@ -2656,33 +2668,33 @@ model default_templates {
 // ===== PROMOTIONS =====
 
 model promotions {
-  id                  Int                       @id @default(autoincrement())
+  id                  Int                      @id @default(autoincrement())
   store_id            Int
-  name                String                    @db.VarChar(255)
+  name                String                   @db.VarChar(255)
   description         String?
-  code                String?                   @db.VarChar(50)
+  code                String?                  @db.VarChar(50)
   type                promotion_type_enum
-  value               Decimal                   @db.Decimal(12, 2)
-  rule_type           promotion_rule_type_enum  @default(flat)
-  scope               promotion_scope_enum      @default(order)
-  min_purchase_amount Decimal?                  @db.Decimal(12, 2)
-  max_discount_amount Decimal?                  @db.Decimal(12, 2)
+  value               Decimal                  @db.Decimal(12, 2)
+  rule_type           promotion_rule_type_enum @default(flat)
+  scope               promotion_scope_enum     @default(order)
+  min_purchase_amount Decimal?                 @db.Decimal(12, 2)
+  max_discount_amount Decimal?                 @db.Decimal(12, 2)
   usage_limit         Int?
-  usage_count         Int                       @default(0)
+  usage_count         Int                      @default(0)
   per_customer_limit  Int?
-  start_date          DateTime                  @db.Timestamp(6)
-  end_date            DateTime?                 @db.Timestamp(6)
-  state               promotion_state_enum      @default(draft)
-  is_auto_apply       Boolean                   @default(false)
-  priority            Int                       @default(0)
-  created_at          DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at          DateTime?                 @default(now()) @db.Timestamp(6)
+  start_date          DateTime                 @db.Timestamp(6)
+  end_date            DateTime?                @db.Timestamp(6)
+  state               promotion_state_enum     @default(draft)
+  is_auto_apply       Boolean                  @default(false)
+  priority            Int                      @default(0)
+  created_at          DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                @default(now()) @db.Timestamp(6)
 
-  stores                  stores                      @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  promotion_products      promotion_products[]
-  promotion_categories    promotion_categories[]
+  stores                   stores                     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  promotion_products       promotion_products[]
+  promotion_categories     promotion_categories[]
   promotion_quantity_tiers promotion_quantity_tiers[]
-  order_promotions        order_promotions[]
+  order_promotions         order_promotions[]
 
   @@unique([store_id, code])
   @@index([store_id, state])
@@ -2690,14 +2702,14 @@ model promotions {
 }
 
 model promotion_quantity_tiers {
-  id           Int                @id @default(autoincrement())
+  id           Int                 @id @default(autoincrement())
   promotion_id Int
   min_quantity Int
   max_quantity Int?
   type         promotion_type_enum
-  value        Decimal            @db.Decimal(12, 2)
-  sort_order   Int                @default(0)
-  promotions   promotions         @relation(fields: [promotion_id], references: [id], onDelete: Cascade)
+  value        Decimal             @db.Decimal(12, 2)
+  sort_order   Int                 @default(0)
+  promotions   promotions          @relation(fields: [promotion_id], references: [id], onDelete: Cascade)
 
   @@unique([promotion_id, min_quantity])
   @@index([promotion_id])
@@ -2900,6 +2912,8 @@ enum notification_type_enum {
   table_request_split
   table_payment_pending
   table_payment_confirmed
+  qr_table_scan
+  order_awaiting_carrier
 }
 
 model notifications {
@@ -3466,30 +3480,30 @@ model membership_profiles {
 }
 
 model membership_access_credentials {
-  id               Int                              @id @default(autoincrement())
+  id               Int                             @id @default(autoincrement())
   store_id         Int
   customer_id      Int
   credential_type  membership_credential_type_enum
-  credential_value String                           @db.VarChar(255)
-  is_active        Boolean                          @default(true)
+  credential_value String                          @db.VarChar(255)
+  is_active        Boolean                         @default(true)
   deleted_at       DateTime?
-  created_at       DateTime                         @default(now())
-  updated_at       DateTime                         @updatedAt
+  created_at       DateTime                        @default(now())
+  updated_at       DateTime                        @updatedAt
 
   @@unique([store_id, credential_type, credential_value], map: "membership_access_cred_uq")
   @@index([store_id, customer_id])
 }
 
 model membership_access_logs {
-  id            Int                            @id @default(autoincrement())
+  id            Int                           @id @default(autoincrement())
   store_id      Int
   customer_id   Int?
   membership_id Int?
   credential_id Int?
   result        membership_access_result_enum
-  reason        String?                        @db.VarChar(120)
-  device_id     String?                        @db.VarChar(120)
-  access_at     DateTime                       @default(now())
+  reason        String?                       @db.VarChar(120)
+  device_id     String?                       @db.VarChar(120)
+  access_at     DateTime                      @default(now())
 
   @@index([store_id, access_at])
   @@index([store_id, customer_id])
@@ -3501,13 +3515,13 @@ model membership_access_logs {
 // Como los demás modelos de membresía, usa store_id escalar (la FK vive en SQL;
 // Prisma ignora la FK escalar — ver migración membership_generalization §9).
 model membership_access_occupancy {
-  id             Int       @id @default(autoincrement())
-  store_id       Int       @unique
-  current_count  Int       @default(0)
-  business_date  DateTime? @db.Date
+  id              Int       @id @default(autoincrement())
+  store_id        Int       @unique
+  current_count   Int       @default(0)
+  business_date   DateTime? @db.Date
   last_leveled_at DateTime?
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
 }
 
 enum api_key_status_enum {
@@ -3538,6 +3552,7 @@ enum app_type_enum {
   STORE_LANDING // Landing de tienda
   STORE_ADMIN // Admin de tienda
   STORE_ECOMMERCE // Ecommerce de tienda
+  STORE_DELIVERY // App interna de delivery (carrier / Vendix Repartos)
 }
 
 enum domain_status_enum {
@@ -4277,34 +4292,34 @@ enum ticket_attachment_type_enum {
 }
 
 model support_tickets {
-  id                      Int                      @id @default(autoincrement())
-  ticket_number           String                   @unique
+  id                      Int                  @id @default(autoincrement())
+  ticket_number           String               @unique
   organization_id         Int
   store_id                Int?
   created_by_user_id      Int
-  created_by              users                    @relation("ticket_creator", fields: [created_by_user_id], references: [id], onDelete: Restrict)
-  title                   String                   @db.VarChar(255)
-  description             String                   @db.Text
-  category                ticket_category_enum     @default(QUESTION)
-  priority                ticket_priority_enum     @default(P3)
-  status                  ticket_status_enum       @default(NEW)
+  created_by              users                @relation("ticket_creator", fields: [created_by_user_id], references: [id], onDelete: Restrict)
+  title                   String               @db.VarChar(255)
+  description             String               @db.Text
+  category                ticket_category_enum @default(QUESTION)
+  priority                ticket_priority_enum @default(P3)
+  status                  ticket_status_enum   @default(NEW)
   assigned_to_user_id     Int?
-  assigned_to             users?                   @relation("ticket_assigned", fields: [assigned_to_user_id], references: [id], onDelete: SetNull)
+  assigned_to             users?               @relation("ticket_assigned", fields: [assigned_to_user_id], references: [id], onDelete: SetNull)
   related_order_id        Int?
-  related_order_type      String?                  @db.VarChar(50)
+  related_order_type      String?              @db.VarChar(50)
   related_product_id      Int?
-  sla_deadline            DateTime?                @db.Timestamp(6)
-  sla_breached            Boolean                  @default(false)
-  first_response_at       DateTime?                @db.Timestamp(6)
-  resolved_at             DateTime?                @db.Timestamp(6)
-  closed_at               DateTime?                @db.Timestamp(6)
-  resolution_summary      String?                  @db.Text
+  sla_deadline            DateTime?            @db.Timestamp(6)
+  sla_breached            Boolean              @default(false)
+  first_response_at       DateTime?            @db.Timestamp(6)
+  resolved_at             DateTime?            @db.Timestamp(6)
+  closed_at               DateTime?            @db.Timestamp(6)
+  resolution_summary      String?              @db.Text
   resolution_time_minutes Int?
   customer_satisfied      Boolean?
-  source_channel          String                   @default("web")
-  tags                    String[]                 @default([])
-  created_at              DateTime?                @default(now()) @db.Timestamp(6)
-  updated_at              DateTime?                @default(now()) @db.Timestamp(6)
+  source_channel          String               @default("web")
+  tags                    String[]             @default([])
+  created_at              DateTime?            @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?            @default(now()) @db.Timestamp(6)
 
   // ── Requester contact fields ─────────────────────────────────────────
   // Structured columns for the visitor who filed the PQR. Replaces the
@@ -4313,19 +4328,19 @@ model support_tickets {
   // Optional + nullable so legacy rows (pre-migration) and anonymous
   // submissions from the public storefront (which previously only
   // collected email) keep working without backfill.
-  requester_first_name    String?                  @db.VarChar(100)
-  requester_last_name     String?                  @db.VarChar(100)
-  requester_email         String?                  @db.VarChar(255)
-  requester_phone         String?                  @db.VarChar(50)
-  requester_document_type String?                  @db.VarChar(20)
-  requester_document_num  String?                  @db.VarChar(50)
+  requester_first_name    String? @db.VarChar(100)
+  requester_last_name     String? @db.VarChar(100)
+  requester_email         String? @db.VarChar(255)
+  requester_phone         String? @db.VarChar(50)
+  requester_document_type String? @db.VarChar(20)
+  requester_document_num  String? @db.VarChar(50)
 
-  organization            organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store                   stores?                  @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  attachments             support_attachments[]
-  comments                support_comments[]
-  status_history          support_status_history[]
-  notifications           support_notifications[]
+  organization   organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store          stores?                  @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  attachments    support_attachments[]
+  comments       support_comments[]
+  status_history support_status_history[]
+  notifications  support_notifications[]
 
   @@unique([organization_id, ticket_number], name: "support_tickets_organization_id_ticket_number_key")
   @@index([organization_id, status], name: "support_tickets_organization_id_status_idx")
@@ -5060,14 +5075,14 @@ model employees {
   created_at          DateTime?                @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                @default(now()) @db.Timestamp(6)
 
-  organization        organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  user                users?                @relation("employees_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  employee_stores     employee_stores[]
-  payroll_items       payroll_items[]
-  payroll_settlements payroll_settlements[]
-  employee_advances   employee_advances[]
-  payroll_novelties   payroll_novelties[]
-  service_providers   service_providers[]
+  organization            organizations             @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  user                    users?                    @relation("employees_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  employee_stores         employee_stores[]
+  payroll_items           payroll_items[]
+  payroll_settlements     payroll_settlements[]
+  employee_advances       employee_advances[]
+  payroll_novelties       payroll_novelties[]
+  service_providers       service_providers[]
   employee_fiscal_profile employee_fiscal_profiles?
 
   @@unique([organization_id, employee_code])
@@ -5090,6 +5105,25 @@ model employee_stores {
   @@unique([employee_id, store_id])
   @@index([store_id])
   @@index([employee_id, status])
+}
+
+/// N:M pivote: assigns a staff user (waiter/server) as the responsible
+/// waiter for one or more `tables` of a restaurant store. Multiple waiters
+/// may be assigned to the same table, and the same waiter may serve many
+/// tables. Used by the QR-de-mesa dine-in flow to route comensal-side
+/// actions (open_tab, require_staff) to the right server.
+model table_waiters {
+  id          Int      @id @default(autoincrement())
+  table_id    Int
+  user_id     Int
+  assigned_at DateTime @default(now()) @db.Timestamp(6)
+
+  table tables @relation(fields: [table_id], references: [id], onDelete: Cascade)
+  user  users  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([table_id, user_id])
+  @@index([user_id])
+  @@map("table_waiters")
 }
 
 model payroll_runs {
@@ -5178,21 +5212,21 @@ model payroll_items {
 }
 
 model employee_fiscal_profiles {
-  id                        Int                          @id @default(autoincrement())
-  employee_id               Int                          @unique
+  id                        Int                      @id @default(autoincrement())
+  employee_id               Int                      @unique
   organization_id           Int
   certificate_year          Int
-  dependents_count          Int                          @default(0)
-  housing_interest_monthly  Decimal                      @default(0) @db.Decimal(12, 2)
-  prepaid_medicine_monthly  Decimal                      @default(0) @db.Decimal(12, 2)
-  voluntary_pension_monthly Decimal                      @default(0) @db.Decimal(12, 2)
-  afc_monthly               Decimal                      @default(0) @db.Decimal(12, 2)
-  retention_procedure       retention_procedure_enum     @default(proc1)
-  fixed_retention_rate      Decimal?                     @db.Decimal(5, 2)
-  rate_semester             String?                      @db.VarChar(7)
-  last_calculated_at        DateTime?                    @db.Timestamp(6)
-  created_at                DateTime?                    @default(now()) @db.Timestamp(6)
-  updated_at                DateTime?                    @default(now()) @db.Timestamp(6)
+  dependents_count          Int                      @default(0)
+  housing_interest_monthly  Decimal                  @default(0) @db.Decimal(12, 2)
+  prepaid_medicine_monthly  Decimal                  @default(0) @db.Decimal(12, 2)
+  voluntary_pension_monthly Decimal                  @default(0) @db.Decimal(12, 2)
+  afc_monthly               Decimal                  @default(0) @db.Decimal(12, 2)
+  retention_procedure       retention_procedure_enum @default(proc1)
+  fixed_retention_rate      Decimal?                 @db.Decimal(5, 2)
+  rate_semester             String?                  @db.VarChar(7)
+  last_calculated_at        DateTime?                @db.Timestamp(6)
+  created_at                DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                @default(now()) @db.Timestamp(6)
 
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   employee     employees     @relation(fields: [employee_id], references: [id], onDelete: Cascade)
@@ -5202,30 +5236,30 @@ model employee_fiscal_profiles {
 }
 
 model pila_submissions {
-  id                   Int                            @id @default(autoincrement())
+  id                   Int                         @id @default(autoincrement())
   organization_id      Int
   accounting_entity_id Int
   period_year          Int
   period_month         Int
-  status               pila_submission_status_enum    @default(generated)
-  employees_count      Int                            @default(0)
-  total_earnings       Decimal                        @default(0) @db.Decimal(14, 2)
-  total_contributions  Decimal                        @default(0) @db.Decimal(14, 2)
+  status               pila_submission_status_enum @default(generated)
+  employees_count      Int                         @default(0)
+  total_earnings       Decimal                     @default(0) @db.Decimal(14, 2)
+  total_contributions  Decimal                     @default(0) @db.Decimal(14, 2)
   metadata             Json?
-  exported_at          DateTime?                      @db.Timestamp(6)
+  exported_at          DateTime?                   @db.Timestamp(6)
   exported_by_user_id  Int?
-  voided_at            DateTime?                      @db.Timestamp(6)
+  voided_at            DateTime?                   @db.Timestamp(6)
   voided_by_user_id    Int?
   void_reason          String?
   created_by_user_id   Int?
-  created_at           DateTime?                      @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
+  created_at           DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                   @default(now()) @db.Timestamp(6)
 
-  organization      organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  organization      organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict)
   accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
-  exported_by_user  users?             @relation("pila_submissions_exported_by", fields: [exported_by_user_id], references: [id], onDelete: SetNull)
-  voided_by_user    users?             @relation("pila_submissions_voided_by", fields: [voided_by_user_id], references: [id], onDelete: SetNull)
-  created_by_user   users?             @relation("pila_submissions_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+  exported_by_user  users?              @relation("pila_submissions_exported_by", fields: [exported_by_user_id], references: [id], onDelete: SetNull)
+  voided_by_user    users?              @relation("pila_submissions_voided_by", fields: [voided_by_user_id], references: [id], onDelete: SetNull)
+  created_by_user   users?              @relation("pila_submissions_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
 
   @@index([accounting_entity_id, period_year, period_month])
   @@index([status, period_year, period_month])
@@ -6967,10 +7001,10 @@ model provider_exceptions {
 // ===== DISPATCH NOTES SYSTEM =====
 
 model dispatch_notes {
-  id                   Int                       @id @default(autoincrement())
+  id                   Int                          @id @default(autoincrement())
   store_id             Int
-  dispatch_number      String                    @db.VarChar(50)
-  status               dispatch_note_status_enum @default(draft)
+  dispatch_number      String                       @db.VarChar(50)
+  status               dispatch_note_status_enum    @default(draft)
   direction            dispatch_note_direction_enum @default(outbound)
   subtype              dispatch_note_subtype_enum   @default(customer_delivery)
   reason               dispatch_note_reason_enum?
@@ -6979,8 +7013,8 @@ model dispatch_notes {
   // or supplier_id (purchase_receipt). Outbound customer_delivery/customer_return
   // still require a real customer_id (enforced in the service layer).
   customer_id          Int?
-  customer_name        String?                   @db.VarChar(255)
-  customer_tax_id      String?                   @db.VarChar(50)
+  customer_name        String?                      @db.VarChar(255)
+  customer_tax_id      String?                      @db.VarChar(50)
   customer_address     Json?
   sales_order_id       Int?
   invoice_id           Int?
@@ -6995,28 +7029,28 @@ model dispatch_notes {
   related_dispatch_id  Int?
   from_location_id     Int?
   to_location_id       Int?
-  needs_collection     Boolean?                  @default(false)
-  emission_date        DateTime                  @default(now()) @db.Timestamp(6)
-  agreed_delivery_date DateTime?                 @db.Timestamp(6)
-  actual_delivery_date DateTime?                 @db.Timestamp(6)
+  needs_collection     Boolean?                     @default(false)
+  emission_date        DateTime                     @default(now()) @db.Timestamp(6)
+  agreed_delivery_date DateTime?                    @db.Timestamp(6)
+  actual_delivery_date DateTime?                    @db.Timestamp(6)
   dispatch_location_id Int?
-  subtotal_amount      Decimal                   @default(0) @db.Decimal(12, 2)
-  discount_amount      Decimal                   @default(0) @db.Decimal(12, 2)
-  tax_amount           Decimal                   @default(0) @db.Decimal(12, 2)
-  grand_total          Decimal                   @default(0) @db.Decimal(12, 2)
-  currency             String?                   @db.VarChar(10)
-  notes                String?                   @db.Text
-  internal_notes       String?                   @db.Text
-  void_reason          String?                   @db.Text
+  subtotal_amount      Decimal                      @default(0) @db.Decimal(12, 2)
+  discount_amount      Decimal                      @default(0) @db.Decimal(12, 2)
+  tax_amount           Decimal                      @default(0) @db.Decimal(12, 2)
+  grand_total          Decimal                      @default(0) @db.Decimal(12, 2)
+  currency             String?                      @db.VarChar(10)
+  notes                String?                      @db.Text
+  internal_notes       String?                      @db.Text
+  void_reason          String?                      @db.Text
   created_by_user_id   Int?
   confirmed_by_user_id Int?
   delivered_by_user_id Int?
   voided_by_user_id    Int?
-  confirmed_at         DateTime?                 @db.Timestamp(6)
-  delivered_at         DateTime?                 @db.Timestamp(6)
-  voided_at            DateTime?                 @db.Timestamp(6)
-  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
+  confirmed_at         DateTime?                    @db.Timestamp(6)
+  delivered_at         DateTime?                    @db.Timestamp(6)
+  voided_at            DateTime?                    @db.Timestamp(6)
+  created_at           DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                    @default(now()) @db.Timestamp(6)
 
   dispatch_note_items  dispatch_note_items[]
   store                stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
@@ -8501,21 +8535,22 @@ model production_orders {
 /// supports a 2D floor-plan view; the schema is intentionally simple to
 /// allow multiple visualization strategies in Fase B+ frontend.
 model tables {
-  id         Int               @id @default(autoincrement())
-  store_id   Int
-  name       String            @db.VarChar(100)
-  zone       String?           @db.VarChar(100)
-  capacity   Int?
-  status     table_status_enum @default(available)
-  pos_x         Int?
-  pos_y         Int?
-  public_token  String            @unique @db.VarChar(64)
-  created_at    DateTime?         @default(now()) @db.Timestamp(6)
-  updated_at    DateTime?         @default(now()) @db.Timestamp(6)
+  id           Int               @id @default(autoincrement())
+  store_id     Int
+  name         String            @db.VarChar(100)
+  zone         String?           @db.VarChar(100)
+  capacity     Int?
+  status       table_status_enum @default(available)
+  pos_x        Int?
+  pos_y        Int?
+  public_token String            @unique @db.VarChar(64)
+  created_at   DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at   DateTime?         @default(now()) @db.Timestamp(6)
 
-  store    stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  sessions table_sessions[]
-  bookings bookings[]
+  store         stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  sessions      table_sessions[]
+  bookings      bookings[]
+  table_waiters table_waiters[]
 
   @@unique([store_id, name])
   @@index([store_id, status])
@@ -8735,31 +8770,31 @@ enum vehicle_type_enum {
 }
 
 model vehicles {
-  id                 Int                   @id @default(autoincrement())
+  id                 Int                  @id @default(autoincrement())
   store_id           Int
-  plate              String                @db.VarChar(20)
-  type               vehicle_type_enum     @default(truck)
-  brand              String?               @db.VarChar(80)
-  model_name         String?               @db.VarChar(80)
-  capacity_kg        Decimal?              @db.Decimal(10, 2)
+  plate              String               @db.VarChar(20)
+  type               vehicle_type_enum    @default(truck)
+  brand              String?              @db.VarChar(80)
+  model_name         String?              @db.VarChar(80)
+  capacity_kg        Decimal?             @db.Decimal(10, 2)
   capacity_units     Int?
   primary_driver_id  Int?
-  is_active          Boolean               @default(true)
-  notes              String?               @db.Text
+  is_active          Boolean              @default(true)
+  notes              String?              @db.Text
   // Plan Despacho Economía — costo del ejecutor (FASE 1 paso 6).
   // `none` ⇒ costo 0 (sueldo interno, nóminas fuera del modelo).
   // `per_delivery` ⇒ settlement_rate × paradas que cuentan.
   // `per_route` ⇒ settlement_rate fijo por ruta cerrada.
-  settlement_type    settlement_type_enum  @default(none)
-  settlement_rate    Decimal?              @db.Decimal(12, 2)
+  settlement_type    settlement_type_enum @default(none)
+  settlement_rate    Decimal?             @db.Decimal(12, 2)
   created_by_user_id Int?
-  created_at         DateTime?             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?             @default(now()) @db.Timestamp(6)
+  created_at         DateTime?            @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?            @default(now()) @db.Timestamp(6)
 
-  store           stores            @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  primary_driver  users?            @relation("vehicles_primary_driver", fields: [primary_driver_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_by_user users?            @relation("vehicles_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  dispatch_routes dispatch_routes[]
+  store               stores             @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  primary_driver      users?             @relation("vehicles_primary_driver", fields: [primary_driver_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by_user     users?             @relation("vehicles_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  dispatch_routes     dispatch_routes[]
   // Plan Despacho Economía — FASE 2 paso 8. Contraparte de la relación
   // shipping_methods.default_vehicle_id → vehicles.id.
   default_for_methods shipping_methods[] @relation("shipping_methods_default_vehicle")
@@ -8770,53 +8805,56 @@ model vehicles {
 }
 
 model dispatch_routes {
-  id                         Int                        @id @default(autoincrement())
-  store_id                   Int
-  route_number               String                     @db.VarChar(50)
-  route_code                 String?                    @db.VarChar(20)
-  status                     dispatch_route_status_enum @default(draft)
-  vehicle_id                 Int?
-  driver_user_id             Int?
-  external_driver_name       String?                    @db.VarChar(255)
-  external_driver_id_number  String?                    @db.VarChar(50)
-  is_primary_driver_external Boolean                    @default(false)
-  assistants                 Json?
-  origin_location_id         Int?
-  planned_date               DateTime                   @db.Timestamp(6)
-  dispatch_started_at        DateTime?                  @db.Timestamp(6)
-  closed_at                  DateTime?                  @db.Timestamp(6)
-  voided_at                  DateTime?                  @db.Timestamp(6)
-  total_to_collect           Decimal                    @default(0) @db.Decimal(14, 2)
-  total_collected            Decimal                    @default(0) @db.Decimal(14, 2)
-  total_prepaid              Decimal                    @default(0) @db.Decimal(14, 2)
-  total_changes              Decimal                    @default(0) @db.Decimal(14, 2)
-  total_withholdings         Decimal                    @default(0) @db.Decimal(14, 2)
-  total_credit               Decimal                    @default(0) @db.Decimal(14, 2)
-  declared_cash              Decimal?                   @db.Decimal(14, 2)
-  cash_variance              Decimal?                   @db.Decimal(14, 2)
-  currency                   String?                    @db.VarChar(10)
-  planilla_pdf_key           String?                    @db.Text
-  planilla_scanned_at        DateTime?                  @db.Timestamp(6)
-  scan_result                Json?
-  scan_confidence            Decimal?                   @db.Decimal(5, 4)
-  notes                      String?                    @db.Text
-  void_reason                String?                    @db.Text
+  id                           Int                        @id @default(autoincrement())
+  store_id                     Int
+  route_number                 String                     @db.VarChar(50)
+  route_code                   String?                    @db.VarChar(20)
+  status                       dispatch_route_status_enum @default(draft)
+  vehicle_id                   Int?
+  driver_user_id               Int?
+  external_driver_name         String?                    @db.VarChar(255)
+  external_driver_id_number    String?                    @db.VarChar(50)
+  is_primary_driver_external   Boolean                    @default(false)
+  // Carrier Pool (Repartos Fase B4) — distingue rutas de repartidor (rol carrier)
+  // de las planillas de despacho DSD tradicionales. Filas existentes = false.
+  is_carrier_route             Boolean                    @default(false)
+  assistants                   Json?
+  origin_location_id           Int?
+  planned_date                 DateTime                   @db.Timestamp(6)
+  dispatch_started_at          DateTime?                  @db.Timestamp(6)
+  closed_at                    DateTime?                  @db.Timestamp(6)
+  voided_at                    DateTime?                  @db.Timestamp(6)
+  total_to_collect             Decimal                    @default(0) @db.Decimal(14, 2)
+  total_collected              Decimal                    @default(0) @db.Decimal(14, 2)
+  total_prepaid                Decimal                    @default(0) @db.Decimal(14, 2)
+  total_changes                Decimal                    @default(0) @db.Decimal(14, 2)
+  total_withholdings           Decimal                    @default(0) @db.Decimal(14, 2)
+  total_credit                 Decimal                    @default(0) @db.Decimal(14, 2)
+  declared_cash                Decimal?                   @db.Decimal(14, 2)
+  cash_variance                Decimal?                   @db.Decimal(14, 2)
+  currency                     String?                    @db.VarChar(10)
+  planilla_pdf_key             String?                    @db.Text
+  planilla_scanned_at          DateTime?                  @db.Timestamp(6)
+  scan_result                  Json?
+  scan_confidence              Decimal?                   @db.Decimal(5, 4)
+  notes                        String?                    @db.Text
+  void_reason                  String?                    @db.Text
   // Plan Despacho Economía — FASE 3 paso 11.
   // El método de envío es la "política" que gobierna la ruta. La fuente de
   // verdad final es `stops→dispatch_notes.order_id→orders.shipping_method_id`,
   // pero este FK permite override explícito (recomendado: una ruta agrupa
   // remisiones del mismo método).
-  shipping_method_id         Int?
+  shipping_method_id           Int?
   // Transportista externo (supplier carrier). Usado por el settlement del
   // FASE 5 cuando `generates_transport_cost` ≠ 'none' y el ejecutor no es
   // propio (carrier | third_party_provider).
   external_carrier_supplier_id Int?
-  dispatched_by_user_id      Int?
-  closed_by_user_id          Int?
-  voided_by_user_id          Int?
-  created_by_user_id         Int?
-  created_at                 DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at                 DateTime?                  @default(now()) @db.Timestamp(6)
+  dispatched_by_user_id        Int?
+  closed_by_user_id            Int?
+  voided_by_user_id            Int?
+  created_by_user_id           Int?
+  created_at                   DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime?                  @default(now()) @db.Timestamp(6)
 
   store              stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   vehicle            vehicles?              @relation(fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)

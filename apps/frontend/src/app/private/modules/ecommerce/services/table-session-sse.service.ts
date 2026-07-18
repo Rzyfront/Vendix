@@ -339,6 +339,52 @@ export class TableSessionSseService {
         return;
       }
 
+      case 'session_opened': {
+        // Staff just opened a session for this table (POS cash/card,
+        // QR `open_tab` resolved, or `require_waiter` confirmed by
+        // mesero). The diner's binding on the server was
+        // `{table_id, session_id:null, order_id:null}` — matchesDiner
+        // accepted this event on `table_id` alone (see backend
+        // `DINER_LIFECYCLE_EVENTS` whitelist). After we mirror the new
+        // `session_id` into `tableContext.sessionId()`, `hideDineInPurchase()`
+        // (Step 7) flips to `false` and the diner's purchase CTAs unlock.
+        //
+        // We MUST reconnect the stream right after: with the old binding
+        // (session_id:null) the server-side `matchesDiner` filter would
+        // drop subsequent `item_added` / `session_closed` events whose
+        // `data.table_session_id` doesn't equal `null`. On reconnect the
+        // server resolves a fresh binding `{table_id, session_id:<id>,
+        // order_id:null|order_id}` and the new events match.
+        const ev = parsed as {
+          session_id?: unknown;
+          session_token?: unknown;
+          order_id?: unknown;
+          opened_at?: unknown;
+          opened_by?: unknown;
+        };
+        if (typeof ev.session_id !== 'number') return;
+        this.tableContext.applySessionOpened({
+          session_id: ev.session_id,
+          session_token:
+            typeof ev.session_token === 'string'
+              ? ev.session_token
+              : undefined,
+          order_id:
+            typeof ev.order_id === 'number' ? ev.order_id : undefined,
+          opened_at:
+            typeof ev.opened_at === 'string' ? ev.opened_at : undefined,
+          opened_by:
+            typeof ev.opened_by === 'number' ? ev.opened_by : undefined,
+        });
+        // Bump the bill tick so the layout's auto-refetch effect (which
+        // is gated on `isOpenTab()` — note: in `mark_occupied` /
+        // `require_staff` the layout still won't auto-fetch, but the
+        // tick is harmless and consistent with `item_added`).
+        this.billLastUpdated.set(Date.now());
+        this.reconnectWithSessionBinding(ev.session_id);
+        return;
+      }
+
       case 'guest_count_changed': {
         const ev = parsed as { guest_count?: unknown };
         if (typeof ev.guest_count === 'number') {
@@ -452,6 +498,41 @@ export class TableSessionSseService {
       this.reconnectTimer = null;
       this.openEventSource(token);
     }, delay);
+  }
+
+  /**
+   * Closes the current EventSource and re-opens one immediately (no
+   * backoff) with the same table token. Used right after a `session_opened`
+   * event so the server's binding flips from
+   * `{table_id, session_id:null, order_id:null}` to
+   * `{table_id, session_id:<id>, order_id:null|order_id}` — without this
+   * step the `matchesDiner` filter would drop subsequent `item_added` /
+   * `session_closed` deltas for this connection.
+   *
+   * The new EventSource URL keeps the same query params
+   * (`store_id`, `device_id`) — the binding is resolved server-side from
+   * the token via `resolveDinerBinding()` (see
+   * `apps/backend/src/domains/ecommerce/tables/ecommerce-tables.service.ts`),
+   * which now sees the freshly opened `table_sessions` row and returns a
+   * full binding.
+   *
+   * `sessionId` is accepted for spec parity / future-proofing but is
+   * intentionally unused in the URL — the server is the single source of
+   * truth for the binding.
+   *
+   * No-op when the service is destroyed or when no token is bound (the
+   * diner cleared the table between the event arriving and this call).
+   */
+  private reconnectWithSessionBinding(_sessionId: number): void {
+    if (this.destroyed) return;
+    const token = this.currentToken;
+    if (!token) return;
+    this.clearReconnectTimer();
+    this.teardownSource();
+    // Fresh start — reset backoff so any previous error counter doesn't
+    // push the next open into a multi-second delay.
+    this.reconnectAttempt = 0;
+    this.openEventSource(token);
   }
 
   private teardownSource(): void {

@@ -26,6 +26,7 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
 import {
   CallWaiterDto,
+  IdentifyTableDto,
   PayTableDto,
   RequestBillDto,
   RequestSplitDto,
@@ -126,6 +127,25 @@ export class EcommerceTablesController {
       throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     const data = await this.service.confirmStaff(token, userId);
+    return { success: true, data };
+  }
+
+  /**
+   * Step 3 — Welcome-wizard identity. `@OptionalAuth` — an authenticated
+   * diner brings `req.user` (mode `authenticated`); anonymous/guest diners
+   * do not. Centralizes the three identity modes (anonymous / guest /
+   * authenticated); the service gates the anonymous option on
+   * `pos.allow_anonymous_sales` and attaches the identity to the active
+   * session when a tab is already open.
+   */
+  @Post(':token/identify')
+  @OptionalAuth()
+  async identify(
+    @Param('token') token: string,
+    @Body() dto: IdentifyTableDto,
+  ) {
+    const userId = RequestContextService.getUserId() ?? undefined;
+    const data = await this.service.identify(token, dto, userId);
     return { success: true, data };
   }
 
@@ -234,10 +254,15 @@ export class EcommerceTablesController {
     let capturedSessionId: number | null = null;
     let capturedDeviceId: string | null = null;
 
-    // 2) Resolve the diner binding (order_id + session_id) SERVER-SIDE
-    //    from the token. Async, so we hold it in a mutable closure var
-    //    and default-deny live events until it resolves (or stays null
-    //    when there is no active session yet).
+    // 2) Resolve the diner binding (table_id + optional session_id +
+    //    order_id) SERVER-SIDE from the token. Async, so we hold it in a
+    //    mutable closure var and default-deny live events until it
+    //    resolves. `resolveDinerBinding` now returns `{ table_id, ... }`
+    //    even when no session is open yet — so the stream filter can
+    //    accept `session_opened` events for the comensal's table in
+    //    pre-session windows (menu_only / mark_occupied / require_staff).
+    //    Returns `null` only on hard denial (no store context / unknown
+    //    token) — those connections drop at the middleware layer.
     let binding: DinerStreamBinding | null = null;
     void RequestContextService.run(requestContext, () =>
       this.service.resolveDinerBinding(token),
@@ -247,9 +272,13 @@ export class EcommerceTablesController {
         if (!b) return;
         capturedSessionId = b.session_id;
         capturedDeviceId = deviceId;
-        // Register this diner device in the per-session Redis set. If it
-        // was NOT in the set before (`added === 1`), broadcast the join
-        // event so other diners see the counter bump live.
+        // Register this diner device in the per-session Redis set ONLY
+        // when a session is open — the Redis set is per-session, so a
+        // pre-session comensal has nothing to join yet. Once a session
+        // opens (via `session_opened`), the comensal reconnects with a
+        // full binding and the device is registered on that fresh
+        // connection.
+        if (b.session_id == null) return;
         try {
           const added = await RequestContextService.run(requestContext, () =>
             (
@@ -259,7 +288,7 @@ export class EcommerceTablesController {
                   uuid: string,
                 ) => Promise<number>;
               }
-            ).registerDevice(b.session_id, deviceId),
+            ).registerDevice(b.session_id as number, deviceId),
           );
           if (added === 1) {
             const count = await RequestContextService.run(
@@ -271,7 +300,7 @@ export class EcommerceTablesController {
                       sessionId: number,
                     ) => Promise<number>;
                   }
-                ).getActiveDevicesCount(b.session_id),
+                ).getActiveDevicesCount(b.session_id as number),
             );
             this.sseService.push(storeId, {
               type: 'comensal_joined',
@@ -436,7 +465,7 @@ export class EcommerceTablesController {
     @Param('token') token: string,
     @Body() dto: CallWaiterDto,
   ) {
-    const data = await this.service.callWaiter(token, dto.note);
+    const data = await this.service.callWaiter(token, dto.note, dto.customer);
     return { success: true, data };
   }
 
@@ -542,6 +571,11 @@ export class EcommerceTablesController {
       // o la reconciliación de un pago digital (Wompi/wallet). El comensal
       // recibe el evento y muestra la despedida / resumen de compra.
       'session_closed',
+      // Mesa de la cual el comensal ya está observando pasa a tener una
+      // cuenta abierta (POS, QR `open_tab` o `require_staff` confirmado).
+      // Filtrado por `table_id` — NO requiere sesión previa en el binding,
+      // porque es el evento que la CREA.
+      'session_opened',
     ]);
 
   /**
@@ -551,9 +585,14 @@ export class EcommerceTablesController {
    *   - `bill.requested` events whose `data.table_session_id` equals the
    *     bound session.
    *   - Diner-side lifecycle events (`comensal_joined|left`, `item_added`,
-   *     `guest_count_changed`, `payment.pending`, `payment.confirmed`)
-   *     whose `data.table_session_id` (or `data.session_id`) equals the
-   *     bound session.
+   *     `guest_count_changed`, `payment.pending`, `payment.confirmed`,
+   *     `session_closed`) whose `data.table_session_id` (or `data.session_id`)
+   *     equals the bound session.
+   *   - `session_opened` events whose `data.table_id` equals the bound
+   *     table — accepted even when `binding.session_id` is `null`
+   *     (pre-session window), so a comensal in `menu_only` / `mark_occupied`
+   *     / `require_staff` can flip to "cuenta abierta" when staff opens the
+   *     tab from the POS side or confirms a `require_staff` scan.
    * Everything else — including all other notification types and any
    * event for a different table — is dropped.
    */
@@ -572,6 +611,14 @@ export class EcommerceTablesController {
     if (type === 'bill.requested') {
       const data = ev.data as { table_session_id?: number } | undefined;
       return data?.table_session_id === binding.session_id;
+    }
+    if (type === 'session_opened') {
+      // Table-scoped event: the comensal's table is the one transitioning.
+      // Works for both pre-session (session_id === null) and post-session
+      // (comensal already reconnected with full binding) — the latter is
+      // effectively a no-op match for the staff.
+      const data = ev.data as { table_id?: number } | undefined;
+      return data?.table_id === binding.table_id;
     }
     if (EcommerceTablesController.DINER_LIFECYCLE_EVENTS.has(type)) {
       const data = ev.data as
@@ -608,6 +655,29 @@ export class EcommerceTablesController {
         body: (ev.body as string) ?? '',
         ts: Date.now(),
       };
+    }
+
+    if (type === 'session_opened') {
+      // Pass-through projection: the comensal needs `table_id`, `session_id`,
+      // `order_id`, `opened_at`, `opened_by` to flip into "cuenta abierta"
+      // and (typically) reconnect the stream so subsequent events match the
+      // post-session binding.
+      const raw = (ev.data ?? {}) as Record<string, unknown>;
+      const projected: Record<string, unknown> = { type };
+      const allowedKeys = [
+        'table_id',
+        'session_id',
+        'order_id',
+        'opened_at',
+        'opened_by',
+      ];
+      for (const key of allowedKeys) {
+        if (raw[key] !== undefined) {
+          projected[key] = raw[key];
+        }
+      }
+      projected.ts = (ev.ts as number) ?? Date.now();
+      return projected;
     }
 
     if (EcommerceTablesController.DINER_LIFECYCLE_EVENTS.has(type)) {

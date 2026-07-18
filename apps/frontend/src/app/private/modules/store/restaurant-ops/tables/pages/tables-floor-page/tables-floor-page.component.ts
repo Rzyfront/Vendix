@@ -179,9 +179,19 @@ export class TablesFloorPageComponent implements OnInit {
       this.isOpenModalOpen.set(true);
       return;
     }
-    // Everything else (cleaning, reserved without bookings, occupied
-    // without session, etc.) opens the quick-status modal so the operator
-    // can flip the mesa to another state without leaving the floor page.
+    // Shortcut 4: mesa marcada como `occupied` por un escaneo de QR-mesa
+    // pero sin sesión POS abierta todavía. El operador adopta la mesa
+    // abriendo una sesión sobre la misma fila (backend ya lo permite
+    // en `openTableSessionPublic` / `openSession`; el form del modal
+    // reusa el mismo flujo POS estándar).
+    if (t.status === 'occupied' && !t.active_session) {
+      this.selectedTable.set(t);
+      this.isOpenModalOpen.set(true);
+      return;
+    }
+    // Everything else (cleaning, reserved without bookings, etc.) opens
+    // the quick-status modal so the operator can flip the mesa to another
+    // state without leaving the floor page.
     this.openQuickStatus(t);
   }
 

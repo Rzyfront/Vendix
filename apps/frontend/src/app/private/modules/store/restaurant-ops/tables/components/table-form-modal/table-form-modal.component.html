@@ -66,6 +66,24 @@
         customWrapperClass="mt-0"
         helperText="Opcional. Se usa al dibujar el plano."
       />
+
+      <div class="md:col-span-2">
+        <label
+          for="waiter-user-ids"
+          class="block text-sm font-medium mb-1 text-[var(--color-text-primary)]"
+        >
+          Meseros asignados
+        </label>
+        <app-store-user-multi-select
+          id="waiter-user-ids"
+          formControlName="waiter_user_ids"
+          placeholder="Buscar usuarios..."
+          [excludeRole]="'customer'"
+        />
+        <p class="mt-1 text-xs text-[var(--color-text-secondary)]">
+          Opcional. Solo usuarios staff de la tienda. Vacío = sin meseros asignados.
+        </p>
+      </div>
     </div>
   </form>
 

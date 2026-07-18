@@ -22,6 +22,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { TableContextService } from '../../services/table-context.service';
 import { environment } from '../../../../../../environments/environment';
 import {
   CheckoutService,
@@ -300,6 +301,9 @@ export class CheckoutComponent implements OnInit {
   private tenant_facade = inject(TenantFacade);
   private geolocation = inject(GeolocationService);
   private geocoding = inject(GeocodingService);
+  // QR dine-in (Step 8): slider must NOT re-add in mesa-mode — the
+  // originating product-card has already routed via the mesa chokepoint.
+  private tableContext = inject(TableContextService);
   readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
   private guest_data_decision_made = false;
   private guest_checkout_data: GuestCheckoutData | null = null;
@@ -1532,6 +1536,12 @@ export class CheckoutComponent implements OnInit {
   }
 
   onAddToCartFromSlider(product: EcommerceProduct): void {
+    // QR dine-in (Step 8): if a mesa is active, the originating product-card
+    // (Step 7 visibility) already routed via the mesa chokepoint. Re-adding
+    // here would double the items on the bill (BUG A). Defense-in-depth guard.
+    if (this.tableContext.isActive()) {
+      return;
+    }
     // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
     const result = this.cart_service.addProduct(product.id, 1);
     if (result) result.subscribe();

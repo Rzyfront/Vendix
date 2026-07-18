@@ -19,8 +19,29 @@ export interface StoreSettings {
   dispatch?: DispatchSettings;
   restaurant?: RestaurantSettings;
   membership?: MembershipSettings;
+  carrier?: CarrierSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
+}
+
+/**
+ * Carrier (Vendix Repartos) store settings. Mirrors backend
+ * `store_settings.settings.carrier`. Holds the store-wide default delivery
+ * tariff applied to carriers without a per-user tariff of their own.
+ */
+export type CarrierTariffMode = 'per_stop' | 'per_route';
+
+export interface CarrierDefaultTariff {
+  /** `per_stop`: paid per delivered stop. `per_route`: flat per closed route. */
+  mode: CarrierTariffMode;
+  /** Decimal string (never a float), e.g. "1500.00". */
+  amount: string;
+  /** Fixed to 'COP' by the backend in v1. */
+  currency?: string;
+}
+
+export interface CarrierSettings {
+  default_tariff: CarrierDefaultTariff;
 }
 
 export interface AppSettings {

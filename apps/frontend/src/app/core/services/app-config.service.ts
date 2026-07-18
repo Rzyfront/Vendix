@@ -17,6 +17,7 @@ import { storeLandingPublicRoutes } from '../../routes/public/store_landing.publ
 import { defaultPublicRoutes } from '../../routes/public/default.public.routes';
 import { orgAdminRoutes } from '../../routes/private/org_admin.routes';
 import { storeAdminRoutes } from '../../routes/private/store_admin.routes';
+import { storeDeliveryRoutes } from '../../routes/private/store_delivery.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { BrandingConfig } from '../models/tenant-config.interface';
 import { environment } from '../../../environments/environment';
@@ -76,9 +77,12 @@ export class AppConfigService {
     // Prioridad: 1) User environment (si está autenticado), 2) Domain app_type
     const isTargetAdmin =
       cachedUserEnv &&
-      [AppType.ORG_ADMIN, AppType.STORE_ADMIN, AppType.VENDIX_ADMIN].includes(
-        cachedUserEnv,
-      );
+      [
+        AppType.ORG_ADMIN,
+        AppType.STORE_ADMIN,
+        AppType.VENDIX_ADMIN,
+        AppType.STORE_DELIVERY,
+      ].includes(cachedUserEnv);
 
     // Solo usar el user environment si hay una sesión válida
     if (cachedUserEnv && isTargetAdmin && this.hasValidAuthState()) {
@@ -151,6 +155,7 @@ export class AppConfigService {
       AppType.STORE_ADMIN,
       AppType.ORG_ADMIN,
       AppType.VENDIX_ADMIN,
+      AppType.STORE_DELIVERY,
     ].includes(domainConfig.environment);
 
     let finalRoutes = [...publicRoutes, ...privateRoutes];
@@ -207,6 +212,8 @@ export class AppConfigService {
         return '/admin/dashboard';
       case AppType.VENDIX_ADMIN:
         return '/superadmin/dashboard';
+      case AppType.STORE_DELIVERY:
+        return '/repartos/pool';
       default:
         return '/admin/dashboard';
     }
@@ -245,6 +252,9 @@ export class AppConfigService {
         break;
       case AppType.STORE_ADMIN:
         routes = storeAdminRoutes;
+        break;
+      case AppType.STORE_DELIVERY:
+        routes = storeDeliveryRoutes;
         break;
       case AppType.STORE_ECOMMERCE:
         routes = ecommerceRoutes;

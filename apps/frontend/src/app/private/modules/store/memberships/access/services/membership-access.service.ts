@@ -62,6 +62,7 @@ export class MembershipAccessService {
     if (query.result) params = params.set('result', query.result);
     if (query.date_from) params = params.set('date_from', query.date_from);
     if (query.date_to) params = params.set('date_to', query.date_to);
+    if (query.search) params = params.set('search', query.search);
 
     return this.http
       .get<PaginatedApiResponse<GymAccessLog>>(
@@ -84,6 +85,10 @@ export class MembershipAccessService {
     if (query.is_active != null) {
       params = params.set('is_active', String(query.is_active));
     }
+    if (query.credential_type) {
+      params = params.set('credential_type', query.credential_type);
+    }
+    if (query.search) params = params.set('search', query.search);
 
     return this.http
       .get<PaginatedApiResponse<GymAccessCredential>>(

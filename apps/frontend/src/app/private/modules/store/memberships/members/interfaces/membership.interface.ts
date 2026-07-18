@@ -84,6 +84,7 @@ export interface GymMembershipQuery {
   status?: GymMembershipStatus;
   customer_id?: number;
   plan_id?: number;
+  search?: string;
 }
 
 export interface RenewMembershipDto {

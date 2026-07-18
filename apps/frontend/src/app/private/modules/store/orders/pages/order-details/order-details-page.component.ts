@@ -59,6 +59,10 @@ import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import {
+  RepartosService,
+  RepartosApiError,
+} from '../../../../store-delivery/services/repartos.service';
 import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
 
 export interface LifecycleStep {
@@ -1015,6 +1019,8 @@ export class OrderDetailsPageComponent {
   private sanitizer = inject(DomSanitizer);
   // Bug 4 — traceability order → dispatch note → route.
   private dispatchNotesService = inject(DispatchNotesService);
+  // Fase F8 — publicar la orden al pool de reparto (Vendix Repartos).
+  private repartosService = inject(RepartosService);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -1437,14 +1443,57 @@ export class OrderDetailsPageComponent {
       });
   }
 
-  /** Route the chooser outcome to the wizard or the plain ship flow. */
+  /**
+   * Route the chooser outcome to the wizard, the plain ship flow, or the
+   * carrier pool. The switch is exhaustive over the three `DispatchMethod`
+   * values (the `never` default gives a compile-time guarantee if a new
+   * variant is added without wiring it here).
+   */
   onDispatchMethodSelected(method: DispatchMethod): void {
     this.showDispatchSelector.set(false);
-    if (method === 'with-note') {
-      this.openDispatchModal();
-    } else {
-      this.startShipWithoutNote();
+    switch (method) {
+      case 'with-note':
+        this.openDispatchModal();
+        break;
+      case 'direct':
+        this.startShipWithoutNote();
+        break;
+      case 'to-dispatch':
+        this.publishOrderToPool();
+        break;
+      default: {
+        const _exhaustive: never = method;
+        return _exhaustive;
+      }
     }
+  }
+
+  /**
+   * Fase F8 — "Enviar a despacho": publica la orden al pool de reparto
+   * (`POST /store/dispatch-notes/orders/:orderId/send-to-dispatch`). Un
+   * repartidor podrá tomarla desde la app Carrier y agregarla a su ruta. La
+   * operación es idempotente en backend; al terminar recargamos la orden para
+   * reflejar el nuevo estado.
+   */
+  private publishOrderToPool(): void {
+    if (!this.orderId) return;
+    this.isProcessingAction.set(true);
+    this.repartosService
+      .publishToPool(Number(this.orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isProcessingAction.set(false);
+          this.toastService.success('Orden enviada a despacho');
+          this.loadData();
+        },
+        error: (err: RepartosApiError) => {
+          this.isProcessingAction.set(false);
+          this.toastService.error(
+            err?.message || 'No se pudo enviar la orden a despacho',
+          );
+        },
+      });
   }
 
   /**

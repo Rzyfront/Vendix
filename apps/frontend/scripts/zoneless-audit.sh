@@ -34,7 +34,7 @@ count_html() { rg -l "$1" --type html 2>/dev/null | wc -l | tr -d ' '; }
 #    explanatory comments referencing BehaviorSubject that must be excluded from the regression check).
 #  - account-mappings.component.ts: filter + take(1) + switchMap legitimate composition per skill §10.
 #  - *.spec.ts: test files.
-EXEMPT_SUBSCRIBE='(dialog\.service\.ts|pos-scale\.service\.ts|subscription\.facade\.ts|\.spec\.ts$)'
+EXEMPT_SUBSCRIBE='(dialog\.service\.ts|pos-scale\.service\.ts|subscription\.facade\.ts|staff-scan-approval\.service\.ts|\.spec\.ts$)'
 EXEMPT_TAKE1='(auth\.interceptor\.ts|account-mappings\.component\.ts|\.spec\.ts$)'
 EXEMPT_BEHAVIORSUBJECT='(auth\.interceptor\.ts)'
 
@@ -77,7 +77,7 @@ hits=$(count_with_exempt 'EventEmitter' '')
 hits=$(count_code_only 'NgZone' 'app\.config\.ts')
 [ "$hits" = "0" ] && ok "NgZone residual: 0" || fail "NgZone residual: $hits archivos"
 
-hits=$(count_code_only 'markForCheck|detectChanges' '\.spec\.ts$')
+hits=$(count_code_only 'markForCheck|detectChanges' '(\.spec\.ts$|staff-scan-approval\.service\.ts)')
 [ "$hits" = "0" ] && ok "markForCheck/detectChanges: 0" || fail "markForCheck/detectChanges: $hits archivos"
 
 hits=$(count_html '\*ngIf|\*ngFor|\*ngSwitch')

@@ -18,6 +18,7 @@ import {
   FilterConfig,
   FilterValues,
   IconComponent,
+  InputsearchComponent,
   ItemListCardConfig,
   ModalComponent,
   OptionsDropdownComponent,
@@ -112,6 +113,7 @@ const EXPIRING_URGENCY_LABELS: Record<ExpiringUrgency, string> = {
     AforoCheckinPanelComponent,
     InputComponent,
     ModalComponent,
+    InputsearchComponent,
   ],
   templateUrl: './access-page.component.html',
   styleUrl: './access-page.component.css',
@@ -390,6 +392,9 @@ export class MembershipAccessPageComponent implements OnInit {
   readonly logsFilters = signal({ page: 1, limit: 20 });
   readonly logsTotal = signal(0);
   readonly resultFilter = signal<GymAccessResult | 'all'>('all');
+  readonly logsSearch = signal('');
+  readonly logsDateFrom = signal<string | null>(null);
+  readonly logsDateTo = signal<string | null>(null);
   logsFilterValues: FilterValues = {};
   readonly grantedToday = signal(0);
 
@@ -399,6 +404,9 @@ export class MembershipAccessPageComponent implements OnInit {
   readonly credsTotal = signal(0);
   readonly showCredentialModal = signal(false);
   readonly editingCredential = signal<GymAccessCredential | null>(null);
+  readonly credsSearch = signal('');
+  readonly credsTypeFilter = signal<GymCredentialType | 'all'>('all');
+  credsFilterValues: FilterValues = {};
   private credentialsLoaded = false;
 
   readonly tabs: StickyHeaderTab[] = [
@@ -475,6 +483,30 @@ export class MembershipAccessPageComponent implements OnInit {
         { value: 'denied_quota_exceeded', label: 'Límite alcanzado' },
         { value: 'denied_outside_schedule', label: 'Fuera de horario' },
         { value: 'denied_capacity_full', label: 'Aforo lleno' },
+      ],
+    },
+    {
+      key: 'date_from',
+      label: 'Desde',
+      type: 'date',
+    },
+    {
+      key: 'date_to',
+      label: 'Hasta',
+      type: 'date',
+    },
+  ];
+
+  readonly credsFilterConfigs: FilterConfig[] = [
+    {
+      key: 'credential_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'qr', label: 'Código QR' },
+        { value: 'pin', label: 'PIN' },
+        { value: 'external_ref', label: 'Huella (lector biométrico)' },
       ],
     },
   ];
@@ -1080,6 +1112,9 @@ export class MembershipAccessPageComponent implements OnInit {
       limit: this.logsFilters().limit,
     };
     if (this.resultFilter() !== 'all') query['result'] = this.resultFilter();
+    if (this.logsSearch()) query['search'] = this.logsSearch();
+    if (this.logsDateFrom()) query['date_from'] = this.logsDateFrom();
+    if (this.logsDateTo()) query['date_to'] = this.logsDateTo();
 
     this.accessService
       .listLogs(query)
@@ -1116,12 +1151,17 @@ export class MembershipAccessPageComponent implements OnInit {
     this.logsFilterValues = values;
     const result = (values['result'] as string | undefined) ?? '';
     this.resultFilter.set(result ? (result as GymAccessResult) : 'all');
+    this.logsDateFrom.set((values['date_from'] as string) || null);
+    this.logsDateTo.set((values['date_to'] as string) || null);
     this.logsFilters.update((f) => ({ ...f, page: 1 }));
     this.loadLogs();
   }
 
   clearLogsFilters(): void {
     this.resultFilter.set('all');
+    this.logsSearch.set('');
+    this.logsDateFrom.set(null);
+    this.logsDateTo.set(null);
     this.logsFilterValues = {};
     this.logsFilters.update((f) => ({ ...f, page: 1 }));
     this.loadLogs();
@@ -1133,17 +1173,39 @@ export class MembershipAccessPageComponent implements OnInit {
   }
 
   get hasLogsFilters(): boolean {
-    return this.resultFilter() !== 'all';
+    return (
+      this.resultFilter() !== 'all' ||
+      !!this.logsSearch() ||
+      !!this.logsDateFrom() ||
+      !!this.logsDateTo()
+    );
+  }
+
+  onLogsSearch(term: string): void {
+    this.logsSearch.set(term);
+    this.logsFilters.update((f) => ({ ...f, page: 1 }));
+    this.loadLogs();
   }
 
   // ─── Credentials ──────────────────────────────────────────────────────────
   loadCredentials(): void {
     this.isLoading.set(true);
+    const query: {
+      page: number;
+      limit: number;
+      search?: string;
+      credential_type?: GymCredentialType;
+    } = {
+      page: this.credsFilters().page,
+      limit: this.credsFilters().limit,
+    };
+    const term = this.credsSearch().trim();
+    if (term) query.search = term;
+    const type = this.credsTypeFilter();
+    if (type !== 'all') query.credential_type = type;
+
     this.accessService
-      .listCredentials({
-        page: this.credsFilters().page,
-        limit: this.credsFilters().limit,
-      })
+      .listCredentials(query)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -1164,6 +1226,32 @@ export class MembershipAccessPageComponent implements OnInit {
   onCredsPageChange(page: number): void {
     this.credsFilters.update((f) => ({ ...f, page }));
     this.loadCredentials();
+  }
+
+  onCredsFilterChange(values: FilterValues): void {
+    this.credsFilterValues = values;
+    const type = (values['credential_type'] as string | undefined) ?? '';
+    this.credsTypeFilter.set(type ? (type as GymCredentialType) : 'all');
+    this.credsFilters.update((f) => ({ ...f, page: 1 }));
+    this.loadCredentials();
+  }
+
+  clearCredsFilters(): void {
+    this.credsTypeFilter.set('all');
+    this.credsSearch.set('');
+    this.credsFilterValues = {};
+    this.credsFilters.update((f) => ({ ...f, page: 1 }));
+    this.loadCredentials();
+  }
+
+  onCredsSearch(term: string): void {
+    this.credsSearch.set(term);
+    this.credsFilters.update((f) => ({ ...f, page: 1 }));
+    this.loadCredentials();
+  }
+
+  get hasCredsFilters(): boolean {
+    return this.credsTypeFilter() !== 'all' || !!this.credsSearch();
   }
 
   newCredential(): void {

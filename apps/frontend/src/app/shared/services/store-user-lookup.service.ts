@@ -41,6 +41,11 @@ export interface StoreUserSearchOptions {
   limit?: number;
   /** User ids to drop from the result set (e.g. the already-selected driver). */
   excludeIds?: number[];
+  /**
+   * Role name to exclude from results (server-side `exclude_role`). Used by
+   * staff-only pickers to hide ecommerce customers (who are also store users).
+   */
+  excludeRole?: string;
 }
 
 const DEFAULT_LIMIT = 10;
@@ -82,6 +87,9 @@ export class StoreUserLookupService {
       .set('state', 'ACTIVE');
     if (trimmed) {
       params = params.set('search', trimmed);
+    }
+    if (opts?.excludeRole) {
+      params = params.set('exclude_role', opts.excludeRole);
     }
 
     return this.http

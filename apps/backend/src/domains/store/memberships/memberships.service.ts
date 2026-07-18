@@ -193,14 +193,49 @@ export class MembershipsService {
 
   async findAll(query: MembershipQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 10, status, customer_id, plan_id } =
+    const { page = 1, limit = 10, status, customer_id, plan_id, search } =
       query ?? {};
     const skip = (page - 1) * limit;
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict memberships to that set.
+    const term = (search ?? '').trim();
+    let customerFilter: Prisma.membershipsWhereInput['customer_id'] | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store membership list.
+      const customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      customerFilter = customer_id;
+    }
 
     const where: Prisma.membershipsWhereInput = {
       store_id: storeId,
       ...(status !== undefined && { status }),
-      ...(customer_id !== undefined && { customer_id }),
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(plan_id !== undefined && { plan_id }),
     };
 

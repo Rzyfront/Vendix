@@ -23,6 +23,7 @@ import {
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
+import { TableContextService } from '../../services/table-context.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
@@ -187,6 +188,9 @@ export class CatalogComponent implements OnInit {
     private toast_service: ToastService,
     private route: ActivatedRoute,
     private router: Router,
+    // QR dine-in (Step 8): parent must NOT re-add in mesa-mode — the
+    // product-card has already routed via the mesa chokepoint.
+    private table_context_service: TableContextService,
   ) {}
 
   ngOnInit(): void {
@@ -452,6 +456,13 @@ export class CatalogComponent implements OnInit {
     // Guard: variant products must go through detail page for variant selection
     if (product.variant_count && product.variant_count > 0) {
       this.router.navigate(['/products', product.slug]);
+      return;
+    }
+    // QR dine-in (Step 8): product-card.onAddToCart already dispatched via
+    // the mesa chokepoint — do NOT call addProduct again here, that would
+    // double the items on the bill. Step 7 already hid purchase CTAs in
+    // mesa-mode at the surface, so this guard is defense-in-depth.
+    if (this.table_context_service.isActive()) {
       return;
     }
     // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.

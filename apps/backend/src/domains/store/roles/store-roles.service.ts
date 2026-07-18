@@ -5,8 +5,13 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  OperatingScopeService,
+  OrganizationOperatingScope,
+} from '@common/services/operating-scope.service';
 import {
   CreateStoreRoleDto,
   UpdateStoreRoleDto,
@@ -19,9 +24,38 @@ export class StoreRolesService {
   /** Core roles that are never exposed to store-level UIs */
   private readonly HIDDEN_ROLES = ['owner', 'super_admin'];
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly operatingScope: OperatingScopeService,
+  ) {}
 
   // ===== PRIVATE HELPERS =====
+
+  /**
+   * Builds the tenant filter applied to the nested `user_roles` `_count`.
+   *
+   * `user_roles` has no `store_id`/`organization_id`, and system roles
+   * (`is_system_role=true`, `organization_id=null`) are shared platform-wide,
+   * so an unfiltered `_count` aggregates users from EVERY tenant. Nested
+   * `_count` selects are NOT intercepted by the scoped Prisma extensions, so
+   * the tenant predicate must be applied explicitly here.
+   */
+  private buildUserRolesCountWhere(
+    scope: OrganizationOperatingScope,
+    storeId: number | undefined,
+    organizationId: number | undefined,
+  ): Prisma.user_rolesWhereInput {
+    if (scope === 'ORGANIZATION') {
+      return { users: { organization_id: organizationId } };
+    }
+    // STORE: users linked to the context store via store_users. Fail closed if
+    // there is no store context — a `store_id: undefined` would collapse the
+    // filter to "any store" and re-introduce the cross-tenant leak.
+    if (!storeId) {
+      throw new ForbiddenException('Store context required');
+    }
+    return { users: { store_users: { some: { store_id: storeId } } } };
+  }
 
   private transformRole(role: any) {
     return {
@@ -45,10 +79,18 @@ export class StoreRolesService {
   async findAll() {
     const context = RequestContextService.getContext();
     const organization_id = context?.organization_id;
+    const store_id = context?.store_id;
 
     if (!organization_id) {
       throw new ForbiddenException('Organization context required');
     }
+
+    const scope = await this.operatingScope.getOperatingScope(organization_id);
+    const userRolesCountWhere = this.buildUserRolesCountWhere(
+      scope,
+      store_id,
+      organization_id,
+    );
 
     // Roles are NOT auto-scoped in StorePrismaService, so we filter manually.
     // Include both org-specific roles AND system roles, but exclude core hidden roles.
@@ -65,7 +107,7 @@ export class StoreRolesService {
         },
         _count: {
           select: {
-            user_roles: true,
+            user_roles: { where: userRolesCountWhere },
           },
         },
       },
@@ -78,6 +120,18 @@ export class StoreRolesService {
   async findOne(id: number) {
     const context = RequestContextService.getContext();
     const organization_id = context?.organization_id;
+    const store_id = context?.store_id;
+
+    if (!organization_id) {
+      throw new ForbiddenException('Organization context required');
+    }
+
+    const scope = await this.operatingScope.getOperatingScope(organization_id);
+    const userRolesCountWhere = this.buildUserRolesCountWhere(
+      scope,
+      store_id,
+      organization_id,
+    );
 
     const role = await this.prisma.roles.findFirst({
       where: {
@@ -92,7 +146,7 @@ export class StoreRolesService {
         },
         _count: {
           select: {
-            user_roles: true,
+            user_roles: { where: userRolesCountWhere },
           },
         },
       },
@@ -108,6 +162,7 @@ export class StoreRolesService {
   async create(dto: CreateStoreRoleDto) {
     const context = RequestContextService.getContext();
     const organization_id = context?.organization_id;
+    const store_id = context?.store_id;
 
     if (!organization_id) {
       throw new ForbiddenException('Organization context required');
@@ -125,6 +180,13 @@ export class StoreRolesService {
       throw new ConflictException('A role with this name already exists');
     }
 
+    const scope = await this.operatingScope.getOperatingScope(organization_id);
+    const userRolesCountWhere = this.buildUserRolesCountWhere(
+      scope,
+      store_id,
+      organization_id,
+    );
+
     // Store admins can NEVER create system roles
     const role = await this.prisma.roles.create({
       data: {
@@ -141,7 +203,7 @@ export class StoreRolesService {
         },
         _count: {
           select: {
-            user_roles: true,
+            user_roles: { where: userRolesCountWhere },
           },
         },
       },
@@ -157,16 +219,20 @@ export class StoreRolesService {
       throw new ForbiddenException('System roles cannot be modified');
     }
 
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+    const store_id = context?.store_id;
+
+    if (!organization_id) {
+      throw new ForbiddenException('Organization context required');
+    }
+
     // Check name uniqueness if changing
     if (dto.name && dto.name !== role.name) {
-      const context = RequestContextService.getContext();
       const existing = await this.prisma.roles.findFirst({
         where: {
           name: dto.name,
-          OR: [
-            { organization_id: context?.organization_id },
-            { is_system_role: true },
-          ],
+          OR: [{ organization_id }, { is_system_role: true }],
         },
       });
 
@@ -174,6 +240,13 @@ export class StoreRolesService {
         throw new ConflictException('A role with this name already exists');
       }
     }
+
+    const scope = await this.operatingScope.getOperatingScope(organization_id);
+    const userRolesCountWhere = this.buildUserRolesCountWhere(
+      scope,
+      store_id,
+      organization_id,
+    );
 
     const updated = await this.prisma.roles.update({
       where: { id },
@@ -189,7 +262,7 @@ export class StoreRolesService {
         },
         _count: {
           select: {
-            user_roles: true,
+            user_roles: { where: userRolesCountWhere },
           },
         },
       },
@@ -205,7 +278,29 @@ export class StoreRolesService {
       throw new ForbiddenException('System roles cannot be deleted');
     }
 
-    if (role._count?.user_roles > 0) {
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+
+    if (!organization_id) {
+      throw new ForbiddenException('Organization context required');
+    }
+
+    // Deleting a role cascades to its `user_roles` across the ENTIRE
+    // organization, so the delete guard must count org-wide, never by the
+    // current store context (which would let a role still assigned in a
+    // sibling store be deleted).
+    const assigned_users = await this.prisma.user_roles.count({
+      where: {
+        role_id: id,
+        ...this.buildUserRolesCountWhere(
+          'ORGANIZATION',
+          undefined,
+          organization_id,
+        ),
+      },
+    });
+
+    if (assigned_users > 0) {
       throw new BadRequestException(
         'Cannot delete a role that has users assigned',
       );

@@ -144,7 +144,14 @@ export type AdminTablesEvent =
       data: Record<string, unknown>;
       ts?: number;
     }
-  | { type: 'session_closed'; data: Record<string, unknown>; ts?: number };
+  | { type: 'session_closed'; data: Record<string, unknown>; ts?: number }
+  | {
+      // Mesa abierta (POS open / QR `open_tab` / `confirmStaff`). Se
+      // refresca el floor-map para reflejar el cambio inmediatamente.
+      type: 'session_opened';
+      data: Record<string, unknown>;
+      ts?: number;
+    };
 
 /**
  * AdminTablesSseService — wrappea el `EventSource` del staff stream
@@ -354,6 +361,15 @@ export class AdminTablesSseService {
       return;
     }
 
+    // `session_opened` is TABLE-scoped, not session-scoped: trigger the
+    // floor-map refetch BEFORE the sessionId guard drops it. The new
+    // session's id won't be in `tablesLive` yet (it's only hydrated by
+    // the snapshot), so we need the refetch to pick it up.
+    if (event.type === 'session_opened') {
+      void this.handleSessionOpened(event);
+      return;
+    }
+
     const sessionId = this.extractSessionId(event.data);
     if (sessionId == null) return;
 
@@ -460,6 +476,38 @@ export class AdminTablesSseService {
       case 'kitchen.cancelled':
       default:
         return;
+    }
+  }
+
+  /**
+   * `session_opened` es table-scoped (no session-scoped): cuando llega,
+   * la mesa afectada pasa a `occupied` con sesión activa — el floor-page
+   * debe refrescar para reflejar el cambio. Como el `tablesLive` map se
+   * hidrata desde `snapshot`, lo más correcto es forzar un refetch del
+   * floor map (que ya incluye `current_session_id` por mesa) y dejar que
+   * el siguiente `snapshot` re-pueble el map.
+   *
+   * También bumpeamos `lastEventAt` para que la UI sepa "algo se movió"
+   * (consistente con el patrón de `bill.requested` / `kitchen.*`).
+   */
+  private async handleSessionOpened(event: AdminTablesEvent): Promise<void> {
+    if (event.type !== 'session_opened') return;
+    this.lastEventAt.set(new Date());
+    await this.refetchFloorMap();
+  }
+
+  /**
+   * Refresh helper — calls `tablesService.getFloorMap()` to pull the
+   * latest floor state. The floor-page consumes a separate `tables()`
+   * signal from `TablesService`; we just trigger the HTTP call here so
+   * the page can re-render. Errors are silent (the next snapshot or
+   * poll tick will recover).
+   */
+  private async refetchFloorMap(): Promise<void> {
+    try {
+      await firstValueFrom(this.tablesService.getFloorMap());
+    } catch {
+      // Silencioso: el próximo snapshot/poll tick reintentará.
     }
   }
 

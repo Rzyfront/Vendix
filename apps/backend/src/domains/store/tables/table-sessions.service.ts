@@ -184,7 +184,13 @@ export class TableSessionsService {
     deliveryType: 'direct_delivery' | 'dine_in';
     guestCount: number | null;
     internalNotes: string;
-  }): Promise<{ id: number; order_id: number; table_id: number }> {
+  }): Promise<{
+    id: number;
+    order_id: number;
+    table_id: number;
+    opened_at: Date;
+    opened_by: number | null;
+  }> {
     const currency = await this.settingsService.getStoreCurrency();
     const safeCurrency = currency || 'COP';
 
@@ -192,7 +198,7 @@ export class TableSessionsService {
       .toString()
       .padStart(3, '0')}`;
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const order = await tx.orders.create({
         data: {
           store_id: args.storeId,
@@ -234,8 +240,21 @@ export class TableSessionsService {
         id: newSession.id,
         order_id: newSession.order_id,
         table_id: newSession.table_id,
+        opened_at: newSession.opened_at,
+        opened_by: newSession.opened_by,
       };
     });
+
+    // Post-commit: notify the comensal stream + staff dashboard that a
+    // new session was opened on this table. SINGLE emit point covering
+    // POS (`openSession`), QR anonymous (`openTableSessionPublic`), and
+    // `confirmStaff` (also routed through `openTableSessionPublic`).
+    // `session_opened` is what lets a comensal in `menu_only` /
+    // `mark_occupied` / `require_staff` flip to "cuenta abierta" in real
+    // time when staff opens the tab from the POS side.
+    this.emitSessionOpened(args.storeId, created);
+
+    return created;
   }
 
   // ---------------------------------------------------------------- open
@@ -312,8 +331,12 @@ export class TableSessionsService {
    *   - `user_id` is NOT required in the request context. Only `store_id`
    *     is needed (the store is encoded in the QR payload / route).
    *   - `opened_by` is null (no authenticated opener).
-   *   - `customer_id` is null (anonymous check; a real customer can be
-   *     attached later via `assignCustomer`).
+   *   - `customer_id` is optional: null for an anonymous check (default),
+   *     or a resolved diner (guest/registered) when the comensal
+   *     identified before opening the tab. A customer can still be
+   *     attached later via `assignCustomer`. No `allow_anonymous_sales`
+   *     gate lives here — the anonymous auto-open (open_tab) must keep
+   *     working; that gate belongs to the explicit "identify" flow.
    *   - The draft order is created with `channel: 'ecommerce'` and
    *     `delivery_type: 'dine_in'` so downstream reporting/filters can
    *     distinguish QR-initiated checks from POS-initiated ones.
@@ -326,6 +349,7 @@ export class TableSessionsService {
     tableId: number,
     openedByUserId?: number | null,
     guestCount?: number | null,
+    customerId?: number | null,
   ): Promise<TableSessionView> {
     const { storeId } = this.requireStoreContext();
 
@@ -341,15 +365,19 @@ export class TableSessionsService {
     //    table_session (opened_by null) + flip table to 'occupied'.
     //    `guestCount` is optional (GAP-10): the QR scan may not know the
     //    party size yet — the diner can set it later via `setGuestCount`.
+    const resolvedCustomerId = customerId ?? null;
     const session = await this.createOpenSession({
       tableId,
       storeId,
       openedBy: openedByUserId ?? null,
-      customerId: null,
+      customerId: resolvedCustomerId,
       channel: 'ecommerce',
       deliveryType: 'dine_in',
       guestCount: guestCount ?? null,
-      internalNotes: 'Mesa abierta vía QR — cuenta anónima',
+      internalNotes:
+        resolvedCustomerId == null
+          ? 'Mesa abierta vía QR — cuenta anónima'
+          : 'Mesa abierta vía QR — comensal identificado',
     });
 
     this.logger.log(
@@ -803,6 +831,61 @@ export class TableSessionsService {
     } catch (err) {
       this.logger.warn(
         `Failed to push session_closed for session ${sessionId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Push the canonical `session_opened` SSE event on the per-store subject.
+   * Mirror of `emitSessionClosed` — emitted by `createOpenSession` so POS
+   * open, QR `open_tab`, and `confirmStaff` (require_staff path) all flow
+   * through a single emit point. Consumed by:
+   *
+   *   - Comensal SSE stream (`EcommerceTablesController.matchesDiner`),
+   *     filtered by `data.table_id === binding.table_id` so a diner who
+   *     scanned the QR BEFORE the session opened (menu_only /
+   *     mark_occupied / require_staff) gets the live transition and
+   *     can reconnect with a fully-resolved binding.
+   *   - Staff floor-map stream (`TableSessionsController.STAFF_EVENT_WHITELIST`
+   *     + `AdminTablesSseService`), so the room map refreshes the moment
+   *     the tab opens.
+   *
+   * Best-effort — SSE failures must never break the (already committed)
+   * open. Payload mirrors the staff + comensal consumers' needs.
+   */
+  emitSessionOpened(
+    storeId: number,
+    session: {
+      id: number;
+      order_id: number;
+      table_id: number;
+      opened_at: Date;
+      opened_by: number | null;
+    },
+  ): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_opened',
+        title: 'Mesa abierta',
+        body: `Se abrió la cuenta de la mesa`,
+        data: {
+          table_id: session.table_id,
+          session_id: session.id,
+          order_id: session.order_id,
+          opened_at:
+            session.opened_at instanceof Date
+              ? session.opened_at.toISOString()
+              : new Date(session.opened_at).toISOString(),
+          opened_by: session.opened_by,
+        },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_opened for session ${session.id}: ${
           (err as Error).message
         }`,
       );

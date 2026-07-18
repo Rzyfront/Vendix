@@ -206,6 +206,9 @@ export class AuthService {
         return normalizedEnv === 'STORE_ADMIN';
       case 'customer':
         return normalizedEnv === 'STORE_ECOMMERCE';
+      case 'carrier':
+        // Repartidor (Vendix Repartos): app interna de reparto STORE_DELIVERY.
+        return normalizedEnv === 'STORE_DELIVERY';
       default:
         return normalizedEnv === 'STORE_ADMIN';
     }

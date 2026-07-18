@@ -519,6 +519,7 @@ export class AuthService {
       'STORE_ADMIN',
       'ORG_ADMIN',
       'STORE_ECOMMERCE',
+      'STORE_DELIVERY',
       'VENDIX_LANDING',
       'VENDIX_ADMIN',
     ];
@@ -1369,8 +1370,10 @@ export class AuthService {
       );
     }
 
-    // Verificar rol válido (solo roles de staff que puede asignar un admin)
-    const validRoles = ['manager', 'supervisor', 'employee'];
+    // Verificar rol válido (solo roles de staff que puede asignar un admin).
+    // Fase B2: `carrier` (Vendix Repartos) es asignable y fuerza
+    // app_type=STORE_DELIVERY más abajo.
+    const validRoles = ['manager', 'supervisor', 'employee', 'carrier'];
     if (!validRoles.includes(role)) {
       throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
@@ -1419,13 +1422,17 @@ export class AuthService {
       },
     });
 
-    // Crear user_settings para el usuario staff usando el servicio centralizado (siempre STORE_ADMIN)
+    // Crear user_settings para el usuario staff usando el servicio centralizado.
+    // Fase B2: el app_type depende del rol — `carrier` (Vendix Repartos) ⇒
+    // STORE_DELIVERY; el resto de staff ⇒ STORE_ADMIN.
+    const staffAppType: 'STORE_ADMIN' | 'STORE_DELIVERY' =
+      role === 'carrier' ? 'STORE_DELIVERY' : 'STORE_ADMIN';
     const staffConfig =
-      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+      await this.defaultPanelUIService.generatePanelUI(staffAppType);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
-        app_type: 'STORE_ADMIN',
+        app_type: staffAppType,
         config: staffConfig,
       },
     });
@@ -3199,7 +3206,8 @@ export class AuthService {
         | 'ORG_ADMIN'
         | 'STORE_LANDING'
         | 'STORE_ADMIN'
-        | 'STORE_ECOMMERCE';
+        | 'STORE_ECOMMERCE'
+        | 'STORE_DELIVERY';
     },
   ): Promise<{
     access_token: string;

@@ -14,7 +14,8 @@ export type JwtAppType =
   | 'ORG_ADMIN'
   | 'STORE_LANDING'
   | 'STORE_ADMIN'
-  | 'STORE_ECOMMERCE';
+  | 'STORE_ECOMMERCE'
+  | 'STORE_DELIVERY';
 
 export interface JwtPayload {
   sub: number; // user id

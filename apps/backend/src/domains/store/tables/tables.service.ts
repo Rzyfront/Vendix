@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -120,6 +120,125 @@ export class TablesService {
     });
   }
 
+  /**
+   * Returns the ids of staff users currently assigned as waiters for a
+   * table. Navigates via the `tables` parent so the call stays inside
+   * the store-scoped client (the `tables` model is in
+   * `StorePrismaService.store_scoped_models`); the relation join to
+   * `table_waiters` is therefore transitively scoped. Returns an empty
+   * array if the table does not belong to the current store.
+   *
+   * Public so other services (e.g. EcommerceTablesService) can resolve
+   * the assigned waiter for a given public_token without re-querying.
+   */
+  async getAssignedWaiterUserIds(tableId: number): Promise<number[]> {
+    const table = await this.prisma.tables.findFirst({
+      where: { id: tableId },
+      include: {
+        table_waiters: { select: { user_id: true } },
+      },
+    });
+    if (!table) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+    }
+    return table.table_waiters.map((tw) => tw.user_id);
+  }
+
+  // -------------------------------------------------------- waiter pivote
+  /**
+   * STAFF-only guard for `waiter_user_ids`. Each id must:
+   *  (a) have a `store_users` row in this store, AND
+   *  (b) carry NO role named `customer` (we look at the user_roles
+   *      join via the relation to `roles`).
+   *
+   * Throws BadRequestException("Uno o más usuarios no son staff de la
+   * tienda") on the first violation. Called BEFORE opening the
+   * transaction so a bad payload fails fast with no DB writes.
+   *
+   * Note: `store_users` / `user_roles` / `users` are NOT in
+   * `store_scoped_models` (the latter two simply have no store_id
+   * column). The `where: { user_id: { in: userIds } }` filter and the
+   * `store_users` member check together make this safe by transitive
+   * trust — every candidate user_id has been confirmed to belong to
+   * this store before this helper returns.
+   */
+  private async assertStaffUserIds(
+    storeId: number,
+    userIds: number[],
+  ): Promise<void> {
+    if (userIds.length === 0) return;
+
+    // (a) membership in this store
+    const members = await this.prisma.store_users.findMany({
+      where: { store_id: storeId, user_id: { in: userIds } },
+      select: { user_id: true },
+    });
+    const memberSet = new Set(members.map((m) => m.user_id));
+    for (const uid of userIds) {
+      if (!memberSet.has(uid)) {
+        throw new BadRequestException(
+          'Uno o más usuarios no son staff de la tienda',
+        );
+      }
+    }
+
+    // (b) none may have the `customer` role
+    const customerRoles = await this.prisma.user_roles.findMany({
+      where: {
+        user_id: { in: userIds },
+        roles: { name: 'customer' },
+      },
+      select: { user_id: true },
+    });
+    if (customerRoles.length > 0) {
+      throw new BadRequestException(
+        'Uno o más usuarios no son staff de la tienda',
+      );
+    }
+  }
+
+  /**
+   * Synchronizes the `table_waiters` pivot for a given table inside an
+   * existing `$transaction`. Three modes driven by the input:
+   *
+   *   - `undefined` → no-op (caller asked us to preserve current state;
+   *     update-only behavior).
+   *   - `[]`        → clear all waiters for this table.
+   *   - `[a,b,...]` → remove anyone NOT in the list, then insert any
+   *     new ids (idempotent via `skipDuplicates` against the
+   *     (table_id, user_id) unique constraint).
+   *
+   * IMPORTANT: the caller MUST have already verified that the table
+   * belongs to this store (via `tables.findFirst`) before opening the
+   * transaction. `table_waiters` is ALSO registered in the StorePrisma
+   * relational scope map (`table: { store_id }`), so direct read/update/
+   * delete operations are tenant-filtered defensively; the transitive
+   * trust on `table_id` here is a second layer, not the only one. Note
+   * `createMany` is intentionally NOT store-injected (relational models
+   * skip the create branch), so the insert below still works as written.
+   */
+  private async syncTableWaiters(
+    tx: Prisma.TransactionClient,
+    tableId: number,
+    waiterUserIds: number[] | undefined,
+  ): Promise<void> {
+    if (waiterUserIds === undefined) return;
+    if (waiterUserIds.length === 0) {
+      await tx.table_waiters.deleteMany({ where: { table_id: tableId } });
+      return;
+    }
+    await tx.table_waiters.deleteMany({
+      where: { table_id: tableId, user_id: { notIn: waiterUserIds } },
+    });
+    await tx.table_waiters.createMany({
+      data: waiterUserIds.map((uid) => ({
+        table_id: tableId,
+        user_id: uid,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
   // ----------------------------------------------------------------- CRUD
   async create(dto: CreateTableDto) {
     const storeId = this.requireStoreId();
@@ -132,19 +251,31 @@ export class TablesService {
       throw new VendixHttpException(ErrorCodes.TABLE_DUP_NAME);
     }
 
+    // Fail fast on bad waiter ids BEFORE opening the transaction —
+    // saves a round-trip when the payload is malformed.
+    if (dto.waiter_user_ids && dto.waiter_user_ids.length > 0) {
+      await this.assertStaffUserIds(storeId, dto.waiter_user_ids);
+    }
+
     try {
-      return await this.prisma.tables.create({
-        data: {
-          store_id: storeId,
-          name: dto.name,
-          zone: dto.zone ?? null,
-          capacity: dto.capacity ?? null,
-          status: dto.status ?? 'available',
-          pos_x: dto.pos_x ?? null,
-          pos_y: dto.pos_y ?? null,
-          public_token: uuidv4(),
-          updated_at: new Date(),
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const table = await tx.tables.create({
+          data: {
+            store_id: storeId,
+            name: dto.name,
+            zone: dto.zone ?? null,
+            capacity: dto.capacity ?? null,
+            status: dto.status ?? 'available',
+            pos_x: dto.pos_x ?? null,
+            pos_y: dto.pos_y ?? null,
+            public_token: uuidv4(),
+            updated_at: new Date(),
+          },
+        });
+
+        await this.syncTableWaiters(tx, table.id, dto.waiter_user_ids);
+
+        return table;
       });
     } catch (error) {
       if (
@@ -274,6 +405,7 @@ export class TablesService {
   }
 
   async update(id: number, dto: UpdateTableDto) {
+    const storeId = this.requireStoreId();
     await this.getById(id);
 
     if (dto.name) {
@@ -304,6 +436,13 @@ export class TablesService {
       }
     }
 
+    // Validate the waiter payload ONLY when the caller provided one.
+    // `undefined` means "preserve current assignment", so no validation
+    // is needed.
+    if (dto.waiter_user_ids && dto.waiter_user_ids.length > 0) {
+      await this.assertStaffUserIds(storeId, dto.waiter_user_ids);
+    }
+
     const data: Prisma.tablesUpdateInput = {
       ...(dto.name !== undefined && { name: dto.name }),
       ...(dto.zone !== undefined && { zone: dto.zone }),
@@ -315,7 +454,11 @@ export class TablesService {
     };
 
     try {
-      return await this.prisma.tables.update({ where: { id }, data });
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.tables.update({ where: { id }, data });
+        await this.syncTableWaiters(tx, id, dto.waiter_user_ids);
+        return updated;
+      });
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

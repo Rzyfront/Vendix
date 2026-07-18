@@ -42,6 +42,14 @@
       iconBgColor="bg-amber-100"
       iconColor="text-amber-600"
     />
+    <app-stats
+      title="Socios inscritos"
+      [value]="stats().membersCount"
+      smallText="Membresías asignadas en la tienda"
+      iconName="users"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+    />
   </div>
 
   <app-card [responsive]="true" [padding]="false" overflow="visible">

@@ -2131,6 +2131,19 @@ export const ErrorCodes = {
       'Cannot void an invoiced dispatch note directly; issue a credit note via return_orders instead',
   },
 
+  // Carrier / Repartos (Fase B6) — namespace /store/carrier/*
+  CARRIER_CLAIM_TAKEN: {
+    code: 'CARRIER_CLAIM_TAKEN',
+    httpStatus: 409,
+    devMessage:
+      'This order was already claimed by another carrier (first-wins claim lost the race)',
+  },
+  CARRIER_NO_ACTIVE_ROUTE: {
+    code: 'CARRIER_NO_ACTIVE_ROUTE',
+    httpStatus: 404,
+    devMessage: 'The carrier has no active route (draft/dispatched/in_transit)',
+  },
+
   // Dispatch Note Receipt Scanner (purchase-receipt OCR via AI — R4c)
   DISPATCH_RECEIPT_SCAN_NO_FILE: {
     code: 'DISPATCH_RECEIPT_SCAN_NO_FILE',

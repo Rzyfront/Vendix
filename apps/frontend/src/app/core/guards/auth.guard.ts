@@ -122,6 +122,33 @@ export class AuthGuard implements CanActivate {
       return userRoles.includes('super_admin');
     }
 
+    // Carrier delivery app (Vendix Repartos) - solo rol carrier.
+    // Defensa en profundidad; el punto de restricción principal es carrierGuard.
+    if (path.startsWith('/repartos')) {
+      return userRoles.includes('carrier');
+    }
+
+    // Carrier-only: confinado a /repartos (+ /account, ya resuelto arriba).
+    // Un intento de forzar /admin, /store o /superadmin se deniega y el guard
+    // lo rebota a /repartos vía getDashboardUrl(). Un usuario híbrido
+    // admin+carrier NO se ve afectado (mantiene su acceso admin).
+    const ADMIN_TYPE_ROLES = [
+      'super_admin',
+      'admin',
+      'owner',
+      'manager',
+      'supervisor',
+      'employee',
+      'cashier',
+      'fiscal_supervisor',
+    ];
+    const isCarrierOnly =
+      userRoles.includes('carrier') &&
+      !userRoles.some((r) => ADMIN_TYPE_ROLES.includes(r));
+    if (isCarrierOnly) {
+      return false;
+    }
+
     // Admin & Store routes
     if (path.startsWith('/admin') || path.startsWith('/store')) {
       const env =
@@ -150,6 +177,26 @@ export class AuthGuard implements CanActivate {
 
     if (userRoles.includes('super_admin')) {
       return this.router.createUrlTree(['/superadmin/dashboard']);
+    }
+
+    // Carrier-only users land in the delivery app (Vendix Repartos).
+    // A hybrid admin+carrier user still resolves to the admin dashboard below.
+    if (
+      userRoles.includes('carrier') &&
+      !userRoles.some((r) =>
+        [
+          'super_admin',
+          'admin',
+          'owner',
+          'manager',
+          'supervisor',
+          'employee',
+          'cashier',
+          'fiscal_supervisor',
+        ].includes(r),
+      )
+    ) {
+      return this.router.createUrlTree(['/repartos']);
     }
 
     // Any non-customer role goes to admin dashboard (custom roles included)

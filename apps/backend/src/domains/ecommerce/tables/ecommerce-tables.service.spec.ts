@@ -19,6 +19,7 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
   let kitchenFireService: any;
   let menuAvailabilityChecker: any;
   let sseService: any;
+  let notificationsService: any;
   let context: any;
 
   const STORE_ID = 100;
@@ -60,6 +61,9 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
     tablesService = {
       update: jest.fn(),
       getActiveSession: jest.fn(),
+      // Step 2 (QR-mesa): per-table waiter resolution used by
+      // dispatchStaffNotification. Default = no waiters → broadcast fallback.
+      getAssignedWaiterUserIds: jest.fn().mockResolvedValue([]),
     };
 
     tableSessionsService = {
@@ -79,6 +83,21 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
       push: jest.fn(),
     };
 
+    // Step 3 (QR-mesa): staff notifications now route per-user via
+    // sendToUser (assigned waiters) with a createAndBroadcast fallback.
+    notificationsService = {
+      sendToUser: jest.fn().mockResolvedValue(undefined),
+      createAndBroadcast: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // Payment / infra deps — not exercised by resolveByToken, mocked as
+    // empty stubs so the 13-arg constructor is satisfied.
+    const storePaymentMethodsService = {};
+    const paymentEncryptionService = {};
+    const wompiClientFactory = {};
+    const s3Service = { signUrl: jest.fn() };
+    const redis = {};
+
     service = new EcommerceTablesService(
       prismaMock as any,
       tablesService as any,
@@ -87,6 +106,12 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
       kitchenFireService as any,
       menuAvailabilityChecker as any,
       sseService as any,
+      notificationsService as any,
+      storePaymentMethodsService as any,
+      paymentEncryptionService as any,
+      wompiClientFactory as any,
+      s3Service as any,
+      redis as any,
     );
   });
 
@@ -175,21 +200,49 @@ describe('EcommerceTablesService — resolveByToken (QR-por-mesa)', () => {
   });
 
   describe('require_staff', () => {
-    it('does NOT open a session and notifies staff via SSE', async () => {
+    it('does NOT open a session and broadcasts a persisted notification when no waiters are assigned', async () => {
       mockTableFound();
       setBehavior('require_staff');
 
       const result = await service.resolveByToken(TOKEN);
+      // notifyStaffTableScan is fire-and-forget (`void dispatch...`); flush
+      // the micro/macrotask queue so the dispatch completes before asserting.
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(tableSessionsService.openTableSessionPublic).not.toHaveBeenCalled();
       expect(result.session_id).toBeUndefined();
-      expect(sseService.push).toHaveBeenCalledWith(
+      // No assigned waiters → store-wide fallback (createAndBroadcast) with
+      // the qr_table_scan type and public_token baked into the payload (Step 4b).
+      expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
         STORE_ID,
+        'qr_table_scan',
+        expect.any(String),
+        expect.any(String),
         expect.objectContaining({
-          type: 'qr_table_scan',
-          data: expect.objectContaining({ table_id: TABLE_ID }),
+          table_id: TABLE_ID,
+          public_token: TOKEN,
         }),
       );
+      expect(notificationsService.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('routes per-user via sendToUser when the table has assigned waiters', async () => {
+      mockTableFound();
+      setBehavior('require_staff');
+      tablesService.getAssignedWaiterUserIds.mockResolvedValue([42]);
+
+      await service.resolveByToken(TOKEN);
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(notificationsService.sendToUser).toHaveBeenCalledWith(
+        STORE_ID,
+        42,
+        'qr_table_scan',
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ table_id: TABLE_ID, public_token: TOKEN }),
+      );
+      expect(notificationsService.createAndBroadcast).not.toHaveBeenCalled();
     });
   });
 

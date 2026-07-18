@@ -45,11 +45,11 @@ export class RegisterStaffDto {
 
   @ApiProperty({
     example: 'manager',
-    description: 'Rol del staff (manager, supervisor, employee)',
-    enum: ['manager', 'supervisor', 'employee'],
+    description: 'Rol del staff (manager, supervisor, employee, carrier)',
+    enum: ['manager', 'supervisor', 'employee', 'carrier'],
   })
   @IsString()
-  @IsEnum(['manager', 'supervisor', 'employee'])
+  @IsEnum(['manager', 'supervisor', 'employee', 'carrier'])
   role: string;
 
   @ApiPropertyOptional({

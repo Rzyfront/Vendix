@@ -8,6 +8,7 @@ import type {
   FiscalScopeInfo,
   FiscalManagementStatus,
   OperatingScopeInfo,
+  OperatingScopeCurrentState,
   OperatingScopePreview,
   OperatingScopeApplyResult,
   ApplyOperatingScopeDto,
@@ -30,11 +31,11 @@ export const OrgConfigService = {
     }),
 
   // Operating scope (paridad visual con web)
-  // Devuelve `OperatingScopeInfo` (legacy) para compat con `settings/operating-scope.tsx`.
-  // El nuevo contrato `OperatingScopeCurrentState` (usado por `config/application.tsx`)
-  // se obtiene vía `previewOperatingScope` / `applyOperatingScope` (nuevos endpoints).
+  // PR #15: getOperatingScope ahora retorna el nuevo contrato `OperatingScopeCurrentState`
+  // (current, is_partner, editable, audit_log_recent) en lugar del legacy `OperatingScopeInfo`.
+  // Consumido por `settings/operating-scope.tsx` (paridad 1:1 con web).
   getOperatingScope: async () =>
-    apiGet<OperatingScopeInfo>(Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE),
+    apiGet<OperatingScopeCurrentState>(Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE),
   previewOperatingScope: async (targetScope: OperatingScopeValue, reason?: string) =>
     apiPost<OperatingScopePreview>(Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE_PREVIEW, {
       target_scope: targetScope,
