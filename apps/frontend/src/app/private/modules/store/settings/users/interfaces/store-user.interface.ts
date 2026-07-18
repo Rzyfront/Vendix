@@ -23,6 +23,13 @@ export interface StoreUserDetail extends StoreUser {
   roles: Role[];
   panel_ui: Record<string, Record<string, boolean>>;
   email_verified?: boolean;
+  /**
+   * App the user lands on: `STORE_ADMIN` (panel de tienda) o `STORE_DELIVERY`
+   * (Repartos). Se asigna MANUALMENTE por un admin vía el selector; asignar el
+   * rol carrier ya no lo mueve solo. Solo puede ser `STORE_DELIVERY` si el
+   * usuario tiene el rol carrier (contrato backend).
+   */
+  app_type?: string;
 }
 
 export enum StoreUserState {

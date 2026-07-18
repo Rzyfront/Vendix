@@ -20,10 +20,14 @@ import {
   MenuNextAvailable,
   PublicMenu,
 } from '../../services/catalog.service';
+import {
+  formatNextAvailableDetailed,
+  NextAvailableDetailed,
+} from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../next-available-notice';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { TableContextService } from '../../services/table-context.service';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
@@ -59,6 +63,7 @@ interface CartaBlock {
     ButtonComponent,
     BadgeComponent,
     IconComponent,
+    NextAvailableNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -79,9 +84,12 @@ interface CartaBlock {
         <ng-template #dishCard let-dish="dish">
           <a
             class="dish-card"
-            [class.dish-card--off]="!dish.is_available_now"
+            [class.dish-card--off]="!dish.is_available_now || !!dish.is_sold_out"
+            [class.dish-card--sold-out]="!!dish.is_sold_out"
             [routerLink]="
-              dish.product?.slug ? ['/products', dish.product?.slug] : null
+              dish.is_sold_out || !dish.product?.slug
+                ? null
+                : ['/products', dish.product?.slug]
             "
           >
             <div class="dish-image">
@@ -95,7 +103,16 @@ interface CartaBlock {
                 <div class="dish-image__placeholder">🍽️</div>
               }
 
-              @if (!dish.is_available_now) {
+              @if (dish.is_sold_out) {
+                <app-badge
+                  class="dish-badge"
+                  variant="error"
+                  size="sm"
+                  badgeStyle="solid"
+                >
+                  Agotado
+                </app-badge>
+              } @else if (!dish.is_available_now) {
                 <app-badge
                   class="dish-badge"
                   variant="warning"
@@ -104,6 +121,9 @@ interface CartaBlock {
                 >
                   Disponible {{ formatNext(dish.next_available) }}
                 </app-badge>
+                @if (nextAvailableFor(dish.next_available); as dishNext) {
+                  <app-next-available-notice [next]="dishNext" />
+                }
               } @else if (dish.product?.has_variants) {
                 <div class="dish-variant-badge">
                   {{ dish.product?.variant_count }} variantes
@@ -132,7 +152,11 @@ interface CartaBlock {
                 </app-button>
               </div>
 
-              @if (dish.is_available_now) {
+              @if (
+                dish.is_available_now &&
+                !dish.is_sold_out &&
+                !tableContext.hideDineInPurchase()
+              ) {
                 <button
                   type="button"
                   class="dish-quick-btn"
@@ -209,6 +233,9 @@ interface CartaBlock {
               <app-badge variant="warning">
                 Disponible {{ formatNext(fb.menu.next_available) }}
               </app-badge>
+              @if (nextAvailableFor(fb.menu.next_available); as fbNext) {
+                <app-next-available-notice [next]="fbNext" />
+              }
             </div>
             <div class="dishes-grid">
               @for (dish of fb.dishes; track dish.id) {
@@ -276,10 +303,30 @@ interface CartaBlock {
         text-align: center;
         margin-top: 1rem;
       }
+      /* Espejo del grid canónico del ecommerce (.products-grid del home):
+         mobile-first con 2 columnas fijas en móvil, escalando en desktop, para
+         que las cards de carta se comporten igual que el resto de cards. */
       .dishes-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-        gap: 1rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem 0.75rem;
+      }
+      @media (min-width: 768px) {
+        .dishes-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 1.5rem;
+        }
+      }
+      @media (min-width: 1100px) {
+        .dishes-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 2rem 1.75rem;
+        }
+      }
+      @media (min-width: 1320px) {
+        .dishes-grid {
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
       }
 
       /* --- dish-card: espejo visual de .product-card --- */
@@ -315,6 +362,16 @@ interface CartaBlock {
       }
       .dish-card--off {
         opacity: 0.7;
+      }
+      /* F2 — Plato agotado: además de opacidad, anula el cursor y el transform
+         de hover para comunicar "no comprable". Los botones internos (Like /
+         Compartir) conservan su pointer-events porque 'card-actions' y los
+         'app-button' restablecen su propio cursor. routerLink ya es null. */
+      .dish-card--sold-out {
+        cursor: default;
+      }
+      .dish-card--sold-out:hover {
+        transform: none;
       }
 
       .dish-image {
@@ -544,7 +601,9 @@ export class MenusShowcaseComponent implements OnInit {
 
   private readonly catalogService = inject(CatalogService);
   private readonly cartService = inject(CartService);
-  private readonly tableContext = inject(TableContextService);
+  /** QR-mode-aware visibility (Step 7) — consumed by the dish-quick-btn
+   *  template to hide purchase CTAs when the active scan mode forbids it. */
+  protected readonly tableContext = inject(TableContextService);
   private readonly wishlistService = inject(WishlistService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
@@ -557,6 +616,11 @@ export class MenusShowcaseComponent implements OnInit {
     day_of_week: number;
     minutes: number;
   } | null>(null);
+
+  /** Store IANA timezone, used to compute the human "Vuelve el Sábado a las
+   *  08:00" labels. Comes from the `/ecommerce/catalog/menus` response so
+   *  we don't depend on TenantFacade being ready. */
+  private readonly storeTimezone = signal<string | null>(null);
 
   /** Product_ids actualmente en favoritos — fuente de verdad compartida con
    *  el home vía WishlistService (signal singleton). Alimenta el fill del
@@ -630,10 +694,12 @@ export class MenusShowcaseComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.now.set(res.data?.now ?? null);
+          this.storeTimezone.set(res.data?.store_timezone ?? null);
           this.menus.set(res.data?.menus ?? []);
         },
         error: () => {
           this.now.set(null);
+          this.storeTimezone.set(null);
           this.menus.set([]);
         },
       });
@@ -683,6 +749,15 @@ export class MenusShowcaseComponent implements OnInit {
     return `${day} ${na.start_time}`.trim();
   }
 
+  /**
+   * Builds the structured payload expected by `<app-next-available-notice>` for
+   * a dish, menu or section. Returns null when `next_available` is missing or
+   * malformed (the notice block renders nothing in that case).
+   */
+  nextAvailableFor(na: MenuNextAvailable | null): NextAvailableDetailed | null {
+    return formatNextAvailableDetailed(na, this.storeTimezone(), new Date());
+  }
+
   /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */
   stopCardNav(event: Event): void {
     event.preventDefault();
@@ -730,7 +805,7 @@ export class MenusShowcaseComponent implements OnInit {
       sku: null,
       stock_quantity: null,
       available_stock: null,
-      is_available: item.is_available_now,
+      is_available: item.is_available_now && !item.is_sold_out,
       final_price: on_sale ? p.sale_price! : p.base_price,
       image_url: p.image_url,
       brand: null,
@@ -745,7 +820,7 @@ export class MenusShowcaseComponent implements OnInit {
    * qty fija de 1 — al carrito ecommerce, o a la mesa en sesión dine-in open_tab. */
   onQuickAdd(event: Event, item: MenuItem): void {
     this.stopCardNav(event);
-    if (!item.is_available_now) return;
+    if (!item.is_available_now || item.is_sold_out) return;
     if (item.product?.has_variants) {
       const slug = item.product?.slug;
       if (slug) this.router.navigate(['/products', slug]);
@@ -757,35 +832,16 @@ export class MenusShowcaseComponent implements OnInit {
   /** Adds a non-variant dish (qty=1) to the cart — or, in a dine-in `open_tab`
    * session, straight to the diner's table tab. Backend rejects off-schedule
    * dishes (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated
-   * by `is_available_now`; this is a defensive guard. */
+   * by `is_available_now`; this is a defensive guard. The mesa-vs-cart
+   * chokepoint + mesa success/error toast live in `cartService.addProduct`
+   * (D3); this method only adds the cart-path success toast here. */
   private addToCartOrTab(item: MenuItem): void {
     const product = item.product;
     if (!product || !item.is_available_now) return;
     const qty = 1;
-
-    // Dine-in QR (open_tab): the dish belongs on the diner's table tab, NOT
-    // the ecommerce cart. Mirrors product-card.onAddToCart so both entry
-    // points (home showcase + full carta page) feed the same session.
-    if (this.tableContext.isOpenTab()) {
-      this.tableContext
-        .addOrder([{ product_id: product.id, quantity: qty }])
-        .subscribe({
-          next: () => {
-            const msg = this.tableContext.autoFire()
-              ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
-              : `Agregado a la mesa ${this.tableContext.tableName()}`;
-            this.toastService.success(msg);
-          },
-          error: (err) => {
-            const { userMessage, devMessage } = parseApiError(err);
-            this.toastService.error(userMessage);
-            if (devMessage) console.error('[table addOrder]', devMessage);
-          },
-        });
-      return;
-    }
-
-    const result = this.cartService.addToCart(product.id, qty);
+    const isMesa = this.tableContext.isOpenTab();
+    const result = this.cartService.addProduct(product.id, qty);
+    if (isMesa) return; // mesa path toasts internally inside addProduct
     const done = () => this.toastService.success('Plato agregado al carrito');
     if (result) {
       result.subscribe({ next: done });

@@ -50,6 +50,26 @@ export class DispatchRoutesController {
   }
 
   /**
+   * Plan Despacho Economía — FASE 8 paso 24.
+   * Monitor económico de planillas: por cada ruta muestra recaudo,
+   * ingreso flete (414505), costo transporte (523550), margen flete
+   * (= ingreso flete − costo transporte) y estado de liquidación.
+   */
+  @Get('monitor')
+  @Permissions('store:dispatch_routes:read')
+  async getMonitor(@Query() query: any) {
+    const result = await this.dispatchRoutesService.getMonitor({
+      page: Number(query?.page ?? 1),
+      limit: Number(query?.limit ?? 20),
+      store_id: query?.store_id ? Number(query.store_id) : undefined,
+    });
+    return this.responseService.success(
+      result,
+      'Monitor de planillas obtenido',
+    );
+  }
+
+  /**
    * Lists dispatch notes that are eligible to be added to a new planilla
    * stop. Excludes notes that are already attached to a non-released stop
    * of a non-draft route, voided, or have been hard-deleted. This is the
@@ -75,6 +95,22 @@ export class DispatchRoutesController {
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.dispatchRoutesService.findOne(id);
     return this.responseService.success(result, 'Planilla obtenida');
+  }
+
+  /**
+   * Map view: not-yet-delivered stops (`pending` / `in_progress`) with their
+   * resolved coordinates plus the route origin, for rendering the suggested
+   * route on the planilla detail map. Stops whose coordinates cannot be
+   * resolved are returned under `unlocated[]`.
+   */
+  @Get(':id/map-stops')
+  @Permissions('store:dispatch_routes:read')
+  async getMapStops(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dispatchRoutesService.getMapStops(id);
+    return this.responseService.success(
+      result,
+      'Paradas del mapa obtenidas',
+    );
   }
 
   @Post()

@@ -158,6 +158,21 @@
           </div>
         </section>
 
+        <!-- Reparto (Carrier default tariff) Section -->
+        <section id="section-reparto" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--teal">
+              <app-icon name="coins" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Reparto</h2>
+          </div>
+          <div class="section-body">
+            <app-carrier-settings-form
+              [settings]="settings().carrier || { default_tariff: { mode: 'per_stop', amount: '0', currency: 'COP' } }"
+              (settingsChange)="onSectionChange('carrier', $event)" />
+          </div>
+        </section>
+
         <!-- Notifications Section -->
         <section id="section-notifications" class="settings-section">
           <div class="section-header">

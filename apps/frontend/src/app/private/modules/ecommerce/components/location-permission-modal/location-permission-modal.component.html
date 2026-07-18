@@ -43,13 +43,23 @@
   </div>
 
   <div slot="footer" class="lp-footer">
-    <app-button variant="ghost" size="md" (clicked)="onDecline()">
-      <app-icon slot="icon" name="pencil" [size]="16" />
-      Ingresar manualmente
-    </app-button>
-    <app-button variant="primary" size="md" (clicked)="onAccept()">
+    <app-button
+      variant="primary"
+      size="md"
+      [fullWidth]="true"
+      (clicked)="onAccept()"
+    >
       <app-icon slot="icon" name="navigation" [size]="16" />
       Usar mi ubicación
+    </app-button>
+    <app-button
+      variant="ghost"
+      size="md"
+      [fullWidth]="true"
+      (clicked)="onDecline()"
+    >
+      <app-icon slot="icon" name="pencil" [size]="16" />
+      Ingresar manualmente
     </app-button>
   </div>
 </app-modal>

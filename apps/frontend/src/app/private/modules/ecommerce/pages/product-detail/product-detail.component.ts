@@ -25,8 +25,11 @@ import {
   CatalogQuery,
   formatMenuNextAvailable,
 } from '../../services/catalog.service';
+import { formatNextAvailableDetailed } from '../../services/next-available.util';
+import { NextAvailableNoticeComponent } from '../../components/next-available-notice';
 import { CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
+import { TableContextService } from '../../services/table-context.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -39,6 +42,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 
 @Component({
   selector: 'app-product-detail',
@@ -58,6 +62,7 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
     ShareModalComponent,
     EmptyStateComponent,
     CurrencyPipe,
+    NextAvailableNoticeComponent,
   ],
   template: `
     <div class="product-detail-page">
@@ -268,59 +273,61 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
               }
 
               <!-- Purchase Section -->
-              <div class="purchase-box">
-                <app-quantity-control
-                  [value]="quantity()"
-                  [min]="1"
-                  [max]="isOnDemand() ? 999 : displayStock() || 99"
-                  [size]="'sm'"
-                  (valueChange)="quantity.set($event)"
-                />
+              @if (!hideDineInPurchase()) {
+                <div class="purchase-box">
+                  <app-quantity-control
+                    [value]="quantity()"
+                    [min]="1"
+                    [max]="isOnDemand() ? 999 : displayStock() || 99"
+                    [size]="'sm'"
+                    (valueChange)="quantity.set($event)"
+                  />
 
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    customClasses="btn-cart"
+                    [disabled]="purchaseDisabled()"
+                    (clicked)="onAddToCart(p)"
+                  >
+                    <app-icon slot="icon" name="shopping-cart" [size]="18" />
+                    {{
+                      isService()
+                        ? 'Agendar'
+                        : !isOnDemand() && displayStock() === 0
+                          ? 'Agotado'
+                          : 'Añadir'
+                    }}
+                  </app-button>
+
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    customClasses="btn-share"
+                    (clicked)="onShareClick()"
+                  >
+                    <app-icon slot="icon" name="share" [size]="18" />
+                  </app-button>
+                </div>
+
+                <!-- Buy Now -->
                 <app-button
                   variant="primary"
-                  size="sm"
-                  customClasses="btn-cart"
+                  size="md"
+                  [fullWidth]="true"
+                  customClasses="btn-buy-now"
                   [disabled]="purchaseDisabled()"
-                  (clicked)="onAddToCart(p)"
+                  (clicked)="onBuyNow(p)"
                 >
-                  <app-icon slot="icon" name="shopping-cart" [size]="18" />
                   {{
                     isService()
-                      ? 'Agendar'
+                      ? 'Agendar ahora'
                       : !isOnDemand() && displayStock() === 0
                         ? 'Agotado'
-                        : 'Añadir'
+                        : 'Comprar ahora'
                   }}
                 </app-button>
-
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  customClasses="btn-share"
-                  (clicked)="onShareClick()"
-                >
-                  <app-icon slot="icon" name="share" [size]="18" />
-                </app-button>
-              </div>
-
-              <!-- Buy Now -->
-              <app-button
-                variant="primary"
-                size="md"
-                [fullWidth]="true"
-                customClasses="btn-buy-now"
-                [disabled]="purchaseDisabled()"
-                (clicked)="onBuyNow(p)"
-              >
-                {{
-                  isService()
-                    ? 'Agendar ahora'
-                    : !isOnDemand() && displayStock() === 0
-                      ? 'Agotado'
-                      : 'Comprar ahora'
-                }}
-              </app-button>
+              }
 
               <!-- Stock Minimal -->
               <div class="stock-minimal">
@@ -328,6 +335,9 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
                   <app-badge variant="warning">
                     Disponible {{ formatNextAvailable() }}
                   </app-badge>
+                  @if (nextAvailableDetailed(); as nextInfo) {
+                    <app-next-available-notice [next]="nextInfo" />
+                  }
                 } @else if (isService()) {
                   <span class="s-dot service"></span>
                   <span class="s-text">Servicio disponible</span>
@@ -1425,6 +1435,9 @@ export class ProductDetailComponent implements OnInit {
   private fb = inject(FormBuilder);
   private reviewsService = inject(EcommerceReviewsService);
   private priceResolver = inject(PriceResolverService);
+  private tenantFacade = inject(TenantFacade);
+  /** Single source of truth for QR-mode-aware purchase visibility (Step 7). */
+  protected readonly tableContext = inject(TableContextService);
 
   // States
   product = signal<ProductDetail | null>(null);
@@ -1656,10 +1669,29 @@ export class ProductDetailComponent implements OnInit {
     return !this.isOnDemand() && this.displayStock() === 0;
   });
 
+  /** True when the active QR-mode forbids ordering right now — keeps the
+   *  product-detail CTAs gated by the same rule as the other 4 surfaces.
+   *  The template hides them outright (UX decision: ocultar > bloquear). */
+  readonly hideDineInPurchase = computed(
+    (): boolean => this.tableContext.hideDineInPurchase(),
+  );
+
   /** Short "Disponible Vie 08:00" label for the off-schedule badge. */
   formatNextAvailable(): string {
     return formatMenuNextAvailable(this.product()?.next_available ?? null);
   }
+
+  /** Structured payload for `<app-next-available-notice>`. Mirrors the
+   *  same TZ-aware logic used by `menus-showcase` and `menus-page`. */
+  readonly nextAvailableDetailed = computed(() => {
+    const p = this.product();
+    if (!p || p.is_available_now !== false) return null;
+    const na = p.next_available ?? null;
+    if (!na) return null;
+    const tz =
+      this.tenantFacade.domainConfig()?.customConfig?.ecommerce?.general?.timezone ?? null;
+    return formatNextAvailableDetailed(na, tz, new Date());
+  });
 
   // Quick View Modal
   readonly quickViewOpen = model<boolean>(false);
@@ -1989,7 +2021,8 @@ export class ProductDetailComponent implements OnInit {
     const variantInfo = variant
       ? { name: variant.name, sku: variant.sku, price: variant.final_price }
       : undefined;
-    const result = this.cartService.addToCart(
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
       variantId,
@@ -2024,7 +2057,8 @@ export class ProductDetailComponent implements OnInit {
     const variantInfo = variant
       ? { name: variant.name, sku: variant.sku, price: variant.final_price }
       : undefined;
-    const result = this.cartService.addToCart(
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cartService.addProduct(
       product.id,
       this.quantity(),
       variantId,

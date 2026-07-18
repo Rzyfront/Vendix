@@ -687,6 +687,51 @@ export class DispatchSettingsDto {
   @IsOptional()
   @IsIn(['live', 'on_close'])
   order_state_update_mode?: 'live' | 'on_close';
+
+  // Plan Despacho Economía — FASE 2 paso 9. Defaults globales de despacho.
+  @ApiProperty({
+    enum: ['prepaid', 'on_delivery'],
+    required: false,
+    description:
+      'Fallback global: timing de pago del envío cuando el método no define política.',
+  })
+  @IsOptional()
+  @IsIn(['prepaid', 'on_delivery'])
+  default_payment_timing?: 'prepaid' | 'on_delivery';
+
+  @ApiProperty({
+    enum: ['none', 'per_delivery', 'per_route'],
+    required: false,
+    description: 'Fallback global: tipo de liquidación del transportista.',
+  })
+  @IsOptional()
+  @IsIn(['none', 'per_delivery', 'per_route'])
+  default_settlement_type?: 'none' | 'per_delivery' | 'per_route';
+
+  @ApiProperty({
+    enum: ['immediate_on_close'],
+    required: false,
+    description: 'Fallback global: cuándo se liquida el costo del transportista.',
+  })
+  @IsOptional()
+  @IsIn(['immediate_on_close'])
+  default_cost_settlement_timing?: 'immediate_on_close';
+
+  @ApiProperty({
+    required: false,
+    description: 'ID de la ubicación origen por defecto para nuevas rutas.',
+  })
+  @IsOptional()
+  @IsInt()
+  default_origin_location_id?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Si true, una orden sin dirección de entrega no es despachable.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requires_dispatch_address?: boolean;
 }
 
 export class RestaurantSettingsDto {
@@ -799,6 +844,27 @@ export class MembershipSettingsDto {
   @IsOptional()
   @IsBoolean()
   ambient_access_enabled?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Kiosk mode: keeps the QR scanner always-on (continuous loop) on the Aforo tab for an unattended reception tablet.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  qr_kiosk_mode?: boolean;
+
+  @ApiProperty({
+    example: 'fullscreen',
+    required: false,
+    enum: ['fullscreen', 'floating'],
+    description:
+      'Default display mode for the Aforo QR scanner: fullscreen overlay or a movable floating window (bubble).',
+  })
+  @IsOptional()
+  @IsIn(['fullscreen', 'floating'])
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
 
   @ApiProperty({
     example: false,

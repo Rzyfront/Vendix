@@ -5,6 +5,8 @@ import {
   inject,
   OnInit,
   signal,
+  TemplateRef,
+  ViewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -16,6 +18,7 @@ import {
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
   PaginationComponent,
@@ -38,11 +41,14 @@ import { MemberBulkScannerService } from '../../services/member-bulk-scanner.ser
 import { CommitMemberRosterDto } from '../../interfaces/member-bulk-scanner.interface';
 import { MembershipsService } from '../../services';
 import { MemberBulkScannerModalComponent } from '../../components/member-bulk-scanner/member-bulk-scanner-modal.component';
+import { MembershipProgressComponent } from '../../components/membership-progress/membership-progress.component';
+import { membershipProgress } from '../../utils/membership-progress.util';
 
 interface MembersStats {
   total: number;
   active: number;
   pending: number;
+  expired: number;
 }
 
 @Component({
@@ -53,11 +59,13 @@ interface MembersStats {
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
+    InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
     MemberBulkScannerModalComponent,
+    MembershipProgressComponent,
   ],
   templateUrl: './members-list-page.component.html',
 })
@@ -69,12 +77,13 @@ export class MembershipMembersListPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly memberships = signal<GymMembership[]>([]);
-  readonly stats = signal<MembersStats>({ total: 0, active: 0, pending: 0 });
+  readonly stats = signal<MembersStats>({ total: 0, active: 0, pending: 0, expired: 0 });
 
   readonly filters = signal({ page: 1, limit: 10 });
   readonly totalItems = signal(0);
   readonly isLoading = signal(false);
 
+  readonly searchTerm = signal('');
   readonly statusFilter = signal<GymMembershipStatus | 'all'>('all');
   /** Drives the bulk-import modal visibility. Server-side permission
    *  (`store:memberships:bulk_import`) is the real gate; we surface the
@@ -118,7 +127,10 @@ export class MembershipMembersListPageComponent implements OnInit {
     },
   ]);
 
-  readonly tableColumns: TableColumn[] = [
+  @ViewChild('progressTpl', { static: true })
+  progressTpl!: TemplateRef<any>;
+
+  readonly tableColumns = computed<TableColumn[]>(() => [
     {
       key: 'customer',
       label: 'Socio',
@@ -143,6 +155,13 @@ export class MembershipMembersListPageComponent implements OnInit {
         value ? formatDateOnlyUTC(value) : 'Sin vigencia',
     },
     {
+      key: 'progress',
+      label: 'Progreso',
+      sortable: false,
+      priority: 2,
+      template: this.progressTpl,
+    },
+    {
       key: 'status',
       label: 'Estado',
       priority: 1,
@@ -151,7 +170,7 @@ export class MembershipMembersListPageComponent implements OnInit {
       badge: true,
       badgeConfig: { type: 'custom', colorMap: GYM_MEMBERSHIP_STATUS_COLORS },
     },
-  ];
+  ]);
 
   readonly tableActions = computed<TableAction[]>(() => [
     {
@@ -186,6 +205,20 @@ export class MembershipMembersListPageComponent implements OnInit {
         transform: (v: string | null) =>
           v ? formatDateOnlyUTC(v) : 'Sin vigencia',
       },
+      {
+        key: 'progress',
+        label: 'Progreso',
+        icon: 'trending-up',
+        progressTransform: (item: GymMembership) => {
+          const p = membershipProgress(item.period_start, item.period_end);
+          if (!p.hasRange) return null;
+          return {
+            percent: p.percent,
+            label: `${p.elapsedDays}/${p.totalDays} días`,
+            color: GYM_MEMBERSHIP_STATUS_COLORS[item.status] ?? '#16a34a',
+          };
+        },
+      },
     ],
   };
 
@@ -200,6 +233,10 @@ export class MembershipMembersListPageComponent implements OnInit {
     return name || c.email || `Socio #${row.customer_id}`;
   }
 
+  statusColorForRow(row: GymMembership): string {
+    return GYM_MEMBERSHIP_STATUS_COLORS[row.status] ?? '#6b7280';
+  }
+
   loadMemberships(): void {
     this.isLoading.set(true);
 
@@ -208,6 +245,7 @@ export class MembershipMembersListPageComponent implements OnInit {
       limit: this.filters().limit,
     };
     if (this.statusFilter() !== 'all') query['status'] = this.statusFilter();
+    if (this.searchTerm()) query['search'] = this.searchTerm();
 
     this.membershipsService
       .listPaginated(query)
@@ -236,6 +274,7 @@ export class MembershipMembersListPageComponent implements OnInit {
       total: this.totalItems(),
       active: list.filter((m) => m.status === 'active').length,
       pending: list.filter((m) => m.status === 'pending_payment').length,
+      expired: list.filter((m) => m.status === 'expired').length,
     });
   }
 
@@ -249,7 +288,14 @@ export class MembershipMembersListPageComponent implements OnInit {
     this.loadMemberships();
   }
 
+  onSearch(term: string): void {
+    this.searchTerm.set(term);
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadMemberships();
+  }
+
   clearFilters(): void {
+    this.searchTerm.set('');
     this.statusFilter.set('all');
     this.filterValues = {};
     this.filters.update((f) => ({ ...f, page: 1 }));
@@ -340,18 +386,18 @@ export class MembershipMembersListPageComponent implements OnInit {
   }
 
   get hasFilters(): boolean {
-    return this.statusFilter() !== 'all';
+    return this.searchTerm().length > 0 || this.statusFilter() !== 'all';
   }
 
   getEmptyStateTitle(): string {
     return this.hasFilters
-      ? 'Ninguna membresía coincide con el filtro'
+      ? 'Ninguna membresía coincide con la búsqueda o el filtro'
       : 'Aún no tienes socios con membresía';
   }
 
   getEmptyStateDescription(): string {
     return this.hasFilters
-      ? 'Ajusta el filtro de estado para ver más membresías.'
+      ? 'Ajusta la búsqueda o el filtro de estado para ver más membresías.'
       : 'Asigna una membresía a un cliente para registrarlo como socio.';
   }
 }

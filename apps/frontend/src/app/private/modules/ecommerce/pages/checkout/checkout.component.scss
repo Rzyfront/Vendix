@@ -198,17 +198,9 @@
     }
 }
 
-// Móvil: ocultamos labels para que los pasos + líneas no desborden; quedan
-// los marcadores con ícono, repartidos simétricamente por el flex:1 de línea.
-@media (max-width: 576px) {
-    .steps {
-        padding: 0.625rem 0.875rem;
-    }
-
-    .step .step-label {
-        display: none;
-    }
-}
+// NOTA: los overrides móviles (≤576px) están consolidados AL FINAL del archivo.
+// Deben ir después de todas las reglas base porque media query y regla normal
+// tienen igual especificidad: gana la última en orden de fuente.
 
 // Loading
 .loading {
@@ -771,6 +763,27 @@
     }
 }
 
+// Coupon block — defined, compact, "ticket" feel via dashed border
+.summary-coupon {
+    margin: 1rem 0;
+    padding: 0.875rem;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-background);
+
+    // app-input owns its own field styling; we only tighten spacing
+    // so the label/field/hint read as one compact, symmetric group.
+    app-input {
+        display: block;
+    }
+
+    // Prefix ticket icon uses the muted token to match system inputs
+    [slot='prefix-icon'] {
+        color: var(--color-text-muted);
+        display: inline-flex;
+    }
+}
+
 // Wompi Info Panel
 .wompi-info-panel {
     margin-top: 1rem;
@@ -819,5 +832,90 @@
 
     p {
         font-size: var(--fs-base);
+    }
+}
+
+// ============================================================================
+// Overrides móviles (≤576px) — CONSOLIDADOS AL FINAL A PROPÓSITO.
+// Media query y regla normal tienen igual especificidad; gana la última en
+// orden de fuente. Al vivir aquí, todos estos overrides vienen después de sus
+// reglas base (.checkout-main, .address-form, .summary-card, etc.) y ganan.
+// ============================================================================
+@media (max-width: 576px) {
+    // --- Fusión header + steps en un solo bloque enmarcado (~64px vs ~166px) ---
+    // Header: compacto en 1 línea. Abre su borde inferior y redondea solo
+    // arriba para pegarse a los steps y leerse como una sola card.
+    .checkout-header {
+        gap: 0.5rem;
+        padding: 0.375rem 0.75rem;
+        margin-bottom: 0;
+        border-bottom: none;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+
+        &__badge {
+            width: 24px;
+            height: 24px;
+        }
+
+        // Eyebrow ("Compra segura") se oculta: ahorra una línea completa.
+        &__eyebrow {
+            display: none;
+        }
+
+        &__title {
+            font-size: var(--fs-sm);
+        }
+    }
+
+    // Steps: pegado al header, esquinas solo abajo; su border-top hace de
+    // divisor interno del bloque fusionado. Labels ocultos, marcadores chicos.
+    .steps {
+        gap: 0.375rem;
+        padding: 0.3125rem 0.875rem;
+        margin-bottom: 1rem;
+        border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    }
+
+    .step .step-marker {
+        width: 20px;
+        height: 20px;
+    }
+
+    .step .step-label {
+        display: none;
+    }
+
+    // --- Contenedor e inputs: cortamos el padding apilado que apretaba ---
+    .checkout-content {
+        gap: 1rem;
+    }
+
+    // Padding al 50% del valor de escritorio (2rem → 1rem) en móvil.
+    .checkout-main {
+        padding: 1rem;
+    }
+
+    .checkout-section h2 {
+        margin-bottom: 0.875rem;
+    }
+
+    .address-form {
+        margin-top: 0.75rem;
+        padding: 0.875rem;
+    }
+
+    .checkout-actions {
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+    }
+
+    // --- Resumen: ajuste ligero de consistencia (intacto por lo demás) ---
+    .summary-card {
+        padding: 1rem;
+    }
+
+    // Apilado en móvil, el sticky con top:120px no aporta; lo neutralizamos.
+    .checkout-summary {
+        position: static;
     }
 }

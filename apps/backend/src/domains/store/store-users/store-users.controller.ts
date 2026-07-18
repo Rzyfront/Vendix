@@ -18,6 +18,8 @@ import {
   ResetPasswordStoreUserDto,
   UpdateUserRolesDto,
   UpdateUserPanelUIDto,
+  SetCarrierTariffDto,
+  SetAppTypeDto,
 } from './dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -141,5 +143,42 @@ export class StoreUsersController {
   ) {
     await this.storeUserManagementService.resetPassword(id, dto);
     return this.responseService.success(null, 'Password reset successfully');
+  }
+
+  // Vendix Repartos (B8): tarifa configurable por repartidor. Persiste en
+  // user_settings.config.carrier_tariff vía MERGE (no pisa el resto del config).
+  @Patch('management/:id/carrier-tariff')
+  @Permissions('store:users:update')
+  async managementSetCarrierTariff(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetCarrierTariffDto,
+  ) {
+    const result = await this.storeUserManagementService.setCarrierTariff(
+      id,
+      dto,
+    );
+    return this.responseService.success(
+      result,
+      'Carrier tariff updated successfully',
+    );
+  }
+
+  // Vendix Repartos: setear manualmente el app_type del usuario (STORE_ADMIN |
+  // STORE_DELIVERY). Desacoplado del rol carrier — mover a la app de reparto es
+  // una acción explícita. El servicio exige rol carrier para STORE_DELIVERY.
+  @Patch('management/:id/app-type')
+  @Permissions('store:users:update')
+  async managementSetAppType(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetAppTypeDto,
+  ) {
+    const result = await this.storeUserManagementService.setAppType(
+      id,
+      dto.app_type,
+    );
+    return this.responseService.success(
+      result,
+      'App type updated successfully',
+    );
   }
 }

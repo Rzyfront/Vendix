@@ -32,11 +32,13 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 
 import { GymPlan } from '../../interfaces';
 import { MembershipPlansService } from '../../services';
+import { MembershipsService } from '../../../members/services';
 
 interface PlansStats {
   total: number;
   active: number;
   inactive: number;
+  membersCount: number;
 }
 
 @Component({
@@ -57,6 +59,7 @@ interface PlansStats {
 })
 export class MembershipPlansListPageComponent implements OnInit {
   private readonly plansService = inject(MembershipPlansService);
+  private readonly membershipsService = inject(MembershipsService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly router = inject(Router);
@@ -64,7 +67,13 @@ export class MembershipPlansListPageComponent implements OnInit {
   private readonly currencyFormat = inject(CurrencyFormatService);
 
   readonly plans = signal<GymPlan[]>([]);
-  readonly stats = signal<PlansStats>({ total: 0, active: 0, inactive: 0 });
+  readonly totalMemberships = signal(0);
+  readonly stats = signal<PlansStats>({
+    total: 0,
+    active: 0,
+    inactive: 0,
+    membersCount: 0,
+  });
 
   readonly filters = signal({ page: 1, limit: 10 });
   readonly totalItems = signal(0);
@@ -181,6 +190,7 @@ export class MembershipPlansListPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadPlans();
+    this.loadMembersCount();
   }
 
   loadPlans(): void {
@@ -219,7 +229,27 @@ export class MembershipPlansListPageComponent implements OnInit {
       total: this.totalItems(),
       active: list.filter((p) => p.is_active).length,
       inactive: list.filter((p) => !p.is_active).length,
+      membersCount: this.totalMemberships(),
     });
+  }
+
+  private loadMembersCount(): void {
+    this.membershipsService
+      .listPaginated({ limit: 1 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.totalMemberships.set(res.meta?.total ?? 0);
+          this.stats.update((s) => ({
+            ...s,
+            membersCount: this.totalMemberships(),
+          }));
+        },
+        error: () => {
+          this.totalMemberships.set(0);
+          this.stats.update((s) => ({ ...s, membersCount: 0 }));
+        },
+      });
   }
 
   onSearch(term: string): void {

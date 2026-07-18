@@ -13,6 +13,8 @@ import { StoreContextRunner } from '@common/context/store-context-runner.service
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
+import { TableSessionsService } from '../../tables/table-sessions.service';
+import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
 
 // States considered terminal for compare-and-swap and idempotency checks.
 const PAYMENT_TERMINAL_STATES = [
@@ -36,6 +38,9 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
+    // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
+    // digital payment (wompi/wallet) is confirmed by the gateway webhook.
+    private readonly tableSessionsService: TableSessionsService,
     @Optional()
     @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
@@ -329,6 +334,29 @@ export class WebhookHandlerService {
         }
       }
 
+      // C4 — emit `payment.received` so the accounting pipeline (auto-entries,
+      // AR, notifications) sees webhook-driven payments. Previously this event
+      // was emitted by the POS path (`payments.service.ts`) and the dispatch
+      // route cash-settlement path (`cash-settlement.service.ts`), but NEVER
+      // by the webhook path — so ecommerce / Wompi / Stripe / PayPal / bank
+      // transfer confirmations left the order paid WITHOUT posting the journal
+      // entry (DR banco 1110 / CR CxC o ingreso+IVA).
+      //
+      // The compare-and-swap above already guarantees `result.transitioned`
+      // is true for at most ONE webhook per payment; the accounting service's
+      // app-level duplicate guard on
+      // (org, source_type='payment.received', source_id=payment_id) is the
+      // second layer of defense. The helper itself is try/catch'd so a
+      // malformed payment row never poisons the webhook response — Wompi in
+      // particular would otherwise retry and could race the duplicate guard.
+      if (
+        result.transitioned &&
+        result.paymentId &&
+        (status === 'succeeded' || status === 'captured')
+      ) {
+        await this.emitPaymentReceivedAccounting(result.paymentId);
+      }
+
       if (result.paymentId) {
         this.logger.log(
           `Payment ${result.paymentId} updated to status: ${status}`,
@@ -379,6 +407,133 @@ export class WebhookHandlerService {
     } catch (cancelErr) {
       this.logger.warn(
         `Failed to auto-cancel order ${orderId}: ${cancelErr.message}`,
+      );
+    }
+  }
+
+  /**
+   * C4 — emits `payment.received` for the accounting pipeline after a
+   * webhook-driven payment transition to a successful state.
+   *
+   * Closes the gap that payments confirmed by webhook (Wompi ecommerce,
+   * Stripe, PayPal, bank transfer) never emitted `payment.received`, so no
+   * auto-entry was created for those sales. The POS path
+   * (`payments.service.ts`) and the dispatch-route cash-settlement path
+   * (`cash-settlement.service.ts`) already emit it — this brings webhooks in
+   * line.
+   *
+   * Idempotency:
+   *   - Caller-side: the compare-and-swap in `updatePaymentStatus` ensures
+   *     we only call this helper once per payment state transition. A second
+   *     concurrent webhook will hit `cas.count === 0` and return
+   *     `transitioned: false` before reaching this code path.
+   *   - Accounting-service-side: `createAutoEntry` has its own
+   *     application-level duplicate guard keyed by
+   *     `(organization_id, source_type='payment.received',
+   *     source_id=payment_id, accounting_entity_id)`. A misbehaving caller
+   *     that invokes the emit twice would resolve to the existing entry
+   *     instead of creating a duplicate (race-susceptible under heavy
+   *     concurrency but safe under our CAS + single-webhook semantics).
+   *
+   * Wompi payments never touch the physical cash register
+   * (`cash_register_movements` is left untouched) — the auto-entry mapping
+   * resolves via `resolveCashBankKey` to `payment.received.bank` (PUC 1110),
+   * not `payment.received.cash` (PUC 1105).
+   *
+   * Errors are caught locally so a malformed payment row (missing order,
+   * missing `system_payment_method`, transient Prisma failure) cannot poison
+   * the webhook response — the gateway would otherwise retry, and the
+   * accounting service's race-susceptible duplicate guard could
+   * theoretically let a second entry slip through.
+   */
+  private async emitPaymentReceivedAccounting(paymentId: number): Promise<void> {
+    try {
+      const client = this.prisma.withoutScope();
+      const payment = await client.payments.findUnique({
+        where: { id: paymentId },
+        include: {
+          store_payment_method: {
+            include: { system_payment_method: true },
+          },
+          orders: {
+            include: {
+              stores: { select: { organization_id: true } },
+            },
+          },
+        },
+      });
+
+      if (!payment || !payment.orders) {
+        this.logger.warn(
+          `Cannot emit payment.received: payment ${paymentId} or its order not found`,
+        );
+        return;
+      }
+
+      const order = payment.orders;
+      const storeId = order.store_id;
+
+      // Tax breakdown (typed per fiscal type so accounting posts one journal
+      // line per type: IVA → 2408, INC → 2436, ICA → 241205). Mirrors the
+      // POS path in `payments.service.ts` so the listener payload is
+      // shape-compatible regardless of origin.
+      const orderItemsWithTaxes = await client.order_items.findMany({
+        where: { order_id: order.id },
+        select: {
+          order_item_taxes: {
+            select: { tax_type: true, tax_amount: true },
+          },
+        },
+      });
+      const tax_breakdown = buildTaxBreakdown(
+        orderItemsWithTaxes.flatMap((i) => i.order_item_taxes || []),
+      );
+
+      const systemPaymentMethod =
+        payment.store_payment_method?.system_payment_method;
+      const paymentMethodLabel =
+        systemPaymentMethod?.display_name ||
+        systemPaymentMethod?.type ||
+        (payment.store_payment_method_id
+          ? `method_${payment.store_payment_method_id}`
+          : 'webhook');
+
+      this.eventEmitter.emit('payment.received', {
+        payment_id: payment.id,
+        store_id: storeId,
+        organization_id: order.stores?.organization_id,
+        order_id: order.id,
+        order_number: order.order_number,
+        amount: Number(payment.amount),
+        subtotal_amount: Number(order.subtotal_amount || 0),
+        tax_amount: Number(order.tax_amount || 0),
+        tax_breakdown,
+        // Webhooks do not compute suffered withholding on the fly (the POS
+        // path resolves it via `WithholdingFlow.resolveSuffered` inside its
+        // transaction). Leave the breakdown empty; the listener + auto-entry
+        // handle `undefined` / `[]` as "no withholding lines".
+        withholding_breakdown: [],
+        discount_amount: Number(order.discount_amount || 0),
+        tip_amount: Number(order.tip_amount || 0),
+        currency: payment.currency || order.currency || 'COP',
+        payment_method: paymentMethodLabel,
+        // Webhooks have no end-user context (no JWT user, no POS cashier).
+        // `user_id` stays undefined intentionally — the auto-entry service
+        // stores `null` in `accounting_entries.created_by_user_id`.
+        customer: order.customer_id
+          ? { id: Number(order.customer_id) }
+          : undefined,
+      });
+
+      this.logger.log(
+        `payment.received emitted for webhook payment ${payment.id} (order ${order.id}, method=${paymentMethodLabel})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit payment.received for webhook payment ${paymentId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        error instanceof Error ? error.stack : undefined,
       );
     }
   }
@@ -469,6 +624,23 @@ export class WebhookHandlerService {
         order.store_id,
         async () => {
           await this.orderFlowService.confirmPayment(orderId);
+
+          // Restaurant Suite (Obj 6): if this order backs a still-open table
+          // session, the POS deferred its close for a digital payment
+          // (wompi/wallet). Now that the gateway confirmed the charge, close
+          // the session — `closeSession` flips the table to `cleaning` and
+          // emits `session_closed` to staff + comensal streams. No-op for
+          // non-restaurant / non-table orders (findFirst returns null).
+          const openSession = await this.prisma.table_sessions.findFirst({
+            where: { order_id: orderId, closed_at: null },
+            select: { id: true },
+          });
+          if (openSession) {
+            await this.tableSessionsService.closeSession(openSession.id);
+            this.logger.log(
+              `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
+            );
+          }
         },
       );
       this.logger.log(

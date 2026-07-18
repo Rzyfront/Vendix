@@ -8,8 +8,10 @@ import {Component,
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { forkJoin, of } from 'rxjs';
 import { switchMap, map } from 'rxjs/operators';
+import { environment } from '../../../../../../../../environments/environment';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
 import {
   StoreShippingMethod,
@@ -144,6 +146,140 @@ import { AddRateWizardModalComponent } from '../../components/index';
         </div>
       }
 
+      <!--
+        Plan Despacho Economía — FASE 2 paso 10.
+        Panel "Comportamiento por defecto" del método de envío.
+        Configura la política tipada (recaudo, costo, ejecutor por defecto).
+      -->
+      <div class="mx-4 md:mx-0 mb-4">
+        <div class="bg-surface rounded-xl border border-border p-4">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <app-icon name="sliders-horizontal" [size]="18" class="text-text-secondary" />
+              <h3 class="text-sm md:text-base font-semibold text-text-primary">
+                Comportamiento por defecto
+              </h3>
+            </div>
+            <app-button
+              size="sm"
+              variant="primary"
+              (clicked)="saveMethodPolicy()"
+              [disabled]="!policy_dirty() || saving_policy()"
+              [loading]="saving_policy()"
+            >
+              Guardar política
+            </app-button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <!-- Recaudo en ruta -->
+            <div class="md:col-span-2 flex items-center justify-between rounded-lg border border-border p-3">
+              <div>
+                <p class="text-sm font-medium text-text-primary">Recauda en ruta</p>
+                <p class="text-xs text-text-secondary">
+                  El transportador cobra al cliente al momento de la entrega.
+                </p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  class="sr-only peer"
+                  [checked]="policy_collects_payment()"
+                  (change)="policy_collects_payment.set(!policy_collects_payment()); markPolicyDirty()"
+                />
+                <div class="w-11 h-6 bg-gray-200 peer-checked:bg-primary rounded-full transition"></div>
+                <div class="absolute left-1 top-1 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5"></div>
+              </label>
+            </div>
+
+            <!-- Timing de pago -->
+            @if (policy_collects_payment()) {
+              <div>
+                <label class="block text-xs font-medium text-text-secondary mb-1">
+                  Cuándo se paga el envío
+                </label>
+                <select
+                  class="w-full px-3 py-2 min-h-[40px] rounded-lg border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                  [value]="policy_payment_timing() ?? 'on_delivery'"
+                  (change)="policy_payment_timing.set($any($event.target).value); markPolicyDirty()"
+                >
+                  <option value="on_delivery">Contra entrega (COD)</option>
+                  <option value="prepaid">Prepagado</option>
+                </select>
+              </div>
+            }
+
+            <!-- Tipo de costo del transportador -->
+            <div>
+              <label class="block text-xs font-medium text-text-secondary mb-1">
+                Costo del transportador
+              </label>
+              <select
+                class="w-full px-3 py-2 min-h-[40px] rounded-lg border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                [value]="policy_generates_cost()"
+                (change)="policy_generates_cost.set($any($event.target).value); markPolicyDirty()"
+              >
+                <option value="none">No genera costo (interno)</option>
+                <option value="per_delivery">Por entrega</option>
+                <option value="per_route">Por ruta cerrada</option>
+              </select>
+            </div>
+
+            <!-- Ejecutor por defecto: solo si genera costo -->
+            @if (policy_generates_cost() !== 'none') {
+              @if (is_own_fleet()) {
+                <div>
+                  <label class="block text-xs font-medium text-text-secondary mb-1">
+                    Vehículo por defecto
+                  </label>
+                  <select
+                    class="w-full px-3 py-2 min-h-[40px] rounded-lg border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    [value]="policy_default_vehicle_id() ?? ''"
+                    (change)="policy_default_vehicle_id.set(+$any($event.target).value || null); markPolicyDirty()"
+                  >
+                    <option value="">— Selecciona —</option>
+                    @for (v of available_vehicles(); track v.id) {
+                      <option [value]="v.id">{{ v.plate }}</option>
+                    }
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-text-secondary mb-1">
+                    Conductor por defecto
+                  </label>
+                  <select
+                    class="w-full px-3 py-2 min-h-[40px] rounded-lg border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    [value]="policy_default_driver_user_id() ?? ''"
+                    (change)="policy_default_driver_user_id.set(+$any($event.target).value || null); markPolicyDirty()"
+                  >
+                    <option value="">— Opcional —</option>
+                    @for (d of available_drivers(); track d.id) {
+                      <option [value]="d.id">{{ d.first_name }} {{ d.last_name }}</option>
+                    }
+                  </select>
+                </div>
+              } @else if (is_carrier()) {
+                <div class="md:col-span-2">
+                  <label class="block text-xs font-medium text-text-secondary mb-1">
+                    Transportista (proveedor carrier) por defecto
+                  </label>
+                  <select
+                    class="w-full px-3 py-2 min-h-[40px] rounded-lg border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    [value]="policy_default_carrier_supplier_id() ?? ''"
+                    (change)="policy_default_carrier_supplier_id.set(+$any($event.target).value || null); markPolicyDirty()"
+                  >
+                    <option value="">— Selecciona —</option>
+                    @for (s of available_carriers(); track s.id) {
+                      <option [value]="s.id">{{ s.name }}</option>
+                    }
+                  </select>
+                </div>
+              }
+            }
+          </div>
+        </div>
+      </div>
+
       <!-- Zones Table Card -->
       <div class="mx-4 md:mx-0 mb-6">
         <div class="bg-surface rounded-xl border border-border overflow-hidden">
@@ -228,6 +364,7 @@ export class MethodDetailComponent implements OnInit {
   private shippingService = inject(ShippingMethodsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
+  private http = inject(HttpClient);
 // ─── State ───
   method = signal<StoreShippingMethod | null>(null);
   zones_with_rates = signal<ZoneWithRates[]>([]);
@@ -236,6 +373,30 @@ export class MethodDetailComponent implements OnInit {
   search_term = signal<string>('');
   show_rate_wizard = signal<boolean>(false);
   edit_rate = signal<ShippingRate | null>(null);
+
+  // Plan Despacho Economía — FASE 2 paso 10.
+  // Estado de la política tipada del método (signals para reactividad sin zona).
+  policy_collects_payment = signal<boolean>(false);
+  policy_payment_timing = signal<'prepaid' | 'on_delivery' | null>('on_delivery');
+  policy_generates_cost = signal<'none' | 'per_delivery' | 'per_route'>('none');
+  policy_default_vehicle_id = signal<number | null>(null);
+  policy_default_driver_user_id = signal<number | null>(null);
+  policy_default_carrier_supplier_id = signal<number | null>(null);
+  saving_policy = signal<boolean>(false);
+  policy_dirty = signal<boolean>(false);
+
+  // Catálogos para los selectores de ejecutor por defecto.
+  available_vehicles = signal<Array<{ id: number; plate: string }>>([]);
+  available_drivers = signal<Array<{ id: number; first_name: string; last_name: string }>>([]);
+  available_carriers = signal<Array<{ id: number; name: string }>>([]);
+
+  /** Tipo de método: helpers para gating del ejecutor por defecto. */
+  is_own_fleet = computed(() => this.method()?.type === ShippingMethodType.OWN_FLEET);
+  is_carrier = computed(
+    () =>
+      this.method()?.type === ShippingMethodType.CARRIER ||
+      this.method()?.type === ShippingMethodType.THIRD_PARTY_PROVIDER,
+  );
 
   // ─── Computed ───
   filtered_zones = computed(() => {
@@ -368,12 +529,26 @@ export class MethodDetailComponent implements OnInit {
   loadMethodData(methodId: number): void {
     this.is_loading.set(true);
 
-    // Load method details
+    // Plan Despacho Economía — FASE 2 paso 10: inicializa la política desde
+    // el método cargado (single source of truth).
     this.shippingService
       .getShippingMethod(methodId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (method) => this.method.set(method),
+        next: (method) => {
+          this.method.set(method);
+          this.policy_collects_payment.set(method.collects_payment ?? false);
+          this.policy_payment_timing.set(method.payment_timing ?? 'on_delivery');
+          this.policy_generates_cost.set(method.generates_transport_cost ?? 'none');
+          this.policy_default_vehicle_id.set(method.default_vehicle_id ?? null);
+          this.policy_default_driver_user_id.set(method.default_driver_user_id ?? null);
+          this.policy_default_carrier_supplier_id.set(
+            method.default_carrier_supplier_id ?? null,
+          );
+          this.policy_dirty.set(false);
+          // Cargar catálogos según el tipo del método (lazy).
+          this.loadExecutorCatalogs();
+        },
         error: () => {
           this.toastService.show({
             variant: 'error',
@@ -410,6 +585,107 @@ export class MethodDetailComponent implements OnInit {
           this.is_loading.set(false);
         },
         error: () => this.is_loading.set(false)});
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 2 paso 10.
+   * Carga vehículos/conductores/transportistas para los selectores del
+   * ejecutor por defecto. Se invoca lazy al cargar el método.
+   */
+  loadExecutorCatalogs(): void {
+    // Vehículos y conductores (catálogos de la tienda actual).
+    this.http
+      .get<any>(`${environment.apiUrl}/store/vehicles?limit=200`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const data = res?.data ?? res;
+          if (Array.isArray(data)) {
+            this.available_vehicles.set(
+              data.map((v: any) => ({ id: v.id, plate: v.plate })),
+            );
+            // Deriva drivers desde cada vehicle.primary_driver cuando exista.
+            const driverMap = new Map<number, { id: number; first_name: string; last_name: string }>();
+            data.forEach((v: any) => {
+              const d = v.primary_driver;
+              if (d && !driverMap.has(d.id)) {
+                driverMap.set(d.id, {
+                  id: d.id,
+                  first_name: d.first_name ?? '',
+                  last_name: d.last_name ?? '',
+                });
+              }
+            });
+            this.available_drivers.set([...driverMap.values()]);
+          }
+        },
+        error: () => undefined,
+      });
+
+    // Transportistas (supplier_category='carrier') — store-scoped.
+    this.http
+      .get<any>(
+        `${environment.apiUrl}/store/inventory/suppliers?supplier_category=carrier&limit=200`,
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const data = res?.data ?? res;
+          if (Array.isArray(data)) {
+            this.available_carriers.set(
+              data.map((s: any) => ({ id: s.id, name: s.name })),
+            );
+          }
+        },
+        error: () => undefined,
+      });
+  }
+
+  /**
+   * Marca la política como dirty (mostrando el botón Guardar). Llamado por
+   * cualquier cambio en las signals de la sección "Comportamiento por defecto".
+   */
+  markPolicyDirty(): void {
+    this.policy_dirty.set(true);
+  }
+
+  /**
+   * PATCH /store/shipping-methods/:id con la política actual. Backend valida
+   * reglas cruzadas (tipo de método ↔ ejecutor por defecto).
+   */
+  saveMethodPolicy(): void {
+    const method = this.method();
+    if (!method) return;
+    this.saving_policy.set(true);
+    this.shippingService
+      .updateStoreShippingMethod(method.id, {
+        collects_payment: this.policy_collects_payment(),
+        payment_timing: this.policy_payment_timing() ?? 'on_delivery',
+        generates_transport_cost: this.policy_generates_cost(),
+        default_vehicle_id: this.policy_default_vehicle_id() ?? undefined,
+        default_driver_user_id: this.policy_default_driver_user_id() ?? undefined,
+        default_carrier_supplier_id:
+          this.policy_default_carrier_supplier_id() ?? undefined,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (m) => {
+          this.method.set(m);
+          this.policy_dirty.set(false);
+          this.saving_policy.set(false);
+          this.toastService.show({
+            variant: 'success',
+            description: 'Política de despacho guardada',
+          });
+        },
+        error: () => {
+          this.saving_policy.set(false);
+          this.toastService.show({
+            variant: 'error',
+            description: 'No se pudo guardar la política',
+          });
+        },
+      });
   }
 
   // ─── Header Actions ───

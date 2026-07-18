@@ -12,6 +12,7 @@ import { ReceiptsSettingsForm } from './components/receipts-settings-form/receip
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
 import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
 import { DispatchSettingsForm } from './components/dispatch-settings-form/dispatch-settings-form.component';
+import { CarrierSettingsForm } from './components/carrier-settings-form/carrier-settings-form.component';
 import { RestaurantSettingsForm } from './components/restaurant-settings-form/restaurant-settings-form.component';
 import { FormsModule } from '@angular/forms';
 import { LucideAngularModule } from "lucide-angular";
@@ -37,6 +38,7 @@ import { firstValueFrom } from 'rxjs';
     AppSettingsForm,
     OperationsSettingsForm,
     DispatchSettingsForm,
+    CarrierSettingsForm,
     RestaurantSettingsForm,
     SettingToggleComponent,
     FormsModule,
@@ -91,6 +93,7 @@ export class GeneralSettingsComponent implements OnInit {
       { id: 'inventory', label: 'Inventario', icon: 'package' },
       { id: 'operations', label: 'Operaciones', icon: 'clock' },
       { id: 'dispatch', label: 'Despacho', icon: 'truck' },
+      { id: 'reparto', label: 'Reparto', icon: 'coins' },
       { id: 'notifications', label: 'Alertas', icon: 'bell' },
       { id: 'pos', label: 'POS', icon: 'monitor' },
       { id: 'receipts', label: 'Recibos', icon: 'file-text' },
@@ -264,7 +267,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'restaurant', 'membership', 'panel_ui',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'carrier', 'restaurant', 'membership', 'panel_ui',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

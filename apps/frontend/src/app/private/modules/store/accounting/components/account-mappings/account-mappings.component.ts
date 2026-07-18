@@ -51,6 +51,11 @@ interface MappingGroup {
 const MAPPING_LABELS: Record<string, string> = {
   'invoice.validated.accounts_receivable': 'Cuentas por Cobrar',
   'invoice.validated.revenue': 'Ingresos por Ventas',
+  // Plan Despacho Economía — FASE 4 paso 13.
+  'invoice.validated.shipping_income': 'Ingresos por Fletes (Factura)',
+  'payment.received.shipping_income': 'Ingresos por Fletes (Pago POS)',
+  'credit_sale.created.shipping_income': 'Ingresos por Fletes (Crédito)',
+  'refund.completed.shipping_income_reversal': 'Reversión Fletes (Reembolso)',
   'invoice.validated.vat_payable': 'IVA por Pagar',
   'invoice.validated.iva_payable': 'IVA por Pagar (Tipado)',
   'invoice.validated.inc_payable': 'INC por Pagar',
@@ -86,6 +91,13 @@ const MAPPING_LABELS: Record<string, string> = {
   'payroll.paid.bank': 'Banco',
   'order.completed.cogs': 'Costo de Ventas',
   'order.completed.inventory': 'Inventario (Salida)',
+  // Remisiones bidireccionales (Fase 4)
+  'dispatch_note.delivered.cogs': 'Costo de Ventas (Remisión)',
+  'dispatch_note.delivered.inventory': 'Inventario (Remisión Entregada)',
+  'dispatch_note.received.inventory': 'Inventario (Recepción Remisión)',
+  'dispatch_note.received.accounts_payable': 'Proveedores (Recepción Remisión)',
+  'dispatch_note.return.inventory': 'Inventario (Devolución Cliente)',
+  'dispatch_note.return.cogs': 'Reversa Costo de Ventas (Devolución)',
   'refund.completed.revenue': 'Ingresos (Reversa)',
   'refund.completed.cash': 'Caja / Banco (Reembolso)',
   'refund.completed.vat_payable': 'IVA por Pagar (Reversa Devolucion)',
@@ -263,7 +275,10 @@ const MAPPING_LABELS: Record<string, string> = {
   'dispatch_route.closed.cash': 'Caja (Cuadre Planilla de Ruta)',
   'dispatch_route.closed.surplus': 'Otros Ingresos (Sobrante de Ruta)',
   'dispatch_route.closed.shortage_receivable':
-    'CxC al Conductor (Faltante de Ruta)',
+    'CXC Trabajadores (Faltante de Ruta)',
+  // Plan Despacho Economía — FASE 5 paso 17. Costo del transportador.
+  'dispatch_route.settlement.transport_cost': 'Costo Transporte (Devengo)',
+  'dispatch_route.settlement.accounts_payable': 'CXP Transportador (Pago)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
   'stock_transfer.completed.inventory_destination':
@@ -328,6 +343,7 @@ const GROUP_DEFINITIONS: Array<{
       'purchase.vat_recognized.',
       'purchase_order.payment.',
       'inventory.adjusted.',
+      'dispatch_note.',
     ],
   },
   {
@@ -420,7 +436,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'dispatch_routes',
     label: 'Planillas de Ruta (DSD)',
     icon: 'truck',
-    prefixes: ['dispatch_route.closed.'],
+    prefixes: ['dispatch_route.closed.', 'dispatch_route.settlement.'],
   },
 ];
 

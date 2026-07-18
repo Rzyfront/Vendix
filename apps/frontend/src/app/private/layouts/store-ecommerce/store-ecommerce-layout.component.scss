@@ -8,11 +8,14 @@
 }
 
 // QR Table Banner
-// ── Banner de mesa (dine-in QR) — mobile-first ───────────────────────────────
+// ── Banner de mesa (dine-in QR) ──────────────────────────────────────────────
+// Desktop (≥ lg): banner slim en la parte superior con acciones inline (base).
+// Móvil (< lg): re-anclado como barra fija inferior (override al FINAL del
+// archivo) para manipularlo con el pulgar, a la par del carrito móvil.
 .table-banner {
   background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
   border-bottom: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.18);
-  padding: 0.4rem 0.9rem;
+  padding: 0.42rem 1.5rem;
   display: flex;
   align-items: center;
   font-size: var(--fs-sm);
@@ -37,19 +40,16 @@
     max-width: 1600px;
     margin: 0 auto;
     width: 100%;
-    // Móvil: una sola línea (info flexible + disparador a la derecha).
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
-  // Línea slim: se encoge y trunca antes de empujar el disparador.
   .table-banner-info {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     min-width: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    white-space: nowrap;
+    flex: 0 1 auto;
   }
 
   .table-banner-name {
@@ -75,7 +75,6 @@
     background: rgba(59, 130, 246, 0.12);
     color: var(--color-primary);
     flex-shrink: 0;
-    max-width: 45%;
     overflow: hidden;
 
     span {
@@ -94,35 +93,33 @@
     }
   }
 
-  // Disparador del sheet — sólo móvil.
-  .table-banner-trigger {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    flex-shrink: 0;
-    margin-left: auto;
-    padding: 0.32rem 0.7rem;
-    border-radius: 999px;
-    border: 1px solid currentColor;
-    background: transparent;
-    color: inherit;
-    font-size: var(--fs-xs);
-    font-weight: var(--fw-semibold);
-    cursor: pointer;
-    transition: background-color 0.18s ease;
-
-    &:active {
-      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.14);
-    }
-  }
-
-  // Acciones inline — sólo desktop.
+  // Acciones inline — desktop (base visible; se ocultan en el override móvil).
+  // Dos subgrupos: secundarias (envuelven al angostar) + primarias (fijas,
+  // pegadas a la derecha) para que NO se encimen en 1024/1280/1440px.
   .table-banner-actions {
-    display: none;
+    display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.35rem;
+    gap: 0.5rem;
     margin-left: auto;
+    min-width: 0;
+    justify-content: flex-end;
+
+    &__secondary {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      min-width: 0;
+    }
+
+    &__primary {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
   }
 
   .table-banner-guests {
@@ -131,35 +128,353 @@
     gap: 0.3rem;
   }
 
-  // ≥ md: fila inline pulida; el disparador móvil desaparece.
-  @media (min-width: 768px) {
-    padding: 0.42rem 1.5rem;
+  // Monto de la cuenta + fila de acción móvil: ocultos en el base desktop;
+  // se muestran en el override < lg (barra fija inferior) al final del archivo.
+  .table-banner-amount {
+    display: none;
+  }
 
-    .table-banner-content {
-      flex-wrap: wrap;
+  .table-banner-mobile {
+    display: none;
+  }
+
+  // Disparador del sheet — sólo móvil (se muestra en el override < lg).
+  .table-banner-trigger {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-lg, 0.75rem);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+    transition: background-color 0.18s ease;
+
+    &:active {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
+    }
+  }
+}
+
+// ── Timbre accionable (banner + header del sheet) ─────────────────────────────
+// Clase top-level (NO anidada en .table-banner) porque también viste el ícono
+// del header del bottom-sheet, que vive fuera de .table-banner. Decorativo por
+// defecto; interactivo sólo cuando `.is-actionable` (modos con sesión).
+.table-banner-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill, 999px);
+  color: inherit;
+
+  &.is-actionable {
+    cursor: pointer;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+
+    &:hover {
+      transform: scale(1.12);
     }
 
-    .table-banner-info {
-      flex: 0 1 auto;
-      white-space: normal;
-      overflow: visible;
+    &:active {
+      transform: scale(0.94);
     }
 
-    .table-banner-status {
-      overflow: visible;
+    &:focus-visible {
+      outline: 2px solid currentColor;
+      outline-offset: 2px;
+    }
+  }
+
+  &.is-loading {
+    opacity: 0.65;
+    animation: table-bell-pulse 1s ease-in-out infinite;
+  }
+}
+
+@keyframes table-bell-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+// ── Panel "Mi cuenta" (responsive) ────────────────────────────────────────────
+// Base = desktop (≥1024px): side-drawer lateral DERECHO, full-height, entra
+// desde la derecha (translateX). El override móvil al FINAL del archivo lo
+// re-ancla como bottom-sheet (translateY). Mismo marcado; el @media decide eje.
+.bill-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+
+  .bill-panel__overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    animation: bill-panel-fade 0.28s ease-out;
+  }
+
+  .bill-panel__drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: min(420px, 90vw);
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    border-left: 1px solid var(--color-border);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.2);
+    animation: bill-drawer-in 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  // Grip: sólo bottom-sheet (móvil). Oculto en el drawer desktop.
+  .bill-panel__handle {
+    display: none;
+    width: 44px;
+    height: 5px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background: var(--color-border);
+    margin: 8px auto 2px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .bill-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .bill-panel__title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: var(--fw-bold);
+    font-size: var(--fs-lg);
+    color: var(--color-text-primary);
+
+    app-icon {
+      color: var(--color-primary);
+    }
+  }
+
+  .bill-panel__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color 0.18s ease, color 0.18s ease;
+
+    &:hover {
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+      color: var(--color-text-primary);
     }
 
-    .table-banner-order-status {
-      max-width: none;
+    &:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+  }
+
+  .bill-panel__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1rem 1.25rem;
+  }
+
+  .bill-panel__items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .bill-panel__item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .bill-panel__item-media {
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md, 0.5rem);
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    background: var(--color-background);
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
     }
 
-    .table-banner-trigger {
-      display: none;
-    }
-
-    .table-banner-actions {
+    .bill-panel__item-placeholder {
+      width: 100%;
+      height: 100%;
       display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-muted);
     }
+  }
+
+  .bill-panel__item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .bill-panel__item-name {
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bill-panel__item-meta {
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bill-panel__item-total {
+    font-weight: var(--fw-bold);
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+
+  .bill-panel__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--color-text-secondary);
+    font-size: var(--fs-sm);
+    text-align: center;
+    padding: 2.5rem 1rem;
+
+    app-icon {
+      color: var(--color-text-muted);
+    }
+  }
+
+  .bill-panel__summary {
+    flex-shrink: 0;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .bill-panel__summary-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+
+    > span:last-child {
+      font-variant-numeric: tabular-nums;
+      color: var(--color-text-primary);
+      font-weight: var(--fw-medium);
+    }
+
+    &--balance > span:last-child {
+      color: var(--color-warning, rgb(217, 119, 6));
+      font-weight: var(--fw-semibold);
+    }
+
+    &--total {
+      margin-top: 0.15rem;
+      padding-top: 0.55rem;
+      border-top: 1px dashed var(--color-border);
+      color: var(--color-text-primary);
+      font-weight: var(--fw-bold);
+
+      > span:last-child {
+        font-size: var(--fs-lg);
+        color: var(--color-text-primary);
+        font-weight: var(--fw-bold);
+      }
+    }
+  }
+}
+
+@keyframes bill-panel-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bill-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes bill-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bill-panel .bill-panel__drawer,
+  .bill-panel .bill-panel__overlay {
+    animation: none;
+  }
+
+  .table-banner-bell.is-actionable {
+    transition: none;
+  }
+
+  .table-banner-bell.is-loading {
+    animation: none;
   }
 }
 
@@ -289,8 +604,8 @@
     }
   }
 
-  // El sheet es exclusivo de móvil; en desktop nunca se muestra.
-  @media (min-width: 768px) {
+  // El sheet es exclusivo de móvil; en desktop (≥ lg) nunca se muestra.
+  @media (min-width: 1024px) {
     display: none;
   }
 }
@@ -372,6 +687,212 @@
   .bill-footer-total {
     font-size: var(--fs-lg);
     font-variant-numeric: tabular-nums;
+  }
+}
+
+// ── D6: Modal footer + body shared styles ───────────────────────────────
+.mesa-modal-text {
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  margin: 0 0 0.75rem;
+}
+
+.mesa-modal-footer {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  width: 100%;
+  flex-wrap: wrap;
+
+  app-button {
+    flex: 1;
+    min-width: 130px;
+  }
+}
+
+// Plan §12 — Farewell modal styles (session_closed)
+.farewell-modal-body {
+  padding: 0.25rem 0 0.5rem;
+}
+
+.farewell-modal-text {
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.farewell-modal-footer {
+  margin-top: 0.5rem;
+}
+
+.move-cart-items {
+  list-style: none;
+  margin: 0 0 0.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--color-background);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.move-cart-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: var(--fs-sm);
+
+  &__name {
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__qty {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+}
+
+// ── D6: Payment picker (mesa self-checkout) ────────────────────────────
+.pay-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md, 0.5rem);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+
+  strong {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--color-text-primary);
+  }
+
+  p {
+    margin: 0;
+    color: var(--color-text-secondary);
+  }
+
+  &--ok {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.32);
+    color: var(--color-success);
+  }
+
+  &--pending {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.32);
+    color: var(--color-warning, rgb(217, 119, 6));
+  }
+}
+
+.pay-method-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.pay-method {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 48px;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg, 0.75rem);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.18s ease;
+
+  app-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  span {
+    flex: 1;
+  }
+
+  &:active {
+    background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  &--primary {
+    background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+    border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+  }
+}
+
+// ── D6: Banner — leave button + diners stepper ─────────────────────────
+.table-banner-diners {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+
+  &__count {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.table-banner-leave {
+  // Only show in desktop inline-actions; the sheet covers mobile.
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: var(--color-error, rgb(220, 38, 38)) !important;
+}
+
+// Sheet row variants
+.table-action-row {
+  &__diners {
+    margin-left: auto;
+    color: var(--color-text-secondary);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  &--primary {
+    background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+    border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+  }
+
+  &--leave {
+    color: var(--color-error, rgb(220, 38, 38));
+    border-color: rgba(239, 68, 68, 0.32);
+
+    app-icon {
+      color: var(--color-error, rgb(220, 38, 38));
+    }
+
+    &:active {
+      background: rgba(239, 68, 68, 0.08);
+    }
   }
 }
 
@@ -699,7 +1220,10 @@
     position: absolute;
     top: calc(100% + 1rem);
     right: 0;
-    width: 360px;
+    // Topa el ancho al viewport en móviles angostos para que el dropdown no se
+    // desborde por la izquierda (anclado a right:0). 3rem = márgenes simétricos
+    // de 1.5rem que coinciden con el padding del .header-container.
+    width: min(360px, calc(100vw - 3rem));
     background: var(--color-surface);
     border-radius: 16px; // Más redondeado para look moderno
     box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); // Sombra premium
@@ -717,6 +1241,12 @@
       align-items: center;
       background: rgba(var(--color-surface-rgb), 0.8);
       backdrop-filter: blur(8px);
+      cursor: pointer; // navega al carrito (reemplaza el click del icono)
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: rgba(var(--color-surface-rgb), 1);
+      }
 
       h3 {
         font-size: 1rem;
@@ -893,6 +1423,7 @@
         font-weight: 700;
         color: var(--color-text-primary);
         font-size: 1.1rem;
+        cursor: pointer; // navega al carrito desde el footer
       }
 
       .cart-actions {
@@ -1432,5 +1963,145 @@
 
   .ecommerce-main {
     padding: 1rem 0.5rem;
+  }
+}
+
+// ── Móvil (< lg): banner de mesa como barra fija inferior ─────────────────────
+// Override colocado al FINAL del archivo para ganar la cascada por orden de
+// fuente (los @media móviles deben ir DESPUÉS de las reglas base — gotcha
+// conocido del repo). Modelado a partir de cart-mobile-footer: fija abajo,
+// blur, sombra hacia arriba, safe-area, y gate a < 1024px (paridad carrito/POS).
+@media (max-width: 1023px) {
+  .table-banner {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60; // sobre el contenido; el action-sheet (9998) queda por encima
+    padding: 0.5rem 0.9rem;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    border-bottom: none;
+    border-top: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.35);
+    background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 -8px 24px -12px rgba(15, 23, 42, 0.35);
+    color: var(--color-text-primary);
+
+    // Los tintes de modo pasan a un acento en el borde superior; el fondo se
+    // mantiene en surface+blur para legibilidad sobre el contenido.
+    &--open-tab {
+      background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+      border-top-color: rgba(34, 197, 94, 0.5);
+    }
+
+    &--require-staff {
+      background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+      border-top-color: rgba(245, 158, 11, 0.5);
+    }
+
+    .table-banner-content {
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 0.5rem;
+    }
+
+    // Fila 1 izquierda: info que se encoge y trunca.
+    .table-banner-info {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .table-banner-name,
+    .table-banner-status {
+      color: var(--color-text-primary);
+    }
+
+    .table-banner-order-status {
+      max-width: 55%;
+    }
+
+    // Fila 1 derecha: monto de la cuenta.
+    .table-banner-amount {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-end;
+      flex: 0 0 auto;
+      line-height: 1.1;
+
+      &__label {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+      }
+
+      &__value {
+        font-size: var(--fs-base);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+    }
+
+    // Acciones inline de desktop: ocultas en móvil.
+    .table-banner-actions {
+      display: none;
+    }
+
+    // Fila 2 a lo ancho: CTA primaria flexible + disparador "Acciones".
+    .table-banner-mobile {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex: 1 1 100%;
+      width: 100%;
+    }
+
+    .table-banner-mobile__cta {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .table-banner-trigger {
+      display: inline-flex;
+      flex: 0 0 auto;
+    }
+  }
+
+  // Panel "Mi cuenta": en móvil se re-ancla como BOTTOM-SHEET (sube desde el
+  // borde inferior con translateY) en vez del drawer lateral desktop. Override
+  // al FINAL del archivo para ganar la cascada por orden de fuente.
+  .bill-panel {
+    .bill-panel__drawer {
+      top: auto;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: auto;
+      width: 100%;
+      max-height: 85vh;
+      border-left: none;
+      border-top: 1px solid var(--color-border);
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.2);
+      animation: bill-sheet-up 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+
+    .bill-panel__handle {
+      display: block;
+    }
+
+    // Safe-area: el resumen es el elemento inferior del sheet.
+    .bill-panel__summary {
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
+  // Clearance: la barra fija no debe tapar el footer ni el contenido inferior.
+  // Sólo cuando hay mesa activa (la barra existe únicamente en ese estado).
+  .ecommerce-layout--table-bar .ecommerce-footer {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
   }
 }

@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, firstValueFrom } from 'rxjs';
+import { map, switchMap } from 'rxjs/operators';
 
 import {
   PopCartService,
@@ -23,6 +24,7 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 
 // Services
 import { PurchaseOrdersService } from '../services';
+import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
 import { ProductsService } from '../../products/services/products.service';
 
 // Auth
@@ -199,6 +201,7 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
+      (receiveModeChange)="popReceiveMode.set($event)"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -231,6 +234,14 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
 })
 export class PopComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private dispatchNotesService = inject(DispatchNotesService);
+  /**
+   * Reception mode for the "Crear y Recibir" flow, coherent with the
+   * dedicated PO view selector: 'direct' calls PO.receive, 'remision' emits
+   * an inbound purchase-receipt dispatch note (confirm → receive) linked to
+   * the freshly-created PO. Default 'direct' preserves the legacy behavior.
+   */
+  readonly popReceiveMode = signal<'direct' | 'remision'>('direct');
   showInvoiceScanner = signal(false);
   /**
    * Fase 4: derive the AI scan profile from the current cart. If any
@@ -1354,6 +1365,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.showOrderConfirmModal.set(false);
     if (this.confirmOrderAction === 'create') {
       this._executeSubmitOrder();
+    } else if (this.popReceiveMode() === 'remision') {
+      this._executeCreateAndReceiveViaDispatch();
     } else {
       this._executeCreateAndReceive();
     }
@@ -1503,6 +1516,80 @@ export class PopComponent implements OnInit, OnDestroy {
         console.error('Error creating order:', error);
         const errorMsg =
           error.error?.message || error.message || 'Error al crear la orden';
+        this.toastService.error(errorMsg);
+      },
+    });
+  }
+
+  /**
+   * "Crear y Recibir" — variante Por remisión. Crea la OC (aprobada) y luego,
+   * en lugar de llamar `PO.receive` directo, emite una remisión de compra
+   * (entrada) enlazada a la OC vía `purchase_order_id` y la confirma/recibe.
+   * El backend (Fase A) delega en `PurchaseOrdersService.receive`.
+   */
+  private _executeCreateAndReceiveViaDispatch(): void {
+    const state = this.popCartService.currentState;
+    const userId = this.authFacade.getUserId() || 0;
+    const request = cartToPurchaseOrderRequest(state, userId, undefined);
+    request.status = 'approved';
+    this.attachPurchaseToStockFactor(request, state);
+
+    this.toastService.info('Creando orden y remisión de entrada...');
+
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
+        if (!response.success || !response.data) return;
+        const order = response.data;
+        const orderItems = order.purchase_order_items || [];
+
+        const items = orderItems.map((item: any) => ({
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? undefined,
+          location_id: order.location_id,
+          ordered_quantity: item.quantity_ordered,
+          dispatched_quantity: item.quantity_ordered,
+          unit_price: Number(item.unit_price ?? item.unit_cost ?? 0),
+          purchase_order_item_id: item.id,
+        }));
+
+        // Inbound purchase_receipt destination is `to_location_id` (the only
+        // location key whitelisted on CreatePurchaseReceiptDispatchDto);
+        // `dispatch_location_id` would trip `forbidNonWhitelisted` (400).
+        const dto = {
+          direction: 'inbound',
+          subtype: 'purchase_receipt',
+          reason: 'normal_purchase',
+          supplier_id: order.supplier_id,
+          purchase_order_id: order.id,
+          to_location_id: order.location_id,
+          items,
+        } as any;
+
+        this.dispatchNotesService.createPurchaseReceipt(dto).pipe(
+          switchMap((dn) => this.dispatchNotesService.confirm(dn.id).pipe(map(() => dn))),
+          switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
+          takeUntilDestroyed(this.destroyRef),
+        ).subscribe({
+          next: () => {
+            this.toastService.success('Stock ingresado por remisión correctamente');
+            this.pricingOverrides.set(new Map());
+            this.popReceiveMode.set('direct');
+            this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+            this.router.navigate(['/admin/products']);
+          },
+          error: (err: any) => {
+            console.error('Error receiving via dispatch note:', err);
+            this.toastService.error('Orden creada pero hubo error al recibir por remisión');
+            this.pricingOverrides.set(new Map());
+            this.popReceiveMode.set('direct');
+            this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+            this.router.navigate(['/admin/products']);
+          },
+        });
+      },
+      error: (error) => {
+        console.error('Error creating order:', error);
+        const errorMsg = error.error?.message || error.message || 'Error al crear la orden';
         this.toastService.error(errorMsg);
       },
     });

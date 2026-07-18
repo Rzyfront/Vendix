@@ -18,6 +18,7 @@ import { PdfExportService } from './pdf-export.service';
 import {
   CloseDispatchRouteDto,
   ReleaseStopDto,
+  ReorderStopsDto,
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
@@ -592,7 +593,7 @@ export class RouteFlowService {
   async startStop(id: number, stopId: number) {
     const store_id = this.getStoreId();
     const route = await this.getRoute(id, store_id);
-    if (!['dispatched', 'in_transit', 'settling'].includes(route.status)) {
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede iniciar liquidación en planilla en estado '${route.status}'`,
       );
@@ -643,7 +644,7 @@ export class RouteFlowService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
-    if (!['dispatched', 'in_transit', 'settling'].includes(route.status)) {
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede liquidar una parada en planilla en estado '${route.status}'`,
       );
@@ -976,6 +977,91 @@ export class RouteFlowService {
     return updated;
   }
 
+  /**
+   * Reorder the stops of a route by rewriting their `stop_sequence`.
+   *
+   * State gate: only routes in `draft` or `dispatched` can be reordered — the
+   * same "editable" window `addStops` uses (once a route is in_transit/settling
+   * the field order is fixed). A route in any other state raises the existing
+   * `DSP_ROUTE_NOT_EDITABLE_001` (HTTP 409).
+   *
+   * Tenant-isolated like the rest of the domain: the route is loaded with a
+   * `{ id, store_id }` filter (dispatch_routes is NOT auto-scoped) so a route
+   * from another store yields a 404. Validates that every `stopId` belongs to
+   * the route and that the requested `sequence` values are unique before
+   * persisting all updates inside one `$transaction`. Returns the refreshed
+   * route (same shape as the other flow endpoints).
+   */
+  async reorderStops(id: number, dto: ReorderStopsDto) {
+    const store_id = this.getStoreId();
+
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      select: { id: true, status: true, is_carrier_route: true },
+    });
+    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+
+    // State guard: draft / dispatched siempre. Vendix Repartos (B7): las rutas
+    // CARRIER admiten además `in_transit` (el repartidor reordena sus paradas
+    // en recorrido, "Aplicar orden óptimo" del mapa). Las rutas admin conservan
+    // el gate original (draft/dispatched).
+    const REORDERABLE_STATES: dispatch_route_status_enum[] =
+      route.is_carrier_route
+        ? ['draft', 'dispatched', 'in_transit']
+        : ['draft', 'dispatched'];
+    if (!REORDERABLE_STATES.includes(route.status)) {
+      throw new VendixHttpException(
+        ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001,
+        `No se pueden reordenar las paradas de una planilla en estado '${route.status}'`,
+      );
+    }
+
+    // Unique target sequences (two stops cannot claim the same position).
+    const sequences = dto.order.map((o) => o.sequence);
+    if (new Set(sequences).size !== sequences.length) {
+      throw new BadRequestException(
+        'Las secuencias de las paradas deben ser únicas',
+      );
+    }
+
+    // No duplicate stopId in the payload.
+    const stopIds = dto.order.map((o) => o.stopId);
+    if (new Set(stopIds).size !== stopIds.length) {
+      throw new BadRequestException('Hay stopId duplicados en la solicitud');
+    }
+
+    // Every stopId must belong to THIS route (the route is already tenant-scoped
+    // above, so route_id membership is the isolation boundary for the stops).
+    const routeStops = await this.prisma.dispatch_route_stops.findMany({
+      where: { route_id: id },
+      select: { id: true },
+    });
+    const routeStopIds = new Set(routeStops.map((s) => s.id));
+    const foreign = stopIds.filter((sid) => !routeStopIds.has(sid));
+    if (foreign.length > 0) {
+      throw new BadRequestException(
+        `Las paradas ${foreign.join(', ')} no pertenecen a la planilla #${id}`,
+      );
+    }
+
+    // Persist all sequence changes atomically. There is no UNIQUE constraint on
+    // (route_id, stop_sequence) (only an index), so a straight batch update
+    // needs no temp-negative two-phase trick.
+    await this.prisma.$transaction(
+      dto.order.map((o) =>
+        this.prisma.dispatch_route_stops.update({
+          where: { id: o.stopId },
+          data: { stop_sequence: o.sequence, updated_at: new Date() },
+        }),
+      ),
+    );
+
+    this.logger.log(
+      `Planilla #${id}: reordenadas ${dto.order.length} parada(s)`,
+    );
+    return this.getRoute(id, store_id);
+  }
+
 
   /**
    * Recompute and persist the parent `dispatch_routes` aggregate columns
@@ -1070,7 +1156,7 @@ export class RouteFlowService {
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
 
-    if (!['dispatched', 'in_transit', 'settling'].includes(route.status)) {
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede cerrar una planilla en estado '${route.status}'`,
       );
@@ -1164,10 +1250,123 @@ export class RouteFlowService {
       cash_variance,
     });
 
+    // Plan Despacho Economía — FASE 5 paso 16. Cálculo del costo del ejecutor.
+    // Se emite en post-commit (fuera de la tx) para no romper el cuadre de caja
+    // si algo del cálculo falla — `dispatch_route.closed` ya se emitió arriba.
+    await this.maybeEmitRouteSettlement(updated, store_id, user_id);
+
     this.logger.log(
       `Planilla #${id} cerrada. Recaudado=${total_collected} Variance=${cash_variance}`,
     );
     return this.withDerivedStopPrepaid(updated);
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 5 paso 16.
+   * Calcula el costo del ejecutor y emite `dispatch_route.settlement` cuando
+   * el costo es > 0. Reglas:
+   *   - Interno con sueldo (driver_user_id sin `is_primary_driver_external`):
+   *     costo 0 — la nómina no es parte del modelo.
+   *   - Externo (carrier | third_party_provider | vehículo externo): el método
+   *     define `generates_transport_cost`. Si es `none`, costo 0.
+   *     Si es `per_route`, `gross_cost = settlement_rate` (vehicle) o el monto
+   *     convenido (carrier — se negocia, default `0` si no hay nada).
+   *     Si es `per_delivery`, `gross_cost = settlement_rate × entregas_que_cuentan`.
+   *
+   * El cálculo se hace best-effort: si algo falla, la ruta sigue cerrada y el
+   * evento simplemente no se emite (con log warn).
+   */
+  private async maybeEmitRouteSettlement(
+    route: any,
+    store_id: number,
+    user_id?: number,
+  ): Promise<void> {
+    try {
+      const carrier_id = route.external_carrier_supplier_id ?? null;
+      const vehicle_id = route.vehicle_id ?? null;
+      let gross_cost = 0;
+      let settlement_type: 'none' | 'per_delivery' | 'per_route' = 'none';
+      let deliveries_count = 0;
+
+      if (vehicle_id) {
+        const vehicle = await this.prisma.vehicles.findFirst({
+          where: { id: vehicle_id, store_id },
+        });
+        if (vehicle && vehicle.settlement_type && vehicle.settlement_type !== 'none') {
+          settlement_type = vehicle.settlement_type;
+          const rate = Number(vehicle.settlement_rate || 0);
+          if (vehicle.settlement_type === 'per_route') {
+            gross_cost = rate;
+          } else if (vehicle.settlement_type === 'per_delivery') {
+            // Cuentan: delivered + partial. rejected/released no cuentan.
+            deliveries_count = (route.stops ?? []).filter(
+              (s: any) =>
+                s.result === 'delivered' || s.result === 'partial',
+            ).length;
+            gross_cost = rate * deliveries_count;
+          }
+        }
+      } else if (carrier_id) {
+        // Carrier externo. La tarifa en v1 se negocia fuera del sistema: si el
+        // método define `generates_transport_cost=per_route`, usamos el
+        // settlement_rate del VEHÍCULO REFERENCIADO POR EL MÉTODO si existe;
+        // si no, 0 (operación manual posterior). Por ahora, sólo emitimos si
+        // el método marca costo.
+        const method_id = route.shipping_method_id ?? null;
+        if (method_id) {
+          const method = await this.prisma.shipping_methods.findFirst({
+            where: { id: method_id, is_system: false },
+          });
+          if (
+            method &&
+            method.generates_transport_cost &&
+            method.generates_transport_cost !== 'none'
+          ) {
+            settlement_type = method.generates_transport_cost;
+            if (settlement_type === 'per_route') {
+              const def_vehicle = method.default_vehicle_id
+                ? await this.prisma.vehicles.findFirst({
+                    where: { id: method.default_vehicle_id, store_id },
+                  })
+                : null;
+              gross_cost = Number(def_vehicle?.settlement_rate || 0);
+            } else {
+              deliveries_count = (route.stops ?? []).filter(
+                (s: any) =>
+                  s.result === 'delivered' || s.result === 'partial',
+              ).length;
+              const def_vehicle = method.default_vehicle_id
+                ? await this.prisma.vehicles.findFirst({
+                    where: { id: method.default_vehicle_id, store_id },
+                  })
+                : null;
+              const rate = Number(def_vehicle?.settlement_rate || 0);
+              gross_cost = rate * deliveries_count;
+            }
+          }
+        }
+      }
+
+      // No emitir cuando el costo es 0 — la ruta cerrada sin costo no genera
+      // CxP ni retención.
+      if (gross_cost <= 0) return;
+
+      this.eventEmitter.emit('dispatch_route.settlement', {
+        route_id: route.id,
+        route_number: route.route_number,
+        store_id,
+        organization_id: route.stores?.organization_id,
+        transporter_supplier_id: carrier_id,
+        gross_cost,
+        deliveries_count,
+        settlement_type,
+        user_id,
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `Planilla #${route.id} cerrada, pero el cálculo del costo falló: ${err?.message}. No se emite settlement.`,
+      );
+    }
   }
 
   /**

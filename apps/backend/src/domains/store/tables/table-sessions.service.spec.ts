@@ -63,12 +63,44 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
     settingsService = {
       getStoreCurrency: jest.fn().mockResolvedValue('COP'),
+      // openSession gates anonymous (customer_id null) opens behind
+      // pos.allow_anonymous_sales — allow it so the smoke test can open.
+      getSettings: jest.fn().mockResolvedValue({
+        pos: { allow_anonymous_sales: true },
+      }),
+    };
+
+    // Deps added after this smoke test was first written. Only
+    // notificationsSseService.push is exercised here (emitSessionOpened fires
+    // on open); the rest are stubbed so the 10-arg constructor is satisfied.
+    const notificationsService = {
+      createAndBroadcast: jest.fn().mockResolvedValue(undefined),
+      sendToUser: jest.fn().mockResolvedValue(undefined),
+    };
+    const notificationsSseService = { push: jest.fn() };
+    const eventEmitter = { emit: jest.fn() };
+    const cashRegisterSessionsService = { getActiveSession: jest.fn() };
+    const cashRegisterMovementsService = { recordSaleMovement: jest.fn() };
+    const kitchenFireService = {
+      cancelTicketInTx: jest.fn(),
+      emitTicketCancelledEvent: jest.fn(),
+    };
+    const stockLevelManager = {
+      getDefaultLocationForProduct: jest.fn(),
+      updateStock: jest.fn(),
     };
 
     service = new TableSessionsService(
       prismaMock as any,
       tablesService as any,
       settingsService,
+      notificationsService as any,
+      notificationsSseService as any,
+      eventEmitter as any,
+      cashRegisterSessionsService as any,
+      cashRegisterMovementsService as any,
+      kitchenFireService as any,
+      stockLevelManager as any,
     );
   });
 

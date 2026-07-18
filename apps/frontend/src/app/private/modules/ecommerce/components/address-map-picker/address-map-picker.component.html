@@ -2,17 +2,54 @@
   <div class="amp-map" #mapContainer></div>
 
   @if (loading()) {
-    <div class="amp-loading" aria-live="polite">
-      <span class="amp-spinner" aria-hidden="true"></span>
-      <span>Cargando mapa...</span>
+    <!-- Skeleton reserves the exact map space (shimmer) while tiles load. -->
+    <div class="amp-skeleton" aria-live="polite" aria-busy="true">
+      <span class="amp-skeleton-shimmer" aria-hidden="true"></span>
+      <span class="amp-skeleton-label">Cargando mapa...</span>
     </div>
   }
 
-  <p class="amp-hint">
-    Arrastra el marcador para ajustar tu ubicación exacta.
-  </p>
+  @if (error()) {
+    <!-- Map could not render (WebGL/tiles). Keep the reserved space with a
+         placeholder so the customer just uses the manual form below. -->
+    <div class="amp-error" role="status">
+      <svg
+        class="amp-error-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+        <circle cx="12" cy="10" r="3" />
+      </svg>
+      <span>No se pudo cargar el mapa. Ingresa tu dirección manualmente.</span>
+    </div>
+  }
 
-  <p class="amp-attribution">
-    © OpenStreetMap · OpenFreeMap
-  </p>
+  @if (!error()) {
+    <p class="amp-hint">
+      <svg
+        class="amp-hint-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+        <circle cx="12" cy="10" r="3" />
+      </svg>
+      @if (hasPoint()) {
+        <span>Arrastra el marcador para ajustar tu ubicación exacta.</span>
+      } @else {
+        <span>Activa tu ubicación o escribe tu dirección para ubicarte en el mapa.</span>
+      }
+    </p>
+  }
 </div>

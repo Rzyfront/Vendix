@@ -14,10 +14,12 @@ export interface SeedDefaultAccountMappingsResult {
 const MAPPING_DEFAULTS: Record<string, string> = {
   'invoice.validated.accounts_receivable': '1305',
   'invoice.validated.revenue': '4135',
+  'invoice.validated.shipping_income': '414505',
   'invoice.validated.vat_payable': '2408',
   'payment.received.cash': '1105',
   'payment.received.accounts_receivable': '1305',
   'payment.received.revenue': '4135',
+  'payment.received.shipping_income': '414505',
   'expense.approved.expense': '5195',
   'expense.approved.accounts_payable': '2205',
   'expense.paid.accounts_payable': '2205',
@@ -51,6 +53,14 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'payroll.paid.bank': '1110',
   'order.completed.cogs': '6135',
   'order.completed.inventory': '1435',
+  // Remisiones bidireccionales (Fase 4) — mismas cuentas PUC que
+  // order.completed / purchase_order.received, mapping key separada.
+  'dispatch_note.delivered.cogs': '6135',
+  'dispatch_note.delivered.inventory': '1435',
+  'dispatch_note.received.inventory': '1435',
+  'dispatch_note.received.accounts_payable': '2205',
+  'dispatch_note.return.inventory': '1435',
+  'dispatch_note.return.cogs': '6135',
   'refund.completed.revenue': '4135',
   'refund.completed.cash': '1105',
   'purchase_order.received.inventory': '1435',
@@ -88,6 +98,7 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Phase 1: Credit sales
   'credit_sale.created.accounts_receivable': '1305',
   'credit_sale.created.revenue': '4135',
+  'credit_sale.created.shipping_income': '414505',
   'credit_sale.created.vat_payable': '2408',
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': '2408',
@@ -259,6 +270,10 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'dispatch_route.closed.cash': '1105',
   'dispatch_route.closed.surplus': '4295',
   'dispatch_route.closed.shortage_receivable': '1365',
+  // Plan Despacho Economía — FASE 5 paso 17. Costo del transportador al
+  // liquidar la ruta. DR 523550 (gross), CR 2205→banco (pago neto).
+  'dispatch_route.settlement.transport_cost': '523550',
+  'dispatch_route.settlement.accounts_payable': '2205',
   // SaaS Subscription (RNC-31) — Store side: gasto admin del cliente
   'saas_subscription_expense.expense': '5135',
   'saas_subscription_expense.cash_bank': '1110',

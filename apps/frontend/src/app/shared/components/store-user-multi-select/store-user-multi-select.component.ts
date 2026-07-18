@@ -108,7 +108,11 @@ const SEARCH_DEBOUNCE_MS = 300;
       <!-- Dropdown -->
       @if (isOpen()) {
         <div
-          class="absolute z-[10000] top-full left-0 right-0 mt-1 bg-[var(--color-surface)] border border-border rounded-lg shadow-lg max-h-64 overflow-y-auto"
+          class="absolute z-[10000] left-0 right-0 bg-[var(--color-surface)] border border-border rounded-lg shadow-lg max-h-64 overflow-y-auto"
+          [class.top-full]="!dropUp()"
+          [class.mt-1]="!dropUp()"
+          [class.bottom-full]="dropUp()"
+          [class.mb-1]="dropUp()"
         >
           @if (isLoading()) {
             <div class="flex items-center justify-center gap-2 p-4 text-sm text-[var(--color-text-secondary)]">
@@ -181,6 +185,12 @@ export class StoreUserMultiSelectComponent
   readonly disabled = input<boolean>(false);
   /** Extra user ids to exclude from results (e.g. an already-chosen driver). */
   readonly excludeIds = input<number[]>([]);
+  /**
+   * Role name to exclude server-side (e.g. `'customer'` for staff-only
+   * pickers). Opt-in — defaults to `null` so existing consumers keep the
+   * full store-user list.
+   */
+  readonly excludeRole = input<string | null>(null);
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -188,7 +198,12 @@ export class StoreUserMultiSelectComponent
   readonly results = signal<StoreUserOption[]>([]);
   readonly isLoading = signal<boolean>(false);
   readonly isOpen = signal<boolean>(false);
+  /** When true the dropdown opens upward (not enough room below, e.g. in a modal). */
+  readonly dropUp = signal<boolean>(false);
   private readonly disabledState = signal<boolean>(false);
+
+  /** Approx. dropdown height (max-h-64 = 16rem = 256px + margin). */
+  private static readonly DROPDOWN_MAX_PX = 264;
 
   /** Selected ids, used both for emission and result de-duplication. */
   private readonly selectedIds = computed(() => this.selected().map((u) => u.id));
@@ -211,7 +226,10 @@ export class StoreUserMultiSelectComponent
         tap(() => this.isLoading.set(true)),
         switchMap((term) =>
           this.lookup
-            .search(term, { excludeIds: this.excludeIds() })
+            .search(term, {
+              excludeIds: this.excludeIds(),
+              excludeRole: this.excludeRole() ?? undefined,
+            })
             .pipe(catchError(() => of([] as StoreUserOption[]))),
         ),
         takeUntilDestroyed(this.destroyRef),
@@ -260,14 +278,33 @@ export class StoreUserMultiSelectComponent
   // ── UI handlers ───────────────────────────────────────────────────────
   onQueryChange(term: string): void {
     this.query.set(term);
+    this.computeDropDirection();
     this.isOpen.set(true);
     this.searchSubject.next(term);
   }
 
   openDropdown(): void {
     if (this.isDisabled()) return;
+    this.computeDropDirection();
     this.isOpen.set(true);
     this.searchSubject.next(this.query());
+  }
+
+  /**
+   * Decide whether the dropdown should open upward. Opens up only when the
+   * space below the control is smaller than the dropdown AND there is more
+   * room above — otherwise keep the default downward direction. Measured with
+   * `getBoundingClientRect` (zoneless-safe, no NgZone) right before opening.
+   */
+  private computeDropDirection(): void {
+    if (typeof window === 'undefined') return;
+    const rect = (
+      this.elementRef.nativeElement as HTMLElement
+    ).getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const max = StoreUserMultiSelectComponent.DROPDOWN_MAX_PX;
+    this.dropUp.set(spaceBelow < max && spaceAbove > spaceBelow);
   }
 
   closeDropdown(): void {

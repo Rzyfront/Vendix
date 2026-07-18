@@ -946,6 +946,50 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
+    // Repartidor (Carrier / Conductor de planillas DSD)
+    {
+      name: 'store:carrier:pool:read',
+      description: 'Ver pool de planillas disponibles para autoasignar (carrier)',
+      path: '/api/store/carrier/pool',
+      method: 'GET',
+    },
+    {
+      name: 'store:carrier:claim',
+      description: 'Autoasignar/aceptar planilla desde el pool (carrier)',
+      path: '/api/store/carrier/claim',
+      method: 'POST',
+    },
+    {
+      name: 'store:carrier:route:read',
+      description: 'Ver planillas asignadas al carrier',
+      path: '/api/store/carrier/routes',
+      method: 'GET',
+    },
+    {
+      name: 'store:carrier:dispatch',
+      description: 'Despachar planilla autoasignada (carrier)',
+      path: '/api/store/carrier/routes/:id/dispatch',
+      method: 'POST',
+    },
+    {
+      name: 'store:carrier:settle',
+      description: 'Liquidar parada de planilla (carrier)',
+      path: '/api/store/carrier/routes/:id/stops/:stopId/settle',
+      method: 'POST',
+    },
+    {
+      name: 'store:carrier:release',
+      description: 'Liberar parada no entregada (carrier)',
+      path: '/api/store/carrier/routes/:id/stops/:stopId/release',
+      method: 'POST',
+    },
+    {
+      name: 'store:carrier:close',
+      description: 'Cerrar/cuadrar planilla al regresar (carrier)',
+      path: '/api/store/carrier/routes/:id/close',
+      method: 'POST',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',
@@ -4029,6 +4073,16 @@ export async function seedPermissionsAndRoles(
     },
   });
 
+  const carrierRole = await client.roles.upsert({
+    where: { name: 'carrier' },
+    update: {},
+    create: {
+      name: 'carrier',
+      description: 'Repartidor',
+      is_system_role: true,
+    },
+  });
+
   // Create-only seed: system roles are inserted with organization_id=null on
   // their initial upsert; existing roles are never mutated by this seed.
 
@@ -4442,6 +4496,68 @@ export async function seedPermissionsAndRoles(
     'cashier',
   );
   assignmentsCreated += cashierSync.added;
+
+  // Assign permissions to carrier (repartidor / conductor de planillas DSD)
+  //
+  // El rol carrier es operativo sobre /store/carrier/*: pool (listar planillas
+  // disponibles para autoasignar), claim (tomar una planilla), dispatch (despachar
+  // su planilla asignada), settle/release (liquidar o liberar paradas en ruta) y
+  // close (cerrar/cuadrar al regresar). Necesita además lectura operativa de
+  // remisiones, órdenes, clientes, direcciones, impuestos, caja (sin create/update/
+  // delete de cajas) y notificaciones, más auth base y resolvers públicos.
+  const carrierPermissions = allPermissions.filter(
+    (p) =>
+      // Autenticación básica
+      p.name === 'auth.login' ||
+      p.name === 'auth.logout' ||
+      p.name === 'auth.profile' ||
+      p.name === 'auth.me' ||
+      p.name === 'auth:sessions' ||
+      p.name === 'auth.change.password' ||
+      // Permisos propios del rol carrier (pool, claim, ruta, dispatch, settle, release, close)
+      p.name === 'store:carrier:pool:read' ||
+      p.name === 'store:carrier:claim' ||
+      p.name === 'store:carrier:route:read' ||
+      p.name === 'store:carrier:dispatch' ||
+      p.name === 'store:carrier:settle' ||
+      p.name === 'store:carrier:release' ||
+      p.name === 'store:carrier:close' ||
+      // Remisiones - lectura y captura en ruta (no update / delete / void / invoice)
+      p.name === 'store:dispatch_notes:create' ||
+      p.name === 'store:dispatch_notes:read' ||
+      p.name === 'store:dispatch_notes:read:one' ||
+      p.name === 'store:dispatch_notes:confirm' ||
+      p.name === 'store:dispatch_notes:print' ||
+      // Órdenes - solo lectura
+      p.name === 'store:orders:read' ||
+      p.name === 'store:orders:read:one' ||
+      // Clientes - solo lectura
+      p.name === 'store:customers:read' ||
+      // Direcciones - solo lectura
+      p.name === 'store:addresses:read' ||
+      // Impuestos - solo lectura
+      p.name === 'store:taxes:read' ||
+      // Caja - apertura, cierre, movimientos y consulta (sin create/update/delete)
+      p.name === 'store:cash_registers:read' ||
+      p.name === 'store:cash_registers:open_session' ||
+      p.name === 'store:cash_registers:close_session' ||
+      p.name === 'store:cash_registers:movements' ||
+      p.name === 'store:cash_registers:reports' ||
+      // Notificaciones - lectura
+      p.name === 'store:notifications:read' ||
+      // Resolvers públicos + health
+      p.name === 'domains.resolve' ||
+      p.name === 'domains.check' ||
+      p.name === 'system.health',
+  );
+
+  const carrierSync = await syncRolePermissions(
+    client,
+    carrierRole.id,
+    carrierPermissions.map((p) => p.id),
+    'carrier',
+  );
+  assignmentsCreated += carrierSync.added;
 
   return {
     permissionsCreated,

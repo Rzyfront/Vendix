@@ -82,7 +82,7 @@ describe('RouteSheetScannerService', () => {
     // confirmAndSettle re-reads the route via DispatchRoutesService.findOne to
     // return the updated route in its response.
     dispatchRoutesMock = {
-      findOne: jest.fn().mockResolvedValue({ id: ROUTE_ID, status: 'settling' }),
+      findOne: jest.fn().mockResolvedValue({ id: ROUTE_ID, status: 'in_transit' }),
     };
     s3Mock = { uploadFile: jest.fn().mockResolvedValue('s3/key/planilla.jpg') };
 

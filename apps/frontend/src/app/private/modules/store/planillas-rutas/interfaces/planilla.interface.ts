@@ -2,7 +2,6 @@ export type DispatchRouteStatus =
   | 'draft'
   | 'dispatched'
   | 'in_transit'
-  | 'settling'
   | 'closed'
   | 'voided';
 
@@ -56,6 +55,13 @@ export interface DispatchDeliveryAddress {
   /** Legacy aliases tolerated by the address-presence check. */
   line1?: string | null;
   address?: string | null;
+  /**
+   * GPS coordinates captured at checkout (address-map-picker). Optional because
+   * legacy addresses may lack them; when present the backend uses them to
+   * geolocate the stop on the route map without a geocoding round-trip.
+   */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 /**
@@ -207,6 +213,48 @@ export interface PaginatedDispatchRoutesResponse {
   pagination: { total: number; page: number; limit: number; totalPages: number };
 }
 
+// ============================================================================
+// Dispatch monitor (GET /store/dispatch-routes/monitor)
+// ============================================================================
+
+/**
+ * One row of the shipping mini-P&L monitor. Mirrors EXACTLY the backend
+ * `data.data[]` shape returned by `GET /store/dispatch-routes/monitor`.
+ *
+ * The four economic fields are pre-aggregated by the backend as plain numbers:
+ * - `recaudo`         — cash collected on the route (COD).
+ * - `ingreso_flete`   — freight revenue charged to the customer.
+ * - `costo_transporte`— transport cost incurred (own fleet or external carrier).
+ * - `margen_flete`    — `ingreso_flete - costo_transporte` (can be NEGATIVE).
+ *
+ * `ejecutor` is the human-readable executor label (driver / carrier) or null,
+ * and `estado_liquidacion` reflects whether the route freight is settled.
+ * The endpoint accepts only `page` / `limit` (no `search`).
+ */
+export interface DispatchRouteMonitorRow {
+  id: number;
+  route_number: string;
+  store_id: number;
+  status: DispatchRouteStatus;
+  planned_date: string;
+  closed_at: string | null;
+  shipping_method: { id: number; name: string } | null;
+  external_carrier_supplier_id: number | null;
+  vehicle_id: number | null;
+  recaudo: number;
+  ingreso_flete: number;
+  costo_transporte: number;
+  margen_flete: number;
+  ejecutor: string | null;
+  estado_liquidacion: 'paid' | 'pending';
+}
+
+/** `GET /store/dispatch-routes/monitor` → unwrapped `data`. */
+export interface PaginatedMonitorResponse {
+  data: DispatchRouteMonitorRow[];
+  pagination: { total: number; page: number; limit: number; totalPages: number };
+}
+
 export interface SettleStopDto {
   result: DispatchRouteStopResult;
   collected_amount?: number;
@@ -237,6 +285,14 @@ export interface CreateDispatchRouteDto {
   currency?: string;
   notes?: string;
   stops: CreateStopDto[];
+  /**
+   * Método de envío elegido para la ruta. Dispara el auto-config de ejecutor
+   * (vehículo/conductor/carrier) en el backend a partir de la política del
+   * método. Plan Despacho Economía — FASE 3 paso 12.
+   */
+  shipping_method_id?: number;
+  /** Proveedor transportador externo (tercero de la CxP — FASE 5). */
+  external_carrier_supplier_id?: number;
 }
 
 export interface CloseDispatchRouteDto {
@@ -252,6 +308,67 @@ export interface VoidDispatchRouteDto {
 
 export interface ReleaseStopDto {
   reason: string;
+}
+
+// ============================================================================
+// Route map (GET /store/dispatch-routes/:id/map-stops)
+// ============================================================================
+
+/**
+ * A pending (or in-progress) stop that HAS resolvable coordinates and can be
+ * rendered on the route map. Mirrors EXACTLY the backend `data.stops[]` shape
+ * returned by `GET /store/dispatch-routes/:id/map-stops`. `sequence` is the
+ * persisted `stop_sequence` already surfaced camelCase by the backend, so it is
+ * consumed as-is (no snake→camel mapping needed on the frontend).
+ */
+export interface MapStop {
+  stopId: number;
+  sequence: number;
+  /**
+   * `pending` / `in_progress` for the active `stops[]`; `delivered` for the
+   * `delivered[]` leg (completed stops kept on the map in green).
+   */
+  status: 'pending' | 'in_progress' | 'delivered';
+  customerName: string | null;
+  addressText: string | null;
+  lat: number;
+  lng: number;
+  /** True when the coords came from a geocoding pass (vs. stored GPS). */
+  geocoded: boolean;
+}
+
+/**
+ * A pending stop WITHOUT resolvable coordinates: it exists in the route but
+ * cannot be painted on the map. Surfaced to the operator as a "Sin ubicación"
+ * list so it is not silently dropped. Mirrors `data.unlocated[]`.
+ */
+export interface MapStopUnlocated {
+  stopId: number;
+  sequence: number;
+  customerName: string | null;
+  addressText: string | null;
+}
+
+/**
+ * `GET /store/dispatch-routes/:id/map-stops` → `data`.
+ *
+ * - `stops[]`: only pending / in_progress located stops (optimizer input).
+ * - `delivered[]`: already-delivered located stops, ordered by `sequence` asc,
+ *   kept so the map can show completed paradas in green with a green leg.
+ *   Same shape as `stops[]` (`status` is always `delivered` here).
+ * - `unlocated[]`: pending stops without resolvable coordinates.
+ */
+export interface MapStopsResponse {
+  origin: { lat: number; lng: number } | null;
+  stops: MapStop[];
+  delivered: MapStop[];
+  unlocated: MapStopUnlocated[];
+}
+
+/** One entry of the reorder payload for `PATCH .../:id/stops/reorder`. */
+export interface ReorderStopEntry {
+  stopId: number;
+  sequence: number;
 }
 
 // ============================================================================

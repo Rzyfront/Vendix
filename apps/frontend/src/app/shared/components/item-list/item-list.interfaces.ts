@@ -1,6 +1,18 @@
 import { TableColumn, TableAction } from '../table/table.component';
 
 /**
+ * Progress ring data rendered in place of a text detail value.
+ */
+export interface ItemListProgressData {
+  /** Progress percentage (0-100). */
+  percent: number;
+  /** Optional accessible label for the ring (defaults to 'Progreso'). */
+  label?: string;
+  /** Optional stroke color (CSS color). Defaults to #16a34a. */
+  color?: string;
+}
+
+/**
  * Configuration for a single detail field shown in the card's detail grid
  */
 export interface ItemListDetailField {
@@ -20,6 +32,8 @@ export interface ItemListDetailField {
   infoIconVariant?: 'primary' | 'warning' | 'danger' | 'success' | 'default';
   /** Optional dynamic function to compute the color variant per-item */
   infoIconVariantTransform?: (value: any, item?: any) => 'primary' | 'warning' | 'danger' | 'success' | 'default' | undefined;
+  /** Optional progress ring rendered instead of a text value. Return null to hide. */
+  progressTransform?: (item: any) => ItemListProgressData | null;
 }
 
 /**

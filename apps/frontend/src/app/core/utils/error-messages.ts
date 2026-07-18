@@ -550,6 +550,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
   KITCHEN_TICKET_NOT_FOUND: 'Ticket de cocina no encontrado.',
 
   // QR Table dine-in (comensal — cuenta de mesa)
+  TABLE_NOT_FOUND:
+    'No encontramos esta mesa. Vuelve a escanear el código QR.',
+  TABLE_SESSION_NOT_FOUND:
+    'Aún no hay una cuenta abierta para esta mesa. Llama al mesero para que la abra.',
+  TABLE_SESSION_ALREADY_OPEN:
+    'Esta mesa ya tiene una cuenta abierta.',
+  TABLE_SESSION_CLOSED:
+    'La cuenta de esta mesa ya fue cerrada.',
+  TABLE_SESSION_CUSTOMER_REQUIRED:
+    'Necesitamos tus datos para abrir la cuenta de la mesa.',
+  TABLE_INVALID_STATUS:
+    'La mesa no está en un estado válido para esta acción.',
   TABLE_SESSION_ADD_ITEMS_INVALID:
     'No se pudieron agregar los productos a la cuenta de la mesa. Verifica que estén disponibles e intenta de nuevo.',
   MENU_ITEM_NOT_AVAILABLE_NOW:

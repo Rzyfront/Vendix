@@ -616,6 +616,18 @@ export interface MembershipSettings {
    */
   ambient_access_enabled: boolean;
   /**
+   * Kiosk mode: keeps the QR scanner always-on (continuous loop) on the Aforo
+   * tab for an unattended reception tablet. When false (default), the scanner
+   * opens on demand and closes after a single decode.
+   */
+  qr_kiosk_mode?: boolean;
+  /**
+   * Default display mode for the Aforo QR scanner on open. `fullscreen`
+   * (default) shows the full overlay; `floating` opens a movable window/bubble.
+   * Per-device overrides are remembered client-side in localStorage.
+   */
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
+  /**
    * Enables capacity (aforo) control for the membership area.
    * When false (default), capacity control is disabled.
    */
@@ -661,4 +673,12 @@ export interface DispatchSettings {
    * Default: `on_close`.
    */
   order_state_update_mode?: 'live' | 'on_close';
+
+  // Plan Despacho Economía — FASE 2 paso 9. Defaults globales de la tienda
+  // usados como fallback cuando un método de envío no define política.
+  default_payment_timing?: 'prepaid' | 'on_delivery';
+  default_settlement_type?: 'none' | 'per_delivery' | 'per_route';
+  default_cost_settlement_timing?: 'immediate_on_close';
+  default_origin_location_id?: number;
+  requires_dispatch_address?: boolean;
 }

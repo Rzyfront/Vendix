@@ -39,34 +39,90 @@
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
       />
+      <app-stats
+        title="Aforo actual"
+        [value]="occupancy()?.current_count ?? 0"
+        [smallText]="(occupancy()?.current_count ?? 0) + ' / ' + (occupancy()?.max_capacity ?? 0) + ' personas'"
+        iconName="gauge"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      />
     </div>
   }
 
   <!-- ══════════════════ Aforo ══════════════════ -->
   @if (activeTab() === 'aforo') {
     <div class="aforo-wrap">
-      <!-- ─── Hero: contador en vivo (SVG gauge) ─── -->
-      <app-aforo-gauge
-        [count]="occupancy()?.current_count ?? 0"
-        [maxCapacity]="occupancy()?.max_capacity ?? 0"
-        [pct]="occupancyPct()"
-        [color]="occupancyColor()"
-        [availableSpots]="availableSpots()"
-        [grantedToday]="grantedToday()"
-        [capacityControlEnabled]="occupancy()?.capacity_control_enabled ?? false"
-        [isFull]="isFull()"
-        [live]="liveConnected()"
-        [syncing]="occupancyLoading()"
-      />
+      <!-- ─── Top: aforo (2/5) + ingreso (3/5) ─── -->
+      <div class="aforo-top">
+        <!-- Hero: contador en vivo (SVG gauge) -->
+        <app-aforo-gauge
+          [count]="occupancy()?.current_count ?? 0"
+          [maxCapacity]="occupancy()?.max_capacity ?? 0"
+          [pct]="occupancyPct()"
+          [color]="occupancyColor()"
+          [availableSpots]="availableSpots()"
+          [grantedToday]="grantedToday()"
+          [capacityControlEnabled]="occupancy()?.capacity_control_enabled ?? false"
+          [isFull]="isFull()"
+          [live]="liveConnected()"
+          [syncing]="occupancyLoading()"
+        />
 
-      <!-- ─── Ingreso + Salida/Ajuste ─── -->
-      <div class="aforo-grid">
         <!-- Ingreso (valida credencial → +1) -->
         <app-aforo-checkin-panel
           [actionInFlight]="actionInFlight()"
           [lastResult]="lastCheckin()"
+          [kiosk]="kioskMode()"
+          [scannerDefaultMode]="scannerDefaultMode()"
           (validate)="onCheckin($event)"
         />
+      </div>
+
+      <!-- ─── Membresías por vencer + Salida/Ajuste ─── -->
+      <div class="aforo-grid">
+        <!-- Membresías por vencer / vencidas -->
+        <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+          <div slot="header" class="aforo-panel-header">
+            <span class="aforo-panel-icon">
+              <app-icon name="calendar-clock" [size]="18" />
+            </span>
+            <div class="aforo-panel-text">
+              <h3>Membresías por vencer</h3>
+              <p>Vencidas y próximas a vencer (7 días)</p>
+            </div>
+            @if (expiring().length) {
+              <span class="aforo-tag">{{ expiring().length }}</span>
+            }
+          </div>
+
+          @if (expiringLoading()) {
+            <div class="expiring-loading">
+              <div
+                class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+              ></div>
+            </div>
+          } @else if (expiringRows().length === 0) {
+            <app-empty-state
+              icon="calendar-check"
+              title="Todo al día"
+              description="No hay membresías vencidas ni próximas a vencer."
+              [showActionButton]="false"
+              [showRefreshButton]="false"
+            />
+          } @else {
+            <app-responsive-data-view
+              [data]="expiringRows()"
+              [columns]="expiringColumns"
+              [cardConfig]="expiringCardConfig"
+              [sortable]="false"
+              [hoverable]="true"
+              emptyMessage="Sin membresías por vencer"
+              emptyIcon="calendar-check"
+              (rowClick)="goToMembership($event)"
+            />
+          }
+        </app-card>
 
         <div class="aforo-side">
           <!-- Salida (−1) -->
@@ -143,22 +199,19 @@
         </div>
       </div>
 
-      <!-- ─── Configuración de aforo (inline) ─── -->
-      @if (showConfig()) {
-        <app-card [responsive]="true">
-          <div class="aforo-config">
-            <header class="aforo-config-head">
-              <div class="aforo-block-title">
-                <app-icon name="gauge" />
-                <span>Configuración de aforo</span>
-              </div>
-              <p class="aforo-block-desc">
-                Define la capacidad, la nivelación automática y el modo torniquete.
-                El horario de atención se toma del horario del Punto de Venta.
-              </p>
-            </header>
+      <!-- ─── Configuración de aforo (modal) ─── -->
+      <app-modal
+        [(isOpen)]="showConfig"
+        title="Configuración de aforo"
+        size="lg"
+      >
+        <div class="aforo-config">
+          <p class="aforo-block-desc">
+            Define la capacidad, la nivelación automática y el modo torniquete.
+            El horario de atención se toma del horario del Punto de Venta.
+          </p>
 
-            <div class="aforo-config-grid">
+          <div class="aforo-config-grid">
               <app-setting-toggle
                 label="Control de aforo"
                 description="Cuenta los ingresos y bloquea al alcanzar la capacidad."
@@ -221,35 +274,34 @@
               </div>
             </div>
 
-            <div class="aforo-schedule-note">
-              <app-icon name="alert-triangle" />
-              <span>
-                El aforo se reinicia a 0 al cerrar el horario de atención y cada
-                día. El horario se configura en el Punto de Venta (Ajustes → Horario).
-              </span>
-            </div>
-
-            <div class="aforo-config-footer">
-              <button
-                type="button"
-                class="aforo-btn ghost"
-                [disabled]="savingConfig()"
-                (click)="showConfig.set(false)"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                class="aforo-btn primary"
-                [disabled]="savingConfig()"
-                (click)="saveConfig()"
-              >
-                {{ savingConfig() ? 'Guardando…' : 'Guardar configuración' }}
-              </button>
-            </div>
+          <div class="aforo-schedule-note">
+            <app-icon name="alert-triangle" />
+            <span>
+              El aforo se reinicia a 0 al cerrar el horario de atención y cada
+              día. El horario se configura en el Punto de Venta (Ajustes → Horario).
+            </span>
           </div>
-        </app-card>
-      }
+        </div>
+
+        <div slot="footer" class="aforo-config-footer">
+          <button
+            type="button"
+            class="aforo-btn ghost"
+            [disabled]="savingConfig()"
+            (click)="showConfig.set(false)"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            class="aforo-btn primary"
+            [disabled]="savingConfig()"
+            (click)="saveConfig()"
+          >
+            {{ savingConfig() ? 'Guardando…' : 'Guardar configuración' }}
+          </button>
+        </div>
+      </app-modal>
     </div>
   }
 
@@ -267,16 +319,26 @@
           >
             Bitácora ({{ logsTotal() }})
           </h2>
-          <app-options-dropdown
-            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px] self-end"
-            [filters]="logsFilterConfigs"
-            [filterValues]="logsFilterValues"
-            [actions]="logsActions()"
-            [isLoading]="isLoading()"
-            (filterChange)="onLogsFilterChange($event)"
-            (clearAllFilters)="clearLogsFilters()"
-            (actionClick)="onHeaderAction($event)"
-          />
+          <div class="flex items-center gap-2 w-full md:w-auto md:justify-end flex-wrap">
+            <app-inputsearch
+              class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              size="sm"
+              placeholder="Buscar socio..."
+              [debounceTime]="300"
+              [ngModel]="logsSearch()"
+              (ngModelChange)="onLogsSearch($event)"
+            />
+            <app-options-dropdown
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px] self-end"
+              [filters]="logsFilterConfigs"
+              [filterValues]="logsFilterValues"
+              [actions]="logsActions()"
+              [isLoading]="isLoading()"
+              (filterChange)="onLogsFilterChange($event)"
+              (clearAllFilters)="clearLogsFilters()"
+              (actionClick)="onHeaderAction($event)"
+            />
+          </div>
         </div>
       </div>
 
@@ -337,11 +399,32 @@
       <div
         class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
       >
-        <h2
-          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
         >
-          Credenciales ({{ credsTotal() }})
-        </h2>
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+          >
+            Credenciales ({{ credsTotal() }})
+          </h2>
+          <div class="flex items-center gap-2 w-full md:w-auto md:justify-end flex-wrap">
+            <app-inputsearch
+              class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              size="sm"
+              placeholder="Buscar socio..."
+              [debounceTime]="300"
+              [ngModel]="credsSearch()"
+              (ngModelChange)="onCredsSearch($event)"
+            />
+            <app-options-dropdown
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px] self-end"
+              [filters]="credsFilterConfigs"
+              [filterValues]="credsFilterValues"
+              (filterChange)="onCredsFilterChange($event)"
+              (clearAllFilters)="clearCredsFilters()"
+            />
+          </div>
+        </div>
       </div>
 
       @if (isLoading()) {
@@ -354,16 +437,28 @@
       }
 
       @if (!isLoading() && credentials().length === 0) {
-        <app-empty-state
-          icon="key-round"
-          title="Sin credenciales"
-          description="Registra una credencial (QR, PIN o referencia externa) para que un socio pueda ingresar."
-          actionButtonText="Nueva credencial"
-          [showActionButton]="true"
-          [showRefreshButton]="true"
-          (actionClick)="newCredential()"
-          (refreshClick)="loadCredentials()"
-        />
+        @if (hasCredsFilters) {
+          <app-empty-state
+            icon="key-round"
+            title="Sin coincidencias"
+            description="Ninguna credencial coincide con los filtros o búsqueda."
+            [showActionButton]="false"
+            [showRefreshButton]="false"
+            [showClearFilters]="true"
+            (clearFiltersClick)="clearCredsFilters()"
+          />
+        } @else {
+          <app-empty-state
+            icon="key-round"
+            title="Sin credenciales"
+            description="Registra una credencial (QR, PIN o referencia externa) para que un socio pueda ingresar."
+            actionButtonText="Nueva credencial"
+            [showActionButton]="true"
+            [showRefreshButton]="true"
+            (actionClick)="newCredential()"
+            (refreshClick)="loadCredentials()"
+          />
+        }
       }
 
       @if (!isLoading() && credentials().length > 0) {
@@ -395,6 +490,38 @@
   <!-- ══════════════════ Configuración de acceso (dispositivo huella) ══════════════════ -->
   @if (activeTab() === 'configuracion') {
     <app-card title="Configuración de acceso" subtitle="Dispositivo de huella">
+      <div class="access-kiosk-toggle">
+        <app-setting-toggle
+          label="Escáner QR siempre activo (kiosko)"
+          description="Al abrir la pestaña Aforo, la cámara se mantiene encendida en bucle para escanear credenciales una tras otra sin volver a pulsar. Ideal para una tablet fija en recepción."
+          [ngModel]="cfgQrKioskMode()"
+          (changed)="cfgQrKioskMode.set($event)"
+        />
+      </div>
+
+      <div class="access-kiosk-toggle">
+        <label class="aforo-field-label">Modo del escáner por defecto</label>
+        <p class="aforo-field-hint">Cómo se abre el escáner QR: a pantalla completa o como ventana flotante que se puede mover, escalar y minimizar. Cada dispositivo recuerda su última posición.</p>
+        <div class="aforo-interval">
+          <button
+            type="button"
+            class="aforo-chip"
+            [class.active]="cfgQrScannerDefaultMode() === 'fullscreen'"
+            (click)="cfgQrScannerDefaultMode.set('fullscreen')"
+          >
+            Pantalla completa
+          </button>
+          <button
+            type="button"
+            class="aforo-chip"
+            [class.active]="cfgQrScannerDefaultMode() === 'floating'"
+            (click)="cfgQrScannerDefaultMode.set('floating')"
+          >
+            Ventana flotante
+          </button>
+        </div>
+      </div>
+
       <div class="form-grid">
         <label class="aforo-field-label">Tipo de lector</label>
         <div class="aforo-interval">

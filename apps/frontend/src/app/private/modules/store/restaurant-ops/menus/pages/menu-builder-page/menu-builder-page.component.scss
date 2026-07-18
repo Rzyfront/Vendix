@@ -244,6 +244,19 @@
   color: #b45309;
 }
 
+/* F1 — Ítem agotado: opacidad reducida + texto gris para reflejar el estado
+ * "visible pero NO comprable" del plato en la carta. Reusa el mismo lenguaje
+ * visual del showcase `.dish-card--off` (opacidad) sin depender de él. */
+.mb-item--off {
+  opacity: 0.62;
+
+  .mb-item__name {
+    color: var(--color-text-secondary);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+}
+
 .mb-item-empty {
   font-size: 0.75rem;
   font-style: italic;

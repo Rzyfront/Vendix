@@ -59,8 +59,21 @@ export interface CreateGymMembershipDto {
   notes?: string;
 }
 
-/** Only editable metadata; status changes go through the transition endpoints. */
+/**
+ * Editable membership fields (admin edit).
+ *
+ * The backend PATCH `/store/memberships/:id` accepts a partial payload: any
+ * subset of these fields. `period_start` / `period_end` accept ISO 8601 or a
+ * bare `YYYY-MM-DD` (the backend widens it to a full UTC day). It validates
+ * `period_start <= period_end` (400 otherwise) and does NOT recalculate price
+ * nor emit accounting entries. `status` transitions here are a direct set
+ * (distinct from the guarded suspend/freeze/cancel/reactivate endpoints).
+ */
 export interface UpdateGymMembershipDto {
+  plan_id?: number;
+  period_start?: string;
+  period_end?: string;
+  status?: GymMembershipStatus;
   auto_renew?: boolean;
   notes?: string;
 }
@@ -71,6 +84,7 @@ export interface GymMembershipQuery {
   status?: GymMembershipStatus;
   customer_id?: number;
   plan_id?: number;
+  search?: string;
 }
 
 export interface RenewMembershipDto {

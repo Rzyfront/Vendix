@@ -9,6 +9,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from './services/planillas-rutas.service';
 import { PlanillasListComponent } from './components/planillas-list/planillas-list.component';
+import { PlanillaMonitorComponent } from './components/planilla-monitor/planilla-monitor.component';
 import { PlanillaStatsComponent } from './components/planilla-stats/planilla-stats.component';
 import { PlanillaWizardComponent } from './components/planilla-wizard/planilla-wizard.component';
 import { ShippingMethodsService } from '../settings/shipping/services/shipping-methods.service';
@@ -20,32 +21,70 @@ import { DispatchRoute, DispatchRouteStats } from './interfaces/planilla.interfa
   standalone: true,
   imports: [
     PlanillasListComponent,
+    PlanillaMonitorComponent,
     PlanillaStatsComponent,
     PlanillaWizardComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- Stats: Sticky on mobile, static on desktop -->
+      <!-- Stats: Sticky on mobile, static on desktop. Only on the Lista tab —
+           the Monitor tab has its own margin table and does not reuse these KPIs. -->
+      @if (activeTab() === 'lista') {
+        <div
+          class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        >
+          <app-planilla-stats
+            [stats]="stats()"
+            [loading]="statsLoading()"
+          ></app-planilla-stats>
+        </div>
+      }
+
+      <!-- Tab switcher: Lista (default) | Monitor -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="flex items-center gap-2 px-2 pb-2 pt-1 md:px-0 md:pt-0 md:mb-3"
+        role="tablist"
+        aria-label="Vistas de planillas"
       >
-        <app-planilla-stats
-          [stats]="stats()"
-          [loading]="statsLoading()"
-        ></app-planilla-stats>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'lista'"
+          [class]="tabClass('lista')"
+          (click)="setTab('lista')"
+        >
+          Lista
+        </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'monitor'"
+          [class]="tabClass('monitor')"
+          (click)="setTab('monitor')"
+        >
+          Monitor
+        </button>
       </div>
 
-      <!-- List Component -->
-      <app-planillas-list
-        (viewDetail)="onViewDetail($event)"
-        (create)="openCreateModal()"
-        (refresh)="refresh()"
-      ></app-planillas-list>
+      <!-- Active tab content -->
+      @if (activeTab() === 'lista') {
+        <app-planillas-list
+          (viewDetail)="onViewDetail($event)"
+          (create)="openCreateModal()"
+          (refresh)="refresh()"
+        ></app-planillas-list>
+      } @else {
+        <app-planilla-monitor></app-planilla-monitor>
+      }
     </div>
 
     @if (showWizard()) {
       <app-planilla-wizard
         [prefillNote]="prefillNote()"
+        [prefillShippingMethodId]="prefillShippingMethodId()"
+        [prefillVehicleId]="prefillVehicleId()"
+        [prefillDriverUserId]="prefillDriverUserId()"
+        [prefillCarrierSupplierId]="prefillCarrierSupplierId()"
         (close)="closeWizard()"
         (created)="onCreated($event)"
       ></app-planilla-wizard>
@@ -62,11 +101,21 @@ export class PlanillasRutasComponent {
 
   readonly planillasList = viewChild<PlanillasListComponent>(PlanillasListComponent);
 
+  /** Active sub-view: 'lista' (default) shows the routes list + stats + wizard;
+   * 'monitor' shows the shipping mini-P&L table. */
+  readonly activeTab = signal<'lista' | 'monitor'>('lista');
+
   readonly stats = signal<DispatchRouteStats | null>(null);
   readonly statsLoading = signal(false);
   readonly showWizard = signal(false);
   // Prefill context passed to the wizard when arriving from a shipping method
   readonly prefillNote = signal<string | null>(null);
+  // Plan Despacho Economía — FASE 3 paso 12: prefill estructurado (no
+  // cosmético) desde la política efectiva del método.
+  readonly prefillShippingMethodId = signal<number | null>(null);
+  readonly prefillVehicleId = signal<number | null>(null);
+  readonly prefillDriverUserId = signal<number | null>(null);
+  readonly prefillCarrierSupplierId = signal<number | null>(null);
 
   ngOnInit() {
     this.refreshStats();
@@ -76,8 +125,9 @@ export class PlanillasRutasComponent {
   /**
    * Atajo método de envío → planilla. Si llega `prefill=1` con
    * `shipping_method_id`, abre el wizard de creación automáticamente y precarga
-   * el contexto del método (nota). El flujo normal (sin queryParams) no se ve
-   * afectado: el wizard se sigue abriendo manualmente con "Crear planilla".
+   * el contexto del método (nota + vehículo/ejecutor derivados de la política).
+   * El flujo normal (sin queryParams) no se ve afectado: el wizard se sigue
+   * abriendo manualmente con "Crear planilla".
    */
   private handlePrefillFromQueryParams(): void {
     const params = this.activatedRoute.snapshot.queryParamMap;
@@ -91,21 +141,47 @@ export class PlanillasRutasComponent {
 
     if (!methodId || Number.isNaN(methodId)) return;
 
+    // Plan Despacho Economía — FASE 3 paso 12.
+    // Resolvemos la política efectiva (método + defaults de tienda) y
+    // preseleccionamos el ejecutor por defecto en el wizard.
     this.shippingService
-      .getShippingMethod(methodId)
+      .getEffectivePolicy(methodId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (method) => {
+        next: (policy) => {
+          this.prefillShippingMethodId.set(policy.method_id);
+          if (policy.default_vehicle_id) {
+            this.prefillVehicleId.set(policy.default_vehicle_id);
+          }
+          if (policy.default_driver_user_id) {
+            this.prefillDriverUserId.set(policy.default_driver_user_id);
+          }
+          if (policy.default_carrier_supplier_id) {
+            this.prefillCarrierSupplierId.set(
+              policy.default_carrier_supplier_id,
+            );
+          }
           this.prefillNote.set(
-            `Despacho del método de envío "${method.name}" (#${method.id}).`,
+            `Despacho del método de envío #${policy.method_id} (tipo ${policy.method_type}).`,
           );
-          // TODO(atajo): cuando el DTO de ruta acepte un vínculo directo a
-          // shipping_method (o derive vehicle_id por defecto del método),
-          // preseleccionar aquí vehículo/remisiones filtradas por el método.
         },
-        // Si falla la carga del método, el wizard ya está abierto en modo manual.
+        // Si falla, el wizard ya está abierto en modo manual.
         error: () => {},
       });
+  }
+
+  /** Switches the active sub-view between the routes list and the P&L monitor. */
+  setTab(tab: 'lista' | 'monitor'): void {
+    this.activeTab.set(tab);
+  }
+
+  /** Tailwind classes for a tab pill, derived reactively from `activeTab()`. */
+  tabClass(tab: 'lista' | 'monitor'): string {
+    const base =
+      'px-4 py-1.5 rounded-full text-sm font-medium transition-colors';
+    return this.activeTab() === tab
+      ? `${base} bg-primary text-white`
+      : `${base} bg-background text-text-secondary border border-border hover:text-text-primary`;
   }
 
   refresh() {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -13,6 +13,9 @@ import {
   EmptyState,
   ConfirmDialog,
   Badge,
+  type FilterConfig,
+  type FilterValues,
+  type DropdownAction,
 } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
@@ -84,6 +87,75 @@ export default function CategoriesListScreen() {
     setPage(1);
   }
 
+  // Filters — `<app-options-dropdown>` parity API (FilterConfig + onFilterChange).
+  const filterValues = useMemo<FilterValues>(
+    () => ({
+      state: stateFilter ?? null,
+      featured: featuredFilter === undefined ? null : featuredFilter ? 'true' : 'false',
+    }),
+    [stateFilter, featuredFilter],
+  );
+
+  const filterConfigs = useMemo<FilterConfig[]>(
+    () => [
+      {
+        key: 'state',
+        label: 'Estado',
+        type: 'select',
+        options: [
+          { value: 'all', label: 'Todas' },
+          { value: 'active', label: 'Activas' },
+          { value: 'inactive', label: 'Inactivas' },
+        ],
+      },
+      {
+        key: 'featured',
+        label: 'Destacadas',
+        type: 'select',
+        options: [
+          { value: 'all', label: 'Todas' },
+          { value: 'true', label: 'Destacadas' },
+          { value: 'false', label: 'No destacadas' },
+        ],
+      },
+    ],
+    [],
+  );
+
+  const handleFilterChange = useCallback((values: FilterValues) => {
+    const s = values.state;
+    setStateFilter(!s || s === 'all' ? undefined : (s as CategoryState));
+    const f = values.featured;
+    setFeaturedFilter(!f || f === 'all' ? undefined : f === 'true');
+    setPage(1);
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setStateFilter(undefined);
+    setFeaturedFilter(undefined);
+    setPage(1);
+  }, []);
+
+  const dropdownActions = useMemo<DropdownAction[]>(
+    () =>
+      canCreate
+        ? [
+            {
+              label: 'Nueva Categoría',
+              icon: 'plus',
+              action: 'new-category',
+            },
+          ]
+        : [],
+    [canCreate],
+  );
+
+  const handleActionClick = useCallback((key: string) => {
+    if (key === 'new-category') {
+      router.push('/(store-admin)/products/categories/create');
+    }
+  }, [router]);
+
   const filtersActive = (stateFilter ? 1 : 0) + (featuredFilter !== undefined ? 1 : 0);
 
   return (
@@ -113,43 +185,12 @@ export default function CategoriesListScreen() {
             />
           </View>
           <OptionsDropdown
-            filters={[
-              {
-                label: 'Estado',
-                options: [
-                  { label: 'Todas', value: 'all', active: (stateFilter ?? 'all') === 'all' },
-                  { label: 'Activas', value: 'active', active: stateFilter === 'active' },
-                  { label: 'Inactivas', value: 'inactive', active: stateFilter === 'inactive' },
-                ],
-                onSelect: (value) => {
-                  setStateFilter(
-                    !value || value === 'all' ? undefined : (value as CategoryState),
-                  );
-                  setPage(1);
-                },
-              },
-              {
-                label: 'Destacadas',
-                options: [
-                  { label: 'Todas', value: 'all', active: featuredFilter === undefined },
-                  { label: 'Destacadas', value: 'true', active: featuredFilter === true },
-                  { label: 'No destacadas', value: 'false', active: featuredFilter === false },
-                ],
-                onSelect: (value) => {
-                  setFeaturedFilter(
-                    !value || value === 'all' ? undefined : value === 'true',
-                  );
-                  setPage(1);
-                },
-              },
-            ]}
-            actions={canCreate ? [
-              {
-                label: 'Nueva Categoría',
-                icon: 'plus',
-                onPress: () => router.push('/(store-admin)/products/categories/create'),
-              },
-            ] : []}
+            filters={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={handleFilterChange}
+            onClearAllFilters={handleClearAllFilters}
+            actions={dropdownActions}
+            onActionClick={handleActionClick}
           />
         </View>
       </View>

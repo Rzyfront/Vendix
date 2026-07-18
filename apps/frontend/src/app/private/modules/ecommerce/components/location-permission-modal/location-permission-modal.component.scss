@@ -103,17 +103,18 @@
 }
 
 /* ---------- FOOTER ---------- */
+/* Stacked full-width buttons: the shared app-button forces `white-space: nowrap`,
+   so side-by-side buttons in a small modal clipped their labels. Stacking gives
+   each label the full modal width and it never truncates. Primary action first. */
 .lp-footer {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
-  justify-content: flex-end;
   width: 100%;
-  flex-wrap: wrap;
 }
 
 .lp-footer app-button {
-  flex: 1;
-  min-width: 140px;
+  width: 100%;
 }
 
 /* ---------- ANIMATIONS ---------- */
@@ -137,12 +138,6 @@
   50% {
     transform: scale(1.15);
     opacity: 0;
-  }
-}
-
-@media (max-width: 480px) {
-  .lp-footer app-button {
-    flex: 1 1 100%;
   }
 }
 

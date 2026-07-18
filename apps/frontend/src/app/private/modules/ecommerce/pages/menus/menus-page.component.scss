@@ -77,7 +77,8 @@
   &__title {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
     padding-bottom: 0.75rem;
     border-bottom: 2px solid #f0f0f0;
     margin-bottom: 1.5rem;
@@ -86,6 +87,12 @@
       font-size: 1.5rem;
       font-weight: 700;
       margin: 0;
+    }
+
+    /* Inline notice for off-schedule menus — wraps cleanly under the title
+       on narrow screens. */
+    app-next-available-notice {
+      flex: 0 1 auto;
     }
   }
 }
@@ -96,7 +103,8 @@
   &__head {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
     margin-bottom: 1rem;
 
     h3 {
@@ -104,6 +112,10 @@
       font-weight: 600;
       margin: 0;
       color: #374151;
+    }
+
+    app-next-available-notice {
+      flex: 0 1 auto;
     }
   }
 }
@@ -125,10 +137,25 @@
   }
 }
 
+/* Espejo del grid canónico del ecommerce (.products-grid del home): mobile-first
+   con 2 columnas fijas en móvil, escalando en desktop, para que las cards de
+   carta se comporten igual que el resto de cards. */
 .dishes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 0.75rem;
+
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.5rem;
+  }
+  @media (min-width: 1100px) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2rem 1.75rem;
+  }
+  @media (min-width: 1320px) {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 /* --- dish-card: espejo visual de .product-card --- */
@@ -166,6 +193,17 @@
 
   &--off {
     opacity: 0.7;
+  }
+
+  /* F3 — Plato agotado: anula cursor y hover transform para indicar "no
+     comprable". Los botones internos (Like/Compartir) conservan su pointer
+     porque `.card-actions` restablece su propio cursor. routerLink ya es null. */
+  &--sold-out {
+    cursor: default;
+
+    &:hover {
+      transform: none;
+    }
   }
 }
 
@@ -392,5 +430,19 @@
     gap: 0.3rem;
     opacity: 1;
     transform: none;
+  }
+
+  /* Banda de título compacta en móvil: 40px exactos (box-sizing border-box de
+     Tailwind ya incluye borde+padding). Se recorta el padding-bottom y se baja
+     la tipografía para que el h2 quepa centrado dentro de los 40px. */
+  .menu-block__title {
+    height: 40px;
+    padding-bottom: 0;
+    margin-bottom: 1rem;
+
+    h2 {
+      font-size: 1.2rem;
+      line-height: 1.2;
+    }
   }
 }

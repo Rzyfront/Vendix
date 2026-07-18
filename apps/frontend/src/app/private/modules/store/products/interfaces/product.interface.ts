@@ -379,6 +379,7 @@ export interface UpdateProductDto {
   stock_quantity?: number;
   track_inventory?: boolean;
   requires_serial_numbers?: boolean;
+  is_sellable?: boolean;
   available_for_ecommerce?: boolean;
   is_featured?: boolean;
   allow_pos_price_override?: boolean;

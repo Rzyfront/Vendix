@@ -30,7 +30,13 @@ export class InviteUserDto {
   email: string;
 
   @ApiPropertyOptional({
-    enum: ['ORG_ADMIN', 'STORE_ADMIN', 'STORE_ECOMMERCE', 'VENDIX_LANDING'],
+    enum: [
+      'ORG_ADMIN',
+      'STORE_ADMIN',
+      'STORE_ECOMMERCE',
+      'STORE_DELIVERY',
+      'VENDIX_LANDING',
+    ],
     description: 'App para la configuración de usuario',
   })
   @IsOptional()

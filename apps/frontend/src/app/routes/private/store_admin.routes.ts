@@ -220,10 +220,10 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
-            path: 'purchase-orders',
+            path: 'purchase-orders/:id',
             loadComponent: () =>
-              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
-                (c) => c.PurchaseOrdersComponent,
+              import('../../private/modules/store/orders/purchase-orders/pages/detail/purchase-order-detail.component').then(
+                (c) => c.StorePurchaseOrderDetailComponent,
               ),
           },
           {

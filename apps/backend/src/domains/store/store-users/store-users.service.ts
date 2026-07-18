@@ -34,6 +34,7 @@ export class StoreUsersService {
       limit = 10,
       search,
       role,
+      exclude_role,
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query;
@@ -64,6 +65,23 @@ export class StoreUsersService {
           some: {
             roles: {
               name: role,
+            },
+          },
+        },
+      };
+    }
+
+    // Exclude store users carrying `exclude_role` (e.g. 'customer'). Merges
+    // with any existing `some` filter so `role` + `exclude_role` compose
+    // (Prisma ANDs `some` and `none` on the same relation).
+    if (exclude_role) {
+      where.user = {
+        ...where.user,
+        user_roles: {
+          ...(where.user?.user_roles ?? {}),
+          none: {
+            roles: {
+              name: exclude_role,
             },
           },
         },

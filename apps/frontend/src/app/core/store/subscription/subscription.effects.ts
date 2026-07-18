@@ -616,6 +616,16 @@ export class SubscriptionEffects {
           return EMPTY;
         }
         return new Observable<Action>((observer) => {
+          // Repartos: la app carrier (STORE_DELIVERY) está confinada a
+          // /store/carrier/* por el DomainScopeGuard; /store/notifications/stream
+          // le responde 403. No abrimos el SSE de subscription-updated en ese
+          // shell (el carrier no consume el banner de suscripción).
+          if (
+            localStorage.getItem('vendix_user_environment') === 'STORE_DELIVERY'
+          ) {
+            return;
+          }
+
           const authState = localStorage.getItem('vendix_auth_state');
           if (!authState) {
             return;

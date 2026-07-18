@@ -33,6 +33,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 import {
   GymMembership,
@@ -42,6 +43,11 @@ import {
 } from '../../interfaces';
 import { MembershipsService } from '../../services';
 import { RenewMembershipModalComponent } from '../../components/renew-membership-modal/renew-membership-modal.component';
+import { EditMembershipModalComponent } from '../../components/edit-membership-modal/edit-membership-modal.component';
+import {
+  calendarDaysBetween,
+  membershipProgress,
+} from '../../utils/membership-progress.util';
 
 import { MembershipAccessService } from '../../../access/services/membership-access.service';
 import {
@@ -59,8 +65,6 @@ interface MetaFormShape {
   notes: FormControl<string>;
 }
 
-const MS_PER_DAY = 86_400_000;
-
 @Component({
   selector: 'app-membership-detail-page',
   standalone: true,
@@ -77,6 +81,7 @@ const MS_PER_DAY = 86_400_000;
     TextareaComponent,
     CurrencyPipe,
     RenewMembershipModalComponent,
+    EditMembershipModalComponent,
   ],
   templateUrl: './membership-detail-page.component.html',
   styleUrls: ['./membership-detail-page.component.css'],
@@ -90,12 +95,25 @@ export class MembershipDetailPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly membership = signal<GymMembership | null>(null);
   readonly isLoading = signal(false);
   readonly isSavingMeta = signal(false);
   readonly actionInProgress = signal(false);
   readonly showRenewModal = signal(false);
+  readonly showEditModal = signal(false);
+
+  /**
+   * UI gate for the admin "Editar membresía" action. The backend
+   * (`store:memberships:update`) remains the source of truth; this only hides
+   * the button for users without the permission. Reads the reactive
+   * permissions signal from the auth facade (frontend permissions come from
+   * `response.data.permissions`, not the JWT claim).
+   */
+  readonly canEditMembership = computed(() =>
+    this.authFacade.hasPermission('store:memberships:update'),
+  );
 
   // ── Access enrichment (credentials + recent access logs) ──────────
   readonly credentials = signal<GymAccessCredential[]>([]);
@@ -159,7 +177,7 @@ export class MembershipDetailPageComponent implements OnInit {
   readonly daysRemaining = computed<number | null>(() => {
     const end = this.membership()?.period_end;
     if (!end) return null;
-    return this.calendarDaysBetween(new Date(), new Date(end));
+    return calendarDaysBetween(new Date(), new Date(end));
   });
 
   readonly daysRemainingDisplay = computed<string>(() => {
@@ -177,25 +195,17 @@ export class MembershipDetailPageComponent implements OnInit {
     return 'Días para el vencimiento';
   });
 
-  readonly vigencia = computed(() => {
-    const m = this.membership();
-    const start = m?.period_start ? new Date(m.period_start) : null;
-    const end = m?.period_end ? new Date(m.period_end) : null;
-    if (!start || !end) {
-      return { totalDays: 0, elapsedDays: 0, percent: 0, hasRange: false };
-    }
-    const totalDays = Math.max(this.calendarDaysBetween(start, end), 0);
-    const rawElapsed = this.calendarDaysBetween(start, new Date());
-    const elapsedDays = Math.min(Math.max(rawElapsed, 0), totalDays);
-    const percent =
-      totalDays > 0 ? Math.min(Math.round((elapsedDays / totalDays) * 100), 100) : 0;
-    return { totalDays, elapsedDays, percent, hasRange: true };
-  });
+  readonly vigencia = computed(() =>
+    membershipProgress(
+      this.membership()?.period_start,
+      this.membership()?.period_end,
+    ),
+  );
 
   readonly membershipAgeDays = computed<number>(() => {
     const created = this.membership()?.created_at;
     if (!created) return 0;
-    return Math.max(this.calendarDaysBetween(new Date(created), new Date()), 0);
+    return Math.max(calendarDaysBetween(new Date(created), new Date()), 0);
   });
 
   // ── Transition guards (unchanged) ─────────────────────────────────
@@ -216,15 +226,26 @@ export class MembershipDetailPageComponent implements OnInit {
       this.canCancel(),
   );
 
-  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    {
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const actions: StickyHeaderActionButton[] = [];
+    if (this.canEditMembership()) {
+      actions.push({
+        id: 'edit',
+        label: 'Editar membresía',
+        icon: 'edit',
+        variant: 'outline',
+        disabled: !this.membership() || this.actionInProgress(),
+      });
+    }
+    actions.push({
       id: 'renew',
       label: 'Renovar',
       icon: 'refresh-cw',
       variant: 'primary',
       disabled: !this.membership() || this.actionInProgress(),
-    },
-  ]);
+    });
+    return actions;
+  });
 
   // ── Access log timeline (most recent first) ───────────────────────
   readonly accessTimelineSteps = computed<TimelineStep[]>(() =>
@@ -265,12 +286,6 @@ export class MembershipDetailPageComponent implements OnInit {
   private statusIn(...statuses: GymMembershipStatus[]): boolean {
     const s = this.membership()?.status;
     return s != null && statuses.includes(s);
-  }
-
-  private calendarDaysBetween(from: Date, to: Date): number {
-    const a = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
-    const b = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
-    return Math.round((b - a) / MS_PER_DAY);
   }
 
   private loadMembership(id: number): void {
@@ -391,6 +406,7 @@ export class MembershipDetailPageComponent implements OnInit {
 
   onHeaderAction(actionId: string): void {
     if (actionId === 'renew') this.showRenewModal.set(true);
+    else if (actionId === 'edit') this.showEditModal.set(true);
   }
 
   goToProfile(): void {
@@ -446,6 +462,12 @@ export class MembershipDetailPageComponent implements OnInit {
   onRenewed(updated: GymMembership): void {
     this.applyMembership(updated);
     // Refresh access data after a renewal (status may have changed).
+    this.loadAccessData(updated.customer_id);
+  }
+
+  onEdited(updated: GymMembership): void {
+    this.applyMembership(updated);
+    // Plan/status/vigencia may have changed — refresh access enrichment too.
     this.loadAccessData(updated.customer_id);
   }
 }

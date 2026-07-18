@@ -19,8 +19,29 @@ export interface StoreSettings {
   dispatch?: DispatchSettings;
   restaurant?: RestaurantSettings;
   membership?: MembershipSettings;
+  carrier?: CarrierSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
+}
+
+/**
+ * Carrier (Vendix Repartos) store settings. Mirrors backend
+ * `store_settings.settings.carrier`. Holds the store-wide default delivery
+ * tariff applied to carriers without a per-user tariff of their own.
+ */
+export type CarrierTariffMode = 'per_stop' | 'per_route';
+
+export interface CarrierDefaultTariff {
+  /** `per_stop`: paid per delivered stop. `per_route`: flat per closed route. */
+  mode: CarrierTariffMode;
+  /** Decimal string (never a float), e.g. "1500.00". */
+  amount: string;
+  /** Fixed to 'COP' by the backend in v1. */
+  currency?: string;
+}
+
+export interface CarrierSettings {
+  default_tariff: CarrierDefaultTariff;
 }
 
 export interface AppSettings {
@@ -168,6 +189,20 @@ export interface MembershipSettings {
    * Default: `{ reader_type: 'id_wrapper' }`.
    */
   fingerprint_device?: FingerprintDeviceConfig;
+  /**
+   * When `true`, the QR scanner runs in kiosk mode: it auto-opens on the Aforo
+   * tab and stays on in a continuous decode loop (for a fixed reception tablet).
+   * When `false` (default), the scanner is opened manually and closes after each
+   * scan. Mirrors backend `store_settings.settings.membership.qr_kiosk_mode`.
+   */
+  qr_kiosk_mode?: boolean;
+  /**
+   * Default display mode for the Aforo QR scanner. `fullscreen` (default) or
+   * `floating` (movable window/bubble). Mirrors backend
+   * `store_settings.settings.membership.qr_scanner_default_mode`. Per-device
+   * position/size/mode overrides live in localStorage.
+   */
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
 }
 
 /**

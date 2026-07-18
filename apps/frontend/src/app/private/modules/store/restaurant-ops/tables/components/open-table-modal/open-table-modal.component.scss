@@ -57,4 +57,17 @@
       color: var(--color-text-primary, #111827);
     }
   }
+
+  .customer-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--color-text-secondary, #6b7280);
+
+    &--error {
+      color: var(--color-error, #ef4444);
+    }
+  }
 }

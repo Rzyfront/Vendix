@@ -6,6 +6,7 @@ import { DispatchNotePdfService } from './pdf/dispatch-note-pdf.service';
 import { DispatchNumberGenerator } from './utils/dispatch-number-generator';
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { DispatchNoteEventsListener } from './listeners/dispatch-note-events.listener';
+import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '../../../common/services/s3.module';
@@ -16,6 +17,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 // the dependency and is harmless.)
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
+import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.module';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.m
     InventoryModule,
     InventorySerialNumbersModule,
     OrderStockCommitModule,
+    PurchaseOrdersModule,
   ],
   controllers: [DispatchNotesController],
   providers: [
@@ -34,6 +37,9 @@ import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.m
     DispatchNumberGenerator,
     RouteNumberGenerator,
     DispatchNoteEventsListener,
+    // Bug C — recomputes orders.dispatch_fulfillment on confirm/deliver/void
+    // so a fully-remitida order stops showing as despachable.
+    DispatchFulfillmentListener,
   ],
   exports: [DispatchNotesService],
 })

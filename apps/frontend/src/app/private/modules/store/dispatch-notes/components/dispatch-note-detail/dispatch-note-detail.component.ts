@@ -29,6 +29,7 @@ const STATUS_LABELS: Record<DispatchNoteStatus, string> = {
   draft: 'Borrador',
   confirmed: 'Confirmada',
   delivered: 'Entregada',
+  received: 'Recibida',
   invoiced: 'Facturada',
   voided: 'Anulada',
 };
@@ -37,6 +38,7 @@ const BADGE_COLOR_MAP: Record<DispatchNoteStatus, StickyHeaderBadgeColor> = {
   draft: 'gray',
   confirmed: 'blue',
   delivered: 'green',
+  received: 'blue',
   invoiced: 'blue',
   voided: 'red',
 };

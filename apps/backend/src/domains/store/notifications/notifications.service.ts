@@ -130,13 +130,44 @@ export class NotificationsService {
     }
   }
 
-  async findAll(query_dto: NotificationQueryDto) {
+  /**
+   * Step 3 (QR-mesa) — bell filter. The bell shows every notification
+   * that is EITHER a store-wide broadcast (no `data.target_user_id` set
+   * or the `data` column itself is SQL NULL) OR directed at the caller
+   * (`data.target_user_id === user_id`). Notifications targeted at
+   * another user are filtered out so a mesero who is NOT assigned to a
+   * table does not see the call-waiter bell.
+   *
+   * Filtering is done in SQL via the Prisma JSON-path `equals` operator
+   * (`data->>'target_user_id' IS NULL` for the broadcast branch and
+   * `data->>'target_user_id' = $userId` for the targeted branch) — no
+   * in-memory filtering, no pagination regression.
+   */
+  async findAll(user_id: number, query_dto: NotificationQueryDto) {
     const { page = 1, limit = 20, type, is_read } = query_dto;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
-    if (type) where.type = type;
-    if (is_read !== undefined) where.is_read = is_read;
+    const target_filter = {
+      OR: [
+        // Broadcast — `data` column is SQL NULL (createAndBroadcast passed
+        // no payload).
+        { data: null },
+        // Broadcast — path `target_user_id` is absent OR explicitly JSON null.
+        { data: { path: ['target_user_id'], equals: null } },
+        // Targeted at the calling user.
+        { data: { path: ['target_user_id'], equals: user_id } },
+      ],
+    };
+
+    const where: any = {
+      AND: [
+        {
+          ...(type && { type }),
+          ...(is_read !== undefined && { is_read }),
+        },
+        target_filter,
+      ],
+    };
 
     const [data, total] = await Promise.all([
       this.notificationsModel.findMany({
@@ -149,7 +180,10 @@ export class NotificationsService {
     ]);
 
     const unread_count = await this.notificationsModel.count({
-      where: { is_read: false },
+      where: {
+        is_read: false,
+        AND: [target_filter],
+      },
     });
 
     return {
@@ -164,9 +198,25 @@ export class NotificationsService {
     };
   }
 
-  async getUnreadCount() {
+  /**
+   * Step 3 (QR-mesa) — unread count applies the same per-user bell
+   * filter as `findAll` so the bell badge doesn't inflate with
+   * notifications targeted at other users.
+   */
+  async getUnreadCount(user_id: number) {
     const count = await this.notificationsModel.count({
-      where: { is_read: false },
+      where: {
+        is_read: false,
+        AND: [
+          {
+            OR: [
+              { data: null },
+              { data: { path: ['target_user_id'], equals: null } },
+              { data: { path: ['target_user_id'], equals: user_id } },
+            ],
+          },
+        ],
+      },
     });
     return { count };
   }

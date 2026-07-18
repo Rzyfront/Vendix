@@ -44,6 +44,14 @@ export type {
   StickyHeaderTab,
 } from './sticky-header/sticky-header';
 export { OptionsDropdown } from './options-dropdown/options-dropdown';
+export type {
+  FilterType,
+  FilterOption,
+  FilterConfig,
+  DropdownActionVariant,
+  DropdownAction,
+  FilterValues,
+} from './options-dropdown/options-dropdown';
 export { Pagination } from './pagination/pagination';
 export type { PaginationProps } from './pagination/pagination';
 export { ImageCarousel } from './image-carousel/image-carousel';

@@ -23,6 +23,7 @@ import {
 } from '../../../../../shared/components/badge/badge.component';
 import { IconName } from '../../../../../shared/components/icon/icons.registry';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { GuestOrderPrintService } from '../../services/guest-order-print.service';
 
 // ============================================================================
 // PAYLOAD CONTRACT — enriched guest order summary endpoint
@@ -399,40 +400,18 @@ interface GuestOrderSummary {
             </div>
           </section>
 
-          <!-- FACTURA ELECTRÓNICA -->
-          @if (invoicingEnabled()) {
-            <section class="order-section invoice-panel">
-              <div class="section-header">
-                <app-icon name="file-text" [size]="18" />
-                <h2>Factura electrónica</h2>
-              </div>
-              @if (data.order.invoice) {
-                <p class="invoice-line">
-                  Factura {{ data.order.invoice.invoice_number }}:
-                  <strong>{{ data.order.invoice.status }}</strong>
-                </p>
-              } @else {
-                <p class="invoice-line muted">
-                  Si la tienda tiene facturación configurada, la factura será
-                  procesada según su flujo actual.
-                </p>
-              }
-              <a class="invoice-link" [routerLink]="['/factura', data.token]"
-                >Agregar o actualizar datos de facturación</a
-              >
-            </section>
-          }
-
           <!-- ACTIONS -->
           <div class="actions no-print">
             <app-button variant="outline" (clicked)="print()">
               <app-icon name="printer" [size]="16" slot="icon" />
               Imprimir
             </app-button>
-            <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
-              <app-icon name="message-circle" [size]="16" slot="icon" />
-              Enviar por WhatsApp
-            </app-button>
+            @if (whatsappEnabled()) {
+              <app-button variant="primary" (clicked)="sendToWhatsApp(data)">
+                <app-icon name="message-circle" [size]="16" slot="icon" />
+                Enviar por WhatsApp
+              </app-button>
+            }
           </div>
         </div>
       }
@@ -834,30 +813,6 @@ interface GuestOrderSummary {
         color: var(--color-primary);
       }
 
-      /* ---- Invoice ---- */
-      .invoice-panel {
-        padding: 1.25rem;
-        border-radius: var(--radius-md);
-        background: var(--color-primary-light);
-      }
-
-      .invoice-line {
-        margin: 0 0 0.5rem;
-        font-size: var(--fs-sm);
-        color: var(--color-text-primary);
-      }
-
-      .invoice-line.muted {
-        color: var(--color-text-secondary);
-      }
-
-      .invoice-link {
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--color-primary);
-        text-decoration: underline;
-      }
-
       /* ---- Actions ---- */
       .actions {
         display: flex;
@@ -924,11 +879,11 @@ export class GuestOrderSummaryComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
+  private readonly voucherPrint = inject(GuestOrderPrintService);
 
   readonly loading = signal(true);
   readonly error = signal(false);
   readonly summary = signal<GuestOrderSummary | null>(null);
-  readonly invoicingEnabled = signal(false);
   readonly justPurchased = signal(false);
 
   // Signal de moneda: forzamos change detection en el card (data-currency)
@@ -961,18 +916,17 @@ export class GuestOrderSummaryComponent implements OnInit {
           this.loading.set(false);
         },
       });
-
-    this.checkoutService
-      .getInvoicingEligibility()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => this.invoicingEnabled.set(result.invoicing_enabled),
-        error: () => this.invoicingEnabled.set(false),
-      });
   }
 
   print(): void {
-    window.print();
+    const summary = this.summary();
+    if (!summary) return;
+    this.voucherPrint.printVoucher(summary);
+  }
+
+  whatsappEnabled(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
   }
 
   sendToWhatsApp(data: GuestOrderSummary): void {
@@ -985,16 +939,10 @@ export class GuestOrderSummaryComponent implements OnInit {
       return;
     }
 
-    const fmt = (value: number) =>
-      this.currencyService.format(Number(value || 0));
-    const items = data.order.items
-      .map(
-        (item: GuestOrderItem) =>
-          `- ${item.product_name} x${item.quantity}: ${fmt(item.total_price)}`,
-      )
-      .join('\n');
+    const storeName =
+      config?.store_name || data.store?.name || 'la tienda';
     const message = encodeURIComponent(
-      `Hola, quiero compartir la orden ${data.order.order_number}\n\n${items}\n\nTotal: ${fmt(data.order.grand_total)}`,
+      `¡Hola! 👋 Acabo de realizar el pedido #${data.order.order_number} en ${storeName}. Quisiera saber por favor en qué estado se encuentra mi orden. ¡Muchas gracias!`,
     );
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
   }

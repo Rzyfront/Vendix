@@ -1,10 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { TablesService } from './tables.service';
 import { SettingsService } from '../settings/settings.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { MovementsService } from '../cash-registers/movements/movements.service';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -109,6 +116,18 @@ export class TableSessionsService {
     private prisma: StorePrismaService,
     private tablesService: TablesService,
     private settingsService: SettingsService,
+    private readonly notificationsService: NotificationsService,
+    private readonly notificationsSseService: NotificationsSseService,
+    private readonly eventEmitter: EventEmitter2,
+    // Cash-register services (from CashRegistersModule) — used to mirror the
+    // POS arqueo behavior when a manual table payment is confirmed by staff.
+    private readonly cashRegisterSessionsService: SessionsService,
+    private readonly cashRegisterMovementsService: MovementsService,
+    // Restaurant Suite — item removal (frente 2). KitchenFireService is used to
+    // cancel a `pending` ticket in-tx + emit its SSE post-commit;
+    // StockLevelManager reverses the fire's inventory consumption.
+    private readonly kitchenFireService: KitchenFireService,
+    private readonly stockLevelManager: StockLevelManager,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -165,7 +184,13 @@ export class TableSessionsService {
     deliveryType: 'direct_delivery' | 'dine_in';
     guestCount: number | null;
     internalNotes: string;
-  }): Promise<{ id: number; order_id: number; table_id: number }> {
+  }): Promise<{
+    id: number;
+    order_id: number;
+    table_id: number;
+    opened_at: Date;
+    opened_by: number | null;
+  }> {
     const currency = await this.settingsService.getStoreCurrency();
     const safeCurrency = currency || 'COP';
 
@@ -173,7 +198,7 @@ export class TableSessionsService {
       .toString()
       .padStart(3, '0')}`;
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const order = await tx.orders.create({
         data: {
           store_id: args.storeId,
@@ -215,8 +240,21 @@ export class TableSessionsService {
         id: newSession.id,
         order_id: newSession.order_id,
         table_id: newSession.table_id,
+        opened_at: newSession.opened_at,
+        opened_by: newSession.opened_by,
       };
     });
+
+    // Post-commit: notify the comensal stream + staff dashboard that a
+    // new session was opened on this table. SINGLE emit point covering
+    // POS (`openSession`), QR anonymous (`openTableSessionPublic`), and
+    // `confirmStaff` (also routed through `openTableSessionPublic`).
+    // `session_opened` is what lets a comensal in `menu_only` /
+    // `mark_occupied` / `require_staff` flip to "cuenta abierta" in real
+    // time when staff opens the tab from the POS side.
+    this.emitSessionOpened(args.storeId, created);
+
+    return created;
   }
 
   // ---------------------------------------------------------------- open
@@ -245,10 +283,23 @@ export class TableSessionsService {
     }
 
     // 2. Resolve the customer. We accept an explicit customer_id; if
-    //    absent, we use the opening user as a placeholder so the draft
-    //    order has a valid FK to `users`. A real customer can be set
-    //    later via the normal order update path.
-    const customerId = dto.customer_id ?? userId;
+    //    absent, the draft order is opened as a true anonymous sale
+    //    (`customer_id = null`, consumidor final) — we NEVER fall back to
+    //    the opening user (that misattributed the check to the waiter/admin
+    //    and violated the restaurant-ops "no id=1 sentinel" invariant).
+    //
+    //    Anonymous open is gated by the `pos.allow_anonymous_sales` setting
+    //    (mirrors the POS cobro flow): if anonymous sales are disabled and
+    //    no customer was provided, opening the table is a business error.
+    if (dto.customer_id == null) {
+      const settings = await this.settingsService.getSettings();
+      if (settings.pos?.allow_anonymous_sales !== true) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_CUSTOMER_REQUIRED,
+        );
+      }
+    }
+    const customerId = dto.customer_id ?? null;
 
     // 3. ATOMIC: create order (empty items) + table_session + flip
     //    table status to 'occupied'. Delegates to the shared
@@ -280,8 +331,12 @@ export class TableSessionsService {
    *   - `user_id` is NOT required in the request context. Only `store_id`
    *     is needed (the store is encoded in the QR payload / route).
    *   - `opened_by` is null (no authenticated opener).
-   *   - `customer_id` is null (anonymous check; a real customer can be
-   *     attached later via `assignCustomer`).
+   *   - `customer_id` is optional: null for an anonymous check (default),
+   *     or a resolved diner (guest/registered) when the comensal
+   *     identified before opening the tab. A customer can still be
+   *     attached later via `assignCustomer`. No `allow_anonymous_sales`
+   *     gate lives here — the anonymous auto-open (open_tab) must keep
+   *     working; that gate belongs to the explicit "identify" flow.
    *   - The draft order is created with `channel: 'ecommerce'` and
    *     `delivery_type: 'dine_in'` so downstream reporting/filters can
    *     distinguish QR-initiated checks from POS-initiated ones.
@@ -294,6 +349,7 @@ export class TableSessionsService {
     tableId: number,
     openedByUserId?: number | null,
     guestCount?: number | null,
+    customerId?: number | null,
   ): Promise<TableSessionView> {
     const { storeId } = this.requireStoreContext();
 
@@ -309,15 +365,19 @@ export class TableSessionsService {
     //    table_session (opened_by null) + flip table to 'occupied'.
     //    `guestCount` is optional (GAP-10): the QR scan may not know the
     //    party size yet — the diner can set it later via `setGuestCount`.
+    const resolvedCustomerId = customerId ?? null;
     const session = await this.createOpenSession({
       tableId,
       storeId,
       openedBy: openedByUserId ?? null,
-      customerId: null,
+      customerId: resolvedCustomerId,
       channel: 'ecommerce',
       deliveryType: 'dine_in',
       guestCount: guestCount ?? null,
-      internalNotes: 'Mesa abierta vía QR — cuenta anónima',
+      internalNotes:
+        resolvedCustomerId == null
+          ? 'Mesa abierta vía QR — cuenta anónima'
+          : 'Mesa abierta vía QR — comensal identificado',
     });
 
     this.logger.log(
@@ -508,6 +568,205 @@ export class TableSessionsService {
     return this.findOne(sessionId);
   }
 
+  // -------------------------------------------------------------- remove
+  /**
+   * Remove a single item from the draft order backing an open table session
+   * (Restaurant Suite — frente 2 "eliminar plato de la cuenta").
+   *
+   * Same gates as `addItems` (session open + order in `draft`). The item's
+   * kitchen state decides the branch:
+   *
+   *   Tier 1 — NOT fired (`inventory_consumed_at_fire=false` AND no
+   *     kitchen_ticket_item): plain delete + recompute. Inventory untouched.
+   *
+   *   Tier 2 — fired with its ticket in `pending`: cancel the KDS ticket
+   *     (in-tx, SSE emitted post-commit) and REVERSE the stock consumed at
+   *     fire, then delete + recompute. The reversal negates the recorded
+   *     `inventory_transactions` of the fire (NOT a BOM re-explosion): those
+   *     rows carry `order_item_id` + `product_id` + `quantity_change<0`; the
+   *     location is re-resolved deterministically the same way the fire did
+   *     (`getDefaultLocationForProduct`). The reversal `updateStock` call is a
+   *     positive `return` movement and MUST NOT carry `order_item_id` (a child
+   *     row with FK `onDelete: Restrict` would re-block the delete below).
+   *
+   *   Tier 3 — fired with its ticket in any non-`pending` status
+   *     (`in_preparation` | `ready` | `delivered` | `cancelled`): blocked with
+   *     `TABLE_SESSION_ITEM_NOT_REMOVABLE` (409).
+   *
+   * The accounting reversal of COGS is intentionally deferred (owner decision,
+   * MVP): only stock is returned here.
+   *
+   * FK reality: `order_items` is the parent of `inventory_transactions`
+   * (Restrict), `kitchen_ticket_items` (Restrict) and `order_item_taxes`
+   * (Restrict), so those children are purged in-tx BEFORE the hard delete.
+   *
+   * Everything (cancel writes + reversal + child purge + delete + recompute)
+   * runs in ONE `$transaction`; the `ticket.cancelled` SSE is emitted only
+   * AFTER the commit.
+   */
+  async removeItem(
+    sessionId: number,
+    orderItemId: number,
+  ): Promise<TableSessionView> {
+    // Mirror addItems: only store context is required (the POS controller path
+    // is already gated by @Permissions('store:table_sessions:update')).
+    this.requireStoreContext();
+
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+    if (!session.order) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+    }
+    if (session.order.state !== 'draft') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ORDER_NOT_DRAFT,
+      );
+    }
+
+    // Locate the item within the session's own draft order (this is also the
+    // ownership guard — findOne is store-scoped).
+    const orderItem = session.order.order_items.find(
+      (it) => it.id === orderItemId,
+    );
+    if (!orderItem) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `El ítem #${orderItemId} no existe o no pertenece a esta sesión de mesa`,
+      );
+    }
+
+    // Resolve the kitchen state. `kitchen_ticket_items` comes ordered desc by
+    // id from findOne, so [0] is the most recent ticket-item for this line.
+    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
+    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
+    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+
+    // "Fired" = the line was sent to the KDS at some point (flag flipped) OR it
+    // currently has a kitchen_ticket_item. Non-fired lines are Tier 1.
+    const wasFired =
+      orderItem.inventory_consumed_at_fire === true || activeKti != null;
+    const isPendingTicket = wasFired && ticketStatus === 'pending';
+
+    // Removable only if: not fired (Tier 1) OR fired with a pending ticket
+    // (Tier 2). Anything else (in_preparation/ready/delivered/cancelled) → 409.
+    if (wasFired && !isPendingTicket) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // Tier 2 — cancel the pending ticket + reverse the fire's stock.
+      if (isPendingTicket && ticketId != null) {
+        // TOCTOU guard: the kitchen may have advanced the ticket between the
+        // findOne read and this transaction. Re-read + re-validate inside tx.
+        const freshTicket = await tx.kitchen_tickets.findFirst({
+          where: { id: ticketId },
+          select: { status: true },
+        });
+        if (!freshTicket || freshTicket.status !== 'pending') {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+          );
+        }
+
+        // Cancel the ticket rows in-tx (no SSE here — emitted post-commit).
+        await this.kitchenFireService.cancelTicketInTx(tx, ticketId);
+
+        // Reverse the leaf-ingredient consumption recorded at fire time.
+        // inventory_movements has NO order_item_id; inventory_transactions
+        // does. Idempotency: negative consumption txns only exist for
+        // track_inventory ingredients — if there are none, there is nothing to
+        // reverse (e.g. recipe-less / non-tracked ingredients).
+        const consumptionTxns = await tx.inventory_transactions.findMany({
+          where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            quantity_change: true,
+          },
+        });
+        for (const ct of consumptionTxns) {
+          const locationId =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              ct.product_id,
+              ct.product_variant_id ?? undefined,
+            );
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: ct.product_id,
+              variant_id: ct.product_variant_id ?? undefined,
+              location_id: locationId,
+              quantity_change: Math.abs(ct.quantity_change),
+              movement_type: 'return',
+              reason: 'Reversa fire — borrado de ítem de mesa',
+              source_module: 'kitchen_fire_reversal',
+              // NO order_item_id: the reversal must not create a child row that
+              // re-blocks the order_item delete below (FK onDelete: Restrict).
+              create_movement: true,
+              validate_availability: false,
+            },
+            tx,
+          );
+        }
+      }
+
+      // Purge FK children (all onDelete: Restrict) BEFORE the hard delete, in
+      // dependency order. Applies to every tier — even a non-fired line can
+      // carry order_item_taxes (POS-created lines do).
+      await tx.inventory_transactions.deleteMany({
+        where: { order_item_id: orderItemId },
+      });
+      await tx.kitchen_ticket_items.deleteMany({
+        where: { order_item_id: orderItemId },
+      });
+      await tx.order_item_taxes.deleteMany({
+        where: { order_item_id: orderItemId },
+      });
+
+      await tx.order_items.delete({ where: { id: orderItemId } });
+
+      // Recompute totals — EXACT mirror of addItems (subtotal = Σ total_price,
+      // tax = Σ tax_amount_item, grand_total = subtotal + tax; no promo/coupon).
+      const allItems = await tx.order_items.findMany({
+        where: { order_id: session.order_id },
+        select: { total_price: true, tax_amount_item: true },
+      });
+      const subtotal = allItems.reduce(
+        (acc, it) => acc + Number(it.total_price),
+        0,
+      );
+      const tax = allItems.reduce(
+        (acc, it) => acc + Number(it.tax_amount_item ?? 0),
+        0,
+      );
+      await tx.orders.update({
+        where: { id: session.order_id },
+        data: {
+          subtotal_amount: new Prisma.Decimal(subtotal),
+          tax_amount: new Prisma.Decimal(tax),
+          grand_total: new Prisma.Decimal(subtotal + tax),
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    // Post-commit: emit the KDS `ticket.cancelled` SSE (Tier 2 only). Never
+    // inside the tx — a rollback must not leave a phantom cancellation event.
+    if (isPendingTicket && ticketId != null) {
+      await this.kitchenFireService.emitTicketCancelledEvent(ticketId);
+    }
+
+    this.logger.log(
+      `Table session item removed: session=${sessionId} order=${session.order_id} item=${orderItemId} tier=${
+        isPendingTicket ? 'pending-reversal' : 'simple'
+      }`,
+    );
+    return this.findOne(sessionId);
+  }
+
   // --------------------------------------------------------------- close
   /**
    * Close a table session (mark `closed_at`). The order is left in
@@ -535,10 +794,210 @@ export class TableSessionsService {
       });
     });
 
+    // Notify staff + comensal streams of the close (ONLY on the real
+    // transition — the idempotent short-circuit above already returned, so a
+    // second close never re-emits). Post-commit: a rollback must not leave a
+    // phantom `session_closed`.
+    this.emitSessionClosed(session.store_id, sessionId);
+
     this.logger.log(
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id}`,
     );
     return this.findOne(sessionId);
+  }
+
+  /**
+   * Push the canonical `session_closed` SSE event on the per-store subject.
+   * Consumed by both the staff dashboard stream (whitelisted in
+   * `TableSessionsController`) and the comensal stream (whitelisted in
+   * `EcommerceTablesController.DINER_LIFECYCLE_EVENTS`); each stream filters
+   * by `data.table_session_id`. Best-effort — SSE failures must never break
+   * the (already committed) close.
+   *
+   * Reused by the POS close-out path (`PaymentsService.processPosPayment`),
+   * which closes the session directly inside its payment transaction and thus
+   * cannot rely on `closeSession`'s own emit.
+   */
+  emitSessionClosed(storeId: number, sessionId: number): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_closed',
+        title: 'Mesa cerrada',
+        body: 'La cuenta de la mesa fue cerrada',
+        data: { table_session_id: sessionId },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_closed for session ${sessionId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Push the canonical `session_opened` SSE event on the per-store subject.
+   * Mirror of `emitSessionClosed` — emitted by `createOpenSession` so POS
+   * open, QR `open_tab`, and `confirmStaff` (require_staff path) all flow
+   * through a single emit point. Consumed by:
+   *
+   *   - Comensal SSE stream (`EcommerceTablesController.matchesDiner`),
+   *     filtered by `data.table_id === binding.table_id` so a diner who
+   *     scanned the QR BEFORE the session opened (menu_only /
+   *     mark_occupied / require_staff) gets the live transition and
+   *     can reconnect with a fully-resolved binding.
+   *   - Staff floor-map stream (`TableSessionsController.STAFF_EVENT_WHITELIST`
+   *     + `AdminTablesSseService`), so the room map refreshes the moment
+   *     the tab opens.
+   *
+   * Best-effort — SSE failures must never break the (already committed)
+   * open. Payload mirrors the staff + comensal consumers' needs.
+   */
+  emitSessionOpened(
+    storeId: number,
+    session: {
+      id: number;
+      order_id: number;
+      table_id: number;
+      opened_at: Date;
+      opened_by: number | null;
+    },
+  ): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_opened',
+        title: 'Mesa abierta',
+        body: `Se abrió la cuenta de la mesa`,
+        data: {
+          table_id: session.table_id,
+          session_id: session.id,
+          order_id: session.order_id,
+          opened_at:
+            session.opened_at instanceof Date
+              ? session.opened_at.toISOString()
+              : new Date(session.opened_at).toISOString(),
+          opened_by: session.opened_by,
+        },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_opened for session ${session.id}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  // ------------------------------------------------------ active sessions
+  /**
+   * Snapshot-friendly list of every OPEN (`closed_at IS NULL`)
+   * table_session for the current store, resolved against the scoped
+   * Prisma client. Used by the SSE staff stream to send a hydrated
+   * initial payload so a freshly connected client doesn't render a
+   * blank room map.
+   *
+   * Shape is intentionally compact (no `order_items` lines, no per-dish
+   * KDS state) — the staff dashboard only needs the headline fields
+   * to know which tables are currently occupied and by whom.
+   * Per-session detail is fetched on demand via `findOne(id)`.
+   */
+  async listActiveSessions(): Promise<
+    Array<{
+      id: number;
+      store_id: number;
+      table_id: number;
+      order_id: number;
+      opened_at: Date;
+      guest_count: number | null;
+      table: {
+        id: number;
+        name: string;
+        zone: string | null;
+        status: string;
+      } | null;
+      order: {
+        id: number;
+        state: string;
+        grand_total: Prisma.Decimal | number;
+        customer: {
+          id: number;
+          first_name: string;
+          last_name: string;
+        } | null;
+      };
+    }>
+  > {
+    const { storeId } = this.requireStoreContext();
+    return this.prisma.table_sessions.findMany({
+      where: { store_id: storeId, closed_at: null },
+      orderBy: { opened_at: 'asc' },
+      select: {
+        id: true,
+        store_id: true,
+        table_id: true,
+        order_id: true,
+        opened_at: true,
+        guest_count: true,
+        table: {
+          select: {
+            id: true,
+            name: true,
+            zone: true,
+            status: true,
+          },
+        },
+        order: {
+          select: {
+            id: true,
+            state: true,
+            grand_total: true,
+            users: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
+      },
+      // The Prisma `users` relation on `orders.customer_id` is renamed
+      // below to match the public `customer` field (same pattern as
+      // `findOne`).
+    }).then((rows) =>
+      rows.map((r) => ({
+        id: r.id,
+        store_id: r.store_id,
+        table_id: r.table_id,
+        order_id: r.order_id,
+        opened_at: r.opened_at,
+        guest_count: r.guest_count,
+        table: r.table
+          ? {
+              id: r.table.id,
+              name: r.table.name,
+              zone: r.table.zone,
+              status: r.table.status,
+            }
+          : null,
+        order: {
+          id: r.order.id,
+          state: r.order.state,
+          grand_total: r.order.grand_total,
+          customer: r.order.users
+            ? {
+                id: r.order.users.id,
+                first_name: r.order.users.first_name,
+                last_name: r.order.users.last_name,
+              }
+            : null,
+        },
+      })),
+    );
   }
 
   // ---------------------------------------------------------------- read
@@ -717,5 +1176,388 @@ export class TableSessionsService {
     );
 
     return this.findOne(sessionId);
+  }
+
+  // --------------------------------------------------- C3 — staff payments
+  /**
+   * List pending payments for the order backing a table session
+   * (Restaurant Suite — table redesign C3).
+   *
+   * Returns every `payments` row where:
+   *   - the row's `order_id` matches `session.order_id`, AND
+   *   - `state = 'pending'`.
+   *
+   * Includes the method info (`store_payment_method.system_payment_method`)
+   * so the POS UI can show "Efectivo $X" / "Transferencia $Y" badges
+   * without a follow-up round-trip per row.
+   *
+   * Tenant-guard: `findOne(sessionId)` is store-scoped via
+   * `StorePrismaService`, so a session id from another store surfaces as
+   * `TABLE_SESSION_NOT_FOUND` before we touch the payments table.
+   */
+  async listPendingPayments(sessionId: number) {
+    const session = await this.findOne(sessionId);
+
+    const rows = await this.prisma.payments.findMany({
+      where: {
+        order_id: session.order_id,
+        state: 'pending',
+      },
+      orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+      include: {
+        store_payment_method: {
+          include: {
+            system_payment_method: {
+              select: {
+                id: true,
+                type: true,
+                display_name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return rows.map((p) => ({
+      id: p.id,
+      order_id: p.order_id,
+      amount: p.amount,
+      currency: p.currency,
+      state: p.state,
+      created_at: p.created_at,
+      transaction_id: p.transaction_id,
+      method: p.store_payment_method
+        ? {
+            store_payment_method_id: p.store_payment_method.id,
+            type: p.store_payment_method.system_payment_method?.type ?? null,
+            display_name:
+              p.store_payment_method.system_payment_method?.display_name ??
+              p.store_payment_method.display_name ??
+              null,
+          }
+        : null,
+    }));
+  }
+
+  /**
+   * Staff-side confirmation of a pending table-session payment
+   * (Restaurant Suite — table redesign C3).
+   *
+   * Validates:
+   *   1. Session exists, belongs to the current store (findOne is scoped).
+   *   2. Session is still OPEN (closed_at IS NULL). Closed sessions do not
+   *      accept new payment transitions (the order can still be paid via
+   *      the normal POS path).
+   *   3. Payment belongs to the session's order AND is in state='pending'.
+   *   4. Method is manual (`cash` / `bank_transfer` / `card`). Wompi /
+   *      wallet payments are NEVER re-confirmed by staff — those are
+   *      finalized by the gateway webhook (`webhook-handler.service.ts`)
+   *      and the auto-entry listener (`AccountingEventsListener`).
+   *
+   * On success:
+   *   - Updates the payment to `succeeded` + `paid_at` (CAS: no-op if the
+   *     row is already in a final state — e.g. a webhook landed first).
+   *   - Updates `orders.total_paid` / `remaining_balance` so the order
+   *     reflects the new paid amount.
+   *   - Emits `payment.received` with the canonical shape so the auto-entry
+   *     listener + notification listener both fire identically to the POS
+   *     fresh-sale path.
+   *   - Pushes `payment.confirmed` on the per-store SSE subject (so the
+   *     comensal UI updates the check live) and broadcasts a
+   *     `table_payment_confirmed` notification (so the staff dashboard
+   *     bell + sidebar refresh fire).
+   *
+   * The session REMAINS OPEN — staff can confirm one payment, then another,
+   * until the full amount is covered. Session/table closure happens
+   * separately (today via `applyPosPaymentToTableSession` when the last
+   * payment drives the POS close-out, or via `closeSession`).
+   */
+  async confirmPayment(
+    sessionId: number,
+    paymentId: number,
+  ): Promise<{ state: 'succeeded'; payment_id: number }> {
+    const { storeId, userId } = this.requireContext();
+
+    // 1. Tenant + open-session guards.
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    // 2. Resolve + authorize the payment row INSIDE the transaction so
+    //    the CAS + balance update are atomic.
+    const result = await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payments.findFirst({
+        where: { id: paymentId, order_id: session.order_id },
+        include: {
+          store_payment_method: {
+            include: { system_payment_method: true },
+          },
+          orders: {
+            select: {
+              id: true,
+              order_number: true,
+              store_id: true,
+              subtotal_amount: true,
+              tax_amount: true,
+              discount_amount: true,
+              tip_amount: true,
+              customer_id: true,
+              stores: { select: { organization_id: true } },
+            },
+          },
+        },
+      });
+
+      if (!payment) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_FIND_001,
+          `Pago #${paymentId} no encontrado o no pertenece a esta sesión de mesa`,
+        );
+      }
+      if (payment.orders?.store_id !== storeId) {
+        // Defense in depth — `findOne(sessionId)` is already store-scoped,
+        // but re-check on the joined order to be safe.
+        throw new VendixHttpException(
+          ErrorCodes.STORE_CONTEXT_001,
+          'La orden asociada pertenece a otra tienda',
+        );
+      }
+
+      const methodType =
+        payment.store_payment_method?.system_payment_method?.type ?? null;
+      // 3. Manual-only gate. Wompi/webhook payments are finalized by the
+      //    gateway; staff must not re-confirm them.
+      const MANUAL_METHODS = new Set(['cash', 'bank_transfer', 'card']);
+      if (!methodType || !MANUAL_METHODS.has(methodType)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_METHOD_DISABLED_001,
+          `El método de pago (${methodType ?? 'desconocido'}) no puede ser confirmado por staff. Use el webhook del procesador.`,
+        );
+      }
+
+      // 4. CAS: skip the transition if the row is no longer pending.
+      if (payment.state !== 'pending') {
+        this.logger.log(
+          `[confirmPayment] payment ${paymentId} state=${payment.state}; idempotent skip.`,
+        );
+        return { state: 'succeeded' as const, payment_id: payment.id, noop: true };
+      }
+
+      // 5. Transition + balance update.
+      await tx.payments.update({
+        where: { id: payment.id },
+        data: {
+          state: 'succeeded',
+          paid_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+
+      const order = payment.orders;
+      const orderTotalPaid = await this.bumpOrderBalanceInTx(
+        tx,
+        order.id,
+        Number(payment.amount),
+      );
+
+      // 6. Emit canonical `payment.received`. Shape mirrors the POS fresh-sale
+      //    emit (payments.service.ts L1179) so the auto-entry listener + the
+      //    notification listener both process it identically.
+      this.eventEmitter.emit('payment.received', {
+        payment_id: payment.id,
+        store_id: storeId,
+        organization_id: order?.stores?.organization_id,
+        order_id: order?.id,
+        order_number: order?.order_number,
+        amount: Number(payment.amount),
+        subtotal_amount: Number(order?.subtotal_amount || 0),
+        tax_amount: Number(order?.tax_amount || 0),
+        tax_breakdown: [],
+        withholding_breakdown: [],
+        discount_amount: Number(order?.discount_amount || 0),
+        tip_amount: Number(order?.tip_amount || 0),
+        currency: payment.currency || 'COP',
+        payment_method:
+          payment.store_payment_method?.system_payment_method?.display_name ||
+          payment.store_payment_method?.display_name ||
+          'Unknown',
+        user_id: userId,
+        customer: order?.customer_id
+          ? { id: Number(order.customer_id) }
+          : undefined,
+      });
+
+      return {
+        state: 'succeeded' as const,
+        payment_id: payment.id,
+        noop: false,
+        orderNumber: order?.order_number ?? '',
+        orderId: order.id,
+        amount: Number(payment.amount),
+        methodType,
+        newTotalPaid: orderTotalPaid,
+      };
+    });
+
+    // 7. Post-commit side effects — fire-and-await because the SSE push
+    //    + notification broadcast are the only consumer-facing signal that
+    //    the confirmation happened. They are safe to retry on idempotent
+    //    state (`table_payment_confirmed` dedup is up to the consumer).
+    if (!result.noop) {
+      // 7a. SSE push — `payment.confirmed` so the comensal UI updates the
+      //     live check (the `payments.pending` row disappears). Goes through
+      //     the per-store subject — `TableSessionsController.stream` whitelists
+      //     this type.
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'payment.confirmed',
+        title: 'Pago confirmado',
+        body: `Pago #${result.payment_id} confirmado`,
+        data: {
+          table_session_id: sessionId,
+          payment_id: result.payment_id,
+          amount: result.newTotalPaid,
+          method: result.methodType,
+          order_number: result.orderNumber,
+        },
+        created_at: new Date().toISOString(),
+      });
+
+      // 7b. Notification row + web push + SSE for the staff dashboard.
+      await this.notificationsService.createAndBroadcast(
+        storeId,
+        'table_payment_confirmed',
+        'Pago confirmado',
+        `Pago de mesa #${sessionId} confirmado por staff`,
+        {
+          route: `/admin/restaurant-ops/tables/session/${sessionId}`,
+          table_session_id: sessionId,
+          payment_id: result.payment_id,
+          method: result.methodType,
+        },
+      );
+
+      // 7c. Cash-register movement (staff arqueo). Mirror of the POS
+      //     `PaymentsService.recordCashRegisterMovement`: only if the staff
+      //     user has an OPEN cash session and the settings gate allows it.
+      //     Runs ONLY on a real transition (guarded by `!result.noop`), so a
+      //     webhook/idempotent re-confirm never double-counts the arqueo. A
+      //     missing session or disabled gate is a SILENT skip — it must NEVER
+      //     block the already-committed payment confirmation.
+      await this.recordStaffCashMovement({
+        storeId,
+        userId,
+        orderId: result.orderId,
+        paymentId: result.payment_id,
+        amount: result.amount,
+        paymentMethod: result.methodType,
+      });
+
+      this.logger.log(
+        `[confirmPayment] payment ${result.payment_id} confirmed by staff ${userId} on session ${sessionId}`,
+      );
+    }
+
+    return { state: 'succeeded', payment_id: result.payment_id };
+  }
+
+  /**
+   * Register a `sale` movement in `cash_register_movements` when a manual
+   * table payment is confirmed by staff — the exact mirror of the POS
+   * `PaymentsService.recordCashRegisterMovement`. Without this, the staff
+   * cash count (arqueo) stays at 0 while accounting already booked the
+   * cash-in (DR 1105 via the `payment.received` event), breaking the
+   * cash-register ↔ ledger reconciliation.
+   *
+   * Business rule (mirror of the POS `processPosPayment` path): record ONLY if
+   *   1. `pos.cash_register.enabled` is on, AND
+   *   2. the confirming staff user has an OPEN cash session, AND
+   *   3. for non-cash methods, `track_non_cash_payments` is on.
+   * Any miss is a SILENT skip. This helper never throws and never blocks the
+   * already-committed payment confirmation (called after the COMMIT and only
+   * on a real transition, i.e. `!result.noop`).
+   */
+  private async recordStaffCashMovement(args: {
+    storeId: number;
+    userId: number;
+    orderId: number;
+    paymentId: number;
+    amount: number;
+    paymentMethod: string;
+  }): Promise<void> {
+    const { storeId, userId, orderId, paymentId, amount, paymentMethod } = args;
+    try {
+      if (amount <= 0) return;
+
+      // 1. Feature gate — same key the POS reads.
+      const settings = await this.settingsService.getSettings();
+      const crSettings = settings.pos?.cash_register;
+      if (!crSettings?.enabled) return;
+
+      // 2. Open cash session for THIS staff user (store-scoped via context).
+      const session = await this.cashRegisterSessionsService.getActiveSession(
+        userId,
+      );
+      if (!session) return;
+
+      // 3. Non-cash gate — skip unless the store tracks non-cash movements.
+      if (paymentMethod !== 'cash' && !crSettings.track_non_cash_payments) {
+        return;
+      }
+
+      await this.cashRegisterMovementsService.recordSaleMovement(session.id, {
+        store_id: storeId,
+        user_id: userId,
+        amount,
+        payment_method: paymentMethod,
+        order_id: orderId,
+        payment_id: paymentId,
+      });
+
+      this.logger.log(
+        `[confirmPayment] cash-register sale movement recorded for session ${session.id}, order ${orderId}, payment ${paymentId}`,
+      );
+    } catch (error) {
+      // Never let a cash-register failure surface to the confirmation — the
+      // payment is already committed. Log and move on (mirror of the POS).
+      this.logger.error(
+        `[confirmPayment] error recording cash-register movement for order ${orderId}, payment ${paymentId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * GAP-2-equivalent balance bump — re-reads `grand_total` and `total_paid`
+   * INSIDE the transaction (so we see the latest values) and writes
+   * `total_paid += payment.amount` / `remaining_balance = max(0, ...)` on
+   * the order. Returns the NEW total_paid so callers (e.g. SSE push) can
+   * surface the running sum without a follow-up read.
+   */
+  private async bumpOrderBalanceInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    paidAmount: number,
+  ): Promise<number> {
+    const order = await tx.orders.findUnique({
+      where: { id: orderId },
+      select: { grand_total: true, total_paid: true },
+    });
+    if (!order) return 0;
+    const grandTotal = Number(order.grand_total || 0);
+    const newTotalPaid = Number(order.total_paid || 0) + Number(paidAmount || 0);
+    const remainingBalance = Math.max(grandTotal - newTotalPaid, 0);
+    await tx.orders.update({
+      where: { id: orderId },
+      data: {
+        total_paid: Math.round(newTotalPaid * 100) / 100,
+        remaining_balance: Math.round(remainingBalance * 100) / 100,
+        updated_at: new Date(),
+      },
+    });
+    return Math.round(newTotalPaid * 100) / 100;
   }
 }

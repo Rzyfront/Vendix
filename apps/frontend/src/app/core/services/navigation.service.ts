@@ -40,6 +40,8 @@ export class NavigationService {
         return '/admin';
       case AppEnvironment.STORE_ECOMMERCE:
         return '/';
+      case AppEnvironment.STORE_DELIVERY:
+        return '/repartos';
       default:
         return '/';
     }

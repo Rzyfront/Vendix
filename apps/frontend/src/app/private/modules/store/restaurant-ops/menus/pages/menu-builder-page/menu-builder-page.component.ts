@@ -18,6 +18,7 @@ import {
 } from '@angular/cdk/drag-drop';
 
 import {
+  BadgeComponent,
   ButtonComponent,
   CardComponent,
   DialogService,
@@ -83,6 +84,7 @@ interface ProductOption {
     IconComponent,
     InputComponent,
     ModalComponent,
+    BadgeComponent,
     MenuProductPickerModalComponent,
     MenuWindowModalComponent,
   ],
@@ -550,6 +552,33 @@ export class MenuBuilderPageComponent implements OnInit {
   private closeProductPicker(): void {
     this.pickerOpen.set(false);
     this.pickerSectionId.set(null);
+  }
+
+  /** F1 — Toggle "Agotado" en un plato de la carta. Lee `is_sellable` del
+   * producto snapshot y lo invierte vía `productsService.updateProduct` (no
+   * creamos servicios nuevos: reusamos el updateProduct estándar). Al
+   * completar recarga la carta (`loadMenu`) para refrescar el snapshot y
+   * emite un toast. Maneja el error como el resto de métodos (string plano
+   * desde el handleError del backend). */
+  toggleItemStock(item: MenuSectionItem): void {
+    const menu = this.menu();
+    if (!menu || !item.product) return;
+    const current = item.product.is_sellable ?? true;
+    this.productsService
+      .updateProduct(item.product_id, { is_sellable: !current })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            current ? 'Plato marcado como agotado' : 'Plato disponible',
+          );
+          this.loadMenu(menu.id);
+        },
+        error: (e: unknown) =>
+          this.toastService.error(
+            typeof e === 'string' ? e : 'Error al actualizar el plato',
+          ),
+      });
   }
 
   async removeItem(section: MenuSection, item: MenuSectionItem): Promise<void> {

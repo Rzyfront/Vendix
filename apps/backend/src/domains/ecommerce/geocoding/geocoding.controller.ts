@@ -7,8 +7,13 @@ import {
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
-import { GeocodingService, NormalizedAddress } from './geocoding.service';
+import {
+  ForwardGeocodeResult,
+  GeocodingService,
+  NormalizedAddress,
+} from './geocoding.service';
 import { ReverseGeocodeDto } from './dto/reverse-geocode.dto';
+import { ForwardGeocodeDto } from './dto/forward-geocode.dto';
 
 /**
  * GeocodingController
@@ -60,5 +65,21 @@ export class GeocodingController {
     }
 
     return this.geocodingService.reverse(lat, lng);
+  }
+
+  /**
+   * `GET /ecommerce/geocoding/forward?q={address}`
+   *
+   * Free-text address → coordinate (Colombia-biased), used when the customer
+   * types the address manually so the map can center on it. Returns
+   * `{ lat: null, lng: null }` when nothing matched (not an error). Provider
+   * failure → 503; too-short/too-long `q` → 400 via the DTO.
+   */
+  @Get('forward')
+  @OptionalAuth()
+  async forward(
+    @Query() query: ForwardGeocodeDto,
+  ): Promise<ForwardGeocodeResult> {
+    return this.geocodingService.forward(query.q);
   }
 }

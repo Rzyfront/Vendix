@@ -11,6 +11,10 @@ import {
   CreateDispatchNoteDto,
   CreateDispatchFromOrderDto,
   ConfirmDispatchNoteDto,
+  CreateTransferDispatchDto,
+  CreateReturnDispatchDto,
+  CreatePurchaseReceiptDispatchDto,
+  ReceiptScanResult,
 } from '../interfaces/dispatch-note.interface';
 
 let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
@@ -170,6 +174,64 @@ export class DispatchNotesService {
     );
   }
 
+  // ==========================================================================
+  // Bidirectional endpoints (ref plan Remisiones Bidireccionales — R2 backend)
+  // ==========================================================================
+
+  /**
+   * Create a transfer dispatch note (outbound `transfer_out` or inbound
+   * `transfer_in`). `direction` + `subtype` determine which location is
+   * origin vs destination. Cross-store scope validation is backend-enforced.
+   */
+  createTransfer(dto: CreateTransferDispatchDto): Observable<DispatchNote> {
+    const url = `${this.apiUrl}/store/dispatch-notes/transfer`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  /**
+   * Create a customer return dispatch note (inbound). Links to the
+   * original dispatch via `related_dispatch_id`; the backend delegates
+   * financial processing to `ReturnOrdersService`.
+   */
+  createReturn(dto: CreateReturnDispatchDto): Observable<DispatchNote> {
+    const url = `${this.apiUrl}/store/dispatch-notes/return`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  /**
+   * Create a purchase receipt dispatch note (inbound). When
+   * `purchase_order_id` is present the backend delegates to
+   * `PurchaseOrdersService.receive`; otherwise it emits its own `stock_in`.
+   */
+  createPurchaseReceipt(dto: CreatePurchaseReceiptDispatchDto): Observable<DispatchNote> {
+    const url = `${this.apiUrl}/store/dispatch-notes/purchase-receipt`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  /**
+   * Receive an inbound dispatch note (confirmed → received). Used by
+   * transfer_in / customer_return / purchase_receipt after confirmation.
+   */
+  receive(id: number): Observable<DispatchNote> {
+    return this.http.post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/receive`, {}).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
   /**
    * Download the dispatch-note (remision) PDF as a Blob.
    * `POST /store/dispatch-notes/:id/pdf` (the backend streams an
@@ -181,6 +243,23 @@ export class DispatchNotesService {
       .pipe(
         catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
       );
+  }
+
+  /**
+   * Scan a purchase receipt (image or PDF) with the backend AI/OCR pipeline
+   * (R4c). Sends `file` as multipart/form-data to
+   * `POST /store/dispatch-notes/receipt-scan` and returns detected supplier +
+   * line items best-effort matched against the store catalog. Do NOT set a
+   * `Content-Type` header manually — the browser sets the multipart boundary.
+   */
+  scanReceipt(file: File): Observable<ReceiptScanResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = `${this.apiUrl}/store/dispatch-notes/receipt-scan`;
+    return this.http.post<any>(url, formData).pipe(
+      map((r) => r.data || r),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
   }
 
   invalidateCache(): void {

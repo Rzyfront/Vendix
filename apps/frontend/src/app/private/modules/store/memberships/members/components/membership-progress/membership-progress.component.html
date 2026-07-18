@@ -1,0 +1,60 @@
+@if (variant() === 'bar') {
+  <div class="mp-bar">
+    <div class="member-progress-track">
+      @if (progress().hasRange) {
+        <div
+          class="member-progress-fill"
+          [style.width.%]="progress().percent"
+          [style.background]="statusColor()"
+        ></div>
+      }
+    </div>
+    <span class="mp-caption">
+      @if (progress().hasRange) {
+        {{ progress().elapsedDays }}/{{ progress().totalDays }} días · {{ progress().percent }}%
+      } @else {
+        Sin vigencia
+      }
+    </span>
+  </div>
+} @else {
+  <div class="mp-donut">
+    <svg viewBox="0 0 120 120" role="img" aria-label="Progreso de vigencia de la membresía">
+      <!-- Background track -->
+      <circle
+        cx="60"
+        cy="60"
+        r="52"
+        stroke="var(--color-border, #e5e7eb)"
+        stroke-width="8"
+        fill="none"
+      />
+      <!-- Progress arc -->
+      @if (progress().hasRange) {
+        <circle
+          cx="60"
+          cy="60"
+          r="52"
+          [attr.stroke]="statusColor()"
+          stroke-width="8"
+          stroke-linecap="round"
+          fill="none"
+          [attr.stroke-dasharray]="circumference"
+          [attr.stroke-dashoffset]="dashOffset()"
+          transform="rotate(-90 60 60)"
+        />
+      }
+      <!-- Center label -->
+      @if (progress().hasRange) {
+        <text x="60" y="56" text-anchor="middle" class="donut-pct">
+          {{ progress().percent }}%
+        </text>
+        <text x="60" y="74" text-anchor="middle" class="donut-sub">
+          {{ progress().elapsedDays }}/{{ progress().totalDays }}d
+        </text>
+      } @else {
+        <text x="60" y="62" text-anchor="middle" class="donut-pct">—</text>
+      }
+    </svg>
+  </div>
+}

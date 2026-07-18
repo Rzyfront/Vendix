@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { DatePipe } from '@angular/common';
 import {
   ModalComponent,
   ButtonComponent,
@@ -22,21 +23,36 @@ import {
 } from '../../../../../../../shared/pipes/index';
 import { PosPaymentService } from '../../../../pos/services/pos-payment.service';
 import { PaymentMethod } from '../../../../pos/models/payment.model';
+import { PaymentPendingView } from '../../interfaces/table.interface';
 
 /**
- * Restaurant Suite — table checkout payment.
+ * Restaurant Suite — table checkout / payment-confirmation modal.
  *
- * Settles an open table's bill directly from the session page when
- * `restaurant.enable_table_checkout` is ON. It is a focused replica of the
- * order-details "modal cobro estilo-POS" (reference only — NOT edited):
- * payment-method picker, cash flow with `amount_received`, transfer/card
- * `payment_reference`, and an `isProcessing` flag driven by the parent.
+ * Two modes driven by the `mode` input:
  *
- * The component does NOT call the backend itself — it emits a `pay` event
- * with the minimal payment fields. The page combines those with the
- * order's `subtotal` / `grand_total` and calls
- * `TablesService.payTableSession` (POST /store/payments/pos with
- * `table_session_id`).
+ *   - `'pos'`     (default, legacy): settles an open table's bill
+ *                  directly from the session page when
+ *                  `restaurant.enable_table_checkout` is ON. Focused
+ *                  replica of the order-details "modal cobro estilo-POS":
+ *                  payment-method picker, cash flow with `amount_received`,
+ *                  transfer/card `payment_reference`, optional gratuity.
+ *                  Emits `pay` with the minimal payment fields; the page
+ *                  combines them with the order's `subtotal` / `grand_total`
+ *                  and calls `TablesService.payTableSession`.
+ *
+ *   - `'confirm'` (E2 — staff confirmation of diner-initiated payments):
+ *                  the mesero reconciles a `pending` payment row created
+ *                  by the comensal flow (cash / transfer). No method
+ *                  picker (the row already carries the method), no cash
+ *                  flow, no reference. Emits `confirm` with the payment
+ *                  id and an optional tip; the page calls
+ *                  `TablesService.confirmPayment`. The session REMAINS
+ *                  OPEN — staff can chain multiple confirms until the
+ *                  order is fully paid.
+ *
+ * The modal does NOT call the backend itself in either mode; the page
+ * owns the network call so it can refresh the pending list and surface
+ * the SSE-driven live reflection.
  *
  * Zoneless + Signals: every template-read piece of state is a signal.
  */
@@ -48,11 +64,21 @@ export interface TablePaymentSubmit {
   tip_amount?: number;
 }
 
+/** Output for the `'confirm'` mode — staff confirms a diner's payment. */
+export interface TablePaymentConfirmSubmit {
+  payment_id: number;
+  /** Optional gratuity echo-back (only sent when > 0). */
+  tip_amount?: number;
+}
+
+export type TablePaymentMode = 'pos' | 'confirm';
+
 @Component({
   selector: 'app-table-payment-modal',
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -69,16 +95,29 @@ export class TablePaymentModalComponent {
 
   // ── Inputs ──────────────────────────────────────────────────────────
   readonly isOpen = input<boolean>(false);
+  /**
+   * Operation mode:
+   *  - 'pos'     → POS-style bill settlement (legacy default).
+   *  - 'confirm' → staff reconciles a pending diner payment (E2).
+   */
+  readonly mode = input<TablePaymentMode>('pos');
   /** Bill total (order grand_total). Used as the cash default + summary. */
   readonly total = input<number>(0);
   readonly tableName = input<string>('');
   /** Driven by the parent while the POS payment request is in flight. */
   readonly isProcessing = input<boolean>(false);
+  /**
+   * Pending payment row to reconcile (only meaningful in 'confirm' mode).
+   * Renders the method/amount and is the target of the `confirm` emit.
+   */
+  readonly pendingPayment = input<PaymentPendingView | null>(null);
 
   // ── Outputs ─────────────────────────────────────────────────────────
   readonly isOpenChange = output<boolean>();
   readonly closed = output<void>();
   readonly pay = output<TablePaymentSubmit>();
+  /** Fires only in 'confirm' mode when the mesero confirms a payment. */
+  readonly confirmPayment = output<TablePaymentConfirmSubmit>();
 
   // ── State ───────────────────────────────────────────────────────────
   readonly methods = signal<PaymentMethod[]>([]);
@@ -91,8 +130,25 @@ export class TablePaymentModalComponent {
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
+  /** Title bound to the modal — varies by mode. */
+  readonly modalTitle = computed(() =>
+    this.mode() === 'confirm' ? 'Confirmar pago' : 'Cobrar mesa',
+  );
+
   /** Amount actually charged: bill total + gratuity. */
   readonly effectiveTotal = computed(() => this.total() + this.tip());
+
+  /** Payment amount in 'confirm' mode (the row's amount as a number). */
+  readonly pendingPaymentAmount = computed(() => {
+    const p = this.pendingPayment();
+    if (!p) return 0;
+    return Number(p.amount) || 0;
+  });
+
+  /** Payment amount in 'confirm' mode (the row's amount + optional tip). */
+  readonly confirmEffectiveTotal = computed(() => {
+    return this.pendingPaymentAmount() + this.tip();
+  });
 
   readonly change = computed(() => {
     if (this.selectedMethod()?.type !== 'cash') return 0;
@@ -108,9 +164,15 @@ export class TablePaymentModalComponent {
     this.isCashInsufficient() ? this.effectiveTotal() - this.cashReceived() : 0,
   );
 
+  /** In 'pos' mode: requires method + amount/ref constraints. */
   readonly canProcess = computed(() => {
+    if (this.isProcessing()) return false;
+    if (this.mode() === 'confirm') {
+      // Confirm is just "I see the pending row + optional tip".
+      return !!this.pendingPayment();
+    }
     const method = this.selectedMethod();
-    if (!method || this.isProcessing()) return false;
+    if (!method) return false;
     if (method.type === 'cash') {
       return this.cashReceived() >= this.effectiveTotal();
     }
@@ -122,11 +184,12 @@ export class TablePaymentModalComponent {
   });
 
   constructor() {
-    // Reset + (lazy) load methods every time the modal opens.
+    // Reset + (lazy) load methods every time the modal opens. In
+    // 'confirm' mode we skip the method fetch entirely.
     effect(() => {
       if (this.isOpen()) {
         this.resetState();
-        if (this.methods().length === 0) {
+        if (this.mode() === 'pos' && this.methods().length === 0) {
           this.loadMethods();
         }
       }
@@ -184,7 +247,19 @@ export class TablePaymentModalComponent {
     return undefined;
   }
 
-  confirm(): void {
+  /** Submit handler — branches by mode. */
+  submit(): void {
+    if (this.mode() === 'confirm') {
+      const p = this.pendingPayment();
+      if (!p || !this.canProcess()) return;
+      const payload: TablePaymentConfirmSubmit = {
+        payment_id: p.id,
+        ...(this.tip() > 0 ? { tip_amount: this.tip() } : {}),
+      };
+      this.confirmPayment.emit(payload);
+      return;
+    }
+    // 'pos' mode — legacy POS-style settlement.
     const method = this.selectedMethod();
     if (!method || !this.canProcess()) return;
     const payload: TablePaymentSubmit = {

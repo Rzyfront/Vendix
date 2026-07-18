@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { AuthGuard } from '../../core/guards/auth.guard';
+import { mesaCartGuard } from '../../core/guards/mesa-cart.guard';
 
 /**
  * E-commerce public routes - accessible without authentication.
@@ -116,6 +117,7 @@ export const storeEcommercePublicRoutes: Routes = [
       },
       {
         path: 'cart',
+        canActivate: [mesaCartGuard],
         loadComponent: () =>
           import('../../private/modules/ecommerce/pages/cart/cart.component').then(
             (c) => c.CartComponent,
@@ -130,6 +132,7 @@ export const storeEcommercePublicRoutes: Routes = [
       },
       {
         path: 'checkout',
+        canActivate: [mesaCartGuard],
         loadComponent: () =>
           import('../../private/modules/ecommerce/pages/checkout/checkout.component').then(
             (c) => c.CheckoutComponent,

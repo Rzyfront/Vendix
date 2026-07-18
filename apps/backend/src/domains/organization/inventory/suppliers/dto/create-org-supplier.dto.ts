@@ -1,14 +1,17 @@
 import {
   IsBoolean,
   IsEmail,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { supplier_category_enum } from '@prisma/client';
 
 /**
  * Create payload for org-level supplier writes.
@@ -134,4 +137,35 @@ export class CreateOrgSupplierDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  // Plan Despacho Economía — FASE 1 paso 7.
+  @ApiPropertyOptional({
+    description: 'Supplier category (goods|carrier|service). `carrier` enables AP+withholding on route close.',
+    enum: supplier_category_enum,
+    default: 'goods',
+  })
+  @IsOptional()
+  @IsEnum(supplier_category_enum)
+  supplier_category?: supplier_category_enum;
+
+  @ApiPropertyOptional({ description: 'Bank name (required when supplier_category=carrier)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  bank_name?: string;
+
+  @ApiPropertyOptional({ description: 'Bank account number (required when supplier_category=carrier)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  bank_account_number?: string;
+
+  @ApiPropertyOptional({
+    description: 'Bank account type (savings|checking)',
+    enum: ['savings', 'checking'],
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  bank_account_type?: string;
 }

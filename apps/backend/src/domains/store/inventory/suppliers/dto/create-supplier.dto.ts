@@ -6,8 +6,11 @@ import {
   IsEnum,
   IsNumber,
   IsBoolean,
+  ValidateIf,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { supplier_category_enum } from '@prisma/client';
 
 export class CreateInventorySupplierDto {
   @ApiProperty({ description: 'Organization ID' })
@@ -99,4 +102,39 @@ export class CreateInventorySupplierDto {
   @ApiProperty({ description: 'Is supplier active' })
   @IsOptional()
   is_active?: boolean = true;
+
+  // Plan Despacho Economía — FASE 1 paso 7.
+  @ApiPropertyOptional({
+    description: 'Supplier category (goods|carrier|service). `carrier` enables AP+withholding on route close.',
+    enum: supplier_category_enum,
+    default: 'goods',
+  })
+  @IsOptional()
+  @IsEnum(supplier_category_enum)
+  supplier_category?: supplier_category_enum;
+
+  // Banco destino del pago inmediato al carrier (paso 17).
+  // Las 3 columnas cierran el bug latente de ap-bank-export.service.ts:39-41
+  // que las seleccionaba sin que existieran en la tabla.
+  @ApiPropertyOptional({ description: 'Bank name (required when supplier_category=carrier)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  bank_name?: string;
+
+  @ApiPropertyOptional({ description: 'Bank account number (required when supplier_category=carrier)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  bank_account_number?: string;
+
+  @ApiPropertyOptional({
+    description: 'Bank account type (savings|checking)',
+    enum: ['savings', 'checking'],
+  })
+  @IsOptional()
+  @ValidateIf((o) => o.bank_name || o.bank_account_number)
+  @IsString()
+  @MaxLength(20)
+  bank_account_type?: string;
 }

@@ -19,7 +19,10 @@ import {
   PayTableSessionDto,
   PayTableSessionResult,
   TableQrResponse,
+  PaymentPendingView,
+  ConfirmTablePaymentResult,
 } from '../interfaces';
+import type { IconName } from '../../../../../../shared/components/icon/icons.registry';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -170,6 +173,28 @@ export class TablesService {
       );
   }
 
+  /**
+   * Removes a single order item from the session's draft order
+   * (`DELETE /store/table-sessions/:id/items/:orderItemId`). Mirrors
+   * `addItems`: the backend recalculates totals and returns the SAME
+   * `TableSessionView` shape so the caller just replaces its local session.
+   *
+   * Backend gate (Frente 2): an un-fired item is deleted outright; a fired
+   * item whose kitchen ticket is still `pending` cancels the ticket + returns
+   * the fire-consumed stock; items in `in_preparation`/`ready`/`delivered`
+   * are rejected with 409 `TABLE_SESSION_ITEM_FIRED`.
+   */
+  removeItem(sessionId: number, orderItemId: number): Observable<TableSession> {
+    return this.http
+      .delete<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/items/${orderItemId}`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   closeSession(sessionId: number): Observable<TableSession> {
     return this.http
       .post<ApiResponse<TableSession>>(
@@ -195,6 +220,62 @@ export class TablesService {
       .patch<ApiResponse<TableSession>>(
         `${this.apiUrl}/store/table-sessions/${sessionId}/customer`,
         { customer_id: customerId },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  // ─── Staff payments (Restaurant Suite — C3) ─────────────────────────
+  /**
+   * List pending manual payments for the order backing a table session
+   * (`GET /store/table-sessions/:id/payments/pending`). The mesero UI
+   * renders this list under the "Pagos por confirmar" badge and offers
+   * a one-click "Confirmar" per row.
+   *
+   * Returns an empty array when the session has no pending payments —
+   * the section hides itself in that case.
+   */
+  listPendingPayments(sessionId: number): Observable<PaymentPendingView[]> {
+    return this.http
+      .get<ApiResponse<PaymentPendingView[]>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/payments/pending`,
+      )
+      .pipe(
+        map((res) => res.data ?? []),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Staff-side confirmation of a pending table-session payment
+   * (`POST /store/table-sessions/:id/payments/:paymentId/confirm`).
+   *
+   * Transitions a `state='pending'` payment row to `succeeded`, updates
+   * `orders.total_paid` / `remaining_balance`, and broadcasts the
+   * canonical events downstream. Manual methods only — gateway-issued
+   * payments are finalized by the webhook, not by staff.
+   *
+   * `tip_amount` is optional (the `payments` table doesn't carry a tip
+   * column, but the C3 DTO accepts it for echo-back).
+   *
+   * The session REMAINS OPEN — staff can confirm multiple payments in
+   * sequence until the order's grand_total is fully covered.
+   */
+  confirmPayment(
+    sessionId: number,
+    paymentId: number,
+    payload: { tip_amount?: number } = {},
+  ): Observable<ConfirmTablePaymentResult> {
+    const body: { tip_amount?: number } = {};
+    if (payload.tip_amount != null && payload.tip_amount > 0) {
+      body.tip_amount = payload.tip_amount;
+    }
+    return this.http
+      .post<ApiResponse<ConfirmTablePaymentResult>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/payments/${paymentId}/confirm`,
+        body,
       )
       .pipe(
         map((res) => res.data),
@@ -300,6 +381,19 @@ export class TablesService {
         return 'var(--color-warning)';
       case 'cleaning':
         return 'var(--color-text-muted)';
+    }
+  }
+
+  static statusIcon(status: TableStatus): IconName {
+    switch (status) {
+      case 'available':
+        return 'circle-check';
+      case 'occupied':
+        return 'utensils';
+      case 'reserved':
+        return 'calendar-clock';
+      case 'cleaning':
+        return 'sparkles';
     }
   }
 

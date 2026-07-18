@@ -16,5 +16,10 @@ import { GeocodingService } from './geocoding.service';
 @Module({
   controllers: [GeocodingController],
   providers: [GeocodingService],
+  // Exported so other domains (e.g. store/dispatch-routes map view) can
+  // forward-geocode addresses through the same Redis-cached, tenant-agnostic
+  // service. GeocodingService only depends on the @Global() REDIS_CLIENT, so
+  // importers do not need to wire any extra providers.
+  exports: [GeocodingService],
 })
 export class GeocodingModule {}

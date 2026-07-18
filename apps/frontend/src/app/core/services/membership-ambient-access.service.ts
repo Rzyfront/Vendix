@@ -28,6 +28,22 @@ export interface MembershipAccessEvent {
 }
 
 /**
+ * Payload emitted by the same stream when a biometric device pings the
+ * enrollment endpoint (`POST /store/memberships/access/enrollment-ping`) and
+ * the backend re-broadcasts it as an `enrollment` event. Used to capture a
+ * freshly-scanned fingerprint reference during credential creation.
+ *
+ * IMPORTANT: `external_ref` is an opaque device reference — it is stored on the
+ * hidden form control and sent to the API, but NEVER rendered to the operator.
+ */
+export interface MembershipEnrollmentEvent {
+  type: 'enrollment';
+  external_ref: string;
+  device_id: string | null;
+  at: string; // ISO
+}
+
+/**
  * Internal connection state for the ambient-access SSE stream. Exposed as a
  * signal so any consumer (and zoneless templates) can observe it without RxJS.
  */
@@ -87,6 +103,18 @@ export class MembershipAmbientAccessService {
   private readonly _occupancy = signal<Occupancy | null>(null);
   /** Read-only view of the live occupancy for consumers (C3). */
   readonly occupancy = this._occupancy.asReadonly();
+
+  /**
+   * Last biometric `enrollment` event seen on the stream. Exposed as its OWN
+   * signal (NOT merged into `lastEvent`) so existing consumers of `lastEvent()`
+   * — e.g. the aforo check-in panel — keep their narrow `MembershipAccessEvent`
+   * type intact. `null` until the first enrollment ping arrives.
+   */
+  private readonly _lastEnrollment = signal<MembershipEnrollmentEvent | null>(
+    null,
+  );
+  /** Read-only view of the last enrollment event for consumers. */
+  readonly lastEnrollment = this._lastEnrollment.asReadonly();
 
   /** Open the SSE stream. Idempotent — a no-op while already open/connecting. */
   connect(): void {
@@ -179,18 +207,23 @@ export class MembershipAmbientAccessService {
     if (typeof event.data !== 'string') return;
     // SSE comment lines (heartbeats) start with ":" — ignore them.
     if (event.data.startsWith(':')) return;
-    let parsed: MembershipAccessEvent | MembershipOccupancyEvent;
+    let parsed:
+      | MembershipAccessEvent
+      | MembershipOccupancyEvent
+      | MembershipEnrollmentEvent;
     try {
       parsed = JSON.parse(event.data) as
         | MembershipAccessEvent
-        | MembershipOccupancyEvent;
+        | MembershipOccupancyEvent
+        | MembershipEnrollmentEvent;
     } catch {
       this.lastError.set('Payload SSE malformado');
       return;
     }
     // Branch by the discriminator. The stream now multiplexes access
-    // DECISIONS (`membership-access`) and occupancy TICKS (`occupancy`).
-    // Any other/unknown payload is ignored so it never disturbs either flow.
+    // DECISIONS (`membership-access`), occupancy TICKS (`occupancy`) and
+    // biometric ENROLLMENT pings (`enrollment`). Any other/unknown payload is
+    // ignored so it never disturbs any flow.
     switch (parsed?.type) {
       case 'membership-access':
         this.lastEvent.set(parsed);
@@ -198,6 +231,11 @@ export class MembershipAmbientAccessService {
         break;
       case 'occupancy':
         this.applyOccupancyEvent(parsed);
+        break;
+      case 'enrollment':
+        // Live fingerprint reference. Do NOT toast or log — the value is
+        // captured silently by whoever armed a scan. Never surface it.
+        this._lastEnrollment.set(parsed);
         break;
       default:
         return;

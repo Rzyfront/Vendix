@@ -5,7 +5,11 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
-import { Prisma, dispatch_route_status_enum } from '@prisma/client';
+import {
+  Prisma,
+  dispatch_route_status_enum,
+  dispatch_route_stop_status_enum,
+} from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
   CreateDispatchRouteDto,
@@ -16,6 +20,7 @@ import {
 import { RouteNumberGenerator } from './utils/route-number-generator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { GeocodingService } from '../../ecommerce/geocoding/geocoding.service';
 import {
   buildStopsData,
   computeRouteTotals,
@@ -84,6 +89,151 @@ const DISPATCH_ROUTE_INCLUDE = {
   },
 };
 
+/**
+ * Map-view include: a slimmer, purpose-built projection for
+ * `GET :id/map-stops`. Unlike {@link DISPATCH_ROUTE_INCLUDE} it (a) restricts
+ * the stops to the drawable set — the active not-yet-delivered stops
+ * (`pending` / `in_progress`) PLUS the already `delivered` ones (the frontend
+ * paints delivered stops in green alongside the pending ones, regardless of the
+ * planilla's own state); `failed`/`rejected`/`released`/`partial` drop out — and
+ * (b) pulls the coordinate + address fields needed to resolve each stop's
+ * lat/lng: the note's `customer_address` snapshot, the order's
+ * `shipping_address_snapshot`, and the order's live shipping-address row
+ * (id + latitude/longitude — the FUENTE DE VERDAD for coordinates). The origin
+ * location's coordinates live on its linked `addresses` row (inventory_locations
+ * itself has no lat/lng column).
+ */
+const MAP_STOPS_INCLUDE = {
+  origin_location: {
+    select: {
+      id: true,
+      name: true,
+      addresses: { select: { latitude: true, longitude: true } },
+    },
+  },
+  stops: {
+    where: {
+      status: {
+        in: [
+          dispatch_route_stop_status_enum.pending,
+          dispatch_route_stop_status_enum.in_progress,
+          dispatch_route_stop_status_enum.delivered,
+        ],
+      },
+    },
+    orderBy: { stop_sequence: 'asc' as const },
+    include: {
+      dispatch_note: {
+        select: {
+          id: true,
+          customer_id: true,
+          customer_name: true,
+          customer_address: true,
+          order: {
+            select: {
+              shipping_address_id: true,
+              shipping_address_snapshot: true,
+              addresses_orders_shipping_address_idToaddresses: {
+                select: {
+                  id: true,
+                  latitude: true,
+                  longitude: true,
+                  address_line1: true,
+                  address_line2: true,
+                  city: true,
+                  state_province: true,
+                  country_code: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+/** Coordinate + address projection of an `addresses` row used by the map. */
+interface MapAddressRow {
+  id: number;
+  latitude: Prisma.Decimal | null;
+  longitude: Prisma.Decimal | null;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state_province: string | null;
+  country_code: string;
+}
+
+/** The dispatch_note shape loaded by {@link MAP_STOPS_INCLUDE}. */
+interface MapStopDispatchNote {
+  id: number;
+  customer_id: number;
+  customer_name: string | null;
+  customer_address: Prisma.JsonValue | null;
+  order: {
+    shipping_address_id: number | null;
+    shipping_address_snapshot: Prisma.JsonValue | null;
+    addresses_orders_shipping_address_idToaddresses: MapAddressRow | null;
+  } | null;
+}
+
+/** A single stop as loaded by {@link MAP_STOPS_INCLUDE}. */
+interface MapStopSource {
+  id: number;
+  stop_sequence: number;
+  status: dispatch_route_stop_status_enum;
+  dispatch_note: MapStopDispatchNote | null;
+}
+
+/** Structured address parts extracted from the best available source. */
+interface AddressParts {
+  line1: string | null;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+}
+
+/** Result of {@link DispatchRoutesService.resolveStopCoordinates}. */
+interface ResolvedStopCoords {
+  lat: number | null;
+  lng: number | null;
+  geocoded: boolean;
+  addressText: string | null;
+}
+
+/** A located stop in the map response (has resolvable coordinates). */
+export interface MapStopLocated {
+  stopId: number;
+  sequence: number;
+  status: dispatch_route_stop_status_enum;
+  customerName: string | null;
+  addressText: string | null;
+  lat: number;
+  lng: number;
+  geocoded: boolean;
+}
+
+/** An unlocated stop in the map response (no coordinates resolvable). */
+export interface MapStopUnlocated {
+  stopId: number;
+  sequence: number;
+  customerName: string | null;
+  addressText: string | null;
+}
+
+/** Full response body of `GET /store/dispatch-routes/:id/map-stops`. */
+export interface MapStopsResponse {
+  origin: { lat: number; lng: number } | null;
+  /** Active not-yet-delivered stops with coordinates (`pending`/`in_progress`). */
+  stops: MapStopLocated[];
+  /** Already `delivered` stops with coordinates (painted green on the map). */
+  delivered: MapStopLocated[];
+  /** Active stops (`pending`/`in_progress`) with no resolvable coordinates. */
+  unlocated: MapStopUnlocated[];
+}
+
 @Injectable()
 export class DispatchRoutesService {
   private readonly logger = new Logger(DispatchRoutesService.name);
@@ -91,6 +241,7 @@ export class DispatchRoutesService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly routeNumberGenerator: RouteNumberGenerator,
+    private readonly geocoding: GeocodingService,
   ) {}
 
   private getStoreId(): number {
@@ -251,6 +402,48 @@ export class DispatchRoutesService {
       }
     }
 
+    // Plan Despacho Economía — FASE 3 paso 11.
+    // Auto-configuración desde la política del método cuando el usuario no
+    // pasa el ejecutor explícitamente. Mantiene UX cero-fricción: el operador
+    // elige el método y el resto se rellena solo.
+    let resolvedVehicle = dto.vehicle_id ?? null;
+    let resolvedDriver = dto.driver_user_id ?? null;
+    let resolvedCarrier = dto.external_carrier_supplier_id ?? null;
+
+    if (dto.shipping_method_id) {
+      const method = await this.prisma.shipping_methods.findFirst({
+        where: { id: dto.shipping_method_id, is_system: false },
+      });
+      if (!method) {
+        throw new BadRequestException(
+          `Método de envío #${dto.shipping_method_id} no habilitado en la tienda`,
+        );
+      }
+      // Mismo método ⇒ autocompletar desde la política.
+      if (method.collects_payment && !dto.external_carrier_supplier_id) {
+        // noop marker — el carrier es opcional; se setea abajo.
+      }
+      if (!resolvedVehicle && method.default_vehicle_id) {
+        const v = await this.prisma.vehicles.findFirst({
+          where: { id: method.default_vehicle_id, store_id },
+        });
+        if (v) resolvedVehicle = method.default_vehicle_id;
+      }
+      if (!resolvedDriver && method.default_driver_user_id) {
+        resolvedDriver = method.default_driver_user_id;
+      }
+      if (!resolvedCarrier && method.default_carrier_supplier_id) {
+        const s = await this.prisma.suppliers.findFirst({
+          where: {
+            id: method.default_carrier_supplier_id,
+            store_id,
+            supplier_category: 'carrier',
+          },
+        });
+        if (s) resolvedCarrier = method.default_carrier_supplier_id;
+      }
+    }
+
     // Generate route_number
     let route_number: string;
     let attempts = 0;
@@ -274,13 +467,16 @@ export class DispatchRoutesService {
             route_number,
             route_code: dto.route_code,
             status: 'draft',
-            vehicle_id: dto.vehicle_id,
-            driver_user_id: dto.driver_user_id,
+            vehicle_id: resolvedVehicle,
+            driver_user_id: resolvedDriver,
             external_driver_name: dto.external_driver_name,
             external_driver_id_number: dto.external_driver_id_number,
             is_primary_driver_external: dto.is_primary_driver_external ?? false,
             assistants: dto.assistants as any,
             origin_location_id: dto.origin_location_id,
+            // Plan Despacho Economía — FASE 3 paso 11.
+            shipping_method_id: dto.shipping_method_id ?? null,
+            external_carrier_supplier_id: resolvedCarrier,
             planned_date: new Date(dto.planned_date),
             currency: dto.currency || 'COP',
             notes: dto.notes,
@@ -384,6 +580,63 @@ export class DispatchRoutesService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 3 paso 11.
+   * Helper de derivación: si la ruta no tiene `shipping_method_id` (caso
+   * legacy o ruta creada sin método explícito), lo deriva del set mayoritario
+   * de órdenes asociadas. Devuelve `null` si la ruta no tiene paradas o las
+   * órdenes tienen métodos mixtos sin mayoría clara.
+   *
+   * NO modifica el registro — es solo lectura. Usado por el monitor y por
+   * el listener de settlement (FASE 5) cuando necesita resolver la política.
+   */
+  async resolveRouteShippingMethod(id: number): Promise<number | null> {
+    const store_id = this.getStoreId();
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      select: { shipping_method_id: true },
+    });
+    if (!route) return null;
+    if (route.shipping_method_id) return route.shipping_method_id;
+
+    const method_counts = await this.prisma.dispatch_route_stops.groupBy({
+      by: ['dispatch_note_id'],
+      where: { route_id: id },
+    });
+    const note_ids = method_counts.map((s) => s.dispatch_note_id);
+    if (note_ids.length === 0) return null;
+
+    const notes = await this.prisma.dispatch_notes.findMany({
+      where: { id: { in: note_ids } },
+      select: { sales_order_id: true },
+    });
+    const order_ids = notes
+      .map((n) => n.sales_order_id)
+      .filter((x): x is number => !!x);
+    if (order_ids.length === 0) return null;
+
+    const orders = await this.prisma.orders.findMany({
+      where: { id: { in: order_ids } },
+      select: { shipping_method_id: true },
+    });
+    const counts = new Map<number, number>();
+    for (const o of orders) {
+      if (!o.shipping_method_id) continue;
+      counts.set(o.shipping_method_id, (counts.get(o.shipping_method_id) ?? 0) + 1);
+    }
+    if (counts.size === 0) return null;
+    // Devuelve el método con mayor recurrencia.
+    let best: number | null = null;
+    let best_count = 0;
+    for (const [mid, c] of counts) {
+      if (c > best_count) {
+        best = mid;
+        best_count = c;
+      }
+    }
+    return best;
   }
 
   async findOne(id: number) {
@@ -706,7 +959,7 @@ export class DispatchRoutesService {
       this.prisma.dispatch_routes.count({ where: { store_id, status: 'closed' } }),
       this.prisma.dispatch_routes.count({ where: { store_id, status: 'voided' } }),
       this.prisma.dispatch_routes.aggregate({
-        where: { store_id, status: { in: ['closed', 'in_transit', 'settling'] } },
+        where: { store_id, status: { in: ['closed', 'in_transit'] } },
         _sum: { total_to_collect: true, total_collected: true, cash_variance: true },
       }),
     ]);
@@ -737,9 +990,177 @@ export class DispatchRoutesService {
    * legacy `dispatch-notes?status=confirmed` endpoint returns notes that the
    * backend then rejects with 500 on `create()`.
    */
+  /**
+   * Plan Despacho Economía — FASE 8 paso 24.
+   * Monitor económico por ruta:
+   *   recaudo              = total_collected + total_prepaid
+   *   ingreso_flete        = SUM(shipping_amount) sobre dispatch_notes de la ruta
+   *   costo_transporte     = SUM(accounts_payable.original_amount donde source_type='dispatch_route' Y source_id=route.id)
+   *   margen_flete         = ingreso_flete − costo_transporte
+   *   estado_liquidacion   = 'pending' | 'paid' (derivado de ap.balance)
+   *
+   * Paginado (ResponseService.paginated no aplica aquí; usamos el envoltorio
+   * del controller vía `@Query`).
+   */
+  async getMonitor(query: {
+    page?: number;
+    limit?: number;
+    store_id?: number;
+  }) {
+    const store_id = query.store_id ?? this.getStoreId();
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.max(1, Math.min(100, query.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    // Traemos las rutas cerradas como foco del monitor.
+    const where: any = { store_id };
+    const [routes, total] = await Promise.all([
+      this.prisma.dispatch_routes.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ closed_at: 'desc' }, { id: 'desc' }],
+        include: {
+          shipping_method: {
+            select: { id: true, name: true, type: true },
+          },
+        },
+      }),
+      this.prisma.dispatch_routes.count({ where }),
+    ]);
+
+    // Para cada ruta, agregar ingreso de flete (suma de shipping_amount de
+    // sus dispatch_notes) y costo (AP source_type='dispatch_route').
+    const route_ids = routes.map((r) => r.id);
+    const [shipping_sums, ap_sums, executor_sums] = await Promise.all([
+      route_ids.length === 0
+        ? []
+        : this.prisma.dispatch_notes.groupBy({
+            by: ['route_id_fk' as any], // placeholder — Prisma no permite route_id directo en notes
+          }).catch(() => []),
+      route_ids.length === 0
+        ? []
+        : this.prisma.accounts_payable.groupBy({
+            by: ['source_id'],
+            where: {
+              organization_id: undefined as any,
+              source_type: 'dispatch_route',
+              source_id: { in: route_ids },
+            },
+            _sum: { original_amount: true, paid_amount: true },
+          }).catch(() => []),
+      route_ids.length === 0
+        ? []
+        : this.prisma.dispatch_routes.findMany({
+            where: { id: { in: route_ids } },
+            select: {
+              id: true,
+              shipping_method_id: true,
+              external_carrier_supplier_id: true,
+              vehicle_id: true,
+            },
+          }),
+    ]);
+
+    // Ingreso de flete: dispatch_notes no tienen route_id directo; lo derivamos
+    // vía dispatch_route_stops.sum(route_id) = route.id.
+    const stop_groups =
+      route_ids.length === 0
+        ? []
+        : await this.prisma.dispatch_route_stops.groupBy({
+            by: ['route_id'],
+            where: { route_id: { in: route_ids } },
+            _count: { dispatch_note_id: true },
+          });
+    const stops_by_route = new Map<number, number>();
+    stop_groups.forEach((g) =>
+      stops_by_route.set(Number(g.route_id), g._count.dispatch_note_id),
+    );
+
+    // Para el flete: sumamos shipping_amount de las notes asociadas por ruta.
+    const note_ids_by_route = new Map<number, number[]>();
+    for (const r of route_ids) {
+      const stops = await this.prisma.dispatch_route_stops.findMany({
+        where: { route_id: r },
+        select: { dispatch_note_id: true },
+      });
+      note_ids_by_route.set(
+        r,
+        stops.map((s) => s.dispatch_note_id),
+      );
+    }
+    const all_note_ids = Array.from(
+      new Set(
+        Array.from(note_ids_by_route.values()).flat(),
+      ),
+    );
+    // El ingreso de flete vive en `invoices.shipping_amount` (FASE 4 paso 13),
+    // no en dispatch_notes. Lo leemos vía la relación dispatch_note.invoice.
+    const notes =
+      all_note_ids.length === 0
+        ? []
+        : await this.prisma.dispatch_notes.findMany({
+            where: { id: { in: all_note_ids } },
+            select: { id: true, invoice: { select: { shipping_amount: true } } },
+          });
+    const shipping_by_note = new Map<number, number>();
+    notes.forEach((n) =>
+      shipping_by_note.set(n.id, Number(n.invoice?.shipping_amount || 0)),
+    );
+    const shipping_by_route = new Map<number, number>();
+    for (const [route_id, ids] of note_ids_by_route) {
+      const total_shipping = ids.reduce(
+        (acc, id) => acc + (shipping_by_note.get(id) ?? 0),
+        0,
+      );
+      shipping_by_route.set(route_id, total_shipping);
+    }
+
+    const ap_by_route = new Map<number, number>();
+    ap_sums.forEach((g: any) => {
+      ap_by_route.set(Number(g.source_id), Number(g._sum.original_amount || 0));
+    });
+
+    const data = routes.map((r) => {
+      const recaudo = Number(r.total_collected || 0) + Number(r.total_prepaid || 0);
+      const ingreso_flete = shipping_by_route.get(r.id) ?? 0;
+      const costo_transporte = ap_by_route.get(r.id) ?? 0;
+      const margen_flete = ingreso_flete - costo_transporte;
+      const ejecutor = r.shipping_method?.name ?? null;
+      const estado_liquidacion = costo_transporte > 0 ? 'paid' : 'pending';
+      return {
+        id: r.id,
+        route_number: r.route_number,
+        store_id: r.store_id,
+        status: r.status,
+        planned_date: r.planned_date,
+        closed_at: r.closed_at,
+        shipping_method: r.shipping_method,
+        external_carrier_supplier_id: r.external_carrier_supplier_id,
+        vehicle_id: r.vehicle_id,
+        recaudo,
+        ingreso_flete,
+        costo_transporte,
+        margen_flete,
+        ejecutor,
+        estado_liquidacion,
+      };
+    });
+
+    return {
+      data,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   async listAvailableNotes(search?: string) {
     const store_id = this.getStoreId();
 
+    // Plan Despacho Economía — FASE 6 paso 18. Sólo remisiones planillables:
+    // `outbound`/`customer_delivery` en `draft|confirmed`. Las `delivered`,
+    // `invoiced` y `voided` NO aparecen. El filtro de status es el source of
+    // truth del endpoint; antes dependía de la limpieza del cliente.
+    //
     // Find notes that are locked by an active (non-released) stop on ANY
     // route. Matches the partial unique index
     // `dispatch_route_stops_dispatch_note_id_active_idx` and the create()
@@ -753,7 +1174,9 @@ export class DispatchRoutesService {
 
     const where: any = {
       store_id,
-      status: { not: 'voided' },
+      direction: 'outbound',
+      subtype: 'customer_delivery',
+      status: { in: ['draft', 'confirmed'] },
     };
     if (search) {
       where.OR = [
@@ -773,7 +1196,9 @@ export class DispatchRoutesService {
         status: true,
         needs_collection: true,
         customer_address: true,
-        order: { select: { shipping_address_snapshot: true } },
+        order: {
+          select: { shipping_address_snapshot: true, shipping_method_id: true },
+        },
       },
     });
     return notes
@@ -787,6 +1212,362 @@ export class DispatchRoutesService {
         needs_collection: n.needs_collection,
         customer_address: n.customer_address,
         shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
+        shipping_method_id: n.order?.shipping_method_id ?? null,
       }));
+  }
+
+  // ==========================================================================
+  // Map view: not-yet-delivered stops with resolved coordinates + a suggested
+  // route origin. Consumed by the planilla detail map.
+  // ==========================================================================
+
+  /**
+   * Build the payload for `GET /store/dispatch-routes/:id/map-stops`.
+   *
+   * Tenant-isolated exactly like {@link findOne}: the route is loaded with a
+   * `{ id, store_id }` filter so a route from another store yields a 404
+   * (dispatch_routes is NOT auto-scoped by the Prisma extension — this domain
+   * scopes manually, mirroring the rest of the service). Works regardless of the
+   * planilla's own state (draft/dispatched/closed/…): the stop set is drawn from
+   * `pending` / `in_progress` (active) PLUS `delivered` (see
+   * {@link MAP_STOPS_INCLUDE}); the two are partitioned so the frontend can paint
+   * delivered stops green alongside the pending ones. Each stop's coordinates are
+   * resolved via {@link resolveStopCoordinates}, preserving `stop_sequence` order:
+   *   - active stops WITH coords → `stops[]`;
+   *   - active stops WITHOUT coords → `unlocated[]`;
+   *   - delivered stops WITH coords → `delivered[]`;
+   *   - delivered stops WITHOUT coords → dropped (nothing to draw).
+   *
+   * `origin` is the coordinate of the route's `origin_location` (read from its
+   * linked `addresses` row); `null` when the location has no address/coords.
+   */
+  async getMapStops(id: number): Promise<MapStopsResponse> {
+    const store_id = this.getStoreId();
+
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      include: MAP_STOPS_INCLUDE,
+    });
+    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+
+    const originAddr = route.origin_location?.addresses ?? null;
+    const originLat = this.decimalToCoord(originAddr?.latitude ?? null);
+    const originLng = this.decimalToCoord(originAddr?.longitude ?? null);
+    const origin =
+      originLat != null && originLng != null
+        ? { lat: originLat, lng: originLng }
+        : null;
+
+    const stops: MapStopLocated[] = [];
+    const delivered: MapStopLocated[] = [];
+    const unlocated: MapStopUnlocated[] = [];
+
+    // Resolve sequentially: {@link resolveStopCoordinates} may hit the geocoding
+    // provider, and serial calls respect Nominatim's 1 req/sec usage policy
+    // (results are Redis-cached anyway, so warm stops are effectively free).
+    for (const stop of route.stops as unknown as MapStopSource[]) {
+      const resolved = await this.resolveStopCoordinates(stop);
+      const customerName = stop.dispatch_note?.customer_name ?? null;
+      const isDelivered =
+        stop.status === dispatch_route_stop_status_enum.delivered;
+      const hasCoords = resolved.lat != null && resolved.lng != null;
+
+      if (hasCoords) {
+        const located: MapStopLocated = {
+          stopId: stop.id,
+          sequence: stop.stop_sequence,
+          status: stop.status,
+          customerName,
+          addressText: resolved.addressText,
+          lat: resolved.lat as number,
+          lng: resolved.lng as number,
+          geocoded: resolved.geocoded,
+        };
+        // Delivered stops feed the green trail; active ones feed the pending set.
+        (isDelivered ? delivered : stops).push(located);
+      } else if (!isDelivered) {
+        // Only active stops surface as unlocated; a delivered stop we can't draw
+        // is dropped silently (there is no marker to place on the map).
+        unlocated.push({
+          stopId: stop.id,
+          sequence: stop.stop_sequence,
+          customerName,
+          addressText: resolved.addressText,
+        });
+      }
+    }
+
+    return { origin, stops, delivered, unlocated };
+  }
+
+  /**
+   * Resolve a stop's delivery coordinates with the following cascade:
+   *   (a) `dispatch_note.customer_address` JSON lat/lng,
+   *   (b) `order.shipping_address_snapshot` JSON lat/lng,
+   *   (c) the order's shipping `addresses` row lat/lng (FUENTE DE VERDAD),
+   *   (d) the customer's stored `shipping` address row lat/lng (B2B/POS or
+   *       legacy notes with no order),
+   *   (e) forward-geocode the composed address text; on success PERSIST the
+   *       lat/lng back onto a known `addresses` row (scoped) and flag
+   *       `geocoded: true`.
+   *
+   * Fail-open: geocoding is wrapped in try/catch and NEVER makes the request
+   * fail — on any error the stop is returned as `{ lat: null, lng: null,
+   * geocoded: false }` and the caller lists it under `unlocated[]`.
+   */
+  private async resolveStopCoordinates(
+    stop: MapStopSource,
+  ): Promise<ResolvedStopCoords> {
+    const dn = stop.dispatch_note;
+    const orderAddrRow =
+      dn?.order?.addresses_orders_shipping_address_idToaddresses ?? null;
+
+    const withText = (
+      coords: { lat: number | null; lng: number | null; geocoded: boolean },
+      customerAddr: MapAddressRow | null,
+    ): ResolvedStopCoords => ({
+      ...coords,
+      addressText: this.buildAddressText(
+        this.extractAddressParts(dn, orderAddrRow, customerAddr),
+      ),
+    });
+
+    // (a) remisión delivery snapshot.
+    const fromNoteJson = this.readCoordsFromJson(dn?.customer_address ?? null);
+    if (fromNoteJson) return withText({ ...fromNoteJson, geocoded: false }, null);
+
+    // (b) order shipping snapshot.
+    const fromOrderJson = this.readCoordsFromJson(
+      dn?.order?.shipping_address_snapshot ?? null,
+    );
+    if (fromOrderJson) return withText({ ...fromOrderJson, geocoded: false }, null);
+
+    // (c) order live shipping-address row.
+    const fromOrderRow = this.readCoordsFromRow(orderAddrRow);
+    if (fromOrderRow) return withText({ ...fromOrderRow, geocoded: false }, null);
+
+    // (d) customer's stored shipping address (no order / POS / B2B / legacy).
+    let customerAddr: MapAddressRow | null = null;
+    if (dn?.customer_id) {
+      customerAddr = await this.findCustomerShippingAddress(dn.customer_id);
+      const fromCustomer = this.readCoordsFromRow(customerAddr);
+      if (fromCustomer) {
+        return withText({ ...fromCustomer, geocoded: false }, customerAddr);
+      }
+    }
+
+    // (e) forward-geocode + best-effort persist.
+    const geo = await this.geocodeAndPersist(dn, orderAddrRow, customerAddr);
+    return withText(geo, customerAddr);
+  }
+
+  /**
+   * Forward-geocode the stop's composed address text and, on a hit, persist the
+   * coordinate back onto the `addresses` row we can identify (order shipping row
+   * first, else the customer's shipping row). Returns `geocoded: true` only when
+   * the provider resolved a coordinate. NEVER throws — a provider/persist
+   * failure degrades to `{ null, null, false }`.
+   */
+  private async geocodeAndPersist(
+    dn: MapStopDispatchNote | null,
+    orderAddrRow: MapAddressRow | null,
+    customerAddr: MapAddressRow | null,
+  ): Promise<{ lat: number | null; lng: number | null; geocoded: boolean }> {
+    const empty = { lat: null, lng: null, geocoded: false };
+    try {
+      const parts = this.extractAddressParts(dn, orderAddrRow, customerAddr);
+      const query = this.buildGeocodeQuery(parts);
+      if (!query) return empty;
+
+      const { lat, lng } = await this.geocoding.forward(query);
+      if (lat == null || lng == null) return empty;
+
+      // Persist only when we hold a concrete addresses.id (never guess). The
+      // scoped updateMany injects store_id, so a cross-tenant row is a silent
+      // no-op instead of a leak.
+      const addrId = orderAddrRow?.id ?? customerAddr?.id ?? null;
+      if (addrId != null) {
+        await this.persistAddressCoords(addrId, lat, lng);
+      }
+      return { lat, lng, geocoded: true };
+    } catch (err) {
+      this.logger.warn(`Geocoding a stop address failed (fail-open): ${err}`);
+      return empty;
+    }
+  }
+
+  /**
+   * Persist resolved coordinates onto an `addresses` row. Uses the store-scoped
+   * `updateMany` (not `update`) so the injected `store_id` acts as a where
+   * filter — a row belonging to another store (or with a null store_id) simply
+   * matches nothing instead of throwing P2025. Best-effort: swallows errors.
+   */
+  private async persistAddressCoords(
+    addressId: number,
+    lat: number,
+    lng: number,
+  ): Promise<void> {
+    try {
+      await this.prisma.addresses.updateMany({
+        where: { id: addressId },
+        data: { latitude: lat, longitude: lng },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Persisting geocoded coords on address #${addressId} failed: ${err}`,
+      );
+    }
+  }
+
+  /**
+   * Find the customer's stored `shipping` address in the current store. The
+   * `addresses` model IS store-scoped, so the injected `store_id` guarantees
+   * tenant isolation. Returns the primary shipping address first. Fail-open.
+   */
+  private async findCustomerShippingAddress(
+    customerId: number,
+  ): Promise<MapAddressRow | null> {
+    try {
+      return await this.prisma.addresses.findFirst({
+        where: { user_id: customerId, type: 'shipping' },
+        orderBy: [{ is_primary: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          latitude: true,
+          longitude: true,
+          address_line1: true,
+          address_line2: true,
+          city: true,
+          state_province: true,
+          country_code: true,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Loading customer #${customerId} shipping address failed: ${err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Extract structured address parts from the first source that carries a
+   * non-empty `address_line1`, in the same priority as the coordinate cascade:
+   * note snapshot → order snapshot → order row → customer row.
+   */
+  private extractAddressParts(
+    dn: MapStopDispatchNote | null,
+    orderAddrRow: MapAddressRow | null,
+    customerAddr: MapAddressRow | null,
+  ): AddressParts {
+    const fromNote = this.partsFromJson(dn?.customer_address ?? null);
+    if (fromNote) return fromNote;
+    const fromOrderSnap = this.partsFromJson(
+      dn?.order?.shipping_address_snapshot ?? null,
+    );
+    if (fromOrderSnap) return fromOrderSnap;
+    const fromOrderRow = this.partsFromRow(orderAddrRow);
+    if (fromOrderRow) return fromOrderRow;
+    const fromCustomer = this.partsFromRow(customerAddr);
+    if (fromCustomer) return fromCustomer;
+    return { line1: null, line2: null, city: null, state: null, country: null };
+  }
+
+  /** Parts from an address JSON blob (column-name keys, with legacy aliases). */
+  private partsFromJson(value: Prisma.JsonValue | null): AddressParts | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const o = value as Record<string, unknown>;
+    const line1 = this.asString(o.address_line1 ?? o.line1 ?? o.address);
+    if (!line1) return null;
+    return {
+      line1,
+      line2: this.asString(o.address_line2 ?? o.line2),
+      city: this.asString(o.city),
+      state: this.asString(o.state_province ?? o.state),
+      country: this.asString(o.country_code ?? o.country),
+    };
+  }
+
+  /** Parts from an `addresses` table row. */
+  private partsFromRow(row: MapAddressRow | null): AddressParts | null {
+    if (!row) return null;
+    const line1 = this.asString(row.address_line1);
+    if (!line1) return null;
+    return {
+      line1,
+      line2: this.asString(row.address_line2),
+      city: this.asString(row.city),
+      state: this.asString(row.state_province),
+      country: this.asString(row.country_code),
+    };
+  }
+
+  /** Human-readable one-line address for the map card. Null when empty. */
+  private buildAddressText(parts: AddressParts): string | null {
+    const text = [parts.line1, parts.line2, parts.city, parts.state]
+      .map((p) => (p ? p.trim() : ''))
+      .filter((p) => p.length > 0)
+      .join(', ');
+    return text.length > 0 ? text : null;
+  }
+
+  /** Geocoding query string ("line1, city, state, country"). Null when no line1. */
+  private buildGeocodeQuery(parts: AddressParts): string | null {
+    if (!parts.line1) return null;
+    const query = [parts.line1, parts.city, parts.state, parts.country]
+      .map((p) => (p ? p.trim() : ''))
+      .filter((p) => p.length > 0)
+      .join(', ');
+    return query.length > 0 ? query : null;
+  }
+
+  /** Read numeric lat/lng from a JSON address blob (accepts string or number). */
+  private readCoordsFromJson(
+    value: Prisma.JsonValue | null,
+  ): { lat: number; lng: number } | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const o = value as Record<string, unknown>;
+    const lat = this.toCoord(o.latitude ?? o.lat);
+    const lng = this.toCoord(o.longitude ?? o.lng ?? o.lon);
+    if (lat == null || lng == null) return null;
+    return { lat, lng };
+  }
+
+  /** Read numeric lat/lng from an `addresses` row (Decimal columns). */
+  private readCoordsFromRow(
+    row: MapAddressRow | null,
+  ): { lat: number; lng: number } | null {
+    if (!row) return null;
+    const lat = this.decimalToCoord(row.latitude);
+    const lng = this.decimalToCoord(row.longitude);
+    if (lat == null || lng == null) return null;
+    return { lat, lng };
+  }
+
+  /** Normalize a Prisma.Decimal|null coordinate to a validated number|null. */
+  private decimalToCoord(value: Prisma.Decimal | null | undefined): number | null {
+    if (value == null) return null;
+    return this.toCoord(value.toString());
+  }
+
+  /**
+   * Coerce an unknown coordinate value to a finite number within valid
+   * geographic bounds. Rejects the (0,0) "Null Island" sentinel implicitly by
+   * bounds only at the pair level (see readCoords*), so a legitimate 0 on ONE
+   * axis is still accepted here.
+   */
+  private toCoord(value: unknown): number | null {
+    if (value == null) return null;
+    const n = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(n)) return null;
+    if (Math.abs(n) > 180) return null;
+    return n;
+  }
+
+  /** Trim a value to a non-empty string, or null. */
+  private asString(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const t = value.trim();
+    return t.length > 0 ? t : null;
   }
 }

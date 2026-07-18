@@ -22,6 +22,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { TableContextService } from '../../services/table-context.service';
 import { environment } from '../../../../../../environments/environment';
 import {
   CheckoutService,
@@ -120,8 +121,6 @@ export class CheckoutComponent implements OnInit {
   readonly location_prompt_shown = signal(false);
   /** Controls the location-permission modal visibility. */
   readonly show_location_modal = signal(false);
-  /** True after the customer grants location: renders the map picker. */
-  readonly map_enabled = signal(false);
   /** Current map center / captured coordinate (never rendered as text). */
   readonly map_center = signal<{ lat: number; lng: number } | null>(null);
 
@@ -302,6 +301,9 @@ export class CheckoutComponent implements OnInit {
   private tenant_facade = inject(TenantFacade);
   private geolocation = inject(GeolocationService);
   private geocoding = inject(GeocodingService);
+  // QR dine-in (Step 8): slider must NOT re-add in mesa-mode — the
+  // originating product-card has already routed via the mesa chokepoint.
+  private tableContext = inject(TableContextService);
   readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
   private guest_data_decision_made = false;
   private guest_checkout_data: GuestCheckoutData | null = null;
@@ -315,11 +317,13 @@ export class CheckoutComponent implements OnInit {
   ) {
     this.initForm();
 
-    // Offer the location opt-in modal ONCE — the first time the customer is on
-    // the address step of a physical-item cart with the new-address form open,
-    // and only when the browser supports geolocation. Reads step/cart/use_new
-    // as reactive deps; the guard runs untracked so writing the flag signals
-    // does not re-trigger the effect.
+    // Offer location capture ONCE — the first time the customer is on the
+    // address step of a physical-item cart with the new-address form open, and
+    // only when the browser supports geolocation. Reads step/cart/use_new as
+    // reactive deps; the guard runs untracked so writing the flag signals does
+    // not re-trigger the effect. The actual decision (use GPS directly vs. show
+    // the opt-in modal vs. stay manual) is delegated to maybeOfferLocation()
+    // based on the current permission state.
     effect(() => {
       const isAddressStep = this.step() === 1;
       const cart = this.cart();
@@ -334,7 +338,7 @@ export class CheckoutComponent implements OnInit {
           this.geolocation.isSupported()
         ) {
           this.location_prompt_shown.set(true);
-          this.show_location_modal.set(true);
+          void this.maybeOfferLocation();
         }
       });
     });
@@ -502,8 +506,60 @@ export class CheckoutComponent implements OnInit {
       )
       .subscribe(() => this.loadShippingOptions());
 
+    // Forward-geocode what the customer TYPES so the map re-centers on it. The
+    // reverse-geocode fill uses `emitEvent: false`, so only genuine typing
+    // reaches here — a map/GPS result never re-triggers this. 800ms debounce
+    // coalesces keystrokes; the backend proxy caches per query.
+    this.address_form
+      .get('address_line1')
+      ?.valueChanges.pipe(
+        debounceTime(800),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((line1: string) => this.forwardGeocodeFromForm(line1));
+
     // Load departments for default country
     this.loadDepartments();
+  }
+
+  /**
+   * Geocodes the free-text address being typed → coordinate, and re-centers the
+   * map on it (dropping the marker). Query = line1 + selected city name +
+   * "Colombia". Moving the map this way does NOT emit `located`, so it never
+   * fights the reverse-geocode that fills the form when the marker is dragged.
+   * The resolved point is stored silently on the hidden lat/lng controls.
+   */
+  private forwardGeocodeFromForm(line1: string | null): void {
+    const base = (line1 ?? '').trim();
+    if (base.length < 5) return;
+
+    const cityId = this.address_form.get('city')?.value;
+    const cityName =
+      this.cities().find((c) => c.id === Number(cityId))?.name ?? '';
+    const query = [base, cityName, 'Colombia'].filter(Boolean).join(', ');
+
+    this.geocoding
+      .forward(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res?.lat == null || res?.lng == null) return;
+          const coords = { lat: res.lat, lng: res.lng };
+          this.map_center.set(coords);
+          // Persist the point silently (never shown as text). Dragging the
+          // marker afterward re-geocodes it precisely.
+          this.address_form
+            .get('latitude')
+            ?.setValue(coords.lat, { emitEvent: false });
+          this.address_form
+            .get('longitude')
+            ?.setValue(coords.lng, { emitEvent: false });
+        },
+        error: () => {
+          // Forward-geocode failed → leave the map as-is; manual form works.
+        },
+      });
   }
 
   private async loadDepartments(): Promise<void> {
@@ -620,17 +676,35 @@ export class CheckoutComponent implements OnInit {
 
   // ========== GEO-LOCATION HANDLERS ==========
 
+  /**
+   * Decides how to capture location based on the current permission state:
+   * - `granted` → the customer already allowed it, so use GPS directly (no
+   *   modal) and prefill the form.
+   * - `denied`  → previously blocked; do not show the modal (keep manual form).
+   * - `prompt`/unknown → offer the opt-in modal so the browser prompt fires on
+   *   accept.
+   */
+  private async maybeOfferLocation(): Promise<void> {
+    const state = await this.geolocation.getPermissionState();
+    if (state === 'granted') {
+      void this.onLocationAccept();
+    } else if (state === 'denied' || state === 'unsupported') {
+      // No modal: nagging a blocked customer is pointless — stay on manual form.
+      this.show_location_modal.set(false);
+    } else {
+      this.show_location_modal.set(true);
+    }
+  }
+
   /** Customer accepted the prompt: request GPS, enable the map, prefill form. */
   async onLocationAccept(): Promise<void> {
     this.show_location_modal.set(false);
     try {
-      const coords = await this.geolocation.getCurrentPosition();
+      const coords = await this.geolocation.getPrecisePosition();
       this.map_center.set(coords);
-      this.map_enabled.set(true);
       this.applyReverseGeocode(coords);
     } catch {
       // Permission denied / unsupported / timeout → stay on the manual form.
-      this.map_enabled.set(false);
       this.toast.info(
         'No pudimos obtener tu ubicación. Puedes ingresar la dirección manualmente.',
         'Ubicación no disponible',
@@ -643,9 +717,13 @@ export class CheckoutComponent implements OnInit {
     this.show_location_modal.set(false);
   }
 
-  /** Marker moved on the map: re-geocode and refresh coordinates + fields. */
+  /**
+   * Marker moved by the user (drag/click): re-geocode and refresh the exact
+   * coordinate + address fields. We deliberately do NOT push `map_center` here —
+   * the marker is already where the user put it, and re-centering would fight the
+   * drag. `map_center` is reserved for programmatic locates (GPS / typed address).
+   */
   onMapLocated(coords: { lat: number; lng: number }): void {
-    this.map_center.set(coords);
     this.applyReverseGeocode(coords);
   }
 
@@ -676,13 +754,21 @@ export class CheckoutComponent implements OnInit {
     const form = this.address_form;
 
     if (address.address_line1) {
-      form.get('address_line1')?.setValue(address.address_line1);
+      // emitEvent:false → this reverse fill must NOT re-trigger the forward
+      // geocode watcher on address_line1 (that would fight the map).
+      form.get('address_line1')?.setValue(address.address_line1, {
+        emitEvent: false,
+      });
     }
     if (address.address_line2) {
-      form.get('address_line2')?.setValue(address.address_line2);
+      form.get('address_line2')?.setValue(address.address_line2, {
+        emitEvent: false,
+      });
     }
     if (address.postal_code) {
-      form.get('postal_code')?.setValue(address.postal_code);
+      form.get('postal_code')?.setValue(address.postal_code, {
+        emitEvent: false,
+      });
     }
 
     const cc = (address.country_code || '').toUpperCase();
@@ -1450,7 +1536,14 @@ export class CheckoutComponent implements OnInit {
   }
 
   onAddToCartFromSlider(product: EcommerceProduct): void {
-    const result = this.cart_service.addToCart(product.id, 1);
+    // QR dine-in (Step 8): if a mesa is active, the originating product-card
+    // (Step 7 visibility) already routed via the mesa chokepoint. Re-adding
+    // here would double the items on the bill (BUG A). Defense-in-depth guard.
+    if (this.tableContext.isActive()) {
+      return;
+    }
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cart_service.addProduct(product.id, 1);
     if (result) result.subscribe();
   }
 

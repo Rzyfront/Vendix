@@ -17,7 +17,6 @@
             (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
           <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-            [showActions]="false"
             [filters]="filterConfigs" [filterValues]="filterValues" [actions]="dropdownActions" [isLoading]="isLoading()"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="clearFilters()"
             (actionClick)="onActionClick($event)"></app-options-dropdown>
