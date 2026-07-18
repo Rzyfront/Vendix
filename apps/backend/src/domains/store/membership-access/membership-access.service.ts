@@ -612,19 +612,32 @@ export class MembershipAccessService {
    * The biometric (`external_ref`) email NEVER includes the device reference —
    * the template is an enrollment notice only, in compliance with Ley 1581.
    */
+  /**
+   * Detects placeholder emails used when a member is created without a real
+   * email (empty/null, or the `@noemail.local` / `@placeholder.vendix.com`
+   * placeholders emitted by the bulk-import scanner). Operators must update
+   * the customer's ficha with a real email before a credential can be created
+   * or resent.
+   */
+  private isPlaceholderEmail(email: string | null | undefined): boolean {
+    const e = (email ?? '').trim().toLowerCase();
+    if (!e) return true; // empty counts as missing
+    return e.endsWith('@noemail.local') || e.endsWith('@placeholder.vendix.com');
+  }
+
   private async sendCredentialEmail(args: {
     storeId: number;
     customer: { id: number; first_name: string | null; last_name: string | null; email: string | null };
     credentialType: 'qr' | 'pin' | 'external_ref';
     credentialValue: string;
-  }): Promise<boolean> {
+  }): Promise<{ sent: boolean; error?: string }> {
     const { storeId, customer, credentialType, credentialValue } = args;
     const to = customer.email?.trim();
     if (!to) {
       this.logger.warn(
         `membership-access: no email for customer_id=${customer.id} (store=${storeId}); skipping credential email`,
       );
-      return false;
+      return { sent: false, error: 'El socio no tiene email' };
     }
 
     const { storeName, organizationName } =
@@ -663,7 +676,7 @@ export class MembershipAccessService {
           ],
           text,
         );
-        return result.success;
+        return { sent: result.success, error: result.success ? undefined : result.error };
       }
 
       if (credentialType === 'pin') {
@@ -674,7 +687,7 @@ export class MembershipAccessService {
             pin: credentialValue,
           });
         const result = await this.emailService.sendEmail(to, subject, html, text);
-        return result.success;
+        return { sent: result.success, error: result.success ? undefined : result.error };
       }
 
       // external_ref (fingerprint) — enrollment notice ONLY. No value leaked.
@@ -684,12 +697,13 @@ export class MembershipAccessService {
           storeName: storeLabel,
         });
       const result = await this.emailService.sendEmail(to, subject, html, text);
-      return result.success;
+      return { sent: result.success, error: result.success ? undefined : result.error };
     } catch (err) {
+      const message = (err as Error).message;
       this.logger.warn(
-        `membership-access: credential email failed (store=${storeId}, customer=${customer.id}, type=${credentialType}): ${(err as Error).message}`,
+        `membership-access: credential email failed (store=${storeId}, customer=${customer.id}, type=${credentialType}): ${message}`,
       );
-      return false;
+      return { sent: false, error: message };
     }
   }
 
@@ -729,6 +743,21 @@ export class MembershipAccessService {
       throw new VendixHttpException(
         ErrorCodes.SYS_NOT_FOUND_001,
         'El cliente (socio) no existe',
+      );
+    }
+
+    // 1b. Reject placeholder/missing emails BEFORE creating the credential.
+    //     Members can be created with `email = null` (CustomersService.create
+    //     allows optional email) or with a `@noemail.local` placeholder from
+    //     the bulk-import scanner. Without this guard the credential is
+    //     created but the email silently never arrives, leaving the operator
+    //     with no way to know why.
+    if (this.isPlaceholderEmail(customer.email)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        customer.email
+          ? 'El socio tiene un correo de marcador (sin email real). Actualiza su ficha de cliente con un correo válido antes de crear la credencial.'
+          : 'El socio no tiene correo electrónico. Agrégalo en su ficha de cliente antes de crear la credencial.',
       );
     }
 
@@ -799,7 +828,7 @@ export class MembershipAccessService {
     //    fails, the operator still sees the returned `email_sent: false`
     //    and can re-share the value manually (it is the only time it is
     //    exposed in clear text).
-    const emailSent = await this.sendCredentialEmail({
+    const emailResult = await this.sendCredentialEmail({
       storeId,
       customer,
       credentialType: dto.credential_type as 'qr' | 'pin' | 'external_ref',
@@ -826,8 +855,67 @@ export class MembershipAccessService {
       // The raw value is one-shot — the list endpoint masks it. Frontend
       // uses it to confirm/display the generated QR/PIN or the fingerprint
       // reference on the same screen.
-      email_sent: emailSent,
+      email_sent: emailResult.sent,
+      email_error: emailResult.error ?? null,
     };
+  }
+
+  /**
+   * Re-send the credential email for an existing credential row. Used by the
+   * operator when the original create email never arrived (provider outage,
+   * transient failure) or when the member's email was fixed after the
+   * credential was created. Reuses `sendCredentialEmail`, which for
+   * `external_ref` (biometric) sends the enrollment notice ONLY — the device
+   * reference is never leaked.
+   *
+   * Permission: same `store:membership_access:create` as the create endpoint
+   * (a re-send is a re-issuance of the credential notification).
+   */
+  async resendCredentialEmail(credentialId: number) {
+    const storeId = this.requireStoreId();
+
+    const credential = await this.credentials.findFirst({
+      where: { id: credentialId, store_id: storeId },
+      select: {
+        id: true,
+        credential_type: true,
+        credential_value: true,
+        customer_id: true,
+      },
+    });
+    if (!credential) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'La credencial no existe',
+      );
+    }
+
+    const customer = await this.prisma.users.findUnique({
+      where: { id: credential.customer_id },
+      select: { id: true, first_name: true, last_name: true, email: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'El cliente (socio) no existe',
+      );
+    }
+    if (this.isPlaceholderEmail(customer.email)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        customer.email
+          ? 'El socio tiene un correo de marcador (sin email real). Actualiza su ficha de cliente con un correo válido.'
+          : 'El socio no tiene correo electrónico. Agrégalo en su ficha de cliente.',
+      );
+    }
+
+    const result = await this.sendCredentialEmail({
+      storeId,
+      customer,
+      credentialType: credential.credential_type as 'qr' | 'pin' | 'external_ref',
+      credentialValue: credential.credential_value,
+    });
+    return { email_sent: result.sent, email_error: result.error ?? null };
   }
 
   async listCredentials(query: CredentialQueryDto) {

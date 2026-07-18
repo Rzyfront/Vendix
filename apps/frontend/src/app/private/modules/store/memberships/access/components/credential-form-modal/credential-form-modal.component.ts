@@ -511,14 +511,17 @@ export class MembershipCredentialFormModalComponent {
 
     // Surface the one-shot value to the operator. The backend never returns
     // it again, so this toast is the only chance to read it back after submit.
+    // The success message reflects whether the email was actually delivered;
+    // a separate warning (below) carries the backend reason on failure.
+    const emailSuffix = emailSent ? 'enviado por email' : 'no se pudo enviar el email';
     if (type === 'qr') {
       this.toastService.success(
-        `QR creado: ${value} — enviado por email`,
+        `QR creado: ${value} — ${emailSuffix}`,
         'Credencial creada',
       );
     } else if (type === 'pin') {
       this.toastService.success(
-        `PIN creado: ${value} — enviado por email`,
+        `PIN creado: ${value} — ${emailSuffix}`,
         'Credencial creada',
       );
     } else {
@@ -526,16 +529,16 @@ export class MembershipCredentialFormModalComponent {
       // that must NEVER be surfaced (Ley 1581). Confirm generically; the raw
       // value is never read, rendered, or logged here.
       this.toastService.success(
-        'Huella registrada correctamente — aviso enviado al socio',
+        emailSent
+          ? 'Huella registrada correctamente — aviso enviado al socio'
+          : 'Huella registrada correctamente — no se pudo enviar el aviso',
         'Credencial creada',
       );
     }
 
     if (!emailSent) {
-      this.toastService.warning(
-        'No se pudo enviar el email (el socio no tiene email configurado o falló el envío).',
-        'Aviso',
-      );
+      const reason = created.email_error ? `: ${created.email_error}` : '';
+      this.toastService.warning(`No se pudo enviar el email${reason}.`, 'Aviso');
     }
 
     this.form.reset({ credential_type: 'qr', is_active: true });

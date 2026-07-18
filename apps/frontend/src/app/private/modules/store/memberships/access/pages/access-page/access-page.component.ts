@@ -408,6 +408,12 @@ export class MembershipAccessPageComponent implements OnInit {
   readonly credsTypeFilter = signal<GymCredentialType | 'all'>('all');
   credsFilterValues: FilterValues = {};
   private credentialsLoaded = false;
+  /**
+   * ID of the credential currently being re-emailed (drives the disabled state
+   * of the "Reenviar email" action button per row). Null when no resend is in
+   * flight.
+   */
+  readonly resendingCredentialId = signal<number | null>(null);
 
   readonly tabs: StickyHeaderTab[] = [
     { id: 'aforo', label: 'Aforo', icon: 'users' },
@@ -630,6 +636,14 @@ export class MembershipAccessPageComponent implements OnInit {
   ];
 
   readonly credsActions = computed<TableAction[]>(() => [
+    {
+      label: 'Reenviar email',
+      icon: 'mail',
+      variant: 'ghost',
+      tooltip: 'Reenviar email de la credencial al socio',
+      disabled: (item: GymAccessCredential) => this.resendingCredentialId() === item.id,
+      action: (item: GymAccessCredential) => this.resendCredentialEmail(item),
+    },
     {
       label: 'Editar',
       icon: 'edit',
@@ -1328,5 +1342,36 @@ export class MembershipAccessPageComponent implements OnInit {
 
   onCredentialSaved(): void {
     this.loadCredentials();
+  }
+
+  /**
+   * Re-send the credential-creation email to the member. Surfaces a success
+   * toast when the backend delivered, a warning with the backend reason when
+   * it did not, and an error toast on transport/HTTP failure. The per-row
+   * "Reenviar email" button is disabled while this credential's request is in
+   * flight (see `resendingCredentialId`).
+   */
+  resendCredentialEmail(credential: GymAccessCredential): void {
+    if (this.resendingCredentialId() !== null) return;
+    this.resendingCredentialId.set(credential.id);
+    this.accessService
+      .resendCredentialEmail(credential.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.resendingCredentialId.set(null);
+          if (res.email_sent) {
+            this.toastService.success('Email reenviado al socio');
+          } else {
+            this.toastService.warning(
+              `No se pudo reenviar el email${res.email_error ? `: ${res.email_error}` : ''}`,
+            );
+          }
+        },
+        error: () => {
+          this.resendingCredentialId.set(null);
+          this.toastService.error('Error al reenviar el email');
+        },
+      });
   }
 }
