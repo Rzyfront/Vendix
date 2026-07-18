@@ -1,0 +1,6 @@
+:host {
+  display: contents;
+}
+
+// El countdown usa tabular-nums (Tailwind) para que los dígitos no "salten"
+// mientras cambian cada segundo; sin estilos adicionales necesarios aquí.

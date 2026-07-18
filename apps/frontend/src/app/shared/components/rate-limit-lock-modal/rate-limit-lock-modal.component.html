@@ -1,0 +1,64 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  size="sm"
+  [closeOnBackdrop]="canRetry()"
+  [closeOnEscape]="canRetry()"
+  title="Demasiados intentos de inicio de sesión"
+  (cancel)="closed.emit()"
+>
+  <div class="flex flex-col items-center gap-4 py-2 text-center">
+    <!-- Estado visual: bloqueado / desbloqueado -->
+    <div
+      class="flex h-16 w-16 items-center justify-center rounded-full"
+      [class]="
+        canRetry()
+          ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
+          : 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'
+      "
+    >
+      <app-icon [name]="canRetry() ? 'shield-check' : 'lock'" [size]="32" />
+    </div>
+
+    <!-- Mensaje explicativo -->
+    <p
+      class="text-sm leading-relaxed text-[var(--color-text-secondary)]"
+    >
+      {{ bodyMessage() }}
+    </p>
+
+    <!-- Countdown / listo -->
+    @if (canRetry()) {
+      <p
+        class="text-base font-semibold text-[var(--color-success)]"
+      >
+        Ya puedes intentar de nuevo
+      </p>
+    } @else {
+      <div class="flex flex-col items-center gap-1">
+        <span class="text-sm text-[var(--color-text-muted)]">
+          Podrás intentar de nuevo en
+        </span>
+        <span
+          class="font-mono text-4xl font-bold tabular-nums tracking-wider text-[var(--color-text-primary)]"
+          aria-live="polite"
+        >
+          {{ formatted() }}
+        </span>
+      </div>
+    }
+  </div>
+
+  <div
+    slot="footer"
+    class="flex flex-col gap-2 sm:flex-row sm:justify-end sm:gap-3"
+  >
+    <a
+      [href]="mailtoHref()"
+      class="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-[var(--color-primary)]/50 px-3 text-sm font-semibold text-[var(--color-primary)] transition-all duration-200 hover:bg-[var(--color-primary)]/[0.06] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50 focus:ring-offset-2 sm:h-11 sm:px-4 sm:text-base"
+    >
+      <app-icon name="life-buoy" [size]="16" />
+      <span>Contactar a soporte</span>
+    </a>
+    <app-button variant="primary" (clicked)="onClose()">Entendido</app-button>
+  </div>
+</app-modal>
