@@ -33,10 +33,18 @@ import { AforoQrScannerComponent, ScannerViewMode } from '../aforo-qr-scanner/af
 /** Normalized shape rendered by the result pill (QR/PIN or fingerprint). */
 interface CheckinResultView {
   granted: boolean;
+  /**
+   * Third visual state: `true` for a RE-ENTRY (warn-grant OR `denied_re_entry`).
+   * Renders amber with an `alert-triangle` icon regardless of `granted`.
+   */
+  warning: boolean;
   label: string;
   color: string;
   name: string | null;
 }
+
+/** Amber shown for the re-entry (warning) state in the result pill. */
+const CHECKIN_WARNING_COLOR = '#d97706';
 
 /**
  * "Ingreso" panel for the gym/aforo view. Lets an operator validate a member's
@@ -208,7 +216,13 @@ interface CheckinResultView {
             [style.border-color]="rv.color + '33'"
           >
             <app-icon
-              [name]="rv.granted ? 'check-circle' : 'x-circle'"
+              [name]="
+                rv.warning
+                  ? 'alert-triangle'
+                  : rv.granted
+                    ? 'check-circle'
+                    : 'x-circle'
+              "
               [size]="16"
             />
             <span class="result-label">{{ rv.label }}</span>
@@ -271,22 +285,54 @@ export class AforoCheckinPanelComponent {
     if (this.method() === 'external_ref') {
       const ev = this.fingerResult();
       if (!ev) return null;
-      return {
-        granted: ev.granted,
-        label: this.resultLabel(ev.result),
-        color: this.resultColor(ev.result),
-        name: ev.customer_name,
-      };
+      return this.buildResultView(
+        ev.granted,
+        ev.result,
+        ev.warning,
+        ev.re_entry_minutes,
+        ev.customer_name,
+      );
     }
     const r = this.lastResult();
     if (!r) return null;
-    return {
-      granted: r.granted,
-      label: this.resultLabel(r.result),
-      color: this.resultColor(r.result),
-      name: null,
-    };
+    return this.buildResultView(
+      r.granted,
+      r.result,
+      r.warning,
+      r.re_entry_minutes,
+      null,
+    );
   });
+
+  /**
+   * Build the normalized pill view. A re-entry (warn-grant `warning: true` OR
+   * `denied_re_entry`) becomes the amber third state with an `alert-triangle`
+   * icon and a "hace N min" suffix; every other result keeps its granted/denied
+   * color + label.
+   */
+  private buildResultView(
+    granted: boolean,
+    result: string,
+    warning: boolean | undefined,
+    minutes: number | undefined,
+    name: string | null,
+  ): CheckinResultView {
+    const isReEntry = warning === true || result === 'denied_re_entry';
+    return {
+      granted,
+      warning: isReEntry,
+      label: isReEntry
+        ? this.reEntryLabel(result, minutes)
+        : this.resultLabel(result),
+      color: isReEntry ? CHECKIN_WARNING_COLOR : this.resultColor(result),
+      name,
+    };
+  }
+
+  private reEntryLabel(result: string, minutes: number | undefined): string {
+    const base = result === 'denied_re_entry' ? 'Reingreso bloqueado' : 'Reingreso';
+    return minutes == null ? base : `${base} · hace ${minutes} min`;
+  }
 
   constructor() {
     // Surface the NEXT ambient decision while a fingerprint read is armed.

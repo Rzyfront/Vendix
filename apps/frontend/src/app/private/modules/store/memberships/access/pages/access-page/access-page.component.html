@@ -207,8 +207,9 @@
       >
         <div class="aforo-config">
           <p class="aforo-block-desc">
-            Define la capacidad, la nivelación automática y el modo torniquete.
-            El horario de atención se toma del horario del Punto de Venta.
+            Define la capacidad, la nivelación automática, el modo torniquete y
+            la detección de reingreso. El horario de atención se toma del horario
+            del Punto de Venta.
           </p>
 
           <div class="aforo-config-grid">
@@ -271,6 +272,62 @@
                     Cada 2 horas
                   </button>
                 </div>
+              </div>
+
+              <!-- Detección de reingreso -->
+              <div class="aforo-field">
+                <label class="aforo-field-label">Detección de reingreso</label>
+                <p class="aforo-field-hint">
+                  Cómo reaccionar cuando un socio que ya ingresó vuelve a
+                  ingresar dentro de la ventana definida.
+                </p>
+                <div class="aforo-interval">
+                  <button
+                    type="button"
+                    class="aforo-chip"
+                    [class.active]="cfgReEntryMode() === 'off'"
+                    (click)="setReEntryMode('off')"
+                  >
+                    Desactivado
+                  </button>
+                  <button
+                    type="button"
+                    class="aforo-chip"
+                    [class.active]="cfgReEntryMode() === 'warn'"
+                    (click)="setReEntryMode('warn')"
+                  >
+                    Advertir
+                  </button>
+                  <button
+                    type="button"
+                    class="aforo-chip"
+                    [class.active]="cfgReEntryMode() === 'block'"
+                    (click)="setReEntryMode('block')"
+                  >
+                    Bloquear
+                  </button>
+                </div>
+              </div>
+
+              <div
+                class="aforo-field"
+                [class.dimmed]="cfgReEntryMode() === 'off'"
+              >
+                <label class="aforo-field-label">
+                  Ventana de reingreso (horas)
+                </label>
+                <app-quantity-control
+                  [value]="cfgReEntryWindowHours()"
+                  [min]="1"
+                  [max]="null"
+                  [step]="1"
+                  [disabled]="cfgReEntryMode() === 'off'"
+                  (valueChange)="onReEntryWindowChange($event)"
+                />
+                <span class="aforo-field-hint">
+                  Un reingreso dentro de este tiempo se advierte o bloquea según
+                  el modo.
+                </span>
               </div>
             </div>
 

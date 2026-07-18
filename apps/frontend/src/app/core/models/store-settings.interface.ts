@@ -203,6 +203,22 @@ export interface MembershipSettings {
    * position/size/mode overrides live in localStorage.
    */
   qr_scanner_default_mode?: 'fullscreen' | 'floating';
+  /**
+   * Re-entry detection mode: what happens when a member who already entered
+   * recently scans again within `re_entry_window_hours`.
+   * - `off`: no re-entry handling (always a normal grant).
+   * - `warn` (default): entry is GRANTED but flagged (`warning: true`) so the
+   *   operator is alerted.
+   * - `block`: entry is DENIED with `denied_re_entry`.
+   * Mirrors backend `store_settings.settings.membership.re_entry_mode`.
+   */
+  re_entry_mode?: 'off' | 'warn' | 'block';
+  /**
+   * Window (in hours) during which a repeated entry counts as a re-entry.
+   * Default `2`. Mirrors backend
+   * `store_settings.settings.membership.re_entry_window_hours`.
+   */
+  re_entry_window_hours?: number;
 }
 
 /**
