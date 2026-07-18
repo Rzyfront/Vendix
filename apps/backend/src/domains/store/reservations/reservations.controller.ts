@@ -19,12 +19,15 @@ import {
   CreateBookingDto,
   RescheduleBookingDto,
   CalendarQueryDto,
+  SendConfirmationDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Public } from '@common/decorators/public.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { BookingConfirmationService } from './booking-confirmation.service';
+import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
 
 @Controller('store/reservations')
 @UseGuards(PermissionsGuard)
@@ -33,6 +36,7 @@ export class ReservationsController {
     private readonly reservationsService: ReservationsService,
     private readonly availabilityService: AvailabilityService,
     private readonly bookingConfirmationService: BookingConfirmationService,
+    private readonly appointmentQueueService: AppointmentQueueService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -180,6 +184,59 @@ export class ReservationsController {
       result,
       'Check-in registrado correctamente',
     );
+  }
+
+  @Patch(':id/mark-arriving')
+  @Permissions('store:reservations:update')
+  async markArriving(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.reservationsService.markArriving(id);
+    return this.responseService.success(
+      result,
+      'Reserva marcada como en sala (arriving)',
+    );
+  }
+
+  @Patch(':id/mark-attending')
+  @Permissions('store:reservations:update')
+  async markAttending(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.reservationsService.markAttending(id);
+    return this.responseService.success(
+      result,
+      'Reserva marcada como siendo atendida (attending)',
+    );
+  }
+
+  @Post(':id/send-confirmation')
+  @Permissions('store:reservations:send_confirmation')
+  async sendConfirmation(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SendConfirmationDto,
+  ) {
+    const result = await this.bookingConfirmationService.sendConfirmationRequest(
+      id,
+      dto.source,
+    );
+    return this.responseService.success(
+      result,
+      'Solicitud de confirmación enviada al cliente',
+    );
+  }
+
+  @Get('queue')
+  @Permissions('store:reservations:queue:read')
+  async getQueue(@Query('day') day?: string) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo determinar la tienda del contexto de la solicitud',
+      );
+    }
+    const targetDay = day ?? new Date().toISOString().split('T')[0];
+    const result = await this.appointmentQueueService.computeQueueForStore(
+      storeId,
+      targetDay,
+    );
+    return this.responseService.success(result, 'Cola de reservas obtenida');
   }
 
   @Patch(':id/reschedule')

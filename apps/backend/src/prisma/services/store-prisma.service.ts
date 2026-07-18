@@ -65,7 +65,6 @@ export class StorePrismaService extends BasePrismaService {
     'customer_consultation_notes',
     'booking_confirmation_tokens',
     'store_business_hours',
-    'proximity_notification_log',
     'email_templates',
     'messaging_channels',
     'social_channels',
@@ -323,6 +322,7 @@ export class StorePrismaService extends BasePrismaService {
       'data_collection_items', // Relational
       'data_collection_template_products', // Relational
       'booking_reminder_logs', // Relational
+      'proximity_notification_log', // Relational (via booking.store_id)
       'subscription_invoices', // Store scoped
       'subscription_payments', // Relational
       'subscription_events', // Relational
@@ -538,6 +538,9 @@ export class StorePrismaService extends BasePrismaService {
         template: { store_id: context.store_id },
       },
       booking_reminder_logs: { booking: { store_id: context.store_id } },
+      proximity_notification_log: {
+        booking: { store_id: context.store_id },
+      },
       subscription_payments: { invoice: { store_id: context.store_id } },
       subscription_events: {
         store_subscription: { store_id: context.store_id },

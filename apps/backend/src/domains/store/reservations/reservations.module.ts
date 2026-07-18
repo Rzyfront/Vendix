@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AvailabilityService } from './availability.service';
 import { BookingConfirmationService } from './booking-confirmation.service';
-import { AppointmentQueueService } from './appointment-queue.service';
+import { AppointmentQueueModule } from './appointment-queue/appointment-queue.module';
+import { BusinessHoursService } from './business-hours/business-hours.service';
+import { BusinessHoursController } from './business-hours/business-hours.controller';
 import { ReservationsController } from './reservations.controller';
 import { ProvidersService } from './providers/providers.service';
 import { ProvidersController } from './providers/providers.controller';
@@ -16,13 +18,25 @@ import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, OrdersModule, S3Module, ProductsModule, TablesModule],
-  controllers: [ProvidersController, ReservationsController],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    OrdersModule,
+    S3Module,
+    ProductsModule,
+    TablesModule,
+    AppointmentQueueModule,
+  ],
+  controllers: [
+    ProvidersController,
+    ReservationsController,
+    BusinessHoursController,
+  ],
   providers: [
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
-    AppointmentQueueService,
+    BusinessHoursService,
     ProvidersService,
     ProviderScheduleService,
     ProviderAvailabilityService,
@@ -31,7 +45,7 @@ import { TablesModule } from '../tables/tables.module';
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
-    AppointmentQueueService,
+    BusinessHoursService,
     ProvidersService,
     ProviderAvailabilityService,
   ],
