@@ -55,6 +55,30 @@ interface AvailableNote {
       (cancel)="close.emit()"
     >
       <div class="space-y-4">
+        <!-- Tarjeta-resumen -->
+        <div
+          class="flex items-center justify-between gap-3 rounded-lg border border-border bg-[var(--color-surface)] p-3"
+        >
+          <p class="text-sm text-[var(--color-text-secondary)]">
+            <strong class="text-[var(--color-text-primary)]">{{
+              availableForPicking().length
+            }}</strong>
+            disponibles ·
+            <strong class="text-[var(--color-text-primary)]">{{
+              selectedNotes().length
+            }}</strong>
+            seleccionadas
+          </p>
+          <div class="text-right shrink-0">
+            <p class="text-xs text-[var(--color-text-secondary)]">
+              Total a recaudar
+            </p>
+            <p class="text-base font-semibold tabular-nums">
+              {{ selectedTotal() | currency }}
+            </p>
+          </div>
+        </div>
+
         <!-- Buscador de remisiones disponibles -->
         <app-inputsearch
           placeholder="Buscar remisión por número o cliente..."
@@ -64,14 +88,13 @@ interface AvailableNote {
 
         <!-- Remisiones disponibles -->
         <div>
-          <h3 class="text-sm font-semibold mb-2">
-            Remisiones disponibles
-            <span class="text-xs font-normal text-[var(--color-text-secondary)]">
-              ({{ availableForPicking().length }})
-            </span>
+          <h3
+            class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2"
+          >
+            Disponibles ({{ availableForPicking().length }})
           </h3>
           <div
-            class="max-h-56 overflow-y-auto space-y-2 rounded-md border border-border p-2 bg-[var(--color-surface)]"
+            class="max-h-56 overflow-y-auto rounded-lg border border-border p-1.5 bg-[var(--color-surface)] space-y-1.5"
           >
             @if (loadingNotes()) {
               <div class="text-sm text-[var(--color-text-secondary)] text-center py-4">
@@ -79,16 +102,15 @@ interface AvailableNote {
               </div>
             } @else {
               @for (note of availableForPicking(); track note.id) {
-                <div class="flex items-center gap-2 p-2 rounded-md border border-border">
+                <div
+                  class="flex items-center gap-2 p-2 rounded-md hover:bg-muted/40 transition-colors"
+                >
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-medium truncate">
                       {{ note.dispatch_number }}
                       <span class="text-[var(--color-text-secondary)]"
                         >· {{ note.customer_name || 'Sin cliente' }}</span
                       >
-                    </p>
-                    <p class="text-xs text-[var(--color-text-secondary)]">
-                      {{ +note.grand_total | currency }}
                     </p>
                     <!-- Dirección de entrega (📍) o aviso de remisión no despachable -->
                     @if (noteHasAddress(note)) {
@@ -105,6 +127,10 @@ interface AvailableNote {
                       </p>
                     }
                   </div>
+                  <span
+                    class="text-sm font-semibold tabular-nums shrink-0"
+                    >{{ +note.grand_total | currency }}</span
+                  >
                   <button
                     type="button"
                     (click)="addNote(note.id)"
@@ -130,13 +156,12 @@ interface AvailableNote {
 
         <!-- Remisiones seleccionadas -->
         <div>
-          <h3 class="text-sm font-semibold mb-2">
-            Remisiones seleccionadas
-            <span class="text-xs font-normal text-[var(--color-text-secondary)]">
-              ({{ selectedNotes().length }})
-            </span>
+          <h3
+            class="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2"
+          >
+            Seleccionadas ({{ selectedNotes().length }})
           </h3>
-          <div class="space-y-2">
+          <div class="space-y-1.5">
             @for (note of selectedNotes(); track note.id) {
               <div
                 class="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30"
@@ -148,10 +173,11 @@ interface AvailableNote {
                       >· {{ note.customer_name || 'Sin cliente' }}</span
                     >
                   </p>
-                  <p class="text-xs text-[var(--color-text-secondary)]">
-                    {{ +note.grand_total | currency }}
-                  </p>
                 </div>
+                <span
+                  class="text-sm font-semibold tabular-nums shrink-0"
+                  >{{ +note.grand_total | currency }}</span
+                >
                 <button
                   type="button"
                   (click)="removeNote(note.id)"
@@ -167,12 +193,6 @@ interface AvailableNote {
               </div>
             }
           </div>
-        </div>
-
-        <!-- Total a recaudar -->
-        <div class="flex items-center justify-between border-t border-border pt-3">
-          <span class="text-sm font-medium">Total a recaudar</span>
-          <span class="text-base font-semibold">{{ selectedTotal() | currency }}</span>
         </div>
       </div>
 
