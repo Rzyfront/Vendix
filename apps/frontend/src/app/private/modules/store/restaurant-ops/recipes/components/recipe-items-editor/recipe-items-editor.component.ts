@@ -282,7 +282,16 @@ export class RecipeItemsEditorComponent implements OnInit {
       );
     }
   }
-}
+        error: () => {
+          // Swallow: missing unit must not block the form; the input simply
+          // shows no suffix.
+          this.unitCache.set(id, '');
+          this.unitCacheTick.update((v) => v + 1);
+        },
+      );
+  }
+
+  private resolveProductUnitLabel(product: any): string {
         error: () => {
           // Swallow: missing unit must not block the form; the input simply
           // shows no suffix.
@@ -308,7 +317,7 @@ export class RecipeItemsEditorComponent implements OnInit {
    * create/update/delete reconciliation relies on the same `id` field, so this
    * is an authoritative state (not a fragile heuristic).
    */
-  isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
+  private isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
     return row.get('id')?.value == null;
   }
 }
