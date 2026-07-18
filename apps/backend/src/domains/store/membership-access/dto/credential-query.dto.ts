@@ -1,5 +1,6 @@
-import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { membership_credential_type_enum } from '@prisma/client';
 
 /**
  * Query DTO for listing access credentials.
@@ -28,4 +29,13 @@ export class CredentialQueryDto {
     typeof value === 'string' ? value === 'true' : value,
   )
   is_active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  search?: string;
+
+  @IsOptional()
+  @IsEnum(membership_credential_type_enum)
+  credential_type?: membership_credential_type_enum;
 }

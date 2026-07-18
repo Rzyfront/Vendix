@@ -82,6 +82,8 @@ export interface CredentialQuery {
   limit?: number;
   customer_id?: number;
   is_active?: boolean;
+  credential_type?: GymCredentialType;
+  search?: string;
 }
 
 export interface GymAccessLog {
@@ -114,6 +116,7 @@ export interface AccessLogQuery {
   result?: GymAccessResult;
   date_from?: string;
   date_to?: string;
+  search?: string;
 }
 
 export interface ValidateAccessDto {

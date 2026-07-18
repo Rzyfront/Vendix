@@ -58,6 +58,9 @@ export class MembershipsService {
     if (query.plan_id != null) {
       params = params.set('plan_id', String(query.plan_id));
     }
+    if (query.search) {
+      params = params.set('search', query.search);
+    }
 
     return this.http
       .get<PaginatedApiResponse<GymMembership>>(

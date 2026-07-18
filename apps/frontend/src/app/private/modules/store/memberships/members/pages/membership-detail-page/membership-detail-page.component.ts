@@ -44,6 +44,10 @@ import {
 import { MembershipsService } from '../../services';
 import { RenewMembershipModalComponent } from '../../components/renew-membership-modal/renew-membership-modal.component';
 import { EditMembershipModalComponent } from '../../components/edit-membership-modal/edit-membership-modal.component';
+import {
+  calendarDaysBetween,
+  membershipProgress,
+} from '../../utils/membership-progress.util';
 
 import { MembershipAccessService } from '../../../access/services/membership-access.service';
 import {
@@ -60,8 +64,6 @@ interface MetaFormShape {
   auto_renew: FormControl<boolean>;
   notes: FormControl<string>;
 }
-
-const MS_PER_DAY = 86_400_000;
 
 @Component({
   selector: 'app-membership-detail-page',
@@ -175,7 +177,7 @@ export class MembershipDetailPageComponent implements OnInit {
   readonly daysRemaining = computed<number | null>(() => {
     const end = this.membership()?.period_end;
     if (!end) return null;
-    return this.calendarDaysBetween(new Date(), new Date(end));
+    return calendarDaysBetween(new Date(), new Date(end));
   });
 
   readonly daysRemainingDisplay = computed<string>(() => {
@@ -193,25 +195,17 @@ export class MembershipDetailPageComponent implements OnInit {
     return 'Días para el vencimiento';
   });
 
-  readonly vigencia = computed(() => {
-    const m = this.membership();
-    const start = m?.period_start ? new Date(m.period_start) : null;
-    const end = m?.period_end ? new Date(m.period_end) : null;
-    if (!start || !end) {
-      return { totalDays: 0, elapsedDays: 0, percent: 0, hasRange: false };
-    }
-    const totalDays = Math.max(this.calendarDaysBetween(start, end), 0);
-    const rawElapsed = this.calendarDaysBetween(start, new Date());
-    const elapsedDays = Math.min(Math.max(rawElapsed, 0), totalDays);
-    const percent =
-      totalDays > 0 ? Math.min(Math.round((elapsedDays / totalDays) * 100), 100) : 0;
-    return { totalDays, elapsedDays, percent, hasRange: true };
-  });
+  readonly vigencia = computed(() =>
+    membershipProgress(
+      this.membership()?.period_start,
+      this.membership()?.period_end,
+    ),
+  );
 
   readonly membershipAgeDays = computed<number>(() => {
     const created = this.membership()?.created_at;
     if (!created) return 0;
-    return Math.max(this.calendarDaysBetween(new Date(created), new Date()), 0);
+    return Math.max(calendarDaysBetween(new Date(created), new Date()), 0);
   });
 
   // ── Transition guards (unchanged) ─────────────────────────────────
@@ -292,12 +286,6 @@ export class MembershipDetailPageComponent implements OnInit {
   private statusIn(...statuses: GymMembershipStatus[]): boolean {
     const s = this.membership()?.status;
     return s != null && statuses.includes(s);
-  }
-
-  private calendarDaysBetween(from: Date, to: Date): number {
-    const a = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
-    const b = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
-    return Math.round((b - a) / MS_PER_DAY);
   }
 
   private loadMembership(id: number): void {

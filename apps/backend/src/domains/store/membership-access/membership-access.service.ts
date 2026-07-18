@@ -832,14 +832,60 @@ export class MembershipAccessService {
 
   async listCredentials(query: CredentialQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 10, customer_id, is_active } = query ?? {};
+    const {
+      page = 1,
+      limit = 10,
+      customer_id,
+      is_active,
+      search,
+      credential_type,
+    } = query ?? {};
     const skip = (page - 1) * limit;
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict credentials to that set.
+    // Mirrors `memberships.service.ts::findAll` (lines 200-233).
+    const term = (search ?? '').trim();
+    let customerFilter:
+      | Prisma.membership_access_credentialsWhereInput['customer_id']
+      | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store credentials list.
+      const customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      customerFilter = customer_id;
+    }
 
     const where: Prisma.membership_access_credentialsWhereInput = {
       store_id: storeId,
       deleted_at: null,
-      ...(customer_id !== undefined && { customer_id }),
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(is_active !== undefined && { is_active }),
+      ...(credential_type !== undefined && { credential_type }),
     };
 
     const [rows, total] = await Promise.all([
@@ -977,13 +1023,58 @@ export class MembershipAccessService {
 
   async listLogs(query: AccessLogQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 20, customer_id, result, date_from, date_to } =
-      query ?? {};
+    const {
+      page = 1,
+      limit = 20,
+      customer_id,
+      result,
+      date_from,
+      date_to,
+      search,
+    } = query ?? {};
     const skip = (page - 1) * limit;
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict logs to that set.
+    // Mirrors `memberships.service.ts::findAll` (lines 200-233).
+    const term = (search ?? '').trim();
+    let customerFilter:
+      | Prisma.membership_access_logsWhereInput['customer_id']
+      | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store logs list.
+      const customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      customerFilter = customer_id;
+    }
 
     const where: Prisma.membership_access_logsWhereInput = {
       store_id: storeId,
-      ...(customer_id !== undefined && { customer_id }),
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(result !== undefined && { result }),
       ...((date_from || date_to) && {
         access_at: {

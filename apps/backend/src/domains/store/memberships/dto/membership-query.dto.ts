@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { membership_status_enum } from '@prisma/client';
 
@@ -31,4 +31,9 @@ export class MembershipQueryDto {
   @Type(() => Number)
   @IsInt()
   plan_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  search?: string;
 }
