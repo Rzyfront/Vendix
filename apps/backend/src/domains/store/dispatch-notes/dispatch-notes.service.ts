@@ -14,6 +14,7 @@ import {
   DispatchNoteQueryDto,
   CreateFromSalesOrderDto,
   CreateFromOrderDto,
+  CreateFromOrderItemDto,
   CreateFromOrdersBatchDto,
   CreateTransferDispatchDto,
   CreateReturnDispatchDto,
@@ -1731,9 +1732,64 @@ export class DispatchNotesService {
       order_id,
     );
 
+    // Resolve which lines to dispatch. Two contracts:
+    //  - EXPLICIT: `dto.items` provided → dispatch exactly those lines (unchanged).
+    //  - QUICK-ACCEPT: `dto.items` omitted/empty → dispatch ALL pending units.
+    //    Per order line the pending = order_item.quantity − Σ dispatched_quantity
+    //    over the NON-VOIDED remisiones matched by `sales_order_item_id` (same
+    //    accounting as getByOrder() and recomputeOrderFulfillment). Lines with
+    //    pending ≤ 0 are skipped. If nothing is pending (order fully dispatched)
+    //    we raise DSP_ORDER_STATE_001 (400) — the batch caller turns this into a
+    //    per-order 'failed' result instead of a 500.
+    const hasExplicitItems =
+      Array.isArray(dto.items) && dto.items.length > 0;
+
+    let effective_items: CreateFromOrderItemDto[];
+    if (hasExplicitItems) {
+      effective_items = dto.items;
+    } else {
+      const existingNotes = await this.prisma.dispatch_notes.findMany({
+        where: { order_id, status: { not: 'voided' } },
+        select: {
+          dispatch_note_items: {
+            select: {
+              sales_order_item_id: true,
+              dispatched_quantity: true,
+            },
+          },
+        },
+      });
+      const dispatchedByItem = new Map<number, number>();
+      for (const note of existingNotes) {
+        for (const it of note.dispatch_note_items) {
+          if (it.sales_order_item_id == null) continue;
+          dispatchedByItem.set(
+            it.sales_order_item_id,
+            (dispatchedByItem.get(it.sales_order_item_id) ?? 0) +
+              Number(it.dispatched_quantity ?? 0),
+          );
+        }
+      }
+      effective_items = [];
+      for (const oi of order.order_items) {
+        const already = dispatchedByItem.get(oi.id) ?? 0;
+        const pending = Number(oi.quantity) - already;
+        if (pending > 0) {
+          effective_items.push({
+            order_item_id: oi.id,
+            dispatched_quantity: pending,
+          } as CreateFromOrderItemDto);
+        }
+      }
+      if (effective_items.length === 0) {
+        // Nothing left to dispatch — order already fully remitida.
+        throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+      }
+    }
+
     // Build items from order items
     const dispatch_items: any[] = [];
-    for (const dto_item of dto.items) {
+    for (const dto_item of effective_items) {
       const order_item = order.order_items.find(
         (oi: any) => oi.id === dto_item.order_item_id,
       );
