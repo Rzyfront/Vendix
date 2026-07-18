@@ -2076,6 +2076,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Dispatch note is already assigned to this route',
   },
+  DSP_NOTE_NOT_ELIGIBLE_001: {
+    code: 'DSP_NOTE_NOT_ELIGIBLE_001',
+    httpStatus: 409,
+    devMessage:
+      'La remisión no puede planillarse porque ya fue entregada, recibida, facturada o anulada.',
+  },
   DISPATCH_NOTE_NO_SHIPPING_ADDRESS: {
     code: 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS',
     httpStatus: 400,
