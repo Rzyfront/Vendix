@@ -92,8 +92,6 @@ export class DispatchNoteWizardService {
   readonly selectedRouteId = signal<number | null>(null);
   readonly newRouteDraft = signal<CreateDispatchFromOrderNewRouteDto | null>(null);
 
-  readonly terminalAction = signal<WizardTerminalAction>('draft');
-
   // Plan Despacho Economía — FASE 7 paso 20.
   // Modo dual quick-accept: si está activo (default), `dispatched_quantity`
   // se autocompleta con `pending_quantity` en cada nuevo ítem / nueva orden.
@@ -241,8 +239,6 @@ export class DispatchNoteWizardService {
     // Reset party + order state — the party step changes shape per subtype.
     this._resetParty();
     this.clearSelectedOrder();
-    // Clamp terminal action to valid options for the new direction.
-    this._clampTerminalAction();
   }
 
   setSubtype(s: DispatchNoteSubtype): void {
@@ -259,7 +255,6 @@ export class DispatchNoteWizardService {
     // Reset party + order state — party step changes shape per subtype.
     this._resetParty();
     this.clearSelectedOrder();
-    this._clampTerminalAction();
   }
 
   setReason(r: DispatchNoteReason | null): void {
@@ -342,23 +337,6 @@ export class DispatchNoteWizardService {
     this.customerId.set(null);
     this.customerName.set(null);
     this.relatedDispatchId.set(null);
-  }
-
-  /** Clamp the terminal action to a valid value for the current subtype. */
-  private _clampTerminalAction(): void {
-    const sub = this.subtype();
-    const action = this.terminalAction();
-    // customer_delivery keeps draft/confirm_route/deliver.
-    // inbound subtypes use draft/confirm/receive.
-    if (sub === 'customer_delivery') {
-      if (action === 'confirm' || action === 'receive') {
-        this.terminalAction.set('draft');
-      }
-    } else {
-      if (action === 'confirm_route' || action === 'deliver') {
-        this.terminalAction.set('draft');
-      }
-    }
   }
 
   // --- Navigation ---
@@ -506,10 +484,6 @@ export class DispatchNoteWizardService {
     this.newRouteDraft.set(draft);
   }
 
-  setTerminalAction(action: WizardTerminalAction): void {
-    this.terminalAction.set(action);
-  }
-
   buildRouteAssignment(): CreateDispatchFromOrderRouteAssignmentDto | undefined {
     const mode = this.routeMode();
     if (mode === 'none') return undefined;
@@ -543,7 +517,6 @@ export class DispatchNoteWizardService {
     this.routeMode.set('none');
     this.selectedRouteId.set(null);
     this.newRouteDraft.set(null);
-    this.terminalAction.set('draft');
     this._resetParty();
   }
 }
