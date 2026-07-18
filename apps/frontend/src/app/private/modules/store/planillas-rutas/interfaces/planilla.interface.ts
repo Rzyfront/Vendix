@@ -272,6 +272,20 @@ export interface CreateStopDto {
   is_extra_route?: boolean;
 }
 
+/**
+ * One stop APPENDED to an already-existing route via `POST /:id/stops`.
+ *
+ * Unlike `CreateStopDto` (used at route creation, where the operator sets the
+ * visiting order), `stop_sequence` is OPTIONAL here: when omitted the backend
+ * appends the stop after the route's current max sequence (see
+ * `AddStopItemDto` / `addStops()` on the backend). `CreateStopDto` is still
+ * assignable to this type, so existing callers passing a full stop keep working.
+ */
+export interface AddStopDto {
+  dispatch_note_id: number;
+  stop_sequence?: number;
+}
+
 export interface CreateDispatchRouteDto {
   route_code?: string;
   vehicle_id?: number;
@@ -347,6 +361,10 @@ export interface MapStopUnlocated {
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id of the backing dispatch note; when present the UI offers "Fijar en mapa". */
+  dispatchNoteId?: number | null;
+  /** Raw customer_address snapshot (AddressPayload | null) from the dispatch note. */
+  customerAddress?: any | null;
 }
 
 /**

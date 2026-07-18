@@ -1,7 +1,6 @@
 import {
   Component,
   DestroyRef,
-  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -9,7 +8,6 @@ import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
-  CardComponent,
   IconComponent,
   InputComponent,
   InputsearchComponent,
@@ -17,6 +15,7 @@ import {
   TextareaComponent,
 } from '../../../../../../shared/components';
 
+import { WizardStepSectionComponent } from './wizard-step-section.component';
 import { PlanillasRutasService } from '../../../planillas-rutas/services/planillas-rutas.service';
 import { DispatchRoute } from '../../../planillas-rutas/interfaces/planilla.interface';
 import { CreateDispatchFromOrderNewRouteDto } from '../../interfaces/dispatch-note.interface';
@@ -40,21 +39,21 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
   selector: 'app-dispatch-wizard-route-step',
   standalone: true,
   imports: [
-    CardComponent,
     FormsModule,
     IconComponent,
     InputComponent,
     InputsearchComponent,
     StoreUserSelectComponent,
     TextareaComponent,
+    WizardStepSectionComponent,
   ],
   template: `
-    <div class="space-y-3">
-      <p class="text-xs text-[var(--color-text-muted)]">
-        Asigna la remisión a una ruta (opcional). Si no la asignas, la
-        entrega se gestiona desde la propia remisión.
-      </p>
-
+    <app-wizard-step-section
+      icon="truck"
+      title="Ruta"
+      subtitle="Asigna una planilla ahora o déjala sin ruta (se creará como borrador)"
+      [dense]="true"
+    >
       <!-- Mode radio group -->
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
         @for (opt of modeOptions; track opt.value) {
@@ -72,7 +71,7 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
               <app-icon [name]="opt.icon" [size]="16"></app-icon>
               <span class="text-sm font-medium">{{ opt.label }}</span>
             </div>
-            <p class="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+            <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
               {{ opt.description }}
             </p>
           </button>
@@ -113,11 +112,11 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
             >
               <div class="flex items-center justify-between">
                 <span class="text-sm font-medium">{{ r.route_number }}</span>
-                <span class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                <span class="text-xs uppercase tracking-wider text-[var(--color-text-muted)]">
                   {{ r.status }}
                 </span>
               </div>
-              <p class="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+              <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
                 {{ r.planned_date }}
                 @if (r.driver_user) {
                   · {{ r.driver_user.first_name }} {{ r.driver_user.last_name }}
@@ -166,7 +165,7 @@ import { DispatchNoteWizardService, WizardRouteMode } from '../../services/dispa
           ></app-textarea>
         </div>
       }
-    </div>
+    </app-wizard-step-section>
   `,
 })
 export class RouteStepComponent {

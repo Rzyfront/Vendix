@@ -155,6 +155,23 @@ export class MembershipAccessService {
       );
   }
 
+  /**
+   * Re-send the credential-creation email for an existing credential. Mirrors
+   * `POST /store/memberships/access/credentials/:id/resend-email`. Returns the
+   * delivery outcome so the caller can surface a success/warning toast.
+   */
+  resendCredentialEmail(id: number): Observable<{ email_sent: boolean; email_error: string | null }> {
+    return this.http
+      .post<ApiResponse<{ email_sent: boolean; email_error: string | null }>>(
+        `${this.apiUrl}${this.basePath}/credentials/${id}/resend-email`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   // ─── Validate (reception) ────────────────────────────────────────────────
   validate(dto: ValidateAccessDto): Observable<AccessValidationResult> {
     return this.http

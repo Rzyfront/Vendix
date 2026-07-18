@@ -172,15 +172,11 @@
                   Dirección de entrega
                 </span>
               </div>
-              @if (hasCustomerAddress()) {
-                <div class="space-y-0.5">
-                  @for (line of customerAddressLines(); track line) {
-                    <p class="text-sm text-[var(--color-text-primary)] leading-snug">{{ line }}</p>
-                  }
-                </div>
-              } @else {
-                <p class="text-xs text-[var(--color-text-secondary)] italic">Sin dirección registrada en la remisión.</p>
-              }
+              <app-dispatch-note-address-editor
+                [noteId]="noteId()"
+                [address]="customerAddress()"
+                (saved)="onAddressSaved()"
+              />
             </div>
           </div>
         </app-card>

@@ -12,7 +12,7 @@ import {
   CreateCustomerRequest,
   UpdateCustomerRequest,
 } from './models/customer.model';
-import { ToastService, DialogService } from '../../../../shared/components';
+import { ToastService, DialogService, type AddressPayload } from '../../../../shared/components';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
@@ -89,6 +89,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         [loading]="actionLoading()"
         (closed)="closeModal()"
         (save)="onSave($event)"
+        (addressData)="onAddressData($event)"
       ></app-customer-modal>
 
       <!-- Bulk Upload Modal -->
@@ -125,6 +126,17 @@ export class CustomersComponent {
   // Modal
   isModalOpen = signal(false);
   selectedCustomer = signal<Customer | null>(null);
+
+  /**
+   * Captura la dirección emitida por `<app-customer-modal>` en crear-mode
+   * (`addressData` output). El modal emite `save` primero y `addressData`
+   * justo después, pero el padre solo conoce el nuevo `customer_id` tras la
+   * respuesta async de `createCustomer`. Guardamos el payload aquí y lo
+   * persistimos vía `customersService.createCustomerAddress` en el callback
+   * `next` de `onSave`. El signal se limpia tanto en éxito como en error para
+   * evitar reutilizar una dirección de una sesión anterior.
+   */
+  private pendingAddress = signal<AddressPayload | null>(null);
 
   // Bulk Upload Modal
   isBulkUploadModalOpen = signal(false);
@@ -219,6 +231,7 @@ export class CustomersComponent {
   onSave(data: CreateCustomerRequest) {
     this.actionLoading.set(true);
 
+    const isCreate = !this.selectedCustomer();
     const request$ = this.selectedCustomer()
       ? this.customersService.updateCustomer(this.selectedCustomer()!.id, data)
       : this.customersService.createCustomer(data);
@@ -229,23 +242,87 @@ export class CustomersComponent {
         finalize(() => this.actionLoading.set(false)),
       )
       .subscribe({
-        next: () => {
+        next: (customer: Customer) => {
           this.toastService.success(
             this.selectedCustomer()
               ? 'Cliente actualizado correctamente'
               : 'Cliente creado correctamente',
           );
+          // En crear-mode, si el modal capturó una dirección, persistirla ahora
+          // que ya conocemos el `customer.id`. El modal emite `addressData`
+          // solo en alta (en edición la persiste él mismo), y en editar-mode
+          // `pendingAddress` siempre estará vacío. No bloqueamos el éxito del
+          // cliente si la dirección falla: lanzamos un toast y seguimos.
+          if (isCreate) {
+            const addr = this.pendingAddress();
+            this.pendingAddress.set(null);
+            if (addr) {
+              this.persistCustomerAddress(customer.id, addr);
+            }
+          }
           this.closeModal();
           this.loadCustomers();
           this.loadStats(); // Refresh stats too
         },
         error: (error) => {
           console.error('Error saving customer:', error);
+          // Limpiar la dirección pendiente si la creación falló, para no
+          // arrastrarla a una próxima alta.
+          if (isCreate) this.pendingAddress.set(null);
           this.toastService.error(
             translateCustomerError(error),
             this.selectedCustomer()
               ? 'Error al actualizar cliente'
               : 'Error al crear cliente',
+          );
+        },
+      });
+  }
+
+  /**
+   * Handler del output `addressData` del customer-modal en crear-mode. Solo
+   * captura el payload; la persistencia ocurre en `onSave` tras crear el
+   * cliente (cuando ya hay `customer_id`).
+   */
+  onAddressData(payload: AddressPayload): void {
+    this.pendingAddress.set(payload);
+  }
+
+  /**
+   * Mapea `AddressPayload` (claves del schema Prisma: address_line1,
+   * state_province, country_code) al DTO del backend (`address_line_1`,
+   * `state`, `country` con guion bajo y nombres cortos) y persiste la
+   * dirección de envío vía `POST /store/addresses`. No bloquea el flujo
+   * principal del cliente: un fallo aquí solo emite un toast.
+   */
+  private persistCustomerAddress(customerId: number, payload: AddressPayload): void {
+    const dto = {
+      address_line_1: payload.address_line1 ?? '',
+      address_line_2: payload.address_line2 ?? undefined,
+      city: payload.city ?? '',
+      state: payload.state_province ?? '',
+      country: payload.country_code ?? '',
+      postal_code: payload.postal_code ?? undefined,
+      type: 'shipping' as const,
+      is_primary: true,
+      customer_id: customerId,
+      latitude: payload.latitude != null ? String(payload.latitude) : undefined,
+      longitude: payload.longitude != null ? String(payload.longitude) : undefined,
+    };
+    this.customersService
+      .createCustomerAddress(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Dirección de envío guardada.');
+          // Refrescar la lista para que el detalle del cliente muestre la
+          // dirección recién creada si el usuario abre el cliente.
+          this.loadCustomers();
+        },
+        error: (err: unknown) => {
+          console.error('Error persisting customer address:', err);
+          this.toastService.error(
+            'No se pudo guardar la dirección de envío. El cliente fue creado correctamente.',
           );
         },
       });

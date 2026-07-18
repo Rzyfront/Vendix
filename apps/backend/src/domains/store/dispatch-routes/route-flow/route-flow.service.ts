@@ -160,6 +160,35 @@ const ROUTE_PDF_INCLUDE = {
   },
 };
 
+/**
+ * Post-commit payload emitted as `dispatch_note.confirmed` for a dispatch_note
+ * that was auto-confirmed (draft → confirmed) while assembling/dispatching a
+ * route. The reservation listener (`handleConfirmed`) reserves stock on this
+ * event, so it MUST be emitted AFTER the transaction commits (once the note's
+ * 'confirmed' status is persisted). Shape mirrors what `dispatch()` emitted
+ * inline before the helper extraction.
+ */
+export interface ConfirmedNotePayload {
+  dispatch_note_id: number;
+  dispatch_number: string;
+  store_id: number;
+  sales_order_id: number | null;
+  order_id: number | null;
+}
+
+/**
+ * Minimal dispatch_note shape consumed by {@link RouteFlowService.confirmDraftNotesInTx}.
+ * Any richer note object (e.g. the `stop.dispatch_note` include) is structurally
+ * assignable — only these fields are read.
+ */
+export interface ConfirmableNote {
+  id: number;
+  dispatch_number: string;
+  status: string;
+  sales_order_id: number | null;
+  order_id: number | null;
+}
+
 @Injectable()
 export class RouteFlowService {
   private readonly logger = new Logger(RouteFlowService.name);
@@ -454,6 +483,59 @@ export class RouteFlowService {
   }
 
   /**
+   * Confirm-on-the-fly every dispatch_note still in 'draft' among `notes`,
+   * INSIDE the given transaction, mirroring the exact field writes `dispatch()`
+   * performed inline (status → 'confirmed', confirmed_by_user_id, confirmed_at,
+   * updated_at). Notes already past 'draft' are skipped (idempotent).
+   *
+   * Returns the list of `dispatch_note.confirmed` payloads that MUST be emitted
+   * AFTER the transaction commits via {@link emitConfirmedNotes} — the
+   * reservation listener (`handleConfirmed`) re-reads the note and must see the
+   * persisted 'confirmed' status before it fires the stock-reservation
+   * primitive. This method deliberately does NOT reserve stock itself: the
+   * `dispatch_note.confirmed` event is the single source of that side effect.
+   */
+  async confirmDraftNotesInTx(
+    tx: Prisma.TransactionClient,
+    notes: ReadonlyArray<ConfirmableNote>,
+    user_id: number | undefined,
+    store_id: number,
+  ): Promise<ConfirmedNotePayload[]> {
+    const payloads: ConfirmedNotePayload[] = [];
+    for (const note of notes) {
+      if (note.status !== 'draft') continue;
+      await tx.dispatch_notes.update({
+        where: { id: note.id },
+        data: {
+          status: 'confirmed',
+          confirmed_by_user_id: user_id,
+          confirmed_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+      payloads.push({
+        dispatch_note_id: note.id,
+        dispatch_number: note.dispatch_number,
+        store_id,
+        sales_order_id: note.sales_order_id,
+        order_id: note.order_id,
+      });
+    }
+    return payloads;
+  }
+
+  /**
+   * Emit one `dispatch_note.confirmed` per payload. MUST be called AFTER the
+   * transaction that produced them commits, so the reservation listener sees the
+   * note's 'confirmed' status already persisted. No-op for an empty list.
+   */
+  emitConfirmedNotes(payloads: ReadonlyArray<ConfirmedNotePayload>): void {
+    for (const payload of payloads) {
+      this.eventEmitter.emit('dispatch_note.confirmed', payload);
+    }
+  }
+
+  /**
    * Transition a route: draft → dispatched.
    * Locks the stops (no more add/remove) and sets dispatch_started_at.
    */
@@ -513,13 +595,7 @@ export class RouteFlowService {
     // Accumulate confirm-on-dispatch payloads so we can emit
     // `dispatch_note.confirmed` AFTER the transaction commits (the reservation
     // listener re-reads the note and must see status:'confirmed' persisted).
-    const confirmedEventPayloads: Array<{
-      dispatch_note_id: number;
-      dispatch_number: string;
-      store_id: number;
-      sales_order_id: number | null;
-      order_id: number | null;
-    }> = [];
+    let confirmedEventPayloads: ConfirmedNotePayload[] = [];
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const updated_route = await tx.dispatch_routes.update({
@@ -539,41 +615,30 @@ export class RouteFlowService {
         if (order_id) {
           await this.advanceOrderToShipped(tx, store_id, order_id);
         }
-
-        // Reserve-invariant: every DISPATCHED remisión must be at least
-        // 'confirmed' so its stock reservation exists (handleConfirmed reserves
-        // only standalone notes). This makes the anti double-deduction gate
-        // consistent: by the time a stop settles to 'delivered', the note has a
-        // reservation to consume. If all notes already arrive confirmed, no-op.
-        const note = stop.dispatch_note;
-        if (note?.status === 'draft') {
-          await tx.dispatch_notes.update({
-            where: { id: note.id },
-            data: {
-              status: 'confirmed',
-              confirmed_by_user_id: user_id,
-              confirmed_at: new Date(),
-              updated_at: new Date(),
-            },
-          });
-          confirmedEventPayloads.push({
-            dispatch_note_id: note.id,
-            dispatch_number: note.dispatch_number,
-            store_id,
-            sales_order_id: note.sales_order_id,
-            order_id: note.order_id,
-          });
-        }
       }
+
+      // Reserve-invariant: every DISPATCHED remisión must be at least
+      // 'confirmed' so its stock reservation exists (handleConfirmed reserves
+      // only standalone notes). This makes the anti double-deduction gate
+      // consistent: by the time a stop settles to 'delivered', the note has a
+      // reservation to consume. If all notes already arrive confirmed, no-op.
+      // Reuses the SAME mechanism as route create/addStops.
+      const notes: ConfirmableNote[] = updated_route.stops
+        .map((stop) => stop.dispatch_note)
+        .filter((note): note is NonNullable<typeof note> => !!note);
+      confirmedEventPayloads = await this.confirmDraftNotesInTx(
+        tx,
+        notes,
+        user_id,
+        store_id,
+      );
 
       return updated_route;
     });
 
     // Post-commit: emit one `dispatch_note.confirmed` per note confirmed above
     // so the reservation listener sees the persisted 'confirmed' status.
-    for (const payload of confirmedEventPayloads) {
-      this.eventEmitter.emit('dispatch_note.confirmed', payload);
-    }
+    this.emitConfirmedNotes(confirmedEventPayloads);
 
     this.eventEmitter.emit('dispatch_route.dispatched', {
       route_id: id,

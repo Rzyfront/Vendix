@@ -3,8 +3,8 @@ export { DispatchNoteListComponent } from './dispatch-note-list/dispatch-note-li
 export { DispatchNoteFormModalComponent } from './dispatch-note-form-modal/dispatch-note-form-modal.component';
 export { DispatchNoteDetailComponent } from './dispatch-note-detail/dispatch-note-detail.component';
 export { DeliverModalComponent } from './deliver-modal/deliver-modal.component';
+export { AssignRouteModalComponent } from './assign-route-modal/assign-route-modal.component';
 export { VoidModalComponent } from './void-modal/void-modal.component';
 export { InvoiceModalComponent } from './invoice-modal/invoice-modal.component';
-export { DetailsStepComponent } from './wizard/details-step.component';
 export { ReviewStepComponent } from './wizard/review-step.component';
 export { DispatchNoteWizardComponent } from './wizard/dispatch-note-wizard.component';

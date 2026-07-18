@@ -30,6 +30,7 @@ import {
   StickyHeaderComponent,
   TextareaComponent,
   ToastService,
+  type AddressPayload,
 } from '../../../../../../../shared/components/index';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
@@ -90,6 +91,16 @@ export class MembershipFormPageComponent implements OnInit {
   /** Inline "crear cliente" modal state. */
   readonly isCustomerModalOpen = signal(false);
   readonly isCreatingCustomer = signal(false);
+
+  /**
+   * Captura la dirección emitida por `<app-customer-modal>` en crear-mode
+   * (`addressData` output). El modal emite `save` primero y `addressData`
+   * justo después, pero el padre solo conoce el nuevo `customer_id` tras la
+   * respuesta async de `createCustomer`. Guardamos el payload aquí y lo
+   * persistimos vía `customersService.createCustomerAddress` en el callback
+   * `next` de `onCustomerCreated`. Se limpia en éxito y en error.
+   */
+  private pendingAddress = signal<AddressPayload | null>(null);
 
   /** Post-alta optional charge modal (reuses the renew modal). */
   readonly showChargeModal = signal(false);
@@ -258,6 +269,15 @@ export class MembershipFormPageComponent implements OnInit {
         next: (customer: Customer) => {
           this.isCreatingCustomer.set(false);
           this.isCustomerModalOpen.set(false);
+          // Si el modal capturó una dirección de envío en crear-mode, la
+          // persistimos ahora que ya conocemos el `customer.id`. Un fallo aquí
+          // no revierte la creación del cliente: el socio quedó seleccionado
+          // y solo lanzamos un toast.
+          const addr = this.pendingAddress();
+          this.pendingAddress.set(null);
+          if (addr) {
+            this.persistCustomerAddress(customer.id, addr);
+          }
           const option: SelectorOption = {
             value: customer.id,
             label:
@@ -275,8 +295,56 @@ export class MembershipFormPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.isCreatingCustomer.set(false);
+          // Limpiar la dirección pendiente si la creación falló.
+          this.pendingAddress.set(null);
           this.toastService.error(
             translateCustomerError(err, 'No se pudo crear el cliente'),
+          );
+        },
+      });
+  }
+
+  /**
+   * Handler del output `addressData` del customer-modal en crear-mode. Solo
+   * captura el payload; la persistencia ocurre en `onCustomerCreated` tras
+   * crear el cliente (cuando ya hay `customer_id`).
+   */
+  onAddressData(payload: AddressPayload): void {
+    this.pendingAddress.set(payload);
+  }
+
+  /**
+   * Mapea `AddressPayload` (claves del schema Prisma: address_line1,
+   * state_province, country_code) al DTO del backend (`address_line_1`,
+   * `state`, `country` con guion bajo y nombres cortos) y persiste la
+   * dirección de envío vía `POST /store/addresses`. No bloquea la creación
+   * del cliente: un fallo aquí solo emite un toast.
+   */
+  private persistCustomerAddress(customerId: number, payload: AddressPayload): void {
+    const dto = {
+      address_line_1: payload.address_line1 ?? '',
+      address_line_2: payload.address_line2 ?? undefined,
+      city: payload.city ?? '',
+      state: payload.state_province ?? '',
+      country: payload.country_code ?? '',
+      postal_code: payload.postal_code ?? undefined,
+      type: 'shipping' as const,
+      is_primary: true,
+      customer_id: customerId,
+      latitude: payload.latitude != null ? String(payload.latitude) : undefined,
+      longitude: payload.longitude != null ? String(payload.longitude) : undefined,
+    };
+    this.customersService
+      .createCustomerAddress(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Dirección de envío del socio guardada.');
+        },
+        error: (err: unknown) => {
+          console.error('Error persisting member address:', err);
+          this.toastService.error(
+            'No se pudo guardar la dirección de envío. El socio fue creado correctamente.',
           );
         },
       });

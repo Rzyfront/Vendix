@@ -9,8 +9,8 @@ import {
   computed,
   effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -35,8 +35,14 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import {
+  InputButtonsComponent,
+  InputButtonOption,
+} from '../../../../../../shared/components/input-buttons/input-buttons.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 
 interface AvailableNote {
   id: number;
@@ -60,7 +66,6 @@ interface AvailableNote {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     SelectorComponent,
@@ -70,8 +75,11 @@ interface AvailableNote {
     CurrencyPipe,
     StepsLineComponent,
     InputComponent,
-    ToggleComponent,
     InputsearchComponent,
+    ButtonComponent,
+    InputButtonsComponent,
+    EmptyStateComponent,
+    BadgeComponent,
   ],
   template: `
     <app-modal
@@ -91,7 +99,8 @@ interface AvailableNote {
       <div class="space-y-4">
         @if (prefillNote()) {
           <div
-            class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-[var(--color-text-primary)]"
+            class="rounded-lg p-3 text-sm text-[var(--color-text-secondary)]"
+            style="background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));"
           >
             {{ prefillNote() }}
           </div>
@@ -102,103 +111,109 @@ interface AvailableNote {
           <!-- Paso 1: Información básica del despacho                        -->
           <!-- ============================================================= -->
           @case (1) {
-            <div class="space-y-3">
-              <app-input
-                label="Código de ruta"
-                placeholder="RI02"
-                [ngModel]="routeCode()"
-                (ngModelChange)="routeCode.set($event)"
-              ></app-input>
-
-              <app-input
-                label="Fecha planeada"
-                type="datetime-local"
-                [ngModel]="plannedDate()"
-                (ngModelChange)="plannedDate.set($event)"
-              ></app-input>
-
-              <app-selector
-                label="Vehículo"
-                placeholder="Seleccionar vehículo..."
-                [searchable]="true"
-                [options]="vehicleOptions()"
-                [ngModel]="vehicleId()"
-                (ngModelChange)="vehicleId.set($event)"
-              ></app-selector>
-
-              <div>
-                <label class="block text-sm font-medium mb-2"
-                  >Tipo de conductor</label
-                >
-                <div class="flex items-center gap-3">
-                  <span
-                    class="text-sm"
-                    [class.font-semibold]="!driverIsExternal()"
-                    [class.text-[var(--color-text-secondary)]]="
-                      driverIsExternal()
-                    "
-                    >Interno (usuario)</span
-                  >
-                  <app-toggle
-                    ariaLabel="Conductor externo"
-                    [checked]="driverIsExternal()"
-                    (changed)="setDriverExternal($event)"
-                  ></app-toggle>
-                  <span
-                    class="text-sm"
-                    [class.font-semibold]="driverIsExternal()"
-                    [class.text-[var(--color-text-secondary)]]="
-                      !driverIsExternal()
-                    "
-                    >Externo (agente)</span
-                  >
-                </div>
-              </div>
-
-              @if (!driverIsExternal()) {
-                <div>
-                  <label class="block text-sm font-medium mb-1">
-                    Conductor
-                    <span class="text-red-500" aria-label="obligatorio">*</span>
-                  </label>
-                  <app-store-user-select
-                    placeholder="Buscar conductor..."
-                    [ngModel]="driverUserId()"
-                    (ngModelChange)="driverUserId.set($event)"
-                  ></app-store-user-select>
-                  @if (driverUserId() == null) {
-                    <p class="text-xs text-amber-700 mt-1">
-                      Selecciona un conductor de tu tienda.
-                    </p>
-                  }
-                </div>
-                <div>
-                  <label class="block text-sm font-medium mb-1">Auxiliares</label>
-                  <app-store-user-multi-select
-                    placeholder="Buscar auxiliares..."
-                    [excludeIds]="assistantExcludeIds()"
-                    [ngModel]="assistantIds()"
-                    (ngModelChange)="assistantIds.set($event)"
-                  ></app-store-user-multi-select>
-                </div>
-              } @else {
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div class="space-y-5">
+              <!-- Sección: Datos de la ruta -->
+              <section class="space-y-3">
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                  Datos de la ruta
+                </h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <app-input
-                    label="Nombre externo"
-                    placeholder="Nombre completo"
-                    [required]="true"
-                    [ngModel]="extName()"
-                    (ngModelChange)="extName.set($event)"
+                    label="Código de ruta"
+                    placeholder="RI02"
+                    [ngModel]="routeCode()"
+                    (ngModelChange)="routeCode.set($event)"
                   ></app-input>
                   <app-input
-                    label="Cédula"
-                    placeholder="1234567890"
-                    [required]="true"
-                    [ngModel]="extId()"
-                    (ngModelChange)="extId.set($event)"
+                    label="Fecha planeada"
+                    type="datetime-local"
+                    [ngModel]="plannedDate()"
+                    (ngModelChange)="plannedDate.set($event)"
                   ></app-input>
                 </div>
-              }
+                <app-selector
+                  label="Vehículo"
+                  placeholder="Seleccionar vehículo..."
+                  [searchable]="true"
+                  [options]="vehicleOptions()"
+                  [ngModel]="vehicleId()"
+                  (ngModelChange)="vehicleId.set($event)"
+                ></app-selector>
+              </section>
+
+              <!-- Sección: Conductor y equipo -->
+              <section
+                class="space-y-3 pt-4 border-t border-[var(--color-border)]"
+              >
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                  Conductor y equipo
+                </h3>
+
+                <app-input-buttons
+                  label="Tipo de conductor"
+                  [options]="driverTypeOptions"
+                  [equalWidth]="true"
+                  [ngModel]="driverIsExternal() ? 'external' : 'internal'"
+                  [ngModelOptions]="{ standalone: true }"
+                  (valueChange)="setDriverExternal($event === 'external')"
+                ></app-input-buttons>
+
+                @if (!driverIsExternal()) {
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label
+                        class="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                      >
+                        Conductor
+                        <span
+                          class="text-[var(--color-danger)]"
+                          aria-label="obligatorio"
+                          >*</span
+                        >
+                      </label>
+                      <app-store-user-select
+                        placeholder="Buscar conductor..."
+                        [ngModel]="driverUserId()"
+                        (ngModelChange)="driverUserId.set($event)"
+                      ></app-store-user-select>
+                      @if (driverUserId() == null) {
+                        <p class="text-xs text-[var(--color-text-muted)] mt-1">
+                          Selecciona un conductor de tu tienda.
+                        </p>
+                      }
+                    </div>
+                    <div>
+                      <label
+                        class="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+                        >Auxiliares</label
+                      >
+                      <app-store-user-multi-select
+                        placeholder="Buscar auxiliares..."
+                        [excludeIds]="assistantExcludeIds()"
+                        [ngModel]="assistantIds()"
+                        (ngModelChange)="assistantIds.set($event)"
+                      ></app-store-user-multi-select>
+                    </div>
+                  </div>
+                } @else {
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <app-input
+                      label="Nombre externo"
+                      placeholder="Nombre completo"
+                      [required]="true"
+                      [ngModel]="extName()"
+                      (ngModelChange)="extName.set($event)"
+                    ></app-input>
+                    <app-input
+                      label="Cédula"
+                      placeholder="1234567890"
+                      [required]="true"
+                      [ngModel]="extId()"
+                      (ngModelChange)="extId.set($event)"
+                    ></app-input>
+                  </div>
+                }
+              </section>
             </div>
           }
 
@@ -207,6 +222,33 @@ interface AvailableNote {
           <!-- ============================================================= -->
           @case (2) {
             <div class="space-y-4">
+              <!-- Tarjeta-resumen / total (compacta, superficie suave) -->
+              <div
+                class="flex items-center justify-between gap-3 rounded-lg p-3"
+                style="background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));"
+              >
+                <p class="text-sm text-[var(--color-text-secondary)]">
+                  <strong class="text-[var(--color-text-primary)]">{{
+                    availableForPicking().length
+                  }}</strong>
+                  disponibles ·
+                  <strong class="text-[var(--color-text-primary)]">{{
+                    stops().length
+                  }}</strong>
+                  seleccionadas
+                </p>
+                <div class="text-right shrink-0">
+                  <p class="text-xs text-[var(--color-text-muted)]">
+                    Total a recaudar
+                  </p>
+                  <p
+                    class="text-base font-semibold tabular-nums text-[var(--color-text-primary)]"
+                  >
+                    {{ stopsTotal() | currency }}
+                  </p>
+                </div>
+              </div>
+
               <!-- Buscador de remisiones disponibles -->
               <app-inputsearch
                 placeholder="Buscar remisión por número o cliente..."
@@ -216,88 +258,96 @@ interface AvailableNote {
 
               <!-- Remisiones disponibles -->
               <div>
-                <h3 class="text-sm font-semibold mb-2">
-                  Remisiones disponibles
-                  <span class="text-xs font-normal text-[var(--color-text-secondary)]">
-                    ({{ availableForPicking().length }})
-                  </span>
+                <h3
+                  class="text-sm font-semibold text-[var(--color-text-primary)] mb-2"
+                >
+                  Disponibles ({{ availableForPicking().length }})
                 </h3>
                 <div
-                  class="max-h-56 overflow-y-auto space-y-2 rounded-md border border-border p-2 bg-[var(--color-surface)]"
+                  class="max-h-64 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 space-y-1"
                 >
                   @for (note of availableForPicking(); track note.id) {
-                    <div
-                      class="flex items-center gap-2 p-2 rounded-md border border-border"
+                    <button
+                      type="button"
+                      (click)="addNote(note.id)"
+                      class="w-full text-left flex items-center gap-3 p-2 rounded-md hover:bg-[var(--color-primary-light)] transition-colors min-h-[44px]"
                     >
                       <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">
+                        <p
+                          class="text-sm font-medium text-[var(--color-text-primary)] truncate"
+                        >
                           {{ note.dispatch_number }}
                           <span class="text-[var(--color-text-secondary)]"
                             >· {{ note.customer_name || 'Sin cliente' }}</span
                           >
                         </p>
-                        <p class="text-xs text-[var(--color-text-secondary)]">
-                          {{ +note.grand_total | currency }}
-                        </p>
-                        <!-- Dirección de entrega (📍) o aviso de remisión no despachable -->
+                        <!-- Dirección de entrega o aviso de remisión no despachable -->
                         @if (noteHasAddress(note)) {
                           <p
-                            class="mt-0.5 text-xs text-[var(--color-text-secondary)] flex items-center gap-1 truncate"
+                            class="mt-0.5 text-xs text-[var(--color-text-muted)] flex items-center gap-1 truncate"
                           >
-                            <app-icon name="map-pin" [size]="12" class="shrink-0" />
-                            <span class="truncate">{{ noteAddressText(note) }}</span>
+                            <app-icon
+                              name="map-pin"
+                              [size]="12"
+                              class="shrink-0"
+                            />
+                            <span class="truncate">{{
+                              noteAddressText(note)
+                            }}</span>
                           </p>
                         } @else if (noteAddressKnown(note)) {
-                          <p
-                            class="mt-0.5 text-xs text-amber-700 flex items-center gap-1"
-                          >
-                            <app-icon name="alert-triangle" [size]="12" class="shrink-0" />
-                            <span>Sin dirección — no podrá despacharse</span>
-                          </p>
+                          <div class="mt-1">
+                            <app-badge variant="warning" size="xs"
+                              >Sin dirección</app-badge
+                            >
+                          </div>
                         }
                       </div>
-                      <button
-                        type="button"
-                        (click)="addNote(note.id)"
-                        class="shrink-0 inline-flex items-center justify-center gap-1 min-h-[44px] min-w-[44px] rounded-md bg-secondary text-secondary-foreground px-3 text-sm"
-                        aria-label="Agregar remisión"
+                      <span
+                        class="text-sm font-semibold tabular-nums text-[var(--color-text-primary)] shrink-0"
+                        >{{ +note.grand_total | currency }}</span
                       >
-                        <app-icon name="plus" [size]="16" />
-                        <span class="hidden sm:inline">Agregar</span>
-                      </button>
-                    </div>
+                      <app-icon
+                        name="plus"
+                        [size]="18"
+                        class="shrink-0 text-[var(--color-primary)]"
+                      />
+                    </button>
                   } @empty {
-                    <div
-                      class="text-sm text-[var(--color-text-secondary)] text-center py-4"
-                    >
-                      @if (noteSearch()) {
-                        No hay remisiones que coincidan con la búsqueda.
-                      } @else {
-                        No hay remisiones disponibles para agregar.
-                      }
-                    </div>
+                    <app-empty-state
+                      size="sm"
+                      icon="package"
+                      title="Sin remisiones"
+                      [description]="
+                        noteSearch()
+                          ? 'No hay coincidencias.'
+                          : 'No hay remisiones disponibles.'
+                      "
+                      [showActionButton]="false"
+                    ></app-empty-state>
                   }
                 </div>
               </div>
 
               <!-- Paradas seleccionadas -->
               <div>
-                <h3 class="text-sm font-semibold mb-2">
-                  Entregas seleccionadas
-                  <span class="text-xs font-normal text-[var(--color-text-secondary)]">
-                    ({{ stops().length }})
-                  </span>
+                <h3
+                  class="text-sm font-semibold text-[var(--color-text-primary)] mb-2"
+                >
+                  En la ruta ({{ stops().length }})
                 </h3>
-                <div class="space-y-2">
+                <div class="space-y-1.5">
                   @for (stop of orderedStops(); track stop.dispatch_note_id; let i = $index) {
                     <div
-                      class="flex items-center gap-2 p-2 rounded-md border border-border bg-muted/30"
+                      class="flex items-center gap-3 p-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)]"
                     >
-                      <span class="text-sm font-mono w-6 text-center shrink-0">{{
+                      <app-badge variant="primary" size="xs">{{
                         i + 1
-                      }}</span>
+                      }}</app-badge>
                       <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">
+                        <p
+                          class="text-sm font-medium text-[var(--color-text-primary)] truncate"
+                        >
                           {{ stopNote(stop.dispatch_note_id)?.dispatch_number }}
                           <span class="text-[var(--color-text-secondary)]"
                             >·
@@ -307,58 +357,53 @@ interface AvailableNote {
                             }}</span
                           >
                         </p>
-                        <p class="text-xs text-[var(--color-text-secondary)]">
-                          {{
-                            +(stopNote(stop.dispatch_note_id)?.grand_total || 0)
-                              | currency
-                          }}
-                        </p>
                       </div>
-                      <button
-                        type="button"
-                        (click)="moveStopUp(i)"
-                        [disabled]="i === 0"
-                        class="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md text-[var(--color-text-primary)] disabled:opacity-30"
-                        aria-label="Subir entrega"
+                      <span
+                        class="text-sm font-semibold tabular-nums text-[var(--color-text-primary)] shrink-0"
+                        >{{
+                          +(stopNote(stop.dispatch_note_id)?.grand_total || 0)
+                            | currency
+                        }}</span
                       >
-                        <app-icon name="arrow-up" [size]="18" />
-                      </button>
-                      <button
-                        type="button"
-                        (click)="moveStopDown(i)"
-                        [disabled]="i === stops().length - 1"
-                        class="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md text-[var(--color-text-primary)] disabled:opacity-30"
-                        aria-label="Bajar entrega"
-                      >
-                        <app-icon name="arrow-down" [size]="18" />
-                      </button>
-                      <button
-                        type="button"
-                        (click)="removeStop(i)"
-                        class="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-md text-[var(--color-destructive)]"
-                        aria-label="Quitar entrega"
-                      >
-                        <app-icon name="trash-2" [size]="18" />
-                      </button>
+                      <div class="flex items-center shrink-0">
+                        <button
+                          type="button"
+                          (click)="moveStopUp(i)"
+                          [disabled]="i === 0"
+                          class="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:opacity-30 min-h-[40px] min-w-[40px]"
+                          aria-label="Subir entrega"
+                        >
+                          <app-icon name="arrow-up" [size]="18" />
+                        </button>
+                        <button
+                          type="button"
+                          (click)="moveStopDown(i)"
+                          [disabled]="i === stops().length - 1"
+                          class="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] disabled:opacity-30 min-h-[40px] min-w-[40px]"
+                          aria-label="Bajar entrega"
+                        >
+                          <app-icon name="arrow-down" [size]="18" />
+                        </button>
+                        <button
+                          type="button"
+                          (click)="removeStop(i)"
+                          class="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-danger)] min-h-[40px] min-w-[40px]"
+                          aria-label="Quitar entrega"
+                        >
+                          <app-icon name="trash-2" [size]="18" />
+                        </button>
+                      </div>
                     </div>
                   } @empty {
-                    <div
-                      class="text-sm text-[var(--color-text-secondary)] text-center py-4"
-                    >
-                      Agrega al menos una remisión desde la lista superior.
-                    </div>
+                    <app-empty-state
+                      size="sm"
+                      icon="map-pin"
+                      title="Ruta vacía"
+                      description="Agrega remisiones desde la lista de arriba."
+                      [showActionButton]="false"
+                    ></app-empty-state>
                   }
                 </div>
-              </div>
-
-              <!-- Total a recaudar -->
-              <div
-                class="flex items-center justify-between border-t border-border pt-3"
-              >
-                <span class="text-sm font-medium">Total a recaudar</span>
-                <span class="text-base font-semibold">{{
-                  stopsTotal() | currency
-                }}</span>
               </div>
             </div>
           }
@@ -367,45 +412,43 @@ interface AvailableNote {
 
       <!-- Footer Paso 1 -->
       @if (currentStep() === 1) {
-        <div slot="footer" class="flex gap-2 w-full">
-          <button
-            (click)="close.emit()"
-            type="button"
-            class="flex-1 rounded-md border border-border bg-[var(--color-surface)] px-4 py-2 text-sm min-h-[44px]"
+        <div
+          slot="footer"
+          class="flex items-center justify-end gap-3 px-4 py-2.5 bg-[var(--color-surface-elevated)] border-t border-[var(--color-border)]"
+        >
+          <app-button variant="ghost" (clicked)="close.emit()"
+            >Cancelar</app-button
           >
-            Cancelar
-          </button>
-          <button
-            (click)="next()"
-            type="button"
+          <app-button
+            variant="primary"
             [disabled]="!canProceedStep1()"
-            class="flex-1 inline-flex items-center justify-center gap-1 rounded-md bg-primary-600 text-white px-4 py-2 text-sm font-medium min-h-[44px] disabled:opacity-50"
+            (clicked)="next()"
           >
             Siguiente
-            <app-icon name="arrow-right" [size]="16" />
-          </button>
+            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+          </app-button>
         </div>
       }
 
       <!-- Footer Paso 2 -->
       @if (currentStep() === 2) {
-        <div slot="footer" class="flex gap-2 w-full">
-          <button
-            (click)="back()"
-            type="button"
-            class="flex-1 inline-flex items-center justify-center gap-1 rounded-md border border-border bg-[var(--color-surface)] px-4 py-2 text-sm min-h-[44px]"
-          >
-            <app-icon name="arrow-left" [size]="16" />
+        <div
+          slot="footer"
+          class="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-elevated)] border-t border-[var(--color-border)]"
+        >
+          <app-button variant="outline" (clicked)="back()">
+            <app-icon name="arrow-left" [size]="16" slot="icon"></app-icon>
             Atrás
-          </button>
-          <button
-            (click)="submit()"
-            type="button"
-            [disabled]="submitting() || !canSubmit()"
-            class="flex-1 rounded-md bg-primary-600 text-white px-4 py-2 text-sm font-medium min-h-[44px] disabled:opacity-50"
+          </app-button>
+          <app-button
+            variant="primary"
+            [disabled]="!canSubmit()"
+            [loading]="submitting()"
+            [showTextWhileLoading]="true"
+            (clicked)="submit()"
           >
-            {{ submitting() ? 'Creando...' : 'Crear planilla' }}
-          </button>
+            Crear planilla
+          </app-button>
         </div>
       }
     </app-modal>
@@ -415,6 +458,7 @@ export class PlanillaWizardComponent {
   private readonly service = inject(PlanillasRutasService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly activatedRoute = inject(ActivatedRoute);
 
   /** Contexto precargado al llegar desde un método de envío (atajo). */
   readonly prefillNote = input<string | null>(null);
@@ -434,6 +478,12 @@ export class PlanillaWizardComponent {
   readonly steps: StepsLineItem[] = [
     { label: 'Información básica del despacho' },
     { label: 'Entregas' },
+  ];
+
+  /** Opciones del segmentado tipo-de-conductor (app-input-buttons). */
+  readonly driverTypeOptions: InputButtonOption[] = [
+    { value: 'internal', label: 'Interno' },
+    { value: 'external', label: 'Externo' },
   ];
 
   /** Paso activo del wizard (1 = datos básicos, 2 = entregas). */
@@ -530,7 +580,18 @@ export class PlanillaWizardComponent {
    */
   private prefillApplied = false;
 
+  /**
+   * Ids de dispatch_note precargados desde el query param `prefillNotes`
+   * (CONTRATO con el flujo "crear ruta nueva desde una remisión" del módulo
+   * dispatch-notes: ids separados por coma, p.ej. `?prefillNotes=12,34`). Se
+   * leen del snapshot en el constructor y se aplican como paradas EN CUANTO
+   * cargan las remisiones elegibles (por eso se difieren hasta el callback de
+   * `loadAvailableNotes`). Campo plano (no signal): se consume una sola vez.
+   */
+  private pendingPrefillNoteIds: number[] = [];
+
   constructor() {
+    this.readPrefillNotesFromQuery();
     this.loadAvailableNotes();
     this.loadVehicles();
 
@@ -608,8 +669,40 @@ export class PlanillaWizardComponent {
         next: (res) => {
           const notes = (res?.data ?? []) as AvailableNote[];
           this.availableNotes.set(notes);
+          this.applyPrefillNotes();
         },
       });
+  }
+
+  /**
+   * Lee el query param `prefillNotes` del snapshot (el repo NO usa
+   * `withComponentInputBinding`, así que los params se leen vía `ActivatedRoute`)
+   * y deja los ids válidos pendientes de aplicar. Idempotente: si no viene el
+   * param, no hace nada y el flujo normal del wizard queda intacto.
+   */
+  private readPrefillNotesFromQuery(): void {
+    const raw = this.activatedRoute.snapshot.queryParamMap.get('prefillNotes');
+    if (!raw) return;
+    this.pendingPrefillNoteIds = raw
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0);
+  }
+
+  /**
+   * Aplica el prefill de remisiones (query param `prefillNotes`) una vez
+   * cargadas las elegibles: agrega como parada cada id que exista en
+   * `availableNotes`. Se ejecuta una sola vez (vacía la lista pendiente). Un id
+   * que no esté entre las elegibles (ya asignado a otra ruta / no confirmado) se
+   * ignora en silencio para no crear paradas fantasma sin datos.
+   */
+  private applyPrefillNotes(): void {
+    if (this.pendingPrefillNoteIds.length === 0) return;
+    const availableIds = new Set(this.availableNotes().map((n) => n.id));
+    for (const id of this.pendingPrefillNoteIds) {
+      if (availableIds.has(id)) this.addNote(id);
+    }
+    this.pendingPrefillNoteIds = [];
   }
 
   private loadVehicles(): void {

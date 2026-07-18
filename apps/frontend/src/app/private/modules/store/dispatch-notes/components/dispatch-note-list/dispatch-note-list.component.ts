@@ -39,6 +39,7 @@ import {
   REASON_LABELS,
 } from '../../constants/dispatch-note.constants';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
+import { AssignRouteModalComponent } from '../assign-route-modal/assign-route-modal.component';
 import {
   DispatchNote,
   DispatchNoteStatus,
@@ -60,6 +61,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     PaginationComponent,
     EmptyStateComponent,
     CardComponent,
+    AssignRouteModalComponent,
   ],
   templateUrl: './dispatch-note-list.component.html',
   styleUrls: ['./dispatch-note-list.component.scss'],
@@ -80,6 +82,10 @@ export class DispatchNoteListComponent {
   dispatch_notes = signal<DispatchNote[]>([]);
   loading = signal(false);
   total_items = signal(0);
+
+  // Assign-route modal state
+  readonly showAssignModal = signal(false);
+  readonly assignTargetNote = signal<DispatchNote | null>(null);
 
   // Pagination
   readonly filters = signal<{ page: number; limit: number }>({ page: 1, limit: 10 });
@@ -287,6 +293,14 @@ export class DispatchNoteListComponent {
       action: (dn: DispatchNote) => this.receiveDispatchNote(dn),
       variant: 'primary',
       show: (dn: DispatchNote) => dn.status === 'confirmed' && dn.direction === 'inbound',
+    },
+    {
+      label: 'Asignar a ruta',
+      icon: 'map-pin',
+      action: (dn: DispatchNote) => this.openAssignModal(dn),
+      variant: 'secondary',
+      show: (dn: DispatchNote) =>
+        !this.activeRoute(dn) && ['draft', 'confirmed'].includes(dn.status),
     },
     {
       label: 'Facturar',
@@ -515,12 +529,24 @@ export class DispatchNoteListComponent {
   }
 
   async deliverDispatchNote(dn: DispatchNote): Promise<void> {
-    const confirmed = await this.dialogService.confirm({
-      title: 'Marcar como Entregada',
-      message: `Marcar la remision ${dn.dispatch_number} como entregada?`,
-      confirmText: 'Entregar',
-      cancelText: 'Volver',
-    });
+    // When the remisión has no active route, delivering is irreversible: the
+    // goods leave the warehouse, stock is deducted and COGS is recorded. Warn
+    // with a danger dialog before proceeding.
+    const hasRoute = !!this.activeRoute(dn);
+    const confirmed = hasRoute
+      ? await this.dialogService.confirm({
+          title: 'Marcar como Entregada',
+          message: `Marcar la remision ${dn.dispatch_number} como entregada?`,
+          confirmText: 'Entregar',
+          cancelText: 'Volver',
+        })
+      : await this.dialogService.confirm({
+          title: 'Entregar sin ruta',
+          message: `Vas a entregar la remisión ${dn.dispatch_number} directamente, sin ruta. Esta acción no se puede deshacer: la mercancía sale de bodega, se descuenta el stock y se registra el costo de venta (COGS). ¿Continuar?`,
+          confirmText: 'Entregar',
+          cancelText: 'Cancelar',
+          confirmVariant: 'danger',
+        });
     if (!confirmed) return;
 
     this.dispatchNotesService
@@ -664,6 +690,27 @@ export class DispatchNoteListComponent {
   activeRouteLabel(dn: DispatchNote): string {
     const a = this.activeRoute(dn);
     return a ? a.route_number : '—';
+  }
+
+  // ── Assign-route modal ─────────────────────────────
+  /** Opens the assign-route modal for an orphan remisión. */
+  openAssignModal(dn: DispatchNote): void {
+    this.assignTargetNote.set(dn);
+    this.showAssignModal.set(true);
+  }
+
+  onAssignModalOpenChange(open: boolean): void {
+    this.showAssignModal.set(open);
+    if (!open) {
+      this.assignTargetNote.set(null);
+    }
+  }
+
+  /** The remisión was assigned to a route → reload the list so the "Planilla"
+   *  column reflects the new assignment. */
+  onRouteAssigned(): void {
+    this.loadDispatchNotes();
+    this.refresh.emit();
   }
 
   /** Returns a clickable HTML string for the table cell. We bypass the

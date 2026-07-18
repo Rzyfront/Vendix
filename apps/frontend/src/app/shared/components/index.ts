@@ -68,6 +68,14 @@ export { DomainResolutionErrorComponent } from './domain-resolution-error/domain
 export type { DomainResolutionErrorKind } from './domain-resolution-error/domain-resolution-error.component';
 export { MapViewComponent } from './map-view/map-view.component';
 export type { LatLng, MapMarker } from './map-view/map-view.component';
+export { AddressFormFieldsComponent } from './address-form-fields/address-form-fields.component';
+export type {
+  LatLng as AddressLatLng,
+  AddressPayload,
+} from './address-form-fields/address-form-fields.component';
+export { DispatchNoteAddressEditorComponent } from './dispatch-note-address-editor/dispatch-note-address-editor.component';
+export { DispatchNoteAddressService } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
+export type { DispatchNoteAddressPayload } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
 
 // Services
 export { TourService } from './tour/services/tour.service';

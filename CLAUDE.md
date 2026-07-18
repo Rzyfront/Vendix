@@ -23,6 +23,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `how-to-dev` |
 | -- | `how-to-plan` |
 | -- | `pr-code-review` |
+| -- | `vendix-address-geocoding` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -86,6 +87,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes | `vendix-restaurant-ops` |
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
+| Adding or editing a customer shipping address | `vendix-address-geocoding` |
 | Adding or editing per-industry module rules | `vendix-panel-ui` |
 | Adding or modifying notification types | `vendix-notifications-system` |
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
@@ -100,6 +102,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
+| Building a customer-modal that captures address in crear-mode | `vendix-address-geocoding` |
 | Building a granular functional inventory of a web module for mobile replication | `mobile-parity-audit` |
 | Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
@@ -166,6 +169,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
 | Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
+| Debugging route-map unlocated stops or resolveStopCoordinates cascade | `vendix-address-geocoding` |
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
@@ -189,6 +193,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing `apps/frontend/src/app/public/modules/store-ecommerce/` table-banner, table-context, table-session-sse | `vendix-restaurant-table-qr` |
 | Editing `store_settings.restaurant.{qr_scan_behavior, qr_auto_fire, enable_table_checkout}` | `vendix-restaurant-table-qr` |
 | Editing `tables.public_token`, mesa QR generation, or qr_code_url regeneration | `vendix-restaurant-table-qr` |
+| Editing backend ecommerce/geocoding proxy (Nominatim/Overpass) | `vendix-address-geocoding` |
+| Editing dispatch_note customer_address snapshot or PATCH /store/dispatch-notes/:id/address | `vendix-address-geocoding` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
 | Editing industry gating so that only `restaurant` stores see restaurant_ops | `vendix-restaurant-ops` |
 | Editing industry rules in INDUSTRY_HIDDEN_MODULES | `vendix-panel-ui` |
@@ -227,6 +233,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Installing or configuring Playwright MCP (agent-browser as fallback) | `how-to-test` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
+| Integrating app-address-map-picker (MapLibre) into a form | `vendix-address-geocoding` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
 | Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
 | Listing Vendix issues in Linear | `linear-issues` |
@@ -267,6 +274,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
+| Reusing app-address-form-fields shared component | `vendix-address-geocoding` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running a controlled E2E verification of a shipped ticket on www.vendix.online | `verify-ticket-prod` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
@@ -345,6 +353,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with DIAN NIT ownership | `vendix-fiscal-scope` |
 | Working with DIAN electronic payroll (DSPNE), CUNE, or adjustment note 103 | `vendix-payroll` |
 | Working with EventSource for AI | `vendix-ai-streaming` |
+| Working with GeocodingService (reverse/forward) frontend | `vendix-address-geocoding` |
 | Working with MCP server | `vendix-ai-engine` |
 | Working with MCP server | `vendix-mcp-server` |
 | Working with McpController | `vendix-mcp-server` |

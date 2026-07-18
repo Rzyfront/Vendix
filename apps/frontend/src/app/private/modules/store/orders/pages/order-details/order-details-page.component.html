@@ -278,6 +278,15 @@
                           {{ addr.country_code }}
                         </span>
                       }
+                      <button
+                        type="button"
+                        (click)="promptEditShippingAddress(addr)"
+                        class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                        title="Editar dirección de entrega"
+                      >
+                        <app-icon name="edit-3" size="13"></app-icon>
+                        Editar dirección
+                      </button>
                     </div>
                   } @else {
                     <button
@@ -2001,14 +2010,17 @@
       </div>
     </app-modal>
 
-    <!-- A3-edit: CAPTURA DE DIRECCIÓN DE ENVÍO EN PÁGINA -->
+    <!-- A3-edit: CAPTURA / EDICIÓN DE DIRECCIÓN DE ENVÍO EN PÁGINA -->
     @if (showShippingAddressModal()) {
       <app-shipping-address-modal
         [customerId]="order()?.customer_id ?? null"
         [customerName]="shippingAddressCustomerName()"
         [saving]="savingShippingAddress()"
+        [addressId]="editingAddressId()"
+        [initialAddress]="editingInitialAddress()"
         (close)="showShippingAddressModal.set(false)"
         (submitForm)="onShippingAddressSubmit($event)"
+        (submitEdit)="onShippingAddressEdit($event)"
       ></app-shipping-address-modal>
     }
 

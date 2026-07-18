@@ -4,6 +4,7 @@ import {
   computed,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -26,6 +27,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import { OrdersService } from '../../../orders/services/orders.service';
 import { Order } from '../../../orders/interfaces/order.interface';
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
+import { WizardStepSectionComponent } from './wizard-step-section.component';
 
 /**
  * Fila enriquecida para tabla/cards. Extiende Order con campos PLANOS
@@ -82,40 +84,118 @@ interface OrderRow extends Order {
     PaginationComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
+    WizardStepSectionComponent,
   ],
   template: `
-    <div class="space-y-3">
-      <!-- Búsqueda -->
-      <app-inputsearch
-        placeholder="Buscar por #orden o cliente..."
-        [debounceTime]="300"
-        (search)="onSearch($event)"
-      ></app-inputsearch>
+    <app-wizard-step-section
+      icon="file-text"
+      title="Orden"
+      subtitle="Elige la orden a despachar"
+    >
+      <!-- Filtros: barra compacta + chips de filtro activo -->
+      <div class="space-y-2.5">
+        <!-- Toolbar: buscador · canal · rango de fechas -->
+        <div
+          class="flex flex-col lg:flex-row lg:items-end gap-2.5 rounded-xl border border-border/70 bg-[var(--color-background)] p-2.5 sm:p-3"
+        >
+          <!-- Buscador (#orden o cliente) — crece para ocupar el ancho libre -->
+          <div class="flex-1 min-w-0">
+            <app-inputsearch
+              placeholder="Buscar por #orden o cliente..."
+              [debounceTime]="300"
+              (search)="onSearch($event)"
+            ></app-inputsearch>
+          </div>
 
-      <!-- Filtros -->
-      <div class="flex flex-col md:flex-row md:items-end gap-2 md:gap-3">
-        <div class="w-full md:w-52">
-          <app-selector
-            label="Canal"
-            size="sm"
-            [options]="channelOptions"
-            (valueChange)="onChannelChange($event)"
-          ></app-selector>
+          <!-- Canal -->
+          <div class="w-full lg:w-48 shrink-0">
+            <app-selector
+              label="Canal"
+              size="sm"
+              [options]="channelOptions"
+              (valueChange)="onChannelChange($event)"
+            ></app-selector>
+          </div>
+
+          <!-- Rango de fechas — sin botón interno: el limpiado vive en los chips -->
+          <div class="shrink-0">
+            <app-date-range-picker
+              [showClear]="false"
+              (dateRangeChange)="onDateRangeChange($event)"
+            ></app-date-range-picker>
+          </div>
         </div>
 
-        <app-date-range-picker
-          (dateRangeChange)="onDateRangeChange($event)"
-        ></app-date-range-picker>
-
+        <!-- Chips de filtro activo -->
         @if (hasActiveFilters()) {
-          <button
-            type="button"
-            (click)="onClearFilters()"
-            class="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-button border border-border text-[var(--color-text-secondary)] hover:bg-[var(--color-muted)]/30 transition-colors self-start md:self-auto"
-          >
-            <app-icon name="x" [size]="14"></app-icon>
-            Limpiar filtros
-          </button>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span
+              class="inline-flex items-center gap-1 mr-0.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
+            >
+              <app-icon name="filter" [size]="12"></app-icon>
+              Filtros
+            </span>
+
+            @if (searchChip(); as s) {
+              <span
+                class="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full text-xs font-medium bg-[var(--color-primary)]/10 text-[var(--color-primary)] border border-[var(--color-primary)]/20"
+              >
+                <app-icon name="search" [size]="12"></app-icon>
+                <span class="truncate max-w-[10rem]">{{ s }}</span>
+                <button
+                  type="button"
+                  (click)="removeSearch()"
+                  class="inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[var(--color-primary)]/20 transition-colors"
+                  aria-label="Quitar búsqueda"
+                >
+                  <app-icon name="x" [size]="12"></app-icon>
+                </button>
+              </span>
+            }
+
+            @if (channelChip(); as c) {
+              <span
+                class="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full text-xs font-medium bg-[var(--color-primary)]/10 text-[var(--color-primary)] border border-[var(--color-primary)]/20"
+              >
+                <app-icon name="store" [size]="12"></app-icon>
+                <span class="truncate max-w-[10rem]">{{ c }}</span>
+                <button
+                  type="button"
+                  (click)="removeChannel()"
+                  class="inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[var(--color-primary)]/20 transition-colors"
+                  aria-label="Quitar canal"
+                >
+                  <app-icon name="x" [size]="12"></app-icon>
+                </button>
+              </span>
+            }
+
+            @if (dateChip(); as d) {
+              <span
+                class="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full text-xs font-medium bg-[var(--color-primary)]/10 text-[var(--color-primary)] border border-[var(--color-primary)]/20"
+              >
+                <app-icon name="calendar" [size]="12"></app-icon>
+                <span class="truncate max-w-[14rem]">{{ d }}</span>
+                <button
+                  type="button"
+                  (click)="removeDateRange()"
+                  class="inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[var(--color-primary)]/20 transition-colors"
+                  aria-label="Quitar rango de fechas"
+                >
+                  <app-icon name="x" [size]="12"></app-icon>
+                </button>
+              </span>
+            }
+
+            <button
+              type="button"
+              (click)="clearAllFilters()"
+              class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-muted)]/40 transition-colors"
+            >
+              <app-icon name="x" [size]="12"></app-icon>
+              Limpiar todo
+            </button>
+          </div>
         }
       </div>
 
@@ -293,7 +373,7 @@ interface OrderRow extends Order {
           </div>
         </div>
       }
-    </div>
+    </app-wizard-step-section>
   `,
 })
 export class OrderStepComponent {
@@ -304,6 +384,11 @@ export class OrderStepComponent {
 
   /** Tamaño de página server-side. */
   readonly limit = 10;
+
+  // --- Refs a controles hijos (para sincronizar su vista al quitar chips) ---
+  private readonly searchRef = viewChild(InputsearchComponent);
+  private readonly channelRef = viewChild(SelectorComponent);
+  private readonly dateRangeRef = viewChild(DateRangePickerComponent);
 
   // --- Estado ---
   readonly loading = signal(false);
@@ -339,6 +424,32 @@ export class OrderStepComponent {
       !!this.channel() ||
       (!!this.dateFrom() && !!this.dateTo()),
   );
+
+  /**
+   * Chips de filtro activo — DERIVADOS de las señales existentes (sin nueva
+   * fuente de verdad). Cada uno devuelve la etiqueta legible o null cuando el
+   * filtro no está aplicado.
+   */
+  readonly searchChip = computed<string | null>(() => {
+    const s = this.search().trim();
+    return s ? s : null;
+  });
+
+  readonly channelChip = computed<string | null>(() => {
+    const c = this.channel();
+    if (!c) return null;
+    return (
+      this.channelOptions.find((o) => o.value === c)?.label ??
+      this.channelLabel(c)
+    );
+  });
+
+  readonly dateChip = computed<string | null>(() => {
+    const from = this.dateFrom();
+    const to = this.dateTo();
+    if (!from || !to) return null;
+    return `${formatDateOnlyUTC(from)} – ${formatDateOnlyUTC(to)}`;
+  });
 
   /**
    * Filas enriquecidas. Lee currentCurrency() para ser REACTIVO zoneless: al
@@ -517,6 +628,62 @@ export class OrderStepComponent {
     this.dateFrom.set(null);
     this.dateTo.set(null);
     this.searchPerformed.set(false);
+    this.page.set(1);
+    this.closePreview();
+    this.fetch();
+  }
+
+  /** Quita solo el chip de búsqueda: limpia el input visible y refresca. */
+  removeSearch(): void {
+    this.searchRef()?.writeValue('');
+    this.onSearch('');
+  }
+
+  /** Quita solo el chip de canal: resetea el selector y refresca. */
+  removeChannel(): void {
+    this.channelRef()?.writeValue(null);
+    this.onChannelChange(null);
+  }
+
+  /**
+   * Quita solo el chip de fechas. El reset del date-range-picker emite
+   * (null, null) → onDateRangeChange dispara el refresco (único). Fallback
+   * defensivo si el ref aún no está resuelto.
+   */
+  removeDateRange(): void {
+    const picker = this.dateRangeRef();
+    if (picker) {
+      picker.clear();
+      return;
+    }
+    this.dateFrom.set(null);
+    this.dateTo.set(null);
+    this.page.set(1);
+    this.closePreview();
+    this.fetch();
+  }
+
+  /**
+   * "Limpiar todo": sincroniza los controles visibles y refresca UNA sola vez.
+   * Buscador y selector se resetean en silencio (writeValue no emite); el reset
+   * del date-range-picker conduce el único fetch vía onDateRangeChange, ya con
+   * las demás señales en su valor vacío.
+   */
+  clearAllFilters(): void {
+    this.searchRef()?.writeValue('');
+    this.channelRef()?.writeValue(null);
+    this.search.set('');
+    this.channel.set(null);
+    this.searchPerformed.set(false);
+
+    const picker = this.dateRangeRef();
+    if (picker) {
+      picker.clear();
+      return;
+    }
+    // Fallback sin ref: reset directo + fetch único (equivale a onClearFilters).
+    this.dateFrom.set(null);
+    this.dateTo.set(null);
     this.page.set(1);
     this.closePreview();
     this.fetch();

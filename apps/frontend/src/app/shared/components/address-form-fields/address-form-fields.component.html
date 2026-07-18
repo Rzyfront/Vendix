@@ -1,0 +1,97 @@
+<div class="address-form-fields space-y-4">
+  <!-- Collapsible map section -->
+  <div class="map-section">
+    <button
+      type="button"
+      class="map-toggle"
+      (click)="toggleMap()"
+      [attr.aria-expanded]="showMap()"
+    >
+      <app-icon name="map-pin" [size]="16"></app-icon>
+      <span>{{ showMap() ? 'Cerrar mapa' : 'Abrir mapa' }}</span>
+    </button>
+
+    @if (showMap()) {
+      <div class="map-wrapper mt-3">
+        <app-address-map-picker
+          [center]="coordsSignal()"
+          (located)="onLocated($event)"
+        />
+      </div>
+    }
+  </div>
+
+  <!-- Non-blocking warning (forward-geocode failed, etc.) -->
+  @if (addressWarning()) {
+    <div class="address-warning" role="status">
+      <app-icon name="alert-triangle" [size]="16"></app-icon>
+      <span>{{ addressWarning() }}</span>
+    </div>
+  }
+
+  @if (reverseLoading()) {
+    <div class="reverse-loading" role="status">
+      <span>Resolviendo dirección desde el mapa…</span>
+    </div>
+  }
+
+  <form [formGroup]="form" class="space-y-4">
+    <app-input
+      label="Dirección"
+      formControlName="address_line1"
+      placeholder="Calle y número"
+      [control]="form.get('address_line1')!"
+      [required]="true"
+    ></app-input>
+
+    <app-input
+      label="Apartamento, oficina, etc. (opcional)"
+      formControlName="address_line2"
+      placeholder="Apto, piso, oficina"
+      [control]="form.get('address_line2')!"
+    ></app-input>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <app-input
+        label="Ciudad"
+        formControlName="city"
+        placeholder="Ciudad"
+        [control]="form.get('city')!"
+        [required]="true"
+      ></app-input>
+
+      <app-input
+        label="Departamento/Estado"
+        formControlName="state_province"
+        placeholder="Departamento o estado"
+        [control]="form.get('state_province')!"
+        [required]="true"
+      ></app-input>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <app-input
+        label="País"
+        formControlName="country_code"
+        placeholder="Código de país (CO)"
+        [control]="form.get('country_code')!"
+        [required]="true"
+      ></app-input>
+
+      <app-input
+        label="Código postal"
+        formControlName="postal_code"
+        placeholder="Código postal"
+        [control]="form.get('postal_code')!"
+      ></app-input>
+    </div>
+
+    <app-input
+      label="Teléfono"
+      formControlName="phone_number"
+      type="tel"
+      placeholder="Teléfono de contacto"
+      [control]="form.get('phone_number')!"
+    ></app-input>
+  </form>
+</div>

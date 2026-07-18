@@ -69,8 +69,8 @@ export interface WizardTotals {
 /**
  * Bidirectional remisión wizard service (ref plan Remisiones Bidireccionales).
  *
- * Outbound steps (6): Tipo → Orden → Items → Detalles → Ruta → Revisión.
- * Inbound steps  (5): Tipo → Orden → Items → Detalles → Revisión.
+ * customer_delivery (5): Tipo → Orden → Ítems y bodega → Ruta → Revisión.
+ * inbound subtypes  (4): Tipo → Party → Ítems y bodega → Revisión.
  *
  * `@Injectable()` (not providedIn:'root') so each modal mount gets a
  * fresh instance.
@@ -92,8 +92,6 @@ export class DispatchNoteWizardService {
   readonly selectedRouteId = signal<number | null>(null);
   readonly newRouteDraft = signal<CreateDispatchFromOrderNewRouteDto | null>(null);
 
-  readonly terminalAction = signal<WizardTerminalAction>('draft');
-
   // Plan Despacho Economía — FASE 7 paso 20.
   // Modo dual quick-accept: si está activo (default), `dispatched_quantity`
   // se autocompleta con `pending_quantity` en cada nuevo ítem / nueva orden.
@@ -114,23 +112,24 @@ export class DispatchNoteWizardService {
   readonly relatedDispatchId = signal<number | null>(null);
 
   // --- Step labels derived from subtype (ref R4a) ---
-  // customer_delivery  (outbound): [Tipo, Orden, Items, Detalles, Ruta, Revisión]
-  // transfer_out/in:                [Tipo, Origen/Destino, Items, Detalles, Revisión]
-  // purchase_receipt  (inbound):    [Tipo, Proveedor, Items, Detalles, Revisión]
-  // customer_return   (inbound):    [Tipo, Cliente+Remisión, Items, Detalles, Revisión]
+  // 'Items' + 'Detalles' se fusionan en 'Ítems y bodega' (bodega origen = ítems).
+  // customer_delivery  (5 pasos): [Tipo, Orden, Ítems y bodega, Ruta, Revisión]
+  // transfer_out/in    (4 pasos): [Tipo, Origen/Destino, Ítems y bodega, Revisión]
+  // purchase_receipt   (4 pasos): [Tipo, Proveedor, Ítems y bodega, Revisión]
+  // customer_return    (4 pasos): [Tipo, Cliente+Remisión, Ítems y bodega, Revisión]
   readonly stepLabels = computed<string[]>(() => {
     switch (this.subtype()) {
       case 'customer_delivery':
-        return ['Tipo', 'Orden', 'Items', 'Detalles', 'Ruta', 'Revisión'];
+        return ['Tipo', 'Orden', 'Ítems y bodega', 'Ruta', 'Revisión'];
       case 'transfer_out':
       case 'transfer_in':
-        return ['Tipo', 'Origen/Destino', 'Items', 'Detalles', 'Revisión'];
+        return ['Tipo', 'Origen/Destino', 'Ítems y bodega', 'Revisión'];
       case 'purchase_receipt':
-        return ['Tipo', 'Proveedor', 'Items', 'Detalles', 'Revisión'];
+        return ['Tipo', 'Proveedor', 'Ítems y bodega', 'Revisión'];
       case 'customer_return':
-        return ['Tipo', 'Cliente y Remisión', 'Items', 'Detalles', 'Revisión'];
+        return ['Tipo', 'Cliente y Remisión', 'Ítems y bodega', 'Revisión'];
       default:
-        return ['Tipo', 'Orden', 'Items', 'Detalles', 'Ruta', 'Revisión'];
+        return ['Tipo', 'Orden', 'Ítems y bodega', 'Ruta', 'Revisión'];
     }
   });
 
@@ -150,6 +149,8 @@ export class DispatchNoteWizardService {
     return { subtotal, discount, tax, grandTotal: subtotal - discount + tax };
   });
 
+  // canProceed por índice (customer_delivery: 5 pasos; inbound: 4 pasos):
+  // 0 Tipo · 1 Party · 2 Ítems y bodega · 3 Ruta|Revisión · 4 Revisión (solo customer_delivery)
   readonly canProceed = computed<boolean>(() => {
     const step = this.currentStep();
     const sub = this.subtype();
@@ -179,23 +180,20 @@ export class DispatchNoteWizardService {
         }
       }
       case 2: {
-        // Items
+        // Ítems y bodega — ítems válidos Y bodega de origen elegida (fusión).
         const its = this.items();
         if (its.length === 0) return false;
         // order-first: clamp to pending_quantity; free-picker: just > 0.
-        if (sub === 'customer_delivery') {
-          return its.every(
-            (i) => i.dispatched_quantity > 0 && i.dispatched_quantity <= i.pending_quantity,
-          );
-        }
-        return its.every((i) => i.dispatched_quantity > 0);
+        const itemsValid =
+          sub === 'customer_delivery'
+            ? its.every(
+                (i) => i.dispatched_quantity > 0 && i.dispatched_quantity <= i.pending_quantity,
+              )
+            : its.every((i) => i.dispatched_quantity > 0);
+        return itemsValid && !!this.details().dispatch_location_id;
       }
       case 3: {
-        // Detalles
-        return !!this.details().dispatch_location_id;
-      }
-      case 4: {
-        // customer_delivery: Ruta (index 4); other subtypes: Revisión (index 4)
+        // customer_delivery: Ruta; inbound subtypes: Revisión (index 3).
         if (sub === 'customer_delivery') {
           const mode = this.routeMode();
           if (mode === 'none') return true;
@@ -206,11 +204,10 @@ export class DispatchNoteWizardService {
           }
           return false;
         }
-        // transfer / purchase_receipt / customer_return: Revisión at index 4
         return true;
       }
-      case 5:
-        // Revisión (customer_delivery only — 6-step flow)
+      case 4:
+        // Revisión (customer_delivery only — 5-step flow).
         return true;
       default:
         return false;
@@ -242,8 +239,6 @@ export class DispatchNoteWizardService {
     // Reset party + order state — the party step changes shape per subtype.
     this._resetParty();
     this.clearSelectedOrder();
-    // Clamp terminal action to valid options for the new direction.
-    this._clampTerminalAction();
   }
 
   setSubtype(s: DispatchNoteSubtype): void {
@@ -260,7 +255,6 @@ export class DispatchNoteWizardService {
     // Reset party + order state — party step changes shape per subtype.
     this._resetParty();
     this.clearSelectedOrder();
-    this._clampTerminalAction();
   }
 
   setReason(r: DispatchNoteReason | null): void {
@@ -343,23 +337,6 @@ export class DispatchNoteWizardService {
     this.customerId.set(null);
     this.customerName.set(null);
     this.relatedDispatchId.set(null);
-  }
-
-  /** Clamp the terminal action to a valid value for the current subtype. */
-  private _clampTerminalAction(): void {
-    const sub = this.subtype();
-    const action = this.terminalAction();
-    // customer_delivery keeps draft/confirm_route/deliver.
-    // inbound subtypes use draft/confirm/receive.
-    if (sub === 'customer_delivery') {
-      if (action === 'confirm' || action === 'receive') {
-        this.terminalAction.set('draft');
-      }
-    } else {
-      if (action === 'confirm_route' || action === 'deliver') {
-        this.terminalAction.set('draft');
-      }
-    }
   }
 
   // --- Navigation ---
@@ -507,10 +484,6 @@ export class DispatchNoteWizardService {
     this.newRouteDraft.set(draft);
   }
 
-  setTerminalAction(action: WizardTerminalAction): void {
-    this.terminalAction.set(action);
-  }
-
   buildRouteAssignment(): CreateDispatchFromOrderRouteAssignmentDto | undefined {
     const mode = this.routeMode();
     if (mode === 'none') return undefined;
@@ -522,6 +495,14 @@ export class DispatchNoteWizardService {
     const draft = this.newRouteDraft();
     if (!draft) return undefined;
     return { mode: 'new', new_route: draft };
+  }
+
+  /**
+   * Codifica la regla de negocio: con ruta → 'confirmed'; sin ruta → 'draft'.
+   * El estado destino de la remisión se deriva del modo de ruta elegido.
+   */
+  deriveTargetStatus(): 'draft' | 'confirmed' {
+    return this.routeMode() !== 'none' ? 'confirmed' : 'draft';
   }
 
   reset(): void {
@@ -536,7 +517,6 @@ export class DispatchNoteWizardService {
     this.routeMode.set('none');
     this.selectedRouteId.set(null);
     this.newRouteDraft.set(null);
-    this.terminalAction.set('draft');
     this._resetParty();
   }
 }

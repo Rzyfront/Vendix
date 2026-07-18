@@ -3,10 +3,12 @@ import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNoteDetailComponent } from '../../components/dispatch-note-detail/dispatch-note-detail.component';
 import { DispatchNotePdfViewerComponent } from '../../components/dispatch-note-pdf-viewer/dispatch-note-pdf-viewer.component';
 import { DeliverModalComponent } from '../../components/deliver-modal/deliver-modal.component';
+import { AssignRouteModalComponent } from '../../components/assign-route-modal/assign-route-modal.component';
 import { VoidModalComponent } from '../../components/void-modal/void-modal.component';
 import { InvoiceModalComponent } from '../../components/invoice-modal/invoice-modal.component';
 import {
@@ -25,6 +27,7 @@ import {
     DispatchNoteDetailComponent,
     DispatchNotePdfViewerComponent,
     DeliverModalComponent,
+    AssignRouteModalComponent,
     VoidModalComponent,
     InvoiceModalComponent,
     DispatchNoteSerialsModalComponent,
@@ -45,9 +48,11 @@ import {
           [dispatch_note]="dispatch_note()!"
           (confirmAction)="handleConfirm($event)"
           (deliverAction)="openDeliverModal($event)"
+          (assignRouteAction)="openAssignRouteModal($event)"
           (voidAction)="openVoidModal($event)"
           (invoiceAction)="openInvoiceModal($event)"
           (printAction)="handlePrint($event)"
+          (addressSaved)="onAddressSaved()"
         ></app-dispatch-note-detail>
       }
 
@@ -66,6 +71,13 @@ import {
           [dispatchNote]="dispatch_note()!"
           (delivered)="handleDeliver($event)"
         ></app-deliver-modal>
+
+        <app-assign-route-modal
+          [isOpen]="showAssignModal()"
+          (isOpenChange)="showAssignModal.set($event)"
+          [dispatchNote]="dispatch_note()!"
+          (assigned)="onRouteAssigned()"
+        ></app-assign-route-modal>
 
         <app-void-modal
           [isOpen]="showVoidModal()"
@@ -109,6 +121,7 @@ export class DispatchNoteDetailPageComponent {
   dispatch_note = signal<DispatchNote | null>(null);
   is_loading = signal(false);
   showDeliverModal = signal(false);
+  showAssignModal = signal(false);
   showVoidModal = signal(false);
   showInvoiceModal = signal(false);
   showPdfViewer = signal(false);
@@ -184,7 +197,7 @@ export class DispatchNoteDetailPageComponent {
           this.loadDispatchNote(id);
         },
         error: (err: Error) =>
-          this.toastService.error(err?.message || 'Error al confirmar la remision'),
+          this.toastService.error(extractApiError(err).message || 'Error al confirmar la remision'),
       });
   }
 
@@ -207,6 +220,17 @@ export class DispatchNoteDetailPageComponent {
 
   openDeliverModal(dn: DispatchNote): void {
     this.showDeliverModal.set(true);
+  }
+
+  openAssignRouteModal(dn: DispatchNote): void {
+    this.showAssignModal.set(true);
+  }
+
+  /** The remisión was assigned to a route → reload so the detail reflects the
+   *  new active route (chip + hidden "Asignar a ruta" action). */
+  onRouteAssigned(): void {
+    const dn = this.dispatch_note();
+    if (dn) this.loadDispatchNote(dn.id);
   }
 
   openVoidModal(dn: DispatchNote): void {
@@ -268,5 +292,16 @@ export class DispatchNoteDetailPageComponent {
   handlePrint(dn: DispatchNote): void {
     this.pdfNoteId.set(dn.id);
     this.showPdfViewer.set(true);
+  }
+
+  /**
+   * The dispatch-note-detail child persisted a delivery address via its inline
+   * `<app-dispatch-note-address-editor (saved)>` → refetch the remision so the
+   * address snapshot, the "dirección de entrega" chip and the dispatch-block
+   * banner all reflect the new state.
+   */
+  onAddressSaved(): void {
+    const dn = this.dispatch_note();
+    if (dn) this.loadDispatchNote(dn.id);
   }
 }

@@ -1,0 +1,586 @@
+- main [ref=f1e6]:
+  - generic [ref=f1e8]:
+    - navigation "Desktop navigation sidebar" [ref=f1e9]:
+      - generic [ref=f1e10]:
+        - img "Store logo" [ref=f1e12]
+        - generic [ref=f1e13]:
+          - heading "Roku" [level=1] [ref=f1e14]
+          - link "roku" [ref=f1e16] [cursor=pointer]:
+            - /url: https://roku-store.vendix.com
+      - navigation [ref=f1e23]:
+        - list [ref=f1e24]:
+          - listitem [ref=f1e25]:
+            - link "Panel Principal" [ref=f1e26] [cursor=pointer]:
+              - /url: /admin/dashboard
+          - listitem [ref=f1e33]:
+            - link "Punto de Venta" [ref=f1e34] [cursor=pointer]:
+              - /url: /admin/pos
+          - listitem [ref=f1e42]:
+            - button "Operaciones de Restaurante" [ref=f1e43] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e56]:
+                - link "Mesas" [ref=f1e57] [cursor=pointer]:
+                  - /url: /admin/restaurant-ops/tables
+              - listitem [ref=f1e59]:
+                - link "Comandas" [ref=f1e60] [cursor=pointer]:
+                  - /url: /admin/restaurant-ops/kds
+              - listitem [ref=f1e62]:
+                - link "Producción" [ref=f1e63] [cursor=pointer]:
+                  - /url: /admin/restaurant-ops/production
+              - listitem [ref=f1e65]:
+                - link "Recetas" [ref=f1e66] [cursor=pointer]:
+                  - /url: /admin/restaurant-ops/recipes
+              - listitem [ref=f1e68]:
+                - link "Cartas" [ref=f1e69] [cursor=pointer]:
+                  - /url: /admin/restaurant-ops/menus
+          - listitem [ref=f1e71]:
+            - button "Zona Fit" [ref=f1e72] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e86]:
+                - link "Accesos" [ref=f1e87] [cursor=pointer]:
+                  - /url: /admin/memberships/access
+              - listitem [ref=f1e89]:
+                - link "Miembros" [ref=f1e90] [cursor=pointer]:
+                  - /url: /admin/memberships/members
+              - listitem [ref=f1e92]:
+                - link "Planes" [ref=f1e93] [cursor=pointer]:
+                  - /url: /admin/memberships/plans
+          - listitem [ref=f1e95]:
+            - button "Órdenes" [ref=f1e96] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e108]:
+                - link "Ordenes de Venta" [ref=f1e109] [cursor=pointer]:
+                  - /url: /admin/orders/sales
+              - listitem [ref=f1e111]:
+                - link "Ordenes de Compra" [ref=f1e112] [cursor=pointer]:
+                  - /url: /admin/orders/purchase-orders
+              - listitem [ref=f1e114]:
+                - link "Cotizaciones" [ref=f1e115] [cursor=pointer]:
+                  - /url: /admin/orders/quotations
+              - listitem [ref=f1e117]:
+                - link "Plan Separe" [ref=f1e118] [cursor=pointer]:
+                  - /url: /admin/orders/layaway
+              - listitem [ref=f1e120]:
+                - link "Reservas" [ref=f1e121] [cursor=pointer]:
+                  - /url: /admin/reservations
+          - listitem [ref=f1e123]:
+            - button "Despacho" [ref=f1e124] [cursor=pointer]
+            - list [ref=f1e697]:
+              - listitem [ref=f1e137]:
+                - link "Remisiones" [ref=f1e138] [cursor=pointer]:
+                  - /url: /admin/orders/dispatch-notes
+              - listitem [ref=f1e140]:
+                - link "Planillas de Ruta" [ref=f1e141] [cursor=pointer]:
+                  - /url: /admin/orders/planillas
+              - listitem [ref=f1e143]:
+                - link "Métodos de Envío" [ref=f1e144] [cursor=pointer]:
+                  - /url: /admin/settings/shipping
+              - listitem [ref=f1e146]:
+                - link "Flota" [ref=f1e147] [cursor=pointer]:
+                  - /url: /admin/orders/fleet
+          - listitem [ref=f1e149]:
+            - button "Productos" [ref=f1e150] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e162]:
+                - link "Lista" [ref=f1e163] [cursor=pointer]:
+                  - /url: /admin/products
+              - listitem [ref=f1e165]:
+                - link "Categorías" [ref=f1e166] [cursor=pointer]:
+                  - /url: /admin/products/categories
+              - listitem [ref=f1e168]:
+                - link "Marcas" [ref=f1e169] [cursor=pointer]:
+                  - /url: /admin/products/brands
+          - listitem [ref=f1e171]:
+            - button "Inventario" [ref=f1e172] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e183]:
+                - link "Punto de Compra" [ref=f1e184] [cursor=pointer]:
+                  - /url: /admin/inventory/pop
+              - listitem [ref=f1e186]:
+                - link "Ajustes de Stock" [ref=f1e187] [cursor=pointer]:
+                  - /url: /admin/inventory/adjustments
+              - listitem [ref=f1e189]:
+                - link "Transferencias" [ref=f1e190] [cursor=pointer]:
+                  - /url: /admin/inventory/transfers
+              - listitem [ref=f1e192]:
+                - link "Movimientos" [ref=f1e193] [cursor=pointer]:
+                  - /url: /admin/inventory/movements
+              - listitem [ref=f1e195]:
+                - link "Ubicaciones" [ref=f1e196] [cursor=pointer]:
+                  - /url: /admin/inventory/locations
+              - listitem [ref=f1e198]:
+                - link "Proveedores" [ref=f1e199] [cursor=pointer]:
+                  - /url: /admin/inventory/suppliers
+              - listitem [ref=f1e201]:
+                - link "Números de Serie" [ref=f1e202] [cursor=pointer]:
+                  - /url: /admin/inventory/serials
+          - listitem [ref=f1e204]:
+            - button "Clientes" [ref=f1e205] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e218]:
+                - link "Todos los Clientes" [ref=f1e219] [cursor=pointer]:
+                  - /url: /admin/customers/all
+              - listitem [ref=f1e221]:
+                - link "Reseñas" [ref=f1e222] [cursor=pointer]:
+                  - /url: /admin/customers/reviews
+              - listitem [ref=f1e224]:
+                - link "Recolección de Datos" [ref=f1e225] [cursor=pointer]:
+                  - /url: /admin/data-collection
+          - listitem [ref=f1e227]:
+            - link "Tienda en línea" [ref=f1e228] [cursor=pointer]:
+              - /url: /admin/ecommerce
+          - listitem [ref=f1e235]:
+            - button "Marketing" [ref=f1e236] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e247]:
+                - link "Promociones" [ref=f1e248] [cursor=pointer]:
+                  - /url: /admin/marketing/promotions
+              - listitem [ref=f1e250]:
+                - link "Cupones" [ref=f1e251] [cursor=pointer]:
+                  - /url: /admin/marketing/coupons
+              - listitem [ref=f1e253]:
+                - link "Anuncios" [ref=f1e254] [cursor=pointer]:
+                  - /url: /admin/marketing/anuncios
+              - listitem [ref=f1e256]:
+                - link "Social Sales" [ref=f1e257] [cursor=pointer]:
+                  - /url: /admin/marketing/social-sales
+          - listitem [ref=f1e259]:
+            - button "Analíticas" [ref=f1e260] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e271]:
+                - link "Resumen" [ref=f1e272] [cursor=pointer]:
+                  - /url: /admin/analytics/overview
+              - listitem [ref=f1e274]:
+                - link "Ventas" [ref=f1e275] [cursor=pointer]:
+                  - /url: /admin/analytics/sales
+              - listitem [ref=f1e277]:
+                - link "Inventario" [ref=f1e278] [cursor=pointer]:
+                  - /url: /admin/analytics/inventory
+              - listitem [ref=f1e280]:
+                - link "Productos" [ref=f1e281] [cursor=pointer]:
+                  - /url: /admin/analytics/products
+              - listitem [ref=f1e283]:
+                - link "Clientes" [ref=f1e284] [cursor=pointer]:
+                  - /url: /admin/analytics/customers
+              - listitem [ref=f1e286]:
+                - link "Compras" [ref=f1e287] [cursor=pointer]:
+                  - /url: /admin/analytics/purchases
+              - listitem [ref=f1e289]:
+                - link "Reseñas" [ref=f1e290] [cursor=pointer]:
+                  - /url: /admin/analytics/reviews
+              - listitem [ref=f1e292]:
+                - link "Financiero" [ref=f1e293] [cursor=pointer]:
+                  - /url: /admin/analytics/financial
+          - listitem [ref=f1e295]:
+            - button "Reportes" [ref=f1e296] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e307]:
+                - link "Resumen" [ref=f1e308] [cursor=pointer]:
+                  - /url: /admin/reports/overview
+              - listitem [ref=f1e310]:
+                - link "Ventas" [ref=f1e311] [cursor=pointer]:
+                  - /url: /admin/reports/sales
+              - listitem [ref=f1e313]:
+                - link "Inventario" [ref=f1e314] [cursor=pointer]:
+                  - /url: /admin/reports/inventory
+              - listitem [ref=f1e316]:
+                - link "Productos" [ref=f1e317] [cursor=pointer]:
+                  - /url: /admin/reports/products
+              - listitem [ref=f1e319]:
+                - link "Clientes" [ref=f1e320] [cursor=pointer]:
+                  - /url: /admin/reports/customers
+              - listitem [ref=f1e322]:
+                - link "Compras" [ref=f1e323] [cursor=pointer]:
+                  - /url: /admin/reports/purchases
+              - listitem [ref=f1e325]:
+                - link "Reseñas" [ref=f1e326] [cursor=pointer]:
+                  - /url: /admin/reports/reviews
+              - listitem [ref=f1e328]:
+                - link "Financiero" [ref=f1e329] [cursor=pointer]:
+                  - /url: /admin/reports/financial
+              - listitem [ref=f1e331]:
+                - link "Contabilidad" [ref=f1e332] [cursor=pointer]:
+                  - /url: /admin/reports/accounting
+              - listitem [ref=f1e334]:
+                - link "Nómina" [ref=f1e335] [cursor=pointer]:
+                  - /url: /admin/reports/payroll
+          - listitem [ref=f1e337]:
+            - link "Gastos" [ref=f1e338] [cursor=pointer]:
+              - /url: /admin/expenses
+          - listitem [ref=f1e345]:
+            - button "Fiscal" [ref=f1e346] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e356]:
+                - link "Operación fiscal" [ref=f1e357] [cursor=pointer]:
+                  - /url: /admin/fiscal
+              - listitem [ref=f1e359]:
+                - link "Facturación" [ref=f1e360] [cursor=pointer]:
+                  - /url: /admin/invoicing
+              - listitem [ref=f1e362]:
+                - link "Contabilidad" [ref=f1e363] [cursor=pointer]:
+                  - /url: /admin/accounting
+              - listitem [ref=f1e365]:
+                - link "Nómina" [ref=f1e366] [cursor=pointer]:
+                  - /url: /admin/payroll
+          - listitem [ref=f1e368]:
+            - button "Ayuda" [ref=f1e369] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e380]:
+                - link "Soporte" [ref=f1e381] [cursor=pointer]:
+                  - /url: /admin/help/support
+              - listitem [ref=f1e383]:
+                - link "Centro de Ayuda" [ref=f1e384] [cursor=pointer]:
+                  - /url: /admin/help/center
+          - listitem [ref=f1e386]:
+            - button "Configuración" [ref=f1e387] [cursor=pointer]
+            - list:
+              - listitem [ref=f1e398]:
+                - link "General" [ref=f1e399] [cursor=pointer]:
+                  - /url: /admin/settings/general
+              - listitem [ref=f1e401]:
+                - link "Usuarios" [ref=f1e402] [cursor=pointer]:
+                  - /url: /admin/settings/users
+              - listitem [ref=f1e404]:
+                - link "Roles" [ref=f1e405] [cursor=pointer]:
+                  - /url: /admin/settings/roles
+              - listitem [ref=f1e407]:
+                - link "Caja Registradora" [ref=f1e408] [cursor=pointer]:
+                  - /url: /admin/cash-registers
+              - listitem [ref=f1e410]:
+                - link "Métodos de Pago" [ref=f1e411] [cursor=pointer]:
+                  - /url: /admin/settings/payments
+              - listitem [ref=f1e413]:
+                - link "Precios y Tarifas" [ref=f1e414] [cursor=pointer]:
+                  - /url: /admin/price-tiers
+              - listitem [ref=f1e416]:
+                - link "Apariencia" [ref=f1e417] [cursor=pointer]:
+                  - /url: /admin/settings/appearance
+              - listitem [ref=f1e419]:
+                - link "Seguridad" [ref=f1e420] [cursor=pointer]:
+                  - /url: /admin/settings/security
+              - listitem [ref=f1e422]:
+                - link "Dominios" [ref=f1e423] [cursor=pointer]:
+                  - /url: /admin/settings/domains
+              - listitem [ref=f1e425]:
+                - link "Documentos Legales" [ref=f1e426] [cursor=pointer]:
+                  - /url: /admin/settings/legal-documents
+      - button "Ir al módulo de suscripción · Dev" [ref=f1e430] [cursor=pointer]:
+        - generic [ref=f1e433]:
+          - 'img "Consumo del ciclo: 7 por ciento" [ref=f1e434]':
+            - generic [ref=f1e438]: 7%
+          - generic [ref=f1e439]:
+            - generic [ref=f1e440]: Plan
+            - generic [ref=f1e447]: Dev
+    - generic [ref=f1e448]:
+      - generic [ref=f1e451]:
+        - generic [ref=f1e452]:
+          - button "Toggle sidebar" [ref=f1e453] [cursor=pointer]
+          - generic [ref=f1e457]:
+            - generic [ref=f1e458]:
+              - generic [ref=f1e459]: Orders
+              - generic [ref=f1e466]: /
+              - generic [ref=f1e467]: Order Details
+            - heading "Order Details" [level=1] [ref=f1e700]
+        - generic [ref=f1e475]:
+          - button "Buscar en Centro de Ayuda" [ref=f1e477] [cursor=pointer]
+          - button "Notificaciones" [ref=f1e485] [cursor=pointer]
+          - button "Menú de usuario" [ref=f1e493] [cursor=pointer]:
+            - generic [ref=f1e494]: RM
+            - generic [ref=f1e496]:
+              - generic [ref=f1e497]: Rafa Martinez
+              - generic [ref=f1e498]: Dueño
+      - main [ref=f1e503]:
+        - generic [ref=f1e1265]:
+          - generic [ref=f1e1266]:
+            - generic [ref=f1e1268]:
+              - generic "Total Planillas" [ref=f1e1269]:
+                - generic [ref=f1e1277]:
+                  - paragraph [ref=f1e1278]: Total Planillas
+                  - heading "16" [level=3] [ref=f1e1279]
+                  - paragraph [ref=f1e1280]: Planillas creadas
+              - generic "En Ruta" [ref=f1e1281]:
+                - generic [ref=f1e1291]:
+                  - paragraph [ref=f1e1292]: En Ruta
+                  - heading "3" [level=3] [ref=f1e1293]
+                  - paragraph [ref=f1e1294]: Despachadas y en tránsito
+              - generic "Cerradas" [ref=f1e1295]:
+                - generic [ref=f1e1303]:
+                  - paragraph [ref=f1e1304]: Cerradas
+                  - heading "10" [level=3] [ref=f1e1305]
+                  - paragraph [ref=f1e1306]: Cuadradas
+              - generic "Anuladas" [ref=f1e1307]:
+                - generic [ref=f1e1316]:
+                  - paragraph [ref=f1e1317]: Anuladas
+                  - heading "3" [level=3] [ref=f1e1318]
+                  - paragraph [ref=f1e1319]: Canceladas
+            - tablist "Vistas de planillas" [ref=f1e1320]:
+              - tab "Lista" [selected] [ref=f1e1321] [cursor=pointer]
+              - tab "Monitor" [ref=f1e1322] [cursor=pointer]
+            - generic [ref=f1e1327]:
+              - generic [ref=f1e1329]:
+                - heading "Planillas (16)" [level=2] [ref=f1e1330]
+                - generic [ref=f1e1331]:
+                  - textbox "Buscar por número, ruta o conductor..." [ref=f1e1335]
+                  - generic [ref=f1e1337]:
+                    - button "Acciones" [ref=f1e1338] [cursor=pointer]
+                    - button "Filtros" [ref=f1e1347] [cursor=pointer]
+              - generic [ref=f1e1357]:
+                - table [ref=f1e1362]:
+                  - rowgroup [ref=f1e1363]:
+                    - row [ref=f1e1364]:
+                      - columnheader "Planilla" [ref=f1e1365] [cursor=pointer]
+                      - columnheader "Ruta" [ref=f1e1368]
+                      - columnheader "Estado" [ref=f1e1371]
+                      - columnheader "Conductor" [ref=f1e1374]
+                      - columnheader "Vehículo" [ref=f1e1377]
+                      - columnheader "Paradas" [ref=f1e1380]
+                      - columnheader "A recaudar" [ref=f1e1383]
+                      - columnheader "Fecha" [ref=f1e1386] [cursor=pointer]
+                      - columnheader "Acciones" [ref=f1e1389]
+                  - rowgroup [ref=f1e1390]:
+                    - row [ref=f1e1391] [cursor=pointer]:
+                      - cell "PLN2607170008" [ref=f1e1392]
+                      - cell "—" [ref=f1e1394]
+                      - cell "Despachada" [ref=f1e1396]
+                      - cell "Repartidor E2e" [ref=f1e1398]
+                      - cell "No data" [ref=f1e1400]
+                      - cell "8" [ref=f1e1402]
+                      - cell "$5.826.240" [ref=f1e1404]
+                      - cell "17/7/2026" [ref=f1e1406]
+                      - cell [ref=f1e1408]:
+                        - button "Ver Detalle" [ref=f1e1410]
+                    - row [ref=f1e1416] [cursor=pointer]:
+                      - cell "PLN2607170007" [ref=f1e1417]
+                      - cell "—" [ref=f1e1419]
+                      - cell "Cerrada" [ref=f1e1421]
+                      - cell "Repartidor E2e" [ref=f1e1423]
+                      - cell "No data" [ref=f1e1425]
+                      - cell "1" [ref=f1e1427]
+                      - cell "$0" [ref=f1e1429]
+                      - cell "17/7/2026" [ref=f1e1431]
+                      - cell [ref=f1e1433]:
+                        - button "Ver Detalle" [ref=f1e1435]
+                    - row [ref=f1e1441] [cursor=pointer]:
+                      - cell "PLN2607170006" [ref=f1e1442]
+                      - cell "—" [ref=f1e1444]
+                      - cell "Anulada" [ref=f1e1446]
+                      - cell "Repartidor E2e" [ref=f1e1448]
+                      - cell "No data" [ref=f1e1450]
+                      - cell "1" [ref=f1e1452]
+                      - cell "$0" [ref=f1e1454]
+                      - cell "17/7/2026" [ref=f1e1456]
+                      - cell [ref=f1e1458]:
+                        - button "Ver Detalle" [ref=f1e1460]
+                    - row [ref=f1e1466] [cursor=pointer]:
+                      - cell "PLN2607170005" [ref=f1e1467]
+                      - cell "—" [ref=f1e1469]
+                      - cell "Cerrada" [ref=f1e1471]
+                      - cell "Repartidor E2e" [ref=f1e1473]
+                      - cell "No data" [ref=f1e1475]
+                      - cell "2" [ref=f1e1477]
+                      - cell "$0" [ref=f1e1479]
+                      - cell "17/7/2026" [ref=f1e1481]
+                      - cell [ref=f1e1483]:
+                        - button "Ver Detalle" [ref=f1e1485]
+                    - row [ref=f1e1491] [cursor=pointer]:
+                      - cell "PLN2607170004" [ref=f1e1492]
+                      - cell "—" [ref=f1e1494]
+                      - cell "Anulada" [ref=f1e1496]
+                      - cell "Repartidor E2e" [ref=f1e1498]
+                      - cell "No data" [ref=f1e1500]
+                      - cell "2" [ref=f1e1502]
+                      - cell "$0" [ref=f1e1504]
+                      - cell "17/7/2026" [ref=f1e1506]
+                      - cell [ref=f1e1508]:
+                        - button "Ver Detalle" [ref=f1e1510]
+                    - row [ref=f1e1516] [cursor=pointer]:
+                      - cell "PLN2607170003" [ref=f1e1517]
+                      - cell "—" [ref=f1e1519]
+                      - cell "Cerrada" [ref=f1e1521]
+                      - cell "No data" [ref=f1e1523]
+                      - cell "DOMI-1784257732" [ref=f1e1525]
+                      - cell "3" [ref=f1e1527]
+                      - cell "$0" [ref=f1e1529]
+                      - cell "16/7/2026" [ref=f1e1531]
+                      - cell [ref=f1e1533]:
+                        - button "Ver Detalle" [ref=f1e1535]
+                    - row [ref=f1e1541] [cursor=pointer]:
+                      - cell "PLN2607170002" [ref=f1e1542]
+                      - cell "—" [ref=f1e1544]
+                      - cell "Cerrada" [ref=f1e1546]
+                      - cell "No data" [ref=f1e1548]
+                      - cell "DOMI-1784257732" [ref=f1e1550]
+                      - cell "3" [ref=f1e1552]
+                      - cell "$0" [ref=f1e1554]
+                      - cell "16/7/2026" [ref=f1e1556]
+                      - cell [ref=f1e1558]:
+                        - button "Ver Detalle" [ref=f1e1560]
+                    - row [ref=f1e1566] [cursor=pointer]:
+                      - cell "PLN2607170001" [ref=f1e1567]
+                      - cell "—" [ref=f1e1569]
+                      - cell "Cerrada" [ref=f1e1571]
+                      - cell "No data" [ref=f1e1573]
+                      - cell "DOMI-1784257732" [ref=f1e1575]
+                      - cell "3" [ref=f1e1577]
+                      - cell "$0" [ref=f1e1579]
+                      - cell "16/7/2026" [ref=f1e1581]
+                      - cell [ref=f1e1583]:
+                        - button "Ver Detalle" [ref=f1e1585]
+                    - row [ref=f1e1591] [cursor=pointer]:
+                      - cell "PLN2607030002" [ref=f1e1592]
+                      - cell "RIOO0123" [ref=f1e1594]
+                      - cell "Despachada" [ref=f1e1596]
+                      - cell "Sebastián Ramírez" [ref=f1e1598]
+                      - cell "RCT1231" [ref=f1e1600]
+                      - cell "2" [ref=f1e1602]
+                      - cell "$100.000" [ref=f1e1604]
+                      - cell "2/7/2026" [ref=f1e1606]
+                      - cell [ref=f1e1608]:
+                        - button "Ver Detalle" [ref=f1e1610]
+                    - row [ref=f1e1616] [cursor=pointer]:
+                      - cell "PLN2607030001" [ref=f1e1617]
+                      - cell "23423423" [ref=f1e1619]
+                      - cell "Despachada" [ref=f1e1621]
+                      - cell "Camila Torres" [ref=f1e1623]
+                      - cell "No data" [ref=f1e1625]
+                      - cell "1" [ref=f1e1627]
+                      - cell "$15.000" [ref=f1e1629]
+                      - cell "3/7/2026" [ref=f1e1631]
+                      - cell [ref=f1e1633]:
+                        - button "Ver Detalle" [ref=f1e1635]
+                    - row [ref=f1e1641] [cursor=pointer]:
+                      - cell "PLN2607010001" [ref=f1e1642]
+                      - cell "—" [ref=f1e1644]
+                      - cell "Cerrada" [ref=f1e1646]
+                      - cell "Rafa Martinez" [ref=f1e1648]
+                      - cell "No data" [ref=f1e1650]
+                      - cell "2" [ref=f1e1652]
+                      - cell "$12.544.980" [ref=f1e1654]
+                      - cell "1/7/2026" [ref=f1e1656]
+                      - cell [ref=f1e1658]:
+                        - button "Ver Detalle" [ref=f1e1660]
+                    - row [ref=f1e1666] [cursor=pointer]:
+                      - cell "PLN2606200002" [ref=f1e1667]
+                      - cell "ROI02" [ref=f1e1669]
+                      - cell "Cerrada" [ref=f1e1671]
+                      - cell "Camila Torres" [ref=f1e1673]
+                      - cell "RCT1231" [ref=f1e1675]
+                      - cell "1" [ref=f1e1677]
+                      - cell "$20.000" [ref=f1e1679]
+                      - cell "20/6/2026" [ref=f1e1681]
+                      - cell [ref=f1e1683]:
+                        - button "Ver Detalle" [ref=f1e1685]
+                    - row [ref=f1e1691] [cursor=pointer]:
+                      - cell "PLN2606200001" [ref=f1e1692]
+                      - cell "R012301" [ref=f1e1694]
+                      - cell "Cerrada" [ref=f1e1696]
+                      - cell "Camila Torres" [ref=f1e1698]
+                      - cell "RCT1231" [ref=f1e1700]
+                      - cell "3" [ref=f1e1702]
+                      - cell "$385.000" [ref=f1e1704]
+                      - cell "20/6/2026" [ref=f1e1706]
+                      - cell [ref=f1e1708]:
+                        - button "Ver Detalle" [ref=f1e1710]
+                    - row [ref=f1e1716] [cursor=pointer]:
+                      - cell "PLN2606190003" [ref=f1e1717]
+                      - cell "ROKU-CENTRO-001" [ref=f1e1719]
+                      - cell "Anulada" [ref=f1e1721]
+                      - cell "No data" [ref=f1e1723]
+                      - cell "No data" [ref=f1e1725]
+                      - cell "3" [ref=f1e1727]
+                      - cell "$21.940.030" [ref=f1e1729]
+                      - cell "20/6/2026" [ref=f1e1731]
+                      - cell [ref=f1e1733]:
+                        - button "Ver Detalle" [ref=f1e1735]
+                    - row [ref=f1e1741] [cursor=pointer]:
+                      - cell "PLN2606190002" [ref=f1e1742]
+                      - cell "ROKU-SUR-001" [ref=f1e1744]
+                      - cell "Cerrada" [ref=f1e1746]
+                      - cell "Rafa Martinez" [ref=f1e1748]
+                      - cell "No data" [ref=f1e1750]
+                      - cell "5" [ref=f1e1752]
+                      - cell "$23.545.340" [ref=f1e1754]
+                      - cell "19/6/2026" [ref=f1e1756]
+                      - cell [ref=f1e1758]:
+                        - button "Ver Detalle" [ref=f1e1760]
+                    - row [ref=f1e1766] [cursor=pointer]:
+                      - cell "PLN2606190001" [ref=f1e1767]
+                      - cell "ROKU-NORTE-001" [ref=f1e1769]
+                      - cell "Cerrada" [ref=f1e1771]
+                      - cell "No data" [ref=f1e1773]
+                      - cell "No data" [ref=f1e1775]
+                      - cell "3" [ref=f1e1777]
+                      - cell "$39.371.150" [ref=f1e1779]
+                      - cell "19/6/2026" [ref=f1e1781]
+                      - cell [ref=f1e1783]:
+                        - button "Ver Detalle" [ref=f1e1785]
+                - generic [ref=f1e1791]:
+                  - generic [ref=f1e1792]: "Por página:"
+                  - combobox "Por página:" [ref=f1e1796]:
+                    - option "10"
+                    - option "20" [selected]
+                    - option "50"
+                    - option "100"
+          - generic:
+            - generic "Nueva Planilla de Despacho":
+              - generic [ref=f1e1818]:
+                - generic [ref=f1e1819]:
+                  - heading "Nueva Planilla de Despacho" [level=3] [ref=f1e1822]
+                  - button "Cerrar modal" [ref=f1e1823] [cursor=pointer]
+                - generic [ref=f1e1826]:
+                  - generic [ref=f1e1829]:
+                    - generic [ref=f1e1830] [cursor=pointer]: Información básica del despacho
+                    - generic [ref=f1e1835] [cursor=pointer]:
+                      - generic [ref=f1e1836]: "2"
+                      - generic [ref=f1e1838]: Entregas
+                  - generic [ref=f1e1909]:
+                    - generic [ref=f1e1910]:
+                      - paragraph [ref=f1e1911]:
+                        - strong [ref=f1e1912]: "3"
+                        - text: disponibles ·
+                        - strong [ref=f1e1913]: "1"
+                        - text: seleccionadas
+                      - generic [ref=f1e1914]:
+                        - paragraph [ref=f1e1915]: Total a recaudar
+                        - paragraph [ref=f1e1916]: $9.988.860
+                    - textbox "Buscar remisión por número o cliente..." [ref=f1e1920]
+                    - generic [ref=f1e1921]:
+                      - heading "Disponibles (3)" [level=3] [ref=f1e1996]
+                      - generic [ref=f1e1923]:
+                        - generic [ref=f1e1924]:
+                          - generic [ref=f1e1925]:
+                            - paragraph [ref=f1e1926]: DSP-20260324-007 · Patricia Restrepo
+                            - paragraph [ref=f1e1927]:
+                              - generic [ref=f1e1932]: Sin dirección — no podrá despacharse
+                          - generic [ref=f1e1933]: $1.602.930
+                          - button "Agregar remisión" [ref=f1e1934] [cursor=pointer]:
+                            - generic [ref=f1e1938]: Agregar
+                        - generic [ref=f1e1939]:
+                          - generic [ref=f1e1940]:
+                            - paragraph [ref=f1e1941]: DSP-20260314-008 · Mauricio Vélez
+                            - paragraph [ref=f1e1942]:
+                              - generic [ref=f1e1947]: Sin dirección — no podrá despacharse
+                          - generic [ref=f1e1948]: $2.614.430
+                          - button "Agregar remisión" [ref=f1e1949] [cursor=pointer]:
+                            - generic [ref=f1e1953]: Agregar
+                        - generic [ref=f1e1954]:
+                          - generic [ref=f1e1955]:
+                            - paragraph [ref=f1e1956]: DSP-20260213-006 · Roberto Mejía
+                            - paragraph [ref=f1e1957]:
+                              - generic [ref=f1e1962]: Sin dirección — no podrá despacharse
+                          - generic [ref=f1e1963]: $17.722.670
+                          - button "Agregar remisión" [ref=f1e1964] [cursor=pointer]:
+                            - generic [ref=f1e1968]: Agregar
+                    - generic [ref=f1e1985]:
+                      - heading "En la ruta (1)" [level=3] [ref=f1e1997]
+                      - generic [ref=f1e1998]:
+                        - generic [ref=f1e1999]: "1"
+                        - paragraph [ref=f1e2001]: DSP-20260112-004 · Patricia Restrepo
+                        - generic [ref=f1e2002]: $9.988.860
+                        - generic [ref=f1e2003]:
+                          - button "Subir entrega" [disabled] [ref=f1e2004]
+                          - button "Bajar entrega" [disabled] [ref=f1e2009]
+                          - button "Quitar entrega" [ref=f1e2014] [cursor=pointer]
+                - generic [ref=f1e1989]:
+                  - button [ref=f1e1990] [cursor=pointer]
+                  - button "Crear planilla" [ref=f1e1995] [cursor=pointer]

@@ -1,4 +1,4 @@
-import { Component, computed, input, output } from '@angular/core';
+import { Component, computed, inject, input, output } from '@angular/core';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -8,10 +8,15 @@ import {
   ItemListCardConfig,
 } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import {
+  DispatchNoteAddressEditorComponent,
+  AddressPayload,
+} from '../../../../../../shared/components/index';
+import {
   DispatchDeliveryAddress,
   DispatchRouteStop,
 } from '../../interfaces/planilla.interface';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /** Address blob may arrive as a JSON object or a pre-formatted string. */
 type AddressLike = DispatchDeliveryAddress | string;
@@ -31,7 +36,13 @@ type AddressLike = DispatchDeliveryAddress | string;
 @Component({
   selector: 'app-stop-detail-modal',
   standalone: true,
-  imports: [CurrencyPipe, ModalComponent, IconComponent, ResponsiveDataViewComponent],
+  imports: [
+    CurrencyPipe,
+    ModalComponent,
+    IconComponent,
+    ResponsiveDataViewComponent,
+    DispatchNoteAddressEditorComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="true"
@@ -88,6 +99,14 @@ type AddressLike = DispatchDeliveryAddress | string;
             <p class="text-xs text-text-secondary italic">Sin dirección registrada en la remisión.</p>
           }
         </div>
+
+        @if (canEditAddress() && noteId() != null) {
+          <app-dispatch-note-address-editor
+            [noteId]="noteId()!"
+            [address]="stopAddress()"
+            (saved)="onAddressSaved()"
+          ></app-dispatch-note-address-editor>
+        }
 
         <!-- Datos de entrega -->
         <div class="grid grid-cols-2 gap-3">
@@ -173,6 +192,47 @@ export class StopDetailModalComponent {
   readonly close = output<void>();
   /** Navigate to the full dispatch-note page (emits the dispatch note id). */
   readonly goToNote = output<number>();
+  /** Emit after the address editor persisted a new snapshot — parent refetches. */
+  readonly refresh = output<void>();
+
+  private readonly authFacade = inject(AuthFacade);
+
+  /** The dispatch-note id backing this stop — drives the address editor. */
+  readonly noteId = computed<number | null>(
+    () => this.stop()?.dispatch_note_id ?? null,
+  );
+
+  /**
+   * Permission gate for the inline address editor. Mirrors the backend
+   * `@Permissions('store:dispatch_notes:update')` on `PATCH /:id/address`.
+   */
+  readonly canEditAddress = computed(() =>
+    this.authFacade.hasPermission('store:dispatch_notes:update'),
+  );
+
+  /**
+   * Raw delivery-address snapshot to seed the editor. Prefers the stop's own
+   * `dispatch_note.customer_address`, falls back to the order's
+   * `shipping_address_snapshot`, then the fully-loaded note's
+   * `customer_address`. String snapshots (legacy) are treated as "no address"
+   * so the editor opens with an empty form the user can fill in. Mapped to
+   * `AddressPayload` vocabulary (1:1 on shared keys).
+   */
+  readonly stopAddress = computed<AddressPayload | null>(() => {
+    const a = this.resolvedAddress();
+    if (!a || typeof a === 'string') return null;
+    return {
+      address_line1: a.address_line1 ?? a.line1 ?? a.address ?? null,
+      address_line2: a.address_line2 ?? null,
+      city: a.city ?? null,
+      state_province: a.state_province ?? null,
+      country_code: a.country_code ?? null,
+      postal_code: a.postal_code ?? null,
+      phone_number: null,
+      latitude: a.latitude ?? null,
+      longitude: a.longitude ?? null,
+    };
+  });
 
   readonly customerName = computed<string>(
     () => this.note()?.customer_name || this.stop().dispatch_note?.customer_name || '(Cliente)',
@@ -265,6 +325,16 @@ export class StopDetailModalComponent {
       (summary?.order?.shipping_address_snapshot as AddressLike | null | undefined) ??
       (this.note()?.customer_address as AddressLike | null | undefined)
     );
+  }
+
+  /**
+   * After the inline editor persisted a new `customer_address` snapshot, bubble
+   * a `refresh` event so the parent refetches the route (`getMapStops`) and
+   * recomputes markers + the `unlocated[]` list — the stop's coordinates may
+   * have changed. The parent also re-opens the detail with the fresh note.
+   */
+  onAddressSaved(): void {
+    this.refresh.emit();
   }
 
   readonly statusLabel = computed<string>(() => {

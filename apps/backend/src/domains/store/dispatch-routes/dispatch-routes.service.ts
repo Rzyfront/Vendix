@@ -21,6 +21,7 @@ import { RouteNumberGenerator } from './utils/route-number-generator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { GeocodingService } from '../../ecommerce/geocoding/geocoding.service';
+import { RouteFlowService } from './route-flow/route-flow.service';
 import {
   buildStopsData,
   computeRouteTotals,
@@ -221,6 +222,10 @@ export interface MapStopUnlocated {
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id of the dispatch note backing the stop, if any (drives the "Fijar en mapa" flow). */
+  dispatchNoteId: number | null;
+  /** Raw customer_address JSON snapshot from the dispatch note (AddressPayload | null). */
+  customerAddress: Prisma.JsonValue | null;
 }
 
 /** Full response body of `GET /store/dispatch-routes/:id/map-stops`. */
@@ -242,7 +247,31 @@ export class DispatchRoutesService {
     private readonly prisma: StorePrismaService,
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly geocoding: GeocodingService,
+    private readonly routeFlow: RouteFlowService,
   ) {}
+
+  /**
+   * Guard that every dispatch_note about to be planned is still eligible to
+   * join a route. A note is planificable only while it is 'draft' or
+   * 'confirmed'; a note already 'delivered' / 'received' / 'invoiced' /
+   * 'voided' is terminal for this flow and must be rejected (409) instead of
+   * silently attached. Reuses the notes the caller already loaded (no extra
+   * query). Surfaces the offending `dispatch_number`(s) in the error detail.
+   */
+  private assertNotesEligible(
+    notes: ReadonlyArray<{ dispatch_number: string; status: string }>,
+  ): void {
+    const ineligible = notes.filter(
+      (n) => n.status !== 'draft' && n.status !== 'confirmed',
+    );
+    if (ineligible.length === 0) return;
+    const numbers = ineligible.map((n) => n.dispatch_number).join(', ');
+    throw new VendixHttpException(
+      ErrorCodes.DSP_NOTE_NOT_ELIGIBLE_001,
+      `La remisión ${numbers} no puede planillarse porque ya fue entregada, recibida, facturada o anulada.`,
+      { dispatch_numbers: numbers },
+    );
+  }
 
   private getStoreId(): number {
     const context = RequestContextService.getContext();
@@ -362,8 +391,12 @@ export class DispatchRoutesService {
       select: {
         id: true,
         store_id: true,
+        // dispatch_number + order_id feed both the eligibility error detail and
+        // the `dispatch_note.confirmed` auto-confirm payload (no extra query).
+        dispatch_number: true,
         status: true,
         sales_order_id: true,
+        order_id: true,
         grand_total: true,
         needs_collection: true,
         invoice: { select: { id: true, status: true, payment_date: true } },
@@ -374,6 +407,10 @@ export class DispatchRoutesService {
         'Una o más remisiones no existen o no pertenecen a la tienda',
       );
     }
+
+    // Eligibility gate: only draft/confirmed notes can be planned. A
+    // delivered/received/invoiced/voided note is terminal for the route flow.
+    this.assertNotesEligible(existing_notes);
 
     // Check whether the dispatch_notes are already in an active (non-released) stop.
     // A stop blocks reuse iff it is not yet 'released'. The previous carve-out
@@ -461,35 +498,53 @@ export class DispatchRoutesService {
           notes_by_id,
         );
 
-        const created = await this.prisma.dispatch_routes.create({
-          data: {
-            store_id,
-            route_number,
-            route_code: dto.route_code,
-            status: 'draft',
-            vehicle_id: resolvedVehicle,
-            driver_user_id: resolvedDriver,
-            external_driver_name: dto.external_driver_name,
-            external_driver_id_number: dto.external_driver_id_number,
-            is_primary_driver_external: dto.is_primary_driver_external ?? false,
-            assistants: dto.assistants as any,
-            origin_location_id: dto.origin_location_id,
-            // Plan Despacho Economía — FASE 3 paso 11.
-            shipping_method_id: dto.shipping_method_id ?? null,
-            external_carrier_supplier_id: resolvedCarrier,
-            planned_date: new Date(dto.planned_date),
-            currency: dto.currency || 'COP',
-            notes: dto.notes,
-            total_to_collect,
-            total_prepaid,
-            created_by_user_id: user_id,
-            updated_at: new Date(),
-            stops: {
-              create: stops_data,
-            },
+        // Create the route + stops and auto-confirm any draft note in the SAME
+        // transaction, then emit `dispatch_note.confirmed` post-commit (the
+        // reservation listener re-reads the note and must see 'confirmed'
+        // persisted). Reuses the shared RouteFlowService mechanism.
+        const { created, confirmedPayloads } = await this.prisma.$transaction(
+          async (tx: any) => {
+            const created = await tx.dispatch_routes.create({
+              data: {
+                store_id,
+                route_number,
+                route_code: dto.route_code,
+                status: 'draft',
+                vehicle_id: resolvedVehicle,
+                driver_user_id: resolvedDriver,
+                external_driver_name: dto.external_driver_name,
+                external_driver_id_number: dto.external_driver_id_number,
+                is_primary_driver_external:
+                  dto.is_primary_driver_external ?? false,
+                assistants: dto.assistants as any,
+                origin_location_id: dto.origin_location_id,
+                // Plan Despacho Economía — FASE 3 paso 11.
+                shipping_method_id: dto.shipping_method_id ?? null,
+                external_carrier_supplier_id: resolvedCarrier,
+                planned_date: new Date(dto.planned_date),
+                currency: dto.currency || 'COP',
+                notes: dto.notes,
+                total_to_collect,
+                total_prepaid,
+                created_by_user_id: user_id,
+                updated_at: new Date(),
+                stops: {
+                  create: stops_data,
+                },
+              },
+              include: DISPATCH_ROUTE_INCLUDE,
+            });
+            const confirmedPayloads =
+              await this.routeFlow.confirmDraftNotesInTx(
+                tx,
+                existing_notes,
+                user_id,
+                store_id,
+              );
+            return { created, confirmedPayloads };
           },
-          include: DISPATCH_ROUTE_INCLUDE,
-        });
+        );
+        this.routeFlow.emitConfirmedNotes(confirmedPayloads);
         return created;
       } catch (error) {
         if (
@@ -721,6 +776,7 @@ export class DispatchRoutesService {
    */
   async addStops(id: number, dto: AddStopsDto) {
     const store_id = this.getStoreId();
+    const user_id = RequestContextService.getContext()?.user_id;
 
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
@@ -768,8 +824,12 @@ export class DispatchRoutesService {
       select: {
         id: true,
         store_id: true,
+        // dispatch_number + order_id feed the eligibility error detail and the
+        // `dispatch_note.confirmed` auto-confirm payload (no extra query).
+        dispatch_number: true,
         status: true,
         sales_order_id: true,
+        order_id: true,
         grand_total: true,
         needs_collection: true,
         invoice: { select: { id: true, status: true, payment_date: true } },
@@ -780,6 +840,10 @@ export class DispatchRoutesService {
         'Una o más remisiones no existen o no pertenecen a la tienda',
       );
     }
+
+    // Eligibility gate: only draft/confirmed notes can be planned. A
+    // delivered/received/invoiced/voided note is terminal for the route flow.
+    this.assertNotesEligible(new_notes);
 
     // Assignability: a note already sitting on an active (non-released) stop
     // of any other route cannot be assigned. Mirrors create()'s rule and the
@@ -864,20 +928,36 @@ export class DispatchRoutesService {
       all_notes_by_id,
     );
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.dispatch_route_stops.createMany({
-        data: new_stops_data.map((s) => ({ ...s, route_id: id })),
-      });
-      return tx.dispatch_routes.update({
-        where: { id },
-        data: {
-          total_to_collect,
-          total_prepaid,
-          updated_at: new Date(),
-        },
-        include: DISPATCH_ROUTE_INCLUDE,
-      });
-    });
+    // Insert the new stops, refresh route totals, and auto-confirm any draft
+    // note among the newly added ones — all in the SAME transaction. The
+    // `dispatch_note.confirmed` events are emitted post-commit so the
+    // reservation listener sees the persisted 'confirmed' status. Applies to a
+    // destination route in both `draft` and `dispatched` states.
+    const { updated, confirmedPayloads } = await this.prisma.$transaction(
+      async (tx: any) => {
+        await tx.dispatch_route_stops.createMany({
+          data: new_stops_data.map((s) => ({ ...s, route_id: id })),
+        });
+        const updated = await tx.dispatch_routes.update({
+          where: { id },
+          data: {
+            total_to_collect,
+            total_prepaid,
+            updated_at: new Date(),
+          },
+          include: DISPATCH_ROUTE_INCLUDE,
+        });
+        const confirmedPayloads = await this.routeFlow.confirmDraftNotesInTx(
+          tx,
+          new_notes,
+          user_id,
+          store_id,
+        );
+        return { updated, confirmedPayloads };
+      },
+    );
+    this.routeFlow.emitConfirmedNotes(confirmedPayloads);
+    return updated;
   }
 
   async update(id: number, dto: UpdateDispatchRouteDto) {
@@ -1293,6 +1373,8 @@ export class DispatchRoutesService {
           sequence: stop.stop_sequence,
           customerName,
           addressText: resolved.addressText,
+          dispatchNoteId: stop.dispatch_note?.id ?? null,
+          customerAddress: stop.dispatch_note?.customer_address ?? null,
         });
       }
     }

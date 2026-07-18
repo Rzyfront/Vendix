@@ -35,6 +35,7 @@ import { VoidDispatchRouteModalComponent } from '../../components/void-dispatch-
 import { RouteSheetScannerModalComponent } from '../../components/route-sheet-scanner-modal/route-sheet-scanner-modal.component';
 import { StopDetailModalComponent } from '../../components/stop-detail-modal/stop-detail-modal.component';
 import { PlanillaMapModalComponent } from '../../components/planilla-map-modal/planilla-map-modal.component';
+import { AddNotesModalComponent } from '../../components/add-notes-modal/add-notes-modal.component';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
@@ -71,6 +72,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
     VoidDispatchRouteModalComponent,
     StopDetailModalComponent,
     PlanillaMapModalComponent,
+    AddNotesModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -245,6 +247,16 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
               </h2>
 
               <div class="flex items-center gap-2">
+                @if (canAddNotes()) {
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="openAddNotes()"
+                  >
+                    <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+                    Agregar remisiones
+                  </app-button>
+                }
                 @if ((r.stops?.length || 0) > 0) {
                   <app-button
                     variant="outline"
@@ -340,6 +352,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         [loading]="detailLoading()"
         (close)="closeStopDetail()"
         (goToNote)="goToDispatchNote($event)"
+        (refresh)="onStopAddressRefresh()"
       ></app-stop-detail-modal>
     }
 
@@ -349,6 +362,14 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         (close)="showMapModal.set(false)"
         (reordered)="load()"
       ></app-planilla-map-modal>
+    }
+
+    @if (showAddNotesModal() && route()) {
+      <app-add-notes-modal
+        [routeId]="route()!.id"
+        (close)="showAddNotesModal.set(false)"
+        (added)="onNotesAdded()"
+      ></app-add-notes-modal>
     }
   `,
 })
@@ -375,6 +396,18 @@ export class PlanillaDetailPageComponent {
   readonly showScannerModal = signal(false);
   /** Route map modal (pending stops + suggested order). */
   readonly showMapModal = signal(false);
+  /** "Agregar remisiones" modal (append eligible notes to a hot route). */
+  readonly showAddNotesModal = signal(false);
+
+  /**
+   * Whether new remisiones can still be attached to the route. Only "hot"
+   * routes (draft / dispatched) accept new stops — mirrors the backend
+   * `addStops()` state gate (`DSP_ROUTE_NOT_EDITABLE_001`).
+   */
+  readonly canAddNotes = computed<boolean>(() => {
+    const s = this.route()?.status;
+    return s === 'draft' || s === 'dispatched';
+  });
 
   // A1 — Quick-view del detalle de una remisión/parada.
   readonly detailStop = signal<DispatchRouteStop | null>(null);
@@ -897,6 +930,30 @@ export class PlanillaDetailPageComponent {
     this.detailLoading.set(false);
   }
 
+  /**
+   * The stop-detail modal persisted a delivery address for the linked remisión
+   * (`onAddressSaved` → `refresh.emit()`). Reload the route so the stops table,
+   * the "dirección de entrega" column and the dispatch-block banner all reflect
+   * the new address snapshot. We also refresh the in-modal `detailNote` so the
+   * operator sees the updated address without reopening the modal.
+   */
+  onStopAddressRefresh(): void {
+    this.load();
+    const stop = this.detailStop();
+    const noteId = stop?.dispatch_note_id;
+    if (noteId) {
+      this.dispatchNotesService
+        .getDispatchNote(noteId)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (note) => this.detailNote.set(note),
+          error: () => {
+            /* keep the existing snapshot; the route reload already happened */
+          },
+        });
+    }
+  }
+
   goToDispatchNote(id: number) {
     this.closeStopDetail();
     this.router.navigate(['/admin/orders/dispatch-notes', id]);
@@ -944,6 +1001,23 @@ export class PlanillaDetailPageComponent {
   /** Open the 3-step route-sheet scanner modal. */
   openScanner() {
     this.showScannerModal.set(true);
+  }
+
+  /** Open the "Agregar remisiones" modal (only on draft/dispatched routes). */
+  openAddNotes() {
+    if (!this.canAddNotes()) return;
+    this.showAddNotesModal.set(true);
+  }
+
+  /**
+   * After remisiones are appended, close the modal and reload the route so the
+   * new paradas (and refreshed totals) appear. The backend recomputes route
+   * totals over the complete stop set, so a plain `getOne` reload is enough.
+   */
+  onNotesAdded() {
+    this.showAddNotesModal.set(false);
+    this.toast.success('Remisiones agregadas a la planilla');
+    this.load();
   }
 
   /**

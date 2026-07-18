@@ -1,5 +1,14 @@
-import { Component, inject, input, output, effect, signal, computed } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {
+  Component,
+  DestroyRef,
+  inject,
+  input,
+  output,
+  effect,
+  signal,
+  computed,
+} from '@angular/core';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -7,6 +16,9 @@ import {
   InputComponent,
   SelectorComponent,
   ToggleComponent,
+  AddressFormFieldsComponent,
+  IconComponent,
+  type AddressPayload,
 } from '../../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
@@ -14,10 +26,49 @@ import {
   DocumentTypeOption,
 } from '../../../../../../shared/constants/document-types';
 import { Customer, CreateCustomerRequest } from '../../models/customer.model';
+import { CustomersService } from '../../services/customers.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { Observable, of } from 'rxjs';
+import { finalize } from 'rxjs/operators';
 
 // Re-export del traductor centralizado para compatibilidad con consumidores
 // que importaban `translateCustomerError` desde este archivo.
 export { translateCustomerError } from '../../utils/customer-error.translator';
+
+/**
+ * Dirección de envío tal como la devuelve el backend (tabla `addresses`).
+ * El modelo `Customer` del frontend no incluye `addresses`, pero el servicio
+ * backend (`customers.service.ts#findOne`) las retorna con `type='shipping'`.
+ */
+interface CustomerAddress {
+  id: number;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state_province: string | null;
+  country_code: string | null;
+  postal_code: string | null;
+  phone_number: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  type?: string;
+  is_primary?: boolean;
+}
+
+/** Payload del DTO `POST /store/addresses` (nombres backend con guion bajo). */
+interface AddressDtoPayload {
+  address_line_1: string;
+  address_line_2?: string;
+  city: string;
+  state: string;
+  country: string;
+  postal_code?: string;
+  type: 'shipping';
+  is_primary: true;
+  customer_id?: number;
+  latitude?: string;
+  longitude?: string;
+}
 
 @Component({
   selector: 'app-customer-modal',
@@ -29,6 +80,8 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
     InputComponent,
     SelectorComponent,
     ToggleComponent,
+    AddressFormFieldsComponent,
+    IconComponent,
   ],
   template: `
     <app-modal
@@ -134,6 +187,31 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
             ></app-toggle>
           </div>
         </div>
+
+        <!-- Dirección de envío (opcional, colapsable) -->
+        <div class="pt-2 border-t border-[var(--color-border)]">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between text-left text-sm font-semibold text-[var(--color-text-primary)]"
+            (click)="toggleAddressSection()"
+          >
+            <span>Dirección de envío (opcional)</span>
+            <app-icon
+              [name]="addressSectionOpen() ? 'chevron-down' : 'chevron-right'"
+              [size]="16"
+            ></app-icon>
+          </button>
+
+          @if (addressSectionOpen()) {
+            <div class="mt-3">
+              <app-address-form-fields
+                [initialAddress]="existingAddress()"
+                (addressChange)="onAddressChange($event)"
+                (validChange)="onAddressValid($event)"
+              ></app-address-form-fields>
+            </div>
+          }
+        </div>
       </form>
 
       <!-- Footer with slot -->
@@ -153,6 +231,9 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
 })
 export class CustomerModalComponent {
   private fb = inject(FormBuilder);
+  private customersService = inject(CustomersService);
+  private toast = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
   readonly customer = input<Customer | null>(null);
@@ -162,6 +243,48 @@ export class CustomerModalComponent {
   readonly isOpenChange = output<boolean>();
   readonly closed = output<void>();
   readonly save = output<CreateCustomerRequest>();
+
+  /**
+   * Emite la dirección capturada en crear-mode para que el consumidor padre
+   * la persista vía `CustomersService.createCustomerAddress` tras crear el
+   * cliente (el modal no conoce el nuevo `customer_id` hasta que el padre
+   * recibe la respuesta de `createCustomer`). En editar-mode el modal
+   * persiste la dirección directamente.
+   */
+  readonly addressData = output<AddressPayload>();
+
+  /** Última dirección emitida por el formulario hijo. */
+  readonly addressPayload = signal<AddressPayload | null>(null);
+  /** Validez del formulario hijo. */
+  readonly addressValid = signal(false);
+  /** Sección de dirección abierta/cerrada. */
+  readonly addressSectionOpen = signal(false);
+  /** ID de la dirección existente (editar-mode); null si no hay. */
+  readonly existingAddressId = signal<number | null>(null);
+  /** Dirección existente mapeada a AddressPayload para prefill el hijo. */
+  readonly existingAddress = computed<AddressPayload | null>(() => {
+    const c = this.customer() as (Customer & { addresses?: CustomerAddress[] }) | null;
+    if (!c?.addresses?.length) return null;
+    const addr =
+      c.addresses.find((a) => a.type === 'shipping' && a.is_primary) ??
+      c.addresses[0];
+    if (!addr) return null;
+    // latitude/longitude vienen como Decimal (string|number) desde el backend;
+    // normalizamos a number para el form del hijo.
+    const lat = addr.latitude != null ? Number(addr.latitude) : null;
+    const lng = addr.longitude != null ? Number(addr.longitude) : null;
+    return {
+      address_line1: addr.address_line1 ?? null,
+      address_line2: addr.address_line2 ?? null,
+      city: addr.city ?? null,
+      state_province: addr.state_province ?? null,
+      country_code: addr.country_code ?? null,
+      postal_code: addr.postal_code ?? null,
+      phone_number: addr.phone_number ?? null,
+      latitude: lat,
+      longitude: lng,
+    };
+  });
 
   form: FormGroup;
 
@@ -266,6 +389,20 @@ export class CustomerModalComponent {
           person_type: customer.person_type ?? '',
           is_withholding_agent: customer.is_withholding_agent ?? false,
         });
+
+        // Cargar la dirección de envío existente (si la hay) para el hijo.
+        const c = customer as Customer & { addresses?: CustomerAddress[] };
+        const addr =
+          c.addresses?.find((a) => a.type === 'shipping' && a.is_primary) ??
+          c.addresses?.[0] ??
+          null;
+        this.existingAddressId.set(addr?.id ?? null);
+        // Resetear estado del hijo; se rellenará vía `initialAddress` + emit
+        // cuando el hijo aplique el effect de prefill.
+        this.addressPayload.set(null);
+        this.addressValid.set(false);
+        // Abrir la sección automáticamente si ya hay dirección.
+        this.addressSectionOpen.set(!!addr);
       }
     });
 
@@ -277,6 +414,11 @@ export class CustomerModalComponent {
         // Boolean no-nullable en backend, así que un `null` emitido rompe el
         // alta (500). Reseteamos preservando el booleano en `false`.
         this.form.reset({ is_withholding_agent: false });
+        // Reset de estado de dirección en alta.
+        this.existingAddressId.set(null);
+        this.addressPayload.set(null);
+        this.addressValid.set(false);
+        this.addressSectionOpen.set(false);
       }
     });
   }
@@ -290,14 +432,118 @@ export class CustomerModalComponent {
     this.isOpenChange.emit(false);
   }
 
+  /** Toggle de la sección colapsable de dirección. */
+  toggleAddressSection(): void {
+    this.addressSectionOpen.set(!this.addressSectionOpen());
+  }
+
+  /** Handler del hijo: actualiza la última dirección emitida. */
+  onAddressChange(payload: AddressPayload): void {
+    this.addressPayload.set(payload);
+  }
+
+  /** Handler del hijo: actualiza la validez del formulario de dirección. */
+  onAddressValid(valid: boolean): void {
+    this.addressValid.set(valid);
+  }
+
+  /**
+   * Mapea `AddressPayload` (claves del schema Prisma: address_line1,
+   * state_province, country_code) al DTO del backend (`address_line_1`,
+   * `state`, `country` con guion bajo y nombres cortos). Verifica
+   * `apps/backend/src/domains/store/addresses/dto/index.ts`.
+   */
+  private mapAddressToDto(
+    p: AddressPayload,
+    customerId?: number,
+  ): AddressDtoPayload {
+    const dto: AddressDtoPayload = {
+      address_line_1: p.address_line1 ?? '',
+      city: p.city ?? '',
+      state: p.state_province ?? '',
+      country: p.country_code ?? '',
+      type: 'shipping',
+      is_primary: true,
+    };
+    if (p.address_line2) dto.address_line_2 = p.address_line2;
+    if (p.postal_code) dto.postal_code = p.postal_code;
+    if (p.latitude != null) dto.latitude = String(p.latitude);
+    if (p.longitude != null) dto.longitude = String(p.longitude);
+    if (customerId != null) dto.customer_id = customerId;
+    return dto;
+  }
+
+  /**
+   * Persiste la dirección de envío para un cliente EXISTENTE (editar-mode).
+   * - Si hay `existingAddressId` → PATCH /store/addresses/:id (update).
+   * - Si no → POST /store/addresses con customer_id (create).
+   * Retorna un Observable que completa tras la persistencia.
+   */
+  private saveExistingAddress(
+    customerId: number,
+  ): Observable<unknown> {
+    const payload = this.addressPayload();
+    if (!this.addressValid() || !payload) {
+      // Nada que guardar: flujo no-op.
+      return of(null);
+    }
+    const dto = this.mapAddressToDto(payload, customerId);
+    const existingId = this.existingAddressId();
+    return existingId
+      ? this.customersService.updateCustomerAddress(existingId, dto)
+      : this.customersService.createCustomerAddress(dto);
+  }
+
   onSubmit() {
-    if (this.form.valid) {
-      // `getRawValue()` para incluir controles deshabilitados (document_number
-      // se deshabilita cuando no hay tipo seleccionado, pero igual queremos
-      // emitir el valor actual del formulario).
-      this.save.emit(this.form.getRawValue() as CreateCustomerRequest);
-    } else {
+    if (this.form.invalid) {
       this.form.markAllAsTouched();
+      return;
+    }
+
+    // `getRawValue()` para incluir controles deshabilitados (document_number
+    // se deshabilita cuando no hay tipo seleccionado, pero igual queremos
+    // emitir el valor actual del formulario).
+    const data = this.form.getRawValue() as CreateCustomerRequest;
+    const customer = this.customer();
+
+    if (customer) {
+      // EDITAR-MODE: el modal persiste la dirección (independiente del update
+      // del cliente que hace el padre). Tras éxito/fracaso de la dirección,
+      // emite `save` para que el padre actualice el cliente + refresque lista.
+      if (this.addressValid() && this.addressPayload()) {
+        this.internalLoading.set(true);
+        this.saveExistingAddress(customer.id)
+          .pipe(
+            takeUntilDestroyed(this.destroyRef),
+            finalize(() => this.internalLoading.set(false)),
+          )
+          .subscribe({
+            next: () => {
+              this.toast.success('Dirección de envío guardada.');
+              this.save.emit(data);
+            },
+            error: (err: unknown) => {
+              console.error('Error saving customer address:', err);
+              this.toast.error(
+                'No se pudo guardar la dirección de envío. El cliente se actualizará igualmente.',
+              );
+              // Igual emitimos para que el cliente se actualice.
+              this.save.emit(data);
+            },
+          });
+      } else {
+        this.save.emit(data);
+      }
+    } else {
+      // CREAR-MODE: el modal no conoce el nuevo `customer_id` hasta que el
+      // padre reciba la respuesta de `createCustomer`. Emitimos `save` (el
+      // padre crea al cliente + refresca lista + cierra modal) y además
+      // emitimos `addressData` para que el padre persista la dirección tras
+      // el alta usando `CustomersService.createCustomerAddress`.
+      this.save.emit(data);
+      if (this.addressValid() && this.addressPayload()) {
+        this.addressData.emit(this.addressPayload()!);
+      }
     }
   }
 

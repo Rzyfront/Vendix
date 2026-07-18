@@ -101,6 +101,7 @@ import { MapStopsResponse } from '../../interfaces/planilla.interface';
             [showApplyOrder]="true"
             [applying]="reordering()"
             (applyOrder)="onApplyOrder($event)"
+            (addressFixed)="onAddressFixed($event)"
           ></app-route-map-view>
         }
       </div>
@@ -195,5 +196,16 @@ export class PlanillaMapModalComponent {
           );
         },
       });
+  }
+
+  /**
+   * Tras corregir la dirección de un stop `unlocated` vía el editor "Fijar en
+   * mapa" (el shared `app-route-map-view` emite `addressFixed` con el
+   * `dispatchNoteId`): recarga `getMapStops`. El backend re-geocodificar la
+   * remisión al PATCHear su `customer_address` (commit f3db91156), as el stop
+   * debe reaparecer con coordenadas en `stops[]` y salir de `unlocated[]`.
+   */
+  onAddressFixed(_noteId: number): void {
+    this.fetch();
   }
 }

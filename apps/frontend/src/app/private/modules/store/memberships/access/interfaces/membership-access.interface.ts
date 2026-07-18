@@ -70,6 +70,11 @@ export interface CreateCredentialDto {
 export interface CreateCredentialResponse extends GymAccessCredential {
   credential_value: string;
   email_sent: boolean;
+  /**
+   * Backend reason when `email_sent` is false (e.g. missing customer email,
+   * provider failure). Null when the email was sent successfully.
+   */
+  email_error?: string | null;
 }
 
 export interface UpdateCredentialDto {

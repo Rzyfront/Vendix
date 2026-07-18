@@ -3,6 +3,7 @@ export {
   CreateDispatchNoteItemDto,
 } from './create-dispatch-note.dto';
 export { UpdateDispatchNoteDto } from './update-dispatch-note.dto';
+export { UpdateDispatchNoteAddressDto } from './update-dispatch-note-address.dto';
 export { DispatchNoteQueryDto } from './dispatch-note-query.dto';
 export {
   CreateFromSalesOrderDto,

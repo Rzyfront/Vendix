@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 
 import { IconComponent } from '../../../../../../shared/components';
+import { WizardStepSectionComponent } from './wizard-step-section.component';
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
 import {
   DispatchNoteDirection,
@@ -32,9 +33,13 @@ import {
 @Component({
   selector: 'app-dispatch-wizard-type-step',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, WizardStepSectionComponent],
   template: `
-    <div class="space-y-4">
+    <app-wizard-step-section
+      icon="git-branch"
+      title="Tipo de remisión"
+      subtitle="Elige dirección y tipo"
+    >
       <!-- 1. Direction selector -->
       <section>
         <h3 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
@@ -56,8 +61,8 @@ import {
                 <span
                   class="flex items-center justify-center w-8 h-8 rounded-lg"
                   [class]="i === 0
-                    ? 'bg-blue-100 text-blue-600'
-                    : 'bg-amber-100 text-amber-600'"
+                    ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                    : 'bg-[var(--color-warning)]/10 text-[var(--color-warning)]'"
                 >
                   <app-icon [name]="i === 0 ? 'arrow-up' : 'arrow-down'" [size]="18"></app-icon>
                 </span>
@@ -65,7 +70,7 @@ import {
                   {{ dir.label }}
                 </span>
               </div>
-              <p class="text-[11px] text-[var(--color-text-muted)] leading-snug">
+              <p class="text-xs text-[var(--color-text-muted)] leading-snug">
                 {{ dir.description }}
               </p>
               @if (wizardService.direction() === dir.value) {
@@ -100,12 +105,12 @@ import {
               (click)="selectSubtype(st)"
             >
               <span
-                class="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0"
+                class="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-semibold shrink-0"
                 [class]="subtypeBgClass(st)"
               >
                 {{ subtypeLabel(st) }}
               </span>
-              <span class="text-[11px] text-[var(--color-text-muted)] truncate">
+              <span class="text-xs text-[var(--color-text-muted)] truncate">
                 {{ subtypeDescription(st) }}
               </span>
               @if (wizardService.subtype() === st) {
@@ -128,7 +133,7 @@ import {
             <h3 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
               Razón
             </h3>
-            <span class="text-[10px] text-[var(--color-text-muted)] italic">(opcional)</span>
+            <span class="text-xs text-[var(--color-text-muted)] italic">(opcional)</span>
           </div>
           <div class="flex flex-wrap gap-1.5">
             <button
@@ -182,7 +187,7 @@ import {
           }
         </p>
       </div>
-    </div>
+    </app-wizard-step-section>
   `,
 })
 export class TypeStepComponent {
@@ -238,7 +243,7 @@ export class TypeStepComponent {
   }
 
   subtypeBgClass(s: DispatchNoteSubtype): string {
-    return SUBTYPE_BG_CLASSES[s] ?? 'bg-gray-100 text-gray-800';
+    return SUBTYPE_BG_CLASSES[s] ?? 'bg-[var(--color-muted)] text-[var(--color-text-primary)]';
   }
 
   reasonLabel(r: DispatchNoteReason): string {

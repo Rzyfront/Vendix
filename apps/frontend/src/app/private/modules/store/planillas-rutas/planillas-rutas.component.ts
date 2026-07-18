@@ -131,7 +131,14 @@ export class PlanillasRutasComponent {
    */
   private handlePrefillFromQueryParams(): void {
     const params = this.activatedRoute.snapshot.queryParamMap;
-    if (params.get('prefill') !== '1') return;
+    // Open the wizard either from the shipping-method shortcut (`prefill=1`) or
+    // from the "crear ruta nueva desde una remisión" flow (`prefillNotes` = ids
+    // de dispatch_note separados por coma). El wizard mismo lee `prefillNotes`
+    // vía ActivatedRoute y precarga las paradas; aquí solo garantizamos que se
+    // abra. Sin ninguno de los dos, el flujo normal (apertura manual) no cambia.
+    const hasPrefillFlag = params.get('prefill') === '1';
+    const hasPrefillNotes = !!params.get('prefillNotes');
+    if (!hasPrefillFlag && !hasPrefillNotes) return;
 
     const methodIdRaw = params.get('shipping_method_id');
     const methodId = methodIdRaw ? Number(methodIdRaw) : NaN;
@@ -227,7 +234,8 @@ export class PlanillasRutasComponent {
   /** Limpia la nota precargada y los queryParams del atajo para evitar re-abrir. */
   private clearPrefill() {
     this.prefillNote.set(null);
-    if (this.activatedRoute.snapshot.queryParamMap.has('prefill')) {
+    const qp = this.activatedRoute.snapshot.queryParamMap;
+    if (qp.has('prefill') || qp.has('prefillNotes')) {
       this.router.navigate([], {
         relativeTo: this.activatedRoute,
         queryParams: {},
