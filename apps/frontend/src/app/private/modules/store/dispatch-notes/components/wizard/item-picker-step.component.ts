@@ -27,6 +27,7 @@ import {
 } from '../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 import { PosProductService, Product } from '../../../pos/services/pos-product.service';
 import { LocationsService } from '../../../inventory/services/locations.service';
 import type {
@@ -873,7 +874,7 @@ export class ItemPickerStepComponent {
         },
         error: (err) => {
           this.scanning.set(false);
-          this.toast.error(err?.message || 'No se pudo escanear el recibo.');
+          this.toast.error(extractApiError(err).message || 'No se pudo escanear el recibo.');
         },
       });
   }

@@ -13,6 +13,7 @@ import {
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 
 /**
  * Modal viewer for a dispatch-note (remision) PDF. Uses signal-based
@@ -113,7 +114,7 @@ export class DispatchNotePdfViewerComponent implements OnInit, OnDestroy {
           this.loading.set(false);
         },
         error: (e) => {
-          this.error.set(e?.message || 'No se pudo cargar el PDF');
+          this.error.set(extractApiError(e).message || 'No se pudo cargar el PDF');
           this.loading.set(false);
         },
       });

@@ -18,6 +18,7 @@ import {
   ToastService,
   DialogService,
 } from '../../../../../../shared/components';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
 import type {
@@ -545,29 +546,9 @@ export class DispatchNoteWizardComponent {
     this.created.emit(note);
   }
 
-  /**
-   * Extrae el `error_code` y `message` de negocio del cuerpo de un
-   * `HttpErrorResponse`. El backend responde `{ error_code, message, ... }` en
-   * `err.error`; `(err as Error).message` sólo trae el mensaje genérico de
-   * Angular ("Http failure response for ..."), que no le dice nada al usuario.
-   */
-  private _extractApiError(err: unknown): { code?: string; message?: string } {
-    // Robusto ante dos formas: el `HttpErrorResponse` crudo (`err.error.*`, del
-    // que sacamos el `error_code`) y un `Error` plano aplastado por métodos del
-    // servicio que aún envuelven en `new Error(msg)` (sólo trae `err.message`).
-    const e = err as {
-      error?: { error_code?: string; message?: string };
-      message?: string;
-    };
-    return {
-      code: e?.error?.error_code,
-      message: e?.error?.message ?? e?.message,
-    };
-  }
-
   private _onCreateError(err: unknown): void {
     this.isSubmitting.set(false);
-    const { code, message } = this._extractApiError(err);
+    const { code, message } = extractApiError(err);
 
     // Error de negocio bloqueante: la orden no tiene dirección de entrega. Un
     // toast se pierde; se muestra un diálogo claro y accionable que lleva a la
@@ -605,7 +586,7 @@ export class DispatchNoteWizardComponent {
   private _onConfirmError(err: unknown): void {
     // La remisión ya se creó como `draft`; sólo falló la confirmación.
     this.isSubmitting.set(false);
-    const { message } = this._extractApiError(err);
+    const { message } = extractApiError(err);
     this.toast.error(
       message || 'Remisión creada, pero falló la confirmación',
     );

@@ -40,7 +40,8 @@ export class DispatchNotesService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error fetching dispatch notes:', error);
-        return throwError(() => new Error(this.extractErrorMessage(error)));
+        // Re-lanza crudo (preserva error_code/status); el componente traduce.
+        return throwError(() => error);
       }),
     );
   }
@@ -59,7 +60,8 @@ export class DispatchNotesService {
       }),
       catchError((error) => {
         console.error('Error fetching dispatch note stats:', error);
-        return throwError(() => new Error('Failed to fetch dispatch note stats'));
+        // Re-lanza crudo (preserva error_code/status); el componente traduce.
+        return throwError(() => error);
       }),
     );
     dispatchNoteStatsCache = { observable: observable$, lastFetch: now };
@@ -70,7 +72,9 @@ export class DispatchNotesService {
     const url = `${this.apiUrl}/store/dispatch-notes/${id}`;
     return this.http.get<any>(url).pipe(
       map((r) => r.data || r),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -79,7 +83,9 @@ export class DispatchNotesService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -88,7 +94,9 @@ export class DispatchNotesService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -97,7 +105,9 @@ export class DispatchNotesService {
     return this.http.patch<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -105,7 +115,9 @@ export class DispatchNotesService {
     const url = `${this.apiUrl}/store/dispatch-notes/${id}`;
     return this.http.delete<void>(url).pipe(
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -121,7 +133,9 @@ export class DispatchNotesService {
       .pipe(
         map((r) => r.data || r),
         tap(() => this.invalidateCache()),
-        catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+        // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
       );
   }
 
@@ -129,7 +143,9 @@ export class DispatchNotesService {
     return this.http.post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/deliver`, dto || {}).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -137,7 +153,9 @@ export class DispatchNotesService {
     return this.http.post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/void`, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -145,7 +163,9 @@ export class DispatchNotesService {
     return this.http.post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/invoice`, {}).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -153,7 +173,9 @@ export class DispatchNotesService {
     const url = `${this.apiUrl}/store/dispatch-notes/by-sales-order/${sales_order_id}`;
     return this.http.get<any>(url).pipe(
       map((r) => r.data || r),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -174,7 +196,9 @@ export class DispatchNotesService {
     const url = `${this.apiUrl}/store/dispatch-notes/by-order/${order_id}`;
     return this.http.get<any>(url).pipe(
       map((r) => r.data || r),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -192,7 +216,9 @@ export class DispatchNotesService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -206,7 +232,9 @@ export class DispatchNotesService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -220,7 +248,9 @@ export class DispatchNotesService {
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -232,7 +262,9 @@ export class DispatchNotesService {
     return this.http.post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/receive`, {}).pipe(
       map((r) => r.data || r),
       tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
@@ -245,7 +277,9 @@ export class DispatchNotesService {
     return this.http
       .post(`${this.apiUrl}/store/dispatch-notes/${id}/pdf`, {}, { responseType: 'blob' })
       .pipe(
-        catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+        // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
       );
   }
 
@@ -262,15 +296,13 @@ export class DispatchNotesService {
     const url = `${this.apiUrl}/store/dispatch-notes/receipt-scan`;
     return this.http.post<any>(url, formData).pipe(
       map((r) => r.data || r),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
+      // la traducción a mensaje la hace el componente vía extractApiError().
+      catchError((error) => throwError(() => error)),
     );
   }
 
   invalidateCache(): void {
     dispatchNoteStatsCache = null;
-  }
-
-  private extractErrorMessage(error: any): string {
-    return error?.error?.message || error?.message || 'Error desconocido';
   }
 }

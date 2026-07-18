@@ -23,6 +23,7 @@ import {
   ToastService,
   DialogService,
 } from '../../../../../../../shared/components/index';
+import { extractApiError } from '../../../../../../../shared/utils/http-error.util';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
@@ -891,7 +892,7 @@ export class StorePurchaseOrderDetailComponent {
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: () => this.onReceptionSuccess(),
-      error: (err) => { this.receiveSaving.set(false); this.toast.error(typeof err === 'string' ? err : (err?.message || 'Error al recibir por remisión')); },
+      error: (err) => { this.receiveSaving.set(false); this.toast.error(typeof err === 'string' ? err : (extractApiError(err).message || 'Error al recibir por remisión')); },
     });
   }
 

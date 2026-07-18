@@ -3,6 +3,7 @@ import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNoteDetailComponent } from '../../components/dispatch-note-detail/dispatch-note-detail.component';
 import { DispatchNotePdfViewerComponent } from '../../components/dispatch-note-pdf-viewer/dispatch-note-pdf-viewer.component';
@@ -196,7 +197,7 @@ export class DispatchNoteDetailPageComponent {
           this.loadDispatchNote(id);
         },
         error: (err: Error) =>
-          this.toastService.error(err?.message || 'Error al confirmar la remision'),
+          this.toastService.error(extractApiError(err).message || 'Error al confirmar la remision'),
       });
   }
 
