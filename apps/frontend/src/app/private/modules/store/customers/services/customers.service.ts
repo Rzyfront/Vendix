@@ -11,6 +11,26 @@ import {
     CustomerFilters,
 } from '../models/customer.model';
 
+/**
+ * Payload para `POST /store/addresses` (alta de dirección de envío de un
+ * cliente). Usa los nombres del DTO del backend (`address_line_1`, `state`,
+ * `country` con guion bajo y nombres cortos), que el service backend mapea
+ * a las columnas `address_line1`/`state_province`/`country_code`.
+ */
+export interface CustomerAddressPayload {
+    address_line_1: string;
+    address_line_2?: string;
+    city: string;
+    state: string;
+    country: string;
+    postal_code?: string;
+    type?: 'shipping' | 'billing' | 'headquarters' | 'branch_office' | 'warehouse' | 'legal' | 'store_physical';
+    is_primary?: boolean;
+    customer_id?: number;
+    latitude?: string;
+    longitude?: string;
+}
+
 export interface PaginatedResponse<T> {
     data: T[];
     meta: {
@@ -133,5 +153,43 @@ export class CustomersService {
      */
     uploadBulkCustomersJson(customers: any[]): Observable<any> {
         return this.http.post(`${this.apiUrl}/bulk/upload`, { customers });
+    }
+
+    // ── Direcciones de envío del cliente ──────────────────────
+
+    /**
+     * POST /store/addresses
+     * Crea una dirección de envío y la vincula al cliente vía `customer_id`.
+     * Devuelve la dirección creada (incluye `id`).
+     */
+    createCustomerAddress(
+        payload: CustomerAddressPayload,
+    ): Observable<{ id: number } & Record<string, unknown>> {
+        const url = `${environment.apiUrl}/store/addresses`;
+        return this.http.post<any>(url, payload).pipe(
+            map((r) => r.data || r),
+            catchError((error) => {
+                console.error('Error creating customer address:', error);
+                return throwError(() => error);
+            }),
+        );
+    }
+
+    /**
+     * PATCH /store/addresses/:id
+     * Actualiza una dirección de envío existente.
+     */
+    updateCustomerAddress(
+        addressId: number,
+        payload: Partial<CustomerAddressPayload>,
+    ): Observable<{ id: number } & Record<string, unknown>> {
+        const url = `${environment.apiUrl}/store/addresses/${addressId}`;
+        return this.http.patch<any>(url, payload).pipe(
+            map((r) => r.data || r),
+            catchError((error) => {
+                console.error('Error updating customer address:', error);
+                return throwError(() => error);
+            }),
+        );
     }
 }
