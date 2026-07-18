@@ -122,23 +122,65 @@
                         }
                         {{ field.label }}
                       </p>
-                      <div class="detail-value-wrap">
-                        <span class="detail-value">{{
-                          getDetailValue(item, field)
-                        }}</span>
-                        @if (getInfoIcon(item, field)) {
-                          <app-icon
-                            [name]="getInfoIcon(item, field)!"
-                            [size]="14"
-                            class="detail-info-icon"
-                            [ngClass]="
-                              getInfoIconVariant(item, field)
-                                ? 'text-' + getInfoIconVariant(item, field)
-                                : ''
-                            "
-                          ></app-icon>
+                      @if (field.progressTransform) {
+                        @let progressData = field.progressTransform(item);
+                        @if (progressData) {
+                          <div
+                            class="detail-progress"
+                            [attr.aria-label]="progressData.label || 'Progreso'"
+                          >
+                            <svg
+                              viewBox="0 0 120 120"
+                              class="detail-progress-svg"
+                              role="img"
+                            >
+                              <circle
+                                cx="60"
+                                cy="60"
+                                [attr.r]="donutRadius"
+                                fill="none"
+                                stroke="var(--color-border, #e5e7eb)"
+                                stroke-width="8"
+                              />
+                              <circle
+                                cx="60"
+                                cy="60"
+                                [attr.r]="donutRadius"
+                                fill="none"
+                                [attr.stroke]="progressData.color || '#16a34a'"
+                                stroke-width="8"
+                                stroke-linecap="round"
+                                [attr.stroke-dasharray]="donutCircumference"
+                                [attr.stroke-dashoffset]="
+                                  getDashOffset(progressData.percent)
+                                "
+                                transform="rotate(-90 60 60)"
+                              />
+                            </svg>
+                            <span class="detail-progress-pct">{{
+                              progressData.percent
+                            }}%</span>
+                          </div>
                         }
-                      </div>
+                      } @else {
+                        <div class="detail-value-wrap">
+                          <span class="detail-value">{{
+                            getDetailValue(item, field)
+                          }}</span>
+                          @if (getInfoIcon(item, field)) {
+                            <app-icon
+                              [name]="getInfoIcon(item, field)!"
+                              [size]="14"
+                              class="detail-info-icon"
+                              [ngClass]="
+                                getInfoIconVariant(item, field)
+                                  ? 'text-' + getInfoIconVariant(item, field)
+                                  : ''
+                              "
+                            ></app-icon>
+                          }
+                        </div>
+                      }
                     </div>
                   }
                   <!-- Optional Placeholder for extra detail flex alignment -->
