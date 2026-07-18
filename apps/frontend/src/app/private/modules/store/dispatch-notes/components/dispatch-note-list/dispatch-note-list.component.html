@@ -78,4 +78,14 @@
       </div>
     }
   </app-card>
+
+  <!-- Assign-route modal (orphan remisiones) -->
+  @if (assignTargetNote(); as note) {
+    <app-assign-route-modal
+      [isOpen]="showAssignModal()"
+      (isOpenChange)="onAssignModalOpenChange($event)"
+      [dispatchNote]="note"
+      (assigned)="onRouteAssigned()"
+    ></app-assign-route-modal>
+  }
 </div>

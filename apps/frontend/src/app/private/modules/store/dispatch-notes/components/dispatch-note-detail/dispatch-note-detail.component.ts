@@ -69,6 +69,7 @@ export class DispatchNoteDetailComponent {
   readonly voidAction = output<DispatchNote>();
   readonly invoiceAction = output<DispatchNote>();
   readonly printAction = output<DispatchNote>();
+  readonly assignRouteAction = output<DispatchNote>();
 
   // ── StickyHeader computed ───────────────────────────
   readonly headerTitle = computed(() => `Remision ${this.dispatch_note().dispatch_number}`);
@@ -78,8 +79,10 @@ export class DispatchNoteDetailComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const status = this.dispatch_note().status;
+    const canAssignRoute = !this.activeRoute() && ['draft', 'confirmed'].includes(status);
     return [
       { id: 'confirm', label: 'Confirmar', variant: 'primary', icon: 'check', visible: status === 'draft' },
+      { id: 'assign-route', label: 'Asignar a ruta', variant: 'outline', icon: 'map-pin', visible: canAssignRoute },
       { id: 'deliver', label: 'Entregar', variant: 'primary', icon: 'truck', visible: status === 'confirmed' },
       { id: 'invoice', label: 'Facturar', variant: 'primary', icon: 'file-plus', visible: status === 'delivered' },
       { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer', visible: ['confirmed', 'delivered', 'invoiced'].includes(status) },
@@ -263,6 +266,7 @@ export class DispatchNoteDetailComponent {
     const dn = this.dispatch_note();
     switch (id) {
       case 'confirm': this.confirmAction.emit(dn); break;
+      case 'assign-route': this.assignRouteAction.emit(dn); break;
       case 'deliver': this.deliverAction.emit(dn); break;
       case 'invoice': this.invoiceAction.emit(dn); break;
       case 'print': this.printAction.emit(dn); break;
