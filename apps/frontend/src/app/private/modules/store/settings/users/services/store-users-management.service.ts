@@ -147,6 +147,23 @@ export class StoreUsersManagementService {
       );
   }
 
+  /**
+   * `PATCH management/:id/app-type` — fija el app_type del usuario
+   * (`STORE_ADMIN` | `STORE_DELIVERY`). El backend valida que `STORE_DELIVERY`
+   * solo se permita si el usuario tiene el rol `carrier`. Devuelve el usuario
+   * actualizado.
+   */
+  setAppType(id: number, app_type: string): Observable<StoreUserDetail> {
+    return this.http
+      .patch<{ data: StoreUserDetail }>(`${this.baseUrl}/${id}/app-type`, {
+        app_type,
+      })
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => throwError(() => error)),
+      );
+  }
+
   getAvailableRoles(): Observable<Role[]> {
     return this.http
       .get<{ data: Role[] }>(`${environment.apiUrl}/store/roles`)

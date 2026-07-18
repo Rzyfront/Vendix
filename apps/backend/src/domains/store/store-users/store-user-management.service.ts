@@ -71,12 +71,13 @@ export class StoreUserManagementService {
       dto.username ||
       `${formatted_first_name.toLowerCase()}_${formatted_last_name.toLowerCase()}_${Date.now()}`;
 
-    // Fase B2: el rol es parametrizable (default `employee`, preservando el
-    // comportamiento previo). Regla adoptada: `carrier` (Vendix Repartos)
-    // fuerza app_type=STORE_DELIVERY; el resto opera bajo STORE_ADMIN.
+    // El rol es parametrizable (default `employee`). Regla de negocio:
+    // `app_type` es MANUAL únicamente — asignar el rol `carrier` NO mueve al
+    // usuario a la app de reparto (evita dejarlo atrapado por error). Todo
+    // usuario nuevo nace en STORE_ADMIN; STORE_DELIVERY se fija después a mano
+    // vía PATCH management/:id/app-type (que exige rol carrier).
     const roleName = dto.role ?? 'employee';
-    const appType: 'STORE_ADMIN' | 'STORE_DELIVERY' =
-      roleName === 'carrier' ? 'STORE_DELIVERY' : 'STORE_ADMIN';
+    const appType: 'STORE_ADMIN' | 'STORE_DELIVERY' = 'STORE_ADMIN';
 
     // Create the user and provision its staff membership atomically. The
     // StaffProvisioningService handles store_users + user_roles + user_settings
@@ -237,7 +238,7 @@ export class StoreUserManagementService {
               },
             },
             user_settings: {
-              select: { config: true },
+              select: { config: true, app_type: true },
             },
           },
         },
@@ -274,6 +275,7 @@ export class StoreUserManagementService {
       store_user_id: store_user.id,
       roles,
       panel_ui: mergedPanelUI,
+      app_type: user_settings?.app_type ?? 'STORE_ADMIN',
     };
   }
 
@@ -404,28 +406,29 @@ export class StoreUserManagementService {
       });
     }
 
-    // Fase B2: mantener user_settings.app_type coherente con el rol `carrier`.
-    // Regla adoptada: rol `carrier` (Vendix Repartos) ⇒ app_type=STORE_DELIVERY.
-    // Al quitarlo degradamos SOLO a un carrier "puro" (app_type actual
-    // STORE_DELIVERY y sin rol de alto privilegio); nunca degradamos a un
-    // admin/owner (owner/admin/super_admin conservan su app_type intacto).
-    await this.syncCarrierAppType(userId);
+    // Salvaguarda de reversión (Vendix Repartos): asignar `carrier` YA NO mueve
+    // al usuario a STORE_DELIVERY — esa decisión es explícita vía `setAppType`.
+    // Aquí sólo SACAMOS: si un carrier "puro" (app_type STORE_DELIVERY y sin rol
+    // de alto privilegio) pierde el rol `carrier`, lo devolvemos a STORE_ADMIN
+    // para que no quede atrapado en la app de reparto sin ser repartidor.
+    await this.revertAppTypeOnCarrierLoss(userId);
 
     return this.findOne(userId);
   }
 
   /**
-   * Sincroniza `user_settings.app_type` con la presencia del rol `carrier`
-   * tras un cambio de roles (Fase B2 — Vendix Repartos).
+   * Salvaguarda de reversión de `user_settings.app_type` tras un cambio de
+   * roles (Vendix Repartos).
    *
-   * - Añadir/conservar `carrier` ⇒ fuerza `STORE_DELIVERY`, salvo que el
-   *   usuario conserve un rol de alto privilegio (owner/admin/super_admin),
-   *   en cuyo caso NO se toca su app_type para no romper su acceso admin.
-   * - Quitar `carrier` a un carrier puro (app_type actual `STORE_DELIVERY`
-   *   y sin alto privilegio) ⇒ degrada a `STORE_ADMIN`.
+   * Regla (sólo SACA, nunca METE):
+   * - Asignar/conservar `carrier` NO mueve a `STORE_DELIVERY`. Esa promoción es
+   *   explícita mediante el endpoint/servicio `setAppType`.
+   * - Quitar `carrier` a un carrier puro (app_type actual `STORE_DELIVERY` y sin
+   *   rol de alto privilegio) ⇒ revierte a `STORE_ADMIN`, para que no quede
+   *   atrapado en la app de reparto.
    * - En cualquier otro caso, `app_type` se deja intacto.
    */
-  private async syncCarrierAppType(userId: number): Promise<void> {
+  private async revertAppTypeOnCarrierLoss(userId: number): Promise<void> {
     const finalRoles = await this.prisma.user_roles.findMany({
       where: { user_id: userId },
       select: { roles: { select: { name: true } } },
@@ -440,12 +443,13 @@ export class StoreUserManagementService {
       select: { app_type: true },
     });
 
-    let nextAppType: 'STORE_DELIVERY' | 'STORE_ADMIN' | null = null;
-    if (willHaveCarrier) {
-      // No degradar a un admin de alto privilegio hacia la app de reparto.
-      if (!isHighPrivilege) nextAppType = 'STORE_DELIVERY';
-    } else if (settings?.app_type === 'STORE_DELIVERY' && !isHighPrivilege) {
-      // Carrier puro que pierde el rol: recupera acceso al panel de tienda.
+    // Sólo reversión: carrier puro que pierde el rol recupera el panel de tienda.
+    let nextAppType: 'STORE_ADMIN' | null = null;
+    if (
+      !willHaveCarrier &&
+      settings?.app_type === 'STORE_DELIVERY' &&
+      !isHighPrivilege
+    ) {
       nextAppType = 'STORE_ADMIN';
     }
 
@@ -469,6 +473,65 @@ export class StoreUserManagementService {
         },
       });
     }
+  }
+
+  /**
+   * Vendix Repartos: setea manualmente `user_settings.app_type` de un usuario de
+   * tienda (STORE_ADMIN | STORE_DELIVERY). Desacopla el app_type del rol
+   * `carrier`: mover a la app de reparto es una acción explícita, no un efecto
+   * colateral de asignar el rol.
+   *
+   * Reglas:
+   * - `findOne` valida que el usuario pertenece a la tienda del contexto (404).
+   * - `STORE_DELIVERY` sólo es válido si el usuario TIENE el rol `carrier`
+   *   (de lo contrario ⇒ BadRequest). No tiene sentido mandar a la app de
+   *   reparto a quien no es repartidor.
+   * - Upsert por user_id sobre `user_settings.app_type`; el legacy sin fila crea
+   *   con el panel_ui por defecto del app_type destino.
+   */
+  async setAppType(
+    userId: number,
+    appType: 'STORE_ADMIN' | 'STORE_DELIVERY',
+  ) {
+    // Verify user belongs to this store (404 si no pertenece).
+    await this.findOne(userId);
+
+    if (appType === 'STORE_DELIVERY') {
+      const carrierRole = await this.prisma.user_roles.findFirst({
+        where: { user_id: userId, roles: { name: 'carrier' } },
+        select: { role_id: true },
+      });
+      if (!carrierRole) {
+        throw new BadRequestException(
+          'Solo un usuario con rol carrier puede acceder a la app de reparto (STORE_DELIVERY)',
+        );
+      }
+    }
+
+    const settings = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId },
+      select: { app_type: true },
+    });
+
+    if (settings) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { app_type: appType as any, updated_at: new Date() },
+      });
+    } else {
+      // Caso legacy sin user_settings: crear con el panel_ui del app_type destino.
+      const defaultConfig =
+        await this.defaultPanelUIService.generatePanelUI(appType);
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: appType as any,
+          config: defaultConfig as any,
+        },
+      });
+    }
+
+    return this.findOne(userId);
   }
 
   async updatePanelUI(userId: number, dto: UpdateUserPanelUIDto) {

@@ -17,6 +17,7 @@ import { FormsModule } from '@angular/forms';
 import {
   ReactiveFormsModule,
   FormBuilder,
+  FormControl,
   FormGroup,
   Validators,
 } from '@angular/forms';
@@ -295,6 +296,50 @@ import {
                       </div>
                     </label>
                   }
+
+                  <!-- ── Tipo de aplicacion (app_type) ─────────────── -->
+                  <div class="pt-3 mt-1 border-t border-border space-y-2">
+                    <div class="flex items-center gap-2.5">
+                      <div class="p-1.5 bg-primary/10 rounded-lg">
+                        <app-icon
+                          name="layout-dashboard"
+                          [size]="16"
+                          class="text-primary"
+                        />
+                      </div>
+                      <div>
+                        <h4 class="text-sm font-semibold text-text-primary">
+                          Tipo de aplicacion
+                        </h4>
+                        <p class="text-[10px] text-text-secondary">
+                          A que aplicacion accede este usuario al iniciar sesion
+                        </p>
+                      </div>
+                    </div>
+
+                    <app-selector
+                      [formControl]="appTypeControl"
+                      label="Tipo de aplicacion"
+                      [options]="appTypeOptions()"
+                      (valueChange)="onAppTypeChange($event)"
+                    />
+
+                    @if (!isCarrierUser()) {
+                      <div
+                        class="flex items-start gap-2 px-3 py-2 rounded-lg border border-border bg-surface/50"
+                      >
+                        <app-icon
+                          name="info"
+                          [size]="14"
+                          class="text-text-secondary mt-0.5 shrink-0"
+                        />
+                        <p class="text-[11px] text-text-secondary">
+                          Asigna el rol carrier para habilitar Repartos
+                          (delivery).
+                        </p>
+                      </div>
+                    }
+                  </div>
                 </div>
               }
 
@@ -558,6 +603,19 @@ export class StoreUserEditModalComponent implements OnChanges {
   /** Loading flag for the carrier-tariff save (direct HTTP, no NgRx action). */
   savingTariff = signal(false);
 
+  /** Loading flag for the app_type save (direct HTTP, no NgRx action). */
+  savingAppType = signal(false);
+
+  /**
+   * Control del selector de app_type. Se precarga desde `userDetail()?.app_type`
+   * en el effect (con `emitEvent: false` para no disparar el guardado). El
+   * guardado se hace por `(valueChange)` — que solo emite en interaccion del
+   * usuario, no en `writeValue` — vía HTTP directo (no NgRx).
+   */
+  readonly appTypeControl = new FormControl<string>('STORE_ADMIN', {
+    nonNullable: true,
+  });
+
   /**
    * True when the edited user has the `carrier` role — derived from the roles
    * currently toggled in the Roles tab (`selectedRoleIds` ∩ `availableRoles`)
@@ -594,6 +652,22 @@ export class StoreUserEditModalComponent implements OnChanges {
     { value: 'per_stop', label: 'Por parada' },
     { value: 'per_route', label: 'Por ruta' },
   ];
+
+  /**
+   * Opciones del selector de app_type. `STORE_ADMIN` siempre disponible;
+   * `STORE_DELIVERY` (Repartos) SOLO si el usuario tiene el rol carrier
+   * (`isCarrierUser()`), replicando la regla del backend. Reactivo: al marcar
+   * el rol carrier en la pestaña Roles, la opcion de Repartos aparece.
+   */
+  readonly appTypeOptions = computed<SelectorOption[]>(() => {
+    const options: SelectorOption[] = [
+      { value: 'STORE_ADMIN', label: 'Panel de tienda' },
+    ];
+    if (this.isCarrierUser()) {
+      options.push({ value: 'STORE_DELIVERY', label: 'Repartos (delivery)' });
+    }
+    return options;
+  });
 
   panelUIAppTabs = [
     { id: 'STORE_ADMIN', label: 'Tienda' },
@@ -734,6 +808,25 @@ export class StoreUserEditModalComponent implements OnChanges {
           mode: tariff?.mode ?? 'per_stop',
           amount: tariff ? Number(tariff.amount) || 0 : 0,
         });
+
+        // Precarga el app_type actual sin disparar `(valueChange)` (writeValue
+        // no lo emite y `emitEvent: false` evita statusChanges innecesarios).
+        this.appTypeControl.setValue(detail.app_type ?? 'STORE_ADMIN', {
+          emitEvent: false,
+        });
+      }
+    });
+
+    // Sincroniza el estado habilitado/deshabilitado del selector de app_type
+    // de forma programatica (no via `[disabled]` en plantilla, que dispararia
+    // el warning de reactive forms al convivir con `[formControl]`). Se apaga
+    // mientras guarda o si el usuario logueado no puede gestionar.
+    effect(() => {
+      const shouldDisable = this.savingAppType() || !this.canManageUsers();
+      if (shouldDisable && this.appTypeControl.enabled) {
+        this.appTypeControl.disable({ emitEvent: false });
+      } else if (!shouldDisable && this.appTypeControl.disabled) {
+        this.appTypeControl.enable({ emitEvent: false });
       }
     });
   }
@@ -887,6 +980,42 @@ export class StoreUserEditModalComponent implements OnChanges {
         error: (err) => {
           this.savingTariff.set(false);
           this.toast.error(parseApiError(err).userMessage);
+        },
+      });
+  }
+
+  // ── Tipo de aplicacion (app_type) ──────────────────────────────
+
+  /**
+   * Persiste el app_type del usuario vía HTTP directo (no NgRx), calcando el
+   * patron de `saveCarrierTariff`. Se dispara desde `(valueChange)` del
+   * selector — solo en interaccion del usuario. En exito refresca el detalle
+   * (recarga NgRx) para que el effect re-sincronice el valor confirmado.
+   */
+  onAppTypeChange(value: string | number | null): void {
+    const currentUser = this.user();
+    if (!currentUser || value == null || this.savingAppType()) return;
+    const appType = String(value);
+    this.savingAppType.set(true);
+    this.storeUsersService
+      .setAppType(currentUser.id, appType)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingAppType.set(false);
+          this.toast.success('Tipo de aplicacion actualizado');
+          this.store.dispatch(
+            StoreUsersActions.loadUserDetail({ id: currentUser.id }),
+          );
+        },
+        error: (err) => {
+          this.savingAppType.set(false);
+          this.toast.error(parseApiError(err).userMessage);
+          // Revierte el selector al valor previo confirmado del detalle.
+          this.appTypeControl.setValue(
+            this.userDetail()?.app_type ?? 'STORE_ADMIN',
+            { emitEvent: false },
+          );
         },
       });
   }
