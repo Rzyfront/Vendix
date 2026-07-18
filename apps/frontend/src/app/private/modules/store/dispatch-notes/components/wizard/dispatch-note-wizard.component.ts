@@ -8,6 +8,7 @@ import {
   computed,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 
 import {
   ModalComponent,
@@ -15,6 +16,7 @@ import {
   IconComponent,
   StepsLineComponent,
   ToastService,
+  DialogService,
 } from '../../../../../../shared/components';
 
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
@@ -208,6 +210,8 @@ export class DispatchNoteWizardComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
   private readonly toast = inject(ToastService);
+  private readonly dialog = inject(DialogService);
+  private readonly router = inject(Router);
   private readonly printService = inject(DispatchNotePrintService);
 
   // Inputs
@@ -541,16 +545,61 @@ export class DispatchNoteWizardComponent {
     this.created.emit(note);
   }
 
+  /**
+   * Extrae el `error_code` y `message` de negocio del cuerpo de un
+   * `HttpErrorResponse`. El backend responde `{ error_code, message, ... }` en
+   * `err.error`; `(err as Error).message` sólo trae el mensaje genérico de
+   * Angular ("Http failure response for ..."), que no le dice nada al usuario.
+   */
+  private _extractApiError(err: unknown): { code?: string; message?: string } {
+    const body = (err as { error?: { error_code?: string; message?: string } })
+      ?.error;
+    return { code: body?.error_code, message: body?.message };
+  }
+
   private _onCreateError(err: unknown): void {
     this.isSubmitting.set(false);
-    this.toast.error((err as Error)?.message || 'Error al crear la remisión');
+    const { code, message } = this._extractApiError(err);
+
+    // Error de negocio bloqueante: la orden no tiene dirección de entrega. Un
+    // toast se pierde; se muestra un diálogo claro y accionable que lleva a la
+    // orden para capturar la dirección antes de reintentar.
+    if (code === 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS') {
+      const order = this.wizardService.selectedOrder();
+      const ref =
+        order?.order_number ?? (order?.id ? `#${order.id}` : 'seleccionada');
+      this.dialog
+        .confirm(
+          {
+            title: 'La orden no tiene dirección de entrega',
+            message:
+              `No se puede generar la remisión porque la orden ${ref} no tiene ` +
+              `una dirección de envío registrada. Agrega una dirección de ` +
+              `entrega a la orden y vuelve a intentarlo.`,
+            confirmText: 'Ir a la orden',
+            cancelText: 'Cerrar',
+            confirmVariant: 'primary',
+          },
+          { size: 'sm' },
+        )
+        .then((goToOrder) => {
+          if (goToOrder && order?.id) {
+            this.onClose();
+            this.router.navigate(['/admin/orders', order.id]);
+          }
+        });
+      return;
+    }
+
+    this.toast.error(message || 'No se pudo crear la remisión');
   }
 
   private _onConfirmError(err: unknown): void {
     // La remisión ya se creó como `draft`; sólo falló la confirmación.
     this.isSubmitting.set(false);
+    const { message } = this._extractApiError(err);
     this.toast.error(
-      (err as Error)?.message || 'Remisión creada, pero falló la confirmación',
+      message || 'Remisión creada, pero falló la confirmación',
     );
   }
 
