@@ -33,7 +33,36 @@ export interface Booking {
   consultation_notes?: any[];
 }
 
-export type BookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+export type BookingStatus = 'pending' | 'confirmed' | 'arriving' | 'attending' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+
+/**
+ * One entry returned by `GET /store/reservations/queue`. Each booking in
+ * `arriving` or `attending` status is ranked by ABS(starts_at - arrival_at),
+ * with priority + created_at as tiebreakers.
+ */
+export interface QueueEntry {
+  booking_id: number;
+  booking_number: string;
+  customer_id: number;
+  provider_id: number | null;
+  starts_at: string;
+  target_time: string;
+  arrival_at: string;
+  score: number;        // milliseconds of (target - arrival). Lower = closer.
+  priority: number;     // manual override. 0 = default.
+}
+
+/**
+ * One row of the per-store business-hours master calendar. The store
+ * availability service intersects provider schedules against these
+ * windows so a provider can't be booked outside the store's open hours.
+ */
+export interface BusinessHoursRow {
+  day_of_week: number;       // 0 = Sunday, 6 = Saturday
+  start_time: string | null; // HH:mm in 24h, null when closed
+  end_time: string | null;
+  is_active: boolean;
+}
 
 export interface BookingStats {
   today_count: number;

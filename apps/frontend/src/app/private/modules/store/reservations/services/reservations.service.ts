@@ -14,6 +14,8 @@ import {
   ProviderException,
   ProviderAvailabilityOverview,
   AvailabilityOverviewQuery,
+  QueueEntry,
+  BusinessHoursRow,
 } from '../interfaces/reservation.interface';
 
 export interface PaginatedResponse<T> {
@@ -231,6 +233,74 @@ export class ReservationsService {
     return this.http.patch<any>(`${this.apiUrl}/${id}/start`, {}).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  /**
+   * Check-in de cliente o staff. Acepta reservas en estado `confirmed` o
+   * `arriving` (idempotente para cliente). Devuelve la reserva con
+   * `arrival_at` set.
+   */
+  checkInReservation(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/check-in`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Marca una reserva como `arriving` sin pasar por el flujo de check-in
+   * (cliente llegó a recepción sin abrir la app).
+   */
+  markArriving(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/mark-arriving`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Marca una reserva como `attending` (el staff está llamándola para
+   * pasar a la silla). El listener de cola lo usa para enviar la
+   * notificación `appointment_queued` al cliente.
+   */
+  markAttending(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/mark-attending`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Dispara manualmente el envío de la solicitud de confirmación al cliente.
+   * El backend genera tokens de 48h y emite `booking.confirmation_request`.
+   */
+  sendConfirmation(id: number, source: 'staff' | 'system' = 'staff'): Observable<{ expires_at: string }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/send-confirmation`, { source })
+      .pipe(map((response) => response.data || response));
+  }
+
+  /**
+   * Cola inteligente del día. Por defecto el día actual; se puede pasar
+   * otra fecha ISO (YYYY-MM-DD) para revisar otro día.
+   */
+  getQueue(day?: string): Observable<QueueEntry[]> {
+    let params = new HttpParams();
+    if (day) params = params.set('day', day);
+    return this.http.get<any>(`${this.apiUrl}/queue`, { params }).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  // --- Business hours (master calendar) ---
+
+  getBusinessHours(): Observable<BusinessHoursRow[]> {
+    return this.http.get<any>(`${environment.apiUrl}/store/business-hours`).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  upsertBusinessHours(items: BusinessHoursRow[]): Observable<BusinessHoursRow[]> {
+    return this.http
+      .put<any>(`${environment.apiUrl}/store/business-hours`, { items })
+      .pipe(map((response) => response.data || response || []));
   }
 
   updateNotes(id: number, dto: { notes?: string; internal_notes?: string }): Observable<Booking> {

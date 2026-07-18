@@ -332,6 +332,20 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/reservations/components/provider-availability/provider-availability.component'
               ).then((c) => c.ProviderAvailabilityComponent),
           },
+          {
+            path: 'queue',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/appointment-queue-panel/appointment-queue-panel.component'
+              ).then((c) => c.AppointmentQueuePanelComponent),
+          },
+          {
+            path: 'business-hours',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/business-hours/business-hours.component'
+              ).then((c) => c.BusinessHoursComponent),
+          },
         ],
       },
       // Consultations Routes

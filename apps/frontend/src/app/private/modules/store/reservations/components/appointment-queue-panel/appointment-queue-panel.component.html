@@ -1,0 +1,69 @@
+<div class="queue-panel">
+  <header class="queue-panel__header">
+    <h2>
+      <app-icon name="list-ordered"></app-icon>
+      Cola inteligente del día
+    </h2>
+    <button class="btn btn--ghost btn--sm" (click)="manualRefresh()" [disabled]="loading()">
+      <app-icon name="refresh-cw"></app-icon>
+      Refrescar
+    </button>
+  </header>
+
+  <p class="queue-panel__subtitle">
+    Clientes en sala ordenados por cercanía a su hora reservada. El de arriba está próximo a ser llamado.
+  </p>
+
+  @if (loading() && rows().length === 0) {
+    <div class="queue-panel__loading">Cargando cola...</div>
+  } @else if (rows().length === 0) {
+    <app-empty-state
+      icon="users"
+      title="Sin clientes en cola"
+      description="Cuando un cliente haga check-in aparecerá aquí, ordenado por cercanía a la hora de su reserva."
+    ></app-empty-state>
+  } @else {
+    <ul class="queue-panel__list">
+      @for (row of rows(); track row.booking_id; let idx = $index) {
+        <li class="queue-row" [class.queue-row--top]="idx === 0">
+          <div class="queue-row__rank">
+            <span class="queue-row__rank-num">{{ idx + 1 }}</span>
+            @if (idx === 0) {
+              <app-badge variant="success" size="sm">Próximo</app-badge>
+            }
+          </div>
+          <div class="queue-row__body">
+            <div class="queue-row__line1">
+              <strong>{{ row.booking_number }}</strong>
+              @if (row.priority > 0) {
+                <app-badge variant="warning" size="sm">Prioridad</app-badge>
+              }
+            </div>
+            <div class="queue-row__line2">
+              Programada: {{ row.starts_at | date: 'shortTime' }} ·
+              Llegó: {{ row.arrival_at | date: 'shortTime' }}
+            </div>
+            <div class="queue-row__line3">
+              <span class="queue-row__score">{{ row.score_label }}</span>
+            </div>
+          </div>
+          <div class="queue-row__actions">
+            @if (idx === 0) {
+              <button class="btn btn--primary btn--sm" (click)="promote(row)">
+                <app-icon name="bell"></app-icon>
+                Llamar
+              </button>
+            }
+            <a
+              class="btn btn--ghost btn--sm"
+              [routerLink]="['/admin/reservations']"
+              [queryParams]="{ booking: row.booking_id }"
+            >
+              Ver detalle
+            </a>
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</div>
