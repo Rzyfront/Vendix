@@ -12,6 +12,7 @@ import { DomainProvisioningJob } from './domain-provisioning.job';
 import { InvoiceRetryJob } from './invoice-retry.job';
 import { BookingRemindersJob } from './booking-reminders.job';
 import { BookingConfirmationJob } from './booking-confirmation.job';
+import { BookingProximityJob } from './booking-proximity.job';
 import { EmbeddingSyncJob } from './embedding-sync.job';
 import { ArAgingUpdateJob } from './ar-aging-update.job';
 import { ApAgingUpdateJob } from './ap-aging-update.job';
@@ -93,6 +94,7 @@ import { ResponseModule } from '../common/responses/response.module';
     InvoiceRetryJob,
     BookingRemindersJob,
     BookingConfirmationJob,
+    BookingProximityJob,
     EmbeddingSyncJob,
     ArAgingUpdateJob,
     ApAgingUpdateJob,
