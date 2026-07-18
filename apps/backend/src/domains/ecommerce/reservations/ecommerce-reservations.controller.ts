@@ -20,6 +20,7 @@ import { ProvidersService } from '../../store/reservations/providers/providers.s
 import {
   AvailabilityQueryDto,
   RescheduleBookingDto,
+  CheckInDto,
 } from '../../store/reservations/dto';
 import { CreateEcommerceBookingDto } from './dto/create-ecommerce-booking.dto';
 import { HoldBookingDto } from './dto/hold-booking.dto';
@@ -185,5 +186,38 @@ export class EcommerceReservationsController {
 
     const result = await this.reservationsService.reschedule(id, dto);
     return { success: true, data: result };
+  }
+
+  /**
+   * Customer self check-in. Authenticates the customer via the ecommerce
+   * JWT, verifies booking ownership, then delegates to
+   * `ReservationsService.checkIn` with `source='customer'` so the event
+   * payload carries that provenance for queue recomputation and the
+   * notifications listener.
+   */
+  @Post(':id/check-in')
+  async clientCheckIn(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req: any,
+    @Body() dto: CheckInDto,
+  ) {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      throw new ForbiddenException(
+        'Debe iniciar sesion para registrar su llegada',
+      );
+    }
+
+    const booking = await this.reservationsService.findOne(id);
+    if (booking.customer_id !== customerId) {
+      throw new ForbiddenException('No tiene permiso sobre esta reserva');
+    }
+
+    const result = await this.reservationsService.checkIn(id, 'customer');
+    return {
+      success: true,
+      data: result,
+      arrival_notes: dto.arrival_notes ?? null,
+    };
   }
 }

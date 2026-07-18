@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { booking_status_enum, booking_mode_enum } from '@prisma/client';
+import { BusinessHoursService } from './business-hours/business-hours.service';
 
 export interface AvailableProvider {
   id: number;
@@ -18,7 +19,10 @@ export interface AvailabilitySlot {
 
 @Injectable()
 export class AvailabilityService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly businessHoursService: BusinessHoursService,
+  ) {}
 
   /**
    * Genera los slots disponibles para un producto/servicio en un rango de fechas.
@@ -36,6 +40,7 @@ export class AvailabilityService {
       where: { id: product_id },
       select: {
         id: true,
+        store_id: true,
         service_duration_minutes: true,
         buffer_minutes: true,
         booking_mode: true,
@@ -43,6 +48,12 @@ export class AvailabilityService {
     });
 
     if (!product) return [];
+
+    // Resolve the store's business-hours master calendar once per call.
+    // Empty Map = store never configured their hours (legacy fallback).
+    const storeHoursMap = await this.businessHoursService.loadStoreHours(
+      product.store_id,
+    );
 
     // Resolve variant-specific duration/buffer if applicable
     let variant: {
@@ -198,10 +209,22 @@ export class AvailabilityService {
           exception?.custom_start_time || schedule.start_time;
         const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
-        // Generar time slots
-        const timeSlots = this.generateTimeSlots(
+        // Intersectar con horario maestro de la tienda. Si la tienda está
+        // cerrada ese día (no hay fila en store_business_hours o está
+        // inactiva) o el horario del provider cae fuera de la ventana del
+        // store, ese provider no ofrece slots ese día.
+        const storeWindow = storeHoursMap.get(dayOfWeek);
+        const clamped = this.clampToStoreHours(
           effectiveStart,
           effectiveEnd,
+          storeWindow,
+        );
+        if (!clamped) continue;
+
+        // Generar time slots
+        const timeSlots = this.generateTimeSlots(
+          clamped.start,
+          clamped.end,
           duration,
           buffer,
         );
@@ -329,6 +352,21 @@ export class AvailabilityService {
     const dayOfWeek = targetDate.getUTCDay();
     const dateStr = this.formatDate(targetDate);
 
+    // Resolve the store_id from the product so we can consult the master
+    // business-hours calendar. The store-hours window is the upper bound:
+    // a provider can't be available if the venue is closed that day.
+    const product = await this.prisma.products.findFirst({
+      where: { id: product_id },
+      select: { store_id: true },
+    });
+    if (!product) return [];
+    const storeHoursMap = await this.businessHoursService.loadStoreHours(
+      product.store_id,
+    );
+    const storeWindow = storeHoursMap.get(dayOfWeek);
+    // No business-hours row for this day → store closed → no providers available.
+    if (!storeWindow) return [];
+
     // Obtener providers activos que ofrecen este servicio
     const providers = await this.prisma.service_providers.findMany({
       where: {
@@ -359,14 +397,23 @@ export class AvailabilityService {
 
       if (exception?.is_unavailable) continue;
 
-      // Verificar que el slot cae dentro del horario efectivo
-      const effectiveStart =
+      // Verificar que el slot cae dentro del horario efectivo del provider
+      // Y dentro de la ventana maestra de la tienda. La intersección se hace
+      // con el más restrictivo: provider.schedule ∩ store.business_hours.
+      const providerStart =
         exception?.custom_start_time || schedule.start_time;
-      const effectiveEnd = exception?.custom_end_time || schedule.end_time;
+      const providerEnd =
+        exception?.custom_end_time || schedule.end_time;
+      const effective = this.clampToStoreHours(
+        providerStart,
+        providerEnd,
+        storeWindow,
+      );
+      if (!effective) continue;
 
       if (
-        this.timeToMinutes(start_time) < this.timeToMinutes(effectiveStart) ||
-        this.timeToMinutes(end_time) > this.timeToMinutes(effectiveEnd)
+        this.timeToMinutes(start_time) < this.timeToMinutes(effective.start) ||
+        this.timeToMinutes(end_time) > this.timeToMinutes(effective.end)
       ) {
         continue;
       }
@@ -477,13 +524,31 @@ export class AvailabilityService {
 
     if (exception?.is_unavailable) return false;
 
-    // Verificar horario efectivo
+    // Verificar horario efectivo del provider
     const effectiveStart = exception?.custom_start_time || schedule.start_time;
     const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
+    // Intersectar con el horario maestro de la tienda. Si la tienda está
+    // cerrada ese día, este provider no está disponible.
+    const product = await this.prisma.products.findFirst({
+      where: { id: product_id },
+      select: { store_id: true },
+    });
+    if (!product) return false;
+    const storeHoursMap = await this.businessHoursService.loadStoreHours(
+      product.store_id,
+    );
+    const storeWindow = storeHoursMap.get(dayOfWeek);
+    const effective = this.clampToStoreHours(
+      effectiveStart,
+      effectiveEnd,
+      storeWindow,
+    );
+    if (!effective) return false;
+
     if (
-      this.timeToMinutes(start_time) < this.timeToMinutes(effectiveStart) ||
-      this.timeToMinutes(end_time) > this.timeToMinutes(effectiveEnd)
+      this.timeToMinutes(start_time) < this.timeToMinutes(effective.start) ||
+      this.timeToMinutes(end_time) > this.timeToMinutes(effective.end)
     ) {
       return false;
     }
@@ -620,18 +685,39 @@ export class AvailabilityService {
     // `store_settings.settings.availability.working_days`.
     const workingDays = await this.getStoreWorkingDays(product_id);
 
+    // Resolve the store's business-hours master calendar. When the store
+    // has configured `store_business_hours`, we use those HH:mm windows
+    // instead of the legacy hardcoded 08:00–18:00 default. If the store
+    // has no rows at all, fall back to 08:00–18:00 so old stores without
+    // a configured calendar keep working unchanged.
+    const product = await this.prisma.products.findFirst({
+      where: { id: product_id },
+      select: { store_id: true },
+    });
+    const storeHoursMap = product
+      ? await this.businessHoursService.loadStoreHours(product.store_id)
+      : new Map<number, { start_time: string; end_time: string }>();
+
     for (const currentDate of dates) {
       const dateStr = this.formatDate(currentDate);
       const dayOfWeek = currentDate.getUTCDay();
 
       if (!workingDays.includes(dayOfWeek)) continue;
 
-      const timeSlots = this.generateTimeSlots(
-        '08:00',
-        '18:00',
-        duration,
-        buffer,
-      );
+      // Use the store's business-hours window when configured; legacy
+      // 08:00–18:00 fallback otherwise.
+      const storeWindow = storeHoursMap.get(dayOfWeek);
+      const dayStart = storeWindow?.start_time ?? '08:00';
+      const dayEnd = storeWindow?.end_time ?? '18:00';
+      // If the store explicitly closed this day (no row), skip entirely.
+      if (!storeWindow) {
+        // No business-hours row + day is in workingDays → use fallback.
+        // If workingDays includes this DOW but the store didn't configure
+        // business hours, we still emit slots in 08:00–18:00 to preserve
+        // legacy behavior.
+      }
+
+      const timeSlots = this.generateTimeSlots(dayStart, dayEnd, duration, buffer);
 
       for (const slot of timeSlots) {
         const bookedCount = existingBookings.filter(
@@ -652,5 +738,29 @@ export class AvailabilityService {
     }
 
     return slots;
+  }
+
+  /**
+   * Intersects an effective provider window with the store's master
+   * business-hours window. Returns null when the intersection is empty
+   * (provider schedule outside store hours, or store closed that day).
+   *
+   * Used by getAvailableSlots, getAvailableProvidersForSlot and
+   * isProviderAvailableForSlot to enforce the upper bound.
+   */
+  private clampToStoreHours(
+    providerStart: string,
+    providerEnd: string,
+    storeWindow: { start_time: string; end_time: string } | undefined,
+  ): { start: string; end: string } | null {
+    if (!storeWindow) return null;
+    const ps = this.timeToMinutes(providerStart);
+    const pe = this.timeToMinutes(providerEnd);
+    const ss = this.timeToMinutes(storeWindow.start_time);
+    const se = this.timeToMinutes(storeWindow.end_time);
+    const start = Math.max(ps, ss);
+    const end = Math.min(pe, se);
+    if (end <= start) return null;
+    return { start: this.minutesToTime(start), end: this.minutesToTime(end) };
   }
 }

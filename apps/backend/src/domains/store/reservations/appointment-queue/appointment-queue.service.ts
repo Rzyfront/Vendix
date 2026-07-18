@@ -12,16 +12,20 @@ import { NotificationsService } from '../notifications/notifications.service';
  * stable ordering that the POS list, the today-reservations panel and
  * the queue-management view consume to show "who is up next".
  *
- * The actual queue position is persisted on `bookings.queue_position`
- * via `BookingsService.update` (TODO: integration with that service in a
- * follow-up step — the spec is in place but the persistence wiring is
- * not part of this commit). The query here returns the live ordering
- * regardless, so consumers can render the queue even if the
- * `queue_position` column is stale.
+ * Two methods:
  *
- * The NotificationService call wires the `appointment_queued`
- * notification type so the next-in-queue customer gets a push
- * (their booking went from `arriving` to `queued`).
+ * - `computeQueueForStore` is a READ-ONLY ranking. Returns the live
+ *   ordering without touching the `bookings.queue_position` column.
+ *   Cheap; safe to call on every render.
+ *
+ * - `refreshAndBroadcastQueue` is a WRITE: persists `queue_position`
+ *   on each booking (in a transaction, idempotent) and broadcasts an
+ *   `appointment_queued` notification to the customer promoted to
+ *   rank 0. More expensive — call only when something changed
+ *   (e.g. on `booking.arrival_recorded` from ReservationsService.checkIn).
+ *
+ * Wired into the NotificationsEventsListener via `booking.arrival_recorded`,
+ * so manual invocations are rarely needed.
  */
 @Injectable()
 export class AppointmentQueueService {

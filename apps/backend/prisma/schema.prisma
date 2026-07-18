@@ -735,8 +735,9 @@ model stores {
   invoice_retry_queue invoice_retry_queue[]
 
   // Bookings
-  bookings          bookings[]
-  service_providers service_providers[]
+  bookings              bookings[]
+  service_providers     service_providers[]
+  store_business_hours  store_business_hours[]
 
   // Dispatch Notes
   dispatch_notes dispatch_notes[]
@@ -6933,6 +6934,7 @@ model bookings {
   consultation_notes          customer_consultation_notes[]
   confirmation_tokens         booking_confirmation_tokens[]
   reminder_logs               booking_reminder_logs[]
+  proximity_notifications     proximity_notification_log[]
 
   @@unique([store_id, booking_number])
   @@index([store_id, date])

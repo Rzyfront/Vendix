@@ -38,9 +38,19 @@ export class ReservationsService {
   ) {}
 
   // Estado maquina de transiciones validas
+  // Includes the appointment redesign states (arriving, attending) that the
+  // smart queue and proximity notifications consume. Transitions added in
+  // phase 1 of the redesign:
+  //   confirmed → arriving   (client or staff check-in)
+  //   arriving  → attending  (staff calls the customer)
+  //   attending → in_progress (staff starts the service)
+  // arriving/attending/in_progress all share the same exit paths as the
+  // previous confirmed → {completed, cancelled, no_show}.
   private readonly VALID_TRANSITIONS: Record<string, string[]> = {
     pending: ['confirmed', 'cancelled'],
-    confirmed: ['in_progress', 'completed', 'cancelled', 'no_show'],
+    confirmed: ['arriving', 'in_progress', 'completed', 'cancelled', 'no_show'],
+    arriving: ['attending', 'in_progress', 'cancelled', 'no_show'],
+    attending: ['in_progress', 'cancelled', 'no_show'],
     in_progress: ['completed'],
     completed: [],
     cancelled: [],
@@ -997,16 +1007,39 @@ export class ReservationsService {
     });
 
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.status !== 'confirmed')
+
+    // The appointment redesign accepts check-in from either 'confirmed' or
+    // 'arriving' so staff can correct/refresh the timestamp without having to
+    // walk the booking back to 'confirmed' first. Anything else (pending,
+    // in_progress, completed, cancelled, no_show) is rejected.
+    if (!['confirmed', 'arriving'].includes(booking.status as string)) {
       throw new BadRequestException(
-        'Solo bookings confirmados pueden hacer check-in',
+        'Solo bookings confirmados o en arriving pueden hacer check-in',
       );
-    if (booking.checked_in_at)
-      throw new BadRequestException('Check-in ya registrado');
+    }
+
+    // Idempotency: if the customer already checked in, return the booking
+    // untouched instead of throwing. Staff-driven check-ins (POS button) can
+    // re-write the timestamp if they had to reset the queue position.
+    if (booking.checked_in_at && source === 'customer') {
+      this.logger.log(
+        `checkIn idempotente (cliente duplicó): booking ${id} ya marcado a las ${booking.checked_in_at.toISOString()}`,
+      );
+      return booking;
+    }
+
+    const now = new Date();
+    const targetStatus: booking_status_enum =
+      booking.status === 'confirmed' ? 'arriving' : (booking.status as booking_status_enum);
 
     const updated = await this.prisma.bookings.update({
       where: { id },
-      data: { checked_in_at: new Date(), updated_at: new Date() },
+      data: {
+        checked_in_at: booking.checked_in_at ?? now,
+        arrival_at: booking.arrival_at ?? now,
+        status: targetStatus,
+        updated_at: now,
+      },
     });
 
     this.eventEmitter.emit('booking.checked_in', {
@@ -1019,8 +1052,41 @@ export class ReservationsService {
       source,
     });
 
-    this.logger.log(`Check-in registered for booking ${id} by ${source}`);
+    // Only emit 'booking.arrival_recorded' when this call actually set a new
+    // arrival_at (i.e. the booking wasn't already in the queue). Idempotent
+    // re-marks from staff or duplicate customer check-ins would otherwise
+    // churn the queue recalculation for no benefit.
+    if (!booking.arrival_at) {
+      const isoDay = booking.date instanceof Date
+        ? booking.date.toISOString().split('T')[0]
+        : String(booking.date).split('T')[0];
+      this.eventEmitter.emit('booking.arrival_recorded', {
+        store_id: updated.store_id,
+        booking_id: updated.id,
+        date: isoDay,
+      });
+    }
+
+    this.logger.log(`Check-in registrado para booking ${id} por ${source}`);
     return updated;
+  }
+
+  /**
+   * Explicit transition `confirmed → arriving`. Used by staff from the queue
+   * panel when they want to flag a customer as "on site" without going through
+   * the customer-facing checkIn flow (e.g. the customer checked in at the
+   * front desk instead of via the ecommerce link).
+   */
+  async markArriving(id: number) {
+    return this.transition(id, 'arriving');
+  }
+
+  /**
+   * Explicit transition `arriving → attending`. Used by staff from the queue
+   * panel to flag "this customer is next, call them up to the chair".
+   */
+  async markAttending(id: number) {
+    return this.transition(id, 'attending');
   }
 
   // --- Helpers privados ---

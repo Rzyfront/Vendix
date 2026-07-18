@@ -808,6 +808,20 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // ===== Business hours (appointment redesign phase 1) =====
+    {
+      name: 'store:business_hours:read',
+      description: 'Leer horario maestro de la tienda',
+      path: '/api/store/business-hours',
+      method: 'GET',
+    },
+    {
+      name: 'store:business_hours:write',
+      description: 'Editar horario maestro de la tienda (PUT batch)',
+      path: '/api/store/business-hours',
+      method: 'PUT',
+    },
+
     // Remisiones
     {
       name: 'store:dispatch_notes:create',

@@ -18,6 +18,7 @@ import {
 } from './interfaces/notification-events.interface';
 import { QueueEntryEvent } from '../customer-queue/interfaces/queue-events.interface';
 import { InvoiceDataRequestEvent } from '../invoicing/invoice-data-requests/interfaces/invoice-data-request-events.interface';
+import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -28,6 +29,7 @@ export class NotificationsEventsListener {
     private readonly global_prisma: GlobalPrismaService,
     private readonly email_service: EmailService,
     private readonly s3_service: S3Service,
+    private readonly appointment_queue_service: AppointmentQueueService,
   ) {}
 
   @OnEvent('order.created')
@@ -1102,6 +1104,137 @@ export class NotificationsEventsListener {
       'Reserva Cancelada Automáticamente',
       `La reserva ${event.booking_number} de ${event.customer_name} fue cancelada por no confirmación`,
       { booking_id: event.booking_id, reason: event.reason },
+    );
+  }
+
+  // ===== APPOINTMENT REDESIGN EVENTS (phase 1) =====
+
+  /**
+   * "Tu cita está por comenzar" — emitted by BookingProximityJob at T-30/T-15/T-5.
+   * Reaches both staff (POS panel) and the customer (push/SSE).
+   */
+  @OnEvent('appointment.upcoming')
+  async handleAppointmentUpcoming(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    proximity_minutes: number;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'appointment_upcoming',
+      'Tu cita está por comenzar',
+      `${event.customer_name}, tu reserva ${event.booking_number} de ${event.service_name} comienza en ${event.proximity_minutes} minutos (${event.start_time})`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        proximity_minutes: event.proximity_minutes,
+        kind: 'proximity',
+      },
+    );
+  }
+
+  /**
+   * Customer arrived at the venue (status arriving). Emitted by ReservationsService.checkIn.
+   */
+  @OnEvent('appointment.checked_in')
+  async handleAppointmentCheckedIn(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    provider_id?: number;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'appointment_checked_in',
+      'Cliente en sala',
+      `${event.customer_name} llegó para ${event.service_name}`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        provider_id: event.provider_id,
+        kind: 'arrival',
+      },
+    );
+  }
+
+  /**
+   * Mirrors the queue promotion notification that
+   * AppointmentQueueService.refreshAndBroadcastQueue emits directly via
+   * notifications.createAndBroadcast. Other services emitting
+   * 'appointment.queued' will also route here.
+   */
+  @OnEvent('appointment.queued')
+  async handleAppointmentQueued(event: {
+    store_id: number;
+    booking_id: number;
+    queue_position: number;
+    customer_name: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'appointment_queued',
+      'Tu turno se acerca',
+      `${event.customer_name}, estás en la posición ${event.queue_position + 1} de la cola. Prepárate para tu cita.`,
+      {
+        booking_id: event.booking_id,
+        queue_position: event.queue_position,
+        kind: 'queue_promotion',
+      },
+    );
+  }
+
+  /**
+   * Fired by ReservationsService.checkIn() whenever a booking gets a new
+   * arrival_at. Triggers the smart queue recalculation + broadcast so the
+   * customer promoted to rank 0 gets notified. Errors here must never crash
+   * the listener chain — they're swallowed + logged.
+   */
+  @OnEvent('booking.arrival_recorded')
+  async handleBookingArrivalRecorded(event: {
+    store_id: number;
+    booking_id: number;
+    date: string;
+  }) {
+    try {
+      await this.appointment_queue_service.refreshAndBroadcastQueue(
+        event.store_id,
+        event.date,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[handleBookingArrivalRecorded] queue refresh failed for booking ${event.booking_id}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
+   * Fired by BookingConfirmationService.processToken when the double-validation
+   * detects a slot conflict. The booking was confirmed anyway (decision: alert
+   * staff to resolve manually) but they need a heads-up.
+   */
+  @OnEvent('booking.double_booking')
+  async handleBookingDoubleBooking(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_attending',
+      'Doble booking detectado',
+      `Revisar reserva ${event.booking_number}: se confirmó pero el slot ya estaba ocupado. Resolver manualmente.`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        kind: 'double_booking',
+      },
     );
   }
 

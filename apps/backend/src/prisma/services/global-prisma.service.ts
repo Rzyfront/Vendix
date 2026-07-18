@@ -598,6 +598,16 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.booking_reminder_logs;
   }
 
+  // Booking proximity notifications (dedup log for AppointmentProximityJob)
+  get proximity_notification_log() {
+    return this.baseClient.proximity_notification_log;
+  }
+
+  // Per-store business hours (used by availability.service.ts)
+  get store_business_hours() {
+    return this.baseClient.store_business_hours;
+  }
+
   // Messaging channels
   get messaging_channels() {
     return this.baseClient.messaging_channels;
