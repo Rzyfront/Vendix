@@ -563,12 +563,13 @@ export class DispatchNotesService {
       | null
       | undefined,
   ): Prisma.InputJsonValue | null {
-    // (1) Prefer the order's own snapshot when it actually carries a line.
+    // (1) Prefer the order's own snapshot when it actually carries a line,
+    // pero inyecta lat/lng si faltan (fallback a relation).
     if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
       const s = snapshot as Record<string, unknown>;
       const line1 = s.address_line1 ?? s.line1 ?? s.address;
       if (typeof line1 === 'string' && line1.trim().length > 0) {
-        return snapshot as Prisma.InputJsonValue;
+        return this.withCoordsFallback(s, relation);
       }
     }
 
@@ -592,6 +593,37 @@ export class DispatchNotesService {
     }
 
     return null;
+  }
+
+  /**
+   * Shallow-mergea lat/lng de `relation` en el snapshot dict `s` si el snapshot
+   * no los trae pero relation sí. Preserva todas las claves originales del snapshot.
+   */
+  private withCoordsFallback(
+    s: Record<string, unknown>,
+    relation:
+      | {
+          latitude?: number | string | null;
+          longitude?: number | string | null;
+        }
+      | null
+      | undefined,
+  ): Prisma.InputJsonValue {
+    // Si el snapshot ya tiene coords finitas, devolver intacto.
+    const hasLat = this.toFiniteNumber(s.latitude as any) !== null;
+    const hasLng = this.toFiniteNumber(s.longitude as any) !== null;
+    if (hasLat && hasLng) {
+      return s as Prisma.InputJsonValue;
+    }
+
+    // Intentar inyectar coords de relation.
+    const lat = this.toFiniteNumber(relation?.latitude);
+    const lng = this.toFiniteNumber(relation?.longitude);
+    return {
+      ...s,
+      ...(lat !== null ? { latitude: lat } : {}),
+      ...(lng !== null ? { longitude: lng } : {}),
+    } as Prisma.InputJsonValue;
   }
 
   /**
