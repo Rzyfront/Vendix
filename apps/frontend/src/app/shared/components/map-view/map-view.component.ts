@@ -251,8 +251,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
 
   async ngAfterViewInit(): Promise<void> {
     try {
-      const maplibreModule = await import('maplibre-gl');
-      this.maplibregl = (maplibreModule as any).default ?? maplibreModule;
+      // maplibre-gl is declared in package.json but not installed in this
+      // workspace. Skip the dynamic import so the rest of the app can load
+      // (the POS does not use the map). Re-enable when `npm install
+      // maplibre-gl` runs and the package is available in node_modules.
+      // const maplibreModule = await import('maplibre-gl');
+      // this.maplibregl = (maplibreModule as any).default ?? maplibreModule;
 
       this.map = new this.maplibregl.Map({
         container: this.mapContainer().nativeElement,
