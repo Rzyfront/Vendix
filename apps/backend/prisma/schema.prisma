@@ -2914,6 +2914,10 @@ enum notification_type_enum {
   table_payment_confirmed
   qr_table_scan
   order_awaiting_carrier
+  appointment_upcoming
+  appointment_checked_in
+  appointment_queued
+  appointment_no_show
 }
 
 model notifications {
@@ -6224,6 +6228,8 @@ enum booking_status_enum {
   pending
   confirmed
   in_progress
+  arriving
+  attending
   completed
   cancelled
   no_show
@@ -6904,6 +6910,12 @@ model bookings {
   checked_in_at             DateTime?           @db.Timestamp(6)
   confirmation_requested_at DateTime?           @db.Timestamp(6)
   confirmation_deadline     DateTime?           @db.Timestamp(6)
+  arrival_at                DateTime?           @db.Timestamp(6)
+  /// Resolved queue position computed by AppointmentQueueService.
+  /// 0 means not in queue (most common case). Lower = sooner.
+  queue_position            Int                 @default(0)
+  /// Manual priority override for queue ordering. Lower = sooner. 0 = default.
+  priority                  Int                 @default(0)
   created_at                DateTime?           @default(now()) @db.Timestamp(6)
   updated_at                DateTime?           @default(now()) @db.Timestamp(6)
 
@@ -6930,6 +6942,45 @@ model bookings {
   @@index([provider_id])
   @@index([order_id])
   @@index([store_id, table_id])
+}
+
+/// Per-store business hours: the master calendar the booking flow consults
+/// when computing slot availability. Overrides / supplements per-provider
+/// `provider_schedules` (provider availability still wins when stricter).
+model store_business_hours {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  /// 0 = Sunday, 6 = Saturday (matches `provider_schedules.day_of_week`).
+  day_of_week Int
+  start_time  String    @db.VarChar(5)
+  end_time    String    @db.VarChar(5)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id])
+
+  @@unique([store_id, day_of_week])
+  @@index([store_id])
+}
+
+/// Dedup log for `appointment_upcoming` notifications. BookingProximityJob
+/// writes one row per (booking_id, proximity_minutes, channel) so the same
+/// notification is never sent twice. The job checks this table before
+/// emitting via `NotificationsService.createAndBroadcast`.
+model proximity_notification_log {
+  id                Int      @id @default(autoincrement())
+  booking_id        Int
+  /// One of the values in `booking_proximity_minutes` (e.g. 30, 15, 5).
+  proximity_minutes Int
+  /// "email" | "web_push" | "in_app" — free-form to match `NotificationsService`.
+  channel           String   @db.VarChar(32)
+  sent_at           DateTime @default(now()) @db.Timestamp(6)
+
+  booking bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([booking_id, proximity_minutes, channel])
+  @@index([booking_id])
 }
 
 model service_providers {

@@ -62,6 +62,8 @@ export class StorePrismaService extends BasePrismaService {
     'booking_metadata_snapshots',
     'customer_consultation_notes',
     'booking_confirmation_tokens',
+    'store_business_hours',
+    'proximity_notification_log',
     'email_templates',
     'messaging_channels',
     'social_channels',
