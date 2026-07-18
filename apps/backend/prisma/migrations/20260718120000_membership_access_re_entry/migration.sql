@@ -1,0 +1,16 @@
+-- DATA IMPACT:
+-- Tables affected: none (enum type extension only)
+-- Expected row changes: 0 (no rows mutated)
+-- Destructive operations: none
+-- FK/cascade risk: none
+-- Idempotency: ADD VALUE IF NOT EXISTS
+-- Approval: schema-only change (adds one enum value)
+--
+-- Adds the `denied_re_entry` result used by the configurable re-entry detection
+-- (store_settings.membership.re_entry_mode = 'block'). In 'warn' mode access is
+-- still `granted` (with a warning flag), so no new value is required for warn.
+--
+-- NOTE: ALTER TYPE ... ADD VALUE cannot run inside a transaction block, so this
+-- migration contains ONLY the enum addition (no data/schema statements that
+-- would consume the new value in the same migration).
+ALTER TYPE "membership_access_result_enum" ADD VALUE IF NOT EXISTS 'denied_re_entry';

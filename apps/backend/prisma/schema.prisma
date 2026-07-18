@@ -3404,6 +3404,9 @@ enum membership_access_result_enum {
   denied_quota_exceeded
   denied_outside_schedule
   denied_capacity_full
+  // Reingreso dentro de la ventana configurada (re_entry_window_hours) cuando
+  // re_entry_mode = 'block'. En modo 'warn' se CONCEDE (granted) con warning.
+  denied_re_entry
 }
 
 // Discriminador de industria/uso de la membresía. `generic` es el default reutilizable;

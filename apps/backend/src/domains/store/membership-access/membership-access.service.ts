@@ -52,6 +52,12 @@ export type MembershipAccessSseEvent =
       period_end: string | null;
       membership_id: number | null;
       at: string;
+      // Re-entry detection (optional): `warning` is true when access is GRANTED
+      // but a re-entry was detected (`re_entry_mode = 'warn'`). `re_entry_minutes`
+      // is the minutes since the last `granted` access — present on a warn-grant
+      // AND on a `denied_re_entry`.
+      warning?: boolean;
+      re_entry_minutes?: number;
     }
   | {
       type: 'enrollment';
@@ -66,6 +72,17 @@ export interface AccessValidationResult {
   reason: string | null;
   customer_id: number | null;
   membership_id: number | null;
+  // Re-entry detection (optional). `warning` = granted despite a re-entry within
+  // the window (`re_entry_mode = 'warn'`). `re_entry_minutes` = minutes since the
+  // last `granted` access; present on a warn-grant AND on a `denied_re_entry`.
+  warning?: boolean;
+  re_entry_minutes?: number;
+}
+
+/** Re-entry policy resolved from `store_settings.membership`. */
+export interface ReEntryConfig {
+  mode: 'off' | 'warn' | 'block';
+  windowHours: number;
 }
 
 /**
@@ -354,6 +371,81 @@ export class MembershipAccessService {
       }
     }
 
+    // 4.6 Re-entry detection — configurable per gym. Runs AFTER the membership
+    //     is confirmed active and BEFORE the grant side-effects (quota consume +
+    //     aforo increment). Looks for the member's most recent `granted` access
+    //     within the configured window:
+    //       - `block` → deny (`denied_re_entry`), no aforo/quota mutation.
+    //       - `warn`  → still grant, flagged (`warning: true` + `re_entry_minutes`),
+    //                   and SKIP the aforo/quota side-effects (same session — the
+    //                   member is presumed already counted, so re-entry must not
+    //                   double count nor re-consume the period quota). It also
+    //                   bypasses the capacity gate for the same reason.
+    //       - `off` / no prior access → normal flow continues untouched.
+    const reEntry = await this.getReEntryConfig(storeId);
+    if (reEntry.mode !== 'off' && customerId != null) {
+      const windowStart = new Date(
+        now.getTime() - reEntry.windowHours * 60 * 60 * 1000,
+      );
+      let lastGranted: { access_at: Date } | null = null;
+      try {
+        lastGranted = await this.accessLogs.findFirst({
+          where: {
+            store_id: storeId,
+            customer_id: customerId,
+            result: membership_access_result_enum.granted,
+            access_at: { gte: windowStart },
+          },
+          orderBy: { access_at: 'desc' },
+          select: { access_at: true },
+        });
+      } catch (err) {
+        // Fail-open: a log-read failure must never break the access decision.
+        this.logger.warn(
+          `membership access re-entry lookup failed store=${storeId} customer=${customerId}: ${(err as Error).message}`,
+        );
+        lastGranted = null;
+      }
+
+      if (lastGranted) {
+        const reEntryMinutes = Math.floor(
+          (now.getTime() - lastGranted.access_at.getTime()) / 60000,
+        );
+
+        if (reEntry.mode === 'block') {
+          return this.logAndReturn(storeId, {
+            result: membership_access_result_enum.denied_re_entry,
+            reason: `Reingreso hace ${reEntryMinutes} min`,
+            customer_id: customerId,
+            membership_id: active.id,
+            credential_id: credential.id,
+            device_id: dto.device_id,
+            customer_name: customerName,
+            status: active.status,
+            period_end: active.period_end,
+            days_remaining: this.daysRemaining(active.period_end, timezone),
+            re_entry_minutes: reEntryMinutes,
+          });
+        }
+
+        // warn → grant but flag it and skip the grant side-effects.
+        return this.logAndReturn(storeId, {
+          result: membership_access_result_enum.granted,
+          reason: 're_entry',
+          customer_id: customerId,
+          membership_id: active.id,
+          credential_id: credential.id,
+          device_id: dto.device_id,
+          customer_name: customerName,
+          status: active.status,
+          period_end: active.period_end,
+          days_remaining: this.daysRemaining(active.period_end, timezone),
+          warning: true,
+          re_entry_minutes: reEntryMinutes,
+        });
+      }
+    }
+
     // 4.5 Capacity (aforo) gate — read the store capacity config ONCE and, when
     //     control is enabled with a positive cap, DENY before granting if the
     //     area is already full (no quota consume, no increment). A stale
@@ -510,6 +602,9 @@ export class MembershipAccessService {
       status?: membership_status_enum | null;
       period_end?: Date | null;
       days_remaining?: number | null;
+      // Re-entry detection (optional).
+      warning?: boolean;
+      re_entry_minutes?: number;
     },
   ): Promise<AccessValidationResult> {
     try {
@@ -547,6 +642,10 @@ export class MembershipAccessService {
         period_end: entry.period_end ? entry.period_end.toISOString() : null,
         membership_id: entry.membership_id,
         at: new Date().toISOString(),
+        ...(entry.warning !== undefined && { warning: entry.warning }),
+        ...(entry.re_entry_minutes !== undefined && {
+          re_entry_minutes: entry.re_entry_minutes,
+        }),
       };
       this.sseService.push(storeId, event as unknown as SseNotificationPayload);
     } catch (err) {
@@ -561,6 +660,10 @@ export class MembershipAccessService {
       reason: entry.reason,
       customer_id: entry.customer_id,
       membership_id: entry.membership_id,
+      ...(entry.warning !== undefined && { warning: entry.warning }),
+      ...(entry.re_entry_minutes !== undefined && {
+        re_entry_minutes: entry.re_entry_minutes,
+      }),
     };
   }
 
@@ -588,12 +691,17 @@ export class MembershipAccessService {
           ? randomBytes(16).toString('hex') // 32 chars
           : randomInt(0, 1_000_000).toString().padStart(6, '0'); // 6 digits
 
+      // Check against ALL rows (not just active): the DB constraint
+      // `membership_access_cred_uq` is on (store_id, credential_type,
+      // credential_value) regardless of `is_active`/`deleted_at`, so an
+      // inactive/archived credential still occupies the value. Filtering by
+      // `is_active` here would let the loop return a value that then collides
+      // with an archived row on insert (P2002).
       const existing = await this.credentials.findFirst({
         where: {
           store_id: storeId,
           credential_type: type,
           credential_value: value,
-          is_active: true,
         },
         select: { id: true },
       });
@@ -816,6 +924,38 @@ export class MembershipAccessService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
+        // Disambiguate WHICH unique constraint was violated so the operator
+        // gets a precise message. Prisma's `meta.target` is the constraint/
+        // index name (string) or the column list (array) depending on driver.
+        const target = (error.meta as { target?: unknown } | undefined)?.target;
+        const targetStr = Array.isArray(target)
+          ? target.join(',')
+          : String(target ?? '');
+
+        // Partial active-uniqueness index (store_id, customer_id, type) WHERE
+        // is_active = true → same member already has an active credential of
+        // this type.
+        if (targetStr.includes('membership_access_cred_active_uq')) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Ya existe una credencial activa de este tipo para este socio',
+          );
+        }
+
+        // Global value-uniqueness index (store_id, credential_type,
+        // credential_value) → the generated/supplied value already exists in
+        // this store (active OR archived).
+        if (
+          targetStr.includes('membership_access_cred_uq') ||
+          targetStr.includes('credential_value')
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Ya existe una credencial con ese valor en esta tienda',
+          );
+        }
+
+        // Unknown target → keep the previous (safe) message.
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
           'Ya existe una credencial activa de este tipo para este socio',
@@ -1297,6 +1437,34 @@ export class MembershipAccessService {
         autoLeveling: false,
         intervalHours: 2,
       };
+    }
+  }
+
+  /**
+   * Read the store's re-entry policy from `store_settings.membership`. Mirrors
+   * `getCapacityConfig`: `withoutScope()` + explicit `store_id`, never throws.
+   * Defaults are `mode = 'warn'` and `windowHours = 2` (per the contract), also
+   * applied when the settings read fails or the stored values are invalid.
+   */
+  private async getReEntryConfig(storeId: number): Promise<ReEntryConfig> {
+    try {
+      const row = await this.prisma
+        .withoutScope()
+        .store_settings.findFirst({
+          where: { store_id: storeId },
+          select: { settings: true },
+        });
+      const settings = mergeStoreSettingsWithDefaults(row?.settings);
+      const m = settings.membership;
+      const rawMode = m?.re_entry_mode;
+      const mode: 'off' | 'warn' | 'block' =
+        rawMode === 'off' || rawMode === 'block' ? rawMode : 'warn';
+      const rawWindow = Number(m?.re_entry_window_hours);
+      const windowHours =
+        Number.isFinite(rawWindow) && rawWindow > 0 ? rawWindow : 2;
+      return { mode, windowHours };
+    } catch {
+      return { mode: 'warn', windowHours: 2 };
     }
   }
 
