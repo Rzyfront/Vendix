@@ -119,15 +119,16 @@ export class PromotionEngineService {
       });
     }
 
-    // WINNER-TAKES-ALL: return only the single highest-priority eligible
-    // promotion (ties broken by lowest id). Mirrors the rule used in
-    // quoteDiscounts so /check-eligibility and the POS payments snapshot
-    // stay consistent.
+    // WINNER-TAKES-ALL: return only the single lowest-priority-number
+    // eligible promotion (1 = highest, per the "1=highest" convention).
+    // Ties broken by highest id (newest promo wins). Mirrors the rule
+    // used in quoteDiscounts so /check-eligibility and the POS payments
+    // snapshot stay consistent.
     if (eligible.length === 0) return eligible;
     const winner = eligible.reduce((best, current) => {
       if (
-        current.priority > best.priority ||
-        (current.priority === best.priority && current.id < best.id)
+        current.priority < best.priority ||
+        (current.priority === best.priority && current.id > best.id)
       ) {
         return current;
       }
