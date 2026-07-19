@@ -4,7 +4,7 @@
 .checkout-shell {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
 }
 
@@ -18,7 +18,7 @@
 .checkout-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 14px;
   min-height: 0;
 }
 
@@ -41,11 +41,12 @@
 
 @media (min-width: 1024px) {
   .checkout-grid {
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: 360px minmax(0, 1fr);
     align-items: start;
   }
 
   .summary-rail {
+    order: -1;
     position: sticky;
     top: 0;
   }
@@ -56,21 +57,27 @@
   background: var(--color-surface);
   border-radius: 16px;
   border: 1px solid var(--color-border);
-  padding: 16px;
+  padding: 14px;
 }
 
 .cliente-section {
   background: var(--color-surface);
   border-radius: 16px;
   border: 1px solid var(--color-border);
-  padding: 16px;
+  padding: 14px;
+}
+
+/* Rail de resumen: fondo sutil (muted) para jerarquía. Fallback a surface
+   mantiene el look actual si el tema no define --color-muted. */
+.summary-rail .payment-section {
+  background: var(--color-muted, var(--color-surface));
 }
 
 .section-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .section-indicator {
@@ -95,7 +102,7 @@
 .product-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 12px;
 }
 
@@ -213,14 +220,14 @@
 .sale-type-options {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .sale-type-btn {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px;
+  padding: 12px;
   border: 2px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-surface);
@@ -327,6 +334,30 @@
   flex: 1;
   justify-content: flex-end;
   min-width: 0;
+}
+
+.btn-prev {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-prev:hover:not(:disabled) {
+  background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.btn-prev:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btn-cancel {

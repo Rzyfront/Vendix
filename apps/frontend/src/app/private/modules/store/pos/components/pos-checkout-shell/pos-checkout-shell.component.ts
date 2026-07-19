@@ -198,6 +198,11 @@ export class PosCheckoutShellComponent {
     () => this.stepKeys()[this.currentStep()] ?? '',
   );
 
+  readonly isFirstStep = computed<boolean>(() => this.currentStep() === 0);
+  readonly isLastStep = computed<boolean>(
+    () => this.currentStep() === this.stepKeys().length - 1,
+  );
+
   /** Live shipping cost projected from the Envío step (0 when not mounted). */
   readonly shippingCost = computed<number>(
     () => this.shippingStep()?.shippingCost() ?? 0,
@@ -349,6 +354,16 @@ export class PosCheckoutShellComponent {
   goToStep(index: number): void {
     if (index < 0 || index >= this.stepKeys().length) return;
     this.currentStep.set(index);
+  }
+
+  /** Wizard: advance one top-level step (no-op past the last; state is preserved). */
+  nextStep(): void {
+    this.goToStep(this.currentStep() + 1);
+  }
+
+  /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
+  prevStep(): void {
+    this.goToStep(this.currentStep() - 1);
   }
 
   /** Navigate by step key; no-op when the key is not part of the current flow. */

@@ -1,6 +1,6 @@
 <app-modal
   [isOpen]="isOpen()"
-  [size]="'full'"
+  [size]="'xl'"
   [title]="'Finalizar venta'"
   [subtitle]="'Cobro y cliente'"
   (closed)="onModalClosed()"
@@ -11,8 +11,7 @@
       <app-steps-line
         [steps]="steps()"
         [currentStep]="currentStep()"
-        [clickable]="true"
-        (stepClicked)="goToStep($event)"
+        [clickable]="false"
       ></app-steps-line>
     </div>
 
@@ -260,6 +259,17 @@
       <span class="footer-total-amount">{{ totalToPay() | currency }}</span>
     </div>
     <div class="footer-actions">
+      @if (!isFirstStep()) {
+        <button
+          type="button"
+          class="btn-prev"
+          (click)="prevStep()"
+          [disabled]="footerProcessing()"
+        >
+          <app-icon name="arrow-left" [size]="16"></app-icon>
+          Anterior
+        </button>
+      }
       <button
         type="button"
         class="btn-cancel"
@@ -277,21 +287,33 @@
         <app-icon name="save" [size]="16"></app-icon>
         Guardar borrador
       </button>
-      <button
-        type="button"
-        class="btn-confirm"
-        (click)="onConfirm()"
-        [disabled]="confirmDisabled()"
-        [class.loading]="footerProcessing()"
-      >
-        @if (!footerProcessing()) {
-          <app-icon name="check-circle" [size]="20"></app-icon>
-        }
-        @if (footerProcessing()) {
-          <span class="spinner"></span>
-        }
-        {{ confirmLabel() }}
-      </button>
+      @if (!isLastStep()) {
+        <button
+          type="button"
+          class="btn-confirm"
+          (click)="nextStep()"
+          [disabled]="footerProcessing()"
+        >
+          Siguiente
+          <app-icon name="arrow-right" [size]="18"></app-icon>
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="btn-confirm"
+          (click)="onConfirm()"
+          [disabled]="confirmDisabled()"
+          [class.loading]="footerProcessing()"
+        >
+          @if (!footerProcessing()) {
+            <app-icon name="check-circle" [size]="20"></app-icon>
+          }
+          @if (footerProcessing()) {
+            <span class="spinner"></span>
+          }
+          {{ confirmLabel() }}
+        </button>
+      }
     </div>
   </div>
 </app-modal>
