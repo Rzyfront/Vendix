@@ -42,7 +42,7 @@
                 "output": "assets"
               }
             ],
-            "styles": ["src/styles.scss"],
+            "styles": ["src/styles.scss", "maplibre-gl/dist/maplibre-gl.css"],
             "allowedCommonJsDependencies": [
               "dijkstrajs",
               "maplibre-gl",

@@ -213,6 +213,9 @@
           [loading]="todayLoading()"
           (bookingClicked)="onBookingClicked($event)"
           (viewAllClicked)="onViewAllToday()"
+          (checkedIn)="onCheckedIn($event)"
+          (started)="onStartBooking($event)"
+          (completed)="onComplete($event)"
         />
 
         <app-quick-actions-panel

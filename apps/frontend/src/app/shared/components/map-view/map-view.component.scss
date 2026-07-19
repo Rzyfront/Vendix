@@ -1,8 +1,5 @@
 /* Global MapLibre stylesheet (controls, marker, canvas positioning).
-   Inlined by the build via node_modules resolution; applies globally because
-   this component uses ViewEncapsulation.None. */
-@import 'maplibre-gl/dist/maplibre-gl.css';
-
+   Loaded via angular.json styles array. */
 .map-view {
   position: relative;
   display: flex;

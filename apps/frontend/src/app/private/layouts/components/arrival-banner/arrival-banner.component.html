@@ -10,7 +10,7 @@
           @let first = pendingArrivals()[0];
           <p class="arrival-banner__title">
             <strong>{{ first.data?.customer_name ?? 'Cliente' }}</strong>
-            llegó para
+            en sala de espera para
             <strong>{{ first.data?.service_name ?? 'su cita' }}</strong>
           </p>
           @if (first.data?.booking_number) {
@@ -46,7 +46,7 @@
             class="arrival-banner__btn arrival-banner__btn--primary"
             [routerLink]="['/admin/reservations']"
           >
-            Ver {{ count() }} llegadas
+            Ver {{ count() }} en sala de espera
           </button>
         }
 

@@ -10,16 +10,16 @@
   </header>
 
   <section class="business-hours__stats">
-    <app-stats-card
-      label="Días activos"
+    <app-stats
+      title="Días activos"
       [value]="activeDays().toString()"
-      icon="calendar-check"
-    ></app-stats-card>
-    <app-stats-card
-      label="Días cerrados"
+      iconName="calendar-check"
+    ></app-stats>
+    <app-stats
+      title="Días cerrados"
       [value]="(7 - activeDays()).toString()"
-      icon="calendar-x"
-    ></app-stats-card>
+      iconName="calendar-x"
+    ></app-stats>
   </section>
 
   @if (loading()) {

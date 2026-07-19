@@ -22,14 +22,19 @@ import {
   ToggleComponent,
 } from '../../../../../../../shared/components';
 
+interface ScheduleBlock {
+  block_order: number;
+  start_time: string;
+  end_time: string;
+}
+
 interface ScheduleDay {
   day_of_week: number;
   label: string;
   shortLabel: string;
   is_active: boolean;
-  start_time: string;
-  end_time: string;
-  editing: boolean;
+  blocks: ScheduleBlock[];
+  editingBlock: number | null; // index of block being edited, null = not editing
 }
 
 @Component({
@@ -96,41 +101,34 @@ export class WeeklyScheduleEditorComponent {
       { day: 0, label: 'Domingo', short: 'Dom' },
     ];
 
-    const scheduleMap = new Map<number, ProviderSchedule>();
-    schedules.forEach((s) => scheduleMap.set(s.day_of_week, s));
+    // Group schedules by day_of_week, support multiple blocks per day
+    const blocksByDay = new Map<number, ScheduleBlock[]>();
+    for (const s of schedules) {
+      if (!blocksByDay.has(s.day_of_week)) {
+        blocksByDay.set(s.day_of_week, []);
+      }
+      blocksByDay.get(s.day_of_week)!.push({
+        block_order: (s as any).block_order ?? 0,
+        start_time: s.start_time,
+        end_time: s.end_time,
+      });
+    }
 
     this.days.set(
       dayNames.map((dn) => {
-        const schedule = scheduleMap.get(dn.day);
+        const blocks = blocksByDay.get(dn.day) || [];
+        const hasBlocks = blocks.length > 0;
         return {
           day_of_week: dn.day,
           label: dn.label,
           shortLabel: dn.short,
-          is_active: schedule?.is_active ?? false,
-          start_time: schedule?.start_time ?? '09:00',
-          end_time: schedule?.end_time ?? '18:00',
-          editing: false,
+          is_active: hasBlocks ? blocks.some(b => b.start_time && b.end_time) : false,
+          blocks: hasBlocks ? blocks : [{ block_order: 0, start_time: '09:00', end_time: '18:00' }],
+          editingBlock: null,
         };
       }),
     );
     this.emitStats();
-  }
-
-  // Calculate bar position as percentage
-  getBarLeft(day: ScheduleDay): number {
-    if (!day.is_active) return 0;
-    const startMinutes = this.timeToMinutes(day.start_time);
-    const rangeStartMin = this.RANGE_START * 60;
-    const totalMin = this.RANGE_HOURS * 60;
-    return Math.max(0, ((startMinutes - rangeStartMin) / totalMin) * 100);
-  }
-
-  getBarWidth(day: ScheduleDay): number {
-    if (!day.is_active) return 0;
-    const startMinutes = this.timeToMinutes(day.start_time);
-    const endMinutes = this.timeToMinutes(day.end_time);
-    const totalMin = this.RANGE_HOURS * 60;
-    return Math.max(0, ((endMinutes - startMinutes) / totalMin) * 100);
   }
 
   private timeToMinutes(time: string): number {
@@ -156,54 +154,126 @@ export class WeeklyScheduleEditorComponent {
     const active = days.filter(d => d.is_active);
     let totalMin = 0;
     for (const d of active) {
-      const [sh, sm] = d.start_time.split(':').map(Number);
-      const [eh, em] = d.end_time.split(':').map(Number);
-      totalMin += (eh * 60 + em) - (sh * 60 + sm);
+      for (const block of d.blocks) {
+        const [sh, sm] = block.start_time.split(':').map(Number);
+        const [eh, em] = block.end_time.split(':').map(Number);
+        totalMin += (eh * 60 + em) - (sh * 60 + sm);
+      }
     }
     this.scheduleChanged.emit({ activeDays: active.length, weeklyHours: Math.round(totalMin / 60) });
   }
 
   toggleDay(index: number): void {
     const updated = [...this.days()];
-    updated[index] = { ...updated[index], is_active: !updated[index].is_active };
+    const day = { ...updated[index] };
+    day.is_active = !day.is_active;
+
+    // When activating, ensure 2 default blocks (morning + afternoon)
+    // Replace single default block with split blocks
+    if (day.is_active) {
+      const hasRealSchedule = day.blocks.length > 1 || 
+        (day.blocks.length === 1 && day.blocks[0].start_time !== '09:00');
+      if (!hasRealSchedule) {
+        day.blocks = [
+          { block_order: 0, start_time: '08:00', end_time: '12:00' },
+          { block_order: 1, start_time: '14:00', end_time: '18:00' },
+        ];
+      }
+    }
+
+    updated[index] = day;
     this.days.set(updated);
     this.emitStats();
   }
 
-  startEditing(index: number): void {
-    const updated = this.days().map((d, i) => ({
-      ...d,
-      editing: i === index ? true : false,
-    }));
+  startEditing(dayIndex: number, blockIndex: number): void {
+    const updated = [...this.days()];
+    updated[dayIndex] = { ...updated[dayIndex], editingBlock: blockIndex };
     this.days.set(updated);
   }
 
-  stopEditing(index: number): void {
+  stopEditing(dayIndex: number): void {
     const updated = [...this.days()];
-    updated[index] = { ...updated[index], editing: false };
+    updated[dayIndex] = { ...updated[dayIndex], editingBlock: null };
     this.days.set(updated);
   }
 
-  updateTime(index: number, field: 'start_time' | 'end_time', value: string): void {
+  updateTime(dayIndex: number, blockIndex: number, field: 'start_time' | 'end_time', value: string): void {
     const updated = [...this.days()];
-    updated[index] = { ...updated[index], [field]: value };
+    const day = { ...updated[dayIndex] };
+    const blocks = [...day.blocks];
+    blocks[blockIndex] = { ...blocks[blockIndex], [field]: value };
+    day.blocks = blocks;
+    updated[dayIndex] = day;
     this.days.set(updated);
     this.emitStats();
+  }
+
+  addBlock(dayIndex: number): void {
+    const updated = [...this.days()];
+    const day = { ...updated[dayIndex] };
+    const lastBlock = day.blocks[day.blocks.length - 1];
+    // New block starts 1 hour after the last block ends
+    const lastEndMinutes = this.timeToMinutes(lastBlock.end_time);
+    const newStartMinutes = Math.min(lastEndMinutes + 60, this.RANGE_END * 60 - 60);
+    const newEndMinutes = Math.min(newStartMinutes + 60, this.RANGE_END * 60);
+
+    day.blocks = [
+      ...day.blocks,
+      {
+        block_order: day.blocks.length,
+        start_time: this.minutesToTime(newStartMinutes),
+        end_time: this.minutesToTime(newEndMinutes),
+      },
+    ];
+    updated[dayIndex] = day;
+    this.days.set(updated);
+    this.emitStats();
+  }
+
+  removeBlock(dayIndex: number, blockIndex: number): void {
+    const updated = [...this.days()];
+    const day = { ...updated[dayIndex] };
+    if (day.blocks.length <= 1) return; // Don't remove the last block
+    day.blocks = day.blocks.filter((_, i) => i !== blockIndex);
+    // Re-order block_order
+    day.blocks = day.blocks.map((b, i) => ({ ...b, block_order: i }));
+    updated[dayIndex] = day;
+    this.days.set(updated);
+    this.emitStats();
+  }
+
+  private minutesToTime(minutes: number): string {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   }
 
   // Quick actions
-  applyPreset(preset: 'weekdays-9-6' | 'weekdays-8-5' | 'all-week'): void {
+  applyPreset(preset: 'weekdays-9-6' | 'weekdays-8-5' | 'weekdays-split' | 'all-week'): void {
+    const singleBlock = (start: string, end: string): ScheduleBlock[] => [
+      { block_order: 0, start_time: start, end_time: end },
+    ];
+    const splitBlocks = (): ScheduleBlock[] => [
+      { block_order: 0, start_time: '08:00', end_time: '12:00' },
+      { block_order: 1, start_time: '14:00', end_time: '18:00' },
+    ];
+
     const updated = this.days().map((d) => {
       if (preset === 'weekdays-9-6') {
         const isWeekday = d.day_of_week >= 1 && d.day_of_week <= 5;
-        return { ...d, is_active: isWeekday, start_time: '09:00', end_time: '18:00', editing: false };
+        return { ...d, is_active: isWeekday, blocks: singleBlock('09:00', '18:00'), editingBlock: null };
       }
       if (preset === 'weekdays-8-5') {
         const isWeekday = d.day_of_week >= 1 && d.day_of_week <= 5;
-        return { ...d, is_active: isWeekday, start_time: '08:00', end_time: '17:00', editing: false };
+        return { ...d, is_active: isWeekday, blocks: singleBlock('08:00', '17:00'), editingBlock: null };
+      }
+      if (preset === 'weekdays-split') {
+        const isWeekday = d.day_of_week >= 1 && d.day_of_week <= 5;
+        return { ...d, is_active: isWeekday, blocks: splitBlocks(), editingBlock: null };
       }
       // all-week
-      return { ...d, is_active: true, start_time: '08:00', end_time: '20:00', editing: false };
+      return { ...d, is_active: true, blocks: singleBlock('08:00', '20:00'), editingBlock: null };
     });
     this.days.set(updated);
     this.emitStats();
@@ -215,9 +285,8 @@ export class WeeklyScheduleEditorComponent {
     const updated = this.days().map((d) => ({
       ...d,
       is_active: true,
-      start_time: activeDay.start_time,
-      end_time: activeDay.end_time,
-      editing: false,
+      blocks: activeDay.blocks.map((b, i) => ({ ...b, block_order: i })),
+      editingBlock: null,
     }));
     this.days.set(updated);
     this.emitStats();
@@ -225,12 +294,19 @@ export class WeeklyScheduleEditorComponent {
 
   save(): void {
     this.saving.set(true);
-    const items = this.days().map((d) => ({
-      day_of_week: d.day_of_week,
-      is_active: d.is_active,
-      start_time: d.start_time,
-      end_time: d.end_time,
-    }));
+    const items: any[] = [];
+    for (const d of this.days()) {
+      if (!d.is_active) continue;
+      for (const block of d.blocks) {
+        items.push({
+          day_of_week: d.day_of_week,
+          block_order: block.block_order,
+          is_active: true,
+          start_time: block.start_time,
+          end_time: block.end_time,
+        });
+      }
+    }
 
     this.reservationsService
       .upsertProviderSchedule(this.providerId(), items)

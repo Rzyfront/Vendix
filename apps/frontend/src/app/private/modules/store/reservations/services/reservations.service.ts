@@ -13,6 +13,7 @@ import {
   ProviderSchedule,
   ProviderException,
   ProviderAvailabilityOverview,
+  ProviderDateInfo,
   AvailabilityOverviewQuery,
   QueueEntry,
   BusinessHoursRow,
@@ -161,6 +162,29 @@ export class ReservationsService {
     }
 
     return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Returns dates where the provider has active schedule blocks,
+   * plus existing bookings per date. Used by the reschedule modal.
+   */
+  getProviderDates(
+    providerId: number,
+    dateFrom: string,
+    dateTo: string,
+    productId?: number,
+  ): Observable<ProviderDateInfo[]> {
+    let params = new HttpParams()
+      .set('date_from', dateFrom)
+      .set('date_to', dateTo);
+
+    if (productId) {
+      params = params.set('product_id', productId.toString());
+    }
+
+    return this.http.get<any>(`${this.apiUrl}/provider-dates/${providerId}`, { params }).pipe(
       map((response) => response.data || response),
     );
   }
