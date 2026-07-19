@@ -38,6 +38,7 @@ import {
   MultiSelectorOption,
 } from '../../../../../../shared/components/index';
 import {
+  INDUSTRY_METADATA,
   STORE_INDUSTRIES,
 } from '../../../../../../shared/constants/industry-modules.constant';
 import { OperatingHoursPickerComponent, OperatingHoursValue } from '../operating-hours-picker/operating-hours-picker.component';
@@ -580,7 +581,7 @@ export class StoreCreateModalComponent implements OnInit {
 
   industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
     value: id,
-    label: this.getIndustryLabel(id),
+    label: INDUSTRY_METADATA[id].label,
   }));
 
   storeForm!: FormGroup;
@@ -649,21 +650,6 @@ export class StoreCreateModalComponent implements OnInit {
       currency_code: ['COP'],
       tax_included: [false],
     });
-  }
-
-  private getIndustryLabel(id: StoreIndustry): string {
-    switch (id) {
-      case 'retail':
-        return 'Retail';
-      case 'restaurant':
-        return 'Restaurante';
-      case 'manufacturing':
-        return 'Manufactura';
-      case 'service':
-        return 'Servicios';
-      case 'gym':
-        return 'Gimnasio';
-    }
   }
 
   private async loadOptions(): Promise<void> {
