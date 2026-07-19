@@ -1433,6 +1433,12 @@ export class DispatchNotesService {
                   Number(item.discount_amount || 0) +
                   Number(item.tax_amount || 0),
                 lot_serial: item.lot_serial,
+                // QUI-425 — carry the operator's per-line price/margin override
+                // onto the dispatch_note_item so the `received` listener can
+                // forward it to PurchaseOrdersService.receive() (PO-linked
+                // receipts). Null when no override was captured.
+                new_base_price: item.new_base_price ?? null,
+                new_profit_margin: item.new_profit_margin ?? null,
               })),
             },
           },

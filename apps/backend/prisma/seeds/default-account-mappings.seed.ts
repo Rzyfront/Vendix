@@ -78,6 +78,9 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'purchase.vat_recognized.accounts_payable': '2205',
   'purchase_order.payment.accounts_payable': '2205',
   'purchase_order.payment.cash_bank': '1110',
+  // Anticipo a proveedores (pago de OC sin recepciones previas): DR 133005 en
+  // vez de 2205. Al recibir, se reclasifica DR 2205 / CR 133005.
+  'purchase_order.payment.supplier_advance': '133005',
   'inventory.adjusted.inventory': '1435',
   'inventory.adjusted.shrinkage': '5295',
   // Restaurant Suite Fase C — sub-recipe batch production.

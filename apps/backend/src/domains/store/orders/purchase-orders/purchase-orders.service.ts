@@ -1936,6 +1936,11 @@ export class PurchaseOrdersService {
     // ACTUALLY posted so far (sum of total_debit for this order's previous
     // reception ids), so a prior reception whose emit failed is naturally
     // recovered here instead of being silently lost.
+    //
+    // `batch_amount` (monto contabilizado como CxP en 2205 por ESTA recepción)
+    // se declara en el scope externo para reutilizarlo luego en la
+    // reclasificación de anticipos (DR 2205 / CR 133005).
+    let batch_amount = 0;
     try {
       // NET order total (Σ quantity_ordered × unit_cost, unit_cost = net). The
       // authoritative net value, independent of the inconsistent total_amount.
@@ -1960,7 +1965,6 @@ export class PurchaseOrdersService {
           ) / 100;
       const emit_total = Math.round((net_total + capitalized_iva) * 100) / 100;
 
-      let batch_amount: number;
       if (result.all_items_received) {
         // Sum what accounting already posted (NET) for THIS order's earlier
         // receptions (source_type is fixed; source_id ranges over this
@@ -2022,6 +2026,104 @@ export class PurchaseOrdersService {
     } catch (error) {
       this.logger.error(
         `Failed to emit purchase_order.received for PO #${id} (reception #${result.reception_id}): ${error.message}`,
+      );
+    }
+
+    // ===== ANTICIPO A PROVEEDORES: reclasificación al recibir =====
+    // Si la OC tuvo pagos ANTICIPADOS (posteados a 133005 con
+    // source_type='purchase_order.advance_payment'), al crear la CxP (CR 2205)
+    // en la recepción hay que trasladar el anticipo contra ese pasivo:
+    //   DR 2205 Proveedores / CR 133005 Anticipos, por
+    //   min(monto_recibido_de_esta_recepción, saldo_anticipo_disponible).
+    //
+    // El SALDO se calcula desde la contabilidad REALMENTE posteada (fuente de
+    // verdad, no desde flags de dominio), sin acoplarse a códigos de cuenta:
+    //   saldo = Σ total_debit(advance_payment de esta OC)
+    //         − Σ total_credit(advance_reclass ya posteadas de esta OC)
+    // Así nunca deja 133005 en negativo aunque un pago anticipado aún no haya
+    // posteado (quedaría en cola de reintento y se reclasificaría después).
+    //
+    // IDEMPOTENCIA: el asiento usa source_id=reception_id, así que cada
+    // recepción reclasifica una sola vez (el guard de createAutoEntry lo cubre);
+    // re-emitir esta recepción no duplica.
+    //
+    // LIMITACIÓN (parciales): con múltiples recepciones, cada una consume el
+    // saldo restante en orden (FIFO por recepción) hasta agotarlo. `batch_amount`
+    // es el neto (O-48) o bruto (O-49) contabilizado en 2205 por esta recepción;
+    // para O-48 el complemento de IVA (240804/2205) se maneja aparte y NO se
+    // reclasifica contra el anticipo (que fue caja real).
+    try {
+      if (batch_amount > 0) {
+        // Débitos realmente posteados a 133005 por pagos anticipados de esta OC.
+        const paymentIds = (
+          await this.prisma.purchase_order_payments.findMany({
+            where: { purchase_order_id: id },
+            select: { id: true },
+          })
+        ).map((p) => p.id);
+
+        let advanceDebits = 0;
+        if (paymentIds.length > 0) {
+          const advanceEntries =
+            await this.prisma.accounting_entries.findMany({
+              where: {
+                source_type: 'purchase_order.advance_payment',
+                source_id: { in: paymentIds },
+              },
+              select: { total_debit: true },
+            });
+          advanceDebits = advanceEntries.reduce(
+            (sum, e) => sum + Number(e.total_debit || 0),
+            0,
+          );
+        }
+
+        // Anticipo ya reclasificado en recepciones previas (y la actual, si se
+        // reintentara) de esta OC.
+        const receptionIds = (
+          await this.prisma.purchase_order_receptions.findMany({
+            where: { purchase_order_id: id },
+            select: { id: true },
+          })
+        ).map((r) => r.id);
+
+        let alreadyReclassified = 0;
+        if (receptionIds.length > 0) {
+          const reclassEntries =
+            await this.prisma.accounting_entries.findMany({
+              where: {
+                source_type: 'purchase_order.advance_reclass',
+                source_id: { in: receptionIds },
+              },
+              select: { total_credit: true },
+            });
+          alreadyReclassified = reclassEntries.reduce(
+            (sum, e) => sum + Number(e.total_credit || 0),
+            0,
+          );
+        }
+
+        const advanceBalance =
+          Math.round((advanceDebits - alreadyReclassified) * 100) / 100;
+        const reclassAmount =
+          Math.round(Math.min(batch_amount, advanceBalance) * 100) / 100;
+
+        if (reclassAmount > 0) {
+          this.eventEmitter.emit('purchase_order.advance_reclass', {
+            purchase_order_id: id,
+            reception_id: result.reception_id,
+            organization_id: result.updated_po.organization_id,
+            store_id,
+            accounting_entity_id,
+            amount: reclassAmount,
+            user_id: RequestContextService.getUserId(),
+            supplier,
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit purchase_order.advance_reclass for PO #${id} (reception #${result.reception_id}): ${error.message}`,
       );
     }
 
@@ -2458,6 +2560,7 @@ export class PurchaseOrdersService {
   async registerPayment(purchaseOrderId: number, dto: RegisterPaymentDto) {
     const po = await this.prisma.purchase_orders.findUnique({
       where: { id: purchaseOrderId },
+      include: { suppliers: true, location: true },
     });
     if (!po) {
       throw new NotFoundException('Purchase order not found');
@@ -2526,12 +2629,49 @@ export class PurchaseOrdersService {
 
     // Emit event for accounting
     try {
+      // ANTICIPO A PROVEEDORES: si la OC NO tiene recepciones al momento del
+      // pago, es un pago anticipado (no extingue una CxP inexistente sino que
+      // crea un activo 133005). El EMISOR resuelve la bandera `is_advance` y el
+      // snapshot del proveedor/entidad; el handler contable NUNCA lo detecta.
+      const receptionsCount = await this.prisma.purchase_order_receptions.count({
+        where: { purchase_order_id: purchaseOrderId },
+      });
+      const is_advance = receptionsCount === 0;
+
+      const store_id = po.location?.store_id ?? undefined;
+      const supplier = po.suppliers
+        ? {
+            id: po.suppliers.id,
+            name: po.suppliers.name,
+            tax_id: po.suppliers.tax_id ?? undefined,
+          }
+        : undefined;
+
+      let accounting_entity_id: number | undefined;
+      try {
+        const entity =
+          await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+            organization_id: po.organization_id,
+            store_id,
+          });
+        accounting_entity_id = entity?.id;
+      } catch (error: any) {
+        this.logger.warn(
+          `Could not resolve fiscal accounting entity for PO payment #${purchaseOrderId}: ${error?.message}`,
+        );
+      }
+
       this.eventEmitter.emit('purchase_order.payment', {
         purchase_order_id: purchaseOrderId,
+        payment_id: payment.id,
         organization_id: po.organization_id,
+        store_id,
+        accounting_entity_id,
         amount: Number(dto.amount),
         payment_method: dto.payment_method,
+        is_advance,
         user_id: userId,
+        supplier,
       });
     } catch (error) {
       this.logger.error(

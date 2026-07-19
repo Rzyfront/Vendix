@@ -509,7 +509,16 @@ export class DispatchNoteFlowService {
       include: DISPATCH_NOTE_INCLUDE,
     });
 
-    this.eventEmitter.emit('dispatch_note.received', {
+    // emitAsync (not emit): await the `received` listener so the stock-in and,
+    // for PO-linked purchase_receipts, the delegated `PurchaseOrdersService.receive()`
+    // (which creates the purchase_order_reception) FINISH before this HTTP call
+    // returns. Callers that chain a payment right after receive (e.g. the POP
+    // "crear + recibir + pagar" flow) would otherwise race: the payment would
+    // count 0 receptions and misclassify as a supplier advance (DR 133005)
+    // instead of settling the payable (DR 2205). handleReceived owns its own
+    // try/catch, so a listener fault surfaces here as a failed receive rather
+    // than a silently-swallowed stock-in.
+    await this.eventEmitter.emitAsync('dispatch_note.received', {
       dispatch_note_id: id,
       dispatch_number: updated.dispatch_number,
       store_id: updated.store_id,

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import {
+  Prisma,
   serial_status_enum,
   sales_document_item_type_enum,
 } from '@prisma/client';
@@ -119,6 +120,10 @@ export class DispatchNoteEventsListener {
       product_id: number;
       product_variant_id: number | null;
       dispatched_quantity: number;
+      // QUI-425 — per-line pricing overrides persisted on the dispatch_note_item.
+      // Prisma returns Decimal columns as Prisma.Decimal (null when unset).
+      new_base_price?: Prisma.Decimal | null;
+      new_profit_margin?: Prisma.Decimal | null;
     }>,
     dispatchNumber: string,
   ): Promise<void> {
@@ -156,7 +161,12 @@ export class DispatchNoteEventsListener {
         select: { id: true, product_id: true, product_variant_id: true },
       });
 
-    const receiveItems: Array<{ id: number; quantity_received: number }> = [];
+    const receiveItems: Array<{
+      id: number;
+      quantity_received: number;
+      new_base_price?: number;
+      new_profit_margin?: number;
+    }> = [];
     for (const item of items) {
       const poLine = poItems.find(
         (p) =>
@@ -171,10 +181,27 @@ export class DispatchNoteEventsListener {
       }
       // dispatched_quantity is in PURCHASE units (same basis the direct receive
       // path uses); receive() applies purchase_to_stock_factor internally.
-      receiveItems.push({
+      const receiveItem: {
+        id: number;
+        quantity_received: number;
+        new_base_price?: number;
+        new_profit_margin?: number;
+      } = {
         id: poLine.id,
         quantity_received: item.dispatched_quantity,
-      });
+      };
+      // QUI-425 — forward the operator's per-line price/margin override to
+      // receive() ONLY when it was actually captured. Attaching the field
+      // unconditionally would push receive() down its pricing path (recomputing
+      // base_price/margin) even for plain receipts with no override, so we
+      // replicate the frontend's "attach-only-if-defined" contract.
+      if (item.new_base_price != null) {
+        receiveItem.new_base_price = Number(item.new_base_price);
+      }
+      if (item.new_profit_margin != null) {
+        receiveItem.new_profit_margin = Number(item.new_profit_margin);
+      }
+      receiveItems.push(receiveItem);
     }
 
     if (receiveItems.length === 0) {

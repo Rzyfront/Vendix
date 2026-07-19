@@ -233,6 +233,14 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '1110',
     description: 'Banco (pago OC)',
   },
+  // Anticipo a proveedores: pagar una OC ANTES de recibirla no extingue un
+  // pasivo (aún no existe CxP), sino que crea un ACTIVO (anticipo). El pago
+  // anticipado debita 133005 en vez de 2205; al recibir, una reclasificación
+  // (DR 2205 / CR 133005) traslada el anticipo contra la CxP creada.
+  'purchase_order.payment.supplier_advance': {
+    code: '133005',
+    description: 'Anticipos a proveedores',
+  },
   'inventory.adjusted.inventory': { code: '1435', description: 'Inventario' },
   'inventory.adjusted.shrinkage': {
     code: '5295',
