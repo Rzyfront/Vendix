@@ -55,89 +55,148 @@
           </div>
         }
 
-        <!-- Paso · Cliente -->
+        <!-- Paso · Cliente. Sub-wizard vertical: opciones a la izquierda ·
+             steps-line a la derecha (size sm). Sub-pasos DINÁMICOS:
+             anónima → [Tipo] · con cliente → [Tipo, Cliente] · delivery →
+             [Tipo, Cliente, Dirección]. Espeja Cobro/Envío. QUI-482: volver a un
+             sub-paso NO resetea cliente/dirección (colapso presentacional). -->
         @if (stepKeys().includes('cliente')) {
         <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cliente'">
-          <section class="cliente-section">
-            <div class="section-header">
-              <app-icon name="users" [size]="16" class="section-icon"></app-icon>
-              <h2 class="section-title">Cliente</h2>
-            </div>
+          <div class="cliente-grid">
+            <div class="cliente-main">
+              <!-- SUB-STEP 0 · Tipo (Venta Anónima / Con Cliente) -->
+              @if (clienteSubStep() === 0) {
+                <section class="cliente-section">
+                  <div class="section-header">
+                    <app-icon name="users" [size]="16" class="section-icon"></app-icon>
+                    <h2 class="section-title">Tipo de venta</h2>
+                  </div>
 
-            <div class="sale-type-options">
-              @if (canBeAnonymous()) {
+                  <div class="sale-type-options">
+                    @if (canBeAnonymous()) {
+                      <button
+                        type="button"
+                        class="sale-type-btn"
+                        [class.selected]="isAnonymousSale()"
+                        (click)="onSelectSaleType(true)"
+                      >
+                        <div class="radio-indicator">
+                          @if (isAnonymousSale()) {
+                            <div class="radio-dot"></div>
+                          }
+                        </div>
+                        <app-icon name="user-x" [size]="20"></app-icon>
+                        <div class="sale-type-info">
+                          <span class="sale-type-name">Venta Anónima</span>
+                          <span class="sale-type-desc">Sin cliente asociado</span>
+                        </div>
+                      </button>
+                    }
+
+                    <button
+                      type="button"
+                      class="sale-type-btn"
+                      [class.selected]="!isAnonymousSale()"
+                      (click)="onSelectSaleType(false)"
+                    >
+                      <div class="radio-indicator">
+                        @if (!isAnonymousSale()) {
+                          <div class="radio-dot"></div>
+                        }
+                      </div>
+                      <app-icon name="user" [size]="20"></app-icon>
+                      <div class="sale-type-info">
+                        <span class="sale-type-name">Con Cliente</span>
+                        <span class="sale-type-desc">{{
+                          cartState()?.customer ? customerDisplayName : 'Seleccionar cliente'
+                        }}</span>
+                      </div>
+                    </button>
+                  </div>
+                </section>
+              } @else {
                 <button
                   type="button"
-                  class="sale-type-btn"
-                  [class.selected]="isAnonymousSale()"
-                  (click)="toggleAnonymousSale(true)"
+                  class="cliente-collapsed"
+                  (click)="goToClienteSubStep(0)"
                 >
-                  <div class="radio-indicator">
-                    @if (isAnonymousSale()) {
-                      <div class="radio-dot"></div>
-                    }
-                  </div>
-                  <app-icon name="user-x" [size]="20"></app-icon>
-                  <div class="sale-type-info">
-                    <span class="sale-type-name">Venta Anónima</span>
-                    <span class="sale-type-desc">Sin cliente asociado</span>
-                  </div>
+                  <span>{{
+                    isAnonymousSale()
+                      ? 'Venta Anónima'
+                      : 'Con Cliente: ' +
+                        (cartState()?.customer ? customerDisplayName : 'Seleccionar')
+                  }}</span>
+                  <app-icon name="check" [size]="16"></app-icon>
                 </button>
               }
 
-              <button
-                type="button"
-                class="sale-type-btn"
-                [class.selected]="!isAnonymousSale()"
-                (click)="toggleAnonymousSale(false)"
-              >
-                <div class="radio-indicator">
-                  @if (!isAnonymousSale()) {
-                    <div class="radio-dot"></div>
-                  }
-                </div>
-                <app-icon name="user" [size]="20"></app-icon>
-                <div class="sale-type-info">
-                  <span class="sale-type-name">Con Cliente</span>
-                  <span class="sale-type-desc">{{
-                    cartState()?.customer ? customerDisplayName : 'Seleccionar cliente'
-                  }}</span>
-                </div>
-              </button>
+              <!-- SUB-STEP 1 · Cliente (selector inline). Solo con-cliente. -->
+              @if (!isAnonymousSale()) {
+                @if (clienteSubStep() === 1) {
+                  <section class="cliente-section">
+                    <div class="section-header">
+                      <app-icon name="user" [size]="16" class="section-icon"></app-icon>
+                      <h2 class="section-title">Cliente</h2>
+                    </div>
+                    <app-pos-customer-selector
+                      [selectedCustomer]="cartState()?.customer ?? null"
+                      [allowAnonymous]="canBeAnonymous()"
+                      [showTopSuggestions]="true"
+                      (customerSelected)="onSelectCustomerAndAdvance($event)"
+                      (customerCleared)="onCustomerCleared()"
+                    ></app-pos-customer-selector>
+                  </section>
+                } @else if (clienteSubStep() > 1 && cartState()?.customer) {
+                  <button
+                    type="button"
+                    class="cliente-collapsed"
+                    (click)="goToClienteSubStep(1)"
+                  >
+                    <span>Cliente: {{ customerDisplayName }}</span>
+                    <app-icon name="check" [size]="16"></app-icon>
+                  </button>
+                }
+              }
+
+              <!-- SUB-STEP 2 · Dirección de envío (solo delivery, terminal).
+                   Captura la dirección con app-address-form-fields (mapa +
+                   geocoding). No se colapsa. -->
+              @if (
+                clienteSubStep() === 2 &&
+                requiresAddress() &&
+                !isAnonymousSale() &&
+                cartState()?.customer
+              ) {
+                <section class="cliente-section">
+                  <div class="section-header">
+                    <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
+                    <h2 class="section-title">Dirección de envío</h2>
+                    @if (!addressValid()) {
+                      <span class="addr-required-badge">Obligatoria</span>
+                    }
+                  </div>
+                  <app-address-form-fields
+                    [initialAddress]="customerInitialAddress()"
+                    (addressChange)="onShellAddressChange($event)"
+                    (validChange)="addressValid.set($event)"
+                  ></app-address-form-fields>
+                </section>
+              }
             </div>
 
-            @if (!isAnonymousSale()) {
-              <app-pos-customer-selector
-                [selectedCustomer]="cartState()?.customer ?? null"
-                [allowAnonymous]="canBeAnonymous()"
-                (customerSelected)="selectCustomer($event)"
-                (customerCleared)="onCustomerCleared()"
-              ></app-pos-customer-selector>
-            }
-          </section>
-
-          <!-- Sub-sección · Dirección de envío (delivery ∧ cliente seleccionado).
-               Captura la dirección aquí (antes vivía en el paso Envío) con el
-               componente reutilizable app-address-form-fields (mapa + geocoding). -->
-          @if (requiresAddress() && !isAnonymousSale() && cartState()?.customer) {
-            <section class="cliente-section">
-              <div class="section-header">
-                <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
-                <h2 class="section-title">Dirección de envío</h2>
-                @if (!addressValid()) {
-                  <span
-                    style="margin-left:auto;font-size:0.7rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:999px;background:rgba(245,158,11,0.12);color:#d97706;"
-                    >Obligatoria</span
-                  >
-                }
-              </div>
-              <app-address-form-fields
-                [initialAddress]="customerInitialAddress()"
-                (addressChange)="onShellAddressChange($event)"
-                (validChange)="addressValid.set($event)"
-              ></app-address-form-fields>
-            </section>
-          }
+            <!-- Columna del stepper: a la derecha en desktop; debajo (DOM-last)
+                 en móvil. -->
+            <aside class="steps-col">
+              <app-steps-line
+                [orientation]="'vertical'"
+                [size]="'sm'"
+                [steps]="clienteSubSteps()"
+                [currentStep]="clienteSubStep()"
+                [clickable]="true"
+                (stepClicked)="goToClienteSubStep($event)"
+              ></app-steps-line>
+            </aside>
+          </div>
         </div>
         }
 

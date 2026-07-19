@@ -245,6 +245,23 @@ export class PosCheckoutShellComponent {
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
   }
 
+  // ── Cliente sub-wizard (presentación; espeja Cobro/Envío) ────────────────
+  /** Sub-paso activo del paso Cliente: 0=Tipo · 1=Cliente · 2=Dirección. */
+  readonly clienteSubStep = signal<number>(0);
+  /**
+   * Sub-pasos DINÁMICOS del paso Cliente:
+   *  - anónima                    → [Tipo]
+   *  - con cliente (no delivery)  → [Tipo, Cliente]
+   *  - con cliente (delivery)     → [Tipo, Cliente, Dirección]  (Dirección terminal)
+   */
+  readonly clienteSubSteps = computed<StepsLineItem[]>(() => {
+    if (this.isAnonymousSale()) return [{ label: 'Tipo' }];
+    if (this.requiresAddress()) {
+      return [{ label: 'Tipo' }, { label: 'Cliente' }, { label: 'Dirección' }];
+    }
+    return [{ label: 'Tipo' }, { label: 'Cliente' }];
+  });
+
   // ── Draft-order (Guardar borrador) submission state ──────────────────────
   readonly submittingDraft = signal(false);
 
@@ -312,6 +329,7 @@ export class PosCheckoutShellComponent {
       if (this.isOpen()) {
         untracked(() => {
           this.currentStep.set(0);
+          this.clienteSubStep.set(0);
           this.payTiming.set('now');
           this.userOverrideAnonymous.set(null);
           this.capturedAddress.set(null);
@@ -328,6 +346,17 @@ export class PosCheckoutShellComponent {
       untracked(() => {
         if (this.currentStep() >= len) {
           this.currentStep.set(Math.max(0, len - 1));
+        }
+      });
+    });
+
+    // Clamp the Cliente sub-cursor when its dynamic sub-steps shrink (e.g. the
+    // operator switches to an anonymous sale, or the intent flips to pickup).
+    effect(() => {
+      const len = this.clienteSubSteps().length;
+      untracked(() => {
+        if (this.clienteSubStep() >= len) {
+          this.clienteSubStep.set(Math.max(0, len - 1));
         }
       });
     });
@@ -411,6 +440,47 @@ export class PosCheckoutShellComponent {
   /** Re-emit the Envío step result to the parent (POS). */
   onShippingCompleted(shippingData: any): void {
     this.shippingCompleted.emit(shippingData);
+  }
+
+  // ── Cliente sub-wizard navegación (presentacional; QUI-482) ──────────────
+  /**
+   * Salta el sub-wizard de Cliente a un sub-paso (clamp al rango). Presentacional:
+   * volver a un sub-paso anterior NO resetea cliente/dirección — el estado vive en
+   * `cartState().customer` / `capturedAddress` / `addressValid`; el colapso solo
+   * cambia el índice activo.
+   */
+  goToClienteSubStep(index: number): void {
+    const max = Math.max(0, this.clienteSubSteps().length - 1);
+    this.clienteSubStep.set(Math.min(Math.max(index, 0), max));
+  }
+
+  /**
+   * Tipo de venta (sub-paso Tipo):
+   *  - "Venta Anónima" estando YA anónima → avanza el wizard TOP-LEVEL
+   *    (`nextStep()`): anónima solo tiene [Tipo], así que el segundo clic salta
+   *    de paso (p.ej. Cliente → Envío en delivery). Si aún no era anónima, la
+   *    fija y se queda en [Tipo] listo (un segundo clic avanza top-level).
+   *  - "Con Cliente" → contrae Tipo y avanza al sub-paso Cliente (Buscar).
+   */
+  onSelectSaleType(anonymous: boolean): void {
+    if (anonymous) {
+      if (this.isAnonymousSale()) {
+        this.nextStep();
+        return;
+      }
+      this.toggleAnonymousSale(true);
+      this.goToClienteSubStep(0);
+      return;
+    }
+    this.toggleAnonymousSale(false);
+    this.goToClienteSubStep(1);
+  }
+
+  /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza. */
+  onSelectCustomerAndAdvance(customer: PosCustomer): void {
+    this.selectCustomer(customer);
+    // Delivery → sub-paso Dirección (2); sin delivery Cliente es terminal (clamp a 1).
+    this.goToClienteSubStep(this.requiresAddress() ? 2 : 1);
   }
 
   // ── Cliente step handlers ───────────────────────────────────────────────

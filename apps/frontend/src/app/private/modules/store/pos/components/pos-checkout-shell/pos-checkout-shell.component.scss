@@ -1,3 +1,5 @@
+@use '../../../../../../shared/components/payment-collector/subwizard' as subwizard;
+
 /* Fase 5·B1 — POS Checkout Shell. Layout stepper + paso activo + resumen.
    Estilos de Resumen / Cliente / footer extraídos de pos-payment-interface. */
 
@@ -214,6 +216,51 @@
   font-weight: 700;
   color: var(--color-primary);
   margin: 4px 0 0 0;
+}
+
+/* ── Cliente sub-wizard (opciones | stepper vertical) ─────
+   Móvil: una columna, steps-col ABAJO (DOM-last).
+   Desktop (≥768px): cliente-main | steps-col. */
+.cliente-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.cliente-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
+   Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
+.cliente-collapsed {
+  @include subwizard.subwizard-collapsed-row;
+}
+
+/* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
+.steps-col {
+  @include subwizard.subwizard-steps-col;
+}
+
+@media (min-width: 768px) {
+  .cliente-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* Badge "Obligatoria" del sub-paso Dirección (warning amber; no /opacity). */
+.addr-required-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
 }
 
 /* ── Cliente (sale type) ─────────────────────────────── */

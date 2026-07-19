@@ -124,6 +124,26 @@ export class PosCustomerService {
   }
 
   /**
+   * Top customers by order volume (store-scoped). Backing endpoint
+   * `GET /store/customers/top?limit=` returns `{ success, data: (PosCustomer &
+   * { order_count })[] }` ordered by `order_count` desc. Reuses the same
+   * response mapping as {@link searchCustomers} (`order_count` is ignored by the
+   * mapper — the selector only needs the customer shape). Errors resolve to an
+   * empty list so the suggestions block degrades gracefully.
+   */
+  topCustomers(limit = 5): Observable<PosCustomer[]> {
+    const params = new HttpParams().set('limit', limit.toString());
+
+    return this.http.get<any>(`${this.apiUrl}/top`, { params }).pipe(
+      map((response) => {
+        const customers = response?.data || [];
+        return customers.map((c: any) => this.mapApiCustomerToPosCustomer(c));
+      }),
+      catchError(() => of([])),
+    );
+  }
+
+  /**
    * Select a customer for the current POS transaction
    */
   selectCustomer(customer: PosCustomer | null): void {
