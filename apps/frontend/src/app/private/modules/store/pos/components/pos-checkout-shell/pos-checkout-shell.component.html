@@ -5,6 +5,15 @@
   [subtitle]="'Cobro y cliente'"
   (closed)="onModalClosed()"
 >
+  <!-- Contenido proyectado envuelto en @for keyed por contentEpoch(): al
+       FINALIZAR (venta directa/envío) resetState() incrementa contentEpoch y
+       este subárbol (payment-step + collector, shipping-step, consumo-step) se
+       DESTRUYE y RECREA limpio. Cancelar NO lo incrementa → preserva las
+       selecciones (invariante QUI-482). Es necesario porque el contenido
+       proyectado dentro de <app-modal> NO se destruye al cerrar (solo se
+       desprende del DOM), y el collector solo resetea al cambiar context()
+       (una vez), así que su estado sobreviviría entre ventas y modos. -->
+  @for (epoch of [contentEpoch()]; track epoch) {
   <div class="checkout-shell">
     <!-- Stepper -->
     <div class="checkout-stepper">
@@ -312,6 +321,7 @@
       </aside>
     </div>
   </div>
+  }
 
   <!-- Footer -->
   <div slot="footer" class="checkout-footer">
