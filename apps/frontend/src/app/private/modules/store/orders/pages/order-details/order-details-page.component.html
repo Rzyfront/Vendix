@@ -1792,20 +1792,22 @@
     </app-modal>
 
     @defer (when showPayModal()) {
-      <app-order-payment-modal
-        [isOpen]="showPayModal()"
-        [order]="orderData"
-        [paymentMethods]="paymentMethods()"
-        [isCreditOrder]="isCreditOrder()"
-        [remainingBalance]="remainingBalance()"
-        [installments]="orderData.order_installments || []"
-        [creditType]="orderData.credit_type || ''"
-        [preSelectedInstallment]="preSelectedInstallment()"
-        [isProcessing]="isProcessingAction()"
-        (isOpenChange)="showPayModal.set($event)"
-        (closed)="showPayModal.set(false)"
-        (paymentSubmitted)="onPaymentSubmitted($event)"
-      />
+      @if (showPayModal()) {
+        <app-order-payment-modal
+          [isOpen]="showPayModal()"
+          [order]="orderData"
+          [paymentMethods]="paymentMethods()"
+          [isCreditOrder]="isCreditOrder()"
+          [remainingBalance]="remainingBalance()"
+          [installments]="orderData.order_installments || []"
+          [creditType]="orderData.credit_type || ''"
+          [preSelectedInstallment]="preSelectedInstallment()"
+          [isProcessing]="isProcessingAction()"
+          (isOpenChange)="showPayModal.set($event)"
+          (closed)="showPayModal.set(false)"
+          (paymentSubmitted)="onPaymentSubmitted($event)"
+        />
+      }
     }
 
     <!-- SHIP MODAL (delivery-type aware) -->
