@@ -1,0 +1,119 @@
+<div class="credit-config">
+  <div class="credit-warning">
+    <app-icon name="info" [size]="18" />
+    <span>Configura el plan de cuotas. El backend calcula el cronograma final.</span>
+  </div>
+
+  <!-- Initial (down) payment -->
+  <div class="credit-field">
+    <label>Pago inicial (opcional)</label>
+    <input
+      appCurrencyInput
+      [currencyDecimals]="currencyDecimals()"
+      [formControl]="initialPaymentControl"
+      placeholder="0"
+      class="credit-input"
+    />
+    @if (paymentMethods().length > 0 && (initialPayment() || 0) > 0) {
+      <div class="credit-methods">
+        @for (m of paymentMethods(); track m.id) {
+          <button
+            type="button"
+            class="credit-method-btn"
+            [class.selected]="isInitialMethod(m)"
+            (click)="selectInitialMethod(m)"
+          >
+            <app-icon [name]="iconFor(m)" [size]="18" />
+            <span>{{ m.name }}</span>
+          </button>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- Number of installments -->
+  <div class="credit-field">
+    <label>Número de cuotas</label>
+    <input
+      type="number"
+      min="1"
+      class="credit-input"
+      [value]="numInstallments()"
+      (input)="onNumInstallments($any($event.target).value)"
+    />
+  </div>
+
+  <!-- Frequency -->
+  <div class="credit-field">
+    <label>Frecuencia</label>
+    <div class="frequency-grid">
+      @for (opt of frequencyOptions; track opt.value) {
+        <button
+          type="button"
+          class="frequency-btn"
+          [class.selected]="frequency() === opt.value"
+          (click)="setFrequency(opt.value)"
+        >
+          {{ opt.label }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <!-- First installment date -->
+  <div class="credit-field">
+    <label>Primera cuota</label>
+    <input
+      type="date"
+      class="credit-input"
+      [value]="firstDate()"
+      (change)="onFirstDate($any($event.target).value)"
+    />
+  </div>
+
+  <!-- Interest -->
+  <div class="credit-two-col">
+    <div class="credit-field">
+      <label>Interés anual (%)</label>
+      <input
+        type="number"
+        min="0"
+        step="0.01"
+        class="credit-input"
+        [value]="interestRate()"
+        (input)="onInterestRate($any($event.target).value)"
+      />
+    </div>
+    <div class="credit-field">
+      <label>Tipo de interés</label>
+      <select
+        class="credit-input"
+        [value]="interestType()"
+        (change)="setInterestType($any($event.target).value)"
+      >
+        <option value="simple">Simple</option>
+        <option value="compound">Compuesto</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="credit-balance">
+    <span>Saldo a financiar</span>
+    <span>{{ remainingToFinance() | currency }}</span>
+  </div>
+
+  @if (installmentsPreview().length > 0) {
+    <div class="installments-preview">
+      @for (inst of installmentsPreview(); track $index) {
+        <div class="installment-row">
+          <div class="installment-left">
+            <span class="installment-number">{{ $index + 1 }}</span>
+            <span class="installment-date">{{ inst.due_date }}</span>
+          </div>
+          <span class="installment-amount">{{ inst.amount | currency }}</span>
+        </div>
+      }
+    </div>
+  }
+</div>

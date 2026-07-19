@@ -77,6 +77,22 @@ export { DispatchNoteAddressEditorComponent } from './dispatch-note-address-edit
 export { DispatchNoteAddressService } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
 export type { DispatchNoteAddressPayload } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
 
+// Payment collector (reusable, capability-driven charge widget — Phase 3)
+export { PaymentCollectorComponent } from './payment-collector/payment-collector.component';
+export { PaymentModalComponent } from './payment-collector/payment-modal.component';
+export { PaymentWompiFieldsComponent } from './payment-collector/payment-wompi-fields.component';
+export { PaymentCreditFieldsComponent } from './payment-collector/payment-credit-fields.component';
+export { DEFAULT_CONFIG_BY_CONTEXT } from './payment-collector/payment-collector.model';
+export type {
+  PaymentCollectorConfig,
+  PaymentSubmit,
+  PaymentContext,
+  PaymentMode,
+  CreditTerms,
+  WompiSlice,
+  ManualPaymentMethod,
+} from './payment-collector/payment-collector.model';
+
 // Services
 export { TourService } from './tour/services/tour.service';
 export { StoreUserLookupService } from '../services/store-user-lookup.service';

@@ -1,0 +1,134 @@
+:host {
+  display: block;
+}
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0 0 8px 0;
+}
+
+.wompi-submethods-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.wompi-submethod-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 8px;
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.2s;
+  min-height: 80px;
+  color: var(--color-text-primary);
+}
+
+.wompi-submethod-btn:hover {
+  border-color: var(--wompi-color, var(--color-primary));
+  background: color-mix(
+    in srgb,
+    var(--wompi-color, var(--color-primary)) 8%,
+    transparent
+  );
+}
+
+.submethod-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.submethod-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.wompi-form-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  border-left: 3px solid var(--color-primary);
+  background: var(--color-muted);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.wompi-back-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.6;
+  color: var(--color-text-muted);
+  padding: 4px;
+  display: inline-flex;
+}
+
+.wompi-back-btn:hover {
+  opacity: 1;
+}
+
+.wompi-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+}
+
+.wompi-input {
+  padding: 10px 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-background);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+
+.wompi-input:focus {
+  border-color: var(--color-primary);
+}
+
+.wompi-info-text {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  padding: 8px 0;
+  margin: 0;
+}
+
+.wompi-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.field-error {
+  font-size: 12px;
+  color: var(--color-error);
+  display: block;
+}
