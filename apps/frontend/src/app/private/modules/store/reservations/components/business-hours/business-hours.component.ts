@@ -12,8 +12,8 @@ import {
   ButtonComponent,
   EmptyStateComponent,
   IconComponent,
-  StatsCardComponent,
 } from '../../../../../../shared/components';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ReservationsService } from '../../services/reservations.service';
 import { BusinessHoursRow } from '../../interfaces/reservation.interface';
 
@@ -53,7 +53,7 @@ interface DayRow {
     ButtonComponent,
     EmptyStateComponent,
     IconComponent,
-    StatsCardComponent,
+    StatsComponent,
   ],
   templateUrl: './business-hours.component.html',
   styleUrls: ['./business-hours.component.scss'],

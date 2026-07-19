@@ -7,7 +7,7 @@ import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } fro
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
-import { Booking, BookingStatus, AvailabilitySlot } from '../../interfaces/reservation.interface';
+import { Booking, BookingStatus, AvailabilitySlot, ProviderDateInfo } from '../../interfaces/reservation.interface';
 import { finalize } from 'rxjs';
 
 @Component({
@@ -57,10 +57,11 @@ export class BookingDetailModalComponent {
 
   // Inline reschedule state
   rescheduling = signal(false);
-  dates = signal<string[]>([]);
+  dates = signal<ProviderDateInfo[]>([]);
   selectedDate = signal('');
   slots = signal<AvailabilitySlot[]>([]);
   selectedSlot = signal<AvailabilitySlot | null>(null);
+  loadingDates = signal(false);
   loadingSlots = signal(false);
   submittingReschedule = signal(false);
 
@@ -159,6 +160,8 @@ export class BookingDetailModalComponent {
 
   /// True while a check-in PATCH is in flight (button shows spinner).
   checkingIn = signal(false);
+  /// True while a complete PATCH is in flight.
+  completing = signal(false);
 
   canReschedule = computed(() => {
     const status = this.booking()?.status;
@@ -241,7 +244,7 @@ export class BookingDetailModalComponent {
 
   startReschedule(): void {
     this.rescheduling.set(true);
-    this.generateDates();
+    this.loadProviderDates();
   }
 
   cancelReschedule(): void {
@@ -251,20 +254,53 @@ export class BookingDetailModalComponent {
     this.slots.set([]);
   }
 
-  private generateDates(): void {
-    const dates: string[] = [];
+  private loadProviderDates(): void {
+    const b = this.booking();
+    if (!b?.provider_id) {
+      this.generateFallbackDates();
+      return;
+    }
+
+    this.loadingDates.set(true);
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 30);
+    const dateFrom = this.formatDateISO(today);
+    const dateTo = this.formatDateISO(endDate);
+
+    this.reservationsService
+      .getProviderDates(b.provider_id, dateFrom, dateTo, b.product_id)
+      .pipe(finalize(() => this.loadingDates.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (providerDates) => {
+          const availableDates = providerDates.filter((d) => d.has_schedule);
+          this.dates.set(availableDates);
+          if (availableDates.length > 0) {
+            this.selectDate(availableDates[0].date);
+          }
+        },
+        error: () => this.generateFallbackDates(),
+      });
+  }
+
+  private generateFallbackDates(): void {
+    const dates: ProviderDateInfo[] = [];
     const today = new Date();
     for (let i = 0; i < 14; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      dates.push(`${year}-${month}-${day}`);
+      dates.push({
+        date: this.formatDateISO(d),
+        day_of_week: d.getDay(),
+        has_schedule: true,
+        booking_count: 0,
+        bookings: [],
+      });
     }
     this.dates.set(dates);
     if (dates.length > 0) {
-      this.selectDate(dates[0]);
+      this.selectDate(dates[0].date);
     }
   }
 
@@ -289,6 +325,19 @@ export class BookingDetailModalComponent {
 
   selectSlot(slot: AvailabilitySlot): void {
     this.selectedSlot.set(slot);
+  }
+
+  getSelectedDateBookings(): Array<{
+    id: number;
+    start_time: string;
+    end_time: string;
+    status: string;
+    customer_name: string;
+    service_name: string;
+  }> {
+    const selected = this.selectedDate();
+    const dateInfo = this.dates().find((d) => d.date === selected);
+    return dateInfo?.bookings || [];
   }
 
   submitReschedule(): void {
@@ -371,6 +420,42 @@ export class BookingDetailModalComponent {
       });
   }
 
+  /** Start the booking service from the detail modal. */
+  startBooking(): void {
+    const b = this.booking();
+    if (!b) return;
+    this.checkingIn.set(true);
+    this.reservationsService.startReservation(b.id)
+      .pipe(finalize(() => this.checkingIn.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.started.emit(updated);
+        },
+        error: () => {
+          this.toastService.error('Error al iniciar el servicio');
+        },
+      });
+  }
+
+  /** Complete the booking service from the detail modal. */
+  completeBooking(): void {
+    const b = this.booking();
+    if (!b) return;
+    this.completing.set(true);
+    this.reservationsService.completeReservation(b.id)
+      .pipe(finalize(() => this.completing.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.completed.emit(updated);
+        },
+        error: () => {
+          this.toastService.error('Error al completar el servicio');
+        },
+      });
+  }
+
   // --- Data Collection ---
 
   private loadSubmission(bookingId: number) {
@@ -433,5 +518,12 @@ export class BookingDetailModalComponent {
     const [sh, sm] = b.start_time.split(':').map(Number);
     const [eh, em] = b.end_time.split(':').map(Number);
     return (eh * 60 + em) - (sh * 60 + sm);
+  }
+
+  private formatDateISO(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 }

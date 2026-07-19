@@ -9,7 +9,7 @@ import {
 } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { ToastService } from '../../../../../../shared/components';
-import { Booking, AvailabilitySlot } from '../../interfaces/reservation.interface';
+import { Booking, AvailabilitySlot, ProviderDateInfo } from '../../interfaces/reservation.interface';
 import { finalize } from 'rxjs';
 
 @Component({
@@ -30,10 +30,11 @@ export class RescheduleModalComponent {
   readonly closed = output<void>();
   readonly rescheduled = output<void>();
 
-  dates = signal<string[]>([]);
+  dates = signal<ProviderDateInfo[]>([]);
   selectedDate = signal('');
   slots = signal<AvailabilitySlot[]>([]);
   selectedSlot = signal<AvailabilitySlot | null>(null);
+  loadingDates = signal(false);
   loadingSlots = signal(false);
   submitting = signal(false);
 
@@ -41,23 +42,57 @@ export class RescheduleModalComponent {
     this.selectedDate.set('');
     this.selectedSlot.set(null);
     this.slots.set([]);
-    this.generateDates();
+    this.dates.set([]);
+    this.loadProviderDates();
   }
 
-  generateDates(): void {
-    const dates: string[] = [];
+  loadProviderDates(): void {
+    const b = this.booking();
+    if (!b?.provider_id) {
+      this.generateFallbackDates();
+      return;
+    }
+
+    this.loadingDates.set(true);
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 30);
+    const dateFrom = this.formatDateISO(today);
+    const dateTo = this.formatDateISO(endDate);
+
+    this.reservationsService
+      .getProviderDates(b.provider_id, dateFrom, dateTo, b.product_id)
+      .pipe(finalize(() => this.loadingDates.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (providerDates) => {
+          const availableDates = providerDates.filter((d) => d.has_schedule);
+          this.dates.set(availableDates);
+          if (availableDates.length > 0) {
+            this.selectDate(availableDates[0].date);
+          }
+        },
+        error: () => this.generateFallbackDates(),
+      });
+  }
+
+  private generateFallbackDates(): void {
+    const dates: ProviderDateInfo[] = [];
     const today = new Date();
     for (let i = 0; i < 14; i++) {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      dates.push(`${year}-${month}-${day}`);
+      dates.push({
+        date: this.formatDateISO(d),
+        day_of_week: d.getDay(),
+        has_schedule: true,
+        booking_count: 0,
+        bookings: [],
+      });
     }
     this.dates.set(dates);
     if (dates.length > 0) {
-      this.selectDate(dates[0]);
+      this.selectDate(dates[0].date);
     }
   }
 
@@ -84,6 +119,19 @@ export class RescheduleModalComponent {
     this.selectedSlot.set(slot);
   }
 
+  getSelectedDateBookings(): Array<{
+    id: number;
+    start_time: string;
+    end_time: string;
+    status: string;
+    customer_name: string;
+    service_name: string;
+  }> {
+    const selected = this.selectedDate();
+    const dateInfo = this.dates().find((d) => d.date === selected);
+    return dateInfo?.bookings || [];
+  }
+
   submit(): void {
     const slot = this.selectedSlot();
     const b = this.booking();
@@ -106,8 +154,8 @@ export class RescheduleModalComponent {
       });
   }
 
-  formatDate(date: string): string {
-    const d = new Date(date + 'T12:00:00');
+  formatDate(dateStr: string): string {
+    const d = new Date(dateStr + 'T12:00:00');
     const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     return `${days[d.getDay()]} ${d.getDate()}`;
   }
@@ -117,5 +165,32 @@ export class RescheduleModalComponent {
     const ampm = hours >= 12 ? 'PM' : 'AM';
     const h = hours % 12 || 12;
     return `${h}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+  }
+
+  getStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente',
+      confirmed: 'Confirmada',
+      in_progress: 'En curso',
+      arriving: 'Llegando',
+    };
+    return labels[status] || status;
+  }
+
+  getStatusClass(status: string): string {
+    const classes: Record<string, string> = {
+      pending: 'status-pending',
+      confirmed: 'status-confirmed',
+      in_progress: 'status-progress',
+      arriving: 'status-arriving',
+    };
+    return classes[status] || '';
+  }
+
+  private formatDateISO(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 }

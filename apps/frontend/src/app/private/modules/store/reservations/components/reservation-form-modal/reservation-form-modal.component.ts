@@ -18,7 +18,7 @@ import { ReservationsService } from '../../services/reservations.service';
 import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
 import { CalendarWeekViewComponent, FreeSlot } from '../calendar/calendar-week-view/calendar-week-view.component';
 import { environment } from '../../../../../../../environments/environment';
-import { debounceTime, Subject, switchMap, of, forkJoin, finalize } from 'rxjs';
+import { debounceTime, Subject, switchMap, of, forkJoin, finalize, map } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -89,6 +89,9 @@ export class ReservationFormModalComponent {
   startTime = signal('');
   endTime = signal('');
   skipAvailabilityCheck = signal(false);
+
+  // Provider schedule blocks (for validation)
+  providerScheduleBlocks = signal<Array<{ day_of_week: number; start_time: string; end_time: string }>>([]);
 
   // Customer
   customerSearch = signal('');
@@ -218,6 +221,7 @@ export class ReservationFormModalComponent {
     this.notes.set('');
     this.submitting.set(false);
     this.directBooking.set(false);
+    this.providerScheduleBlocks.set([]);
     if (this.initialProduct()) {
       const product = this.initialProduct();
       this.selectedService.set(product);
@@ -272,9 +276,11 @@ export class ReservationFormModalComponent {
 
     if (step === 0) {
       if (!this.isFreeBooking()) {
-        this.loadProviders();
+        this.loadingProviders.set(true);
+        this.loadProvidersAndAdvance(step);
+      } else {
+        this.currentStep.set(step + 1);
       }
-      this.currentStep.set(step + 1);
       return;
     }
 
@@ -294,6 +300,16 @@ export class ReservationFormModalComponent {
           `Horario fuera del servicio`,
         );
         return;
+      }
+      // Validate against provider schedule (lunch break, out of range)
+      if (this.startTime() && this.endTime()) {
+        const scheduleError = this.validateTimeAgainstProviderSchedule(
+          this.selectedDate(), this.startTime(), this.endTime()
+        );
+        if (scheduleError) {
+          this.toastService.warning(scheduleError);
+          return;
+        }
       }
       if (this.isFreeBooking()) {
         // For free booking, try loading slots if not already loaded
@@ -316,14 +332,77 @@ export class ReservationFormModalComponent {
 
   loadProviders(): void {
     const productId = this.selectedService()?.id;
+    const date = this.selectedDate();
     if (!productId) return;
 
     this.loadingProviders.set(true);
     this.reservationsService.getProvidersForService(productId)
+      .pipe(
+        switchMap((providers) => {
+          if (!providers.length) return of([]);
+          const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+          // Load schedule for each provider and filter by who works this day
+          const checks = providers.map(p =>
+            this.reservationsService.getProviderSchedule(p.id).pipe(
+              map(blocks => ({
+                provider: p,
+                works: blocks.some(b => b.day_of_week === dayOfWeek && b.is_active)
+              }))
+            )
+          );
+          return forkJoin(checks);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingProviders.set(false)),
+      )
       .subscribe({
-        next: (providers) => {
-          this.providers.set(providers);
-          this.loadingProviders.set(false);
+        next: (results) => {
+          const working = results.filter(r => r.works).map(r => r.provider);
+          this.providers.set(working);
+          if (working.length === 0) {
+            this.toastService.warning('No hay proveedores disponibles este día (dia de descanso)');
+          }
+        },
+        error: () => {
+          this.providers.set([]);
+        },
+      });
+  }
+
+  private loadProvidersAndAdvance(currentStep: number): void {
+    const productId = this.selectedService()?.id;
+    const date = this.selectedDate();
+    if (!productId) return;
+
+    this.reservationsService.getProvidersForService(productId)
+      .pipe(
+        switchMap((providers) => {
+          if (!providers.length) return of([]);
+          const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+          const checks = providers.map(p =>
+            this.reservationsService.getProviderSchedule(p.id).pipe(
+              map(blocks => ({
+                provider: p,
+                works: blocks.some(b => b.day_of_week === dayOfWeek && b.is_active)
+              }))
+            )
+          );
+          return forkJoin(checks);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingProviders.set(false)),
+      )
+      .subscribe({
+        next: (results) => {
+          const working = results.filter(r => r.works).map(r => r.provider);
+          this.providers.set(working);
+          if (working.length === 0) {
+            this.toastService.warning('No hay proveedores disponibles este día (dia de descanso)');
+            // Do NOT advance — stay on current step
+          } else {
+            // Advance to provider step
+            this.currentStep.set(currentStep + 1);
+          }
         },
         error: () => {
           this.providers.set([]);
@@ -334,6 +413,15 @@ export class ReservationFormModalComponent {
 
   selectProvider(provider: any | null): void {
     this.selectedProvider.set(provider);
+    // Load provider schedule for time validation
+    if (provider?.id) {
+      this.reservationsService.getProviderSchedule(provider.id).subscribe({
+        next: (blocks) => this.providerScheduleBlocks.set(blocks || []),
+        error: () => this.providerScheduleBlocks.set([]),
+      });
+    } else {
+      this.providerScheduleBlocks.set([]);
+    }
   }
 
   loadAvailableSlots(): void {
@@ -448,16 +536,24 @@ export class ReservationFormModalComponent {
       return;
     }
 
-    // Compute the service-aware end time so the next-step guard passes.
-    const startMinutes = (() => {
+    // Validate against provider schedule (lunch break, out of range)
+    const duration = this.selectedService()?.service_duration_minutes || 60;
+    const startMin = (() => {
       const [h, m] = event.time.split(':').map(Number);
       return h * 60 + m;
     })();
-    const duration = this.selectedService()?.service_duration_minutes || 60;
-    const endMin = startMinutes + duration;
+    const endMin = startMin + duration;
     const endH = Math.floor(endMin / 60) % 24;
     const endM = endMin % 60;
     const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+
+    const scheduleError = this.validateTimeAgainstProviderSchedule(event.date, event.time, endTime);
+    if (scheduleError) {
+      this.toastService.warning(scheduleError);
+      return;
+    }
+
+    // Compute the service-aware end time so the next-step guard passes.
 
     this.startTime.set(event.time);
     this.endTime.set(endTime);
@@ -485,6 +581,16 @@ export class ReservationFormModalComponent {
       );
       return;
     }
+    // Validate against provider schedule
+    const duration = this.selectedService()?.service_duration_minutes || 60;
+    const [h, m] = time.split(':').map(Number);
+    const endMin = h * 60 + m + duration;
+    const endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+    const scheduleError = this.validateTimeAgainstProviderSchedule(this.selectedDate(), time, endTime);
+    if (scheduleError) {
+      this.toastService.warning(scheduleError);
+      return;
+    }
     this.startTime.set(time);
   }
 
@@ -497,6 +603,48 @@ export class ReservationFormModalComponent {
     const now = new Date();
     const selected = new Date(`${date}T${time.length > 5 ? time : time + ':00'}`);
     return selected.getTime() < now.getTime();
+  }
+
+  /**
+   * Validates if a time slot (start, end) is within the provider's schedule blocks
+   * for the given day. Returns null if valid, or an error message if invalid.
+   */
+  validateTimeAgainstProviderSchedule(date: string, startTime: string, endTime: string): string | null {
+    const blocks = this.providerScheduleBlocks();
+    if (!blocks.length) return null; // No schedule loaded, skip validation
+
+    const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+    const dayBlocks = blocks.filter(b => b.day_of_week === dayOfWeek);
+    if (!dayBlocks.length) return 'El proveedor no trabaja este día';
+
+    const startMin = this.timeToMinutes(startTime);
+    const endMin = this.timeToMinutes(endTime);
+
+    // Check if the slot falls within ANY block
+    for (const block of dayBlocks) {
+      const blockStart = this.timeToMinutes(block.start_time);
+      const blockEnd = this.timeToMinutes(block.end_time);
+      if (startMin >= blockStart && endMin <= blockEnd) {
+        return null; // Valid - slot is within a block
+      }
+    }
+
+    // Slot is not within any block - check if it's in a gap (lunch break)
+    const sortedBlocks = [...dayBlocks].sort((a, b) => this.timeToMinutes(a.start_time) - this.timeToMinutes(b.start_time));
+    for (let i = 0; i < sortedBlocks.length - 1; i++) {
+      const gapEnd = this.timeToMinutes(sortedBlocks[i].end_time);
+      const gapStart = this.timeToMinutes(sortedBlocks[i + 1].start_time);
+      if (startMin >= gapEnd && endMin <= gapStart) {
+        return 'El proveedor está en hora de almuerzo/descanso en ese horario';
+      }
+    }
+
+    return 'El horario seleccionado está fuera del horario del proveedor';
+  }
+
+  private timeToMinutes(time: string): number {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
   }
 
   onCustomerSearch(query: string): void {

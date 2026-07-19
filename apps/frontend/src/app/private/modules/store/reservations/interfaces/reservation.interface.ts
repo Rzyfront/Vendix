@@ -80,6 +80,21 @@ export interface AvailabilitySlot {
   total_available: number;
 }
 
+export interface ProviderDateInfo {
+  date: string;
+  day_of_week: number;
+  has_schedule: boolean;
+  booking_count: number;
+  bookings: Array<{
+    id: number;
+    start_time: string;
+    end_time: string;
+    status: string;
+    customer_name: string;
+    service_name: string;
+  }>;
+}
+
 export interface BookingQuery {
   page?: number;
   limit?: number;

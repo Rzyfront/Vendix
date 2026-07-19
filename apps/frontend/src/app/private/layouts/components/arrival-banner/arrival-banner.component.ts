@@ -72,7 +72,7 @@ export class ArrivalBannerComponent {
         if (!this.toastedIds.has(a.id)) {
           this.toastedIds.add(a.id);
           this.toast.show({
-            title: 'Cliente llegó',
+            title: 'Cliente en sala de espera',
             description: `${a.data?.customer_name ?? 'Cliente'} — ${a.data?.service_name ?? 'servicio'}`,
             variant: 'warning',
             duration: 8000,

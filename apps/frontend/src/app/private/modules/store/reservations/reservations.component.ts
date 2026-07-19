@@ -250,22 +250,12 @@ export class ReservationsComponent {
   }
 
   onComplete(booking: Booking): void {
-    this.reservationsService
-      .completeReservation(booking.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.isDetailModalOpen.set(false);
-          this.toastService.success('Reserva completada');
-          this.loadBookings();
-          this.loadStats();
-          this.loadTodayBookings();
-          this.calendarRefreshTrigger.update(v => v + 1);
-        },
-        error: () => {
-          this.toastService.error('Error al completar la reserva');
-        },
-      });
+    this.isDetailModalOpen.set(false);
+    this.toastService.success('Reserva completada');
+    this.loadBookings();
+    this.loadStats();
+    this.loadTodayBookings();
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onNoShow(booking: Booking): void {
@@ -309,22 +299,12 @@ export class ReservationsComponent {
   }
 
   onStartBooking(booking: Booking): void {
-    this.reservationsService
-      .startReservation(booking.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.isDetailModalOpen.set(false);
-          this.toastService.success('Reserva iniciada');
-          this.loadBookings();
-          this.loadStats();
-          this.loadTodayBookings();
-          this.calendarRefreshTrigger.update(v => v + 1);
-        },
-        error: () => {
-          this.toastService.error('Error al iniciar la reserva');
-        },
-      });
+    this.isDetailModalOpen.set(false);
+    this.toastService.success('Reserva iniciada');
+    this.loadBookings();
+    this.loadStats();
+    this.loadTodayBookings();
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onRescheduledFromDetail(): void {
@@ -426,6 +406,13 @@ export class ReservationsComponent {
     this.dateTo.set(today);
     this.page.set(1);
     this.loadBookings();
+  }
+
+  onCheckedIn(updatedBooking: Booking): void {
+    this.todayBookings.update((bookings) =>
+      bookings.map((b) => (b.id === updatedBooking.id ? updatedBooking : b))
+    );
+    this.loadStats();
   }
 
   formatRate(value: number): string {

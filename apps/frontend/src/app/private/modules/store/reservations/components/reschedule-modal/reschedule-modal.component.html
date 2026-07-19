@@ -26,16 +26,54 @@
 
     <!-- Date selector -->
     <label class="section-label">Seleccionar nueva fecha</label>
-    <div class="date-selector">
-      @for (date of dates(); track date) {
-        <button
-          class="date-chip"
-          [class.selected]="selectedDate() === date"
-          (click)="selectDate(date)">
-          {{ formatDate(date) }}
-        </button>
-      }
-    </div>
+    @if (loadingDates()) {
+      <div class="loading-center">
+        <app-spinner size="sm" color="primary"></app-spinner>
+      </div>
+    } @else if (dates().length === 0) {
+      <p class="empty-slots">No hay fechas disponibles para este proveedor</p>
+    } @else {
+      <div class="date-selector">
+        @for (dateInfo of dates(); track dateInfo.date) {
+          <button
+            class="date-chip"
+            [class.selected]="selectedDate() === dateInfo.date"
+            [class.has-bookings]="dateInfo.booking_count > 0"
+            (click)="selectDate(dateInfo.date)">
+            <span class="date-label">{{ formatDate(dateInfo.date) }}</span>
+            @if (dateInfo.booking_count > 0) {
+              <span class="booking-badge">{{ dateInfo.booking_count }}</span>
+            }
+          </button>
+        }
+      </div>
+    }
+
+    <!-- Existing bookings for selected date -->
+    @if (getSelectedDateBookings().length > 0) {
+      <div class="existing-bookings">
+        <label class="section-label">
+          <app-icon name="calendar" [size]="14"></app-icon>
+          Citas agendadas este día
+        </label>
+        <div class="bookings-list">
+          @for (bk of getSelectedDateBookings(); track bk.id) {
+            <div class="booking-item">
+              <div class="booking-time">
+                {{ formatTime(bk.start_time) }} - {{ formatTime(bk.end_time) }}
+              </div>
+              <div class="booking-details">
+                <span class="booking-customer">{{ bk.customer_name }}</span>
+                <span class="booking-service">{{ bk.service_name }}</span>
+              </div>
+              <span class="booking-status" [class]="getStatusClass(bk.status)">
+                {{ getStatusLabel(bk.status) }}
+              </span>
+            </div>
+          }
+        </div>
+      </div>
+    }
 
     <!-- Time slots -->
     <label class="section-label">Horarios disponibles</label>

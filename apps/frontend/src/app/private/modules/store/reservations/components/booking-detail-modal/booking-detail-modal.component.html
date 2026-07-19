@@ -259,16 +259,24 @@
 
         <!-- Date selector -->
         <label class="section-label">Nueva fecha</label>
+        @if (loadingDates()) {
+          <div class="loading-center">
+            <app-spinner size="sm" color="primary"></app-spinner>
+          </div>
+        } @else if (dates().length === 0) {
+          <p class="empty-slots">No hay fechas disponibles para este proveedor</p>
+        } @else {
         <div class="date-selector">
-          @for (date of dates(); track date) {
+          @for (dateInfo of dates(); track dateInfo.date) {
             <button
               class="date-chip"
-              [class.selected]="selectedDate() === date"
-              (click)="selectDate(date)">
-              {{ formatDateShort(date) }}
+              [class.selected]="selectedDate() === dateInfo.date"
+              (click)="selectDate(dateInfo.date)">
+              {{ formatDateShort(dateInfo.date) }}
             </button>
           }
         </div>
+        }
 
         <!-- Time slots -->
         <label class="section-label">Horario disponible</label>
@@ -395,7 +403,7 @@
               {{ consultationButtonLabel() }}
             </button>
           } @else {
-            <button class="btn-footer primary" (click)="started.emit(f)">
+            <button class="btn-footer primary" [disabled]="checkingIn()" (click)="startBooking()">
               <app-icon name="play" [size]="15"></app-icon>
               Iniciar
             </button>
@@ -408,7 +416,7 @@
               {{ consultationButtonLabel() }}
             </button>
           }
-          <button class="btn-footer success" (click)="completed.emit(f)">
+          <button class="btn-footer success" [disabled]="completing()" (click)="completeBooking()">
             <app-icon name="check-circle" [size]="15"></app-icon>
             Completar
           </button>

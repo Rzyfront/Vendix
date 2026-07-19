@@ -2,7 +2,7 @@ import { Component, computed, inject, input, output, signal } from '@angular/cor
 
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
-import { BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent } from '../../../../../../shared/components';
+import { BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent, ToastService } from '../../../../../../shared/components';
 import { BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
 import { ReservationsService } from '../../services/reservations.service';
@@ -21,6 +21,7 @@ const SPANISH_MONTHS = [
 })
 export class TodayReservationsPanelComponent {
   private readonly reservations = inject(ReservationsService);
+  private readonly toastService = inject(ToastService);
 
   bookings = input<Booking[]>([]);
   readonly loadingInput = input(false, { alias: 'loading' });
@@ -30,6 +31,8 @@ export class TodayReservationsPanelComponent {
   bookingClicked = output<Booking>();
   viewAllClicked = output<void>();
   checkedIn = output<Booking>();
+  started = output<Booking>();
+  completed = output<Booking>();
 
   todayLabel = computed(() => {
     const now = new Date();
@@ -44,6 +47,8 @@ export class TodayReservationsPanelComponent {
     const map: Record<BookingStatus, string> = {
       pending: 'var(--color-warning)',
       confirmed: 'var(--color-info)',
+      arriving: 'var(--color-success)',
+      attending: 'var(--color-primary)',
       in_progress: 'var(--color-primary)',
       completed: 'var(--color-success)',
       cancelled: 'var(--color-error)',
@@ -56,6 +61,8 @@ export class TodayReservationsPanelComponent {
     const map: Record<BookingStatus, BadgeVariant> = {
       pending: 'warning',
       confirmed: 'primary',
+      arriving: 'success',
+      attending: 'primary',
       in_progress: 'primary',
       completed: 'success',
       cancelled: 'error',
@@ -86,12 +93,60 @@ export class TodayReservationsPanelComponent {
     event.stopPropagation();
     if (!this.canCheckIn(booking)) return;
     this.reservations.checkInReservation(booking.id).subscribe({
-      next: (updated) => this.checkedIn.emit(updated),
+      next: (updated) => {
+        this.toastService.success('Llegada registrada exitosamente');
+        this.checkedIn.emit(updated);
+      },
+      error: () => {
+        this.toastService.error('Error al registrar la llegada');
+      },
     });
   }
 
   canCheckIn(booking: Booking): boolean {
-    return booking.status === 'confirmed' || booking.status === 'arriving';
+    return booking.status === 'confirmed';
+  }
+
+  canStart(booking: Booking): boolean {
+    return booking.status === 'arriving' || booking.status === 'attending';
+  }
+
+  canComplete(booking: Booking): boolean {
+    return booking.status === 'in_progress';
+  }
+
+  quickStart(booking: Booking, event: Event): void {
+    event.stopPropagation();
+    if (!this.canStart(booking)) return;
+    this.internalLoading.set(true);
+    this.reservations.startReservation(booking.id).subscribe({
+      next: (updated) => {
+        this.internalLoading.set(false);
+        this.toastService.success('Servicio iniciado');
+        this.started.emit(updated);
+      },
+      error: () => {
+        this.internalLoading.set(false);
+        this.toastService.error('Error al iniciar el servicio');
+      },
+    });
+  }
+
+  quickComplete(booking: Booking, event: Event): void {
+    event.stopPropagation();
+    if (!this.canComplete(booking)) return;
+    this.internalLoading.set(true);
+    this.reservations.completeReservation(booking.id).subscribe({
+      next: (updated) => {
+        this.internalLoading.set(false);
+        this.toastService.success('Servicio completado');
+        this.completed.emit(updated);
+      },
+      error: () => {
+        this.internalLoading.set(false);
+        this.toastService.error('Error al completar el servicio');
+      },
+    });
   }
 
   formatTime(time: string): string {
