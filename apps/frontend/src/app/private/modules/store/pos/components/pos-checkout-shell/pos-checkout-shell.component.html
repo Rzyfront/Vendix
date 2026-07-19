@@ -116,6 +116,29 @@
               ></app-pos-customer-selector>
             }
           </section>
+
+          <!-- Sub-sección · Dirección de envío (delivery ∧ cliente seleccionado).
+               Captura la dirección aquí (antes vivía en el paso Envío) con el
+               componente reutilizable app-address-form-fields (mapa + geocoding). -->
+          @if (requiresAddress() && !isAnonymousSale() && cartState()?.customer) {
+            <section class="cliente-section">
+              <div class="section-header">
+                <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
+                <h2 class="section-title">Dirección de envío</h2>
+                @if (!addressValid()) {
+                  <span
+                    style="margin-left:auto;font-size:0.7rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:999px;background:rgba(245,158,11,0.12);color:#d97706;"
+                    >Obligatoria</span
+                  >
+                }
+              </div>
+              <app-address-form-fields
+                [initialAddress]="customerInitialAddress()"
+                (addressChange)="onShellAddressChange($event)"
+                (validChange)="addressValid.set($event)"
+              ></app-address-form-fields>
+            </section>
+          }
         </div>
         }
 
@@ -125,6 +148,8 @@
           <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
+              [address]="capturedAddress()"
+              [addressId]="capturedAddressId()"
               [(payTiming)]="payTiming"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>

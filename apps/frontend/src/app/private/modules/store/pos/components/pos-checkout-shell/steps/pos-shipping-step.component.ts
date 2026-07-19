@@ -3,52 +3,41 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   input,
   model,
   output,
   signal,
+  untracked,
 } from '@angular/core';
-import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  FormBuilder,
   FormControl,
-  FormGroup,
-  Validators,
   ReactiveFormsModule,
   FormsModule,
 } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { debounceTime, startWith } from 'rxjs';
 
 import {
   IconComponent,
   InputComponent,
-  SelectorComponent,
 } from '../../../../../../../shared/components';
-import type {
-  SelectorOption,
-  PaymentSubmit,
-} from '../../../../../../../shared/components';
+import type { PaymentSubmit } from '../../../../../../../shared/components';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   CurrencyFormatService,
   CurrencyPipe,
 } from '../../../../../../../shared/pipes/currency';
 import { CurrencyInputDirective } from '../../../../../../../shared/directives/currency-input.directive';
-import {
-  CountryService,
-  Department,
-  City,
-} from '../../../../../../../services/country.service';
+import { CountryService } from '../../../../../../../services/country.service';
+import { AddressPayload } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { environment } from '../../../../../../../../environments/environment';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
-import { PosCustomerService } from '../../../services/pos-customer.service';
 import { CartState } from '../../../models/cart.model';
-import { PosCustomer } from '../../../models/customer.model';
 import {
   PosShippingMethod,
   PosShippingAddress,
@@ -82,7 +71,6 @@ type FlashSection = 'shipping-method' | 'address' | 'customer';
     FormsModule,
     IconComponent,
     InputComponent,
-    SelectorComponent,
     CurrencyPipe,
     CurrencyInputDirective,
   ],
@@ -94,18 +82,27 @@ export class PosShippingStepComponent {
 
   // ── Inputs / two-way ──────────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
+  /**
+   * Shipping address captured upstream in the Cliente step (shell-owned
+   * `app-address-form-fields`). This step no longer collects the address; it
+   * only consumes it to calculate the cost and build the order.
+   */
+  readonly address = input<AddressPayload | null>(null);
+  /**
+   * Id of the customer's saved address to reuse. `null` → this step will
+   * create the captured address before processing the order.
+   */
+  readonly addressId = input<number | null>(null);
   /** Toggle "cuándo paga": 'now' (pagar ahora) | 'later' (contra entrega). */
   readonly payTiming = model<'now' | 'later'>('now');
 
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly shippingCompleted = output<any>();
 
-  private readonly fb = inject(FormBuilder);
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly paymentService = inject(PosPaymentService);
   private readonly shippingService = inject(PosShippingService);
-  private readonly customerService = inject(PosCustomerService);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly countryService = inject(CountryService);
@@ -123,47 +120,21 @@ export class PosShippingStepComponent {
   // ── Processing ────────────────────────────────────────────────────────────
   readonly isProcessing = signal<boolean>(false);
 
-  // ── Address auto-fill state ───────────────────────────────────────────────
-  readonly selectedCustomerAddressId = signal<number | null>(null);
-
-  // ── Location dropdowns (API Colombia) ─────────────────────────────────────
-  readonly departments = signal<Department[]>([]);
-  readonly cities = signal<City[]>([]);
-  readonly selectedDepartmentId = signal<number | null>(null);
-  readonly selectedCityId = signal<number | null>(null);
-
   // ── Validation flash ──────────────────────────────────────────────────────
   readonly flashSection = signal<FlashSection | null>(null);
   readonly flashMessage = signal<string>('');
   private flashTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // ── Forms ─────────────────────────────────────────────────────────────────
-  readonly addressForm: FormGroup = this.fb.group({
-    address_line1: ['', Validators.required],
-    city: ['', Validators.required],
-    state_province: [''],
-    delivery_notes: [''],
-  });
-
   /**
-   * Zoneless bridge: `addressForm.value` is a plain property, NOT a signal, so
-   * reading it inside a `computed()` never recomputes. We mirror it through a
-   * signal so {@link canConfirm} (consumed by the shell's `confirmDisabled`
-   * computed) reacts to address edits.
+   * Delivery notes are the only free-text field still owned here; the address
+   * itself is captured upstream by `app-address-form-fields` and arrives via
+   * the `address` input.
    */
-  private readonly addressValue = toSignal(
-    this.addressForm.valueChanges.pipe(startWith(this.addressForm.value)),
-    { initialValue: this.addressForm.value },
-  );
+  readonly notesControl = new FormControl<string>('', { nonNullable: true });
 
-  get addressLine1Control(): FormControl {
-    return this.addressForm.get('address_line1') as FormControl;
-  }
-  get cityControl(): FormControl {
-    return this.addressForm.get('city') as FormControl;
-  }
   get deliveryNotesControl(): FormControl {
-    return this.addressForm.get('delivery_notes') as FormControl;
+    return this.notesControl;
   }
 
   get customerDisplayName(): string {
@@ -178,17 +149,11 @@ export class PosShippingStepComponent {
     () => (this.cartState()?.summary?.total || 0) + this.shippingCost(),
   );
 
-  readonly departmentOptions = computed<SelectorOption[]>(() =>
-    this.departments().map((d) => ({ value: d.id, label: d.name })),
-  );
-  readonly cityOptions = computed<SelectorOption[]>(() =>
-    this.cities().map((c) => ({ value: c.id, label: c.name })),
-  );
-
   /**
    * Reactive confirm gate (signal-based so the shell footer recomputes). Mirrors
    * the shipping half of the legacy `canConfirm` (the payment half is validated
-   * by the Cobro step / collector, not here).
+   * by the Cobro step / collector, not here). The address now arrives via the
+   * `address` input captured in the Cliente step.
    */
   readonly canConfirm = computed<boolean>(() => {
     const method = this.selectedShippingMethod();
@@ -196,42 +161,39 @@ export class PosShippingStepComponent {
     if (!this.cartState()?.customer) return false;
     if (!this.cartState()?.items?.length) return false;
     if (method.type !== 'pickup') {
-      const addr = this.addressValue() as
-        | { address_line1?: string; city?: string }
-        | null;
-      if (!addr?.address_line1 || !addr?.city) return false;
+      const a = this.address();
+      if (!a?.address_line1 || !a?.city) return false;
     }
     return true;
   });
 
   constructor() {
     this.loadShippingMethods();
-    this.setupFormListeners();
     this.currencyService.loadCurrency();
-    void this.loadDepartments();
+
+    // Recalculate shipping cost whenever the captured address changes (delivery
+    // only, unless the operator overrode the cost manually). Writes to signals
+    // happen through calculateShippingCost inside untracked() (zoneless-safe).
+    effect(() => {
+      this.address();
+      untracked(() => {
+        if (this.selectedShippingMethod() && !this.manualCostOverride()) {
+          this.calculateShippingCost();
+        }
+      });
+    });
 
     inject(DestroyRef).onDestroy(() => {
       if (this.flashTimeout) clearTimeout(this.flashTimeout);
     });
   }
 
-  // ── Loaders / listeners ───────────────────────────────────────────────────
+  // ── Loaders ──────────────────────────────────────────────────────────────
   private loadShippingMethods(): void {
     this.shippingService
       .getShippingMethods()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((methods) => this.shippingMethods.set(methods));
-  }
-
-  private setupFormListeners(): void {
-    // Recalculate shipping cost when the address changes (delivery only).
-    this.addressForm.valueChanges
-      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(500))
-      .subscribe(() => {
-        if (this.selectedShippingMethod() && !this.manualCostOverride()) {
-          this.calculateShippingCost();
-        }
-      });
   }
 
   // ── Shipping methods ──────────────────────────────────────────────────────
@@ -260,8 +222,8 @@ export class PosShippingStepComponent {
     const method = this.selectedShippingMethod();
     if (!method || !this.cartState()?.items?.length) return;
 
-    const address = this.addressForm.value;
-    if (method.type !== 'pickup' && !address.city) return;
+    const a = this.address();
+    if (method.type !== 'pickup' && !a?.city) return;
 
     this.isCalculatingShipping.set(true);
 
@@ -276,9 +238,9 @@ export class PosShippingStepComponent {
     this.shippingService
       .calculateShipping(items, {
         country_code: 'CO',
-        city: address.city || undefined,
-        state_province: address.state_province || undefined,
-        address_line1: address.address_line1 || undefined,
+        city: a?.city || undefined,
+        state_province: a?.state_province || undefined,
+        address_line1: a?.address_line1 || undefined,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -317,106 +279,6 @@ export class PosShippingStepComponent {
     // shippingCost already updated by the [(ngModel)] binding.
   }
 
-  // ── Location dropdowns (API Colombia) ─────────────────────────────────────
-  private async loadDepartments(): Promise<void> {
-    this.departments.set(await this.countryService.getDepartments());
-  }
-
-  async onDepartmentChange(departmentId: number): Promise<void> {
-    this.selectedDepartmentId.set(departmentId || null);
-    const dept = this.departments().find((d) => d.id === departmentId);
-    this.addressForm.patchValue({ state_province: dept?.name || '' });
-
-    this.cities.set([]);
-    this.selectedCityId.set(null);
-    this.addressForm.patchValue({ city: '' });
-
-    if (departmentId) {
-      this.cities.set(await this.countryService.getCitiesByDepartment(departmentId));
-    }
-  }
-
-  onCityChange(cityId: number): void {
-    this.selectedCityId.set(cityId || null);
-    const city = this.cities().find((c) => c.id === cityId);
-    this.addressForm.patchValue({ city: city?.name || '' });
-  }
-
-  // ── Customer address prefill (shell-driven, user-action triggered) ─────────
-  /** Public hook: prefill the address form from the cart's current customer. */
-  prefillFromCart(): void {
-    void this.prefillFromCustomer(this.cartState()?.customer ?? null);
-  }
-
-  /**
-   * Public hook: prefill from a specific customer object (the shell passes the
-   * fresh selection before it flows back through the `cartState` input). Fetches
-   * the full customer when its addresses are not yet hydrated.
-   */
-  async prefillFromCustomer(customer: PosCustomer | null | undefined): Promise<void> {
-    if (!customer) return;
-    if (this.departments().length === 0) await this.loadDepartments();
-
-    if (customer.addresses && customer.addresses.length > 0) {
-      await this.applyCustomerAddress(customer);
-      return;
-    }
-
-    this.customerService
-      .fetchCustomerById(customer.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((refreshed) => {
-        if (refreshed) void this.applyCustomerAddress(refreshed);
-      });
-  }
-
-  private async applyCustomerAddress(customer: PosCustomer): Promise<void> {
-    const shippingAddress =
-      customer.addresses?.find((a) => a.is_primary) || customer.addresses?.[0];
-
-    if (!shippingAddress) {
-      this.addressForm.reset();
-      this.selectedCustomerAddressId.set(null);
-      this.selectedDepartmentId.set(null);
-      this.selectedCityId.set(null);
-      this.cities.set([]);
-      return;
-    }
-
-    this.addressForm.patchValue({ address_line1: shippingAddress.address_line1 });
-    this.selectedCustomerAddressId.set(shippingAddress.id);
-
-    if (shippingAddress.state_province) {
-      const dept = this.departments().find(
-        (d) => d.name.toLowerCase() === shippingAddress.state_province!.toLowerCase(),
-      );
-      if (dept) {
-        this.selectedDepartmentId.set(dept.id);
-        this.addressForm.patchValue({ state_province: dept.name });
-        this.cities.set(await this.countryService.getCitiesByDepartment(dept.id));
-
-        if (shippingAddress.city) {
-          const city = this.cities().find(
-            (c) => c.name.toLowerCase() === shippingAddress.city!.toLowerCase(),
-          );
-          if (city) {
-            this.selectedCityId.set(city.id);
-            this.addressForm.patchValue({ city: city.name });
-          }
-        }
-      } else {
-        this.addressForm.patchValue({
-          state_province: shippingAddress.state_province || '',
-          city: shippingAddress.city || '',
-        });
-      }
-    }
-
-    if (this.selectedShippingMethod() && !this.manualCostOverride()) {
-      this.calculateShippingCost();
-    }
-  }
-
   navigateToShippingSettings(): void {
     this.router.navigate(['/admin/settings/shipping']);
   }
@@ -428,8 +290,8 @@ export class PosShippingStepComponent {
       return { section: 'shipping-method', message: 'Selecciona un método de envío' };
     }
     if (method.type !== 'pickup') {
-      const addr = this.addressForm.value;
-      if (!addr.address_line1 || !addr.city) {
+      const a = this.address();
+      if (!a?.address_line1 || !a?.city) {
         return { section: 'address', message: 'Completa la dirección de envío' };
       }
     }
@@ -484,12 +346,12 @@ export class PosShippingStepComponent {
 
     const deliveryType = method.type === 'pickup' ? 'pickup' : 'home_delivery';
 
-    const addr = this.addressForm.value;
+    const a = this.address();
     const shippingAddress: PosShippingAddress = {
-      address_line1: addr.address_line1 || '',
-      city: addr.city || '',
-      state_province: addr.state_province || '',
-      country_code: 'CO',
+      address_line1: a?.address_line1 || '',
+      city: a?.city || '',
+      state_province: a?.state_province || '',
+      country_code: a?.country_code || 'CO',
       recipient_name: this.customerDisplayName,
       recipient_phone: cart.customer?.phone || '',
     };
@@ -533,10 +395,10 @@ export class PosShippingStepComponent {
         : undefined;
     }
 
-    const customerAddressId = this.selectedCustomerAddressId();
-    if (!customerAddressId && addr.address_line1 && addr.city && cart.customer) {
+    const existingId = this.addressId();
+    if (!existingId && a?.address_line1 && a?.city && cart.customer) {
       this.createAddressThenProcessOrder(
-        addr,
+        a,
         shippingAddress,
         deliveryType,
         paymentRequest,
@@ -547,14 +409,14 @@ export class PosShippingStepComponent {
         shippingAddress,
         deliveryType,
         paymentRequest,
-        customerAddressId,
+        existingId,
         creditConfig,
       );
     }
   }
 
   private createAddressThenProcessOrder(
-    address: any,
+    address: AddressPayload,
     shippingAddress: PosShippingAddress,
     deliveryType: string,
     paymentRequest: PaymentRequest | null,
@@ -598,8 +460,6 @@ export class PosShippingStepComponent {
     addressId: number | null,
     creditConfig?: any,
   ): void {
-    const address = this.addressForm.value;
-
     this.paymentService
       .processShippingSale(
         this.cartState()!,
@@ -608,7 +468,7 @@ export class PosShippingStepComponent {
           shippingCost: this.shippingCost(),
           deliveryType,
           shippingAddress,
-          deliveryNotes: address.delivery_notes || undefined,
+          deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
         },
         paymentRequest,

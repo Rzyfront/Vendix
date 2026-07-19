@@ -94,63 +94,6 @@
     }
   </section>
 
-  <!-- SECTION 3 · Dirección (solo si método no-pickup) -->
-  @if (selectedShippingMethod() && selectedShippingMethod()!.type !== 'pickup') {
-    <section
-      class="payment-section"
-      [class.config-flash-warning]="flashSection() === 'address'"
-    >
-      <div class="section-header">
-        <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
-        <h2 class="section-title">Dirección de envío</h2>
-      </div>
-
-      <!-- Auto-fill badge -->
-      @if (selectedCustomerAddressId()) {
-        <div class="addr-badge addr-badge-fill">
-          <app-icon name="map-pin" [size]="14"></app-icon>
-          <span>Dirección del cliente (editable)</span>
-        </div>
-      }
-      @if (!selectedCustomerAddressId() && cartState()?.customer) {
-        <div class="addr-badge addr-badge-new">
-          <app-icon name="plus-circle" [size]="14"></app-icon>
-          <span>Nueva dirección (se guardará al cliente)</span>
-        </div>
-      }
-
-      <div class="address-form">
-        <app-input
-          [formControl]="addressLine1Control"
-          [label]="'Dirección *'"
-          [placeholder]="'Calle, número, barrio...'"
-          [size]="'sm'"
-        ></app-input>
-        <div class="form-row">
-          <app-selector
-            label="Departamento"
-            placeholder="Seleccionar..."
-            [options]="departmentOptions()"
-            [required]="true"
-            [size]="'sm'"
-            [ngModel]="selectedDepartmentId()"
-            (valueChange)="onDepartmentChange(+($event || 0))"
-          ></app-selector>
-          <app-selector
-            label="Ciudad"
-            placeholder="Seleccionar..."
-            [options]="cityOptions()"
-            [required]="true"
-            [disabled]="!cities().length"
-            [size]="'sm'"
-            [ngModel]="selectedCityId()"
-            (valueChange)="onCityChange(+($event || 0))"
-          ></app-selector>
-        </div>
-      </div>
-    </section>
-  }
-
   <!-- SECTION 4 · Costo de envío + notas (cuando hay método) -->
   @if (selectedShippingMethod()) {
     <section class="payment-section">

@@ -21,6 +21,10 @@ import {
 } from '../../../../../../shared/components';
 import type { StepsLineItem, PaymentSubmit } from '../../../../../../shared/components';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import {
+  AddressFormFieldsComponent,
+  AddressPayload,
+} from '../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { PosCustomerSelectorComponent } from '../pos-customer-selector/pos-customer-selector.component';
 import { PosConsumoStepComponent } from './steps/pos-consumo-step.component';
 import { PosPaymentStepComponent } from './steps/pos-payment-step.component';
@@ -61,6 +65,7 @@ export type CheckoutIntent = 'pickup' | 'delivery';
     IconComponent,
     StepsLineComponent,
     CurrencyPipe,
+    AddressFormFieldsComponent,
     PosCustomerSelectorComponent,
     PosConsumoStepComponent,
     PosPaymentStepComponent,
@@ -108,6 +113,42 @@ export class PosCheckoutShellComponent {
 
   // ── Pay timing (delivery only; owned here, two-way with the Envío step) ──
   readonly payTiming = signal<'now' | 'later'>('now');
+
+  // ── Address capture (moved from the Envío step into the Cliente step) ────
+  /** Live address payload emitted by the shell-mounted `app-address-form-fields`. */
+  readonly capturedAddress = signal<AddressPayload | null>(null);
+  /** Validity of the captured address (drives whether delivery can proceed). */
+  readonly addressValid = signal<boolean>(false);
+  /** Id of the selected customer's saved address; null → the Envío step creates it. */
+  readonly capturedAddressId = signal<number | null>(null);
+
+  /** Delivery flows must capture a shipping address in the Cliente step. */
+  readonly requiresAddress = computed<boolean>(
+    () => this.checkoutIntent() === 'delivery',
+  );
+
+  /**
+   * Seeds `app-address-form-fields` from the current customer's primary saved
+   * address (defensive mapping to `AddressPayload`). Null when the customer has
+   * no address on file.
+   */
+  readonly customerInitialAddress = computed<AddressPayload | null>(() => {
+    const customer = this.cartState()?.customer;
+    const addresses = customer?.addresses;
+    const a = addresses?.find((x) => x.is_primary) ?? addresses?.[0];
+    if (!a) return null;
+    return {
+      address_line1: a.address_line1 ?? null,
+      address_line2: null,
+      city: a.city ?? null,
+      state_province: a.state_province ?? null,
+      country_code: a.country_code ?? 'CO',
+      postal_code: null,
+      phone_number: customer?.phone ?? null,
+      latitude: null,
+      longitude: null,
+    };
+  });
 
   // ── Stepper state ──────────────────────────────────────────────────────
   readonly currentStep = signal(0);
@@ -268,6 +309,9 @@ export class PosCheckoutShellComponent {
           this.currentStep.set(0);
           this.payTiming.set('now');
           this.userOverrideAnonymous.set(null);
+          this.capturedAddress.set(null);
+          this.addressValid.set(false);
+          this.capturedAddressId.set(null);
           this.syncAnonymousSaleState();
         });
       }
@@ -305,11 +349,6 @@ export class PosCheckoutShellComponent {
   goToStep(index: number): void {
     if (index < 0 || index >= this.stepKeys().length) return;
     this.currentStep.set(index);
-    // Lazily prefill the delivery address when the operator enters the Envío
-    // step (user action → not an effect, keeps HTTP out of reactive contexts).
-    if (this.stepKeys()[index] === 'envio') {
-      this.shippingStep()?.prefillFromCart();
-    }
   }
 
   /** Navigate by step key; no-op when the key is not part of the current flow. */
@@ -371,9 +410,39 @@ export class PosCheckoutShellComponent {
     this.isAnonymousSale.set(false);
     // El padre (POS) es dueño del carrito; solo re-emitimos.
     this.customerSelected.emit(customer);
-    // Prefill the delivery address with the fresh selection (the cartState input
-    // only updates after the parent re-renders, so pass the object directly).
-    this.shippingStep()?.prefillFromCustomer(customer);
+    // Derive the customer's saved primary-address id so the Envío step reuses it
+    // (null → the shipping step will create the captured address).
+    const addresses = customer.addresses;
+    const primary = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
+    this.capturedAddressId.set(primary?.id ?? null);
+
+    // Seed the captured address from the customer's saved primary address so the
+    // delivery gate is not blocked before the operator touches the form.
+    // `app-address-form-fields` prefills via patchValue({emitEvent:false}) and
+    // never emits addressChange/validChange on hydration, so `capturedAddress`
+    // would otherwise stay null for an existing customer with a saved address.
+    // We derive from the `customer` argument (NOT cartState(), which is still
+    // stale here — the parent has not propagated the new customer yet).
+    if (this.requiresAddress() && primary) {
+      const seeded: AddressPayload = {
+        address_line1: primary.address_line1 ?? null,
+        address_line2: null,
+        city: primary.city ?? null,
+        state_province: primary.state_province ?? null,
+        country_code: primary.country_code ?? 'CO',
+        postal_code: null,
+        phone_number: customer.phone ?? null,
+        latitude: null,
+        longitude: null,
+      };
+      this.capturedAddress.set(seeded);
+      this.addressValid.set(!!(seeded.address_line1 && seeded.city));
+    }
+  }
+
+  /** Live address payload from the shell-mounted `app-address-form-fields`. */
+  onShellAddressChange(a: AddressPayload): void {
+    this.capturedAddress.set(a);
   }
 
   /** "Quitar cliente / venta anónima" desde el selector inline. */
