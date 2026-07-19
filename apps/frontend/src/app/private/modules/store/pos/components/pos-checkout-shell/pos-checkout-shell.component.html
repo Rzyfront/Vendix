@@ -232,8 +232,8 @@
       <button
         type="button"
         class="btn-draft"
-        [disabled]="true"
-        title="Disponible próximamente"
+        [disabled]="footerProcessing()"
+        (click)="onSaveDraft()"
       >
         <app-icon name="save" [size]="16"></app-icon>
         Guardar borrador
