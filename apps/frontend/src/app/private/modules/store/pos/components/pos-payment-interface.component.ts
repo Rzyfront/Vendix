@@ -10,32 +10,25 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  FormBuilder,
-  FormGroup,
-  FormControl,
-  Validators,
-  ReactiveFormsModule,
-  FormsModule,
-} from '@angular/forms';
-import { Subscription, debounceTime, firstValueFrom } from 'rxjs';
+import { Subscription, firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 
 import {
   ModalComponent,
-  InputComponent,
   IconComponent,
-  SelectorComponent,
   SpinnerComponent,
   ButtonComponent,
+  PaymentCollectorComponent,
+} from '../../../../../shared/components';
+import type {
+  PaymentSubmit,
+  CreditTerms,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
   CurrencyFormatService,
   CurrencyPipe,
 } from '../../../../../shared/pipes/currency';
-import { CurrencyInputDirective } from '../../../../../shared/directives/currency-input.directive';
-import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -49,9 +42,7 @@ import { PosWalletService, WalletInfo } from '../services/pos-wallet.service';
 import {
   WompiService,
   WompiSubMethod,
-  WompiSubMethodConfig,
   WompiPaymentStatusUpdate,
-  PseFinancialInstitution,
 } from '../../../../../shared/services/wompi.service';
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
@@ -59,32 +50,23 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
 import type { BusinessHours } from '../../../../../core/models/store-settings.interface';
 
 interface PaymentState {
-  selectedMethod: PaymentMethod | null;
-  cashReceived: number;
-  reference: string;
   isProcessing: boolean;
-  change: number;
   isAnonymousSale: boolean;
-  paymentForm: 'contado' | 'credito';
 }
 
 @Component({
   selector: 'app-pos-payment-interface',
   standalone: true,
   imports: [
-    ReactiveFormsModule,
-    FormsModule,
     ModalComponent,
-    InputComponent,
     IconComponent,
-    SelectorComponent,
     SpinnerComponent,
     ButtonComponent,
     CurrencyPipe,
-    CurrencyInputDirective,
     PosFulfillmentSelectorComponent,
     PosCustomerSelectorComponent,
     PosOpenTableModalComponent,
+    PaymentCollectorComponent,
   ],
   templateUrl: './pos-payment-interface.component.html',
   styles: [
@@ -1279,7 +1261,6 @@ export class PosPaymentInterfaceComponent {
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
   paymentMethods = signal<PaymentMethod[]>([]);
-  paymentForm: FormGroup;
   /** Fulfillment type selected for this payment. Defaults to 'entrega' so
    *  retail stores (and restaurants without prepared items) keep the legacy
    *  UX untouched. Restaurant stores must explicitly choose 'consumo' when
@@ -1300,26 +1281,28 @@ export class PosPaymentInterfaceComponent {
   /** Bug 1 (Fase K): toggles the inline PosOpenTableModalComponent. */
   readonly openTablePicker = signal(false);
 
+  /**
+   * Fase 4: the headless payment collector owns the collection UI/state
+   * (method grid, cash/keypad, reference, Wompi sub-methods, credit terms).
+   * We read its public signals for the footer button and drive it via
+   * `triggerSubmit()`. `protected` so the template can access it.
+   */
+  protected readonly collector = viewChild(PaymentCollectorComponent);
+
   paymentState = signal<PaymentState>({
-    selectedMethod: null,
-    cashReceived: 0,
-    reference: '',
     isProcessing: false,
-    change: 0,
     isAnonymousSale: false,
-    paymentForm: 'contado',
   });
 
-  // Wallet
+  // Wallet — the full WalletInfo is kept locally so we can forward `wallet_id`
+  // to the payment request; the collector only needs the available balance.
   walletInfo = signal<WalletInfo | null>(null);
-  walletLoading = signal(false);
 
-  // Wompi state
+  // Wompi POST-submit polling state. The collector only RECOLECTA the
+  // sub-method + payload PRE-submit; the async confirmation loop lives here.
   wompiService = inject(WompiService);
-  selectedWompiSubMethod = signal<WompiSubMethod | null>(null);
-  wompiSubMethods: WompiSubMethodConfig[] = WompiService.SUB_METHODS.filter(
-    (m) => m.key !== WompiSubMethod.CARD,
-  );
+  /** Sub-method captured at submit time so the awaiting message can vary. */
+  private readonly submittedWompiSubMethod = signal<WompiSubMethod | null>(null);
   wompiAwaitingPayment = signal(false);
   wompiAwaitingMessage = signal('');
   wompiPollingSubscription: Subscription | null = null;
@@ -1335,23 +1318,6 @@ export class PosPaymentInterfaceComponent {
   }>({ active: false, attempts: 0, maxAttempts: 60 });
   // setInterval handle for the active confirm-wompi-payment poll loop
   private wompiConfirmIntervalId: ReturnType<typeof setInterval> | null = null;
-
-  // Nequi form
-  nequiPhoneControl = new FormControl('', [
-    Validators.required,
-    Validators.pattern(/^3\d{9}$/),
-  ]);
-
-  // PSE form
-  pseForm = new FormGroup({
-    userType: new FormControl<number>(0, [Validators.required]),
-    userLegalIdType: new FormControl('CC', [Validators.required]),
-    userLegalId: new FormControl('', [Validators.required]),
-    financialInstitutionCode: new FormControl('', [Validators.required]),
-    paymentDescription: new FormControl(''),
-  });
-  pseFinancialInstitutions = signal<PseFinancialInstitution[]>([]);
-  pseBankOptions = signal<{ value: string; label: string }[]>([]);
 
   // Store settings (reactive via StoreSettingsFacade)
   private settingsFacade = inject(StoreSettingsFacade);
@@ -1377,58 +1343,21 @@ export class PosPaymentInterfaceComponent {
   readonly businessHours = computed<Record<string, BusinessHours>>(
     () => (this.settingsFacade.pos()?.business_hours as any) ?? {},
   );
-  readonly defaultPaymentForm = computed<'contado' | 'credito'>(
-    () => ((this.settingsFacade.pos() as any)?.default_payment_form as 'contado' | 'credito') ?? 'contado',
-  );
 
   // User-session preserved selection (overrides anonymousSalesAsDefault when user toggles)
   readonly userOverrideAnonymous = signal<boolean | null>(null);
 
-  paymentFormCollapsed = signal(false);
-  paymentMethodCollapsed = signal(false);
-
-  // Currency symbol (computed signal from CurrencyFormatService)
-  currencySymbol: any;
-
-  // Credit configuration state
-  creditNumInstallments = signal(3);
-  creditFrequency = signal<'weekly' | 'biweekly' | 'monthly'>('monthly');
-  creditFirstDate = signal('');
-  creditInterestRate = signal(0);
-  creditInitialPayment = signal(0);
-  creditInitialPaymentMethod = signal<PaymentMethod | null>(null);
-  creditType = signal<'installments' | 'free'>('installments');
-  creditInterestType = signal<'simple' | 'compound'>('simple');
-
-  creditTypeOptions = [
-    { value: 'installments' as const, label: 'Con Cuotas' },
-    { value: 'free' as const, label: 'Libre' },
-  ];
-
-  interestTypeOptions = [
-    { value: 'simple' as const, label: 'Simple' },
-    { value: 'compound' as const, label: 'Compuesto' },
-  ];
-
-  creditRemainingBalance = signal(0);
-  creditInstallmentsPreview = signal<{ amount: number; due_date: string }[]>(
-    [],
-  );
-
-  frequencyOptions = [
-    { value: 'weekly' as const, label: 'Semanal' },
-    { value: 'biweekly' as const, label: 'Quincenal' },
-    { value: 'monthly' as const, label: 'Mensual' },
-  ];
-
-  // quickCashAmounts = [10, 20, 50, 100]; // Removed as per new requirement
-  get cashReceivedControl(): FormControl {
-    return this.paymentForm.get('cashReceived') as FormControl;
-  }
-
-  get referenceControl(): FormControl {
-    return this.paymentForm.get('reference') as FormControl;
-  }
+  // ── Collector input adapters ──────────────────────────────────────────────
+  /** Customer shape the collector expects (id only). */
+  readonly collectorCustomer = computed<{ id: number | string } | null>(() => {
+    const c = this.cartState()?.customer;
+    return c ? { id: c.id } : null;
+  });
+  /** Wallet balance forwarded to the collector (available balance). */
+  readonly collectorWalletInfo = computed<{ balance: number } | null>(() => {
+    const w = this.walletInfo();
+    return w ? { balance: w.available } : null;
+  });
 
   get customerDisplayName(): string {
     if (!this.cartState()?.customer) {
@@ -1466,7 +1395,6 @@ export class PosPaymentInterfaceComponent {
     this.tableSessionOpened.emit(result);
   }
 
-  private fb = inject(FormBuilder);
   private paymentService = inject(PosPaymentService);
 private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private toastService = inject(ToastService);
@@ -1475,20 +1403,14 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private walletService = inject(PosWalletService);
 
   constructor() {
-    this.paymentForm = this.createPaymentForm();
-    // Exponer el símbolo de moneda para usar en el template
-    this.currencySymbol = this.currencyService.currencySymbol;
-
     inject(DestroyRef).onDestroy(() => {
       this.wompiPollingSubscription?.unsubscribe();
       this.stopWompiConfirmPolling();
     });
 
     this.loadPaymentMethods();
-    this.setupFormListeners();
-    // Asegurar que la moneda esté cargada para la interfaz de pago
+    // Asegurar que la moneda esté cargada para la interfaz de pago (pipe | currency)
     this.currencyService.loadCurrency();
-    this.setDefaultCreditFirstDate();
 
     // Reactive sync: when settings change in NgRx, propagate to paymentState.
     // Anonymous flag derives from facade unless user explicitly overrode it.
@@ -1502,24 +1424,22 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
       );
     });
 
-    // Apply default payment form once when settings load (do not clobber user choice)
-    effect(() => {
-      const settings = this.settingsFacade.pos();
-      if (!settings || this.settingsLoaded) return;
-      const form = (settings as any).default_payment_form as
-        | 'contado'
-        | 'credito'
-        | undefined;
-      if (form) {
-        this.paymentState.update((s) => ({ ...s, paymentForm: form }));
-      }
-      this.settingsLoaded = true;
-    });
-
     effect(() => {
       // When modal opens, sync anonymous sale state with current settings
       if (this.isOpen() === true) {
         this.syncAnonymousSaleState();
+      }
+    });
+
+    // Credit sales cannot be anonymous: when the collector enters credito mode,
+    // clear the anonymous flag so the customer selector is shown (mirrors the
+    // legacy setPaymentForm('credito') behaviour).
+    effect(() => {
+      if (
+        this.collector()?.mode() === 'credito' &&
+        this.paymentState().isAnonymousSale
+      ) {
+        this.paymentState.update((s) => ({ ...s, isAnonymousSale: false }));
       }
     });
   }
@@ -1532,36 +1452,6 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     const override = this.userOverrideAnonymous();
     const next = override ?? this.anonymousSalesAsDefault();
     this.paymentState.update((s) => ({ ...s, isAnonymousSale: next }));
-  }
-
-  // Track if default_payment_form has been seeded into paymentState already
-  private settingsLoaded = false;
-
-  private createPaymentForm(): FormGroup {
-    return this.fb.group({
-      cashReceived: [0, [Validators.required, Validators.min(0)]],
-      reference: [''],
-    });
-  }
-
-  private setupFormListeners(): void {
-    this.cashReceivedControl.valueChanges
-      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(100))
-      .subscribe((value: string | number | null) => {
-        if (value !== null && value !== undefined && value !== '') {
-          this.paymentState.update((s) => ({
-            ...s,
-            cashReceived: parseFloat(value.toString()) || 0,
-          }));
-          this.calculateChange();
-        }
-      });
-
-    this.referenceControl.valueChanges
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((value: string | null) => {
-        this.paymentState.update((s) => ({ ...s, reference: value || '' }));
-      });
   }
 
   private loadPaymentMethods(): void {
@@ -1624,209 +1514,66 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     return currentTime >= openTime && currentTime <= closeTime;
   }
 
-  private setDefaultCreditFirstDate(): void {
-    const date = new Date();
-    date.setDate(date.getDate() + 30);
-    this.creditFirstDate.set(toLocalDateString(date));
+  /**
+   * Wallet lookup driven by the collector's `(walletLookup)` output. Resolves
+   * the customer's wallet via {@link PosWalletService} and feeds the balance
+   * back to the collector through `[walletInfo]`. The full `WalletInfo` is kept
+   * locally so the payment request can carry `wallet_id`.
+   */
+  onWalletLookup(e: { id: number | string }): void {
+    this.walletInfo.set(null);
+    this.walletService
+      .getCustomerWallet(Number(e.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (wallet) => {
+          this.walletInfo.set(wallet);
+          if (!wallet || wallet.available <= 0) {
+            this.toastService.warning(
+              'El cliente no tiene saldo disponible en su wallet',
+            );
+          }
+        },
+        error: () => {
+          this.walletInfo.set(null);
+          this.toastService.error('Error al consultar wallet del cliente');
+        },
+      });
   }
 
-  selectPaymentMethod(method: PaymentMethod): void {
-    // Reset Wompi state when changing payment method
-    this.resetWompiState();
+  /** Restaurant + prepared 'consumo' still requires an open table. The
+   *  collector is table-unaware, so this gate stays in the host (footer). */
+  readonly restaurantConsumoNeedsTable = computed<boolean>(
+    () =>
+      this.isRestaurantWithPrepared() &&
+      this.fulfillment() === 'consumo' &&
+      (this.tableId() ?? this.pickedTableId()) == null,
+  );
 
-    // Wallet requires customer selection
-    if (method.type === 'wallet') {
-      if (!this.cartState()?.customer) {
-        this.toastService.info('Seleccione un cliente para pagar con Wallet');
-        this.requestCustomer.emit();
-        return;
-      }
-      // Load wallet balance
-      this.walletLoading.set(true);
-      this.walletInfo.set(null);
-      this.walletService
-        .getCustomerWallet(this.cartState()!.customer!.id)
-        .subscribe({
-          next: (wallet) => {
-            this.walletInfo.set(wallet);
-            this.walletLoading.set(false);
-            if (!wallet || wallet.available <= 0) {
-              this.toastService.warning(
-                'El cliente no tiene saldo disponible en su wallet',
-              );
-            }
-          },
-          error: () => {
-            this.walletInfo.set(null);
-            this.walletLoading.set(false);
-            this.toastService.error('Error al consultar wallet del cliente');
-          },
-        });
-    } else {
-      // Reset wallet info when switching to other method
-      this.walletInfo.set(null);
-      this.walletLoading.set(false);
-    }
+  /**
+   * Handles the collector's `(submit)` output. The collector only RECOLECTA
+   * the normalized {@link PaymentSubmit}; all POS orchestration (customer /
+   * register / business-hours gates, request building, service call, Wompi
+   * async handling) lives here.
+   */
+  onCollectorSubmit(submit: PaymentSubmit): void {
+    if (!this.cartState()) return;
 
-    this.paymentState.update(s => ({ ...s, selectedMethod: method }));
-    this.paymentMethodCollapsed.set(true);
+    // Restaurant + prepared: 'consumo' requires an open table (mirrors the
+    // legacy canProcessPayment gate; the collector is unaware of tables).
+    if (this.restaurantConsumoNeedsTable()) return;
 
-    // Reset only the reference; do NOT blanket-reset the form, which would null
-    // cashReceived and flash a false "Faltan: $X" before the debounced
-    // valueChanges fires (it skips null). Keep paymentState in sync synchronously.
-    this.referenceControl.setValue('');
-    this.paymentState.update(s => ({ ...s, change: 0, reference: '' }));
-
-    if (method.type === 'cash') {
-      const total = this.cartState()?.summary?.total || 0;
-      this.cashReceivedControl.setValue(total);
-      this.paymentState.update(s => ({ ...s, cashReceived: total }));
-      this.calculateChange();
-    } else {
-      this.cashReceivedControl.setValue(0);
-      this.paymentState.update(s => ({ ...s, cashReceived: 0 }));
-    }
-  }
-
-  togglePaymentFormCollapsed(): void {
-    this.paymentFormCollapsed.set(!this.paymentFormCollapsed());
-  }
-
-  togglePaymentMethodCollapsed(): void {
-    this.paymentMethodCollapsed.set(!this.paymentMethodCollapsed());
-  }
-
-  getPaymentMethodClasses(method: PaymentMethod): string {
-    const base_classes = ['payment-method-card'];
-    if (this.paymentState().selectedMethod?.id === method.id) {
-      base_classes.push('selected');
-    }
-    return base_classes.join(' ');
-  }
-
-  setCashAmount(amount: number): void {
-    this.cashReceivedControl.setValue(amount);
-  }
-
-  setFullAmount(): void {
-    const total = this.cartState()?.summary?.total || 0;
-    this.setCashAmount(total);
-  }
-
-  appendNumber(num: number): void {
-    const current_value = this.cashReceivedControl.value || 0;
-    // If current value is 0, replace it, otherwise append (handling string vs number)
-    const new_value = parseFloat(current_value.toString() + num.toString());
-    this.cashReceivedControl.setValue(new_value);
-  }
-
-  backspace(): void {
-    const current_value = this.cashReceivedControl.value;
-    if (!current_value) return;
-
-    const str_val = current_value.toString();
-    if (str_val.length <= 1) {
-      this.cashReceivedControl.setValue(0);
-    } else {
-      this.cashReceivedControl.setValue(parseFloat(str_val.slice(0, -1)));
-    }
-  }
-
-  clearCashAmount(): void {
-    this.cashReceivedControl.setValue(0);
-  }
-
-  calculateChange(): void {
-    if (this.paymentState().selectedMethod?.type === 'cash') {
-      const total = this.cartState()?.summary?.total || 0;
-      const received = this.paymentState().cashReceived || 0;
-      this.paymentState.update(s => ({ ...s, change: Math.max(0, received - total) }));
-    }
-  }
-
-  getReferenceError(): string | undefined {
-    const control = this.referenceControl;
-    if (control && control.errors && control.touched) {
-      if (control.errors['required']) {
-        return 'Este campo es requerido';
-      }
-      if (control.errors['minlength']) {
-        return 'Mínimo 4 caracteres';
-      }
-    }
-    return undefined;
-  }
-
-  canProcessPayment(): boolean {
-    if (this.paymentState().isProcessing) return false;
-
-    // Restaurant + prepared: 'consumo' requires an open table. Bug 1
-    // (Fase K): the picker is embedded in this modal, so the table id
-    // can come from the parent (input) OR from `pickedTableId` (the
-    // session opened via the inline picker). Either unblocks the CTA.
-    if (this.isRestaurantWithPrepared() && this.fulfillment() === 'consumo') {
-      const t = this.tableId() ?? this.pickedTableId();
-      if (t == null) {
-        return false;
-      }
-    }
-
-    // Modo crédito: requiere cliente y saldo válido (cuotas solo para tipo 'installments')
-    if (this.paymentState().paymentForm === 'credito') {
-      const baseValid =
-        !!this.cartState()?.customer && this.creditRemainingBalance() > 0;
-      if (this.creditType() === 'installments') {
-        return baseValid && this.creditNumInstallments() > 0;
-      }
-      return baseValid;
-    }
-
-    // Modo contado: lógica actual
-    const selectedMethod = this.paymentState().selectedMethod;
-    if (!selectedMethod) return false;
-
-    // Wallet validation
-    if (selectedMethod.type === 'wallet') {
-      if (!this.cartState()?.customer) return false;
-      if (!this.walletInfo()) return false;
-      const total = this.cartState()?.summary?.total || 0;
-      return (this.walletInfo()?.available ?? 0) >= total;
-    }
-
-    if (!this.paymentState().isAnonymousSale && !this.cartState()?.customer) {
-      return false;
-    }
-
-    if (selectedMethod.type === 'cash') {
-      const total = this.cartState()?.summary?.total || 0;
-      return this.paymentState().cashReceived >= total;
-    }
-
-    // Wompi: requires sub-method selection and valid form
-    if (this.isWompiSelected()) {
-      return this.isWompiFormValid();
-    }
-
-    if (selectedMethod.requiresReference) {
-      const reference = this.referenceControl.value;
-      return reference && reference.trim().length >= 4;
-    }
-
-    return true;
-  }
-
-  processPayment(): void {
-    if (!this.canProcessPayment() || !this.cartState()) return;
-
-    // Flujo crédito
-    if (this.paymentState().paymentForm === 'credito') {
-      this.processCreditSaleWithTerms();
+    // Credito plan creation (POS creates the plan; installmentId is unused here).
+    if (submit.mode === 'credito') {
+      this.runCreditSale(submit.credit ?? null);
       return;
     }
 
-    // Flujo contado (lógica existente)
-    if (!this.paymentState().selectedMethod) return;
+    // ── Contado (cash / card / transfer / wompi / wallet) ──
+    const method = submit.method;
 
+    // Non-anonymous sales require a customer (defensive — the collector already
+    // gates this via requireCustomer).
     if (!this.paymentState().isAnonymousSale && !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
@@ -1835,12 +1582,10 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     }
 
     let register_id = localStorage.getItem('pos_register_id');
-
     if (!register_id && (!this.cashRegisterEnabled() || this.autoCreateDefaultRegister())) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }
-
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
       this.requestRegisterConfig.emit();
@@ -1849,15 +1594,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     }
 
     if (!this.isWithinBusinessHours()) {
-      const dayNames = [
-        'Domingo',
-        'Lunes',
-        'Martes',
-        'Miércoles',
-        'Jueves',
-        'Viernes',
-        'Sábado',
-      ];
+      const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
       const today = dayNames[new Date().getDay()];
       this.toastService.show({
         variant: 'error',
@@ -1867,30 +1604,30 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
       return;
     }
 
-    this.paymentState.update(s => ({ ...s, isProcessing: true }));
+    this.paymentState.update((s) => ({ ...s, isProcessing: true }));
+
+    const isWompi = method.type === 'wompi';
+    // Capture the sub-method so the POST-submit awaiting UI can vary its message.
+    this.submittedWompiSubMethod.set(submit.wompi?.subMethod ?? null);
 
     const payment_request: any = {
       orderId: 'ORDER_' + Date.now(),
       amount: this.cartState()!.summary.total,
-      paymentMethod: this.paymentState().selectedMethod,
-      cashReceived: this.paymentState().cashReceived,
-      reference: this.paymentState().reference,
+      paymentMethod: method,
+      cashReceived: submit.amountReceived,
+      reference: submit.reference,
       isAnonymousSale: this.paymentState().isAnonymousSale,
     };
 
-    // Pass wallet metadata
-    if (
-      this.paymentState().selectedMethod?.type === 'wallet' &&
-      this.walletInfo()
-    ) {
+    // Wallet metadata (wallet_id kept locally from the walletLookup response).
+    if (method.type === 'wallet' && this.walletInfo()) {
       payment_request.metadata = { walletId: this.walletInfo()?.wallet_id };
     }
-
-    // Pass Wompi payment method data
-    if (this.isWompiSelected()) {
+    // Wompi sub-method payload collected pre-submit by the collector.
+    if (isWompi && submit.wompi) {
       payment_request.metadata = {
         ...payment_request.metadata,
-        wompiPaymentMethod: this.buildWompiPaymentMethodData(),
+        wompiPaymentMethod: submit.wompi.payload,
       };
     }
 
@@ -1899,27 +1636,22 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
         this.cartState()!,
         payment_request,
         'current_user',
-        // Bug 1 / Obj 4 (Fase K): when the inline picker opened a
-        // table from inside this modal, forward the session id so
-        // the backend closes out that table's existing draft order
-        // instead of creating a brand-new one.
+        // Bug 1 / Obj 4 (Fase K): forward the inline-picked table session id so
+        // the backend closes out its existing draft order.
         this.pickedSessionId() ?? null,
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success) {
-            // Handle Wompi async payment flows (redirect, await, 3ds)
-            if (
-              this.isWompiSelected() &&
-              response.nextAction &&
-              response.nextAction.type !== 'none'
-            ) {
+            // Wompi async flows (redirect, await, 3ds): keep the modal open and
+            // hand off to the POST-submit polling loop that lives here.
+            if (isWompi && response.nextAction && response.nextAction.type !== 'none') {
               this.handleWompiNextAction(response);
-              return; // Don't close modal, wait for async confirmation
+              return;
             }
 
-            this.paymentState.update(s => ({ ...s, isProcessing: false }));
+            this.paymentState.update((s) => ({ ...s, isProcessing: false }));
             this.paymentCompleted.emit({
               success: true,
               order: response.order,
@@ -1927,13 +1659,12 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
               change: response.change,
               message: response.message,
               isAnonymousSale: this.paymentState().isAnonymousSale,
-            
               fulfillment: this.fulfillment(),
               tableId: this.tableId() ?? this.pickedTableId(),
             });
             this.onModalClosed();
           } else {
-            this.paymentState.update(s => ({ ...s, isProcessing: false }));
+            this.paymentState.update((s) => ({ ...s, isProcessing: false }));
             console.error('Payment failed:', response.message);
             this.toastService.show({
               variant: 'error',
@@ -1943,23 +1674,28 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
           }
         },
         error: (error) => {
-          this.paymentState.update(s => ({ ...s, isProcessing: false }));
+          this.paymentState.update((s) => ({ ...s, isProcessing: false }));
           console.error('Payment error:', error);
           this.toastService.show({
             variant: 'error',
             title: 'Error',
-            description:
-              error.message || 'Error de conexión al procesar el pago',
+            description: error.message || 'Error de conexión al procesar el pago',
           });
         },
       });
   }
 
-  private processCreditSaleWithTerms(): void {
+  /**
+   * Creates a credit plan from the collector's {@link CreditTerms}. POS always
+   * creates an installment plan (`creditType='installments'`); the legacy
+   * 'free' credit type is not exposed by the shared collector.
+   */
+  private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       return;
     }
+    if (!terms) return; // collector gates this; defensive.
 
     let register_id = localStorage.getItem('pos_register_id');
     if (!register_id && (!this.cashRegisterEnabled() || this.autoCreateDefaultRegister())) {
@@ -1996,15 +1732,13 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     this.paymentState.update(s => ({ ...s, isProcessing: true }));
 
     const creditConfig = {
-      num_installments: this.creditNumInstallments(),
-      frequency: this.creditFrequency(),
-      first_installment_date: this.creditFirstDate(),
-      interest_rate: this.creditInterestRate(),
-      interest_type: this.creditInterestType(),
-      initial_payment: this.creditInitialPayment(),
-      initial_payment_method_id: this.creditInitialPaymentMethod()
-        ? parseInt(this.creditInitialPaymentMethod()?.id ?? '')
-        : undefined,
+      num_installments: terms.numInstallments,
+      frequency: terms.frequency,
+      first_installment_date: terms.firstInstallmentDate,
+      interest_rate: terms.interestRate,
+      interest_type: terms.interestType,
+      initial_payment: terms.initialPayment,
+      initial_payment_method_id: terms.initialPaymentMethodId,
     };
 
     this.paymentService
@@ -2012,7 +1746,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
         this.cartState()!,
         creditConfig,
         'current_user',
-        this.creditType(),
+        'installments',
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -2040,94 +1774,6 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
         },
         error: (error) => {
           this.paymentState.update(s => ({ ...s, isProcessing: false }));
-          this.toastService.show({
-            variant: 'error',
-            title: 'Error',
-            description:
-              error.message || 'Error al procesar la venta a crédito',
-          });
-        },
-      });
-  }
-
-  processCreditSale(): void {
-    if (!this.cartState() || this.paymentState().isProcessing) return;
-
-    // Credit sales always require a customer (cannot be anonymous)
-    if (!this.cartState()!.customer) {
-      this.toastService.info('Seleccione un cliente para continuar');
-      this.requestCustomer.emit();
-      this.onModalClosed();
-      return;
-    }
-
-    let register_id = localStorage.getItem('pos_register_id');
-
-    // Auto-configure default register if not required
-    if (!register_id && (!this.cashRegisterEnabled() || this.autoCreateDefaultRegister())) {
-      register_id = 'DEFAULT-POS';
-      localStorage.setItem('pos_register_id', register_id);
-    }
-
-    if (!register_id) {
-      this.toastService.info('Configure la caja para continuar');
-      this.requestRegisterConfig.emit();
-      this.onModalClosed();
-      return;
-    }
-
-    // Check business hours if validation is enabled
-    if (!this.isWithinBusinessHours()) {
-      const dayNames = [
-        'Domingo',
-        'Lunes',
-        'Martes',
-        'Miércoles',
-        'Jueves',
-        'Viernes',
-        'Sábado',
-      ];
-      const today = dayNames[new Date().getDay()];
-      this.toastService.show({
-        variant: 'error',
-        title: 'Fuera del horario de atención',
-        description: `El POS está cerrado. Hoy ${today} no se permite realizar ventas fuera del horario configurado.`,
-      });
-      return;
-    }
-
-    this.paymentState.update(s => ({ ...s, isProcessing: true }));
-
-    this.paymentService
-      .processCreditSale(this.cartState()!, 'current_user')
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.paymentState.update(s => ({ ...s, isProcessing: false }));
-          if (response.success) {
-            this.paymentCompleted.emit({
-              success: true,
-              order: response.order,
-              message: response.message,
-              isCreditSale: true,
-            
-              fulfillment: this.fulfillment(),
-              tableId: this.tableId() ?? this.pickedTableId(),
-            });
-            this.onModalClosed();
-          } else {
-            console.error('Credit sale failed:', response.message);
-            this.toastService.show({
-              variant: 'error',
-              title: 'Error',
-              description:
-                response.message || 'Error al procesar la venta a crédito',
-            });
-          }
-        },
-        error: (error) => {
-          this.paymentState.update(s => ({ ...s, isProcessing: false }));
-          console.error('Credit sale error:', error);
           this.toastService.show({
             variant: 'error',
             title: 'Error',
@@ -2180,31 +1826,17 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
   }
 
   onModalClosed(): void {
+    // The collector owns all collection state (method / cash / reference /
+    // Wompi sub-method / credit terms) and is destroyed+recreated by the
+    // modal's internal `@if(isOpen())`, so it self-resets on close/reopen.
+    // Here we only reset the host-owned orchestration state.
     this.paymentState.set({
-      selectedMethod: null,
-      cashReceived: 0,
-      reference: '',
       isProcessing: false,
-      change: 0,
       isAnonymousSale: false,
-      paymentForm: this.defaultPaymentForm(),
     });
-    this.paymentForm.reset();
     this.customerSelector()?.reset();
-    this.paymentFormCollapsed.set(false);
-    this.paymentMethodCollapsed.set(false);
-    // Reset Wompi state
+    // Reset the Wompi POST-submit polling state.
     this.resetWompiState();
-    // Reset credit state
-    this.creditNumInstallments.set(3);
-    this.creditFrequency.set('monthly');
-    this.creditInterestRate.set(0);
-    this.creditInitialPayment.set(0);
-    this.creditInitialPaymentMethod.set(null);
-    this.creditType.set('installments');
-    this.creditInterestType.set('simple');
-    this.setDefaultCreditFirstDate();
-    this.updateCreditCalculations();
     this.closed.emit();
   }
 
@@ -2218,190 +1850,9 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     // (overview/search/create); no hace falta forzarla desde aquí.
   }
 
-  setPaymentForm(form: 'contado' | 'credito'): void {
-    this.paymentState.update(s => ({ ...s, paymentForm: form }));
-    this.paymentFormCollapsed.set(true);
-    this.paymentMethodCollapsed.set(false);
-    if (form === 'credito') {
-      // Crédito requiere cliente — deshabilitar venta anónima
-      this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
-      this.updateCreditCalculations();
-    }
-  }
-
-  private getCreditRemainingBalance(): number {
-    const total = this.cartState()?.summary?.total || 0;
-    return Math.max(0, total - (this.creditInitialPayment() || 0));
-  }
-
-  private getCreditInstallmentsPreview(): {
-    amount: number;
-    due_date: string;
-  }[] {
-    const total = this.getCreditRemainingBalance();
-    const n = this.creditNumInstallments();
-    if (n <= 0 || total <= 0) return [];
-
-    const baseAmount = Math.round((total / n) * 100) / 100;
-    const freqDays: Record<string, number> = {
-      weekly: 7,
-      biweekly: 14,
-      monthly: 30,
-    };
-    const startDate = this.creditFirstDate()
-      ? new Date(this.creditFirstDate() + 'T12:00:00')
-      : new Date();
-
-    return Array.from({ length: n }, (_, i) => {
-      const due = new Date(startDate);
-      due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
-      return {
-        amount:
-          i === n - 1
-            ? Math.round((total - baseAmount * (n - 1)) * 100) / 100
-            : baseAmount,
-        due_date: toLocalDateString(due),
-      };
-    });
-  }
-
-  getTotalInstallments(): number {
-    return this.creditInstallmentsPreview().reduce(
-      (sum: number, inst: { amount: number; due_date: string }) => sum + inst.amount,
-      0,
-    );
-  }
-
-  getAnnualRate(): number {
-    const raw = this.creditInterestRate() || 0;
-    return raw > 1 ? raw : raw * 100;
-  }
-
-  getPeriodicRate(): number {
-    const annual = this.getAnnualRate();
-    const divisors: Record<string, number> = {
-      weekly: 52,
-      biweekly: 26,
-      monthly: 12,
-    };
-    return (
-      Math.round((annual / (divisors[this.creditFrequency()] || 12)) * 100) / 100
-    );
-  }
-
-  getPeriodicLabel(): string {
-    const labels: Record<string, string> = {
-      weekly: 'semanal',
-      biweekly: 'quincenal',
-      monthly: 'mensual',
-    };
-    return labels[this.creditFrequency()] || 'mensual';
-  }
-
-  getInterestAmount(): number {
-    if (this.creditInstallmentsPreview().length === 0) return 0;
-    return (
-      Math.round(
-        (this.getTotalInstallments() - this.creditRemainingBalance()) * 100,
-      ) / 100
-    );
-  }
-
-  getEffectivePercent(): number {
-    if (this.creditRemainingBalance() <= 0) return 0;
-    return (
-      Math.round(
-        (this.getInterestAmount() / this.creditRemainingBalance()) * 10000,
-      ) / 100
-    );
-  }
-
-  selectCreditInitialPaymentMethod(method: PaymentMethod): void {
-    this.creditInitialPaymentMethod.set(method);
-  }
-
-  updateCreditCalculations(): void {
-    const total = this.cartState()?.summary?.total || 0;
-    const initialPayment = this.creditInitialPayment() || 0;
-    const amountToFinance = Math.max(0, total - initialPayment);
-    this.creditRemainingBalance.set(amountToFinance);
-
-    const n = this.creditNumInstallments();
-    if (n <= 0 || amountToFinance <= 0) {
-      this.creditInstallmentsPreview.set([]);
-      return;
-    }
-
-    const rawRate = this.creditInterestRate() || 0;
-    const annualRate = rawRate > 1 ? rawRate / 100 : rawRate;
-    const interestType = this.creditInterestType() || 'simple';
-    const freqDays: Record<string, number> = {
-      weekly: 7,
-      biweekly: 14,
-      monthly: 30,
-    };
-    const periodsPerYear: Record<string, number> = {
-      weekly: 52,
-      biweekly: 26,
-      monthly: 12,
-    };
-    const startDate = this.creditFirstDate()
-      ? new Date(this.creditFirstDate() + 'T12:00:00')
-      : new Date();
-
-    if (annualRate <= 0) {
-      // No interest: simple division
-      const baseAmount = Math.round((amountToFinance / n) * 100) / 100;
-      this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
-        const due = new Date(startDate);
-        due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
-        return {
-          amount:
-            i === n - 1
-              ? Math.round((amountToFinance - baseAmount * (n - 1)) * 100) / 100
-              : baseAmount,
-          due_date: toLocalDateString(due),
-        };
-      }));
-    } else if (interestType === 'compound') {
-      // Compound interest (capitalization): FV = P × (1+r)^n
-      // Interest capitalizes each period, then total divided into equal installments
-      const r = annualRate / (periodsPerYear[this.creditFrequency()] || 12);
-      const totalWithInterest =
-        Math.round(amountToFinance * Math.pow(1 + r, n) * 100) / 100;
-      const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
-      this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
-        const due = new Date(startDate);
-        due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
-        return {
-          amount:
-            i === n - 1
-              ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) /
-                100
-              : baseAmount,
-          due_date: toLocalDateString(due),
-        };
-      }));
-    } else {
-      // Simple interest: I = P × r × n, distributed equally
-      const r = annualRate / (periodsPerYear[this.creditFrequency()] || 12);
-      const totalInterest = Math.round(amountToFinance * r * n * 100) / 100;
-      const totalWithInterest = amountToFinance + totalInterest;
-      const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
-      this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
-        const due = new Date(startDate);
-        due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
-        return {
-          amount:
-            i === n - 1
-              ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) /
-                100
-              : baseAmount,
-          due_date: toLocalDateString(due),
-        };
-      }));
-    }
-  }
+  // Credit-plan math + method selection now live entirely inside the shared
+  // collector's `app-payment-credit-fields`; the host only forwards the
+  // resulting `CreditTerms` to `runCreditSale()`.
 
   // Customer Management Methods
   //
@@ -2427,98 +1878,20 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     this.toggleAnonymousSale(true);
   }
 
-  // Getter for insufficient amount
-  get isCashAmountInsufficient(): boolean {
-    if (this.paymentState().selectedMethod?.type === 'cash') {
-      const total = this.cartState()?.summary?.total || 0;
-      const received = this.paymentState().cashReceived || 0;
-      return received < total;
-    }
-    return false;
-  }
+  // ─── Wompi POST-submit polling ─────────────────────────────────────────
+  // The pre-submit COLLECTION (method + sub-method + NEQUI/PSE payload) is now
+  // owned by the collector's `app-payment-wompi-fields`; the host only drives
+  // the async confirmation loop after the payment row is created.
 
-  get missingAmount(): number {
-    if (this.isCashAmountInsufficient) {
-      const total = this.cartState()?.summary?.total || 0;
-      const received = this.paymentState().cashReceived || 0;
-      return total - received;
-    }
-    return 0;
-  }
-
-  // ─── Wompi Methods ───────────────────────────────────────────────────
-
-  isWompiSelected(): boolean {
-    return this.wompiService.isWompiMethod(this.paymentState()?.selectedMethod);
-  }
-
-  selectWompiSubMethod(sub: WompiSubMethod): void {
-    this.selectedWompiSubMethod.set(sub);
-
-    // Load PSE banks if needed
-    if (
-      sub === WompiSubMethod.PSE &&
-      this.pseFinancialInstitutions.length === 0
-    ) {
-      this.wompiService.getPseFinancialInstitutions().subscribe({
-        next: (institutions) => {
-          this.pseFinancialInstitutions.set(institutions);
-          this.pseBankOptions.set(institutions.map((i) => ({
-            value: i.financial_institution_code,
-            label: i.financial_institution_name,
-          })));
-        },
-        error: () => {}, // Silently fail, user can retry
-      });
-    }
-  }
-
-  buildWompiPaymentMethodData(): any {
-    switch (this.selectedWompiSubMethod()) {
-      case WompiSubMethod.NEQUI:
-        return { type: 'NEQUI', phone_number: this.nequiPhoneControl.value };
-      case WompiSubMethod.PSE:
-        return {
-          type: 'PSE',
-          user_type: this.pseForm.value.userType,
-          user_legal_id_type: this.pseForm.value.userLegalIdType,
-          user_legal_id: this.pseForm.value.userLegalId,
-          financial_institution_code:
-            this.pseForm.value.financialInstitutionCode,
-          payment_description:
-            this.pseForm.value.paymentDescription || 'Pago Vendix',
-        };
-      case WompiSubMethod.BANCOLOMBIA_TRANSFER:
-        return { type: 'BANCOLOMBIA_TRANSFER' };
-      default:
-        return { type: this.selectedWompiSubMethod() };
-    }
-  }
-
-  isWompiFormValid(): boolean {
-    if (!this.selectedWompiSubMethod()) return false;
-    switch (this.selectedWompiSubMethod()) {
-      case WompiSubMethod.NEQUI:
-        return this.nequiPhoneControl.valid;
-      case WompiSubMethod.PSE:
-        return this.pseForm.valid;
-      default:
-        return true; // Card and Bancolombia don't need extra input
-    }
-  }
-
+  /**
+   * Resets the Wompi POST-submit awaiting/polling state. Pre-submit collection
+   * state (sub-method, NEQUI phone, PSE form) lives inside the collector and is
+   * disposed with it, so nothing to reset here beyond the captured sub-method.
+   */
   resetWompiState(): void {
-    this.selectedWompiSubMethod.set(null);
+    this.submittedWompiSubMethod.set(null);
     this.wompiAwaitingPayment.set(false);
     this.wompiAwaitingMessage.set('');
-    this.nequiPhoneControl.reset();
-    this.pseForm.reset({
-      userType: 0,
-      userLegalIdType: 'CC',
-      userLegalId: '',
-      financialInstitutionCode: '',
-      paymentDescription: '',
-    });
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = null;
     this.wompiPaymentId = null;
@@ -2561,7 +1934,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
         break;
       case 'await':
         this.wompiAwaitingPayment.set(true);
-        this.wompiAwaitingMessage.set(this.selectedWompiSubMethod() === WompiSubMethod.NEQUI
+        this.wompiAwaitingMessage.set(this.submittedWompiSubMethod() === WompiSubMethod.NEQUI
             ? 'Esperando confirmación en la app de Nequi...'
             : 'Esperando confirmación del pago...');
         this.startWompiPolling();
