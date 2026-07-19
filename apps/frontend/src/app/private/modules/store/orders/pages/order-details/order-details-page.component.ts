@@ -37,7 +37,7 @@ import {
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
-import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
+import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -1290,11 +1290,36 @@ export class OrderDetailsPageComponent {
     this.showPayModal.set(true);
   }
 
-  onPaymentSubmitted(dto: PayOrderDto): void {
+  onPaymentSubmitted(submit: PaymentSubmit): void {
     if (!this.orderId) return;
+
+    // Map the collector's normalized submit → PayOrderDto. A null method id would
+    // mean a manual method, which this order context never enables.
+    if (submit.storePaymentMethodId == null) {
+      this.toastService.error('Selecciona un método de pago válido');
+      return;
+    }
+
+    const isCredit = this.isCreditOrder();
+
+    const dto: PayOrderDto = {
+      store_payment_method_id: submit.storePaymentMethodId,
+      payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
+      ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
+      ...(submit.reference ? { payment_reference: submit.reference } : {}),
+    };
+
+    // Credit abono: carry the amount (override ?? remaining balance) and, when the
+    // operator picked one, the target installment. `flow/pay` ignores `amount`
+    // (it charges the full order total), so only attach it for the credit path.
+    if (isCredit) {
+      dto.amount = submit.amount;
+      if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    }
+
     this.isProcessingAction.set(true);
 
-    const request$ = this.isCreditOrder()
+    const request$ = isCredit
       ? this.ordersService.flowCreditPayment(this.orderId, dto)
       : this.ordersService.flowPayOrder(this.orderId, dto);
 

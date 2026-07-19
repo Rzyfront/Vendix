@@ -105,3 +105,21 @@ export interface PublishToPoolResult {
   order_id: number;
   pooled_at: string;
 }
+
+/** Query del historial de rutas (`GET /store/carrier/routes`). */
+export interface RouteHistoryQuery {
+  page?: number;
+  limit?: number;
+  /** Filtro opcional por estado (`closed`, `voided`, `in_transit`, …). */
+  status?: string;
+}
+
+/**
+ * `GET /store/carrier/routes` → envelope paginado. Cada fila es una
+ * `DispatchRoute` enriquecida con `vehicle` y `_count.stops` (el backend
+ * incluye ambos). Reusa `PoolMeta` para la paginación.
+ */
+export interface RouteHistoryResponse {
+  data: DispatchRoute[];
+  meta: PoolMeta;
+}

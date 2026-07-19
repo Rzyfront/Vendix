@@ -390,6 +390,10 @@ export function getDefaultStoreSettings(): StoreSettings {
       turnstile_mode: false,
       auto_leveling_enabled: false,
       auto_leveling_interval_hours: 2,
+      // Re-entry detection: warn by default (grant but flag repeated access
+      // within the window without re-counting aforo/quota). Window in hours.
+      re_entry_mode: 'warn',
+      re_entry_window_hours: 2,
       // Default reader mode = Tipo A (id_wrapper). Reader emits an opaque ID
       // directly; Vendix stores credentials as `external_ref` and never sees
       // the biometric template. The `template_sdk` (Tipo B) flow is planned

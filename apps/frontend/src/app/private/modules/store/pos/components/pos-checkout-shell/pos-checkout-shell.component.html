@@ -1,0 +1,380 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [size]="'xl'"
+  [title]="'Finalizar venta'"
+  [subtitle]="'Cobro y cliente'"
+  (closed)="onModalClosed()"
+>
+  <div class="checkout-shell">
+    <!-- Stepper -->
+    <div class="checkout-stepper">
+      <app-steps-line
+        [steps]="steps()"
+        [currentStep]="currentStep()"
+        [clickable]="false"
+      ></app-steps-line>
+    </div>
+
+    <!-- Body: paso activo + resumen (rail) -->
+    <div class="checkout-grid">
+      <!-- Columna principal: paso activo -->
+      <div class="checkout-main">
+        <!-- Paso · Consumo (restaurante ∧ intent ≠ delivery). Se mantiene
+             MONTADO mientras 'consumo' esté en stepKeys para que el shell lea
+             fulfillment()/pickedTableId()/pickedSessionId()/needsTable(). -->
+        @if (stepKeys().includes('consumo')) {
+          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'consumo'">
+            <app-pos-consumo-step
+              [cartState]="cartState()"
+              [tableId]="tableId()"
+              (tableSessionOpened)="onTableSessionOpened($event)"
+            ></app-pos-consumo-step>
+          </div>
+        }
+
+        <!-- Paso · Cobro (pickup + delivery pagar-ahora). Se mantiene MONTADO
+             mientras 'cobro' esté en stepKeys para que el footer lea sus señales
+             y triggerSubmit() funcione desde cualquier paso. -->
+        @if (stepKeys().includes('cobro')) {
+          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cobro'">
+            <app-pos-payment-step
+              [cartState]="cartState()"
+              [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
+              [tableId]="consumoStep()?.pickedTableId() ?? tableId()"
+              [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
+              [sessionId]="consumoStep()?.pickedSessionId() ?? null"
+              [isAnonymous]="isAnonymousSale()"
+              [paymentMethods]="paymentMethods()"
+              [isProcessing]="isProcessing()"
+              [autoExecute]="checkoutIntent() === 'pickup'"
+              [amountOverride]="deliveryAmount()"
+              (paymentCompleted)="onCheckoutCompleted($event)"
+              (paymentReady)="onPaymentReady($event)"
+              (requestCustomer)="onRequestCustomer()"
+            ></app-pos-payment-step>
+          </div>
+        }
+
+        <!-- Paso · Cliente. Sub-wizard vertical: opciones a la izquierda ·
+             steps-line a la derecha (size sm). Sub-pasos DINÁMICOS:
+             anónima → [Tipo] · con cliente → [Tipo, Cliente] · delivery →
+             [Tipo, Cliente, Dirección]. Espeja Cobro/Envío. QUI-482: volver a un
+             sub-paso NO resetea cliente/dirección (colapso presentacional). -->
+        @if (stepKeys().includes('cliente')) {
+        <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cliente'">
+          <div class="cliente-grid">
+            <div class="cliente-main">
+              <!-- SUB-STEP 0 · Tipo (Venta Anónima / Con Cliente) -->
+              @if (clienteSubStep() === 0) {
+                <section class="cliente-section">
+                  <div class="section-header">
+                    <app-icon name="users" [size]="16" class="section-icon"></app-icon>
+                    <h2 class="section-title">Tipo de venta</h2>
+                  </div>
+
+                  <div class="sale-type-options">
+                    @if (canBeAnonymous()) {
+                      <button
+                        type="button"
+                        class="sale-type-btn"
+                        [class.selected]="isAnonymousSale()"
+                        (click)="onSelectSaleType(true)"
+                      >
+                        <div class="radio-indicator">
+                          @if (isAnonymousSale()) {
+                            <div class="radio-dot"></div>
+                          }
+                        </div>
+                        <app-icon name="user-x" [size]="20"></app-icon>
+                        <div class="sale-type-info">
+                          <span class="sale-type-name">Venta Anónima</span>
+                          <span class="sale-type-desc">Sin cliente asociado</span>
+                        </div>
+                      </button>
+                    }
+
+                    <button
+                      type="button"
+                      class="sale-type-btn"
+                      [class.selected]="!isAnonymousSale()"
+                      (click)="onSelectSaleType(false)"
+                    >
+                      <div class="radio-indicator">
+                        @if (!isAnonymousSale()) {
+                          <div class="radio-dot"></div>
+                        }
+                      </div>
+                      <app-icon name="user" [size]="20"></app-icon>
+                      <div class="sale-type-info">
+                        <span class="sale-type-name">Con Cliente</span>
+                        <span class="sale-type-desc">{{
+                          cartState()?.customer ? customerDisplayName : 'Seleccionar cliente'
+                        }}</span>
+                      </div>
+                    </button>
+                  </div>
+                </section>
+              } @else {
+                <button
+                  type="button"
+                  class="cliente-collapsed"
+                  (click)="goToClienteSubStep(0)"
+                >
+                  <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+                  <span class="sw-label">{{
+                    isAnonymousSale()
+                      ? 'Venta Anónima'
+                      : 'Con Cliente: ' +
+                        (cartState()?.customer ? customerDisplayName : 'Seleccionar')
+                  }}</span>
+                  <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+                </button>
+              }
+
+              <!-- SUB-STEP 1 · Cliente (selector inline). Solo con-cliente. -->
+              @if (!isAnonymousSale()) {
+                @if (clienteSubStep() === 1) {
+                  <section class="cliente-section">
+                    <div class="section-header">
+                      <app-icon name="user" [size]="16" class="section-icon"></app-icon>
+                      <h2 class="section-title">Cliente</h2>
+                    </div>
+                    <app-pos-customer-selector
+                      [selectedCustomer]="cartState()?.customer ?? null"
+                      [allowAnonymous]="canBeAnonymous()"
+                      [showTopSuggestions]="true"
+                      (customerSelected)="onSelectCustomerAndAdvance($event)"
+                      (customerCleared)="onCustomerCleared()"
+                    ></app-pos-customer-selector>
+                  </section>
+                } @else if (clienteSubStep() > 1 && cartState()?.customer) {
+                  <button
+                    type="button"
+                    class="cliente-collapsed"
+                    (click)="goToClienteSubStep(1)"
+                  >
+                    <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+                    <span class="sw-label">Cliente: {{ customerDisplayName }}</span>
+                    <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+                  </button>
+                }
+              }
+
+              <!-- SUB-STEP 2 · Dirección de envío (solo delivery, terminal).
+                   Captura la dirección con app-address-form-fields (mapa +
+                   geocoding). No se colapsa. -->
+              @if (
+                clienteSubStep() === 2 &&
+                requiresAddress() &&
+                !isAnonymousSale() &&
+                cartState()?.customer
+              ) {
+                <section class="cliente-section">
+                  <div class="section-header">
+                    <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
+                    <h2 class="section-title">Dirección de envío</h2>
+                    @if (!addressValid()) {
+                      <span class="addr-required-badge">Obligatoria</span>
+                    }
+                  </div>
+                  <app-address-form-fields
+                    [initialAddress]="customerInitialAddress()"
+                    (addressChange)="onShellAddressChange($event)"
+                    (validChange)="addressValid.set($event)"
+                  ></app-address-form-fields>
+                </section>
+              }
+            </div>
+
+            <!-- Columna del stepper: a la derecha en desktop; debajo (DOM-last)
+                 en móvil. -->
+            <aside class="steps-col">
+              <app-steps-line
+                [orientation]="'vertical'"
+                [size]="'sm'"
+                [steps]="clienteSubSteps()"
+                [currentStep]="clienteSubStep()"
+                [clickable]="true"
+                (stepClicked)="goToClienteSubStep($event)"
+              ></app-steps-line>
+            </aside>
+          </div>
+        </div>
+        }
+
+        <!-- Paso · Envío (delivery). Montado mientras 'envio' esté en stepKeys
+             para que el footer lea shippingCost/canConfirm/isProcessing. -->
+        @if (stepKeys().includes('envio')) {
+          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'envio'">
+            <app-pos-shipping-step
+              [cartState]="cartState()"
+              [address]="capturedAddress()"
+              [addressId]="capturedAddressId()"
+              [(payTiming)]="payTiming"
+              (shippingCompleted)="onShippingCompleted($event)"
+            ></app-pos-shipping-step>
+          </div>
+        }
+      </div>
+
+      <!-- Rail de Resumen (fijo). Reutiliza el markup de Resumen del modal viejo. -->
+      <aside class="summary-rail">
+        <section class="payment-section">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h2 class="section-title">Resumen</h2>
+          </div>
+
+          <div class="product-list">
+            @for (item of cartState()?.items; track item) {
+              <div class="product-item">
+                <div class="product-info">
+                  <span class="product-name"
+                    >{{ item.product.name
+                    }}@if (item.variant_display_name) {
+                      <span style="font-size: 0.85em; opacity: 0.7"
+                        > - {{ item.variant_display_name }}</span
+                      >
+                    }</span
+                  >
+                  <div class="product-badges">
+                    @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                      <span
+                        class="tier-badge"
+                        [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                        >{{ item.applied_price_tier_name }}</span
+                      >
+                    }
+                    @if (item.is_package_unit && (item.units_per_package ?? 0) > 1) {
+                      <span class="item-package-badge"
+                        >Caja ×{{ item.units_per_package }}</span
+                      >
+                    }
+                  </div>
+                </div>
+                @if (item.is_weight_product) {
+                  <span class="product-qty"
+                    >{{ item.weight }} {{ item.weight_unit || 'kg' }}</span
+                  >
+                } @else if (item.is_package_unit && (item.units_per_package ?? 0) > 1) {
+                  <span class="product-qty"
+                    >{{ item.quantity }} {{ item.quantity === 1 ? 'paq.' : 'paqs.' }} =
+                    {{ item.quantity * (item.units_per_package ?? 1) }} u.</span
+                  >
+                } @else {
+                  <span class="product-qty">x{{ item.quantity }}</span>
+                }
+              </div>
+            }
+            @if (!cartState()?.items?.length) {
+              <div class="empty-cart">El carrito está vacío</div>
+            }
+          </div>
+
+          <div class="summary-details">
+            <div class="summary-row">
+              <span>Productos</span>
+              <span class="summary-value">{{ cartState()?.summary?.itemCount || 0 }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Cantidad</span>
+              <span class="summary-value">{{ cartState()?.summary?.totalItems || 0 }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span class="summary-value">{{ cartState()?.summary?.subtotal || 0 | currency }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Impuestos</span>
+              <span class="summary-value">{{ cartState()?.summary?.taxAmount || 0 | currency }}</span>
+            </div>
+            @if ((cartState()?.summary?.discountAmount ?? 0) > 0) {
+              <div class="summary-row">
+                <span>Descuento</span>
+                <span class="summary-value discount"
+                  >-{{ cartState()?.summary?.discountAmount | currency }}</span
+                >
+              </div>
+            }
+            @if (checkoutIntent() === 'delivery') {
+              <div class="summary-row">
+                <span>Envío</span>
+                <span class="summary-value">{{ shippingCost() | currency }}</span>
+              </div>
+            }
+          </div>
+
+          <div class="total-section">
+            <p class="total-label">Total a Pagar</p>
+            <p class="total-amount">{{ totalToPay() | currency }}</p>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer" class="checkout-footer">
+    <div class="footer-left">
+      <span class="footer-total-label">Total</span>
+      <span class="footer-total-amount">{{ totalToPay() | currency }}</span>
+    </div>
+    <div class="footer-actions">
+      @if (!isFirstStep()) {
+        <button
+          type="button"
+          class="btn-prev"
+          (click)="prevStep()"
+          [disabled]="footerProcessing()"
+        >
+          <app-icon name="arrow-left" [size]="16"></app-icon>
+          Anterior
+        </button>
+      }
+      <button
+        type="button"
+        class="btn-cancel"
+        (click)="onModalClosed()"
+        [disabled]="footerProcessing()"
+      >
+        Cancelar
+      </button>
+      <button
+        type="button"
+        class="btn-draft"
+        [disabled]="footerProcessing()"
+        (click)="onSaveDraft()"
+      >
+        <app-icon name="save" [size]="16"></app-icon>
+        Guardar borrador
+      </button>
+      @if (!isLastStep()) {
+        <button
+          type="button"
+          class="btn-confirm"
+          (click)="nextStep()"
+          [disabled]="footerProcessing()"
+        >
+          Siguiente
+          <app-icon name="arrow-right" [size]="18"></app-icon>
+        </button>
+      } @else {
+        <button
+          type="button"
+          class="btn-confirm"
+          (click)="onConfirm()"
+          [disabled]="confirmDisabled()"
+          [class.loading]="footerProcessing()"
+        >
+          @if (!footerProcessing()) {
+            <app-icon name="check-circle" [size]="20"></app-icon>
+          }
+          @if (footerProcessing()) {
+            <span class="spinner"></span>
+          }
+          {{ confirmLabel() }}
+        </button>
+      }
+    </div>
+  </div>
+</app-modal>

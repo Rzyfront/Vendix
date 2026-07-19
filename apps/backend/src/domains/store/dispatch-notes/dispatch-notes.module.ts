@@ -18,6 +18,12 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
 import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.module';
+// QUI-498 — order ↔ remisión unification: import OrderFlowModule so the events
+// listener can inject OrderFlowService and reconcile the linked order's state
+// (and clear the COD balance) from a standalone remisión delivered/invoiced.
+// Acyclic: OrderFlowModule does NOT import DispatchNotesModule (nor transitively
+// via Prisma/Response/CashRegisters/Settings/Serials/OrderStockCommit).
+import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 
 @Module({
   imports: [
@@ -28,6 +34,7 @@ import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.
     InventorySerialNumbersModule,
     OrderStockCommitModule,
     PurchaseOrdersModule,
+    OrderFlowModule,
   ],
   controllers: [DispatchNotesController],
   providers: [

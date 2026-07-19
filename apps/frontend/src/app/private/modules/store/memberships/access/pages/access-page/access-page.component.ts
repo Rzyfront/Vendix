@@ -278,6 +278,10 @@ export class MembershipAccessPageComponent implements OnInit {
   readonly cfgTurnstile = signal(false);
   readonly cfgLevelingEnabled = signal(false);
   readonly cfgLevelingInterval = signal<1 | 2>(2);
+  /** Re-entry detection mode (off | warn | block). Default `warn`. */
+  readonly cfgReEntryMode = signal<'off' | 'warn' | 'block'>('warn');
+  /** Window (hours) that counts a repeated entry as a re-entry. Default `2`. */
+  readonly cfgReEntryWindowHours = signal(2);
 
   // ─── Access config (fingerprint device) ────────────────────────────────────
   readonly savingAccessConfig = signal(false);
@@ -489,6 +493,7 @@ export class MembershipAccessPageComponent implements OnInit {
         { value: 'denied_quota_exceeded', label: 'Límite alcanzado' },
         { value: 'denied_outside_schedule', label: 'Fuera de horario' },
         { value: 'denied_capacity_full', label: 'Aforo lleno' },
+        { value: 'denied_re_entry', label: 'Reingreso bloqueado' },
       ],
     },
     {
@@ -796,7 +801,13 @@ export class MembershipAccessPageComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.lastCheckin.set(res);
-          if (res.granted) {
+          if (res.result === 'denied_re_entry') {
+            // Re-entry blocked (mode 'block'): reflected as denied, amber toast.
+            this.toastService.warning(this.reEntryToastMessage(res, true));
+          } else if (res.granted && res.warning) {
+            // Granted, but a re-entry within the window (mode 'warn').
+            this.toastService.warning(this.reEntryToastMessage(res, false));
+          } else if (res.granted) {
             this.toastService.success('Ingreso concedido');
           } else {
             this.toastService.warning(
@@ -815,6 +826,19 @@ export class MembershipAccessPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  /**
+   * "Reingreso" / "Reingreso bloqueado" toast line with the elapsed minutes
+   * since the last granted entry, e.g. "Reingreso: ya ingresó hace 12 min".
+   */
+  private reEntryToastMessage(
+    res: AccessValidationResult,
+    blocked: boolean,
+  ): string {
+    const prefix = blocked ? 'Reingreso bloqueado' : 'Reingreso';
+    const mins = res.re_entry_minutes;
+    return mins == null ? prefix : `${prefix}: ya ingresó hace ${mins} min`;
   }
 
   registerExit(): void {
@@ -921,6 +945,12 @@ export class MembershipAccessPageComponent implements OnInit {
     this.cfgTurnstile.set(m?.turnstile_mode ?? false);
     this.cfgLevelingEnabled.set(m?.auto_leveling_enabled ?? false);
     this.cfgLevelingInterval.set(m?.auto_leveling_interval_hours === 1 ? 1 : 2);
+    this.cfgReEntryMode.set(m?.re_entry_mode ?? 'warn');
+    this.cfgReEntryWindowHours.set(
+      m?.re_entry_window_hours != null && m.re_entry_window_hours >= 1
+        ? m.re_entry_window_hours
+        : 2,
+    );
 
     // Fingerprint device config (anot 3b).
     const fd = m?.fingerprint_device;
@@ -979,6 +1009,14 @@ export class MembershipAccessPageComponent implements OnInit {
     this.cfgMaxCapacity.set(Math.max(0, Math.round(value)));
   }
 
+  setReEntryMode(mode: 'off' | 'warn' | 'block'): void {
+    this.cfgReEntryMode.set(mode);
+  }
+
+  onReEntryWindowChange(value: number): void {
+    this.cfgReEntryWindowHours.set(Math.max(1, Math.round(value)));
+  }
+
   onFingerprintEndpointInput(value: string): void {
     this.cfgFingerprintEndpoint.set(value);
     this.fcFingerprintEndpoint.setValue(value, { emitEvent: false });
@@ -1024,6 +1062,8 @@ export class MembershipAccessPageComponent implements OnInit {
         ? false
         : this.cfgLevelingEnabled(),
       auto_leveling_interval_hours: this.cfgLevelingInterval(),
+      re_entry_mode: this.cfgReEntryMode(),
+      re_entry_window_hours: Math.max(1, Math.round(this.cfgReEntryWindowHours())),
     };
 
     this.storeSettingsService

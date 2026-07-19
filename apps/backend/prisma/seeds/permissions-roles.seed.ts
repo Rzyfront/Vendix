@@ -989,6 +989,18 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/carrier/routes/:id/close',
       method: 'POST',
     },
+    {
+      name: 'store:carrier:stop:read',
+      description: 'Ver detalle de una parada de la planilla (carrier)',
+      path: '/api/store/carrier/route/stops/:stopId',
+      method: 'GET',
+    },
+    {
+      name: 'store:carrier:stop:update_address',
+      description: 'Editar la dirección de entrega de una parada (carrier)',
+      path: '/api/store/carrier/route/stops/:stopId/address',
+      method: 'PATCH',
+    },
 
     // Categorías
     {
@@ -4522,6 +4534,8 @@ export async function seedPermissionsAndRoles(
       p.name === 'store:carrier:settle' ||
       p.name === 'store:carrier:release' ||
       p.name === 'store:carrier:close' ||
+      p.name === 'store:carrier:stop:read' ||
+      p.name === 'store:carrier:stop:update_address' ||
       // Remisiones - lectura y captura en ruta (no update / delete / void / invoice)
       p.name === 'store:dispatch_notes:create' ||
       p.name === 'store:dispatch_notes:read' ||

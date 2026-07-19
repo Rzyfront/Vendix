@@ -16,7 +16,7 @@ import {
   City,
 } from '../../../../services/country.service';
 import { CurrencyService } from '../../../../services/currency.service';
-import { StoreIndustry } from '../../../../shared/constants/industry-modules.constant';
+import { StoreIndustry, INDUSTRY_OPTIONS } from '../../../../shared/constants/industry-modules.constant';
 
 @Component({
   selector: 'app-store-setup-step',
@@ -786,42 +786,13 @@ export class StoreSetupStepComponent implements OnInit {
   locationOptions: { value: number; label: string }[] = [];
 
   /**
-   * Industry options rendered as multi-toggle cards. Each entry maps the
-   * backend `StoreIndustry` value to a user-facing label and a Lucide
-   * icon already registered in the icon registry (no new icons are
-   * introduced — same pattern as the store-type cards).
+   * Industry options rendered as multi-toggle cards. Derived from the single
+   * source of truth `INDUSTRY_OPTIONS` (built off `STORE_INDUSTRIES`, the mirror
+   * of the backend `industry_enum`), so EVERY industry — including new ones —
+   * appears automatically without editing this component. Previously this was a
+   * hardcoded list that had drifted from the enum (e.g. `gym` was missing).
    */
-  readonly industryOptions: ReadonlyArray<{
-    value: StoreIndustry;
-    label: string;
-    description: string;
-    icon: string;
-  }> = [
-    {
-      value: 'retail',
-      label: 'Retail',
-      description: 'Venta de productos físicos',
-      icon: 'store',
-    },
-    {
-      value: 'restaurant',
-      label: 'Restaurante',
-      description: 'Menú, mesas y cocina',
-      icon: 'flame',
-    },
-    {
-      value: 'manufacturing',
-      label: 'Manufactura',
-      description: 'Producción y elaboración',
-      icon: 'boxes',
-    },
-    {
-      value: 'service',
-      label: 'Servicios',
-      description: 'Citas, reservas y atención',
-      icon: 'briefcase',
-    },
-  ];
+  readonly industryOptions = INDUSTRY_OPTIONS;
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();

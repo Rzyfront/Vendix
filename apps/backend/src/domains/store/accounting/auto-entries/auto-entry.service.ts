@@ -671,6 +671,11 @@ export class AutoEntryService {
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
+      // Anticipo a proveedores (pago de OC sin recepciones) y su reclasificación
+      // al recibir. El pago es una compra (activo por anticipo); la
+      // reclasificación es un ajuste entre CxP y el anticipo.
+      'purchase_order.advance_payment': 'auto_purchase',
+      'purchase_order.advance_reclass': 'adjustment',
       purchase_vat: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
@@ -2903,13 +2908,44 @@ export class AutoEntryService {
   }
 
   /**
-   * purchase_order.payment: Debit Accounts Payable, Credit Cash/Bank
+   * purchase_order.payment: contabiliza el pago de una orden de compra.
+   *
+   * DOS comportamientos según `is_advance` (bandera resuelta por el EMISOR en
+   * purchase-orders.service.ts — PROHIBIDO detectarlo aquí):
+   *
+   *  - Pago NORMAL (la OC ya tenía recepciones): extingue la CxP creada al
+   *    recibir → DR 2205 Proveedores / CR 1110 Banco.
+   *    Comportamiento actual INTACTO: `source_type='purchase_order.payment'`,
+   *    `source_id=purchase_order_id`.
+   *
+   *  - Pago ANTICIPADO (la OC NO tenía recepciones al pagar): NO hay pasivo que
+   *    extinguir todavía, así que registra un ACTIVO → DR 133005 Anticipos a
+   *    proveedores / CR 1110 Banco. Usa un `source_type` propio
+   *    ('purchase_order.advance_payment') y `source_id=payment_id` para que:
+   *      (a) cada pago anticipado postee su PROPIO asiento (no colisiona con el
+   *          guard de idempotencia por-OC del pago normal), y
+   *      (b) el emisor pueda sumar los débitos REALMENTE posteados a 133005
+   *          (Σ total_debit de estos asientos) como "saldo de anticipo" al
+   *          reclasificar en la recepción — sin acoplarse a códigos de cuenta.
+   *
+   * Al recibir después, `onPurchaseOrderAdvanceReclass` emite DR 2205 / CR 133005
+   * por min(monto_recibido, saldo_anticipo) para netear ambas cuentas.
    */
   async onPurchaseOrderPayment(data: {
     purchase_order_id: number;
+    /**
+     * `purchase_order_payments.id`. Usado como `source_id` SOLO en el camino de
+     * anticipo (para granularidad por-pago). El pago normal conserva
+     * `source_id=purchase_order_id` (comportamiento actual intacto).
+     */
+    payment_id?: number;
     organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
     amount: number;
     payment_method: string;
+    /** Resuelto por el emisor: la OC no tenía recepciones al momento del pago. */
+    is_advance?: boolean;
     user_id?: number;
     /** Snapshot del proveedor. Ver onPurchaseOrderReceived. */
     supplier?: { id: number; name?: string; tax_id?: string };
@@ -2923,21 +2959,27 @@ export class AutoEntryService {
         }
       : undefined;
 
-    // Resolve cash/bank key based on payment method
-    const method = (data.payment_method || '').toLowerCase();
-    const is_cash = method.includes('cash') || method.includes('efectivo');
-    const cash_bank_key = is_cash
-      ? 'purchase_order.payment.cash_bank'
-      : 'purchase_order.payment.cash_bank';
+    // Débito según naturaleza del pago: anticipo (activo 133005) vs pago normal
+    // (extinción de CxP 2205).
+    const debit_key = data.is_advance
+      ? 'purchase_order.payment.supplier_advance'
+      : 'purchase_order.payment.accounts_payable';
+    const debit_label = data.is_advance
+      ? 'Anticipo a proveedor - Pago OC'
+      : 'Proveedores - Pago OC';
+
+    // Cash/bank key (mismo default para efectivo o banco; el override de la
+    // cuenta de contrapartida se maneja vía mapping store/org).
+    const cash_bank_key = 'purchase_order.payment.cash_bank';
 
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
-        'purchase_order.payment.accounts_payable',
-        'Proveedores - Pago OC',
+        debit_key,
+        debit_label,
         data.amount,
         0,
-        undefined,
+        data.store_id,
         supplier_third_party,
       ),
       this.resolveAccountLine(
@@ -2946,13 +2988,112 @@ export class AutoEntryService {
         `Pago OC #${data.purchase_order_id}`,
         0,
         data.amount,
+        data.store_id,
       ),
     ]);
 
     return this.createAutoEntry({
-      source_type: 'purchase_order.payment',
-      source_id: data.purchase_order_id,
-      organization_id: data.organization_id,      description: `Pago orden de compra #${data.purchase_order_id}`,
+      source_type: data.is_advance
+        ? 'purchase_order.advance_payment'
+        : 'purchase_order.payment',
+      source_id: data.is_advance
+        ? (data.payment_id ?? data.purchase_order_id)
+        : data.purchase_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: data.is_advance
+        ? `Anticipo a proveedor — orden de compra #${data.purchase_order_id}`
+        : `Pago orden de compra #${data.purchase_order_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * purchase_order.advance_reclass: reclasifica un anticipo a proveedor contra
+   * la CxP creada al recibir → DR 2205 Proveedores / CR 133005 Anticipos.
+   *
+   * Se dispara al RECIBIR una OC que tiene anticipos pendientes. El EMISOR
+   * (purchase-orders.service.ts::receive) calcula el `amount` como
+   * min(monto_recibido_de_esta_recepción, saldo_anticipo_disponible) —
+   * PROHIBIDO recalcularlo aquí.
+   *
+   * Neto económico final de una OC pagada por anticipado y luego recibida:
+   *   Pago anticipo:   DR 133005 / CR 1110
+   *   Recepción:       DR 1435   / CR 2205
+   *   Reclasificación: DR 2205   / CR 133005
+   *   → 2205 y 133005 quedan en cero; neto = DR 1435 / CR 1110.
+   *
+   * IDEMPOTENCIA: `source_type='purchase_order.advance_reclass'` con
+   * `source_id=reception_id` → cada recepción reclasifica UNA sola vez (el guard
+   * de createAutoEntry por (org, source_type, source_id, entity) lo garantiza).
+   *
+   * LIMITACIÓN documentada (recepciones/pagos parciales): el saldo de anticipo
+   * lo calcula el emisor sumando los débitos REALMENTE posteados a 133005 menos
+   * lo ya reclasificado; con múltiples recepciones cada una consume una porción
+   * del saldo hasta agotarlo (FIFO por recepción). Si un pago anticipado falló
+   * al postear su asiento (error contable en cola de reintento), su débito NO
+   * cuenta como saldo hasta que el reintento lo postee — la reclasificación
+   * nunca deja 133005 en negativo.
+   */
+  async onPurchaseOrderAdvanceReclass(data: {
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    amount: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const amount = Number(data.amount || 0);
+    if (!(amount > 0)) {
+      this.logger.warn(
+        `Skipping advance reclass for PO #${data.purchase_order_id} ` +
+          `(reception #${data.reception_id}): non-positive amount (${amount})`,
+      );
+      return null;
+    }
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    const lines = await Promise.all([
+      // DR 2205 Proveedores (extingue la CxP creada por la recepción)
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase_order.received.accounts_payable',
+        'Proveedores (reclasificación de anticipo)',
+        amount,
+        0,
+        data.store_id,
+        supplier_third_party,
+      ),
+      // CR 133005 Anticipos a proveedores (consume el anticipo)
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase_order.payment.supplier_advance',
+        'Anticipos a proveedores (reclasificación)',
+        0,
+        amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_order.advance_reclass',
+      source_id: data.reception_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Reclasificación anticipo → CxP OC #${data.purchase_order_id} (recepción #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });

@@ -1,28 +1,16 @@
-import {
-  Component,
-  computed,
-  DestroyRef,
-  effect,
-  inject,
-  input,
-  output,
-  signal,
-} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import {
   ModalComponent,
   ButtonComponent,
   IconComponent,
-  InputComponent,
+  PaymentModalComponent,
 } from '../../../../../../../shared/components/index';
+import type { PaymentSubmit } from '../../../../../../../shared/components/index';
 import {
   CurrencyFormatService,
   CurrencyPipe,
 } from '../../../../../../../shared/pipes/index';
-import { PosPaymentService } from '../../../../pos/services/pos-payment.service';
-import { PaymentMethod } from '../../../../pos/models/payment.model';
 import { PaymentPendingView } from '../../interfaces/table.interface';
 
 /**
@@ -30,15 +18,15 @@ import { PaymentPendingView } from '../../interfaces/table.interface';
  *
  * Two modes driven by the `mode` input:
  *
- *   - `'pos'`     (default, legacy): settles an open table's bill
- *                  directly from the session page when
- *                  `restaurant.enable_table_checkout` is ON. Focused
- *                  replica of the order-details "modal cobro estilo-POS":
- *                  payment-method picker, cash flow with `amount_received`,
- *                  transfer/card `payment_reference`, optional gratuity.
- *                  Emits `pay` with the minimal payment fields; the page
- *                  combines them with the order's `subtotal` / `grand_total`
- *                  and calls `TablesService.payTableSession`.
+ *   - `'pos'`     (default): settles an open table's bill directly from the
+ *                  session page when `restaurant.enable_table_checkout` is ON.
+ *                  The collection UI (method picker, cash flow, reference, tip,
+ *                  keypad) is delegated to the shared, capability-driven
+ *                  `app-payment-modal` / `app-payment-collector`
+ *                  (`context="table"`). Its normalized {@link PaymentSubmit} is
+ *                  mapped here into {@link TablePaymentSubmit} and emitted via
+ *                  `pay`; the page combines it with the order totals and calls
+ *                  `TablesService.payTableSession` (`POST /store/payments/pos`).
  *
  *   - `'confirm'` (E2 — staff confirmation of diner-initiated payments):
  *                  the mesero reconciles a `pending` payment row created
@@ -77,31 +65,28 @@ export type TablePaymentMode = 'pos' | 'confirm';
   selector: 'app-table-payment-modal',
   standalone: true,
   imports: [
-    ReactiveFormsModule,
     DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    InputComponent,
     CurrencyPipe,
+    PaymentModalComponent,
   ],
   templateUrl: './table-payment-modal.component.html',
   styleUrl: './table-payment-modal.component.scss',
 })
 export class TablePaymentModalComponent {
-  private readonly posPaymentService = inject(PosPaymentService);
   private readonly currencyService = inject(CurrencyFormatService);
-  private readonly destroyRef = inject(DestroyRef);
 
   // ── Inputs ──────────────────────────────────────────────────────────
   readonly isOpen = input<boolean>(false);
   /**
    * Operation mode:
-   *  - 'pos'     → POS-style bill settlement (legacy default).
+   *  - 'pos'     → POS-style bill settlement (default).
    *  - 'confirm' → staff reconciles a pending diner payment (E2).
    */
   readonly mode = input<TablePaymentMode>('pos');
-  /** Bill total (order grand_total). Used as the cash default + summary. */
+  /** Bill total (order grand_total). Used as the collector's base amount. */
   readonly total = input<number>(0);
   readonly tableName = input<string>('');
   /** Driven by the parent while the POS payment request is in flight. */
@@ -120,13 +105,8 @@ export class TablePaymentModalComponent {
   readonly confirmPayment = output<TablePaymentConfirmSubmit>();
 
   // ── State ───────────────────────────────────────────────────────────
-  readonly methods = signal<PaymentMethod[]>([]);
-  readonly isLoadingMethods = signal(false);
-  readonly selectedMethod = signal<PaymentMethod | null>(null);
-  readonly cashReceived = signal<number>(0);
-  /** Gratuity added on top of the bill. Signal → templates + computeds stay reactive. */
+  /** Gratuity added on top of the bill (confirm mode). */
   readonly tip = signal<number>(0);
-  readonly referenceControl = new FormControl('');
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
@@ -134,9 +114,6 @@ export class TablePaymentModalComponent {
   readonly modalTitle = computed(() =>
     this.mode() === 'confirm' ? 'Confirmar pago' : 'Cobrar mesa',
   );
-
-  /** Amount actually charged: bill total + gratuity. */
-  readonly effectiveTotal = computed(() => this.total() + this.tip());
 
   /** Payment amount in 'confirm' mode (the row's amount as a number). */
   readonly pendingPaymentAmount = computed(() => {
@@ -150,129 +127,53 @@ export class TablePaymentModalComponent {
     return this.pendingPaymentAmount() + this.tip();
   });
 
-  readonly change = computed(() => {
-    if (this.selectedMethod()?.type !== 'cash') return 0;
-    return Math.max(0, this.cashReceived() - this.effectiveTotal());
-  });
-
-  readonly isCashInsufficient = computed(() => {
-    if (this.selectedMethod()?.type !== 'cash') return false;
-    return this.cashReceived() < this.effectiveTotal();
-  });
-
-  readonly missingAmount = computed(() =>
-    this.isCashInsufficient() ? this.effectiveTotal() - this.cashReceived() : 0,
-  );
-
-  /** In 'pos' mode: requires method + amount/ref constraints. */
+  /** 'confirm' mode gate — the mesero just confirms the pending row. */
   readonly canProcess = computed(() => {
     if (this.isProcessing()) return false;
-    if (this.mode() === 'confirm') {
-      // Confirm is just "I see the pending row + optional tip".
-      return !!this.pendingPayment();
-    }
-    const method = this.selectedMethod();
-    if (!method) return false;
-    if (method.type === 'cash') {
-      return this.cashReceived() >= this.effectiveTotal();
-    }
-    if (method.requiresReference) {
-      const ref = this.referenceControl.value;
-      return !!ref && ref.trim().length >= 4;
-    }
-    return true;
+    return !!this.pendingPayment();
   });
 
   constructor() {
-    // Reset + (lazy) load methods every time the modal opens. In
-    // 'confirm' mode we skip the method fetch entirely.
+    // Reset gratuity every time the modal opens (both modes). The 'pos'
+    // collection UI now lives in the shared collector, which is created
+    // fresh on each open (app-modal gates its content with @if).
     effect(() => {
       if (this.isOpen()) {
         this.resetState();
-        if (this.mode() === 'pos' && this.methods().length === 0) {
-          this.loadMethods();
-        }
       }
     });
-  }
-
-  private loadMethods(): void {
-    this.isLoadingMethods.set(true);
-    this.posPaymentService
-      .getPaymentMethods()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (methods) => {
-          const enabled = (methods ?? []).filter((m) => m.enabled !== false);
-          this.methods.set(enabled);
-          this.isLoadingMethods.set(false);
-          if (enabled.length > 0 && !this.selectedMethod()) {
-            this.selectMethod(enabled[0]);
-          }
-        },
-        error: () => {
-          this.methods.set([]);
-          this.isLoadingMethods.set(false);
-        },
-      });
-  }
-
-  selectMethod(method: PaymentMethod): void {
-    this.selectedMethod.set(method);
-    this.referenceControl.reset();
-    if (method.type === 'cash') {
-      this.cashReceived.set(this.effectiveTotal());
-    } else {
-      this.cashReceived.set(0);
-    }
-  }
-
-  onCashInput(value: number): void {
-    this.cashReceived.set(Number.isFinite(value) ? value : 0);
   }
 
   onTipInput(value: number): void {
     this.tip.set(Number.isFinite(value) && value > 0 ? value : 0);
   }
 
-  setFullAmount(): void {
-    this.cashReceived.set(this.effectiveTotal());
-  }
-
-  getReferenceError(): string | undefined {
-    const control = this.referenceControl;
-    if (control.touched && control.value && control.value.trim().length < 4) {
-      return 'Mínimo 4 caracteres';
-    }
-    return undefined;
-  }
-
-  /** Submit handler — branches by mode. */
-  submit(): void {
-    if (this.mode() === 'confirm') {
-      const p = this.pendingPayment();
-      if (!p || !this.canProcess()) return;
-      const payload: TablePaymentConfirmSubmit = {
-        payment_id: p.id,
-        ...(this.tip() > 0 ? { tip_amount: this.tip() } : {}),
-      };
-      this.confirmPayment.emit(payload);
-      return;
-    }
-    // 'pos' mode — legacy POS-style settlement.
-    const method = this.selectedMethod();
-    if (!method || !this.canProcess()) return;
+  /**
+   * Map the shared collector's normalized {@link PaymentSubmit} into the
+   * table settlement DTO and emit `pay`. Keeps the exact contract the page
+   * feeds to `TablesService.payTableSession` (`POST /store/payments/pos`).
+   */
+  onCollectorSubmit(submit: PaymentSubmit): void {
     const payload: TablePaymentSubmit = {
-      store_payment_method_id: Number(method.id),
-      ...(method.type === 'cash'
-        ? { amount_received: this.cashReceived() }
+      store_payment_method_id: Number(submit.storePaymentMethodId),
+      ...(submit.amountReceived != null
+        ? { amount_received: submit.amountReceived }
         : {}),
-      ...(method.requiresReference && this.referenceControl.value?.trim()
-        ? { payment_reference: this.referenceControl.value.trim() }
-        : {}),
-      ...(this.tip() > 0 ? { tip_amount: this.tip() } : {}),
+      ...(submit.reference ? { payment_reference: submit.reference } : {}),
+      ...(submit.tip && submit.tip > 0 ? { tip_amount: submit.tip } : {}),
     };
     this.pay.emit(payload);
+  }
+
+  /** 'confirm' mode submit — staff confirms a diner's pending payment. */
+  submit(): void {
+    const p = this.pendingPayment();
+    if (!p || !this.canProcess()) return;
+    const payload: TablePaymentConfirmSubmit = {
+      payment_id: p.id,
+      ...(this.tip() > 0 ? { tip_amount: this.tip() } : {}),
+    };
+    this.confirmPayment.emit(payload);
   }
 
   onIsOpenChange(value: boolean): void {
@@ -285,9 +186,6 @@ export class TablePaymentModalComponent {
   }
 
   private resetState(): void {
-    this.selectedMethod.set(null);
-    this.cashReceived.set(0);
     this.tip.set(0);
-    this.referenceControl.reset();
   }
 }

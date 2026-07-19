@@ -658,6 +658,21 @@ export interface MembershipSettings {
    * where the reader emits an opaque ID and Vendix never sees the template.
    */
   fingerprint_device?: FingerprintDeviceConfig;
+  /**
+   * Re-entry detection policy. When a member is granted access again within
+   * `re_entry_window_hours` of their last `granted` access:
+   *   - `off`   → no detection (current behavior).
+   *   - `warn`  → still grant, but flag it (`warning: true` + `re_entry_minutes`)
+   *               without re-counting aforo or re-consuming quota. Default.
+   *   - `block` → deny with `denied_re_entry` (anti pass-back).
+   * Default `'warn'`.
+   */
+  re_entry_mode?: 'off' | 'warn' | 'block';
+  /**
+   * Window in hours used by `re_entry_mode` to consider an access a re-entry.
+   * Default `2`.
+   */
+  re_entry_window_hours?: number;
 }
 
 // ============================================================================

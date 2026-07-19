@@ -56,13 +56,12 @@ import {
   PosProductVariant,
 } from './services/pos-product.service';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
-import { PosPaymentInterfaceComponent } from './components/pos-payment-interface.component';
+import { PosCheckoutShellComponent } from './components/pos-checkout-shell/pos-checkout-shell.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
-import { PosOrderCreateModalComponent, PosOrderCreateResult } from './components/pos-order-create-modal.component';
-import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
+import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
 import { QuotationsService } from '../quotations/services/quotations.service';
@@ -116,13 +115,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosStatsComponent,
     PosProductSelectionComponent,
     PosCustomerModalComponent,
-    PosPaymentInterfaceComponent,
+    PosCheckoutShellComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
     BadgeComponent,
     PosMobileFooterComponent,
     PosCartModalComponent,
-    PosShippingModalComponent,
     PosSessionStatusBarComponent,
     PosSessionOpenModalComponent,
     PosSessionCloseModalComponent,
@@ -134,7 +132,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
     PosAISummaryModalComponent,
-    PosOrderCreateModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -593,25 +590,24 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (customerSelected)="onCustomerSelected($event)"
       ></app-pos-customer-modal>
 
-      <app-pos-payment-interface
-        [isOpen]="showPaymentModal()"
+      <!-- Fase 5·B3: SHELL de checkout con stepper — único checkout del POS
+           (cobro, cliente, envío y "Guardar borrador" en el footer). El paso
+           Cobro autocarga sus métodos, por eso no se bindea [paymentMethods]. -->
+      <app-pos-checkout-shell
+        [isOpen]="showCheckoutModal()"
         [cartState]="cartState()"
+        [checkoutIntent]="checkoutIntent()"
         [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
         [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
-        (closed)="onPaymentModalClosed()"
-        (paymentCompleted)="onPaymentCompleted($event)"
+        (isOpenChange)="showCheckoutModal.set($event)"
+        (closed)="showCheckoutModal.set(false)"
+        (checkoutCompleted)="onPaymentCompleted($event)"
+        (shippingCompleted)="onShippingCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
         (tableSessionOpened)="onPaymentTableSessionOpened($event)"
-      ></app-pos-payment-interface>
-
-      <app-pos-shipping-modal
-        [isOpen]="showShippingModal()"
-        [cartState]="cartState()"
-        (closed)="onShippingModalClosed()"
-        (shippingCompleted)="onShippingCompleted($event)"
-        (customerSelected)="onPaymentCustomerSelected($event)"
-      ></app-pos-shipping-modal>
+        (draftSaved)="onCreateOrderConfirmed($event)"
+      ></app-pos-checkout-shell>
 
       <app-pos-order-confirmation
         [isOpen]="showOrderConfirmation()"
@@ -698,14 +694,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (close)="showLayawayConfigModal.set(false)"
         ></app-layaway-config-modal>
       }
-
-      <!-- Create order modal (Crear) — replaces the legacy 'Guardar' flow -->
-      <app-pos-order-create-modal
-        [isOpen]="showCreateOrderModal()"
-        (isOpenChange)="showCreateOrderModal.set($event)"
-        (created)="onCreateOrderConfirmed($event)"
-        (cancelled)="showCreateOrderModal.set(false)"
-      ></app-pos-order-create-modal>
     </div>
   `,
   styles: [
@@ -852,14 +840,18 @@ export class PosComponent {
   showCustomerModal = signal(false);
   editingCustomer = signal<PosCustomer | null>(null);
 
-  showPaymentModal = signal(false);
+  /**
+   * Fase 5·B3: SHELL unificado de checkout (stepper) — único punto de entrada
+   * del cobro. Cubre cobro sin envío ('pickup'), delivery y "Guardar borrador"
+   * desde el footer; los 3 modales viejos ya fueron retirados.
+   */
+  showCheckoutModal = signal(false);
+  checkoutIntent = signal<'pickup' | 'delivery'>('pickup');
   /** Fulfillment type chosen for the current payment. Mirrors the
    *  payment-modal selector so the parent can react when the modal closes. */
   paymentFulfillment = signal<'consumo' | 'entrega' | null>(null);
   /** Table id chosen for the current payment. */
   paymentTableId = signal<number | null>(null);
-
-  showShippingModal = signal(false);
 
   showOrderConfirmation = signal(false);
   productRefreshCounter = signal(0);
@@ -964,9 +956,6 @@ export class PosComponent {
   // Layaway mode
   isLayawayMode = signal(false);
   showLayawayConfigModal = signal(false);
-
-  // Create order modal (Crear action — replaces the legacy 'Guardar')
-  showCreateOrderModal = signal(false);
 
   // Mobile detection signal
   isMobile = signal(false);
@@ -1365,34 +1354,35 @@ export class PosComponent {
 
   /**
    * Legacy entrypoint kept for any call site that still binds to it.
-   * The "Crear" UX is now handled by `onOpenCreateModal` which opens the
-   * order-create modal (with the fulfillment selector for restaurant
-   * stores and the anti-double-fire KDS guard).
+   * The "Crear" UX is now folded into the checkout shell ("Guardar
+   * borrador" in the footer), so it delegates to `onOpenCreateModal`.
    */
   onSaveDraft(): void {
     this.onOpenCreateModal();
   }
 
   /**
-   * Open the "Crear orden" modal. The modal owns the create flow
-   * (retail draft / restaurant counter draft / append-to-table) and the
-   * KDS fire. On success the cart is cleared.
+   * Fase 5·B3: the "Crear orden / Guardar borrador" flow now lives inside
+   * the checkout shell footer. This entrypoint just opens the shell in
+   * pickup intent; the shell owns the create flow (retail draft /
+   * restaurant counter draft / append-to-table) and the KDS fire, and
+   * clears the cart on success.
    */
   onOpenCreateModal(): void {
     if (!this.cartState() || this.isEmpty) return;
-    // Close the mobile cart modal so the order-create modal is the only
+    // Close the mobile cart modal so the checkout shell is the only
     // full-screen dialog open at a time.
     this.showCartModal.set(false);
-    this.showCreateOrderModal.set(true);
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(true);
   }
 
   /**
-   * Post-create handler invoked by `app-pos-order-create-modal`. Persists
-   * the new order id so the operator can re-print / track it, and
-   * surfaces the order-confirmation screen.
+   * Post-create handler invoked by the checkout shell `(draftSaved)`
+   * output. Persists the new order id so the operator can re-print /
+   * track it, and surfaces the order-confirmation screen.
    */
   onCreateOrderConfirmed(result: PosOrderCreateResult): void {
-    this.showCreateOrderModal.set(false);
     if (!result?.order) return;
     this.currentOrderId.set(result.order.id ? String(result.order.id) : null);
     this.currentOrderNumber.set(result.order.order_number ?? null);
@@ -1746,13 +1736,11 @@ export class PosComponent {
       return;
     }
 
-    this.showPaymentModal.set(true);
+    // Fase 5·B3: el checkout sin envío ('pickup') pasa por el SHELL con
+    // stepper — único checkout del POS.
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(true);
   }
-
-  onPaymentModalClosed(): void {
-    this.showPaymentModal.set(false);
-  }
-
 
   /**
    * Restaurant Suite — Fase K Gap 1: returns true when the cart item
@@ -1789,7 +1777,8 @@ export class PosComponent {
     if (!this.cartState() || this.isEmpty) return;
 
     this.loading.set(false);
-    this.showPaymentModal.set(false);
+    // Fase 5·B3: la venta directa finaliza aquí; cierra el shell (espeja envío).
+    this.showCheckoutModal.set(false);
 
     // Capture fulfillment + tableId chosen in the payment modal so the
     // parent can audit / forward them, then reset the local signals.
@@ -1884,6 +1873,11 @@ export class PosComponent {
               console.error('Error consuming queue entry:', err),
           });
       }
+
+      // Finalización: limpia el estado residual del padre a su valor inicial.
+      this.selectedCustomer.set(null);
+      this.paymentFulfillment.set(null);
+      this.paymentTableId.set(null);
     }
   }
 
@@ -2231,7 +2225,9 @@ export class PosComponent {
       this.toastService.warning('El carrito está vacío');
       return;
     }
-    this.showShippingModal.set(true);
+    // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
+    this.checkoutIntent.set('delivery');
+    this.showCheckoutModal.set(true);
   }
 
   onShippingFromModal(): void {
@@ -2239,15 +2235,12 @@ export class PosComponent {
     this.onShipping();
   }
 
-  onShippingModalClosed(): void {
-    this.showShippingModal.set(false);
-  }
-
   onShippingCompleted(shippingData: any): void {
     if (!this.cartState() || this.isEmpty) return;
 
     this.loading.set(false);
-    this.showShippingModal.set(false);
+    // Fase 5·B3: el flujo delivery emite desde el shell; ciérralo.
+    this.showCheckoutModal.set(false);
 
     if (shippingData.success) {
       this.currentOrderId.set(shippingData.order?.id);
@@ -2315,6 +2308,11 @@ export class PosComponent {
               console.error('Error consuming queue entry:', err),
           });
       }
+
+      // Finalización: limpia el estado residual del padre a su valor inicial.
+      this.selectedCustomer.set(null);
+      this.paymentFulfillment.set(null);
+      this.paymentTableId.set(null);
     }
   }
 

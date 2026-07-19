@@ -1,4 +1,9 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, dispatch_route_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -8,6 +13,7 @@ import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { RouteFlowService } from '../dispatch-routes/route-flow/route-flow.service';
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { CreateFromOrderDto } from '../dispatch-notes/dto/create-from-order.dto';
+import { UpdateDispatchNoteAddressDto } from '../dispatch-notes/dto';
 import {
   SettleStopDto,
   ReleaseStopDto,
@@ -15,6 +21,7 @@ import {
   ReorderStopsDto,
 } from '../dispatch-routes/dto';
 import { PoolQueryDto } from './dto/pool-query.dto';
+import { RouteHistoryQueryDto } from './dto/route-history-query.dto';
 
 /**
  * A single order sitting in the carrier pool (published by the admin, not yet
@@ -262,6 +269,121 @@ export class CarrierDeliveryService {
         earned,
       } as CarrierPayout,
     };
+  }
+
+  // ── Detalle de parada + editar dirección ──────────────────────────────────
+
+  /**
+   * Detalle de una parada de MI ruta activa: resuelve el `dispatch_note_id` de
+   * la parada y REUSA `DispatchNotesService.findOne` para devolver la remisión
+   * completa (ítems + producto + …), el MISMO shape que el admin
+   * `GET /store/dispatch-notes/:id`. Aislamiento por construcción:
+   * `assertStopBelongsToRoute` garantiza que la parada es de mi ruta.
+   */
+  async getStopDetail(stopId: number) {
+    const route = await this.requireMyActiveRoute();
+    this.assertStopBelongsToRoute(route, stopId);
+    const noteId = this.resolveStopNoteId(route, stopId);
+    return this.dispatchNotesService.findOne(noteId);
+  }
+
+  /**
+   * Editar la dirección de entrega de una parada de MI ruta activa. Delega en
+   * `DispatchNotesService.updateCustomerAddressSnapshot`, que sólo re-snapshotea
+   * la dirección (display + mapa) — NO toca inventario ni contabilidad.
+   */
+  async updateStopAddress(stopId: number, dto: UpdateDispatchNoteAddressDto) {
+    const route = await this.requireMyActiveRoute();
+    this.assertStopBelongsToRoute(route, stopId);
+    const noteId = this.resolveStopNoteId(route, stopId);
+    return this.dispatchNotesService.updateCustomerAddressSnapshot(noteId, dto);
+  }
+
+  /** Resolver el `dispatch_note_id` de una parada YA validada como mía. */
+  private resolveStopNoteId(
+    route: { stops: Array<{ id: number; dispatch_note_id: number }> },
+    stopId: number,
+  ): number {
+    const stop = route.stops.find((s) => s.id === stopId);
+    const noteId = stop?.dispatch_note_id;
+    if (!noteId) {
+      throw new NotFoundException(
+        `La parada #${stopId} no tiene remisión asociada`,
+      );
+    }
+    return noteId;
+  }
+
+  // ── Historial de rutas del carrier ────────────────────────────────────────
+
+  /**
+   * Historial paginado de MIS planillas (TODOS los estados, incl. closed/voided).
+   * `dispatch_routes` NO es auto-scoped → se filtra `store_id` manualmente,
+   * junto con `driver_user_id` (mías) e `is_carrier_route`.
+   */
+  async listMyRoutes(query: RouteHistoryQueryDto): Promise<{
+    data: unknown[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const { store_id, user_id } = this.requireContext();
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.dispatch_routesWhereInput = {
+      store_id,
+      driver_user_id: user_id,
+      is_carrier_route: true,
+      ...(query.status
+        ? { status: query.status as dispatch_route_status_enum }
+        : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.dispatch_routes.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' },
+        include: {
+          vehicle: true,
+          _count: { select: { stops: true } },
+        },
+      }),
+      this.prisma.dispatch_routes.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
+  }
+
+  /**
+   * Detalle de UNA de mis planillas del historial (por id, cualquier estado).
+   * Aislamiento: el `findFirst` filtra `store_id` + `driver_user_id` +
+   * `is_carrier_route`, así una planilla ajena devuelve null → 404.
+   */
+  async getMyRouteById(id: number) {
+    const { store_id, user_id } = this.requireContext();
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: {
+        id,
+        store_id,
+        driver_user_id: user_id,
+        is_carrier_route: true,
+      },
+      include: {
+        stops: {
+          orderBy: { stop_sequence: 'asc' },
+          include: { dispatch_note: true },
+        },
+        vehicle: true,
+      },
+    });
+    if (!route) {
+      throw new NotFoundException(`Planilla #${id} no encontrada`);
+    }
+    return route;
   }
 
   // ── Helpers de ejecución (Fase B7) ────────────────────────────────────────
@@ -560,6 +682,10 @@ export class CarrierDeliveryService {
         order_id,
       });
     }
+
+    // La orden salió del pool → notificar a los streams SSE de repartidores
+    // para que la retiren de su lista en vivo (mismo shape que la limpieza).
+    this.eventEmitter.emit('carrier.pool.changed', { store_id });
 
     // STEP 2 — Resolver ruta: existente (tomar-en-recorrido) o crear nueva.
     let route_id: number;

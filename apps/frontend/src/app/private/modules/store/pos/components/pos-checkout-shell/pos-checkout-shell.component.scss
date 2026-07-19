@@ -1,0 +1,515 @@
+@use '../../../../../../shared/components/payment-collector/subwizard' as subwizard;
+
+/* Fase 5·B1 — POS Checkout Shell. Layout stepper + paso activo + resumen.
+   Estilos de Resumen / Cliente / footer extraídos de pos-payment-interface. */
+
+.checkout-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.checkout-stepper {
+  max-width: 560px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── Body grid ─────────────────────────────────────── */
+.checkout-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  min-height: 0;
+}
+
+.checkout-main {
+  min-width: 0;
+}
+
+.step-panel {
+  min-width: 0;
+}
+
+.step-hidden {
+  display: none;
+}
+
+/* Rail de resumen: en móvil va debajo; en desktop columna fija sticky. */
+.summary-rail {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .checkout-grid {
+    grid-template-columns: 360px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .summary-rail {
+    order: -1;
+    position: sticky;
+    top: 0;
+  }
+}
+
+/* ── Section shell (reutilizado de la interfaz vieja) ─ */
+.payment-section {
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  padding: 14px;
+}
+
+.cliente-section {
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  padding: 14px;
+}
+
+/* Rail de resumen: fondo sutil (muted) para jerarquía. Fallback a surface
+   mantiene el look actual si el tema no define --color-muted. */
+.summary-rail .payment-section {
+  background: var(--color-muted, var(--color-surface));
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.section-indicator {
+  width: 4px;
+  height: 20px;
+  background: var(--color-primary);
+  border-radius: 2px;
+}
+
+.section-icon {
+  color: var(--color-primary);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* ── Product list / summary ──────────────────────────── */
+.product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.product-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.product-info {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.product-name {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tier-badge,
+.item-package-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.tier-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.item-package-badge {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.product-qty {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.empty-cart {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-style: italic;
+  padding: 16px 0;
+}
+
+.summary-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.summary-value {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.summary-value.discount {
+  color: var(--color-error);
+}
+
+.total-section {
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.total-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin: 0;
+}
+
+.total-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin: 4px 0 0 0;
+}
+
+/* ── Cliente sub-wizard (opciones | stepper vertical) ─────
+   Móvil: una columna, steps-col ABAJO (DOM-last).
+   Desktop (≥768px): cliente-main | steps-col. */
+.cliente-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.cliente-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
+   Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
+.cliente-collapsed {
+  @include subwizard.subwizard-collapsed-row;
+}
+
+/* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
+.steps-col {
+  @include subwizard.subwizard-steps-col;
+}
+
+@media (min-width: 768px) {
+  .cliente-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* Badge "Obligatoria" del sub-paso Dirección (warning amber; no /opacity). */
+.addr-required-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+/* ── Cliente (sale type) ─────────────────────────────── */
+.sale-type-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sale-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+  text-align: left;
+}
+
+.sale-type-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.sale-type-btn.selected {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.radio-indicator {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sale-type-btn.selected .radio-indicator {
+  border-color: var(--color-primary);
+}
+
+.radio-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  border-radius: 50%;
+}
+
+.sale-type-btn app-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.sale-type-btn.selected app-icon {
+  color: var(--color-primary);
+}
+
+.sale-type-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sale-type-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sale-type-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+.checkout-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.footer-total-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.footer-total-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.footer-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.btn-prev {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-prev:hover:not(:disabled) {
+  background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.btn-prev:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-cancel {
+  padding: 12px 16px;
+  border: 1px solid rgba(var(--color-error-rgb), 0.3);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-error);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: rgba(var(--color-error-rgb), 0.05);
+}
+
+.btn-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-draft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-primary);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-draft:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 24px;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+}
+
+.btn-confirm:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.btn-confirm:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Desktop: el rail ya muestra el total, ocultamos el total del footer. */
+@media (min-width: 1024px) {
+  .footer-left {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .btn-confirm {
+    padding: 12px 16px;
+    font-size: 15px;
+  }
+
+  .footer-actions {
+    flex-wrap: wrap;
+  }
+}

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import {
+  Prisma,
   serial_status_enum,
   sales_document_item_type_enum,
 } from '@prisma/client';
@@ -13,6 +14,7 @@ import {
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
+import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -66,6 +68,16 @@ export class DispatchNoteEventsListener {
     // (3-arg construction) keeps compiling; when absent the delegation is a
     // logged no-op (never a silent double stock-in).
     private readonly purchaseOrdersService?: PurchaseOrdersService,
+    // QUI-498 — SINGLE reconciler for the order ↔ remisión lifecycle. Optional
+    // for the same reason as `serials` / `eventEmitter` / `purchaseOrdersService`:
+    // the existing unit spec constructs with 3 args, so when absent (tests) the
+    // order-state reconciliation and COD balance clearing simply no-op. In
+    // production Nest injects it (OrderFlowModule is imported by
+    // DispatchNotesModule). It replaces the old direct `checkAndUpdateOrderStatus`
+    // updateMany: reconcileOrderFromDispatch derives the order state from its
+    // remisiones + balance (POST-COMMIT) and applyDispatchCodPayment clears a COD
+    // balance idempotently.
+    private readonly orderFlowService?: OrderFlowService,
   ) {}
 
   /**
@@ -108,6 +120,10 @@ export class DispatchNoteEventsListener {
       product_id: number;
       product_variant_id: number | null;
       dispatched_quantity: number;
+      // QUI-425 — per-line pricing overrides persisted on the dispatch_note_item.
+      // Prisma returns Decimal columns as Prisma.Decimal (null when unset).
+      new_base_price?: Prisma.Decimal | null;
+      new_profit_margin?: Prisma.Decimal | null;
     }>,
     dispatchNumber: string,
   ): Promise<void> {
@@ -145,7 +161,12 @@ export class DispatchNoteEventsListener {
         select: { id: true, product_id: true, product_variant_id: true },
       });
 
-    const receiveItems: Array<{ id: number; quantity_received: number }> = [];
+    const receiveItems: Array<{
+      id: number;
+      quantity_received: number;
+      new_base_price?: number;
+      new_profit_margin?: number;
+    }> = [];
     for (const item of items) {
       const poLine = poItems.find(
         (p) =>
@@ -160,10 +181,27 @@ export class DispatchNoteEventsListener {
       }
       // dispatched_quantity is in PURCHASE units (same basis the direct receive
       // path uses); receive() applies purchase_to_stock_factor internally.
-      receiveItems.push({
+      const receiveItem: {
+        id: number;
+        quantity_received: number;
+        new_base_price?: number;
+        new_profit_margin?: number;
+      } = {
         id: poLine.id,
         quantity_received: item.dispatched_quantity,
-      });
+      };
+      // QUI-425 — forward the operator's per-line price/margin override to
+      // receive() ONLY when it was actually captured. Attaching the field
+      // unconditionally would push receive() down its pricing path (recomputing
+      // base_price/margin) even for plain receipts with no override, so we
+      // replicate the frontend's "attach-only-if-defined" contract.
+      if (item.new_base_price != null) {
+        receiveItem.new_base_price = Number(item.new_base_price);
+      }
+      if (item.new_profit_margin != null) {
+        receiveItem.new_profit_margin = Number(item.new_profit_margin);
+      }
+      receiveItems.push(receiveItem);
     }
 
     if (receiveItems.length === 0) {
@@ -352,8 +390,12 @@ export class DispatchNoteEventsListener {
 
       // Sincronización de estado del documento padre (idempotente). El servicio
       // canónico ya liberó/consumió las reservas; aquí sólo avanzamos el estado
-      // de la orden / sales order cuando todas sus líneas quedaron despachadas.
-      // CONSERVADO: checkAndUpdateSalesOrderStatus / checkAndUpdateOrderStatus.
+      // del documento padre. La rama sales_order CONSERVA
+      // checkAndUpdateSalesOrderStatus intacta. La rama `orders` (QUI-498) ahora
+      // delega en el reconciliador único (reconcileOrderFromDispatch), que corre
+      // DESPUÉS de commitDispatchDelivery (arriba) para garantizar el orden
+      // stock_out → order.status_changed (nunca `finished` sin haber deducido
+      // stock). Best-effort: el reconciliador ya traga sus propios errores.
       if (dispatch_note.sales_order_id) {
         try {
           await this.checkAndUpdateSalesOrderStatus(
@@ -365,15 +407,15 @@ export class DispatchNoteEventsListener {
             `[delivered] Failed to update sales order #${dispatch_note.sales_order_id}: ${err.message}`,
           );
         }
-      } else if (dispatch_note.order_id) {
+      } else if (dispatch_note.order_id && this.orderFlowService) {
         try {
-          await this.checkAndUpdateOrderStatus(
+          await this.orderFlowService.reconcileOrderFromDispatch(
             dispatch_note.order_id,
-            'shipped',
+            dispatch_note.store_id,
           );
         } catch (err) {
           this.logger.error(
-            `[delivered] Failed to update order #${dispatch_note.order_id}: ${err.message}`,
+            `[delivered] Failed to reconcile order #${dispatch_note.order_id}: ${err.message}`,
           );
         }
       }
@@ -747,6 +789,7 @@ export class DispatchNoteEventsListener {
         select: {
           id: true,
           sales_order_id: true,
+          order_id: true,
           dispatch_number: true,
         },
       });
@@ -768,6 +811,39 @@ export class DispatchNoteEventsListener {
         } catch (err) {
           this.logger.error(
             `[invoiced] Failed to update sales order #${dispatch_note.sales_order_id}: ${err.message}`,
+          );
+        }
+      } else if (dispatch_note.order_id && this.orderFlowService) {
+        // QUI-498 — COD order settled at invoice time (standalone remisión):
+        //  (a) if the order still carries a balance, clear it idempotently via
+        //      the shared helper with the standalone correlation key
+        //      `dispatch_note:{id}` (route flow uses `dispatch_route_stop:{id}`);
+        //  (b) reconcile the order state from its remisiones + (now-zero)
+        //      balance → typically advancing it to `finished`.
+        // Best-effort: both helpers already swallow their own errors, but the
+        // try/catch keeps a settlement glitch from ever tumbling the listener.
+        const store_id = event.store_id;
+        try {
+          const order = await this.prisma.orders.findFirst({
+            where: { id: dispatch_note.order_id, store_id },
+            select: { remaining_balance: true },
+          });
+          const remaining = Number(order?.remaining_balance ?? 0);
+          if (remaining > 0) {
+            await this.orderFlowService.applyDispatchCodPayment({
+              storeId: store_id,
+              dispatchNoteId: dispatch_note.id,
+              amount: remaining,
+              correlationKey: `dispatch_note:${dispatch_note.id}`,
+            });
+          }
+          await this.orderFlowService.reconcileOrderFromDispatch(
+            dispatch_note.order_id,
+            store_id,
+          );
+        } catch (err) {
+          this.logger.error(
+            `[invoiced] Failed to settle/reconcile order #${dispatch_note.order_id}: ${err.message}`,
           );
         }
       }
@@ -874,60 +950,6 @@ export class DispatchNoteEventsListener {
 
         this.logger.log(
           `[checkSOStatus] Sales order #${sales_order_id} marked as invoiced`,
-        );
-      }
-    }
-  }
-
-  /**
-   * Order ⇄ dispatch-note bridge. Mirrors {@link checkAndUpdateSalesOrderStatus}
-   * for the `orders` table. When every non-voided dispatch note linked to the
-   * order has been delivered, advances the order `processing -> shipped`.
-   *
-   * It writes `orders.state` directly (instead of calling OrderFlowService) so
-   * it stays idempotent and never re-fires order-flow side effects (shipping
-   * validations, `order.shipped` auto-fulfillment, etc.). The guard
-   * `state === 'processing'` makes late/duplicate events a no-op, and the
-   * `processing -> shipped` transition is valid in the order state machine.
-   */
-  private async checkAndUpdateOrderStatus(
-    order_id: number,
-    target_status: 'shipped',
-  ): Promise<void> {
-    const order = await this.prisma.orders.findFirst({
-      where: { id: order_id },
-      include: {
-        dispatch_notes: {
-          where: { status: { not: 'voided' } },
-          select: { id: true, status: true },
-        },
-      },
-    });
-
-    if (!order) {
-      this.logger.warn(`[checkOrderStatus] Order #${order_id} not found`);
-      return;
-    }
-
-    if (target_status === 'shipped') {
-      const dispatch_notes = order.dispatch_notes;
-      const all_dispatched =
-        dispatch_notes.length > 0 &&
-        dispatch_notes.every(
-          (dn) => dn.status === 'delivered' || dn.status === 'invoiced',
-        );
-
-      if (all_dispatched && order.state === 'processing') {
-        await this.prisma.orders.update({
-          where: { id: order_id },
-          data: {
-            state: 'shipped',
-            updated_at: new Date(),
-          },
-        });
-
-        this.logger.log(
-          `[checkOrderStatus] Order #${order_id} marked as shipped`,
         );
       }
     }

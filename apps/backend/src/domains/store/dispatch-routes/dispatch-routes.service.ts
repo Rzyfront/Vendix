@@ -1246,8 +1246,14 @@ export class DispatchRoutesService {
     // `dispatch_route_stops_dispatch_note_id_active_idx` and the create()
     // /addStops() blockers. We don't carve out parent=draft here because a
     // draft route still holds its stops locked at the DB layer.
+    // QUI-484 — scope the lock lookup by store. `dispatch_route_stops` is NOT
+    // auto-scoped by the Prisma extension (this domain scopes manually), so a
+    // bare `status != released` filter would over-read active stops from EVERY
+    // tenant and could hide another store's notes from this store's picker.
+    // Constrain via the parent remisión's `store_id` (relation `dispatch_note`,
+    // schema.prisma dispatch_route_stops → dispatch_notes).
     const lockedNoteIds = await this.prisma.dispatch_route_stops.findMany({
-      where: { status: { not: 'released' } },
+      where: { status: { not: 'released' }, dispatch_note: { store_id } },
       select: { dispatch_note_id: true },
     });
     const lockedSet = new Set(lockedNoteIds.map((s) => s.dispatch_note_id));

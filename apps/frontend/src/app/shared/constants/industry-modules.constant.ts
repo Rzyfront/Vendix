@@ -9,6 +9,67 @@ export const STORE_INDUSTRIES = [
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
 
 /**
+ * Rich per-industry presentation metadata (label + description + icon), keyed
+ * by every `StoreIndustry`. Single source of truth for how an industry is
+ * RENDERED in any surface (onboarding cards, store create/edit modals, general
+ * settings). Because it is a `Record<StoreIndustry, …>`, adding a value to
+ * `STORE_INDUSTRIES` (the frontend mirror of the backend `industry_enum`)
+ * without a metadata entry is a COMPILE ERROR — the industry list rendered to
+ * users can never silently drift from the enum again.
+ *
+ * `icon` values are Lucide keys already registered in the icon registry
+ * (`shared/components/icon/icons.registry.ts`) — no new icons are introduced.
+ */
+export interface IndustryMeta {
+  value: StoreIndustry;
+  label: string;
+  description: string;
+  icon: string;
+}
+
+export const INDUSTRY_METADATA: Record<StoreIndustry, IndustryMeta> = {
+  retail: {
+    value: 'retail',
+    label: 'Retail',
+    description: 'Venta de productos físicos',
+    icon: 'store',
+  },
+  restaurant: {
+    value: 'restaurant',
+    label: 'Restaurante',
+    description: 'Menú, mesas y cocina',
+    icon: 'flame',
+  },
+  manufacturing: {
+    value: 'manufacturing',
+    label: 'Manufactura',
+    description: 'Producción y elaboración',
+    icon: 'boxes',
+  },
+  service: {
+    value: 'service',
+    label: 'Servicios',
+    description: 'Citas, reservas y atención',
+    icon: 'briefcase',
+  },
+  gym: {
+    value: 'gym',
+    label: 'Gimnasio',
+    description: 'Membresías, accesos y aforo',
+    icon: 'dumbbell',
+  },
+};
+
+/**
+ * Canonical, ordered list of industry options for pickers. Derived from
+ * `STORE_INDUSTRIES` so the order mirrors the enum and every industry appears
+ * exactly once. Card-based consumers (onboarding) use the full `IndustryMeta`;
+ * `{value,label}` consumers (multi-selectors) map over it.
+ */
+export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
+  STORE_INDUSTRIES.map((value) => INDUSTRY_METADATA[value]);
+
+/**
  * Map of panel_ui module keys hidden per industry.
  *
  * - Key: a `StoreIndustry` value (lowercase, matches the backend `StoreIndustry`

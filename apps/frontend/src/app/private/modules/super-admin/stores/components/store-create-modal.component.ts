@@ -11,6 +11,7 @@ import {
   MultiSelectorOption,
 } from '../../../../../shared/components/index';
 import {
+  INDUSTRY_METADATA,
   STORE_INDUSTRIES,
   StoreIndustry,
 } from '../../../../../shared/constants/industry-modules.constant';
@@ -339,23 +340,8 @@ export class StoreCreateModalComponent {
 
   readonly industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
     value: id,
-    label: this.getIndustryLabel(id),
+    label: INDUSTRY_METADATA[id].label,
   }));
-
-  private getIndustryLabel(id: StoreIndustry): string {
-    switch (id) {
-      case 'retail':
-        return 'Retail';
-      case 'restaurant':
-        return 'Restaurante';
-      case 'manufacturing':
-        return 'Manufactura';
-      case 'service':
-        return 'Servicios';
-      case 'gym':
-        return 'Gimnasio';
-    }
-  }
 
   onSubmit(): void {
     if (this.storeForm.invalid) {

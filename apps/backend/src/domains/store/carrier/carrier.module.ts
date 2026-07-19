@@ -6,6 +6,8 @@ import { DispatchRoutesModule } from '../dispatch-routes/dispatch-routes.module'
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { CarrierDeliveryController } from './carrier-delivery.controller';
 import { CarrierDeliveryService } from './carrier-delivery.service';
+import { CarrierPoolSseService } from './carrier-pool-sse.service';
+import { CarrierPoolSseListener } from './carrier-pool-sse.listener';
 
 /**
  * Carrier namespace module (Repartos Fase B6).
@@ -27,7 +29,12 @@ import { CarrierDeliveryService } from './carrier-delivery.service';
     DispatchRoutesModule,
   ],
   controllers: [CarrierDeliveryController],
-  providers: [CarrierDeliveryService, RouteNumberGenerator],
+  providers: [
+    CarrierDeliveryService,
+    RouteNumberGenerator,
+    CarrierPoolSseService,
+    CarrierPoolSseListener,
+  ],
   exports: [CarrierDeliveryService],
 })
 export class CarrierModule {}

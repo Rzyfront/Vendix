@@ -9,6 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 
 import {
   AddressFormFieldsComponent,
@@ -56,6 +57,18 @@ export class DispatchNoteAddressEditorComponent {
   /** Current `customer_address` snapshot (JSON blob from the note). */
   readonly address = input<AddressPayload | null>(null);
 
+  /**
+   * Optional carrier-mode saver. When provided (Vendix Repartos), `save()`
+   * delegates to this fn — which targets the carrier endpoint
+   * `PATCH /store/carrier/route/stops/:stopId/address` and resolves the stop
+   * from the JWT (so no `noteId` is needed) — instead of the admin
+   * `DispatchNoteAddressService.updateAddress`. In admin mode it stays null and
+   * the component keeps its original behavior.
+   */
+  readonly saveFn = input<
+    ((payload: DispatchNoteAddressPayload) => Observable<unknown>) | null
+  >(null);
+
   /** Emits after a successful save so the parent can refresh the note. */
   readonly saved = output<void>();
 
@@ -88,8 +101,11 @@ export class DispatchNoteAddressEditorComponent {
   }
 
   save(): void {
+    const fn = this.saveFn();
     const id = this.noteId();
-    if (id == null) {
+    // Carrier mode (saveFn present) resuelve la parada desde el JWT → no exige
+    // noteId. Solo el modo admin (sin saveFn) necesita el id de la remisión.
+    if (!fn && id == null) {
       this.toast.error('No se pudo guardar: falta el id de la remisión.');
       return;
     }
@@ -112,8 +128,10 @@ export class DispatchNoteAddressEditorComponent {
     };
 
     this.saving.set(true);
-    this.addressService
-      .updateAddress(id, payload)
+    const request$ = fn
+      ? fn(payload)
+      : this.addressService.updateAddress(id as number, payload);
+    request$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

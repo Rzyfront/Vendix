@@ -48,6 +48,11 @@ import type {
 // importa como tipo directamente desde la interfaz de planillas (misma fuente
 // que usa `repartos.interface` internamente) para portar el gate de dirección.
 import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interfaces/planilla.interface';
+// Detalle completo de la remisión (Items 4+5): mismo tipo que consume el modal
+// admin, para alimentar `[note]` con cliente/dirección/total/fecha/ítems.
+import type { DispatchNote } from '../../store/dispatch-notes/interfaces/dispatch-note.interface';
+import type { DispatchNoteAddressPayload } from '../../../../shared/components/dispatch-note-address-editor/dispatch-note-address-editor.service';
+import type { Observable } from 'rxjs';
 
 /**
  * Fase F4 — "Mi Ruta activa" (`/repartos/ruta`).
@@ -365,8 +370,12 @@ import type { DispatchDeliveryAddress } from '../../store/planillas-rutas/interf
     @if (detailStop(); as s) {
       <app-stop-detail-modal
         [stop]="s"
-        (close)="detailStop.set(null)"
-        (goToNote)="detailStop.set(null)"
+        [note]="detailNote()"
+        [loading]="detailLoading()"
+        [addressSaveFn]="detailAddressSaveFn()"
+        (close)="closeStopDetail()"
+        (goToNote)="closeStopDetail()"
+        (refresh)="onStopDetailRefresh()"
       ></app-stop-detail-modal>
     }
   `,
@@ -559,11 +568,44 @@ export class RutaActivaPageComponent {
   readonly releaseStopSig = signal<DispatchRouteStop | null>(null);
   readonly showCloseModal = signal(false);
   readonly detailStop = signal<DispatchRouteStop | null>(null);
+  // Items 4+5 — remisión completa de la parada abierta (cliente/dirección/ítems)
+  // + flag de carga mientras se resuelve `GET /store/carrier/route/stops/:id`.
+  readonly detailNote = signal<DispatchNote | null>(null);
+  readonly detailLoading = signal(false);
+
+  /**
+   * Saver de dirección en modo carrier para el `StopDetailModalComponent`.
+   * Se recomputa SOLO cuando cambia la parada abierta; devuelve un closure que
+   * persiste vía el endpoint carrier (`PATCH /store/carrier/route/stops/:id/address`,
+   * resuelto por JWT). `null` cuando no hay parada abierta → el modal no muestra
+   * el editor. Esto habilita "Editar dirección" en el repartidor sin el permiso
+   * admin `store:dispatch_notes:update`.
+   */
+  readonly detailAddressSaveFn = computed<
+    ((payload: DispatchNoteAddressPayload) => Observable<unknown>) | null
+  >(() => {
+    const stop = this.detailStop();
+    if (!stop) return null;
+    return (payload: DispatchNoteAddressPayload) =>
+      this.repartosService.updateStopAddress(stop.id, payload);
+  });
 
   ngOnInit(): void {
     // Resolución perezosa idempotente: si el shell ya cargó la ruta esto es un
     // no-op; si el carrier abrió `/repartos/ruta` directo, carga aquí.
     this.store.resolve();
+
+    // Item 3a — al ABANDONAR una ruta CERRADA/ANULADA, limpiar el resumen del
+    // store singleton para que la vista quede "sin ruta activa" al volver. Un
+    // `clear()` resetea `resolved`, así el próximo `resolve()` re-consulta y el
+    // backend devuelve `null` (una ruta cerrada ya no es activa). Si la ruta
+    // sigue viva (draft/dispatched/in_transit) NO se limpia — se preserva.
+    this.destroyRef.onDestroy(() => {
+      const status = this.route()?.status;
+      if (status === 'closed' || status === 'voided') {
+        this.store.clear();
+      }
+    });
   }
 
   // ── Derivados de cabecera ───────────────────────────────────────────────────
@@ -933,7 +975,47 @@ export class RutaActivaPageComponent {
   }
 
   openStopDetail(stop: DispatchRouteStop): void {
+    // Abre el modal de inmediato con el resumen que ya trae la parada; en
+    // paralelo resuelve la remisión COMPLETA (ítems + cliente + dirección) para
+    // alimentar `[note]`. Mientras llega, el modal muestra el skeleton de carga.
     this.detailStop.set(stop);
+    this.detailNote.set(null);
+    this.detailLoading.set(true);
+    this.repartosService
+      .getStopDetail(stop.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => {
+          this.detailNote.set(note);
+          this.detailLoading.set(false);
+        },
+        error: (e) => {
+          this.detailLoading.set(false);
+          this.toast.error(
+            e?.message || 'No se pudo cargar el detalle de la parada',
+          );
+        },
+      });
+  }
+
+  /** Cierra el modal de detalle y limpia su estado transitorio. */
+  closeStopDetail(): void {
+    this.detailStop.set(null);
+    this.detailNote.set(null);
+    this.detailLoading.set(false);
+  }
+
+  /**
+   * Tras guardar la dirección en el editor inline: refresca la ruta activa (por
+   * si cambiaron coordenadas/orden de paradas) y recarga el detalle abierto para
+   * que el modal muestre el snapshot recién persistido.
+   */
+  onStopDetailRefresh(): void {
+    this.store.refresh();
+    const stop = this.detailStop();
+    if (stop) {
+      this.openStopDetail(stop);
+    }
   }
 
   goToPool(): void {

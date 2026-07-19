@@ -71,6 +71,26 @@ export class CreateDispatchNoteItemDto {
   @IsInt()
   @Min(1)
   purchase_order_item_id?: number;
+
+  /**
+   * QUI-425 — optional per-line pricing override captured in the "Crear y
+   * recibir" margin/price editor. When a purchase_receipt remisión is delegated
+   * to its purchase order at reception time, these are forwarded to
+   * `PurchaseOrdersService.receive()` (mirroring `ReceiveItemDto.new_base_price`)
+   * so the operator's price/margin edit is re-applied to the product's sale
+   * price. Persisted on the dispatch_note_item so the `received` listener (which
+   * reads the line back from the DB) can carry them. Declared here so
+   * `forbidNonWhitelisted` accepts them on the purchase-receipt payload.
+   */
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  new_base_price?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  new_profit_margin?: number;
 }
 
 export class CreateDispatchNoteDto {

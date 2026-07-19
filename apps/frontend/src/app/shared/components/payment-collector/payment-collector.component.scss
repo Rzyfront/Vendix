@@ -1,0 +1,371 @@
+@use './subwizard' as subwizard;
+
+:host {
+  display: block;
+}
+
+.pc-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pc-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 16px;
+}
+
+/* Section header with primary indicator bar */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.section-indicator {
+  width: 4px;
+  height: 20px;
+  background: var(--color-primary);
+  border-radius: 2px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* Prominent total */
+.total-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin: 0;
+}
+
+.total-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin: 4px 0 0 0;
+}
+
+/* Inputs */
+.pc-input {
+  padding: 10px 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-background);
+  font-size: 14px;
+  color: var(--color-text-primary);
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+
+.pc-input:focus {
+  border-color: var(--color-primary);
+}
+
+.pc-input-lg {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.pc-input.error {
+  border-color: var(--color-error);
+  background: rgba(var(--color-error-rgb), 0.05);
+}
+
+.pc-hint {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+
+.pc-loading {
+  text-align: center;
+  padding: 16px 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.pc-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(var(--color-warning-rgb), 0.1);
+  border: 1px solid rgba(var(--color-warning-rgb), 0.3);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--color-warning);
+  font-weight: 500;
+}
+
+/* Tabs */
+.tab-headers {
+  display: flex;
+  gap: 4px;
+  background: var(--color-background);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.tab-btn.active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Payment methods grid */
+.payment-methods-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.payment-method-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  color: var(--color-text-muted);
+}
+
+.payment-method-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.payment-method-btn.selected {
+  border: 2px solid var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
+  color: var(--color-primary);
+}
+
+.method-name {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+  color: var(--color-text-primary);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.no-methods {
+  text-align: center;
+  padding: 24px;
+  color: var(--color-text-muted);
+}
+
+.no-methods p {
+  font-size: 13px;
+  margin: 8px 0 0 0;
+}
+
+/* Quick amounts */
+.quick-amounts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.quick-btn {
+  padding: 10px 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.quick-btn:hover {
+  border-color: var(--color-primary);
+}
+
+/* Keypad */
+.keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.keypad-btn {
+  padding: 14px;
+  font-size: 18px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.keypad-btn:hover {
+  background: var(--color-muted);
+}
+
+.keypad-btn.clear {
+  color: var(--color-error);
+  border-color: rgba(var(--color-error-rgb), 0.3);
+}
+
+.keypad-btn.clear:hover {
+  background: rgba(var(--color-error-rgb), 0.1);
+}
+
+/* Change / balance */
+.change-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(var(--color-success-rgb), 0.1);
+  border: 2px solid rgba(var(--color-success-rgb), 0.3);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-top: 12px;
+}
+
+.change-display span {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.error-text {
+  display: block;
+  font-size: 12px;
+  color: var(--color-error);
+  font-weight: 500;
+  margin-top: 8px;
+}
+
+.credit-balance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(var(--color-muted-rgb, 128, 128, 128), 0.15);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.credit-balance span:first-child {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.credit-balance span:last-child {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+/* ══════════════════════════════ STEPPED layout ══════════════════════════════
+   Everything here is scoped under `.pc-stepped` so the flat layout is never
+   touched. Reuses existing .pc-card / .keypad / .tab-* rules; only adds the
+   two-column grid, the collapsed-panel row, and the keypad column. */
+.pc-stepped {
+  .pc-stepped-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .pc-stepped-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  /* Denser than flat: sub-wizard panels are already sequenced. */
+  .pc-card {
+    padding: 14px;
+  }
+
+  .section-header {
+    margin-bottom: 12px;
+  }
+
+  /* Collapsed panel summary row (clickable, jumps back to that sub-step).
+     Shared sub-wizard pattern — see ./_subwizard.scss. */
+  .pc-panel-collapsed {
+    @include subwizard.subwizard-collapsed-row;
+  }
+
+  /* Keypad column: only positions; .keypad/.keypad-btn reuse the flat rules. */
+  .pc-keypad-col {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .pc-keypad-col .keypad {
+    margin-top: 0;
+    width: 100%;
+  }
+
+  /* Stepper column (right of the options; below them on mobile — DOM-last). */
+  .pc-steps-col {
+    @include subwizard.subwizard-steps-col;
+  }
+}
+
+/* Desktop columns. Mobile stays the base single column (steps-col falls below
+   the options, DOM-last); ≥768px promotes the stepper to its own right column.
+   options | stepper — or options | keypad | stepper when the pad is docked. */
+@media (min-width: 768px) {
+  .pc-stepped .pc-stepped-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .pc-stepped .pc-stepped-grid--with-keypad {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) auto;
+  }
+}

@@ -10,12 +10,81 @@ import {
   DispatchNoteStats,
   CreateDispatchNoteDto,
   CreateDispatchFromOrderDto,
+  CreateDispatchFromOrderItemDto,
+  CreateDispatchFromOrderRouteAssignmentDto,
   ConfirmDispatchNoteDto,
   CreateTransferDispatchDto,
   CreateReturnDispatchDto,
   CreatePurchaseReceiptDispatchDto,
   ReceiptScanResult,
 } from '../interfaces/dispatch-note.interface';
+
+// ============================================================================
+// Batch create-from-orders (Modo B del switch A/B — Plan Despacho Economía,
+// FASE 7 paso 23). Declarados inline aquí (y NO en
+// `../interfaces/dispatch-note.interface.ts`) porque ese archivo del dominio
+// está fuera del scope editable de este agente. Mirror del backend
+// `CreateFromOrdersBatchDto` y del retorno de
+// `DispatchNotesService.createFromOrdersBatch`.
+// TODO: si en el futuro se consolida, mover estos tipos al archivo de
+// interfaces del dominio junto al resto de DTOs de remisión.
+// ============================================================================
+
+/**
+ * Body para `POST /store/dispatch-notes/from-orders`. Mirror del backend
+ * `CreateFromOrdersBatchDto`.
+ *
+ * Para el Modo B se invoca con `orders` + `target_status: 'draft'` +
+ * `batch_key` (idempotencia) y SIN `items_by_order` (quick-accept: se
+ * despacha todo lo pendiente por orden).
+ */
+export interface CreateFromOrdersBatchDto {
+  /** 1..100 order ids. El backend rechaza vacío (DSP_BATCH_EMPTY_001) o >100 (DSP_BATCH_TOO_LARGE_001). */
+  orders: number[];
+  /**
+   * Ítems a despachar por orden (opcional). Si una orden no aparece aquí, el
+   * backend asume quick-accept (todas las líneas pendientes).
+   */
+  items_by_order?: Record<number, CreateDispatchFromOrderItemDto[]>;
+  /** Idempotencia: si el `batch_key` ya se aplicó, el backend devuelve todo `skipped`. */
+  batch_key?: string;
+  /** `true` = transacción todo-o-nada; `false`/omitido = resultado parcial por orden. */
+  atomic?: boolean;
+  /** Estado destino de las remisiones creadas. Backend default `confirmed`. */
+  target_status?: 'draft' | 'confirmed';
+  route_assignment?: CreateDispatchFromOrderRouteAssignmentDto;
+}
+
+/** Un resultado por orden dentro del batch. */
+export type CreateFromOrdersBatchResultItem =
+  | {
+      status: 'created';
+      order_id: number;
+      dispatch_note_id: number;
+      dispatch_number: string;
+    }
+  | {
+      status: 'failed';
+      order_id: number;
+      error_code: string;
+      message: string;
+    }
+  | {
+      status: 'skipped';
+      order_id: number;
+      reason: string;
+    };
+
+/**
+ * Response de `POST /store/dispatch-notes/from-orders`. Mirror del retorno del
+ * backend `DispatchNotesService.createFromOrdersBatch`. `partial` es `true`
+ * cuando al menos una orden falló (modo no-atómico).
+ */
+export interface CreateFromOrdersBatchResult {
+  results: CreateFromOrdersBatchResultItem[];
+  route_id?: number | null;
+  partial: boolean;
+}
 
 let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
 
@@ -188,6 +257,26 @@ export class DispatchNotesService {
       // ambos consumidores del wizard (dispatch-note-wizard + generate-dispatch-wizard)
       // discriminan por `err.error.error_code` (p.ej. DISPATCH_NOTE_NO_SHIPPING_ADDRESS)
       // para mostrar un diálogo/mensaje accionable. Aplastarlo destruía el `error_code`.
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  /**
+   * Crea remisiones en lote desde N órdenes (Modo B del switch A/B —
+   * Plan Despacho Economía, FASE 7 paso 23). `POST /store/dispatch-notes/from-orders`.
+   * Devuelve un resultado por orden (`created` / `failed` / `skipped`) y
+   * `partial: true` si al menos una orden falló (modo no-atómico).
+   * Para el Modo B se llama con `target_status: 'draft'` + `batch_key`
+   * (idempotencia) y SIN `items_by_order` (quick-accept de todo lo pendiente).
+   */
+  createFromOrdersBatch(dto: CreateFromOrdersBatchDto): Observable<CreateFromOrdersBatchResult> {
+    const url = `${this.apiUrl}/store/dispatch-notes/from-orders`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      // Re-lanza el `HttpErrorResponse` crudo (NO lo aplastamos a `new Error(msg)`)
+      // para preservar error_code/status; la traducción a mensaje la hace el
+      // componente vía extractApiError().
       catchError((error) => throwError(() => error)),
     );
   }

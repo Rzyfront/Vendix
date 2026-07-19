@@ -1,0 +1,85 @@
+@if (!selectedSub()) {
+  <p class="section-label">Selecciona el medio Wompi</p>
+  <div class="wompi-submethods-grid">
+    @for (sub of subMethods(); track sub.key) {
+      <button
+        type="button"
+        class="wompi-submethod-btn"
+        [style.--wompi-color]="sub.color"
+        (click)="selectSub(sub.key)"
+      >
+        <app-icon [name]="iconFor(sub)" [size]="24" />
+        <span class="submethod-label">{{ sub.label }}</span>
+        <span class="submethod-desc">{{ sub.description }}</span>
+      </button>
+    }
+  </div>
+} @else {
+  <div class="wompi-form-header">
+    <app-icon name="smartphone" [size]="18" />
+    <span>{{ selectedSub() }}</span>
+    <button type="button" class="wompi-back-btn" (click)="backToMethods()" aria-label="Volver">
+      <app-icon name="arrow-left" [size]="16" />
+    </button>
+  </div>
+
+  @switch (selectedSub()) {
+    @case (WompiSubMethod.NEQUI) {
+      <div class="wompi-form-fields">
+        <div class="form-row">
+          <label class="form-label">Número Nequi</label>
+          <input
+            type="tel"
+            class="wompi-input"
+            placeholder="3XXXXXXXXX"
+            [formControl]="nequiPhoneControl"
+          />
+          @if (nequiPhoneControl.touched && nequiPhoneControl.invalid) {
+            <span class="field-error">Ingresa un número Nequi válido (10 dígitos).</span>
+          }
+        </div>
+      </div>
+    }
+    @case (WompiSubMethod.PSE) {
+      <form class="wompi-form-fields" [formGroup]="pseForm">
+        <div class="form-row">
+          <label class="form-label">Tipo de persona</label>
+          <select class="wompi-input" formControlName="userType">
+            <option [ngValue]="0">Natural</option>
+            <option [ngValue]="1">Jurídica</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">Tipo de documento</label>
+          <select class="wompi-input" formControlName="userLegalIdType">
+            <option value="CC">CC</option>
+            <option value="CE">CE</option>
+            <option value="NIT">NIT</option>
+            <option value="PP">Pasaporte</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="form-label">Número de documento</label>
+          <input type="text" class="wompi-input" formControlName="userLegalId" />
+        </div>
+        <div class="form-row">
+          <label class="form-label">Banco</label>
+          <select class="wompi-input" formControlName="financialInstitutionCode">
+            <option value="">Selecciona tu banco…</option>
+            @for (bank of pseBankOptions(); track bank.value) {
+              <option [value]="bank.value">{{ bank.label }}</option>
+            }
+          </select>
+          @if (pseBankOptions().length === 0) {
+            <span class="wompi-hint">Cargando bancos…</span>
+          }
+        </div>
+      </form>
+    }
+    @default {
+      <p class="wompi-info-text">
+        Serás guiado por Wompi para completar el pago con este medio.
+      </p>
+    }
+  }
+}

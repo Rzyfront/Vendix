@@ -36,7 +36,6 @@ import {
   PurchaseOrderReception,
   PurchaseOrderPayment,
   PurchaseOrderAttachment,
-  ReceivePurchaseOrderItemDto,
 } from '../../../../inventory/interfaces';
 import { PurchaseOrderPrintService } from '../../services/purchase-order-print.service';
 import { PoPaymentModalComponent } from '../../../../inventory/pop/components/po-payment-modal/po-payment-modal.component';
@@ -89,9 +88,10 @@ interface ReceiveLine {
  * STORE_ADMIN — Vista dedicada full-page de una Orden de Compra.
  *
  * Reemplaza el flujo modal-en-modal (po-detail-modal + po-receive-modal). Gestiona
- * aprobar, recibir (parciales + seriales, con selector Directa | Por remisión),
- * registrar pagos, adjuntos e historial. La tabla de recepción se construye al
- * cargar la OC (no depende de `onOpenChange`, el bug del modal anterior).
+ * aprobar, recibir (parciales + seriales; toda recepción genera una remisión de
+ * entrada — dispatch_note inbound purchase_receipt), registrar pagos, adjuntos e
+ * historial. La tabla de recepción se construye al cargar la OC (no depende de
+ * `onOpenChange`, el bug del modal anterior).
  */
 @Component({
   selector: 'app-store-purchase-order-detail',
@@ -223,26 +223,11 @@ interface ReceiveLine {
               <!-- ============ RECEPTION SECTION ============ -->
               @if (canReceive()) {
                 <app-card id="reception-section" [padding]="false">
-                  <div class="px-4 py-3 border-b border-border bg-surface-secondary flex items-center justify-between gap-2">
+                  <div class="px-4 py-3 border-b border-border bg-surface-secondary flex items-center gap-2">
                     <h2 class="text-sm md:text-base font-semibold text-text-primary flex items-center gap-2">
                       <app-icon name="package-check" [size]="16" class="text-primary" />
                       Recibir mercancía
                     </h2>
-                    <!-- Directa | Por remisión selector -->
-                    <div class="inline-flex rounded-lg border border-border overflow-hidden text-xs">
-                      <button type="button"
-                        class="px-3 py-1.5 font-medium transition-colors"
-                        [class]="receiveMode() === 'direct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-surface-secondary'"
-                        (click)="receiveMode.set('direct')">
-                        Directa
-                      </button>
-                      <button type="button"
-                        class="px-3 py-1.5 font-medium transition-colors border-l border-border"
-                        [class]="receiveMode() === 'remision' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-surface-secondary'"
-                        (click)="receiveMode.set('remision')">
-                        Por remisión
-                      </button>
-                    </div>
                   </div>
 
                   <div class="overflow-x-auto">
@@ -320,19 +305,17 @@ interface ReceiveLine {
                         placeholder="Notas opcionales sobre esta recepción..."
                         [(ngModel)]="receptionNotes"></textarea>
                     </div>
-                    @if (receiveMode() === 'remision') {
-                      <p class="text-xs text-text-secondary flex items-center gap-1.5">
-                        <app-icon name="file-text" [size]="13" class="text-primary" />
-                        Se generará una remisión de compra (entrada) enlazada a esta orden y se confirmará automáticamente.
-                      </p>
-                    }
+                    <p class="text-xs text-text-secondary flex items-center gap-1.5">
+                      <app-icon name="file-text" [size]="13" class="text-primary" />
+                      Se generará una remisión de compra (entrada) enlazada a esta orden y se confirmará automáticamente.
+                    </p>
                     <div class="flex flex-col sm:flex-row gap-2 sm:justify-between">
                       <app-button variant="outline" size="sm" (clicked)="receiveAll()" [disabled]="receiveSaving() || !hasPending()">
                         <app-icon name="check-check" [size]="14" slot="icon" />
                         Recibir todo
                       </app-button>
                       <app-button variant="primary" (clicked)="confirmReception()" [disabled]="receiveSaving() || !hasItemsToReceive()" [loading]="receiveSaving()">
-                        {{ receiveMode() === 'remision' ? 'Recibir por remisión' : 'Confirmar recepción' }}
+                        Recibir por remisión
                       </app-button>
                     </div>
                   </div>
@@ -557,9 +540,9 @@ export class StorePurchaseOrderDetailComponent {
   readonly attachments = signal<PurchaseOrderAttachment[]>([]);
   readonly uploading = signal(false);
 
-  // Reception state
+  // Reception state — la recepción SIEMPRE genera una remisión de entrada
+  // (dispatch_note inbound purchase_receipt). No hay recepción directa.
   readonly receiveLines = signal<ReceiveLine[]>([]);
-  readonly receiveMode = signal<'direct' | 'remision'>('direct');
   readonly receiveSaving = signal(false);
   receptionNotes = '';
 
@@ -827,31 +810,8 @@ export class StorePurchaseOrderDetailComponent {
       return;
     }
 
-    if (this.receiveMode() === 'remision') {
-      this.receiveViaDispatchNote(po, lines);
-    } else {
-      this.receiveDirect(po, lines);
-    }
-  }
-
-  private receiveDirect(po: PurchaseOrder, lines: ReceiveLine[]): void {
-    const serialsByLine = this.serialsByLine();
-    const items: ReceivePurchaseOrderItemDto[] = lines.map((l) => {
-      const qty = Math.min(l.receive_quantity, l.pending);
-      const dto: ReceivePurchaseOrderItemDto = { id: l.id, quantity_received: qty };
-      if (l.requires_serial) {
-        const serials = serialsByLine.get(l.id);
-        if (serials && serials.length > 0) dto.serial_numbers = serials.slice(0, qty);
-      }
-      return dto;
-    });
-
-    this.receiveSaving.set(true);
-    const notes = this.receptionNotes.trim() || undefined;
-    this.service.receivePurchaseOrder(po.id, items, notes).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: () => this.onReceptionSuccess(),
-      error: (err) => { this.receiveSaving.set(false); this.toast.error(typeof err === 'string' ? err : 'Error al recibir mercancía'); },
-    });
+    // Toda recepción genera una remisión de entrada (inbound purchase_receipt).
+    this.receiveViaDispatchNote(po, lines);
   }
 
   private receiveViaDispatchNote(po: PurchaseOrder, lines: ReceiveLine[]): void {

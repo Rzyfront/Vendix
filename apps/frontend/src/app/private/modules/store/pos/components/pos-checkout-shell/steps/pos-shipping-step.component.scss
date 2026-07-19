@@ -1,0 +1,470 @@
+@use '../../../../../../../shared/components/payment-collector/subwizard' as subwizard;
+
+/* Fase 5·B2b — POS Shipping Step. Recolección de envío aplanada (sin modal).
+   Estilos extraídos de pos-shipping-modal (sección Pago interna descartada). */
+
+.shipping-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ── Sub-wizard grid (opciones | stepper) ─────────────────
+   Móvil: una columna, steps-col ABAJO (DOM-last).
+   Desktop (≥768px): ship-main | steps-col. */
+.ship-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.ship-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
+   Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
+.ship-collapsed {
+  @include subwizard.subwizard-collapsed-row;
+}
+
+/* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
+.steps-col {
+  @include subwizard.subwizard-steps-col;
+}
+
+@media (min-width: 768px) {
+  .ship-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* ── Flash banner ─────────────────────────────────────── */
+.flash-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Section shell ────────────────────────────────────── */
+.payment-section {
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  padding: 16px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.section-icon {
+  color: var(--color-primary);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* ── Sale type (payTiming toggle) ─────────────────────── */
+.sale-type-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sale-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+  text-align: left;
+}
+
+.sale-type-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.sale-type-btn.selected {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.radio-indicator {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sale-type-btn.selected .radio-indicator {
+  border-color: var(--color-primary);
+}
+
+.radio-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  border-radius: 50%;
+}
+
+.sale-type-btn app-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.sale-type-btn.selected app-icon {
+  color: var(--color-primary);
+}
+
+.sale-type-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sale-type-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sale-type-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* ── Methods grid ─────────────────────────────────────── */
+.payment-methods-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.payment-method-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--color-text-muted);
+}
+
+.payment-method-btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.payment-method-btn.selected {
+  border: 2px solid var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
+  color: var(--color-primary);
+}
+
+.method-name {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+  color: var(--color-text-primary);
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* ── No methods alert ─────────────────────────────────── */
+.no-methods-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(var(--color-error-rgb, 220, 38, 38), 0.08);
+  border: 1px solid rgba(var(--color-error-rgb, 220, 38, 38), 0.25);
+  border-radius: 10px;
+}
+
+.no-methods-icon {
+  color: var(--color-error);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.no-methods-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.no-methods-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.no-methods-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.no-methods-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+}
+
+/* ── Address ──────────────────────────────────────────── */
+.addr-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.addr-badge-fill {
+  background: rgba(var(--color-success-rgb), 0.1);
+  border: 1px solid rgba(var(--color-success-rgb), 0.3);
+  color: var(--color-success);
+}
+
+.addr-badge-fill app-icon {
+  color: var(--color-success);
+}
+
+.addr-badge-new {
+  background: rgba(var(--color-primary-rgb), 0.05);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+  color: var(--color-text-secondary);
+}
+
+.addr-badge-new app-icon {
+  color: var(--color-primary);
+}
+
+.address-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ── Shipping cost ────────────────────────────────────── */
+.calculating-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.cost-display {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.calculated-cost {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(var(--color-success-rgb), 0.1);
+  border: 1px solid rgba(var(--color-success-rgb), 0.3);
+  border-radius: 10px;
+}
+
+.cost-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.cost-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.manual-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.toggle-label input[type='checkbox'] {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
+}
+
+.manual-cost-input {
+  margin-top: 4px;
+}
+
+.cash-input {
+  display: flex;
+  align-items: center;
+  background: var(--color-background);
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  transition: border-color 0.2s;
+}
+
+.cash-input:focus-within {
+  border-color: var(--color-primary);
+}
+
+.cash-input .currency {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-right: 4px;
+}
+
+.cash-input input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  outline: none;
+  width: 100%;
+  min-width: 0;
+}
+
+/* ── Delivery notes ───────────────────────────────────── */
+.delivery-notes {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ── Total con envío ──────────────────────────────────── */
+.ship-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.ship-total-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.ship-total-amount {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Validation flash animation ───────────────────────── */
+@keyframes configFlashWarning {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+  15% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4);
+    border-color: #f59e0b;
+  }
+  30% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+  55% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4);
+    border-color: #f59e0b;
+  }
+  70% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+}
+
+.config-flash-warning {
+  animation: configFlashWarning 1.2s ease-out;
+}

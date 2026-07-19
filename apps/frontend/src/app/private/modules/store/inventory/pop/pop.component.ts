@@ -3,8 +3,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subscription, firstValueFrom } from 'rxjs';
-import { map, switchMap } from 'rxjs/operators';
+import { Observable, Subscription, firstValueFrom, of, throwError } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 
 import {
   PopCartService,
@@ -93,6 +93,7 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
           class="flex-none border-b border-border"
           (openSupplierModal)="supplierModalOpen.set(true)"
           (openWarehouseModal)="warehouseModalOpen.set(true)"
+          (configDone)="onConfigDone()"
         ></app-pop-header>
 
         <!-- Main Content Grid -->
@@ -201,7 +202,8 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
-      (receiveModeChange)="popReceiveMode.set($event)"
+      (ackReceiveChange)="ackReceive.set($event)"
+      (ackPayChange)="ackPay.set($event)"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -236,12 +238,21 @@ export class PopComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private dispatchNotesService = inject(DispatchNotesService);
   /**
-   * Reception mode for the "Crear y Recibir" flow, coherent with the
-   * dedicated PO view selector: 'direct' calls PO.receive, 'remision' emits
-   * an inbound purchase-receipt dispatch note (confirm → receive) linked to
-   * the freshly-created PO. Default 'direct' preserves the legacy behavior.
+   * PASO 1 — Acción diferida. Cuando el usuario dispara guardar/crear/recibir
+   * sin proveedor+bodega, la recordamos, abrimos el config modal y la
+   * reconectamos al cerrar el modal ya configurado (`onConfigDone`).
    */
-  readonly popReceiveMode = signal<'direct' | 'remision'>('direct');
+  private pendingAction = signal<'draft' | 'create' | 'create-receive' | null>(
+    null,
+  );
+  /**
+   * PASO 2/3 — Acuses individuales del modal de confirmación (create-receive).
+   * `ackReceive` (ON por defecto) genera la remisión de entrada; `ackPay`
+   * (OFF por defecto) registra el pago total. Se sincronizan desde los outputs
+   * del modal y el modal los resetea a (true,false) cada vez que se abre.
+   */
+  readonly ackReceive = signal(true);
+  readonly ackPay = signal(false);
   showInvoiceScanner = signal(false);
   /**
    * Fase 4: derive the AI scan profile from the current cart. If any
@@ -344,9 +355,12 @@ export class PopComponent implements OnInit, OnDestroy {
   loadingCostPreview = signal(false);
   /**
    * QUI-425 (D4) — Latest pricing overrides captured by the confirmation
-   * modal. Mirrored here so `_executeCreateAndReceive` can thread them into
-   * `receivePurchaseOrder()` without round-tripping through the modal's
-   * internal signal. Default to an empty Map so `?.get()` is always safe.
+   * modal. Mirrored here so the parent can grab them synchronously on confirm.
+   * Default to an empty Map so `?.get()` is always safe.
+   *
+   * Se aplican por la vía remisión: el DTO de la remisión de compra acepta
+   * `new_base_price`/`new_profit_margin` opcionales y los propaga a `receive()`;
+   * ver `_buildReceptionViaDispatch$`.
    */
   pricingOverrides = signal<PricingOverridesMap>(new Map());
 
@@ -1254,6 +1268,8 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
       if ((!state.supplierId || !state.locationId) && this.header) {
+        // PASO 1: recuerda la acción para reconectarla al cerrar el config modal.
+        this.pendingAction.set('create-receive');
         this.header.openConfigModal();
       }
       this.toastService.warning(
@@ -1262,10 +1278,42 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.pendingAction.set(null);
     this.showCartModal.set(false);
     this.confirmOrderAction = 'create-receive';
+    // Cada apertura de create-receive arranca con acuses por defecto
+    // (recibir ON, pagar OFF) y overrides limpios.
+    this.ackReceive.set(true);
+    this.ackPay.set(false);
+    this.pricingOverrides.set(new Map());
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
+  }
+
+  /**
+   * PASO 1 — El config modal se cerró con "Listo" ya configurado (pop-header
+   * solo emite `configDone` cuando `isConfigured()` es true). Si había una
+   * acción pendiente y el carrito confirma proveedor+bodega, la re-disparamos.
+   *
+   * Si el usuario cierra el modal SIN completar la config, pop-header no emite
+   * y `pendingAction` se conserva para el próximo intento; se limpia al
+   * re-disparar aquí o al proceder normalmente en cualquier handler.
+   */
+  onConfigDone(): void {
+    const action = this.pendingAction();
+    if (!action) return;
+
+    const state = this.popCartService.currentState;
+    if (!state.supplierId || !state.locationId) return;
+
+    this.pendingAction.set(null);
+    if (action === 'draft') {
+      this.onSaveAsDraft();
+    } else if (action === 'create') {
+      this.onSubmitOrder();
+    } else {
+      this.onCreateAndReceive();
+    }
   }
 
   // ============================================================
@@ -1282,6 +1330,8 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId) {
       if (this.header) {
+        // PASO 1: recuerda "guardar borrador" para reconectarla al configurar.
+        this.pendingAction.set('draft');
         this.header.openConfigModal();
       }
       this.toastService.warning(
@@ -1289,6 +1339,7 @@ export class PopComponent implements OnInit, OnDestroy {
       );
       return;
     }
+    this.pendingAction.set(null);
     const draftState = { ...state, status: 'draft' as const };
     const userId = this.authFacade.getUserId() || 0;
 
@@ -1321,6 +1372,8 @@ export class PopComponent implements OnInit, OnDestroy {
         this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
+        // PASO 1: recuerda "crear" para reconectarla al configurar.
+        this.pendingAction.set('create');
         this.header.openConfigModal();
       }
       this.toastService.warning(
@@ -1329,6 +1382,7 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.pendingAction.set(null);
     this.confirmOrderAction = 'create';
     this.showOrderConfirmModal.set(true);
   }
@@ -1341,6 +1395,8 @@ export class PopComponent implements OnInit, OnDestroy {
         this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
+        // PASO 1: recuerda "crear y recibir" para reconectarla al configurar.
+        this.pendingAction.set('create-receive');
         this.header.openConfigModal();
       }
       this.toastService.warning(
@@ -1349,9 +1405,12 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.pendingAction.set(null);
     this.confirmOrderAction = 'create-receive';
-    // Reset overrides from any previous reception — each confirmation gets a
-    // clean slate anchored to the freshly-loaded cost preview.
+    // Cada apertura de create-receive arranca con acuses por defecto
+    // (recibir ON, pagar OFF) y overrides limpios anclados al cost preview.
+    this.ackReceive.set(true);
+    this.ackPay.set(false);
     this.pricingOverrides.set(new Map());
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
@@ -1361,15 +1420,81 @@ export class PopComponent implements OnInit, OnDestroy {
   // Order Confirmation Modal Handlers
   // ============================================================
 
-  onOrderConfirmed(): void {
+  /**
+   * PASO 3/4 — Cierra el modal, pide confirmación con un diálogo dinámico
+   * (según acción + acuses) y, si el usuario acepta, orquesta los efectos.
+   * `create` → solo crea; `create-receive` → crea y encadena recepción por
+   * remisión y/o pago como efectos individuales.
+   */
+  async onOrderConfirmed(): Promise<void> {
     this.showOrderConfirmModal.set(false);
-    if (this.confirmOrderAction === 'create') {
+
+    const action = this.confirmOrderAction;
+    const doReceive = this.ackReceive();
+    const doPay = this.ackPay();
+
+    const ok = await this.dialogService.confirm(
+      this._buildConfirmDialog(action, doReceive, doPay),
+    );
+    if (!ok) return;
+
+    if (action === 'create') {
       this._executeSubmitOrder();
-    } else if (this.popReceiveMode() === 'remision') {
-      this._executeCreateAndReceiveViaDispatch();
-    } else {
-      this._executeCreateAndReceive();
+      return;
     }
+    this._executeCreateReceivePay(doReceive, doPay);
+  }
+
+  /**
+   * PASO 4 — Construye el contenido dinámico del diálogo de confirmación.
+   */
+  private _buildConfirmDialog(
+    action: 'create' | 'create-receive',
+    doReceive: boolean,
+    doPay: boolean,
+  ): { title: string; message: string; confirmText: string; cancelText: string } {
+    const cancelText = 'Cancelar';
+    if (action === 'create') {
+      return {
+        title: 'Crear orden de compra',
+        message: '¿Seguro que quieres crear esta orden de compra?',
+        confirmText: 'Crear orden',
+        cancelText,
+      };
+    }
+    if (doReceive && doPay) {
+      return {
+        title: 'Crear, pagar y recibir',
+        message:
+          '¿Seguro que quieres crear la orden, marcarla como pagada y recibir la mercancía (se generará una remisión de entrada)?',
+        confirmText: 'Crear, pagar y recibir',
+        cancelText,
+      };
+    }
+    if (doReceive) {
+      return {
+        title: 'Crear y recibir',
+        message:
+          '¿Seguro que quieres crear y recibir esta orden? Se generará una remisión de entrada.',
+        confirmText: 'Crear y recibir',
+        cancelText,
+      };
+    }
+    if (doPay) {
+      return {
+        title: 'Crear y pagar (anticipo)',
+        message:
+          '¿Seguro que quieres crear y pagar esta orden sin recibir la mercancía? (anticipo a proveedor)',
+        confirmText: 'Crear y pagar',
+        cancelText,
+      };
+    }
+    return {
+      title: 'Crear orden de compra',
+      message: '¿Seguro que quieres crear esta orden de compra?',
+      confirmText: 'Crear orden',
+      cancelText,
+    };
   }
 
   onNavigateToSettings(): void {
@@ -1378,10 +1503,10 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * QUI-425 (D4) — keep the latest override Map in sync with the modal so
-   * `_executeCreateAndReceive` can grab it synchronously when the operator
-   * confirms. We accept a Map directly (no copy) because the modal emits
-   * the same Map it stores; downstream consumers must treat it as read-only.
+   * QUI-425 (D4) — keep the latest override Map in sync with the modal. We
+   * accept a Map directly (no copy) because the modal emits the same Map it
+   * stores; downstream consumers must treat it as read-only. Se aplican al
+   * recibir por remisión (ver `_buildReceptionViaDispatch$`).
    */
   onPricingOverridesChange(overrides: PricingOverridesMap): void {
     this.pricingOverrides.set(overrides);
@@ -1448,7 +1573,17 @@ export class PopComponent implements OnInit, OnDestroy {
     });
   }
 
-  private _executeCreateAndReceive(): void {
+  /**
+   * PASO 3 — Orquestación de efectos individuales para "Crear y Recibir".
+   * SIEMPRE crea la OC (aprobada); luego, opcionalmente y en este orden:
+   *   1. recibir → remisión de entrada (createPurchaseReceipt→confirm→receive)
+   *   2. pagar   → registerPurchaseOrderPayment (total, hoy, método 'cash')
+   * Cada efecto es individual: ackReceive=false + ackPay=true crea + paga sin
+   * recibir (anticipo — la contabilidad correcta la maneja el backend); ambos
+   * false equivale a crear. Encadenado con switchMap; errores por etapa con
+   * toasts claros. Si la OC ya existe, limpia carrito y navega igual.
+   */
+  private _executeCreateReceivePay(doReceive: boolean, doPay: boolean): void {
     const state = this.popCartService.currentState;
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
@@ -1456,143 +1591,188 @@ export class PopComponent implements OnInit, OnDestroy {
     // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
     this.attachPurchaseToStockFactor(request, state);
 
-    this.toastService.info('Creando orden e ingresando inventario...');
+    // Snapshot del total del carrito ANTES de limpiar: respaldo del monto de
+    // pago si la respuesta de la OC no trae `total_amount`.
+    const cartTotal = Number(state.summary?.total) || 0;
 
-    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        if (response.success && response.data) {
-          const orderId = response.data.id;
-          const orderItems = response.data.purchase_order_items || [];
+    this.toastService.info(this._buildProgressMessage(doReceive, doPay));
 
-          // Capture the latest overrides synchronously — the modal emits
-          // them right before `confirmed`, but we also accept a stale or
-          // missing Map (e.g. confirm from keyboard) by falling back to
-          // an empty Map. QUI-425 (D4).
-          const overrides = this.pricingOverrides();
+    // Nos permite distinguir en el error si la OC llegó a crearse (limpiar
+    // carrito) o si falló la creación (conservar carrito para reintentar).
+    let createdOrder: any = null;
 
-          const receiveItems = orderItems.map((item: any) => {
-            // Same key shape as the modal: `${product_id}-${variant_id || 0}`.
-            // purchase_order_items carry product_id + product_variant_id
-            // directly so we don't need to walk any joins.
-            const key = `${item.product_id}-${item.product_variant_id || 0}`;
-            const lineOverride = overrides?.get(key);
-            return {
-              id: item.id,
-              quantity_received: item.quantity_ordered,
-              // Only attach the override when defined — `receive` skips
-              // the pricing path entirely when BOTH fields are absent,
-              // applying the cost-anchor default at the backend instead.
-              ...(lineOverride?.new_base_price !== undefined && {
-                new_base_price: lineOverride.new_base_price,
-              }),
-              ...(lineOverride?.new_profit_margin !== undefined && {
-                new_profit_margin: lineOverride.new_profit_margin,
-              }),
-            };
-          });
+    this.purchaseOrdersService
+      .createPurchaseOrder(request)
+      .pipe(
+        switchMap((response) => {
+          if (!response.success || !response.data) {
+            return throwError(() => ({ stage: 'create' as const }));
+          }
+          createdOrder = response.data;
 
-          this.purchaseOrdersService
-            .receivePurchaseOrder(orderId, receiveItems)
-            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-              next: () => {
-                this.toastService.success('Stock ingresado correctamente');
-                this.pricingOverrides.set(new Map());
-                this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-                this.router.navigate(['/admin/products']);
-              },
-              error: (err: any) => {
-                console.error('Error receiving order:', err);
-                this.toastService.error(
-                  'Orden creada pero hubo error al recibir stock',
+          // Etapa recepción (por remisión de entrada, único camino).
+          const reception$: Observable<unknown> = doReceive
+            ? this._buildReceptionViaDispatch$(createdOrder).pipe(
+                catchError(() => throwError(() => ({ stage: 'receive' as const }))),
+              )
+            : of(null);
+
+          // Etapa pago (tras crear y, si aplica, tras recibir).
+          return reception$.pipe(
+            switchMap(() => {
+              if (!doPay) return of(null);
+              const amount =
+                Number(createdOrder.total_amount) > 0
+                  ? Number(createdOrder.total_amount)
+                  : cartTotal;
+              return this.purchaseOrdersService
+                .registerPurchaseOrderPayment(createdOrder.id, {
+                  amount,
+                  payment_date: this._todayISO(),
+                  // TODO: leer el método de pago por defecto de store_settings
+                  // si existe; por ahora 'cash'.
+                  payment_method: 'cash',
+                })
+                .pipe(
+                  catchError(() => throwError(() => ({ stage: 'pay' as const }))),
                 );
-                this.pricingOverrides.set(new Map());
-                this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-                this.router.navigate(['/admin/products']);
-              },
-            });
-        }
-      },
-      error: (error) => {
-        console.error('Error creating order:', error);
-        const errorMsg =
-          error.error?.message || error.message || 'Error al crear la orden';
-        this.toastService.error(errorMsg);
-      },
-    });
+            }),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success(this._buildSuccessMessage(doReceive, doPay));
+          this._finalizeAfterOrder();
+        },
+        error: (err: any) => {
+          console.error('Error in create/receive/pay flow:', err);
+          const stage = err?.stage;
+          if (stage === 'create' || !createdOrder) {
+            // La OC no se creó → no limpiamos el carrito (permite reintentar).
+            const msg =
+              err?.error?.message || err?.message || 'Error al crear la orden';
+            this.toastService.error(msg);
+            return;
+          }
+          if (stage === 'receive') {
+            this.toastService.error(
+              'Orden creada pero hubo error al recibir por remisión',
+            );
+          } else if (stage === 'pay') {
+            this.toastService.error(
+              'Orden creada pero hubo error al registrar el pago',
+            );
+          } else {
+            this.toastService.error(
+              'Orden creada pero una etapa posterior falló',
+            );
+          }
+          // La OC ya existe: limpiamos y navegamos como el flujo previo.
+          this._finalizeAfterOrder();
+        },
+      });
+  }
+
+  /** Mensaje de progreso (toast info) según los efectos elegidos. */
+  private _buildProgressMessage(doReceive: boolean, doPay: boolean): string {
+    if (doReceive && doPay)
+      return 'Creando orden, remisión de entrada y registrando pago...';
+    if (doReceive) return 'Creando orden y remisión de entrada...';
+    if (doPay) return 'Creando orden y registrando pago...';
+    return 'Creando orden...';
+  }
+
+  /** Mensaje de éxito (toast success) según los efectos ejecutados. */
+  private _buildSuccessMessage(doReceive: boolean, doPay: boolean): string {
+    if (doReceive && doPay)
+      return 'Orden creada, recibida por remisión y pagada';
+    if (doReceive) return 'Stock ingresado por remisión correctamente';
+    if (doPay) return 'Orden creada y pago registrado';
+    return 'Orden creada exitosamente';
   }
 
   /**
-   * "Crear y Recibir" — variante Por remisión. Crea la OC (aprobada) y luego,
-   * en lugar de llamar `PO.receive` directo, emite una remisión de compra
-   * (entrada) enlazada a la OC vía `purchase_order_id` y la confirma/recibe.
-   * El backend (Fase A) delega en `PurchaseOrdersService.receive`.
+   * Cadena de recepción POR REMISIÓN de entrada (único camino de recepción;
+   * ya no existe recepción directa). Emite una remisión de compra (entrada)
+   * enlazada a la OC vía `purchase_order_id`, la confirma y la recibe. El
+   * backend delega en `PurchaseOrdersService.receive`.
+   *
+   * QUI-425 — El backend amplió `CreateDispatchNoteItemDto` para aceptar
+   * `new_base_price?`/`new_profit_margin?` opcionales, persistirlos y
+   * propagarlos a `receive()`. Por eso ahora SÍ adjuntamos los pricingOverrides
+   * por línea (mismo patrón condicional que el receive directo): solo cuando
+   * están definidos, para no forzar el path de pricing en el backend cuando el
+   * operador ancla el costo (sin override).
    */
-  private _executeCreateAndReceiveViaDispatch(): void {
-    const state = this.popCartService.currentState;
-    const userId = this.authFacade.getUserId() || 0;
-    const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
-    this.attachPurchaseToStockFactor(request, state);
+  private _buildReceptionViaDispatch$(order: any): Observable<unknown> {
+    const orderItems = order.purchase_order_items || [];
 
-    this.toastService.info('Creando orden y remisión de entrada...');
+    // Overrides de precio/margen keyed por `${product_id}-${variant_id || 0}`
+    // (mismo shape que usa el modal de confirmación).
+    const overrides = this.pricingOverrides();
 
-    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        if (!response.success || !response.data) return;
-        const order = response.data;
-        const orderItems = order.purchase_order_items || [];
-
-        const items = orderItems.map((item: any) => ({
-          product_id: item.product_id,
-          product_variant_id: item.product_variant_id ?? undefined,
-          location_id: order.location_id,
-          ordered_quantity: item.quantity_ordered,
-          dispatched_quantity: item.quantity_ordered,
-          unit_price: Number(item.unit_price ?? item.unit_cost ?? 0),
-          purchase_order_item_id: item.id,
-        }));
-
-        // Inbound purchase_receipt destination is `to_location_id` (the only
-        // location key whitelisted on CreatePurchaseReceiptDispatchDto);
-        // `dispatch_location_id` would trip `forbidNonWhitelisted` (400).
-        const dto = {
-          direction: 'inbound',
-          subtype: 'purchase_receipt',
-          reason: 'normal_purchase',
-          supplier_id: order.supplier_id,
-          purchase_order_id: order.id,
-          to_location_id: order.location_id,
-          items,
-        } as any;
-
-        this.dispatchNotesService.createPurchaseReceipt(dto).pipe(
-          switchMap((dn) => this.dispatchNotesService.confirm(dn.id).pipe(map(() => dn))),
-          switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
-          takeUntilDestroyed(this.destroyRef),
-        ).subscribe({
-          next: () => {
-            this.toastService.success('Stock ingresado por remisión correctamente');
-            this.pricingOverrides.set(new Map());
-            this.popReceiveMode.set('direct');
-            this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-            this.router.navigate(['/admin/products']);
-          },
-          error: (err: any) => {
-            console.error('Error receiving via dispatch note:', err);
-            this.toastService.error('Orden creada pero hubo error al recibir por remisión');
-            this.pricingOverrides.set(new Map());
-            this.popReceiveMode.set('direct');
-            this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
-            this.router.navigate(['/admin/products']);
-          },
-        });
-      },
-      error: (error) => {
-        console.error('Error creating order:', error);
-        const errorMsg = error.error?.message || error.message || 'Error al crear la orden';
-        this.toastService.error(errorMsg);
-      },
+    const items = orderItems.map((item: any) => {
+      const key = `${item.product_id}-${item.product_variant_id || 0}`;
+      const lineOverride = overrides?.get(key);
+      return {
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? undefined,
+        location_id: order.location_id,
+        ordered_quantity: item.quantity_ordered,
+        dispatched_quantity: item.quantity_ordered,
+        unit_price: Number(item.unit_price ?? item.unit_cost ?? 0),
+        purchase_order_item_id: item.id,
+        // Solo adjuntar cuando esté definido — el backend aplica el ancla-a-costo
+        // por defecto cuando AMBOS campos están ausentes.
+        ...(lineOverride?.new_base_price !== undefined && {
+          new_base_price: lineOverride.new_base_price,
+        }),
+        ...(lineOverride?.new_profit_margin !== undefined && {
+          new_profit_margin: lineOverride.new_profit_margin,
+        }),
+      };
     });
+
+    // Inbound purchase_receipt destination is `to_location_id` (the only
+    // location key whitelisted on CreatePurchaseReceiptDispatchDto);
+    // `dispatch_location_id` would trip `forbidNonWhitelisted` (400).
+    const dto = {
+      direction: 'inbound',
+      subtype: 'purchase_receipt',
+      reason: 'normal_purchase',
+      supplier_id: order.supplier_id,
+      purchase_order_id: order.id,
+      to_location_id: order.location_id,
+      items,
+    } as any;
+
+    return this.dispatchNotesService.createPurchaseReceipt(dto).pipe(
+      switchMap((dn) =>
+        this.dispatchNotesService.confirm(dn.id).pipe(map(() => dn)),
+      ),
+      switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
+    );
+  }
+
+  /** Cierre común tras crear/recibir/pagar: limpia overrides + carrito y navega. */
+  private _finalizeAfterOrder(): void {
+    this.pricingOverrides.set(new Map());
+    this.popCartService
+      .clearCart()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+    this.router.navigate(['/admin/products']);
+  }
+
+  /** Fecha de hoy en formato YYYY-MM-DD (hora local) para el pago. */
+  private _todayISO(): string {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   }
 
   /**

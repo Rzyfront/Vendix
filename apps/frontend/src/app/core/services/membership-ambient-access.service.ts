@@ -25,6 +25,17 @@ export interface MembershipAccessEvent {
   period_end: string | null; // ISO
   membership_id: number;
   at: string; // ISO
+  /**
+   * True when access is GRANTED but it is a RE-ENTRY within the configured
+   * window (`membership.re_entry_mode: 'warn'`). Optional — only present on
+   * the warn-grant path.
+   */
+  warning?: boolean;
+  /**
+   * Minutes since the member's last granted entry. Present on the warn-grant
+   * path (`warning: true`) and on the `denied_re_entry` result. Optional.
+   */
+  re_entry_minutes?: number;
 }
 
 /**
@@ -265,6 +276,30 @@ export class MembershipAmbientAccessService {
 
   private showToast(ev: MembershipAccessEvent): void {
     const name = ev.customer_name?.trim() || 'Socio';
+
+    // Re-entry states (third state). Both the warn-grant (granted + `warning`)
+    // and the hard block (`denied_re_entry`) use the `warning` variant so the
+    // reception operator notices the member is coming back in within the
+    // configured window.
+    if (ev.result === 'denied_re_entry') {
+      this.toast.show({
+        variant: 'warning',
+        title: `${name} — reingreso bloqueado`,
+        description: this.buildReEntryDescription(ev),
+        duration: 5000,
+      });
+      return;
+    }
+    if (ev.warning === true) {
+      this.toast.show({
+        variant: 'warning',
+        title: `${name} — reingreso`,
+        description: this.buildReEntryDescription(ev),
+        duration: 4500,
+      });
+      return;
+    }
+
     const variant: ToastVariant = ev.granted ? 'success' : 'warning';
     const title = ev.granted ? `${name} ingresó` : `${name} — acceso denegado`;
     this.toast.show({
@@ -273,6 +308,16 @@ export class MembershipAmbientAccessService {
       description: this.buildDescription(ev),
       duration: ev.granted ? 3000 : 4500,
     });
+  }
+
+  /**
+   * Re-entry toast body: "Ya ingresó hace N min". Falls back to a generic line
+   * when the backend did not carry `re_entry_minutes`.
+   */
+  private buildReEntryDescription(ev: MembershipAccessEvent): string {
+    const mins = ev.re_entry_minutes;
+    if (mins == null) return 'Ya había ingresado recientemente';
+    return `Ya ingresó hace ${mins} min`;
   }
 
   /**

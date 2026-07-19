@@ -34,6 +34,12 @@ export interface NormalizedApiPayload {
   error_code?: string;
   statusCode?: number;
   timestamp?: string;
+  /**
+   * Segundos restantes hasta que se levante un rate limit (HTTP 429).
+   * Lo emite `LoginRateLimitMiddleware` en el backend como `retryAfter`.
+   * Se propaga para poder mostrar un countdown real en el modal de bloqueo.
+   */
+  retryAfter?: number;
 }
 
 function extractNestedMessage(value: any): string | null {
@@ -212,6 +218,12 @@ export function normalizeApiPayload(response: any): NormalizedApiPayload {
 
   if (typeof response.error_code === 'string') {
     payload.error_code = response.error_code;
+  }
+
+  // Propaga `retryAfter` (segundos) de las respuestas 429 del rate limit,
+  // para alimentar el countdown del modal de bloqueo de login.
+  if (typeof response.retryAfter === 'number') {
+    payload.retryAfter = response.retryAfter;
   }
 
   return payload;

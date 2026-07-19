@@ -27,6 +27,7 @@ import {
 import { PanelUiModulesEditorComponent } from '../../../../../../../shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import {
+  INDUSTRY_METADATA,
   STORE_INDUSTRIES,
   StoreIndustry,
   getModulesHiddenByIndustries,
@@ -151,7 +152,7 @@ export class GeneralSettingsForm implements OnInit {
 
   industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
     value: id,
-    label: this.getIndustryLabel(id),
+    label: INDUSTRY_METADATA[id].label,
   }));
 
   // Cargado dinámicamente desde CurrencyService
@@ -267,20 +268,5 @@ export class GeneralSettingsForm implements OnInit {
       if (next[key] === false) disabled[key] = false;
     }
     this.panelUiChange.emit({ STORE_ADMIN: disabled });
-  }
-
-  private getIndustryLabel(id: StoreIndustry): string {
-    switch (id) {
-      case 'retail':
-        return 'Retail';
-      case 'restaurant':
-        return 'Restaurante';
-      case 'manufacturing':
-        return 'Manufactura';
-      case 'service':
-        return 'Servicios';
-      case 'gym':
-        return 'Gimnasio';
-    }
   }
 }

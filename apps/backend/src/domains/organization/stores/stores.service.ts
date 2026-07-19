@@ -813,7 +813,11 @@ export class StoresService {
       data: {
         hostname,
         store_id: storeId,
-        app_type: 'VENDIX_LANDING',
+        // El app_type de un dominio `-store` es STORE_LANDING (nunca el default
+        // VENDIX_LANDING del schema). Se deriva del contexto vía el helper.
+        app_type: this.domainGeneratorHelper.appTypeForContext(
+          DomainContext.STORE,
+        ),
         domain_type: 'store',
         is_primary: true,
         ownership: 'vendix_subdomain',

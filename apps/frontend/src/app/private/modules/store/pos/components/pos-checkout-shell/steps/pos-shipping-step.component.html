@@ -1,0 +1,215 @@
+<div class="shipping-step">
+  <!-- Validation flash banner -->
+  @if (flashSection()) {
+    <div class="flash-banner">
+      <app-icon name="alert-triangle" [size]="16"></app-icon>
+      <span>{{ flashMessage() }}</span>
+    </div>
+  }
+
+  <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
+       Sub-pasos: 0=¿Cuándo paga? · 1=Método · 2=Costo (terminal). Espeja Cobro. -->
+  <div class="ship-grid">
+    <div class="ship-main">
+      <!-- SUB-STEP 0 · ¿Cuándo paga? (toggle ahora / contra-entrega) -->
+      @if (shipSubStep() === 0) {
+        <section class="payment-section">
+          <div class="section-header">
+            <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title">¿Cuándo paga?</h2>
+          </div>
+
+          <div class="sale-type-options">
+            <button
+              type="button"
+              class="sale-type-btn"
+              [class.selected]="payTiming() === 'now'"
+              (click)="selectPayTiming('now')"
+            >
+              <div class="radio-indicator">
+                @if (payTiming() === 'now') {
+                  <div class="radio-dot"></div>
+                }
+              </div>
+              <app-icon name="credit-card" [size]="20"></app-icon>
+              <div class="sale-type-info">
+                <span class="sale-type-name">Pagar ahora</span>
+                <span class="sale-type-desc">Cobro inmediato al finalizar</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="sale-type-btn"
+              [class.selected]="payTiming() === 'later'"
+              (click)="selectPayTiming('later')"
+            >
+              <div class="radio-indicator">
+                @if (payTiming() === 'later') {
+                  <div class="radio-dot"></div>
+                }
+              </div>
+              <app-icon name="package" [size]="20"></app-icon>
+              <div class="sale-type-info">
+                <span class="sale-type-name">Contra entrega</span>
+                <span class="sale-type-desc">El cliente paga al recibir</span>
+              </div>
+            </button>
+          </div>
+        </section>
+      } @else {
+        <button type="button" class="ship-collapsed" (click)="goToShipSubStep(0)">
+          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+          <span class="sw-label">Pago: {{ payTiming() === 'now' ? 'ahora' : 'contra entrega' }}</span>
+          <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+        </button>
+      }
+
+      <!-- SUB-STEP 1 · Método de envío -->
+      @if (shipSubStep() === 1) {
+        <section
+          class="payment-section"
+          [class.config-flash-warning]="flashSection() === 'shipping-method'"
+        >
+          <div class="section-header">
+            <app-icon name="package" [size]="16" class="section-icon"></app-icon>
+            <h2 class="section-title">Método de envío</h2>
+          </div>
+
+          @if (shippingMethods().length > 0) {
+            <div class="payment-methods-grid">
+              @for (method of shippingMethods(); track method.id) {
+                <button
+                  type="button"
+                  (click)="selectShippingMethod(method)"
+                  class="payment-method-btn"
+                  [class.selected]="selectedShippingMethod()?.id === method.id"
+                >
+                  <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
+                  <span class="method-name">{{ method.name }}</span>
+                </button>
+              }
+            </div>
+          } @else {
+            <div class="no-methods-alert">
+              <app-icon name="alert-triangle" [size]="18" class="no-methods-icon"></app-icon>
+              <div class="no-methods-body">
+                <span class="no-methods-title">No hay métodos de envío configurados</span>
+                <span class="no-methods-desc"
+                  >Debes configurar al menos un método de envío para crear órdenes con
+                  envío.</span
+                >
+                <button
+                  type="button"
+                  class="no-methods-link"
+                  (click)="navigateToShippingSettings()"
+                >
+                  Ir a configuración de envíos
+                </button>
+              </div>
+            </div>
+          }
+        </section>
+      } @else if (shipSubStep() > 1 && selectedShippingMethod()) {
+        <button type="button" class="ship-collapsed" (click)="goToShipSubStep(1)">
+          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+          <span class="sw-label">Método: {{ selectedShippingMethod()?.name }}</span>
+          <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+        </button>
+      }
+
+      <!-- SUB-STEP 2 · Costo de envío + notas + total (terminal) -->
+      @if (shipSubStep() === 2) {
+        @if (selectedShippingMethod()) {
+          <section class="payment-section">
+            <div class="section-header">
+              <app-icon name="calculator" [size]="16" class="section-icon"></app-icon>
+              <h2 class="section-title">Costo de envío</h2>
+            </div>
+
+            @if (isCalculatingShipping()) {
+              <div class="calculating-indicator">
+                <span class="spinner-sm"></span>
+                <span>Calculando...</span>
+              </div>
+            } @else {
+              <div class="cost-display">
+                @if (!manualCostOverride() && calculatedShippingCost() !== null) {
+                  <div class="calculated-cost">
+                    <span class="cost-label">Calculado:</span>
+                    <span class="cost-value">{{ calculatedShippingCost() | currency }}</span>
+                  </div>
+                }
+                @if (calculatedShippingCost() !== null) {
+                  <div class="manual-toggle">
+                    <label class="toggle-label">
+                      <input
+                        type="checkbox"
+                        [checked]="manualCostOverride()"
+                        (change)="toggleManualCost()"
+                      />
+                      <span>Editar costo manualmente</span>
+                    </label>
+                  </div>
+                }
+                @if (manualCostOverride() || calculatedShippingCost() === null) {
+                  <div class="manual-cost-input">
+                    <div class="cash-input">
+                      <span class="currency">{{ currencySymbol() }}</span>
+                      <input
+                        appCurrencyInput
+                        [ngModel]="shippingCost()"
+                        (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+
+            <div class="delivery-notes">
+              <app-input
+                [formControl]="deliveryNotesControl"
+                [label]="'Notas de envío'"
+                [placeholder]="'Instrucciones especiales de entrega...'"
+                [size]="'sm'"
+              ></app-input>
+            </div>
+
+            <div class="ship-total">
+              <span class="ship-total-label">Total (con envío)</span>
+              <span class="ship-total-amount">{{ totalWithShipping() | currency }}</span>
+            </div>
+          </section>
+        } @else {
+          <!-- Terminal sin método: prompt para volver a elegir uno -->
+          <div class="no-methods-alert">
+            <app-icon name="alert-triangle" [size]="18" class="no-methods-icon"></app-icon>
+            <div class="no-methods-body">
+              <span class="no-methods-title">Selecciona un método de envío</span>
+              <span class="no-methods-desc"
+                >Elige primero un método para calcular el costo del envío.</span
+              >
+              <button type="button" class="no-methods-link" (click)="goToShipSubStep(1)">
+                Volver a Método
+              </button>
+            </div>
+          </div>
+        }
+      }
+    </div>
+
+    <!-- Columna del stepper: a la derecha en desktop; debajo (DOM-last) en móvil. -->
+    <aside class="steps-col">
+      <app-steps-line
+        [orientation]="'vertical'"
+        [size]="'sm'"
+        [steps]="shipSubSteps()"
+        [currentStep]="shipSubStep()"
+        [clickable]="true"
+        (stepClicked)="goToShipSubStep($event)"
+      ></app-steps-line>
+    </aside>
+  </div>
+</div>

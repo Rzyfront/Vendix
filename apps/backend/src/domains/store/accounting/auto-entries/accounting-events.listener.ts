@@ -699,27 +699,80 @@ export class AccountingEventsListener {
   @OnEvent('purchase_order.payment')
   async handlePurchaseOrderPayment(event: {
     purchase_order_id: number;
+    payment_id?: number;
     organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
     amount: number;
     payment_method: string;
+    /** Resuelto por el emisor: la OC no tenía recepciones al pagar (anticipo). */
+    is_advance?: boolean;
     user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled((event as any).store_id, 'purchases')))
-        return;
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
       await this.auto_entry_service.onPurchaseOrderPayment({
         purchase_order_id: event.purchase_order_id,
+        payment_id: event.payment_id,
         organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
         amount: Number(event.amount),
         payment_method: event.payment_method,
+        is_advance: event.is_advance,
         user_id: event.user_id,
+        supplier: event.supplier,
       });
       this.logger.log(
-        `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}`,
+        `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}` +
+          (event.is_advance ? ' (anticipo)' : ''),
       );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.payment PO #${event.purchase_order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * purchase_order.advance_reclass: reclasifica el anticipo a proveedor contra
+   * la CxP al recibir la OC → DR 2205 / CR 133005. El emisor
+   * (purchase-orders.service.ts::receive) ya calculó `amount` como
+   * min(monto_recibido_de_esta_recepción, saldo_anticipo). Gateado por el mismo
+   * subflow `purchases`. Fallos contables se loguean y nunca revierten la
+   * recepción ya completada.
+   */
+  @OnEvent('purchase_order.advance_reclass')
+  async handlePurchaseOrderAdvanceReclass(event: {
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    amount: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
+      await this.auto_entry_service.onPurchaseOrderAdvanceReclass({
+        purchase_order_id: event.purchase_order_id,
+        reception_id: event.reception_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        amount: Number(event.amount),
+        user_id: event.user_id,
+        supplier: event.supplier,
+      });
+      this.logger.log(
+        `Auto-entry created for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
         error.stack,
       );
     }

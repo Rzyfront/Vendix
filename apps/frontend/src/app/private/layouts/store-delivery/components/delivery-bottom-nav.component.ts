@@ -73,12 +73,12 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
         class="nav-tab"
         routerLink="/repartos/sesion"
         routerLinkActive="active"
-        aria-label="Sesión"
+        aria-label="Usuario"
       >
         <span class="nav-icon-wrap">
           <app-icon name="user" [size]="22" />
         </span>
-        <span class="nav-label">Sesión</span>
+        <span class="nav-label">Usuario</span>
       </a>
     </nav>
   `,

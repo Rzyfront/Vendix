@@ -928,6 +928,29 @@ export class MembershipSettingsDto {
   @ValidateNested()
   @Type(() => FingerprintDeviceConfigDto)
   fingerprint_device?: FingerprintDeviceConfigDto;
+
+  @ApiProperty({
+    example: 'warn',
+    required: false,
+    enum: ['off', 'warn', 'block'],
+    description:
+      'Re-entry detection policy: off (disabled), warn (grant with a warning flag, no re-count), or block (deny with denied_re_entry). Default warn.',
+  })
+  @IsOptional()
+  @IsIn(['off', 'warn', 'block'])
+  re_entry_mode?: 'off' | 'warn' | 'block';
+
+  @ApiProperty({
+    example: 2,
+    required: false,
+    description:
+      'Window in hours used by re_entry_mode to consider an access a re-entry. Default 2.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  re_entry_window_hours?: number;
 }
 
 export class PanelUISettingsDto {

@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Query,
@@ -9,18 +10,28 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  Sse,
+  Req,
+  MessageEvent,
+  ForbiddenException,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { Observable, map } from 'rxjs';
 import { CarrierDeliveryService } from './carrier-delivery.service';
+import { CarrierPoolSseService } from './carrier-pool-sse.service';
 import { PoolQueryDto } from './dto/pool-query.dto';
+import { RouteHistoryQueryDto } from './dto/route-history-query.dto';
 import {
   SettleStopDto,
   ReleaseStopDto,
   CloseDispatchRouteDto,
   ReorderStopsDto,
 } from '../dispatch-routes/dto';
+import { UpdateDispatchNoteAddressDto } from '../dispatch-notes/dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 /**
  * Carrier namespace controller (Repartos Fase B6).
@@ -44,6 +55,7 @@ export class CarrierDeliveryController {
   constructor(
     private readonly carrierService: CarrierDeliveryService,
     private readonly responseService: ResponseService,
+    private readonly poolSse: CarrierPoolSseService,
   ) {}
 
   /** Pool de órdenes publicadas por el admin, sin reclamar. */
@@ -58,6 +70,29 @@ export class CarrierDeliveryController {
       page,
       limit,
       'Pool de repartos',
+    );
+  }
+
+  /**
+   * Stream SSE del pool en vivo. Emite `{ type: 'pool_changed' }` cada vez que
+   * el pool muta (orden publicada/reexpuesta, reclamada, o cancelada/reembolsada)
+   * para que la lista del repartidor se refresque sin polling. Auth por `?token=`
+   * la resuelve el `JwtAuthGuard` global + el interceptor que puebla
+   * `RequestContextService`. `pool/stream` es un sub-path distinto de `pool`
+   * (exacto) y de `pool/:orderId/claim` (POST): no rompe el matching.
+   */
+  @Sse('pool/stream')
+  @Permissions('store:carrier:pool:read')
+  poolStream(@Req() req: Request): Observable<MessageEvent> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) throw new ForbiddenException('Store context required');
+
+    const subject = this.poolSse.getOrCreate(store_id);
+    req.on('close', () => this.poolSse.unsubscribe(store_id));
+
+    return subject.pipe(
+      map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
   }
 
@@ -138,5 +173,61 @@ export class CarrierDeliveryController {
   async reorderStops(@Body() dto: ReorderStopsDto) {
     const result = await this.carrierService.reorderStops(dto);
     return this.responseService.success(result, 'Paradas reordenadas');
+  }
+
+  // ── Detalle de parada + editar dirección ─────────────────────────────────
+
+  /**
+   * Detalle de una parada de MI ruta: la remisión completa con ítems +
+   * producto (mismo shape que el admin `GET /store/dispatch-notes/:id`) para que
+   * el modal del repartidor lo lea sin un contrato nuevo.
+   */
+  @Get('route/stops/:stopId')
+  @Permissions('store:carrier:stop:read')
+  async getStopDetail(@Param('stopId', ParseIntPipe) stopId: number) {
+    const result = await this.carrierService.getStopDetail(stopId);
+    return this.responseService.success(result, 'Detalle de parada');
+  }
+
+  /**
+   * Editar la dirección de entrega de una parada de MI ruta. Delega en el
+   * re-snapshot del admin (solo display+mapa, NO toca inventario ni contabilidad).
+   */
+  @Patch('route/stops/:stopId/address')
+  @Permissions('store:carrier:stop:update_address')
+  async updateStopAddress(
+    @Param('stopId', ParseIntPipe) stopId: number,
+    @Body() dto: UpdateDispatchNoteAddressDto,
+  ) {
+    const result = await this.carrierService.updateStopAddress(stopId, dto);
+    return this.responseService.success(result, 'Dirección actualizada');
+  }
+
+  // ── Historial de rutas del carrier ───────────────────────────────────────
+
+  /**
+   * Historial paginado de MIS planillas (todos los estados, incl. closed/voided).
+   * `routes` (plural) NO choca con `route` (singular) ni con `route/...`.
+   */
+  @Get('routes')
+  @Permissions('store:carrier:route:read')
+  async listMyRoutes(@Query() query: RouteHistoryQueryDto) {
+    const { data, total, page, limit } =
+      await this.carrierService.listMyRoutes(query);
+    return this.responseService.paginated(
+      data,
+      total,
+      page,
+      limit,
+      'Historial de planillas',
+    );
+  }
+
+  /** Detalle de una de MIS planillas del historial (por id). */
+  @Get('routes/:id')
+  @Permissions('store:carrier:route:read')
+  async getMyRouteById(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.carrierService.getMyRouteById(id);
+    return this.responseService.success(result, 'Detalle de planilla');
   }
 }
