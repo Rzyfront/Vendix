@@ -4,6 +4,7 @@ import { Observable, of, throwError, Subject } from 'rxjs';
 import { catchError, map, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
 import {
@@ -59,49 +60,13 @@ export class PosPaymentService {
     );
   }
 
-  private readonly PAYMENT_METHODS: PaymentMethod[] = [
-    {
-      id: 'cash',
-      name: 'Efectivo',
-      type: 'cash',
-      icon: 'cash',
-      enabled: true,
-    },
-    {
-      id: 'card',
-      name: 'Tarjeta de Crédito/Débito',
-      type: 'card',
-      icon: 'credit-card',
-      enabled: true,
-      requiresReference: true,
-      referenceLabel: 'Últimos 4 dígitos',
-    },
-    {
-      id: 'transfer',
-      name: 'Transferencia Bancaria',
-      type: 'transfer',
-      icon: 'bank',
-      enabled: true,
-      requiresReference: true,
-      referenceLabel: 'Número de referencia',
-    },
-    {
-      id: 'digital_wallet',
-      name: 'Billetera Digital',
-      type: 'digital_wallet',
-      icon: 'smartphone',
-      enabled: true,
-      requiresReference: true,
-      referenceLabel: 'Referencia de pago',
-    },
-  ];
-
   private transactions: Transaction[] = [];
 
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
     private cashRegisterService: PosCashRegisterService,
+    private paymentMethodsCatalog: PaymentMethodsCatalogService,
   ) {}
 
   /**
@@ -206,73 +171,16 @@ export class PosPaymentService {
     return rateSum || undefined;
   }
 
+  /**
+   * Payment methods available for POS charging.
+   *
+   * Delegates to the shared {@link PaymentMethodsCatalogService}, which hits the
+   * same context-aware endpoint (`GET /store/payments/payment-methods`) and maps
+   * the response to the canonical `PaymentMethod` shape. Kept as a thin wrapper
+   * so existing POS/table consumers keep their `getPaymentMethods()` call site.
+   */
   getPaymentMethods(): Observable<PaymentMethod[]> {
-    // Use the context-aware endpoint that relies on the user's token scope
-    const paymentMethodsUrl = `${environment.apiUrl}/store/payments/payment-methods`;
-
-    return this.http.get<any>(paymentMethodsUrl).pipe(
-      map((response) => {
-        const methodsData = response.data || response;
-        if (methodsData && Array.isArray(methodsData)) {
-          // Transform backend payment methods to frontend format
-          return methodsData.map((method: any) => {
-            // Handle both flattened or nested structure
-            const type =
-              method.system_payment_method?.type || method.type || 'unknown';
-            const name =
-              method.display_name ||
-              method.name ||
-              method.system_payment_method?.name;
-
-            return {
-              id: method.id.toString(),
-              name: name,
-              type: type,
-              icon: this.getPaymentIcon(type),
-              enabled: method.state === 'enabled',
-              requiresReference: type !== 'cash' && type !== 'voucher' && type !== 'wallet',
-              referenceLabel: this.getReferenceLabel(type),
-              dian_code: method.system_payment_method?.dian_code || undefined,
-              // Preservar metadata original
-              original: method,
-            };
-          });
-        }
-        // Fallback to default methods if backend fails
-        return this.PAYMENT_METHODS.filter((method) => method.enabled);
-      }),
-      catchError((error) => {
-        return of(this.PAYMENT_METHODS.filter((method) => method.enabled)).pipe(
-          delay(100),
-        );
-      }),
-    );
-  }
-
-  private getPaymentIcon(type: string): string {
-    const iconMap: { [key: string]: string } = {
-      cash: 'cash',
-      card: 'credit-card',
-      paypal: 'paypal',
-      bank_transfer: 'bank',
-      digital_wallet: 'smartphone',
-      wompi: 'smartphone',
-      voucher: 'wallet',
-      wallet: 'wallet',
-    };
-    return iconMap[type] || 'credit-card';
-  }
-
-  private getReferenceLabel(type: string): string {
-    const labelMap: { [key: string]: string } = {
-      card: 'Últimos 4 dígitos',
-      paypal: 'Email de PayPal',
-      bank_transfer: 'Número de referencia',
-      digital_wallet: 'Referencia de pago',
-      wompi: 'Teléfono Nequi o referencia',
-      wallet: 'Saldo disponible',
-    };
-    return labelMap[type] || 'Referencia';
+    return this.paymentMethodsCatalog.getEnabledMethods();
   }
 
   /**
@@ -314,7 +222,7 @@ export class PosPaymentService {
         ),
       ),
       payment_reference: request.reference || '',
-      wompi_payment_method: request.paymentMethod?.original?.system_payment_method?.type === 'wompi'
+      wompi_payment_method: (request.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? request.metadata?.wompiPaymentMethod
         : undefined,
       wallet_id: request.metadata?.walletId,
@@ -416,7 +324,7 @@ export class PosPaymentService {
         ).toFixed(2),
       ),
       payment_reference: paymentRequest.reference || '',
-      wompi_payment_method: paymentRequest.paymentMethod?.original?.system_payment_method?.type === 'wompi'
+      wompi_payment_method: (paymentRequest.paymentMethod?.original as any)?.system_payment_method?.type === 'wompi'
         ? paymentRequest.metadata?.wompiPaymentMethod
         : undefined,
       wallet_id: paymentRequest.metadata?.walletId,
