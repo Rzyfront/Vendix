@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from './notifications.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { EmailService } from '../../../email/email.service';
@@ -28,6 +28,7 @@ export class NotificationsEventsListener {
     private readonly global_prisma: GlobalPrismaService,
     private readonly email_service: EmailService,
     private readonly s3_service: S3Service,
+    private readonly event_emitter: EventEmitter2,
   ) {}
 
   @OnEvent('order.created')
@@ -154,6 +155,11 @@ export class NotificationsEventsListener {
       await this.global_prisma.orders.updateMany({
         where: { id: event.order_id, store_id: event.store_id },
         data: { dispatch_pool_at: null, claimed_by_carrier_user_id: null },
+      });
+      // La orden salió del pool (cancelada/reembolsada) → notificar al stream
+      // SSE de repartidores para que la retiren de su lista en vivo.
+      this.event_emitter.emit('carrier.pool.changed', {
+        store_id: event.store_id,
       });
     } catch (err: any) {
       this.logger.error(
