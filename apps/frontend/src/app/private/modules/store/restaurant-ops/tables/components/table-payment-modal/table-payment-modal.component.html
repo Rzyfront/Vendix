@@ -1,18 +1,18 @@
-<app-modal
-  [isOpen]="isOpen()"
-  [size]="mode() === 'confirm' ? 'sm' : 'md'"
-  [title]="modalTitle()"
-  [subtitle]="tableName() ? tableName() : ''"
-  (isOpenChange)="onIsOpenChange($event)"
-  (closed)="onModalClosed()"
->
-  @if (mode() === 'confirm') {
-    <!--
-      E2 — Staff confirmation of a diner-initiated payment. We render
-      the pending row's method + amount as read-only facts; the mesero
-      just confirms and optionally adds a tip. No method picker (the
-      payment already carries one), no cash flow.
-    -->
+@if (mode() === 'confirm') {
+  <!--
+    E2 — Staff confirmation of a diner-initiated payment. We render the
+    pending row's method + amount as read-only facts; the mesero just
+    confirms and optionally adds a tip. No method picker (the payment
+    already carries one), no cash flow.
+  -->
+  <app-modal
+    [isOpen]="isOpen()"
+    size="sm"
+    [title]="modalTitle()"
+    [subtitle]="tableName() ? tableName() : ''"
+    (isOpenChange)="onIsOpenChange($event)"
+    (closed)="onModalClosed()"
+  >
     <div class="confirm-content">
       <div class="confirm-summary">
         <div class="confirm-row">
@@ -73,167 +73,44 @@
         La sesión seguirá abierta hasta cubrir el total de la cuenta.
       </p>
     </div>
-  } @else {
-    <!-- Legacy 'pos' mode: full settlement UI. -->
-    <div class="payment-content">
-      <!-- Total -->
-      <div class="total-display">
-        <span class="label">Total a cobrar</span>
-        <p class="amount">{{ effectiveTotal() | currency }}</p>
-        @if (tip() > 0) {
-          <span class="total-breakdown">
-            Cuenta {{ total() | currency }} + Propina {{ tip() | currency }}
-          </span>
-        }
-      </div>
 
-      <!-- Tip (optional gratuity) -->
-      <div class="tip-section">
-        <label>Propina (opcional)</label>
-        <div class="tip-input">
-          <span class="currency">{{ currencySymbol() }}</span>
-          <input
-            type="number"
-            [value]="tip()"
-            (input)="onTipInput($any($event.target).valueAsNumber)"
-            placeholder="0.00"
-            step="0.01"
-            min="0"
-          />
-        </div>
-      </div>
-
-      <!-- Payment method picker -->
-      <div class="section-header">
-        <app-icon name="credit-card" [size]="16"></app-icon>
-        <h2>Método de pago</h2>
-      </div>
-
-      @if (isLoadingMethods()) {
-        <p class="muted">Cargando métodos…</p>
-      } @else if (methods().length > 0) {
-        <div class="methods-grid">
-          @for (method of methods(); track method.id) {
-            <button
-              type="button"
-              class="method-btn"
-              [class.selected]="selectedMethod()?.id === method.id"
-              (click)="selectMethod(method)"
-            >
-              <app-icon [name]="method.icon" [size]="22"></app-icon>
-              <span class="method-name">{{ method.name }}</span>
-            </button>
-          }
-        </div>
-      } @else {
-        <div class="empty-methods">
-          <app-icon name="credit-card" [size]="22"></app-icon>
-          <p>No hay métodos de pago configurados</p>
-        </div>
-      }
-
-      <!-- Cash flow -->
-      @if (selectedMethod()?.type === 'cash') {
-        <div class="cash-section">
-          <div class="cash-row">
-            <label>Monto recibido</label>
-            <div class="cash-input" [class.error]="isCashInsufficient()">
-              <span class="currency">{{ currencySymbol() }}</span>
-              <input
-                type="number"
-                [value]="cashReceived()"
-                (input)="onCashInput($any($event.target).valueAsNumber)"
-                placeholder="0.00"
-                step="0.01"
-              />
-            </div>
-          </div>
-          <div class="cash-meta">
-            @if (isCashInsufficient()) {
-              <span class="error-text">Faltan: {{ missingAmount() | currency }}</span>
-            } @else {
-              <span class="change-text">Cambio: {{ change() | currency }}</span>
-            }
-            <button type="button" class="link-btn" (click)="setFullAmount()">
-              Monto exacto
-            </button>
-          </div>
-        </div>
-      }
-
-      <!-- Reference for non-cash -->
-      @if (selectedMethod()?.requiresReference) {
-        <div class="reference-section">
-          <app-input
-            [formControl]="referenceControl"
-            [label]="selectedMethod()?.referenceLabel || 'Referencia'"
-            [placeholder]="'Ingresa la referencia'"
-            [error]="getReferenceError()"
-          ></app-input>
-        </div>
-      }
-
-      <!-- Summary -->
-      @if (selectedMethod(); as method) {
-        <div class="summary">
-          <div class="summary-row">
-            <span>Método</span>
-            <strong>{{ method.name }}</strong>
-          </div>
-          @if (tip() > 0) {
-            <div class="summary-row">
-              <span>Cuenta</span>
-              <strong>{{ total() | currency }}</strong>
-            </div>
-            <div class="summary-row">
-              <span>Propina</span>
-              <strong>{{ tip() | currency }}</strong>
-            </div>
-          }
-          @if (method.type === 'cash' && cashReceived() > 0) {
-            <div class="summary-row">
-              <span>Recibido</span>
-              <strong>{{ cashReceived() | currency }}</strong>
-            </div>
-            <div class="summary-row">
-              <span>Cambio</span>
-              <strong class="change">{{ change() | currency }}</strong>
-            </div>
-          }
-          <div class="summary-row total">
-            <span>Total</span>
-            <strong>{{ effectiveTotal() | currency }}</strong>
-          </div>
-        </div>
-      }
-    </div>
-  }
-
-  <div slot="footer" class="payment-footer">
-    <app-button variant="ghost" (clicked)="onModalClosed()">
-      Cancelar
-    </app-button>
-    <app-button
-      variant="primary"
-      [disabled]="!canProcess()"
-      [loading]="isProcessing()"
-      [showTextWhileLoading]="true"
-      (clicked)="submit()"
-    >
-      <app-icon slot="icon" name="check-circle" [size]="18"></app-icon>
-      @if (mode() === 'confirm') {
+    <div slot="footer" class="payment-footer">
+      <app-button variant="ghost" (clicked)="onModalClosed()">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="primary"
+        [disabled]="!canProcess()"
+        [loading]="isProcessing()"
+        [showTextWhileLoading]="true"
+        (clicked)="submit()"
+      >
+        <app-icon slot="icon" name="check-circle" [size]="18"></app-icon>
         @if (isProcessing()) {
           Confirmando…
         } @else {
           Confirmar pago
         }
-      } @else {
-        @if (isProcessing()) {
-          Procesando…
-        } @else {
-          Confirmar cobro
-        }
-      }
-    </app-button>
-  </div>
-</app-modal>
+      </app-button>
+    </div>
+  </app-modal>
+} @else {
+  <!--
+    'pos' mode — POS-style bill settlement. Collection UI (method grid,
+    cash/keypad, reference, tip) is delegated to the shared, capability-
+    driven collector via `app-payment-modal` (context="table"). Its
+    normalized submit is mapped to `TablePaymentSubmit` in `onCollectorSubmit`.
+  -->
+  <app-payment-modal
+    [open]="isOpen()"
+    [title]="modalTitle()"
+    [subtitle]="tableName()"
+    size="md"
+    context="table"
+    [amount]="total()"
+    [isProcessing]="isProcessing()"
+    (openChange)="onIsOpenChange($event)"
+    (submit)="onCollectorSubmit($event)"
+    (closed)="onModalClosed()"
+  />
+}
