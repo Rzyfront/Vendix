@@ -120,13 +120,14 @@
                   class="cliente-collapsed"
                   (click)="goToClienteSubStep(0)"
                 >
-                  <span>{{
+                  <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+                  <span class="sw-label">{{
                     isAnonymousSale()
                       ? 'Venta Anónima'
                       : 'Con Cliente: ' +
                         (cartState()?.customer ? customerDisplayName : 'Seleccionar')
                   }}</span>
-                  <app-icon name="check" [size]="16"></app-icon>
+                  <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
                 </button>
               }
 
@@ -152,8 +153,9 @@
                     class="cliente-collapsed"
                     (click)="goToClienteSubStep(1)"
                   >
-                    <span>Cliente: {{ customerDisplayName }}</span>
-                    <app-icon name="check" [size]="16"></app-icon>
+                    <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+                    <span class="sw-label">Cliente: {{ customerDisplayName }}</span>
+                    <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
                   </button>
                 }
               }

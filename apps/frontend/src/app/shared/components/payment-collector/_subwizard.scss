@@ -12,33 +12,88 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Collapsed summary row: a clickable, condensed line that summarizes an already
-// completed sub-step and jumps back to it when clicked. Neutral surface at rest,
-// primary accent (border + text + trailing icon) on hover.
+// completed sub-step and jumps back to it when clicked. Settled "completed green"
+// surface with a one-shot fill animation that plays exactly once (on the freshly
+// mounted @if node when the sub-step collapses) and STAYS green. Uses CSS
+// `animation`/@keyframes — never `transition` on a class toggle — because the
+// payment step runs CONTINUOUS change detection (Wompi polling); a transition
+// would restart every CD cycle, a keyframe on the mounted element runs once.
+// (reference_transition_all_continuous_cd)
+//
+// Internal structure applied by every consumer:
+//   .sw-check (left)  ·  .sw-label (center, grows)  ·  .sw-edit (right)
 @mixin subwizard-collapsed-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
   text-align: left;
   padding: 10px 14px;
-  border: 1px solid var(--color-border);
+  border: 1px solid rgba(var(--color-success-rgb), 0.4);
   border-radius: 12px;
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
+  background: rgba(var(--color-success-rgb), 0.1);
+  color: var(--color-text-primary);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
+  position: relative;
+  overflow: hidden;
 
-  &:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
+  // One-shot green fill: sweeps left→right once, then `forwards` holds it full.
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(var(--color-success-rgb), 0.18);
+    transform: scaleX(0);
+    transform-origin: left;
+    animation: subwizard-fill 420ms ease-out forwards;
+    pointer-events: none;
+    z-index: 0;
   }
 
-  app-icon {
-    color: var(--color-primary);
+  .sw-check {
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-success);
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .sw-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+    color: var(--color-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    position: relative;
+    z-index: 1;
+  }
+
+  .sw-edit {
+    display: inline-flex;
+    align-items: center;
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+    transition: color 0.2s;
+  }
+
+  &:hover .sw-edit {
+    color: var(--color-primary);
+  }
+}
+
+@keyframes subwizard-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
   }
 }
 

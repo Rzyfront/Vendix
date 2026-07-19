@@ -59,8 +59,9 @@
         </section>
       } @else {
         <button type="button" class="ship-collapsed" (click)="goToShipSubStep(0)">
-          <span>Pago: {{ payTiming() === 'now' ? 'ahora' : 'contra entrega' }}</span>
-          <app-icon name="check" [size]="16"></app-icon>
+          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+          <span class="sw-label">Pago: {{ payTiming() === 'now' ? 'ahora' : 'contra entrega' }}</span>
+          <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
         </button>
       }
 
@@ -111,8 +112,9 @@
         </section>
       } @else if (shipSubStep() > 1 && selectedShippingMethod()) {
         <button type="button" class="ship-collapsed" (click)="goToShipSubStep(1)">
-          <span>Método: {{ selectedShippingMethod()?.name }}</span>
-          <app-icon name="check" [size]="16"></app-icon>
+          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+          <span class="sw-label">Método: {{ selectedShippingMethod()?.name }}</span>
+          <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
         </button>
       }
 

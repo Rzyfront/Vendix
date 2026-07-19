@@ -36,8 +36,9 @@
             </div>
           } @else {
             <button type="button" class="pc-panel-collapsed" (click)="goToSubStep(0)">
-              <span>Forma de pago: {{ mode() === 'contado' ? 'Contado' : 'Crédito' }}</span>
-              <app-icon name="check" [size]="16" />
+              <span class="sw-check"><app-icon name="check" [size]="16" /></span>
+              <span class="sw-label">Forma de pago: {{ mode() === 'contado' ? 'Contado' : 'Crédito' }}</span>
+              <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
             </button>
           }
         }
@@ -78,8 +79,9 @@
               class="pc-panel-collapsed"
               (click)="goToSubStep(modoOffset())"
             >
-              <span>Método: {{ selectedMethod()?.name }}</span>
-              <app-icon name="check" [size]="16" />
+              <span class="sw-check"><app-icon name="check" [size]="16" /></span>
+              <span class="sw-label">Método: {{ selectedMethod()?.name }}</span>
+              <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
             </button>
           }
 
