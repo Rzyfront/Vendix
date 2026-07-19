@@ -85,20 +85,44 @@ export class ReservationsController {
   async getAvailability(
     @Param('productId', ParseIntPipe) productId: number,
     @Query() query: AvailabilityQueryDto,
-    @Query('provider_id') providerId?: string,
   ) {
     const result = await this.availabilityService.getAvailableSlots(
       productId,
       query.date_from,
       query.date_to,
       {
-        provider_id: providerId ? parseInt(providerId, 10) : undefined,
+        provider_id: query.provider_id,
         product_variant_id: query.product_variant_id,
       },
     );
     return this.responseService.success(
       result,
       'Disponibilidad obtenida exitosamente',
+    );
+  }
+
+  /**
+   * Returns dates within a range where the given provider has active
+   * schedule blocks, plus the count of existing bookings per date.
+   * Used by the reschedule modal to show only available days.
+   */
+  @Get('provider-dates/:providerId')
+  @Permissions('store:reservations:read')
+  async getProviderDates(
+    @Param('providerId', ParseIntPipe) providerId: number,
+    @Query('date_from') dateFrom: string,
+    @Query('date_to') dateTo: string,
+    @Query('product_id') productId?: string,
+  ) {
+    const result = await this.availabilityService.getProviderDatesWithBookings(
+      providerId,
+      dateFrom,
+      dateTo,
+      productId ? parseInt(productId, 10) : undefined,
+    );
+    return this.responseService.success(
+      result,
+      'Fechas del proveedor obtenidas exitosamente',
     );
   }
 

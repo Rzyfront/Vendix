@@ -7023,6 +7023,9 @@ model provider_schedules {
   id          Int       @id @default(autoincrement())
   provider_id Int
   day_of_week Int       @db.SmallInt
+  /// Order of this block within the day (0 = first, 1 = second, etc.)
+  /// Allows multiple time blocks per day (e.g., morning + afternoon)
+  block_order Int       @default(0)
   start_time  String    @db.VarChar(5)
   end_time    String    @db.VarChar(5)
   is_active   Boolean   @default(true)
@@ -7031,8 +7034,8 @@ model provider_schedules {
 
   provider service_providers @relation(fields: [provider_id], references: [id], onDelete: Cascade)
 
-  @@unique([provider_id, day_of_week])
-  @@index([provider_id])
+  @@unique([provider_id, day_of_week, block_order])
+  @@index([provider_id, day_of_week])
 }
 
 model provider_exceptions {

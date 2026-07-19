@@ -67,7 +67,7 @@ describe('NotificationsEventsListener — appointment redesign handlers', () => 
     expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
       2,
       'appointment_checked_in',
-      'Cliente en sala',
+      'Cliente en sala de espera',
       expect.stringContaining('Ana'),
       expect.objectContaining({ booking_id: 99, provider_id: 7, kind: 'arrival' }),
     );

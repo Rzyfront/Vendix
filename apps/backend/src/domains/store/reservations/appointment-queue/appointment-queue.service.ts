@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 
 /**
  * Smart queue for the reservations redesign.

@@ -11,5 +11,10 @@ export class AvailabilityQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  provider_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   product_variant_id?: number;
 }
