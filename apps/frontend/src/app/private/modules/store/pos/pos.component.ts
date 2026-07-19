@@ -619,6 +619,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (isOpenChange)="showCheckoutModal.set($event)"
         (closed)="showCheckoutModal.set(false)"
         (checkoutCompleted)="onPaymentCompleted($event)"
+        (shippingCompleted)="onShippingCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
         (tableSessionOpened)="onPaymentTableSessionOpened($event)"
@@ -2261,7 +2262,11 @@ export class PosComponent {
       this.toastService.warning('El carrito está vacío');
       return;
     }
-    this.showShippingModal.set(true);
+    // Fase 5·B2b: el flujo DELIVERY ahora vive en el shell con stepper. El modal
+    // viejo (showShippingModal / <app-pos-shipping-modal>) queda vivo y se
+    // retira en B3.
+    this.checkoutIntent.set('delivery');
+    this.showCheckoutModal.set(true);
   }
 
   onShippingFromModal(): void {
@@ -2278,6 +2283,8 @@ export class PosComponent {
 
     this.loading.set(false);
     this.showShippingModal.set(false);
+    // Fase 5·B2b: el flujo delivery ahora emite desde el shell; ciérralo también.
+    this.showCheckoutModal.set(false);
 
     if (shippingData.success) {
       this.currentOrderId.set(shippingData.order?.id);

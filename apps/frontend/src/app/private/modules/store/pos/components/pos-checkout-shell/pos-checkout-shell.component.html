@@ -20,23 +20,31 @@
     <div class="checkout-grid">
       <!-- Columna principal: paso activo -->
       <div class="checkout-main">
-        <!-- Paso 0 · Cobro -->
-        <div class="step-panel" [class.step-hidden]="currentStep() !== 0">
-          <app-pos-payment-step
-            [cartState]="cartState()"
-            [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
-            [tableId]="tableId()"
-            [isAnonymous]="isAnonymousSale()"
-            [paymentMethods]="paymentMethods()"
-            [isProcessing]="isProcessing()"
-            (paymentCompleted)="onCheckoutCompleted($event)"
-            (requestCustomer)="onRequestCustomer()"
-            (tableSessionOpened)="onTableSessionOpened($event)"
-          ></app-pos-payment-step>
-        </div>
+        <!-- Paso · Cobro (pickup + delivery pagar-ahora). Se mantiene MONTADO
+             mientras 'cobro' esté en stepKeys para que el footer lea sus señales
+             y triggerSubmit() funcione desde cualquier paso. -->
+        @if (stepKeys().includes('cobro')) {
+          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cobro'">
+            <app-pos-payment-step
+              [cartState]="cartState()"
+              [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
+              [tableId]="tableId()"
+              [isAnonymous]="isAnonymousSale()"
+              [paymentMethods]="paymentMethods()"
+              [isProcessing]="isProcessing()"
+              [autoExecute]="checkoutIntent() === 'pickup'"
+              [amountOverride]="deliveryAmount()"
+              (paymentCompleted)="onCheckoutCompleted($event)"
+              (paymentReady)="onPaymentReady($event)"
+              (requestCustomer)="onRequestCustomer()"
+              (tableSessionOpened)="onTableSessionOpened($event)"
+            ></app-pos-payment-step>
+          </div>
+        }
 
-        <!-- Paso 1 · Cliente -->
-        <div class="step-panel" [class.step-hidden]="currentStep() !== 1">
+        <!-- Paso · Cliente -->
+        @if (stepKeys().includes('cliente')) {
+        <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cliente'">
           <section class="cliente-section">
             <div class="section-header">
               <app-icon name="users" [size]="16" class="section-icon"></app-icon>
@@ -95,6 +103,19 @@
             }
           </section>
         </div>
+        }
+
+        <!-- Paso · Envío (delivery). Montado mientras 'envio' esté en stepKeys
+             para que el footer lea shippingCost/canConfirm/isProcessing. -->
+        @if (stepKeys().includes('envio')) {
+          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'envio'">
+            <app-pos-shipping-step
+              [cartState]="cartState()"
+              [(payTiming)]="payTiming"
+              (shippingCompleted)="onShippingCompleted($event)"
+            ></app-pos-shipping-step>
+          </div>
+        }
       </div>
 
       <!-- Rail de Resumen (fijo). Reutiliza el markup de Resumen del modal viejo. -->
@@ -176,11 +197,17 @@
                 >
               </div>
             }
+            @if (checkoutIntent() === 'delivery') {
+              <div class="summary-row">
+                <span>Envío</span>
+                <span class="summary-value">{{ shippingCost() | currency }}</span>
+              </div>
+            }
           </div>
 
           <div class="total-section">
             <p class="total-label">Total a Pagar</p>
-            <p class="total-amount">{{ cartState()?.summary?.total || 0 | currency }}</p>
+            <p class="total-amount">{{ totalToPay() | currency }}</p>
           </div>
         </section>
       </aside>
@@ -191,7 +218,7 @@
   <div slot="footer" class="checkout-footer">
     <div class="footer-left">
       <span class="footer-total-label">Total</span>
-      <span class="footer-total-amount">{{ cartState()?.summary?.total || 0 | currency }}</span>
+      <span class="footer-total-amount">{{ totalToPay() | currency }}</span>
     </div>
     <div class="footer-actions">
       <button
