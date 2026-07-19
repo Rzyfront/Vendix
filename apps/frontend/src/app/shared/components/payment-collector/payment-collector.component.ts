@@ -28,11 +28,13 @@ import {
 import { PaymentMethodsCatalogService } from '../../services/payment-methods-catalog.service';
 import { PaymentWompiFieldsComponent } from './payment-wompi-fields.component';
 import { PaymentCreditFieldsComponent } from './payment-credit-fields.component';
+import { StepsLineComponent, type StepsLineItem } from '../steps-line/steps-line.component';
 import {
   DEFAULT_CONFIG_BY_CONTEXT,
   type CreditTerms,
   type ManualPaymentMethod,
   type PaymentCollectorConfig,
+  type PaymentCollectorLayout,
   type PaymentContext,
   type PaymentMode,
   type PaymentSubmit,
@@ -61,6 +63,7 @@ import {
     CurrencyInputDirective,
     PaymentWompiFieldsComponent,
     PaymentCreditFieldsComponent,
+    StepsLineComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './payment-collector.component.html',
@@ -89,6 +92,12 @@ export class PaymentCollectorComponent implements OnInit {
    * 'contado'). Restores the legacy POS `settings.pos.default_payment_form`.
    */
   readonly initialMode = input<PaymentMode>('contado');
+  /**
+   * Presentational layout. `flat` (default) keeps the classic single-scroll
+   * stack untouched; `stepped` renders an opt-in vertical sub-wizard
+   * (mode → method → amount) with the keypad docked to the right.
+   */
+  readonly layout = input<PaymentCollectorLayout>('flat');
 
   // ── Capability inputs (undefined → context default) ────────────────────
   // NOTE: signal inputs cannot be `private` (NG1053), and because a parent
@@ -120,6 +129,8 @@ export class PaymentCollectorComponent implements OnInit {
   // ── Independent state slices (signals) ──────────────────────────────────
   readonly selectedMethod = signal<PaymentMethod | null>(null);
   readonly mode = signal<PaymentMode>('contado');
+  /** Active sub-step index for the `stepped` layout sub-wizard. */
+  readonly subStep = signal<number>(0);
   readonly selectedInstallmentId = signal<number | null>(null);
   /** Two-way bound to the Wompi child; null = incomplete. */
   readonly wompiSlice = signal<WompiSlice | null>(null);
@@ -158,6 +169,19 @@ export class PaymentCollectorComponent implements OnInit {
       allowAmountOverride: this.allowAmountOverrideIn() ?? base.allowAmountOverride,
       showKeypad: this.showKeypadIn() ?? base.showKeypad,
     };
+  });
+
+  // ── Stepped sub-wizard (presentation only; drives `layout==='stepped'`) ──
+  /** When credit is exposed, sub-step 0 is the "Forma de pago" (mode) picker. */
+  readonly hasModoStep = computed<boolean>(() => this.config().allowCredit);
+  /** Index of the first sub-step after the (optional) mode picker. */
+  readonly modoOffset = computed<number>(() => (this.hasModoStep() ? 1 : 0));
+  /** Index of the "Monto" sub-step in contado mode. */
+  readonly montoIndex = computed<number>(() => this.modoOffset() + 1);
+  readonly subSteps = computed<StepsLineItem[]>(() => {
+    const modo: StepsLineItem[] = this.hasModoStep() ? [{ label: 'Forma de pago' }] : [];
+    if (this.mode() === 'credito') return [...modo, { label: 'Plan de crédito' }];
+    return [...modo, { label: 'Método' }, { label: 'Monto' }];
   });
 
   // ── Method cards ────────────────────────────────────────────────────────
@@ -330,6 +354,14 @@ export class PaymentCollectorComponent implements OnInit {
     if (mode === 'credito' && !this.customer()) {
       this.requestCustomer.emit();
     }
+    // In the stepped layout, choosing the mode advances past the mode picker:
+    // contado → Método, credito → Plan de crédito (both = modoOffset).
+    if (this.layout() === 'stepped') this.subStep.set(this.modoOffset());
+  }
+
+  /** Jump the stepped sub-wizard to a given sub-step (clamped to range). */
+  goToSubStep(i: number): void {
+    if (i >= 0 && i < this.subSteps().length) this.subStep.set(i);
   }
 
   selectMethod(method: PaymentMethod): void {
@@ -347,6 +379,8 @@ export class PaymentCollectorComponent implements OnInit {
       this.methodSelected.emit(method);
       this.walletLookup.emit({ id: customer.id });
       this.cashReceivedControl.setValue(0);
+      // A customer existed → the method was really selected: advance to Monto.
+      if (this.layout() === 'stepped') this.subStep.set(this.montoIndex());
       return;
     }
 
@@ -358,6 +392,8 @@ export class PaymentCollectorComponent implements OnInit {
     } else {
       this.cashReceivedControl.setValue(0);
     }
+    // In the stepped layout, picking a method advances to the Monto sub-step.
+    if (this.layout() === 'stepped') this.subStep.set(this.montoIndex());
   }
 
   isSelected(method: PaymentMethod): boolean {
@@ -416,6 +452,7 @@ export class PaymentCollectorComponent implements OnInit {
   // ── Internals ────────────────────────────────────────────────────────────
   private resetState(): void {
     this.selectedMethod.set(null);
+    this.subStep.set(0);
     // Seed the mode from `initialMode`, but only respect a 'credito' seed when
     // credit is actually enabled; otherwise fall back to 'contado'.
     const seedCredit = this.initialMode() === 'credito' && this.config().allowCredit;

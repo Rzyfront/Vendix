@@ -303,3 +303,79 @@
   font-weight: 700;
   color: var(--color-text-primary);
 }
+
+/* ══════════════════════════════ STEPPED layout ══════════════════════════════
+   Everything here is scoped under `.pc-stepped` so the flat layout is never
+   touched. Reuses existing .pc-card / .keypad / .tab-* rules; only adds the
+   two-column grid, the collapsed-panel row, and the keypad column. */
+.pc-stepped {
+  .pc-stepped-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .pc-stepped-main {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  /* Denser than flat: sub-wizard panels are already sequenced. */
+  .pc-card {
+    padding: 14px;
+  }
+
+  .section-header {
+    margin-bottom: 12px;
+  }
+
+  /* Collapsed panel summary row (clickable, jumps back to that sub-step). */
+  .pc-panel-collapsed {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+  }
+
+  .pc-panel-collapsed:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+
+  .pc-panel-collapsed app-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  /* Keypad column: only positions; .keypad/.keypad-btn reuse the flat rules. */
+  .pc-keypad-col {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .pc-keypad-col .keypad {
+    margin-top: 0;
+    width: 100%;
+  }
+}
+
+/* Two-column split (content | keypad) once there is room for the pad. */
+@media (min-width: 768px) {
+  .pc-stepped .pc-stepped-grid--with-keypad {
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
+  }
+}

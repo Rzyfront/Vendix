@@ -35,6 +35,16 @@ export type PaymentContext =
 /** Contado (single charge) vs credito (installment plan creation). */
 export type PaymentMode = 'contado' | 'credito';
 
+/**
+ * Presentational layout for the collector. Not a capability (kept out of
+ * {@link PaymentCollectorConfig}): it only changes how the same headless
+ * behaviour is rendered.
+ *  - `flat`    : the classic single-scroll stack (default; unchanged).
+ *  - `stepped` : an opt-in vertical sub-wizard (mode → method → amount) with
+ *    collapse-on-select panels and the touch keypad docked to the right.
+ */
+export type PaymentCollectorLayout = 'flat' | 'stepped';
+
 /** Credit terms produced by `app-payment-credit-fields`. */
 export interface CreditTerms {
   /**

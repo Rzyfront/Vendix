@@ -9,6 +9,7 @@
   <div [style.display]="wompiAwaitingPayment() ? 'none' : 'block'">
     <app-payment-collector
       context="pos"
+      [layout]="'stepped'"
       [amount]="effectiveAmount()"
       [paymentMethods]="paymentMethods()"
       [autoLoad]="false"
