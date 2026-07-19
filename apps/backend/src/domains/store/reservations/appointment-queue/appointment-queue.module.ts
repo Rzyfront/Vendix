@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AppointmentQueueService } from './appointment-queue.service';
 import { NotificationsModule } from '../../notifications/notifications.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
@@ -17,7 +17,7 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
  * and NotificationsEventsListener needs both).
  */
 @Module({
-  imports: [PrismaModule, NotificationsModule],
+  imports: [PrismaModule, forwardRef(() => NotificationsModule)],
   providers: [AppointmentQueueService],
   exports: [AppointmentQueueService],
 })

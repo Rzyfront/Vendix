@@ -16,6 +16,12 @@ export class ProviderScheduleItemDto {
   @Max(6)
   day_of_week: number;
 
+  /// Order of this block within the day (0 = first, 1 = second, etc.)
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  block_order?: number = 0;
+
   @IsString()
   start_time: string;
 

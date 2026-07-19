@@ -44,8 +44,8 @@ ALTER TABLE "bookings" ADD COLUMN IF NOT EXISTS "priority" INTEGER NOT NULL DEFA
 -- ---------------------------------------------------------------------------
 -- 4. Supporting indexes for queue + check-in hot paths.
 -- ---------------------------------------------------------------------------
-CREATE INDEX IF NOT EXISTS "bookings_store_id_starts_at_idx"
-  ON "bookings" ("store_id", "starts_at");
+CREATE INDEX IF NOT EXISTS "bookings_store_id_date_idx"
+  ON "bookings" ("store_id", "date");
 
 -- Partial index for the live queue query: rows that have actually arrived.
 -- Keeps the index small even on stores with millions of historical bookings.
@@ -68,9 +68,20 @@ CREATE TABLE IF NOT EXISTS "store_business_hours" (
 );
 
 DO $$ BEGIN
+  -- Drop the index if it exists (created by a previous partial apply)
+  -- before adding the UNIQUE constraint (which auto-creates an index with the same name).
+  IF EXISTS (
+    SELECT 1 FROM pg_indexes
+    WHERE indexname = 'store_business_hours_store_id_day_of_week_key'
+      AND tablename = 'store_business_hours'
+  ) THEN
+    DROP INDEX IF EXISTS "store_business_hours_store_id_day_of_week_key";
+  END IF;
+
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'store_business_hours_store_id_day_of_week_key'
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'store_business_hours_store_id_day_of_week_key'
+      AND table_name = 'store_business_hours'
   ) THEN
     ALTER TABLE "store_business_hours"
       ADD CONSTRAINT "store_business_hours_store_id_day_of_week_key"
@@ -94,8 +105,9 @@ CREATE TABLE IF NOT EXISTS "proximity_notification_log" (
 
 DO $$ BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'proximity_notification_log_booking_id_proximity_minutes_channel_key'
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'proximity_notification_log_booking_id_proximity_minutes_channel_key'
+      AND table_name = 'proximity_notification_log'
   ) THEN
     ALTER TABLE "proximity_notification_log"
       ADD CONSTRAINT "proximity_notification_log_booking_id_proximity_minutes_channel_key"

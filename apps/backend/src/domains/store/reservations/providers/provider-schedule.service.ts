@@ -10,7 +10,7 @@ export class ProviderScheduleService {
   async getSchedule(providerId: number) {
     return this.prisma.provider_schedules.findMany({
       where: { provider_id: providerId },
-      orderBy: { day_of_week: 'asc' },
+      orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
     });
   }
 
@@ -30,12 +30,13 @@ export class ProviderScheduleService {
         where: { provider_id: providerId },
       });
 
-      // Create new schedules
+      // Create new schedules with block_order
       if (items.length > 0) {
         await tx.provider_schedules.createMany({
-          data: items.map((item) => ({
+          data: items.map((item, index) => ({
             provider_id: providerId,
             day_of_week: item.day_of_week,
+            block_order: item.block_order ?? Math.floor(index / 7),
             start_time: item.start_time,
             end_time: item.end_time,
             is_active: item.is_active ?? true,
@@ -45,7 +46,7 @@ export class ProviderScheduleService {
 
       return tx.provider_schedules.findMany({
         where: { provider_id: providerId },
-        orderBy: { day_of_week: 'asc' },
+        orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
       });
     });
   }

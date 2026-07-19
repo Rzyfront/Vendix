@@ -192,8 +192,9 @@ export class AvailabilityService {
 
       for (const provider of providers) {
         const provSchedules = schedulesByProvider.get(provider.id) || [];
-        const schedule = provSchedules.find((s) => s.day_of_week === dayOfWeek);
-        if (!schedule) continue;
+        // Get ALL blocks for this day (supports multiple blocks per day)
+        const dayBlocks = provSchedules.filter((s) => s.day_of_week === dayOfWeek);
+        if (dayBlocks.length === 0) continue;
 
         // Verificar excepciones para este provider en este dia
         const provExceptions = exceptionsByProvider.get(provider.id) || [];
@@ -204,57 +205,57 @@ export class AvailabilityService {
         // Si el provider no esta disponible este dia, saltar
         if (exception?.is_unavailable) continue;
 
-        // Determinar horario efectivo
-        const effectiveStart =
-          exception?.custom_start_time || schedule.start_time;
-        const effectiveEnd = exception?.custom_end_time || schedule.end_time;
+        // Process each block for this day
+        for (const schedule of dayBlocks) {
+          // Determinar horario efectivo (exception overrides entire day if set)
+          const effectiveStart =
+            exception?.custom_start_time || schedule.start_time;
+          const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
-        // Intersectar con horario maestro de la tienda. Si la tienda está
-        // cerrada ese día (no hay fila en store_business_hours o está
-        // inactiva) o el horario del provider cae fuera de la ventana del
-        // store, ese provider no ofrece slots ese día.
-        const storeWindow = storeHoursMap.get(dayOfWeek);
-        const clamped = this.clampToStoreHours(
-          effectiveStart,
-          effectiveEnd,
-          storeWindow,
-        );
-        if (!clamped) continue;
+          // Intersectar con horario maestro de la tienda
+          const storeWindow = storeHoursMap.get(dayOfWeek);
+          const clamped = this.clampToStoreHours(
+            effectiveStart,
+            effectiveEnd,
+            storeWindow,
+          );
+          if (!clamped) continue;
 
-        // Generar time slots
-        const timeSlots = this.generateTimeSlots(
-          clamped.start,
-          clamped.end,
-          duration,
-          buffer,
-        );
-
-        for (const slot of timeSlots) {
-          // Verificar si este provider ya tiene booking en este slot
-          const providerBooked = existingBookings.some(
-            (b) =>
-              this.formatDate(new Date(b.date)) === dateStr &&
-              b.start_time === slot.start_time &&
-              b.end_time === slot.end_time &&
-              b.provider_id === provider.id,
+          // Generar time slots
+          const timeSlots = this.generateTimeSlots(
+            clamped.start,
+            clamped.end,
+            duration,
+            buffer,
           );
 
-          if (providerBooked) continue;
+          for (const slot of timeSlots) {
+            // Verificar si este provider ya tiene booking en este slot
+            const providerBooked = existingBookings.some(
+              (b) =>
+                this.formatDate(new Date(b.date)) === dateStr &&
+                b.start_time === slot.start_time &&
+                b.end_time === slot.end_time &&
+                b.provider_id === provider.id,
+            );
 
-          const key = `${dateStr}|${slot.start_time}|${slot.end_time}`;
-          if (!slotMap.has(key)) {
-            slotMap.set(key, {
-              date: dateStr,
-              start_time: slot.start_time,
-              end_time: slot.end_time,
-              providers: [],
+            if (providerBooked) continue;
+
+            const key = `${dateStr}|${slot.start_time}|${slot.end_time}`;
+            if (!slotMap.has(key)) {
+              slotMap.set(key, {
+                date: dateStr,
+                start_time: slot.start_time,
+                end_time: slot.end_time,
+                providers: [],
+              });
+            }
+            slotMap.get(key)!.providers.push({
+              id: provider.id,
+              display_name: provider.display_name || '',
+              avatar_url: provider.avatar_url,
             });
           }
-          slotMap.get(key)!.providers.push({
-            id: provider.id,
-            display_name: provider.display_name || '',
-            avatar_url: provider.avatar_url,
-          });
         }
       }
     }
@@ -379,16 +380,17 @@ export class AvailabilityService {
     const available: AvailableProvider[] = [];
 
     for (const provider of providers) {
-      // Verificar schedule para este dia
-      const schedule = await this.prisma.provider_schedules.findFirst({
+      // Get ALL blocks for this day (supports multiple blocks per day)
+      const dayBlocks = await this.prisma.provider_schedules.findMany({
         where: {
           provider_id: provider.id,
           day_of_week: dayOfWeek,
           is_active: true,
         },
+        orderBy: { block_order: 'asc' },
       });
 
-      if (!schedule) continue;
+      if (dayBlocks.length === 0) continue;
 
       // Verificar excepciones
       const exception = await this.prisma.provider_exceptions.findFirst({
@@ -397,26 +399,32 @@ export class AvailabilityService {
 
       if (exception?.is_unavailable) continue;
 
-      // Verificar que el slot cae dentro del horario efectivo del provider
-      // Y dentro de la ventana maestra de la tienda. La intersección se hace
-      // con el más restrictivo: provider.schedule ∩ store.business_hours.
-      const providerStart =
-        exception?.custom_start_time || schedule.start_time;
-      const providerEnd =
-        exception?.custom_end_time || schedule.end_time;
-      const effective = this.clampToStoreHours(
-        providerStart,
-        providerEnd,
-        storeWindow,
-      );
-      if (!effective) continue;
+      // Check if the slot falls within ANY of the provider's blocks for this day
+      let slotIsWithinBlock = false;
+      for (const schedule of dayBlocks) {
+        // Verificar que el slot cae dentro del horario efectivo del provider
+        // Y dentro de la ventana maestra de la tienda
+        const providerStart =
+          exception?.custom_start_time || schedule.start_time;
+        const providerEnd =
+          exception?.custom_end_time || schedule.end_time;
+        const effective = this.clampToStoreHours(
+          providerStart,
+          providerEnd,
+          storeWindow,
+        );
+        if (!effective) continue;
 
-      if (
-        this.timeToMinutes(start_time) < this.timeToMinutes(effective.start) ||
-        this.timeToMinutes(end_time) > this.timeToMinutes(effective.end)
-      ) {
-        continue;
+        if (
+          this.timeToMinutes(start_time) >= this.timeToMinutes(effective.start) &&
+          this.timeToMinutes(end_time) <= this.timeToMinutes(effective.end)
+        ) {
+          slotIsWithinBlock = true;
+          break;
+        }
       }
+
+      if (!slotIsWithinBlock) continue;
 
       // Verificar si ya tiene booking que se superponga con este slot
       const where: any = {
@@ -510,12 +518,13 @@ export class AvailabilityService {
 
     if (!assignment) return false;
 
-    // Verificar schedule
-    const schedule = await this.prisma.provider_schedules.findFirst({
+    // Verificar schedule - get ALL blocks for this day
+    const dayBlocks = await this.prisma.provider_schedules.findMany({
       where: { provider_id, day_of_week: dayOfWeek, is_active: true },
+      orderBy: { block_order: 'asc' },
     });
 
-    if (!schedule) return false;
+    if (dayBlocks.length === 0) return false;
 
     // Verificar excepciones
     const exception = await this.prisma.provider_exceptions.findFirst({
@@ -524,12 +533,7 @@ export class AvailabilityService {
 
     if (exception?.is_unavailable) return false;
 
-    // Verificar horario efectivo del provider
-    const effectiveStart = exception?.custom_start_time || schedule.start_time;
-    const effectiveEnd = exception?.custom_end_time || schedule.end_time;
-
-    // Intersectar con el horario maestro de la tienda. Si la tienda está
-    // cerrada ese día, este provider no está disponible.
+    // Verificar horario efectivo del provider - check if slot falls within ANY block
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
       select: { store_id: true },
@@ -539,19 +543,28 @@ export class AvailabilityService {
       product.store_id,
     );
     const storeWindow = storeHoursMap.get(dayOfWeek);
-    const effective = this.clampToStoreHours(
-      effectiveStart,
-      effectiveEnd,
-      storeWindow,
-    );
-    if (!effective) return false;
 
-    if (
-      this.timeToMinutes(start_time) < this.timeToMinutes(effective.start) ||
-      this.timeToMinutes(end_time) > this.timeToMinutes(effective.end)
-    ) {
-      return false;
+    let slotIsWithinBlock = false;
+    for (const schedule of dayBlocks) {
+      const effectiveStart = exception?.custom_start_time || schedule.start_time;
+      const effectiveEnd = exception?.custom_end_time || schedule.end_time;
+      const effective = this.clampToStoreHours(
+        effectiveStart,
+        effectiveEnd,
+        storeWindow,
+      );
+      if (!effective) continue;
+
+      if (
+        this.timeToMinutes(start_time) >= this.timeToMinutes(effective.start) &&
+        this.timeToMinutes(end_time) <= this.timeToMinutes(effective.end)
+      ) {
+        slotIsWithinBlock = true;
+        break;
+      }
     }
+
+    if (!slotIsWithinBlock) return false;
 
     // Verificar si ya tiene booking que se superponga
     const where: any = {
@@ -762,5 +775,159 @@ export class AvailabilityService {
     const end = Math.min(pe, se);
     if (end <= start) return null;
     return { start: this.minutesToTime(start), end: this.minutesToTime(end) };
+  }
+
+  /**
+   * Returns dates within a range where the provider has active schedule
+   * blocks, along with the count of existing bookings per date.
+   * Used by the reschedule modal to show only available days.
+   */
+  async getProviderDatesWithBookings(
+    providerId: number,
+    dateFrom: string,
+    dateTo: string,
+    productId?: number,
+  ): Promise<
+    Array<{
+      date: string;
+      day_of_week: number;
+      has_schedule: boolean;
+      booking_count: number;
+      bookings: Array<{
+        id: number;
+        start_time: string;
+        end_time: string;
+        status: string;
+        customer_name: string;
+        service_name: string;
+      }>;
+    }>
+  > {
+    // 1. Get the provider's active schedule blocks
+    const schedules = await this.prisma.provider_schedules.findMany({
+      where: { provider_id: providerId, is_active: true },
+    });
+
+    // Group by day_of_week for quick lookup
+    const blocksByDay = new Map<number, typeof schedules>();
+    for (const s of schedules) {
+      if (!blocksByDay.has(s.day_of_week)) {
+        blocksByDay.set(s.day_of_week, []);
+      }
+      blocksByDay.get(s.day_of_week)!.push(s);
+    }
+
+    // 2. Get exceptions for this provider in the date range
+    const exceptions = await this.prisma.provider_exceptions.findMany({
+      where: {
+        provider_id: providerId,
+        date: {
+          gte: new Date(dateFrom),
+          lte: new Date(dateTo),
+        },
+      },
+    });
+
+    const exceptionsByDate = new Map<
+      string,
+      (typeof exceptions)[number]
+    >();
+    for (const e of exceptions) {
+      exceptionsByDate.set(this.formatDate(new Date(e.date)), e);
+    }
+
+    // 3. Get existing bookings for this provider in the date range
+    const bookingWhere: any = {
+      provider_id: providerId,
+      date: {
+        gte: new Date(dateFrom),
+        lte: new Date(dateTo),
+      },
+      status: {
+        notIn: [booking_status_enum.cancelled],
+      },
+    };
+    if (productId) {
+      bookingWhere.product_id = productId;
+    }
+
+    const existingBookings = await this.prisma.bookings.findMany({
+      where: bookingWhere,
+      select: {
+        id: true,
+        date: true,
+        start_time: true,
+        end_time: true,
+        status: true,
+        product: { select: { name: true } },
+        customer: { select: { first_name: true, last_name: true } },
+      },
+      orderBy: { start_time: 'asc' },
+    });
+
+    // Group bookings by date
+    const bookingsByDate = new Map<
+      string,
+      typeof existingBookings
+    >();
+    for (const b of existingBookings) {
+      const dateStr = this.formatDate(new Date(b.date));
+      if (!bookingsByDate.has(dateStr)) {
+        bookingsByDate.set(dateStr, []);
+      }
+      bookingsByDate.get(dateStr)!.push(b);
+    }
+
+    // 4. Build result for each date in range
+    const dates = this.getDatesInRange(dateFrom, dateTo);
+    const result: Array<{
+      date: string;
+      day_of_week: number;
+      has_schedule: boolean;
+      booking_count: number;
+      bookings: Array<{
+        id: number;
+        start_time: string;
+        end_time: string;
+        status: string;
+        customer_name: string;
+        service_name: string;
+      }>;
+    }> = [];
+
+    for (const currentDate of dates) {
+      const dateStr = this.formatDate(currentDate);
+      const dayOfWeek = currentDate.getUTCDay();
+
+      // Check if provider has blocks for this day
+      const dayBlocks = blocksByDay.get(dayOfWeek) || [];
+      let hasSchedule = dayBlocks.length > 0;
+
+      // Check exceptions: if marked as unavailable, override
+      const exception = exceptionsByDate.get(dateStr);
+      if (exception?.is_unavailable) {
+        hasSchedule = false;
+      }
+
+      // Format bookings for this date
+      const dayBookings = (bookingsByDate.get(dateStr) || []).map((b) => ({
+        id: b.id,
+        start_time: b.start_time,
+        end_time: b.end_time,
+        status: b.status,
+        customer_name: `${b.customer?.first_name || ''} ${b.customer?.last_name || ''}`.trim(),
+        service_name: b.product?.name || '',
+      }));
+
+      result.push({
+        date: dateStr,
+        day_of_week: dayOfWeek,
+        has_schedule: hasSchedule,
+        booking_count: dayBookings.length,
+        bookings: dayBookings,
+      });
+    }
+
+    return result;
   }
 }

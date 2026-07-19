@@ -1583,6 +1583,10 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   // Subscription models
+  get store_business_hours() {
+    return this.scoped_client.store_business_hours;
+  }
+
   get store_subscriptions() {
     return this.scoped_client.store_subscriptions;
   }

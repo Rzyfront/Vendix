@@ -1061,8 +1061,8 @@ export class NotificationsEventsListener {
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'booking_arrival',
-      'Cliente llegó',
-      `${event.customer_name} llegó para ${event.service_name} (${event.booking_number})`,
+      'Cliente en sala de espera',
+      `${event.customer_name} en sala de espera para ${event.service_name} (${event.booking_number})`,
       {
         booking_id: event.booking_id,
         booking_number: event.booking_number,
@@ -1158,8 +1158,8 @@ export class NotificationsEventsListener {
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'appointment_checked_in',
-      'Cliente en sala',
-      `${event.customer_name} llegó para ${event.service_name}`,
+      'Cliente en sala de espera',
+      `${event.customer_name} en sala de espera para ${event.service_name}`,
       {
         booking_id: event.booking_id,
         booking_number: event.booking_number,
