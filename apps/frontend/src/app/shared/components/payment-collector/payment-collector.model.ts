@@ -35,8 +35,18 @@ export type PaymentContext =
 /** Contado (single charge) vs credito (installment plan creation). */
 export type PaymentMode = 'contado' | 'credito';
 
-/** Installment-plan terms produced by `app-payment-credit-fields`. */
+/** Credit terms produced by `app-payment-credit-fields`. */
 export interface CreditTerms {
+  /**
+   * Credit shape:
+   *  - `installments`: financed with an explicit cuota schedule (count,
+   *    frequency, first date, interest). The parent creates the plan via
+   *    `processCreditSaleWithTerms(...)`.
+   *  - `free`: fiado libre — an open debt with NO cuota schedule. The parent
+   *    creates it via `processCreditSale(...)` (no credit config); the
+   *    installment-specific fields below are ignored.
+   */
+  type: 'installments' | 'free';
   numInstallments: number;
   frequency: 'weekly' | 'biweekly' | 'monthly';
   firstInstallmentDate: string;

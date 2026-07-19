@@ -150,6 +150,7 @@
           [paymentMethods]="paymentMethods()"
           [autoLoad]="false"
           [isProcessing]="paymentState().isProcessing"
+          [initialMode]="defaultPaymentForm()"
           [showKeypad]="showOnscreenKeypad()"
           [customer]="collectorCustomer()"
           [requireCustomer]="!paymentState().isAnonymousSale"

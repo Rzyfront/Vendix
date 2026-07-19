@@ -23,6 +23,7 @@ import {
 import type {
   PaymentSubmit,
   CreditTerms,
+  PaymentMode,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
@@ -1340,6 +1341,17 @@ export class PosPaymentInterfaceComponent {
   readonly showOnscreenKeypad = computed(
     () => this.settingsFacade.pos()?.show_onscreen_keypad !== false,
   );
+  /**
+   * Legacy `settings.pos.default_payment_form` ('contado' | 'credito', default
+   * 'contado'). Seeds the collector's `initialMode` so a store configured to
+   * start in credit opens the payment modal already on the Crédito tab.
+   * `PosSettings` doesn't type this key, so we read it defensively.
+   */
+  readonly defaultPaymentForm = computed<PaymentMode>(() => {
+    const form = (this.settingsFacade.pos() as { default_payment_form?: string } | null)
+      ?.default_payment_form;
+    return form === 'credito' ? 'credito' : 'contado';
+  });
   readonly businessHours = computed<Record<string, BusinessHours>>(
     () => (this.settingsFacade.pos()?.business_hours as any) ?? {},
   );
@@ -1686,9 +1698,14 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
   }
 
   /**
-   * Creates a credit plan from the collector's {@link CreditTerms}. POS always
-   * creates an installment plan (`creditType='installments'`); the legacy
-   * 'free' credit type is not exposed by the shared collector.
+   * Creates a credit sale from the collector's {@link CreditTerms}. Routes by
+   * `terms.type`:
+   *  - `'free'` → fiado libre (open debt, no schedule) via
+   *    {@link PosPaymentService.processCreditSale} (no credit config).
+   *  - `'installments'` (default) → financed plan via
+   *    {@link PosPaymentService.processCreditSaleWithTerms}.
+   * All gates (customer, cash register, business hours) and the
+   * `paymentCompleted` emission are preserved for both paths.
    */
   private runCreditSale(terms: CreditTerms | null): void {
     if (!this.cartState() || !this.cartState()!.customer) {
@@ -1731,23 +1748,29 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
 
     this.paymentState.update(s => ({ ...s, isProcessing: true }));
 
-    const creditConfig = {
-      num_installments: terms.numInstallments,
-      frequency: terms.frequency,
-      first_installment_date: terms.firstInstallmentDate,
-      interest_rate: terms.interestRate,
-      interest_type: terms.interestType,
-      initial_payment: terms.initialPayment,
-      initial_payment_method_id: terms.initialPaymentMethodId,
-    };
+    // Route by credit shape (restored legacy behaviour):
+    //  - 'free'  → fiado libre: open debt, no cuota schedule → processCreditSale
+    //             (SIN config).
+    //  - 'installments' (default) → financed plan → processCreditSaleWithTerms.
+    const request$ =
+      terms.type === 'free'
+        ? this.paymentService.processCreditSale(this.cartState()!, 'current_user')
+        : this.paymentService.processCreditSaleWithTerms(
+            this.cartState()!,
+            {
+              num_installments: terms.numInstallments,
+              frequency: terms.frequency,
+              first_installment_date: terms.firstInstallmentDate,
+              interest_rate: terms.interestRate,
+              interest_type: terms.interestType,
+              initial_payment: terms.initialPayment,
+              initial_payment_method_id: terms.initialPaymentMethodId,
+            },
+            'current_user',
+            'installments',
+          );
 
-    this.paymentService
-      .processCreditSaleWithTerms(
-        this.cartState()!,
-        creditConfig,
-        'current_user',
-        'installments',
-      )
+    request$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {

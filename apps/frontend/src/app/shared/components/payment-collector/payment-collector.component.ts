@@ -83,6 +83,12 @@ export class PaymentCollectorComponent implements OnInit {
   readonly context = input<PaymentContext>('generic');
   readonly currencyDecimals = input<number>();
   readonly walletInfo = input<{ balance: number } | null>(null);
+  /**
+   * Seed for the initial mode on reset. Honored only when the resolved config
+   * has `allowCredit` (a 'credito' seed on a credit-less config falls back to
+   * 'contado'). Restores the legacy POS `settings.pos.default_payment_form`.
+   */
+  readonly initialMode = input<PaymentMode>('contado');
 
   // ── Capability inputs (undefined → context default) ────────────────────
   // NOTE: signal inputs cannot be `private` (NG1053), and because a parent
@@ -410,7 +416,10 @@ export class PaymentCollectorComponent implements OnInit {
   // ── Internals ────────────────────────────────────────────────────────────
   private resetState(): void {
     this.selectedMethod.set(null);
-    this.mode.set('contado');
+    // Seed the mode from `initialMode`, but only respect a 'credito' seed when
+    // credit is actually enabled; otherwise fall back to 'contado'.
+    const seedCredit = this.initialMode() === 'credito' && this.config().allowCredit;
+    this.mode.set(seedCredit ? 'credito' : 'contado');
     this.wompiSlice.set(null);
     this.creditTerms.set(null);
     this.cashReceivedControl.setValue(0);

@@ -56,6 +56,12 @@ export class PaymentCreditFieldsComponent {
   readonly currencyDecimals = input<number>();
 
   // Independent slices — one signal per concern.
+  /**
+   * Credit shape: `installments` (financed cuota schedule) vs `free` (fiado
+   * libre — open debt, no schedule). Restored from the legacy POS toggle
+   * "Cuotas"/"Libre"; in `free` the installment fields + preview are hidden.
+   */
+  readonly creditType = signal<'installments' | 'free'>('installments');
   readonly numInstallments = signal<number>(3);
   readonly frequency = signal<Frequency>('monthly');
   readonly firstDate = signal<string>(this.defaultFirstDate());
@@ -122,16 +128,36 @@ export class PaymentCreditFieldsComponent {
 
   /** Pure derivation of the emitted terms. */
   private readonly computedTerms = computed<CreditTerms | null>(() => {
+    const initialPayment = this.initialPayment() || 0;
+    const initialPaymentMethodId = this.initialPaymentMethodId() ?? undefined;
+
+    // Fiado libre: open debt, no cuota schedule. Emit non-null terms so the
+    // parent's `canSubmit` passes; the installment-specific fields are inert
+    // (the parent routes `type:'free'` to `processCreditSale` without config).
+    if (this.creditType() === 'free') {
+      return {
+        type: 'free',
+        numInstallments: 1,
+        frequency: this.frequency(),
+        firstInstallmentDate: this.firstDate(),
+        interestRate: 0,
+        interestType: this.interestType(),
+        initialPayment,
+        initialPaymentMethodId,
+      };
+    }
+
     const n = this.numInstallments();
     if (!n || n <= 0) return null;
     return {
+      type: 'installments',
       numInstallments: n,
       frequency: this.frequency(),
       firstInstallmentDate: this.firstDate(),
       interestRate: this.interestRate(),
       interestType: this.interestType(),
-      initialPayment: this.initialPayment() || 0,
-      initialPaymentMethodId: this.initialPaymentMethodId() ?? undefined,
+      initialPayment,
+      initialPaymentMethodId,
     };
   });
 
@@ -139,6 +165,10 @@ export class PaymentCreditFieldsComponent {
     // Push the derived terms into the two-way model. Reads `computedTerms`
     // only; never reads `terms`, so there is no feedback loop.
     effect(() => this.terms.set(this.computedTerms()));
+  }
+
+  setCreditType(type: 'installments' | 'free'): void {
+    this.creditType.set(type);
   }
 
   setFrequency(freq: Frequency): void {
