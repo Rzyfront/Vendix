@@ -11,14 +11,6 @@
       "
     >
       <div class="pc-stepped-main">
-        <app-steps-line
-          [orientation]="'vertical'"
-          [steps]="subSteps()"
-          [currentStep]="subStep()"
-          [clickable]="true"
-          (stepClicked)="goToSubStep($event)"
-        ></app-steps-line>
-
         <!-- Panel: Forma de pago (mode) -->
         @if (hasModoStep()) {
           @if (subStep() === 0) {
@@ -232,6 +224,18 @@
           </div>
         </aside>
       }
+
+      <!-- Stepper column: own column to the right (below the options on mobile). -->
+      <aside class="pc-steps-col">
+        <app-steps-line
+          [orientation]="'vertical'"
+          [size]="'sm'"
+          [steps]="subSteps()"
+          [currentStep]="subStep()"
+          [clickable]="true"
+          (stepClicked)="goToSubStep($event)"
+        ></app-steps-line>
+      </aside>
     </div>
   } @else {
     <!-- ═══════════════════════════════ FLAT ═══════════════════════════════

@@ -1,0 +1,55 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Sub-wizard shared partial
+// ---------------------------------------------------------------------------
+// Reusable SCSS mixins for the "stepped sub-wizard" pattern used by the paso-a-
+// paso flows (Cobro / Cliente / Envío). Because each consuming component uses
+// Angular view-encapsulation, these are exposed as MIXINS (not concrete
+// selectors) so every component can apply them to its own local class names
+// without style collisions across components.
+//
+// Tokens only — never hardcoded hex. If a primary tint is needed use
+// rgba(var(--color-primary-rgb), …); never Tailwind /opacity.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Collapsed summary row: a clickable, condensed line that summarizes an already
+// completed sub-step and jumps back to it when clicked. Neutral surface at rest,
+// primary accent (border + text + trailing icon) on hover.
+@mixin subwizard-collapsed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+
+  &:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+
+  app-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+}
+
+// Right-hand stepper column: hosts the vertical <app-steps-line>. Auto/min-content
+// width so it hugs the labels and stays out of the options' way, top-aligned, with
+// a small inline gap from the options column.
+@mixin subwizard-steps-col {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  width: auto;
+  min-width: min-content;
+  padding-inline-start: 4px;
+}

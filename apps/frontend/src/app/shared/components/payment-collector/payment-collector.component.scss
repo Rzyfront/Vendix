@@ -1,3 +1,5 @@
+@use './subwizard' as subwizard;
+
 :host {
   display: block;
 }
@@ -332,33 +334,10 @@
     margin-bottom: 12px;
   }
 
-  /* Collapsed panel summary row (clickable, jumps back to that sub-step). */
+  /* Collapsed panel summary row (clickable, jumps back to that sub-step).
+     Shared sub-wizard pattern — see ./_subwizard.scss. */
   .pc-panel-collapsed {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    text-align: left;
-    padding: 10px 14px;
-    border: 1px solid var(--color-border);
-    border-radius: 12px;
-    background: var(--color-surface);
-    color: var(--color-text-secondary);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
-  }
-
-  .pc-panel-collapsed:hover {
-    border-color: var(--color-primary);
-    color: var(--color-primary);
-  }
-
-  .pc-panel-collapsed app-icon {
-    color: var(--color-primary);
-    flex-shrink: 0;
+    @include subwizard.subwizard-collapsed-row;
   }
 
   /* Keypad column: only positions; .keypad/.keypad-btn reuse the flat rules. */
@@ -371,11 +350,22 @@
     margin-top: 0;
     width: 100%;
   }
+
+  /* Stepper column (right of the options; below them on mobile — DOM-last). */
+  .pc-steps-col {
+    @include subwizard.subwizard-steps-col;
+  }
 }
 
-/* Two-column split (content | keypad) once there is room for the pad. */
+/* Desktop columns. Mobile stays the base single column (steps-col falls below
+   the options, DOM-last); ≥768px promotes the stepper to its own right column.
+   options | stepper — or options | keypad | stepper when the pad is docked. */
 @media (min-width: 768px) {
+  .pc-stepped .pc-stepped-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
   .pc-stepped .pc-stepped-grid--with-keypad {
-    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
+    grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) auto;
   }
 }
