@@ -1,3 +1,5 @@
+@use '../../../../../../../shared/components/payment-collector/subwizard' as subwizard;
+
 /* Fase 5·B2b — POS Shipping Step. Recolección de envío aplanada (sin modal).
    Estilos extraídos de pos-shipping-modal (sección Pago interna descartada). */
 
@@ -6,6 +8,40 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+}
+
+/* ── Sub-wizard grid (opciones | stepper) ─────────────────
+   Móvil: una columna, steps-col ABAJO (DOM-last).
+   Desktop (≥768px): ship-main | steps-col. */
+.ship-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.ship-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
+   Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
+.ship-collapsed {
+  @include subwizard.subwizard-collapsed-row;
+}
+
+/* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
+.steps-col {
+  @include subwizard.subwizard-steps-col;
+}
+
+@media (min-width: 768px) {
+  .ship-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
 }
 
 /* ── Flash banner ─────────────────────────────────────── */

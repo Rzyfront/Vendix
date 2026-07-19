@@ -23,8 +23,12 @@ import { Router } from '@angular/router';
 import {
   IconComponent,
   InputComponent,
+  StepsLineComponent,
 } from '../../../../../../../shared/components';
-import type { PaymentSubmit } from '../../../../../../../shared/components';
+import type {
+  PaymentSubmit,
+  StepsLineItem,
+} from '../../../../../../../shared/components';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
   CurrencyFormatService,
@@ -73,6 +77,7 @@ type FlashSection = 'shipping-method' | 'address' | 'customer';
     InputComponent,
     CurrencyPipe,
     CurrencyInputDirective,
+    StepsLineComponent,
   ],
   templateUrl: './pos-shipping-step.component.html',
   styleUrl: './pos-shipping-step.component.scss',
@@ -116,6 +121,16 @@ export class PosShippingStepComponent {
   readonly calculatedShippingCost = signal<number | null>(null);
   readonly manualCostOverride = signal<boolean>(false);
   readonly isCalculatingShipping = signal<boolean>(false);
+
+  // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
+  /** Sub-paso activo del paso Envío: 0=¿Cuándo paga? · 1=Método · 2=Costo. */
+  readonly shipSubStep = signal<number>(0);
+  /** Sub-pasos fijos reflejados en el `app-steps-line` vertical (Costo es terminal). */
+  readonly shipSubSteps = computed<StepsLineItem[]>(() => [
+    { label: '¿Cuándo paga?' },
+    { label: 'Método' },
+    { label: 'Costo' },
+  ]);
 
   // ── Processing ────────────────────────────────────────────────────────────
   readonly isProcessing = signal<boolean>(false);
@@ -196,6 +211,22 @@ export class PosShippingStepComponent {
       .subscribe((methods) => this.shippingMethods.set(methods));
   }
 
+  // ── Envío sub-wizard (navegación presentacional) ──────────────────────────
+  /**
+   * Salta el sub-wizard de Envío a un sub-paso (clamp al rango). Presentacional:
+   * volver atrás NO resetea payTiming/método/costo — el estado vive en sus
+   * propios signals; el colapso solo cambia el índice activo.
+   */
+  goToShipSubStep(i: number): void {
+    if (i >= 0 && i < this.shipSubSteps().length) this.shipSubStep.set(i);
+  }
+
+  /** Fija el "cuándo paga" y avanza el sub-wizard al sub-paso Método. */
+  selectPayTiming(timing: 'now' | 'later'): void {
+    this.payTiming.set(timing);
+    this.goToShipSubStep(1);
+  }
+
   // ── Shipping methods ──────────────────────────────────────────────────────
   selectShippingMethod(method: PosShippingMethod): void {
     this.selectedShippingMethod.set(method);
@@ -205,6 +236,8 @@ export class PosShippingStepComponent {
     } else {
       this.calculateShippingCost();
     }
+    // Avanza al sub-paso terminal Costo tras seleccionar método.
+    this.goToShipSubStep(2);
   }
 
   getShippingIcon(type: string): string {
