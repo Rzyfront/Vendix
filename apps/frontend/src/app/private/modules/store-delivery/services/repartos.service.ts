@@ -11,12 +11,17 @@ import type {
   CloseDispatchRouteDto,
   DispatchRoute,
   DispatchRouteStop,
+  PoolMeta,
   PoolQuery,
   PoolResponse,
   PublishToPoolResult,
   ReleaseStopDto,
+  RouteHistoryQuery,
+  RouteHistoryResponse,
   SettleStopDto,
 } from '../interfaces/repartos.interface';
+import type { DispatchNote } from '../../store/dispatch-notes/interfaces/dispatch-note.interface';
+import type { DispatchNoteAddressPayload } from '../../../../shared/components/dispatch-note-address-editor/dispatch-note-address-editor.service';
 
 /**
  * Error normalizado del namespace carrier. Conserva `errorCode` (p. ej.
@@ -178,6 +183,88 @@ export class RepartosService {
       .post<any>(`${this.apiUrl}/store/carrier/route/close`, dto)
       .pipe(
         map((r) => r.data as CarrierCloseRouteResult),
+        catchError((e) => this.handleError(e)),
+      );
+  }
+
+  // ── Detalle de parada + editar dirección (Items 4+5) ──────────────────────
+
+  /**
+   * `GET /store/carrier/route/stops/:stopId` — remisión COMPLETA de una parada
+   * de MI ruta (cliente, NIT, dirección, total, fecha de entrega, ítems +
+   * producto). Mismo shape que el admin `GET /store/dispatch-notes/:id`, para
+   * alimentar `[note]` del `StopDetailModalComponent` sin un contrato nuevo. El
+   * backend valida pertenencia por JWT (`assertStopBelongsToRoute`); 403 si la
+   * parada no es de mi ruta activa.
+   */
+  getStopDetail(stopId: number): Observable<DispatchNote> {
+    return this.http
+      .get<any>(`${this.apiUrl}/store/carrier/route/stops/${stopId}`)
+      .pipe(
+        map((r) => r.data as DispatchNote),
+        catchError((e) => this.handleError(e)),
+      );
+  }
+
+  /**
+   * `PATCH /store/carrier/route/stops/:stopId/address` — re-snapshotea la
+   * `customer_address` de la remisión de una parada de MI ruta. Delega en el
+   * mismo `updateCustomerAddressSnapshot` del admin (solo display + mapa, NO
+   * toca inventario ni contabilidad). Consumido por el editor de dirección
+   * compartido en modo carrier (`[saveFn]`).
+   */
+  updateStopAddress(
+    stopId: number,
+    payload: DispatchNoteAddressPayload,
+  ): Observable<unknown> {
+    return this.http
+      .patch<any>(
+        `${this.apiUrl}/store/carrier/route/stops/${stopId}/address`,
+        payload,
+      )
+      .pipe(
+        map((r) => r.data),
+        catchError((e) => this.handleError(e)),
+      );
+  }
+
+  // ── Historial de rutas (Item 3b) ──────────────────────────────────────────
+
+  /**
+   * `GET /store/carrier/routes` — historial paginado de MIS planillas
+   * (`driver_user_id = ctx.user_id`, TODOS los estados incl. closed/voided),
+   * orden `created_at desc`. Nunca acepta un `driver_user_id` de query — el
+   * scope sale SIEMPRE del JWT.
+   */
+  getRouteHistory(query: RouteHistoryQuery = {}): Observable<RouteHistoryResponse> {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') {
+        params.append(k, String(v));
+      }
+    });
+    const qs = params.toString();
+    return this.http
+      .get<any>(`${this.apiUrl}/store/carrier/routes${qs ? `?${qs}` : ''}`)
+      .pipe(
+        map(
+          (r) =>
+            ({ data: r.data, meta: r.meta as PoolMeta }) as RouteHistoryResponse,
+        ),
+        catchError((e) => this.handleError(e)),
+      );
+  }
+
+  /**
+   * `GET /store/carrier/routes/:id` — detalle de UNA de mis planillas del
+   * historial (con paradas + remisión + vehículo), validando pertenencia por
+   * JWT. 404 si la planilla no es del conductor autenticado.
+   */
+  getRouteById(routeId: number): Observable<DispatchRoute> {
+    return this.http
+      .get<any>(`${this.apiUrl}/store/carrier/routes/${routeId}`)
+      .pipe(
+        map((r) => r.data as DispatchRoute),
         catchError((e) => this.handleError(e)),
       );
   }

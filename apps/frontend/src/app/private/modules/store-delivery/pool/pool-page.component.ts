@@ -2,8 +2,10 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  effect,
   inject,
   signal,
+  untracked,
   OnInit,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -26,6 +28,7 @@ import {
   RepartosService,
   type RepartosApiError,
 } from '../services/repartos.service';
+import { PoolSseService } from '../services/pool-sse.service';
 import { PoolEmptyStateComponent } from './components/pool-empty-state.component';
 import { ActiveRouteStore } from '../state/active-route.store';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
@@ -146,11 +149,27 @@ import type { PoolItem } from '../interfaces/repartos.interface';
 })
 export class PoolPageComponent implements OnInit {
   private readonly repartosService = inject(RepartosService);
+  private readonly poolSse = inject(PoolSseService);
   private readonly activeRouteStore = inject(ActiveRouteStore);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+
+  constructor() {
+    // Item 1 — Pool en vivo: ante cada ping del SSE (`poolChanged` incrementa)
+    // se hace REFETCH de la página actual (respeta `page`/`search`), NO parcheo
+    // local, para reflejar altas Y desapariciones (órdenes reclamadas por otros).
+    // Se ignora el 0 inicial (el effect corre una vez al registrarse) para no
+    // duplicar el load de `ngOnInit`. `load()` va en `untracked` para que el
+    // effect solo dependa de `poolChanged()` y no de los signals que `load` lee.
+    effect(() => {
+      const ping = this.poolSse.poolChanged();
+      if (ping > 0) {
+        untracked(() => this.load());
+      }
+    });
+  }
 
   readonly poolItems = signal<PoolItem[]>([]);
   readonly loading = signal(false);
@@ -242,6 +261,12 @@ export class PoolPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    // Item 1 — abre el stream SSE del pool; el `effect` del constructor hace el
+    // refetch ante cada ping. El stream se cierra al destruir la vista para no
+    // fugar el `EventSource` (el servicio es singleton `root`, así que el
+    // consumidor es responsable del ciclo de vida connect/disconnect).
+    this.poolSse.connect();
+    this.destroyRef.onDestroy(() => this.poolSse.disconnect());
   }
 
   load(): void {

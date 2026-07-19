@@ -1,4 +1,5 @@
 import { Component, computed, inject, input, output } from '@angular/core';
+import { Observable } from 'rxjs';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -11,6 +12,7 @@ import {
   DispatchNoteAddressEditorComponent,
   AddressPayload,
 } from '../../../../../../shared/components/index';
+import { DispatchNoteAddressPayload } from '../../../../../../shared/components/dispatch-note-address-editor/dispatch-note-address-editor.service';
 import {
   DispatchDeliveryAddress,
   DispatchRouteStop,
@@ -101,10 +103,11 @@ type AddressLike = DispatchDeliveryAddress | string;
           }
         </div>
 
-        @if (canEditAddress() && noteId() != null) {
+        @if (canEditAddress() && (noteId() != null || addressSaveFn() != null)) {
           <app-dispatch-note-address-editor
-            [noteId]="noteId()!"
+            [noteId]="noteId() ?? undefined"
             [address]="stopAddress()"
+            [saveFn]="addressSaveFn()"
             (saved)="onAddressSaved()"
           ></app-dispatch-note-address-editor>
         }
@@ -189,6 +192,17 @@ export class StopDetailModalComponent {
   /** True while the parent is fetching the full dispatch note. */
   readonly loading = input<boolean>(false);
 
+  /**
+   * Optional carrier-mode address saver (Vendix Repartos). When provided, the
+   * inline address editor is shown WITHOUT the admin `store:dispatch_notes:update`
+   * permission and persists via this fn (carrier endpoint
+   * `PATCH /store/carrier/route/stops/:stopId/address`) instead of the admin
+   * `DispatchNoteAddressService`. Left null in admin usages → original behavior.
+   */
+  readonly addressSaveFn = input<
+    ((payload: DispatchNoteAddressPayload) => Observable<unknown>) | null
+  >(null);
+
   /** Dismiss the modal. */
   readonly close = output<void>();
   /** Navigate to the full dispatch-note page (emits the dispatch note id). */
@@ -204,11 +218,15 @@ export class StopDetailModalComponent {
   );
 
   /**
-   * Permission gate for the inline address editor. Mirrors the backend
-   * `@Permissions('store:dispatch_notes:update')` on `PATCH /:id/address`.
+   * Permission gate for the inline address editor. In admin mode mirrors the
+   * backend `@Permissions('store:dispatch_notes:update')` on `PATCH /:id/address`;
+   * in carrier mode the presence of `addressSaveFn` is the gate (the carrier has
+   * its own `store:carrier:stop:update_address` permission, not the admin one).
    */
-  readonly canEditAddress = computed(() =>
-    this.authFacade.hasPermission('store:dispatch_notes:update'),
+  readonly canEditAddress = computed(
+    () =>
+      this.addressSaveFn() != null ||
+      this.authFacade.hasPermission('store:dispatch_notes:update'),
   );
 
   /**

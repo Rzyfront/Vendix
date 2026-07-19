@@ -1,20 +1,27 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   inject,
+  signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ButtonComponent,
   CardComponent,
   IconComponent,
+  ModalComponent,
   StatsComponent,
 } from '../../../../shared/components/index';
 import { CurrencyPipe } from '../../../../shared/pipes/currency';
+import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
 
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ActiveRouteStore } from '../state/active-route.store';
+import { RepartosService } from '../services/repartos.service';
+import type { DispatchRoute } from '../interfaces/repartos.interface';
 
 /**
  * Fase F6 — "Sesión" del repartidor (`/repartos/sesion`).
@@ -46,6 +53,7 @@ import { ActiveRouteStore } from '../state/active-route.store';
     ButtonComponent,
     CardComponent,
     IconComponent,
+    ModalComponent,
     StatsComponent,
     CurrencyPipe,
   ],
@@ -178,6 +186,108 @@ import { ActiveRouteStore } from '../state/active-route.store';
         </app-card>
       }
 
+      <!-- Historial de rutas (Item 3b) -->
+      <div>
+        <div class="mb-2 flex items-center justify-between px-1">
+          <h3
+            class="text-xs font-bold uppercase tracking-wide text-text-secondary"
+          >
+            Historial de rutas
+          </h3>
+          @if (routeHistory().length > 0) {
+            <span class="text-[11px] text-text-secondary">
+              {{ routeHistory().length }}
+            </span>
+          }
+        </div>
+
+        @if (historyLoading()) {
+          <div
+            class="rounded-lg border border-border bg-background px-4 py-3 text-sm text-text-secondary"
+          >
+            Cargando historial…
+          </div>
+        } @else if (historyError()) {
+          <div
+            class="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="alert-triangle"
+              [size]="18"
+              class="text-danger mt-0.5 shrink-0"
+            ></app-icon>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm text-text-primary">{{ historyError() }}</p>
+              <button
+                type="button"
+                class="mt-1 text-xs font-semibold text-primary-600"
+                (click)="loadHistory()"
+              >
+                Reintentar
+              </button>
+            </div>
+          </div>
+        } @else if (routeHistory().length === 0) {
+          <div
+            class="rounded-lg border border-border bg-background px-4 py-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="truck"
+              [size]="18"
+              class="text-text-secondary mt-0.5 shrink-0"
+            ></app-icon>
+            <p class="text-sm text-text-secondary">
+              Aún no tienes rutas en tu historial.
+            </p>
+          </div>
+        } @else {
+          <div class="space-y-2">
+            @for (r of routeHistory(); track r.id) {
+              <button
+                type="button"
+                class="history-card"
+                (click)="openRouteSummary(r)"
+              >
+                <span class="history-card-icon">
+                  <app-icon name="truck" [size]="18"></app-icon>
+                </span>
+                <div class="min-w-0 flex-1 text-left">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="text-sm font-bold text-text-primary truncate"
+                    >
+                      {{ r.route_number }}
+                    </span>
+                    <span
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0"
+                      [style.color]="routeStatusColor(r.status).fg"
+                      [style.background]="routeStatusColor(r.status).bg"
+                    >
+                      {{ routeStatusLabel(r.status) }}
+                    </span>
+                  </div>
+                  <p class="mt-0.5 text-xs text-text-secondary">
+                    {{ formatRouteDate(r.planned_date) }} ·
+                    {{ routeStopsCount(r) }} paradas
+                  </p>
+                </div>
+                <div class="text-right shrink-0">
+                  <p class="text-sm font-bold text-text-primary font-mono">
+                    {{ +r.total_collected | currency }}
+                  </p>
+                  <p class="text-[10px] text-text-secondary">recaudo</p>
+                </div>
+                <app-icon
+                  name="chevron-right"
+                  [size]="16"
+                  class="text-text-secondary shrink-0"
+                ></app-icon>
+              </button>
+            }
+          </div>
+        }
+      </div>
+
       <!-- Cerrar sesión -->
       <app-button
         variant="outline-danger"
@@ -188,6 +298,134 @@ import { ActiveRouteStore } from '../state/active-route.store';
         Cerrar sesión
       </app-button>
     </div>
+
+    <!-- Resumen de una ruta del historial (modal) -->
+    @if (selectedRoute(); as r) {
+      <app-modal
+        [isOpen]="true"
+        title="Resumen de la ruta"
+        [subtitle]="r.route_number"
+        size="md"
+        (cancel)="closeRouteSummary()"
+        (closed)="closeRouteSummary()"
+      >
+        <div class="space-y-4">
+          <!-- Estado + fechas -->
+          <div class="flex items-center justify-between gap-2">
+            <span
+              class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide"
+              [style.color]="routeStatusColor(r.status).fg"
+              [style.background]="routeStatusColor(r.status).bg"
+            >
+              {{ routeStatusLabel(r.status) }}
+            </span>
+            @if (detailLoading()) {
+              <span class="text-xs text-text-secondary italic">
+                Actualizando…
+              </span>
+            }
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-xl border border-border bg-surface p-3">
+              <span
+                class="text-[11px] font-bold uppercase tracking-wide text-text-secondary block mb-0.5"
+              >
+                Planificada
+              </span>
+              <span class="text-sm text-text-primary">
+                {{ formatRouteDate(r.planned_date) }}
+              </span>
+            </div>
+            <div class="rounded-xl border border-border bg-surface p-3">
+              <span
+                class="text-[11px] font-bold uppercase tracking-wide text-text-secondary block mb-0.5"
+              >
+                Cerrada
+              </span>
+              <span class="text-sm text-text-primary">
+                {{ formatRouteDate(r.closed_at) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- KPIs de entrega -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="rounded-xl border border-border bg-surface p-3">
+              <span
+                class="text-[11px] font-bold uppercase tracking-wide text-text-secondary block mb-0.5"
+              >
+                Entregas
+              </span>
+              <span class="text-base font-bold text-text-primary">
+                {{ selectedDeliveredCount() }} / {{ selectedStopsCount() }}
+              </span>
+            </div>
+            <div class="rounded-xl border border-border bg-surface p-3">
+              <span
+                class="text-[11px] font-bold uppercase tracking-wide text-text-secondary block mb-0.5"
+              >
+                Recaudo
+              </span>
+              <span class="text-base font-bold text-text-primary font-mono">
+                {{ +r.total_collected | currency }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Totales financieros -->
+          <div class="rounded-xl border border-border bg-surface divide-y divide-border">
+            <div class="flex items-center justify-between px-3 py-2">
+              <span class="text-xs text-text-secondary">Por cobrar</span>
+              <span class="text-sm font-mono text-text-primary">
+                {{ +r.total_to_collect | currency }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between px-3 py-2">
+              <span class="text-xs text-text-secondary">Crédito</span>
+              <span class="text-sm font-mono text-text-primary">
+                {{ +r.total_credit | currency }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between px-3 py-2">
+              <span class="text-xs text-text-secondary">Retenciones</span>
+              <span class="text-sm font-mono text-text-primary">
+                {{ +r.total_withholdings | currency }}
+              </span>
+            </div>
+            @if (r.declared_cash != null) {
+              <div class="flex items-center justify-between px-3 py-2">
+                <span class="text-xs text-text-secondary">Efectivo declarado</span>
+                <span class="text-sm font-mono text-text-primary">
+                  {{ +r.declared_cash | currency }}
+                </span>
+              </div>
+            }
+            @if (r.cash_variance != null) {
+              <div class="flex items-center justify-between px-3 py-2">
+                <span class="text-xs text-text-secondary">Varianza de caja</span>
+                <span
+                  class="text-sm font-mono font-bold"
+                  [style.color]="+r.cash_variance < 0 ? '#b91c1c' : '#047857'"
+                >
+                  {{ +r.cash_variance | currency }}
+                </span>
+              </div>
+            }
+          </div>
+        </div>
+
+        <div slot="footer" class="flex items-center justify-end">
+          <button
+            type="button"
+            (click)="closeRouteSummary()"
+            class="rounded-md border border-border bg-surface px-4 py-2 text-sm"
+          >
+            Cerrar
+          </button>
+        </div>
+      </app-modal>
+    }
   `,
   styles: [
     `
@@ -308,12 +546,51 @@ import { ActiveRouteStore } from '../state/active-route.store';
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      /* ── Tarjeta de una ruta del historial (botón táctil ≥44px) ── */
+      .history-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 12px;
+        border-radius: 0.75rem;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+        cursor: pointer;
+        transition:
+          background var(--transition-fast) ease,
+          border-color var(--transition-fast) ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .history-card:hover {
+        background: var(--color-background);
+        border-color: var(--color-primary);
+      }
+      .history-card:focus-visible {
+        outline: 2px solid var(--color-ring);
+        outline-offset: 2px;
+      }
+      .history-card-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+        border-radius: 0.625rem;
+        color: var(--color-primary);
+        background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.1);
+        border: 1px solid rgba(var(--color-primary-rgb, 126, 215, 165), 0.18);
+      }
     `,
   ],
 })
 export class SesionPageComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly routeStore = inject(ActiveRouteStore);
+  private readonly repartosService = inject(RepartosService);
+  private readonly destroyRef = inject(DestroyRef);
 
   // ─── Identidad (AuthFacade) ────────────────────────────────────────────────
   readonly carrierName = computed(
@@ -346,8 +623,14 @@ export class SesionPageComponent {
       .reduce((sum, s) => sum + (Number(s.collected_amount) || 0), 0),
   );
 
-  /** Total de paradas de la ruta (base del cálculo de avance). */
-  readonly totalStops = computed(() => this.routeStore.stops().length);
+  /**
+   * Total de paradas que cuentan para el avance: EXCLUYE las liberadas
+   * (`released`), que volvieron al pool. Las rechazadas/parciales permanecen
+   * (intentos cerrados). Mismo criterio que el denominador del header del shell.
+   */
+  readonly totalStops = computed(
+    () => this.routeStore.stops().filter((s) => s.status !== 'released').length,
+  );
 
   /**
    * Avance de la ruta en porcentaje (entregadas / total). Cae a 0% de forma
@@ -384,10 +667,122 @@ export class SesionPageComponent {
     this.payout()?.mode === 'per_route' ? 'Por ruta' : 'Por parada',
   );
 
+  // ─── Historial de rutas (Item 3b) ──────────────────────────────────────────
+  /** Planillas pasadas del repartidor (`GET /store/carrier/routes`). */
+  readonly routeHistory = signal<DispatchRoute[]>([]);
+  readonly historyLoading = signal(false);
+  readonly historyError = signal<string | null>(null);
+
+  /** Ruta seleccionada para el resumen (modal). `null` = modal cerrado. */
+  readonly selectedRoute = signal<DispatchRoute | null>(null);
+  /** True mientras se resuelve el detalle completo de la ruta seleccionada. */
+  readonly detailLoading = signal(false);
+
+  /** Nº de paradas entregadas de la ruta seleccionada (para el resumen). */
+  readonly selectedDeliveredCount = computed(
+    () =>
+      (this.selectedRoute()?.stops ?? []).filter(
+        (s) => s.status === 'delivered',
+      ).length,
+  );
+
+  /** Nº total de paradas de la ruta seleccionada (prefiere `_count`). */
+  readonly selectedStopsCount = computed(() => {
+    const r = this.selectedRoute();
+    return r?._count?.stops ?? r?.stops?.length ?? 0;
+  });
+
   constructor() {
     // Idempotente: si ya se resolvió (shell), no re-pide. Garantiza KPIs con
     // datos aunque se entre directo a la pestaña Sesión.
     this.routeStore.resolve();
+    this.loadHistory();
+  }
+
+  /** Carga la primera página del historial de planillas del repartidor. */
+  loadHistory(): void {
+    this.historyLoading.set(true);
+    this.historyError.set(null);
+    this.repartosService
+      .getRouteHistory({ page: 1, limit: 20 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.routeHistory.set(res.data);
+          this.historyLoading.set(false);
+        },
+        error: (e) => {
+          this.historyLoading.set(false);
+          this.historyError.set(
+            e?.message || 'No se pudo cargar el historial de rutas.',
+          );
+        },
+      });
+  }
+
+  /**
+   * Abre el resumen de una planilla. Muestra de inmediato lo que ya trae la
+   * lista y, en paralelo, pide el detalle completo (con paradas) para enriquecer
+   * los KPIs (entregas/total). Si el detalle falla, se conserva el resumen de la
+   * lista y solo se corta el spinner.
+   */
+  openRouteSummary(route: DispatchRoute): void {
+    this.selectedRoute.set(route);
+    this.detailLoading.set(true);
+    this.repartosService
+      .getRouteById(route.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (full) => {
+          this.selectedRoute.set(full);
+          this.detailLoading.set(false);
+        },
+        error: () => {
+          this.detailLoading.set(false);
+        },
+      });
+  }
+
+  /** Cierra el modal de resumen de ruta. */
+  closeRouteSummary(): void {
+    this.selectedRoute.set(null);
+    this.detailLoading.set(false);
+  }
+
+  /** Formatea una fecha (date-only, UTC) o devuelve un guion si es nula. */
+  formatRouteDate(value?: string | null): string {
+    return value ? formatDateOnlyUTC(value) : '—';
+  }
+
+  /** Etiqueta legible del estado de una planilla. */
+  routeStatusLabel(status?: string): string {
+    const map: Record<string, string> = {
+      draft: 'Borrador',
+      dispatched: 'Despachada',
+      in_transit: 'En ruta',
+      settling: 'Cuadrando',
+      closed: 'Cerrada',
+      voided: 'Anulada',
+    };
+    return map[status ?? ''] || status || '—';
+  }
+
+  /** Colores inline (WCAG-AA) para el badge de estado de la planilla. */
+  routeStatusColor(status?: string): { fg: string; bg: string } {
+    const map: Record<string, { fg: string; bg: string }> = {
+      draft: { fg: '#475569', bg: '#f1f5f9' },
+      dispatched: { fg: '#1d4ed8', bg: '#dbeafe' },
+      in_transit: { fg: '#b45309', bg: '#fef3c7' },
+      settling: { fg: '#7e22ce', bg: '#f3e8ff' },
+      closed: { fg: '#047857', bg: '#d1fae5' },
+      voided: { fg: '#b91c1c', bg: '#fee2e2' },
+    };
+    return map[status ?? ''] || { fg: '#475569', bg: '#f1f5f9' };
+  }
+
+  /** Nº de paradas de una fila del historial (prefiere `_count`). */
+  routeStopsCount(route: DispatchRoute): number {
+    return route._count?.stops ?? route.stops?.length ?? 0;
   }
 
   /** Cierra la sesión del repartidor (toast + limpieza vía SessionService). */

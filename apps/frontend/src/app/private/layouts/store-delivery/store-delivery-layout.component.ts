@@ -366,7 +366,18 @@ export class StoreDeliveryLayoutComponent {
   private readonly activeRoute = this.activeRouteStore.activeRoute;
 
   readonly hasActiveRoute = computed(() => this.activeRouteId() !== null);
-  readonly totalStops = computed(() => this.activeRouteStore.stops().length);
+  /**
+   * Total de paradas que cuentan para el avance: EXCLUYE las liberadas
+   * (`released`), que salieron de la ruta y volvieron al pool. Las
+   * rechazadas/parciales SÍ permanecen en el total (son intentos de entrega
+   * cerrados, no removidos), así la barra es "% entregado" fiel. Replica el
+   * criterio de exclusión de `ActiveRouteStore.pendingStopsCount`.
+   */
+  readonly totalStops = computed(
+    () =>
+      this.activeRouteStore.stops().filter((s) => s.status !== 'released')
+        .length,
+  );
   readonly deliveredStops = computed(
     () =>
       this.activeRouteStore
