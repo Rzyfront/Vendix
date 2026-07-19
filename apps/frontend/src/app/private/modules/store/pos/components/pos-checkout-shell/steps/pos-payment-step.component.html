@@ -1,0 +1,109 @@
+<!-- Fase 5·B1 — Paso Cobro. Réplica de la sección "Pago" de
+     pos-payment-interface.html (fulfillment + collector + Wompi awaiting +
+     picker de mesa inline), sin el <app-modal> ni Resumen/Cliente. -->
+<div class="payment-step">
+  @if (isRestaurantWithPrepared()) {
+    <div class="fulfillment-section">
+      <div class="fulfillment-section-title">
+        <app-icon name="utensils" [size]="16"></app-icon>
+        <span>Tipo de servicio</span>
+      </div>
+      <app-pos-fulfillment-selector
+        [value]="fulfillment()"
+        [consumoBlocked]="false"
+        (selectionChange)="onFulfillmentChange($event)"
+      ></app-pos-fulfillment-selector>
+
+      @if (fulfillment() === 'consumo') {
+        @if (tableId() == null && pickedTableId() == null) {
+          <button
+            type="button"
+            class="open-table-cta"
+            (click)="openTablePicker.set(true)"
+          >
+            <app-icon name="layout-grid" [size]="16"></app-icon>
+            <span>Abrir mesa</span>
+          </button>
+          <div class="fulfillment-hint">
+            <app-icon name="info" [size]="14"></app-icon>
+            <span>Selecciona una mesa antes de cobrar esta orden como consumo.</span>
+          </div>
+        } @else {
+          <div class="table-pill">
+            <app-icon name="layout-grid" [size]="14"></app-icon>
+            <span>Mesa #{{ tableId() ?? pickedTableId() }}</span>
+          </div>
+        }
+      }
+    </div>
+  }
+
+  <!-- Bloque de RECOLECCIÓN de pago delegado al collector headless. La
+       orquestación (fulfillment, sesión de mesa, cliente, polling Wompi
+       POST-submit) vive en este step. -->
+  <div [style.display]="wompiAwaitingPayment() ? 'none' : 'block'">
+    <app-payment-collector
+      context="pos"
+      [amount]="cartState()?.summary?.total || 0"
+      [paymentMethods]="paymentMethods()"
+      [autoLoad]="false"
+      [isProcessing]="isProcessing()"
+      [initialMode]="defaultPaymentForm()"
+      [showKeypad]="showOnscreenKeypad()"
+      [customer]="collectorCustomer()"
+      [requireCustomer]="!isAnonymous()"
+      [walletInfo]="collectorWalletInfo()"
+      (submit)="onCollectorSubmit($event)"
+      (requestCustomer)="requestCustomer.emit()"
+      (walletLookup)="onWalletLookup($event)"
+    ></app-payment-collector>
+  </div>
+
+  <!-- Wompi Awaiting Payment UI (POST-submit polling vive en este step). -->
+  @if (wompiAwaitingPayment()) {
+    <div class="wompi-awaiting">
+      <app-spinner></app-spinner>
+      <p class="awaiting-message">{{ wompiAwaitingMessage() }}</p>
+      @if (wompiPollingState().active) {
+        <p class="awaiting-attempts">
+          Verificando con Wompi… intento
+          {{ wompiPollingState().attempts }} /
+          {{ wompiPollingState().maxAttempts }}
+        </p>
+      }
+      <div class="awaiting-actions">
+        <app-button
+          label="Verificar pago ahora"
+          variant="outline"
+          size="sm"
+          (clicked)="manualVerifyPayment()"
+        ></app-button>
+        @if (!wompiPollingState().active) {
+          <app-button
+            label="Continuar esperando"
+            variant="ghost"
+            size="sm"
+            (clicked)="startWompiPolling()"
+          ></app-button>
+        }
+        <app-button
+          label="Cancelar espera"
+          variant="ghost"
+          size="sm"
+          (clicked)="cancelWompiAwait()"
+        ></app-button>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- Picker de mesa inline (restaurant + prepared). Reutiliza el mismo
+     PosOpenTableModalComponent del flujo crear-orden. -->
+@if (isRestaurantWithPrepared()) {
+  <app-pos-open-table-modal
+    [isOpen]="openTablePicker()"
+    (isOpenChange)="openTablePicker.set($event)"
+    [customer]="cartState()?.customer ?? null"
+    (sessionOpened)="onTableSessionPicked($event)"
+  ></app-pos-open-table-modal>
+}

@@ -57,6 +57,7 @@ import {
 } from './services/pos-product.service';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
 import { PosPaymentInterfaceComponent } from './components/pos-payment-interface.component';
+import { PosCheckoutShellComponent } from './components/pos-checkout-shell/pos-checkout-shell.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
@@ -117,6 +118,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosProductSelectionComponent,
     PosCustomerModalComponent,
     PosPaymentInterfaceComponent,
+    PosCheckoutShellComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
     BadgeComponent,
@@ -605,6 +607,23 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (tableSessionOpened)="onPaymentTableSessionOpened($event)"
       ></app-pos-payment-interface>
 
+      <!-- Fase 5·B1: SHELL de checkout con stepper (flujo sin envío 'pickup').
+           Convive con los 3 modales viejos; se consolidan en B3. El paso Cobro
+           autocarga sus métodos, por eso no se bindea [paymentMethods]. -->
+      <app-pos-checkout-shell
+        [isOpen]="showCheckoutModal()"
+        [cartState]="cartState()"
+        [checkoutIntent]="checkoutIntent()"
+        [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
+        [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
+        (isOpenChange)="showCheckoutModal.set($event)"
+        (closed)="showCheckoutModal.set(false)"
+        (checkoutCompleted)="onPaymentCompleted($event)"
+        (requestCustomer)="onOpenCustomerModal()"
+        (customerSelected)="onPaymentCustomerSelected($event)"
+        (tableSessionOpened)="onPaymentTableSessionOpened($event)"
+      ></app-pos-checkout-shell>
+
       <app-pos-shipping-modal
         [isOpen]="showShippingModal()"
         [cartState]="cartState()"
@@ -853,6 +872,13 @@ export class PosComponent {
   editingCustomer = signal<PosCustomer | null>(null);
 
   showPaymentModal = signal(false);
+  /**
+   * Fase 5·B1: nuevo SHELL unificado de checkout (stepper). En B1 arranca el
+   * flujo NO-delivery ('pickup'). Los 3 modales viejos siguen vivos; el shell
+   * los reemplaza como punto de entrada del cobro sin envío.
+   */
+  showCheckoutModal = signal(false);
+  checkoutIntent = signal<'pickup' | 'delivery'>('pickup');
   /** Fulfillment type chosen for the current payment. Mirrors the
    *  payment-modal selector so the parent can react when the modal closes. */
   paymentFulfillment = signal<'consumo' | 'entrega' | null>(null);
@@ -1746,7 +1772,11 @@ export class PosComponent {
       return;
     }
 
-    this.showPaymentModal.set(true);
+    // Fase 5·B1: el checkout sin envío ('pickup') pasa por el nuevo SHELL con
+    // stepper. El modal viejo (app-pos-payment-interface) queda vivo pero sin
+    // quien lo abra; se retira en B3.
+    this.checkoutIntent.set('pickup');
+    this.showCheckoutModal.set(true);
   }
 
   onPaymentModalClosed(): void {

@@ -1,0 +1,231 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [size]="'full'"
+  [title]="'Finalizar venta'"
+  [subtitle]="'Cobro y cliente'"
+  (closed)="onModalClosed()"
+>
+  <div class="checkout-shell">
+    <!-- Stepper -->
+    <div class="checkout-stepper">
+      <app-steps-line
+        [steps]="steps()"
+        [currentStep]="currentStep()"
+        [clickable]="true"
+        (stepClicked)="goToStep($event)"
+      ></app-steps-line>
+    </div>
+
+    <!-- Body: paso activo + resumen (rail) -->
+    <div class="checkout-grid">
+      <!-- Columna principal: paso activo -->
+      <div class="checkout-main">
+        <!-- Paso 0 · Cobro -->
+        <div class="step-panel" [class.step-hidden]="currentStep() !== 0">
+          <app-pos-payment-step
+            [cartState]="cartState()"
+            [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
+            [tableId]="tableId()"
+            [isAnonymous]="isAnonymousSale()"
+            [paymentMethods]="paymentMethods()"
+            [isProcessing]="isProcessing()"
+            (paymentCompleted)="onCheckoutCompleted($event)"
+            (requestCustomer)="onRequestCustomer()"
+            (tableSessionOpened)="onTableSessionOpened($event)"
+          ></app-pos-payment-step>
+        </div>
+
+        <!-- Paso 1 · Cliente -->
+        <div class="step-panel" [class.step-hidden]="currentStep() !== 1">
+          <section class="cliente-section">
+            <div class="section-header">
+              <app-icon name="users" [size]="16" class="section-icon"></app-icon>
+              <h2 class="section-title">Cliente</h2>
+            </div>
+
+            <div class="sale-type-options">
+              @if (canBeAnonymous()) {
+                <button
+                  type="button"
+                  class="sale-type-btn"
+                  [class.selected]="isAnonymousSale()"
+                  (click)="toggleAnonymousSale(true)"
+                >
+                  <div class="radio-indicator">
+                    @if (isAnonymousSale()) {
+                      <div class="radio-dot"></div>
+                    }
+                  </div>
+                  <app-icon name="user-x" [size]="20"></app-icon>
+                  <div class="sale-type-info">
+                    <span class="sale-type-name">Venta Anónima</span>
+                    <span class="sale-type-desc">Sin cliente asociado</span>
+                  </div>
+                </button>
+              }
+
+              <button
+                type="button"
+                class="sale-type-btn"
+                [class.selected]="!isAnonymousSale()"
+                (click)="toggleAnonymousSale(false)"
+              >
+                <div class="radio-indicator">
+                  @if (!isAnonymousSale()) {
+                    <div class="radio-dot"></div>
+                  }
+                </div>
+                <app-icon name="user" [size]="20"></app-icon>
+                <div class="sale-type-info">
+                  <span class="sale-type-name">Con Cliente</span>
+                  <span class="sale-type-desc">{{
+                    cartState()?.customer ? customerDisplayName : 'Seleccionar cliente'
+                  }}</span>
+                </div>
+              </button>
+            </div>
+
+            @if (!isAnonymousSale()) {
+              <app-pos-customer-selector
+                [selectedCustomer]="cartState()?.customer ?? null"
+                [allowAnonymous]="canBeAnonymous()"
+                (customerSelected)="selectCustomer($event)"
+                (customerCleared)="onCustomerCleared()"
+              ></app-pos-customer-selector>
+            }
+          </section>
+        </div>
+      </div>
+
+      <!-- Rail de Resumen (fijo). Reutiliza el markup de Resumen del modal viejo. -->
+      <aside class="summary-rail">
+        <section class="payment-section">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h2 class="section-title">Resumen</h2>
+          </div>
+
+          <div class="product-list">
+            @for (item of cartState()?.items; track item) {
+              <div class="product-item">
+                <div class="product-info">
+                  <span class="product-name"
+                    >{{ item.product.name
+                    }}@if (item.variant_display_name) {
+                      <span style="font-size: 0.85em; opacity: 0.7"
+                        > - {{ item.variant_display_name }}</span
+                      >
+                    }</span
+                  >
+                  <div class="product-badges">
+                    @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                      <span
+                        class="tier-badge"
+                        [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                        >{{ item.applied_price_tier_name }}</span
+                      >
+                    }
+                    @if (item.is_package_unit && (item.units_per_package ?? 0) > 1) {
+                      <span class="item-package-badge"
+                        >Caja ×{{ item.units_per_package }}</span
+                      >
+                    }
+                  </div>
+                </div>
+                @if (item.is_weight_product) {
+                  <span class="product-qty"
+                    >{{ item.weight }} {{ item.weight_unit || 'kg' }}</span
+                  >
+                } @else if (item.is_package_unit && (item.units_per_package ?? 0) > 1) {
+                  <span class="product-qty"
+                    >{{ item.quantity }} {{ item.quantity === 1 ? 'paq.' : 'paqs.' }} =
+                    {{ item.quantity * (item.units_per_package ?? 1) }} u.</span
+                  >
+                } @else {
+                  <span class="product-qty">x{{ item.quantity }}</span>
+                }
+              </div>
+            }
+            @if (!cartState()?.items?.length) {
+              <div class="empty-cart">El carrito está vacío</div>
+            }
+          </div>
+
+          <div class="summary-details">
+            <div class="summary-row">
+              <span>Productos</span>
+              <span class="summary-value">{{ cartState()?.summary?.itemCount || 0 }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Cantidad</span>
+              <span class="summary-value">{{ cartState()?.summary?.totalItems || 0 }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span class="summary-value">{{ cartState()?.summary?.subtotal || 0 | currency }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Impuestos</span>
+              <span class="summary-value">{{ cartState()?.summary?.taxAmount || 0 | currency }}</span>
+            </div>
+            @if ((cartState()?.summary?.discountAmount ?? 0) > 0) {
+              <div class="summary-row">
+                <span>Descuento</span>
+                <span class="summary-value discount"
+                  >-{{ cartState()?.summary?.discountAmount | currency }}</span
+                >
+              </div>
+            }
+          </div>
+
+          <div class="total-section">
+            <p class="total-label">Total a Pagar</p>
+            <p class="total-amount">{{ cartState()?.summary?.total || 0 | currency }}</p>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer" class="checkout-footer">
+    <div class="footer-left">
+      <span class="footer-total-label">Total</span>
+      <span class="footer-total-amount">{{ cartState()?.summary?.total || 0 | currency }}</span>
+    </div>
+    <div class="footer-actions">
+      <button
+        type="button"
+        class="btn-cancel"
+        (click)="onModalClosed()"
+        [disabled]="footerProcessing()"
+      >
+        Cancelar
+      </button>
+      <button
+        type="button"
+        class="btn-draft"
+        [disabled]="true"
+        title="Disponible próximamente"
+      >
+        <app-icon name="save" [size]="16"></app-icon>
+        Guardar borrador
+      </button>
+      <button
+        type="button"
+        class="btn-confirm"
+        (click)="onConfirm()"
+        [disabled]="confirmDisabled()"
+        [class.loading]="footerProcessing()"
+      >
+        @if (!footerProcessing()) {
+          <app-icon name="check-circle" [size]="20"></app-icon>
+        }
+        @if (footerProcessing()) {
+          <span class="spinner"></span>
+        }
+        {{ confirmLabel() }}
+      </button>
+    </div>
+  </div>
+</app-modal>

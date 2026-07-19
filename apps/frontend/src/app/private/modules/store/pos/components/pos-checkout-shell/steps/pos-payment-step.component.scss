@@ -1,0 +1,105 @@
+/* Fase 5·B1 — estilos del paso Cobro. Extraídos de la sección "Pago" de
+   pos-payment-interface (styles inline) para preservar la apariencia. */
+.payment-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Fulfillment selector (Restaurant stores with prepared items) */
+.fulfillment-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--color-muted);
+  border: 1px solid var(--color-border);
+}
+
+.fulfillment-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.fulfillment-hint {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: rgb(194, 65, 12);
+}
+
+.open-table-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.open-table-cta:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.table-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(var(--color-primary-rgb), 0.08);
+  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ─── Wompi awaiting ─────────────────────────────── */
+.wompi-awaiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  text-align: center;
+  min-height: 192px;
+  margin-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.awaiting-message {
+  font-size: 15px;
+  color: var(--color-text-primary);
+  max-width: 320px;
+  margin: 0;
+}
+
+.awaiting-attempts {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  max-width: 320px;
+  margin: 0;
+}
+
+.awaiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}
