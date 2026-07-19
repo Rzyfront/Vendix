@@ -20,6 +20,19 @@
     <div class="checkout-grid">
       <!-- Columna principal: paso activo -->
       <div class="checkout-main">
+        <!-- Paso · Consumo (restaurante ∧ intent ≠ delivery). Se mantiene
+             MONTADO mientras 'consumo' esté en stepKeys para que el shell lea
+             fulfillment()/pickedTableId()/pickedSessionId()/needsTable(). -->
+        @if (stepKeys().includes('consumo')) {
+          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'consumo'">
+            <app-pos-consumo-step
+              [cartState]="cartState()"
+              [tableId]="tableId()"
+              (tableSessionOpened)="onTableSessionOpened($event)"
+            ></app-pos-consumo-step>
+          </div>
+        }
+
         <!-- Paso · Cobro (pickup + delivery pagar-ahora). Se mantiene MONTADO
              mientras 'cobro' esté en stepKeys para que el footer lea sus señales
              y triggerSubmit() funcione desde cualquier paso. -->
@@ -28,7 +41,9 @@
             <app-pos-payment-step
               [cartState]="cartState()"
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
-              [tableId]="tableId()"
+              [tableId]="consumoStep()?.pickedTableId() ?? tableId()"
+              [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
+              [sessionId]="consumoStep()?.pickedSessionId() ?? null"
               [isAnonymous]="isAnonymousSale()"
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"
@@ -37,7 +52,6 @@
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"
               (requestCustomer)="onRequestCustomer()"
-              (tableSessionOpened)="onTableSessionOpened($event)"
             ></app-pos-payment-step>
           </div>
         }

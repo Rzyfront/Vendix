@@ -14,7 +14,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, firstValueFrom } from 'rxjs';
 
 import {
-  IconComponent,
   SpinnerComponent,
   ButtonComponent,
   PaymentCollectorComponent,
@@ -29,12 +28,7 @@ import {
   PosPaymentService,
   PaymentMethod,
 } from '../../../services/pos-payment.service';
-import {
-  PosFulfillmentSelectorComponent,
-  FulfillmentType,
-} from '../../pos-fulfillment-selector.component';
-import { PosOpenTableModalComponent } from '../../pos-open-table-modal.component';
-import { OpenTableSessionResult } from '../../../services/pos-restaurant-integration.service';
+import { FulfillmentType } from '../../pos-fulfillment-selector.component';
 import { PosWalletService, WalletInfo } from '../../../services/pos-wallet.service';
 import {
   WompiService,
@@ -52,25 +46,24 @@ import type { BusinessHours } from '../../../../../../../core/models/store-setti
  * la ORQUESTACIÓN de cobro que antes vivía en `PosPaymentInterfaceComponent`,
  * SIN su `<app-modal>` ni las secciones Resumen / Cliente (esas viven en el
  * shell). El comportamiento se preserva 1:1: gates de `onCollectorSubmit`
- * (mesa/consumo, cliente, caja, horario), construcción de `payment_request`,
+ * (cliente, caja, horario), construcción de `payment_request`,
  * `processSaleWithPayment`, manejo asíncrono de Wompi (nextAction + polling),
- * y venta a crédito (fiado libre vs financiado).
+ * y venta a crédito (fiado libre vs financiado). El tipo de servicio
+ * (fulfillment) y la mesa ahora los posee el paso Consumo y llegan por input
+ * (`fulfillment`, `sessionId`, `tableId`).
  *
  * El shell lee las señales públicas (`canSubmit`, `mode`, `isWompiSelected`,
- * `selectedMethodType`, `isProcessing`, `restaurantConsumoNeedsTable`) para el
- * footer y dispara el cobro vía `triggerSubmit()`.
+ * `selectedMethodType`, `isProcessing`) para el footer y dispara el cobro vía
+ * `triggerSubmit()`.
  */
 @Component({
   selector: 'app-pos-payment-step',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    IconComponent,
     SpinnerComponent,
     ButtonComponent,
     PaymentCollectorComponent,
-    PosFulfillmentSelectorComponent,
-    PosOpenTableModalComponent,
   ],
   templateUrl: './pos-payment-step.component.html',
   styleUrl: './pos-payment-step.component.scss',
@@ -83,6 +76,16 @@ export class PosPaymentStepComponent implements OnInit {
   /** Restaurant stores that have at least one `prepared` line in the cart. */
   readonly isRestaurantWithPrepared = input<boolean>(false);
   readonly tableId = input<number | null>(null);
+  /**
+   * Fulfillment type — now OWNED by the Consumo step and passed in by the shell.
+   * Forwarded onto the payment payloads (`paymentCompleted.emit(... fulfillment)`).
+   */
+  readonly fulfillment = input<FulfillmentType>('entrega');
+  /**
+   * Opened table_session id — OWNED by the Consumo step and passed in by the
+   * shell. Forwarded to `processSaleWithPayment` so the sale binds to the table.
+   */
+  readonly sessionId = input<number | null>(null);
   /** Anonymous-sale flag owned by the shell (drives collector requireCustomer). */
   readonly isAnonymous = input<boolean>(false);
   /**
@@ -114,8 +117,6 @@ export class PosPaymentStepComponent implements OnInit {
   readonly paymentCompleted = output<any>();
   readonly requestCustomer = output<void>();
   readonly walletLookup = output<{ id: number | string }>();
-  /** Bug 1 (Fase K): emitted when the inline picker opens a session. */
-  readonly tableSessionOpened = output<OpenTableSessionResult>();
   /**
    * Deferred-execution channel (autoExecute=false): emits the collected payload
    * without processing it. The shell forwards it to the shipping step.
@@ -145,16 +146,6 @@ export class PosPaymentStepComponent implements OnInit {
   readonly isProcessing = computed<boolean>(
     () => this.processing() || this.externalProcessing(),
   );
-
-  // ── Fulfillment / table (Restaurant + prepared) ──────────────────────────
-  readonly fulfillment = signal<FulfillmentType>('entrega');
-  /** Local mirror of the picked table id so the step can unblock cobro even
-   *  before the parent persists a currentTableSession. */
-  readonly pickedTableId = signal<number | null>(null);
-  /** Mirror of the opened table_session id forwarded to the backend payload. */
-  readonly pickedSessionId = signal<number | null>(null);
-  /** Toggles the inline PosOpenTableModalComponent. */
-  readonly openTablePicker = signal(false);
 
   // ── Wallet ───────────────────────────────────────────────────────────────
   // Full WalletInfo kept locally to forward `wallet_id`; collector only needs
@@ -221,14 +212,6 @@ export class PosPaymentStepComponent implements OnInit {
     () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
   );
 
-  /** Restaurant + prepared 'consumo' still requires an open table. */
-  readonly restaurantConsumoNeedsTable = computed<boolean>(
-    () =>
-      this.isRestaurantWithPrepared() &&
-      this.fulfillment() === 'consumo' &&
-      (this.tableId() ?? this.pickedTableId()) == null,
-  );
-
   // ── Footer-facing collector projections (read by the shell) ──────────────
   readonly mode = computed<PaymentMode | undefined>(() => this.collector()?.mode());
   readonly isWompiSelected = computed<boolean>(
@@ -267,24 +250,6 @@ export class PosPaymentStepComponent implements OnInit {
   // ── Public API used by the shell footer ──────────────────────────────────
   triggerSubmit(): void {
     this.collector()?.triggerSubmit();
-  }
-
-  // ── Fulfillment / table handlers ─────────────────────────────────────────
-  onFulfillmentChange(next: FulfillmentType): void {
-    this.fulfillment.set(next);
-    if (next !== 'consumo') {
-      this.pickedTableId.set(null);
-    }
-  }
-
-  onTableSessionPicked(result: OpenTableSessionResult): void {
-    this.openTablePicker.set(false);
-    const session = result?.session ?? result;
-    const tableId = (session as any)?.table_id ?? null;
-    const sessionId = (session as any)?.id ?? null;
-    this.pickedTableId.set(tableId);
-    this.pickedSessionId.set(sessionId);
-    this.tableSessionOpened.emit(result);
   }
 
   // ── Business hours gate (copied verbatim) ────────────────────────────────
@@ -360,9 +325,6 @@ export class PosPaymentStepComponent implements OnInit {
   // ── The single collector submit handler (all POS gates preserved) ────────
   onCollectorSubmit(submit: PaymentSubmit): void {
     if (!this.cartState()) return;
-
-    // Restaurant + prepared: 'consumo' requires an open table.
-    if (this.restaurantConsumoNeedsTable()) return;
 
     // Deferred execution (delivery pay-now): don't process here. Emit the raw
     // payload so the shipping step folds it into a single processShippingSale.
@@ -451,7 +413,7 @@ export class PosPaymentStepComponent implements OnInit {
         this.cartState()!,
         payment_request,
         'current_user',
-        this.pickedSessionId() ?? null,
+        this.sessionId() ?? null,
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -475,7 +437,7 @@ export class PosPaymentStepComponent implements OnInit {
               message: response.message,
               isAnonymousSale: this.isAnonymous(),
               fulfillment: this.fulfillment(),
-              tableId: this.tableId() ?? this.pickedTableId(),
+              tableId: this.tableId(),
             });
           } else {
             this.processing.set(false);
@@ -574,7 +536,7 @@ export class PosPaymentStepComponent implements OnInit {
             message: response.message,
             isCreditSale: true,
             fulfillment: this.fulfillment(),
-            tableId: this.tableId() ?? this.pickedTableId(),
+            tableId: this.tableId(),
           });
         } else {
           this.toastService.show({
@@ -786,7 +748,7 @@ export class PosPaymentStepComponent implements OnInit {
       transactionId: result?.transactionId,
       isAnonymousSale: this.isAnonymous(),
       fulfillment: this.fulfillment(),
-      tableId: this.tableId() ?? this.pickedTableId(),
+      tableId: this.tableId(),
     });
   }
 

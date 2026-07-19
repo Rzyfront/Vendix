@@ -22,6 +22,7 @@ import {
 import type { StepsLineItem, PaymentSubmit } from '../../../../../../shared/components';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { PosCustomerSelectorComponent } from '../pos-customer-selector/pos-customer-selector.component';
+import { PosConsumoStepComponent } from './steps/pos-consumo-step.component';
 import { PosPaymentStepComponent } from './steps/pos-payment-step.component';
 import { PosShippingStepComponent } from './steps/pos-shipping-step.component';
 import {
@@ -61,6 +62,7 @@ export type CheckoutIntent = 'pickup' | 'delivery';
     StepsLineComponent,
     CurrencyPipe,
     PosCustomerSelectorComponent,
+    PosConsumoStepComponent,
     PosPaymentStepComponent,
     PosShippingStepComponent,
   ],
@@ -99,6 +101,7 @@ export class PosCheckoutShellComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   // ── Child references ────────────────────────────────────────────────────
+  protected readonly consumoStep = viewChild(PosConsumoStepComponent);
   protected readonly paymentStep = viewChild(PosPaymentStepComponent);
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
@@ -110,8 +113,19 @@ export class PosCheckoutShellComponent {
   readonly currentStep = signal(0);
 
   /**
+   * The dedicated "Consumo" step (tipo de servicio + mesa) is shown only for
+   * restaurant tenants when the intent is NOT delivery. Gating by industry ∧
+   * intent (NOT by "hay platos prepared"): consumo/mesa never makes sense on a
+   * domicilio. The kitchen fire keeps its own gate (`hasUnfiredPreparedItems`).
+   */
+  readonly showConsumoStep = computed<boolean>(
+    () => this.integration.isRestaurantMode() && this.checkoutIntent() !== 'delivery',
+  );
+
+  /**
    * Dynamic steps by intent + "cuándo paga":
-   *  - pickup                    → [Cobro, Cliente]
+   *  - pickup (no restaurante)   → [Cobro, Cliente]
+   *  - pickup (restaurante)      → [Consumo, Cobro, Cliente]
    *  - delivery + pagar ahora    → [Cobro, Cliente, Envío]
    *  - delivery + contra-entrega → [Cliente, Envío]  (sin Cobro)
    */
@@ -121,7 +135,9 @@ export class PosCheckoutShellComponent {
         ? [{ label: 'Cobro' }, { label: 'Cliente' }, { label: 'Envío' }]
         : [{ label: 'Cliente' }, { label: 'Envío' }];
     }
-    return [{ label: 'Cobro' }, { label: 'Cliente' }];
+    return this.showConsumoStep()
+      ? [{ label: 'Consumo' }, { label: 'Cobro' }, { label: 'Cliente' }]
+      : [{ label: 'Cobro' }, { label: 'Cliente' }];
   });
 
   /** Parallel key array (same order/length as {@link steps}) used to render the
@@ -132,7 +148,9 @@ export class PosCheckoutShellComponent {
         ? ['cobro', 'cliente', 'envio']
         : ['cliente', 'envio'];
     }
-    return ['cobro', 'cliente'];
+    return this.showConsumoStep()
+      ? ['consumo', 'cobro', 'cliente']
+      : ['cobro', 'cliente'];
   });
 
   readonly currentStepKey = computed<string>(
@@ -206,10 +224,10 @@ export class PosCheckoutShellComponent {
       return !ship.canConfirm();
     }
 
-    // pickup (B1): idéntico al collector.
+    // pickup (B1): idéntico al collector + gate de mesa del paso Consumo.
     const step = this.paymentStep();
     if (!step) return true;
-    return !step.canSubmit() || step.restaurantConsumoNeedsTable();
+    return !step.canSubmit() || (this.consumoStep()?.needsTable() ?? false);
   });
   /** Delivery → 'Finalizar venta'. Pickup → replica el label del collector. */
   readonly confirmLabel = computed<string>(() => {
@@ -545,13 +563,13 @@ export class PosCheckoutShellComponent {
     orderItemIds: number[],
     firedToKitchen: boolean,
   ): void {
-    const fulfillment: FulfillmentType | null = this.isRestaurantWithPrepared()
-      ? (this.paymentStep()?.fulfillment() ?? null)
+    const fulfillment: FulfillmentType | null = this.showConsumoStep()
+      ? (this.consumoStep()?.fulfillment() ?? null)
       : null;
     const tableId =
       this.integration.currentTableSession()?.table_id ??
       this.tableId() ??
-      this.paymentStep()?.pickedTableId?.() ??
+      this.consumoStep()?.pickedTableId?.() ??
       null;
 
     this.draftSaved.emit({ order, fulfillment, tableId, firedToKitchen });
