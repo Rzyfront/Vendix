@@ -523,13 +523,13 @@ export class RouteFlowService {
     // state). The route is now `dispatched` (OPEN) holding confirmed notes, so
     // the reconciler derives `processing → shipped` and caps there. Single
     // source of truth: no direct `orders.state` write from the route.
-    const dispatchedOrderIds = [
-      ...new Set(
-        updated.stops
-          .map((stop) => stop.dispatch_note?.order_id)
-          .filter((oid): oid is number => oid != null),
-      ),
-    ];
+    const dispatchedOrderIds: number[] = [];
+    for (const stop of updated.stops) {
+      const oid = stop.dispatch_note?.order_id;
+      if (typeof oid === 'number' && !dispatchedOrderIds.includes(oid)) {
+        dispatchedOrderIds.push(oid);
+      }
+    }
     for (const order_id of dispatchedOrderIds) {
       await this.orderFlowService.reconcileOrderFromDispatch(order_id, store_id);
     }
@@ -1191,14 +1191,14 @@ export class RouteFlowService {
     // remaining balance is already 0 from the per-stop recaudo at settle).
     // rejected/released stops do NOT reconcile. Single source of truth: no
     // direct `orders.state` write from the route.
-    const finishedOrderIds = [
-      ...new Set(
-        updated.stops
-          .filter((stop) => stop.result === 'delivered')
-          .map((stop) => stop.dispatch_note?.order_id)
-          .filter((oid): oid is number => oid != null),
-      ),
-    ];
+    const finishedOrderIds: number[] = [];
+    for (const stop of updated.stops) {
+      if (stop.result !== 'delivered') continue;
+      const oid = stop.dispatch_note?.order_id;
+      if (typeof oid === 'number' && !finishedOrderIds.includes(oid)) {
+        finishedOrderIds.push(oid);
+      }
+    }
     for (const order_id of finishedOrderIds) {
       await this.orderFlowService.reconcileOrderFromDispatch(order_id, store_id);
     }
