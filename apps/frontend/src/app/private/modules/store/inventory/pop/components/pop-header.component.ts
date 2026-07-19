@@ -136,6 +136,7 @@ import { InventoryService } from "../../services/inventory.service";
       (shippingMethodChange)="onShippingMethodChange($event)"
       (openSupplierModal)="openSupplierModal.emit()"
       (openWarehouseModal)="openWarehouseModal.emit()"
+      (done)="onConfigModalDone()"
     ></app-pop-order-config-modal>
   `,
   styles: [
@@ -197,6 +198,20 @@ export class PopHeaderComponent {
 
   readonly openSupplierModal = output<void>();
   readonly openWarehouseModal = output<void>();
+
+  /**
+   * Emitido cuando el usuario cierra el modal de configuración con "Listo"
+   * ESTANDO ya configurada la orden (proveedor + bodega). Permite al padre
+   * (`pop.component`) reconectar la acción que quedó pendiente por falta de
+   * configuración (guardar borrador / crear / crear+recibir).
+   */
+  readonly configDone = output<void>();
+
+  onConfigModalDone(): void {
+    if (this.isConfigured()) {
+      this.configDone.emit();
+    }
+  }
 
   constructor() {
     this.loadSuppliers().subscribe();

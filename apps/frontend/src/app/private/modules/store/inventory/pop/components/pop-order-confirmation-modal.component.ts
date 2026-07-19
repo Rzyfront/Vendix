@@ -46,6 +46,7 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
       [title]="modalTitle"
       size="lg"
       (isOpenChange)="isOpenChange.emit($event)"
+      (opened)="onOpened()"
       (cancel)="onCancel()"
     >
       <div class="space-y-3 p-4">
@@ -290,28 +291,55 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
           </div>
         </section>
 
+        <!-- Acuses de recepción / pago (solo "Crear y Recibir"). Cada uno es un
+             efecto independiente: la recepción SIEMPRE va por remisión de
+             entrada; el pago registra el total y marca la orden como pagada. -->
+        @if (actionType() === 'create-receive') {
+          <section class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-border)] overflow-hidden">
+            <label class="flex items-start gap-3 p-3 cursor-pointer select-none hover:bg-[var(--color-surface-elevated)] transition-colors">
+              <input
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-[var(--color-border)] accent-[var(--color-primary)] cursor-pointer"
+                [checked]="ackReceive()"
+                (change)="onAckReceiveToggle($event)"
+              />
+              <span class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-sm font-medium text-[var(--color-text-primary)]">
+                  He recibido esta orden y verificado las cantidades recibidas
+                </span>
+                <span class="text-xs text-[var(--color-text-muted)]">
+                  Marca la orden como recibida y genera una remisión de entrada
+                </span>
+              </span>
+            </label>
+            <label class="flex items-start gap-3 p-3 cursor-pointer select-none hover:bg-[var(--color-surface-elevated)] transition-colors">
+              <input
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-[var(--color-border)] accent-[var(--color-primary)] cursor-pointer"
+                [checked]="ackPay()"
+                (change)="onAckPayToggle($event)"
+              />
+              <span class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-sm font-medium text-[var(--color-text-primary)]">
+                  He pagado esta orden
+                </span>
+                <span class="text-xs text-[var(--color-text-muted)]">
+                  Registra el pago total y marca la orden como pagada
+                </span>
+              </span>
+            </label>
+          </section>
+        }
+
       </div>
 
       <div slot="footer">
-        <div class="flex flex-col gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100 sm:flex-row sm:items-center sm:justify-between">
-          <!-- Directa | Por remisión (coherente con la vista dedicada de OC) -->
-          @if (actionType() === 'create-receive') {
-            <div class="inline-flex self-start rounded-lg border border-border overflow-hidden text-xs">
-              <button type="button" class="px-3 py-1.5 font-medium transition-colors"
-                [class]="receiveMode() === 'direct' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-surface-secondary'"
-                (click)="setReceiveMode('direct')">Directa</button>
-              <button type="button" class="px-3 py-1.5 font-medium transition-colors border-l border-border"
-                [class]="receiveMode() === 'remision' ? 'bg-primary text-white' : 'bg-surface text-text-secondary hover:bg-surface-secondary'"
-                (click)="setReceiveMode('remision')">Por remisión</button>
-            </div>
-          }
-          <div class="flex items-center justify-end gap-3">
-            <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
-            <app-button variant="primary" (clicked)="onConfirm()">
-              <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon" ></app-icon>
-              {{ actionType() === 'create-receive' ? 'Crear y Recibir' : 'Crear Orden' }}
-            </app-button>
-          </div>
+        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+          <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+          <app-button variant="primary" (clicked)="onConfirm()">
+            <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon" ></app-icon>
+            {{ actionType() === 'create-receive' ? 'Confirmar' : 'Crear Orden' }}
+          </app-button>
         </div>
       </div>
     </app-modal>
@@ -337,16 +365,42 @@ export class PopOrderConfirmationModalComponent {
   readonly pricingOverridesChange = output<PricingOverridesMap>();
 
   /**
-   * Reception mode for "Crear y Recibir", coherent with the dedicated PO view
-   * selector. Emitted so the parent can branch between PO.receive (direct) and
-   * an inbound purchase-receipt dispatch note (por remisión).
+   * Acuses independientes para el flujo "Crear y Recibir". Toda recepción va
+   * SIEMPRE por remisión de entrada (ya no existe recepción directa), así que
+   * en vez de un modo de recepción exponemos dos efectos individuales:
+   *  - `ackReceive` (ON por defecto): recibir la mercancía → remisión de entrada.
+   *  - `ackPay` (OFF por defecto): registrar el pago total y marcar como pagada.
+   * Se emiten al padre para que orqueste los efectos al confirmar.
    */
-  readonly receiveMode = signal<'direct' | 'remision'>('direct');
-  readonly receiveModeChange = output<'direct' | 'remision'>();
+  readonly ackReceive = signal(true);
+  readonly ackPay = signal(false);
+  readonly ackReceiveChange = output<boolean>();
+  readonly ackPayChange = output<boolean>();
 
-  setReceiveMode(mode: 'direct' | 'remision'): void {
-    this.receiveMode.set(mode);
-    this.receiveModeChange.emit(mode);
+  onAckReceiveToggle(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.ackReceive.set(checked);
+    this.ackReceiveChange.emit(checked);
+  }
+
+  onAckPayToggle(event: Event): void {
+    const checked = (event.target as HTMLInputElement).checked;
+    this.ackPay.set(checked);
+    this.ackPayChange.emit(checked);
+  }
+
+  /**
+   * Reset de los acuses cada vez que el modal se abre para "Crear y Recibir"
+   * (recibir ON, pagar OFF) y sincroniza al padre. El modal permanece montado
+   * entre aperturas, así que sin este reset conservaría el último estado.
+   */
+  onOpened(): void {
+    if (this.actionType() === 'create-receive') {
+      this.ackReceive.set(true);
+      this.ackPay.set(false);
+      this.ackReceiveChange.emit(true);
+      this.ackPayChange.emit(false);
+    }
   }
 
   /**
