@@ -617,6 +617,44 @@ export class OnboardingWizardService {
   }
 
   /**
+   * Sincroniza el mirror JSON store_settings.settings.general (currency +
+   * industries) con lo que trae el wizard, para RE-ENTRADAS del wizard.
+   *
+   * store_settings se accede vía baseClient (getter NO-scoped en
+   * OrganizationPrismaService), por lo que `.update({ where: { store_id } })`
+   * es scope-safe (store_id es @unique y no se envuelve en AND). Idempotente:
+   * corre en AMBAS ramas (nombre igual y nombre cambiado). Sólo escribe si el
+   * DTO trae currency o industries (industries !== undefined preserva la
+   * semántica "campo ausente ⇒ no tocar").
+   */
+  private async syncStoreSettingsGeneralMirror(
+    storeId: number,
+    setupStoreDto: SetupStoreWizardDto,
+  ): Promise<void> {
+    if (!setupStoreDto.currency && setupStoreDto.industries === undefined) {
+      return;
+    }
+    const storeSettings = await this.prismaService.store_settings.findUnique({
+      where: { store_id: storeId },
+    });
+    if (!storeSettings) {
+      return;
+    }
+    const settings = storeSettings.settings as any;
+    settings.general = settings.general || {};
+    if (setupStoreDto.currency) {
+      settings.general.currency = setupStoreDto.currency;
+    }
+    if (setupStoreDto.industries !== undefined) {
+      settings.general.industries = setupStoreDto.industries;
+    }
+    await this.prismaService.store_settings.update({
+      where: { store_id: storeId },
+      data: { settings, updated_at: new Date() },
+    });
+  }
+
+  /**
    * Setup store with address
    *
    * Atomic flow for the FIRST store of an organization (onboarding wizard):
@@ -656,6 +694,26 @@ export class OnboardingWizardService {
         // Store already created in a previous wizard step — do NOT re-trigger
         // trial bootstrap (it was already attempted when this store was first
         // created, and trial is one-shot per organization anyway).
+        //
+        // BUG B: aunque el nombre no cambie, una RE-ENTRADA al wizard puede
+        // traer un cambio de industrias. Antes se hacía un early-return sin
+        // tocar ni la columna stores.industries ni el mirror JSON, así que el
+        // cambio se perdía. Sincronizamos AMBOS (columna + mirror) igual que la
+        // rama de "nombre cambiado", respetando la semántica: sólo se escribe si
+        // el DTO trae `industries` (undefined ⇒ no tocar).
+        if (setupStoreDto.industries !== undefined) {
+          await this.prismaService.stores.update({
+            where: { id: existingStore.id },
+            data: {
+              industries: setupStoreDto.industries,
+              updated_at: new Date(),
+            },
+          });
+        }
+        await this.syncStoreSettingsGeneralMirror(
+          existingStore.id,
+          setupStoreDto,
+        );
         // CD7: garantiza el vínculo owner↔tienda también en RE-ENTRADAS del
         //      wizard (la tienda ya existía). Fuera de la tx atómica de creación
         //      ⇒ usamos el cliente global sin scope como `tx`. Idempotente, así
@@ -671,7 +729,13 @@ export class OnboardingWizardService {
             setMainStore: true,
           },
         );
-        return { ...existingStore, already_completed: true };
+        return {
+          ...existingStore,
+          ...(setupStoreDto.industries !== undefined && {
+            industries: setupStoreDto.industries,
+          }),
+          already_completed: true,
+        };
       }
 
       // If name changed, update it. Trial is NOT re-triggered: the store
@@ -693,22 +757,13 @@ export class OnboardingWizardService {
         },
       });
 
-      // Update currency in store_settings if provided
-      if (setupStoreDto.currency) {
-        const storeSettings =
-          await this.prismaService.store_settings.findUnique({
-            where: { store_id: existingStore.id },
-          });
-        if (storeSettings) {
-          const settings = storeSettings.settings as any;
-          settings.general = settings.general || {};
-          settings.general.currency = setupStoreDto.currency;
-          await this.prismaService.store_settings.update({
-            where: { store_id: existingStore.id },
-            data: { settings, updated_at: new Date() },
-          });
-        }
-      }
+      // Mirror wizard-provided currency + industries into store_settings.general
+      // so the JSON mirror (read by MenuFilterService and the settings UI) stays
+      // in sync with the stores.industries column updated above. Without the
+      // industries mirror the store kept showing only the default 'retail'.
+      // Factorizado en syncStoreSettingsGeneralMirror para compartirlo con la
+      // rama isSameStoreData (BUG B).
+      await this.syncStoreSettingsGeneralMirror(existingStore.id, setupStoreDto);
 
       // CD7: mismo vínculo owner↔tienda en la rama "nombre cambiado". Fuera de
       //      tx (cliente global sin scope como `tx`). Idempotente. `roleName`
@@ -743,6 +798,13 @@ export class OnboardingWizardService {
     }
     if (setupStoreDto.timezone) {
       defaultSettings.general.timezone = setupStoreDto.timezone;
+    }
+    // Mirror the wizard-picked industries into the settings JSON so it matches
+    // the stores.industries column written by createStoreWithDefaultLocation.
+    // MenuFilterService and the general-settings UI read this mirror (not the
+    // column), so skipping it left the store showing only the default 'retail'.
+    if (setupStoreDto.industries) {
+      defaultSettings.general.industries = setupStoreDto.industries;
     }
 
     // Atomic store bootstrap (matches the pattern used by StoresService.create
@@ -1035,7 +1097,7 @@ export class OnboardingWizardService {
 
         if (!newHostnameExists) {
           // Update existing domain to new format
-          await this.prismaService.domain_settings.update({
+          await this.prismaService.domain_settings.updateMany({
             where: { id: existingAutoDomain.id },
             data: {
               hostname: newHostname,
@@ -1062,7 +1124,7 @@ export class OnboardingWizardService {
             existingHostnames,
           );
 
-          await this.prismaService.domain_settings.update({
+          await this.prismaService.domain_settings.updateMany({
             where: { id: existingAutoDomain.id },
             data: {
               hostname: uniqueHostname,
@@ -1077,7 +1139,7 @@ export class OnboardingWizardService {
         }
       } else {
         // Domain already has correct format, just ensure it's primary/active
-        await this.prismaService.domain_settings.update({
+        await this.prismaService.domain_settings.updateMany({
           where: { id: existingAutoDomain.id },
           data: {
             app_type: 'ORG_LANDING',
@@ -1203,7 +1265,7 @@ export class OnboardingWizardService {
         theme: 'light',
       });
 
-      // Read existing store_settings to preserve currency/timezone set during setupStore
+      // Read existing store_settings to preserve currency/timezone/industries set during setupStore
       const existingStoreSettings =
         await this.prismaService.store_settings.findUnique({
           where: { store_id: store.id },
@@ -1220,6 +1282,15 @@ export class OnboardingWizardService {
             existing?.general?.currency || defaultSettings.general.currency,
           timezone:
             existing?.general?.timezone || defaultSettings.general.timezone,
+          // Preserve the wizard-picked industries mirror written by setupStore.
+          // Without this, this branding step rebuilds `general` from fresh
+          // defaults (industries: ['retail']) and clobbers the multi-industry
+          // selection — MenuFilterService and the settings UI read this mirror.
+          industries:
+            Array.isArray(existing?.general?.industries) &&
+            existing.general.industries.length > 0
+              ? existing.general.industries
+              : defaultSettings.general.industries,
         },
         branding: {
           name: store.name,
@@ -1255,7 +1326,7 @@ export class OnboardingWizardService {
 
       if (existingStoreDomain) {
         // Update existing store domain - branding lives in store_settings now
-        storeDomainRecord = await this.prismaService.domain_settings.update({
+        await this.prismaService.domain_settings.updateMany({
           where: { id: existingStoreDomain.id },
           data: {
             app_type: 'STORE_LANDING',
@@ -1264,6 +1335,9 @@ export class OnboardingWizardService {
             status: 'active',
             updated_at: new Date(),
           },
+        });
+        storeDomainRecord = await this.prismaService.domain_settings.findFirst({
+          where: { id: existingStoreDomain.id },
         });
       } else {
         // Generate new store domain hostname
@@ -1313,7 +1387,7 @@ export class OnboardingWizardService {
 
         if (collidingDomain && collidingDomain.store_id === store.id) {
           // Domain exists and belongs to this store -> Update it
-          storeDomainRecord = await this.prismaService.domain_settings.update({
+          await this.prismaService.domain_settings.updateMany({
             where: { id: collidingDomain.id },
             data: {
               app_type: 'STORE_LANDING',
@@ -1324,6 +1398,10 @@ export class OnboardingWizardService {
               updated_at: new Date(),
             },
           });
+          storeDomainRecord =
+            await this.prismaService.domain_settings.findFirst({
+              where: { id: collidingDomain.id },
+            });
         } else {
           // Create new store domain
           let finalHostname = storeHostname;
@@ -1406,7 +1484,7 @@ export class OnboardingWizardService {
 
       if (existingCustom) {
         // Update existing record for this org
-        customDomainRecord = await this.prismaService.domain_settings.update({
+        await this.prismaService.domain_settings.updateMany({
           where: { id: existingCustom.id },
           data: {
             app_type: customAppType as any,
@@ -1415,6 +1493,9 @@ export class OnboardingWizardService {
             status: 'pending_dns',
             updated_at: new Date(),
           },
+        });
+        customDomainRecord = await this.prismaService.domain_settings.findFirst({
+          where: { id: existingCustom.id },
         });
       } else {
         // Create new custom domain record
