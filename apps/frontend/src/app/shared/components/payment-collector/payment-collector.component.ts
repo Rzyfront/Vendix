@@ -368,7 +368,17 @@ export class PaymentCollectorComponent implements OnInit {
 
   onInstallmentChange(value: string): void {
     const id = Number(value);
-    this.selectedInstallmentId.set(Number.isFinite(id) && id > 0 ? id : null);
+    const valid = Number.isFinite(id) && id > 0;
+    this.selectedInstallmentId.set(valid ? id : null);
+    // Preserve the legacy abono UX: picking an installment pre-fills the amount
+    // with that installment's outstanding balance (operator may still override).
+    if (valid && this.config().allowAmountOverride) {
+      const inst = (this.installments() ?? []).find(
+        (i: any) => Number(i?.id ?? i?.installment_id) === id,
+      );
+      const bal = inst ? Number(inst.remaining_balance ?? inst.amount ?? 0) : 0;
+      if (bal > 0) this.amountOverrideControl.setValue(bal);
+    }
   }
 
   // ── Keypad / quick cash ──────────────────────────────────────────────────
@@ -409,7 +419,17 @@ export class PaymentCollectorComponent implements OnInit {
     this.referenceControl.setValue('');
     const pre = this.preSelectedInstallment();
     const preId = pre == null ? null : Number((pre as any)?.id ?? pre);
-    this.selectedInstallmentId.set(preId && preId > 0 ? preId : null);
+    if (preId && preId > 0) {
+      this.selectedInstallmentId.set(preId);
+      // Match the legacy modal: a pre-selected installment seeds the abono
+      // amount with its outstanding balance.
+      const preBal = Number(
+        (pre as any)?.remaining_balance ?? (pre as any)?.amount ?? 0,
+      );
+      this.amountOverrideControl.setValue(preBal > 0 ? preBal : null);
+    } else {
+      this.selectedInstallmentId.set(null);
+    }
   }
 
   private buildSubmit(): PaymentSubmit {

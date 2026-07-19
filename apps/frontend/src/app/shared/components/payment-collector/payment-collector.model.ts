@@ -188,8 +188,12 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     allowReference: true,
     allowTip: true,
     allowCredit: false,
-    allowWompi: true,
-    allowWallet: true,
+    // Table checkout settles directly via `payTableSession`
+    // (POST /store/payments/pos): it cannot drive the async Wompi online flow
+    // nor a wallet charge (no customer is wired into the mesa session). Exposing
+    // them would let an operator pick a method that silently can't be processed.
+    allowWompi: false,
+    allowWallet: false,
     requireCustomer: false,
     allowAmountOverride: false,
     showKeypad: true,
@@ -199,8 +203,12 @@ export const DEFAULT_CONFIG_BY_CONTEXT: Record<PaymentContext, PaymentCollectorC
     allowReference: true,
     allowTip: false,
     allowCredit: false,
-    allowWompi: true,
-    allowWallet: true,
+    // Order settlement goes through `flow/pay` | `flow/credit-payment`, which
+    // accept a direct/reference PayOrderDto only — there is no order-flow
+    // endpoint that processes an async Wompi charge or a wallet debit. Keep them
+    // off so the operator is never offered a method the flow can't complete.
+    allowWompi: false,
+    allowWallet: false,
     requireCustomer: false,
     allowAmountOverride: false,
     showKeypad: false,
