@@ -9,6 +9,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
   let eventEmitterMock: any;
   let cashSettlementMock: any;
   let pdfExportMock: any;
+  let orderFlowServiceMock: any;
   let context: any;
 
   const STORE_ID = 100;
@@ -87,7 +88,10 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       store_settings: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
-      // orders is only touched by advanceOrderToDelivered (live mode).
+      // orders must NEVER be written by the route anymore: the single
+      // reconciler (OrderFlowService.reconcileOrderFromDispatch, invoked by the
+      // dispatch_note.delivered listener) owns orders.state. Kept here only so
+      // the tests can assert updateMany is never called.
       orders: {
         findFirst: jest.fn(),
         updateMany: jest.fn(),
@@ -107,6 +111,10 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
 
     pdfExportMock = { generate: jest.fn() };
 
+    // Single order-state writer: the route defers to this reconciler (invoked by
+    // the dispatch_note.delivered listener), never writing orders.state itself.
+    orderFlowServiceMock = { reconcileOrderFromDispatch: jest.fn() };
+
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue(context);
 
     service = new RouteFlowService(
@@ -114,6 +122,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       eventEmitterMock as any,
       cashSettlementMock as any,
       pdfExportMock as any,
+      orderFlowServiceMock as any,
     );
 
     // Stub history/stop update so the transaction body resolves.
@@ -241,11 +250,20 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
   // ── d) PREPAID ─────────────────────────────────────────────────────
   it('d) prepaid stop: emits NONE of the cash settlement events', async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    // Prepaid is DERIVED (deriveStopIsPrepaid), never the frozen stop.is_prepaid.
+    // A paid invoice (payment_date set) is what classifies the stop as prepaid,
+    // so we must seed the note's invoice — not just the persisted boolean.
     prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
-      buildStop({ is_prepaid: true }),
+      buildStop({
+        is_prepaid: true,
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          invoice: { payment_date: new Date('2026-01-01T00:00:00Z') },
+        },
+      }),
     );
 
-    // is_prepaid bypasses the collection-coverage check even with collected=0.
+    // Derived-prepaid bypasses the collection-coverage check even with collected=0.
     await service.settleStop(ROUTE_ID, STOP_ID, {
       result: 'delivered',
       collected_amount: 0,
@@ -264,8 +282,8 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
-  // ── e) LIVE order-state mode ───────────────────────────────────────
-  it('e) live mode + linked COD order (shipped): advances order shipped→delivered on settle', async () => {
+  // ── e) Single source of truth: route NEVER writes orders.state ─────
+  it('e) linked COD order (live mode): settle does NOT write orders.state; emits dispatch_note.delivered carrying order_id for the single reconciler', async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
     prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
       buildStop({
@@ -275,7 +293,6 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     prismaMock.store_settings.findFirst.mockResolvedValue({
       settings: { dispatch: { order_state_update_mode: 'live' } },
     });
-    prismaMock.orders.findFirst.mockResolvedValue({ id: 7777, state: 'shipped' });
 
     await service.settleStop(ROUTE_ID, STOP_ID, {
       result: 'delivered',
@@ -283,21 +300,19 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       payment_method: 'cash',
     } as any);
 
-    // The COD order is advanced shipped → delivered inside the settle tx.
-    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          id: 7777,
-          store_id: STORE_ID,
-          state: 'shipped',
-        }),
-        data: expect.objectContaining({ state: 'delivered' }),
-      }),
+    // The route is an aggregator: it emits dispatch_note.delivered post-commit
+    // and its listener drives OrderFlowService.reconcileOrderFromDispatch — the
+    // ONLY order-state writer. No parallel orders.state write lives in the route,
+    // so the removed advanceOrderTo*/updateMany seam must stay gone.
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+      'dispatch_note.delivered',
+      expect.objectContaining({ dispatch_note_id: 900, order_id: 7777 }),
     );
   });
 
-  // ── f) ON_CLOSE mode (default): order state untouched at settle ─────
-  it('f) on_close mode (default) + linked COD order: does NOT advance order state on settle', async () => {
+  // ── f) Mode is honored by the reconciler, not the route ────────────
+  it('f) on_close mode (default) + linked COD order: settle still does NOT write orders.state (mode enforced downstream in the reconciler)', async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
     prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
       buildStop({
@@ -305,7 +320,6 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       }),
     );
     // store_settings default mock → null → 'on_close'.
-    prismaMock.orders.findFirst.mockResolvedValue({ id: 7777, state: 'shipped' });
 
     await service.settleStop(ROUTE_ID, STOP_ID, {
       result: 'delivered',
@@ -313,7 +327,9 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       payment_method: 'cash',
     } as any);
 
-    // Legacy behavior: order state advances only at route close, not at settle.
+    // order_state_update_mode (live vs on_close) is applied inside the reconciler
+    // (covered by order-flow.service.spec.ts), never at settle: the route writes
+    // no orders.state in either mode.
     expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
   });
 
