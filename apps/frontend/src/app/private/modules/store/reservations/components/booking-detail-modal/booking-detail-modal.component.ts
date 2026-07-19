@@ -39,6 +39,7 @@ export class BookingDetailModalComponent {
   readonly started = output<Booking>();
   readonly rescheduled = output<void>();
   readonly notesUpdated = output<void>();
+  readonly checkedIn = output<Booking>();
 
   // Image fallback tracking
   imageErrors = signal<Record<number, boolean>>({});
@@ -68,6 +69,8 @@ export class BookingDetailModalComponent {
     const map: Record<BookingStatus, string> = {
       pending: 'Pendiente',
       confirmed: 'Confirmada',
+      arriving: 'En sala',
+      attending: 'Atendiendo',
       in_progress: 'En progreso',
       completed: 'Completada',
       cancelled: 'Cancelada',
@@ -81,6 +84,8 @@ export class BookingDetailModalComponent {
     const map: Record<BookingStatus, string> = {
       pending: 'status-pending',
       confirmed: 'status-confirmed',
+      arriving: 'status-arriving',
+      attending: 'status-attending',
       in_progress: 'status-in-progress',
       completed: 'status-completed',
       cancelled: 'status-cancelled',
@@ -94,6 +99,8 @@ export class BookingDetailModalComponent {
     const map: Record<BookingStatus, string> = {
       pending: 'var(--color-warning)',
       confirmed: 'var(--color-info)',
+      arriving: 'var(--color-success)',
+      attending: 'var(--color-primary)',
       in_progress: 'var(--color-primary)',
       completed: 'var(--color-success)',
       cancelled: 'var(--color-error)',
@@ -130,6 +137,28 @@ export class BookingDetailModalComponent {
     const status = this.booking()?.status;
     return status === 'completed' || status === 'cancelled' || status === 'no_show';
   });
+
+  /**
+   * Check-in button is enabled for `confirmed` (will transition to arriving)
+   * and for `arriving` (idempotent re-mark by staff).
+   */
+  canCheckIn = computed(() => {
+    const status = this.booking()?.status;
+    return status === 'confirmed' || status === 'arriving';
+  });
+
+  /**
+   * Manual "mark attending" button for staff once the customer is on
+   * site. Distinct from check-in so the staff can flag "this customer is
+   * next" without auto-starting the service.
+   */
+  canMarkAttending = computed(() => {
+    const status = this.booking()?.status;
+    return status === 'arriving';
+  });
+
+  /// True while a check-in PATCH is in flight (button shows spinner).
+  checkingIn = signal(false);
 
   canReschedule = computed(() => {
     const status = this.booking()?.status;
@@ -293,6 +322,53 @@ export class BookingDetailModalComponent {
     if (!b) return;
     this.closed.emit();
     this.router.navigate(['/admin/consultations', b.id, 'attend']);
+  }
+
+  // --- Check-in / Mark attending (appointment redesign) ---
+
+  /**
+   * POST PATCH /:id/check-in (server marks `arrival_at`, transitions to
+   * `arriving`, and broadcasts `booking.arrival_recorded` so the smart
+   * queue refreshes + notifies the next-in-line customer).
+   */
+  checkIn(): void {
+    const b = this.booking();
+    if (!b || this.checkingIn()) return;
+    this.checkingIn.set(true);
+    this.reservationsService.checkInReservation(b.id)
+      .pipe(finalize(() => this.checkingIn.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.checkedIn.emit(updated);
+          this.toastService.success('Check-in registrado. Cliente en cola.');
+        },
+        error: () => {
+          this.toastService.error('No se pudo registrar el check-in');
+        },
+      });
+  }
+
+  /**
+   * PATCH /:id/mark-attending. The staff is calling this customer to the
+   * chair; the queue listener fires `appointment_queued` to the customer.
+   */
+  markAttending(): void {
+    const b = this.booking();
+    if (!b || this.checkingIn()) return;
+    this.checkingIn.set(true);
+    this.reservationsService.markAttending(b.id)
+      .pipe(finalize(() => this.checkingIn.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.checkedIn.emit(updated);
+          this.toastService.success('Cliente llamado a la silla');
+        },
+        error: () => {
+          this.toastService.error('No se pudo marcar como atendiendo');
+        },
+      });
   }
 
   // --- Data Collection ---
