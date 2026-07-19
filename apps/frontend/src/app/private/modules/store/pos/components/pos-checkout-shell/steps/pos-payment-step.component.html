@@ -44,7 +44,7 @@
   <div [style.display]="wompiAwaitingPayment() ? 'none' : 'block'">
     <app-payment-collector
       context="pos"
-      [amount]="cartState()?.summary?.total || 0"
+      [amount]="effectiveAmount()"
       [paymentMethods]="paymentMethods()"
       [autoLoad]="false"
       [isProcessing]="isProcessing()"

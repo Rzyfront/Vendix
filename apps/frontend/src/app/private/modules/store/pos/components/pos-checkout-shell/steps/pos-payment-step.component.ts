@@ -95,6 +95,20 @@ export class PosPaymentStepComponent implements OnInit {
   });
   /** External processing flag OR-combined with the step's internal state. */
   readonly externalProcessing = input<boolean>(false, { alias: 'isProcessing' });
+  /**
+   * When false, the step does NOT execute the sale on collector submit; it only
+   * runs the collector gate and emits {@link paymentReady} with the raw
+   * {@link PaymentSubmit}. Used by the delivery flow, where the shell/shipping
+   * step combines this payload into a single `processShippingSale` call. Pickup
+   * keeps the default `true` (self-executes via `processSaleWithPayment`).
+   */
+  readonly autoExecute = input<boolean>(true);
+  /**
+   * Overrides the amount charged by the collector. Delivery passes
+   * `cartTotal + shippingCost` here so the cash/change math reflects the real
+   * charge; null → falls back to the cart total.
+   */
+  readonly amountOverride = input<number | null>(null);
 
   // ── Outputs (same contract the legacy interface emitted) ─────────────────
   readonly paymentCompleted = output<any>();
@@ -102,6 +116,11 @@ export class PosPaymentStepComponent implements OnInit {
   readonly walletLookup = output<{ id: number | string }>();
   /** Bug 1 (Fase K): emitted when the inline picker opens a session. */
   readonly tableSessionOpened = output<OpenTableSessionResult>();
+  /**
+   * Deferred-execution channel (autoExecute=false): emits the collected payload
+   * without processing it. The shell forwards it to the shipping step.
+   */
+  readonly paymentReady = output<PaymentSubmit>();
 
   /** The headless collector — the shell drives it through this step's API. */
   protected readonly collector = viewChild(PaymentCollectorComponent);
@@ -197,6 +216,10 @@ export class PosPaymentStepComponent implements OnInit {
     const w = this.walletInfo();
     return w ? { balance: w.available } : null;
   });
+  /** Amount charged by the collector: override (delivery total+shipping) ?? cart total. */
+  readonly effectiveAmount = computed<number>(
+    () => this.amountOverride() ?? (this.cartState()?.summary?.total || 0),
+  );
 
   /** Restaurant + prepared 'consumo' still requires an open table. */
   readonly restaurantConsumoNeedsTable = computed<boolean>(
@@ -340,6 +363,15 @@ export class PosPaymentStepComponent implements OnInit {
 
     // Restaurant + prepared: 'consumo' requires an open table.
     if (this.restaurantConsumoNeedsTable()) return;
+
+    // Deferred execution (delivery pay-now): don't process here. Emit the raw
+    // payload so the shipping step folds it into a single processShippingSale.
+    // Business-hours / cash-register gates are intentionally skipped — the
+    // legacy shipping flow (confirmShipping) never enforced them.
+    if (!this.autoExecute()) {
+      this.paymentReady.emit(submit);
+      return;
+    }
 
     // Credito plan creation.
     if (submit.mode === 'credito') {
