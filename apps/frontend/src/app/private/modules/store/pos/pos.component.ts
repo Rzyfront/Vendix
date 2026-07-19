@@ -1777,6 +1777,8 @@ export class PosComponent {
     if (!this.cartState() || this.isEmpty) return;
 
     this.loading.set(false);
+    // Fase 5·B3: la venta directa finaliza aquí; cierra el shell (espeja envío).
+    this.showCheckoutModal.set(false);
 
     // Capture fulfillment + tableId chosen in the payment modal so the
     // parent can audit / forward them, then reset the local signals.
@@ -1871,6 +1873,11 @@ export class PosComponent {
               console.error('Error consuming queue entry:', err),
           });
       }
+
+      // Finalización: limpia el estado residual del padre a su valor inicial.
+      this.selectedCustomer.set(null);
+      this.paymentFulfillment.set(null);
+      this.paymentTableId.set(null);
     }
   }
 
@@ -2301,6 +2308,11 @@ export class PosComponent {
               console.error('Error consuming queue entry:', err),
           });
       }
+
+      // Finalización: limpia el estado residual del padre a su valor inicial.
+      this.selectedCustomer.set(null);
+      this.paymentFulfillment.set(null);
+      this.paymentTableId.set(null);
     }
   }
 

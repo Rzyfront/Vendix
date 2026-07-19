@@ -224,6 +224,8 @@ export class PosCheckoutShellComponent {
   // ── Anonymous-sale ownership (moved from the legacy interface) ───────────
   readonly isAnonymousSale = signal<boolean>(false);
   readonly userOverrideAnonymous = signal<boolean | null>(null);
+  /** Guard: apply the config-driven anonymous default only on the first render. */
+  private readonly anonymousDefaultSynced = signal(false);
 
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
@@ -323,21 +325,24 @@ export class PosCheckoutShellComponent {
       });
     });
 
-    // Reset-on-open (Fase 1 pattern): reset the stepper cursor, the pay-timing
-    // toggle and the anonymous state whenever the shell opens.
+    // First-render only: apply the config-driven "Venta Anónima" default once,
+    // as soon as the POS settings resolve and the operator has NOT overridden the
+    // toggle. This REPLACES the retired reset-on-open effect — opening the modal no
+    // longer resets ANY shell signal, so closing mid-checkout and reopening
+    // preserves the operator's selections (QUI-482 invariant). The pristine reset
+    // now happens only on a successful finalization (see resetState()).
     effect(() => {
-      if (this.isOpen()) {
-        untracked(() => {
-          this.currentStep.set(0);
-          this.clienteSubStep.set(0);
-          this.payTiming.set('now');
-          this.userOverrideAnonymous.set(null);
-          this.capturedAddress.set(null);
-          this.addressValid.set(false);
-          this.capturedAddressId.set(null);
+      const allow = this.allowAnonymousSales();
+      // Read the default too so the effect re-evaluates when settings resolve.
+      void this.anonymousSalesAsDefault();
+      if (this.anonymousDefaultSynced()) return;
+      if (!allow) return; // settings not resolved yet (or anonymous disabled)
+      untracked(() => {
+        if (this.userOverrideAnonymous() === null) {
           this.syncAnonymousSaleState();
-        });
-      }
+        }
+        this.anonymousDefaultSynced.set(true);
+      });
     });
 
     // Clamp the cursor when the steps array shrinks (intent / pay-timing change).
@@ -377,6 +382,26 @@ export class PosCheckoutShellComponent {
     }
     const override = this.userOverrideAnonymous();
     this.isAnonymousSale.set(override ?? this.anonymousSalesAsDefault());
+  }
+
+  /**
+   * Restore every shell signal to its declared initial value. Invoked ONLY after
+   * a successful finalization (direct sale → {@link onCheckoutCompleted}, delivery
+   * → {@link onShippingCompleted}) so the NEXT open starts pristine. It is NOT tied
+   * to open/close or step navigation (QUI-482): a mid-checkout close preserves
+   * state because nothing here runs on reopen. The final `syncAnonymousSaleState()`
+   * re-applies the config-driven "Venta Anónima" default for the next sale.
+   */
+  private resetState(): void {
+    this.currentStep.set(0);
+    this.clienteSubStep.set(0);
+    this.payTiming.set('now');
+    this.userOverrideAnonymous.set(null);
+    this.capturedAddress.set(null);
+    this.addressValid.set(false);
+    this.capturedAddressId.set(null);
+    this.submittingDraft.set(false);
+    this.syncAnonymousSaleState();
   }
 
   // ── Stepper navigation (non-blocking) ────────────────────────────────────
@@ -440,6 +465,8 @@ export class PosCheckoutShellComponent {
   /** Re-emit the Envío step result to the parent (POS). */
   onShippingCompleted(shippingData: any): void {
     this.shippingCompleted.emit(shippingData);
+    // Successful finalization → leave the shell pristine for the next open.
+    this.resetState();
   }
 
   // ── Cliente sub-wizard navegación (presentacional; QUI-482) ──────────────
@@ -538,6 +565,8 @@ export class PosCheckoutShellComponent {
   // ── Step passthrough outputs ─────────────────────────────────────────────
   onCheckoutCompleted(paymentData: any): void {
     this.checkoutCompleted.emit(paymentData);
+    // Successful finalization → leave the shell pristine for the next open.
+    this.resetState();
   }
 
   onRequestCustomer(): void {
