@@ -704,6 +704,81 @@ export class CustomersService {
     };
   }
 
+  /**
+   * Top-N clientes de la tienda ordenados por NÚMERO de órdenes `finished`.
+   * Pensado para pre-mostrar en el buscador de clientes del POS.
+   *
+   * 1. Agrega órdenes finished por `customer_id` (store-scoped, ignora null).
+   * 2. Carga los usuarios con la MISMA forma PosCustomer que `findAll`
+   *    (rol customer + store link + direcciones shipping primarias).
+   * 3. Devuelve el arreglo en el MISMO orden del ranking, cada item con
+   *    `order_count` (= _count._all). Sin clientes con órdenes → `[]`.
+   */
+  async getTopCustomers(storeId: number, limit = 5) {
+    const grouped = await this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: {
+        store_id: storeId,
+        state: 'finished',
+        customer_id: { not: null },
+      },
+      _count: { _all: true, customer_id: true },
+      orderBy: { _count: { customer_id: 'desc' } },
+      take: limit,
+    });
+
+    const ranking = grouped
+      .filter((g) => g.customer_id != null)
+      .map((g) => ({
+        customer_id: g.customer_id as number,
+        order_count: g._count._all,
+      }));
+
+    if (ranking.length === 0) {
+      return [];
+    }
+
+    const customerIds = ranking.map((r) => r.customer_id);
+
+    // Misma forma PosCustomer que `findAll`: rol customer + store link +
+    // direcciones shipping ordenadas por is_primary. `users` no está scoped
+    // por StorePrismaService (getter baseClient), de ahí el filtro manual.
+    const users = await this.prisma.users.findMany({
+      where: {
+        id: { in: customerIds },
+        store_users: {
+          some: {
+            store_id: storeId,
+          },
+        },
+        user_roles: {
+          some: {
+            roles: {
+              name: 'customer',
+            },
+          },
+        },
+      },
+      include: {
+        addresses: {
+          where: { type: 'shipping' },
+          orderBy: { is_primary: 'desc' },
+        },
+      },
+    });
+
+    const usersById = new Map(users.map((u) => [u.id, u]));
+
+    // Preserva el orden del ranking del groupBy y adjunta order_count.
+    return ranking
+      .map((r) => {
+        const user = usersById.get(r.customer_id);
+        if (!user) return null;
+        return { ...user, order_count: r.order_count };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  }
+
   async findOne(storeId: number, id: number) {
     const user = await this.prisma.users.findFirst({
       where: {

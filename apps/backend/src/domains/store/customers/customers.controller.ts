@@ -77,6 +77,24 @@ export class CustomersController {
     return this.responseService.success(result);
   }
 
+  @Get('top')
+  @Permissions('store:customers:read')
+  async getTopCustomers(
+    @Req() req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    if (!req.user.store_id) throw new Error('Store context required');
+    const n = Math.min(Math.max(parseInt(limit ?? '5', 10) || 5, 1), 20);
+    const result = await this.customersService.getTopCustomers(
+      req.user.store_id,
+      n,
+    );
+    return this.responseService.success(
+      result,
+      'Top clientes obtenidos exitosamente',
+    );
+  }
+
   @Get(':id')
   @Permissions('store:customers:read')
   findOne(
