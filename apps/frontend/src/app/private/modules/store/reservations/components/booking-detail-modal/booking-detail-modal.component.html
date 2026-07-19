@@ -367,6 +367,39 @@
               Iniciar
             </button>
           }
+          @if (canCheckIn()) {
+            <button class="btn-footer success-outline" [disabled]="checkingIn()" (click)="checkIn()">
+              @if (checkingIn()) {
+                <app-spinner size="sm" color="primary"></app-spinner>
+              } @else {
+                <app-icon name="log-in" [size]="15"></app-icon>
+              }
+              Check-in
+            </button>
+          }
+        } @else if (f.status === 'arriving' || f.status === 'attending') {
+          <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
+          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+            <app-icon name="x" [size]="15"></app-icon>
+            Cancelar
+          </button>
+          @if (canMarkAttending()) {
+            <button class="btn-footer warning-outline" [disabled]="checkingIn()" (click)="markAttending()">
+              <app-icon name="bell" [size]="15"></app-icon>
+              Llamar a la silla
+            </button>
+          }
+          @if (isConsultation()) {
+            <button class="btn-footer primary" (click)="goToConsultation()">
+              <app-icon name="stethoscope" [size]="15"></app-icon>
+              {{ consultationButtonLabel() }}
+            </button>
+          } @else {
+            <button class="btn-footer primary" (click)="started.emit(f)">
+              <app-icon name="play" [size]="15"></app-icon>
+              Iniciar
+            </button>
+          }
         } @else if (f.status === 'in_progress') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
           @if (isConsultation()) {
