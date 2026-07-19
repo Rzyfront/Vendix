@@ -56,6 +56,10 @@
         Volver
       </button>
       <span>Buscar cliente</span>
+      <app-button variant="primary" size="sm" (clicked)="goToCreate(lastQuery())">
+        <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
+        Crear cliente
+      </app-button>
     </div>
 
     <app-inputsearch
@@ -135,13 +139,6 @@
         <p>No se encontraron clientes con esos criterios</p>
       </div>
     }
-
-    <div class="create-customer-action">
-      <app-button variant="outline" size="sm" (clicked)="goToCreate(lastQuery())">
-        <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
-        Crear nuevo cliente
-      </app-button>
-    </div>
   }
 
   <!-- ══════════════════ CREATE ══════════════════ -->

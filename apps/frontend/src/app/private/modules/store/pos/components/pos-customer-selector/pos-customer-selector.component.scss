@@ -112,6 +112,11 @@
     text-transform: uppercase;
     color: var(--color-text-muted);
   }
+
+  /* Botón "Crear cliente" pegado al extremo derecho de la barra */
+  app-button {
+    margin-left: auto;
+  }
 }
 
 .back-btn {
@@ -120,7 +125,7 @@
   gap: 4px;
   background: none;
   border: none;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
