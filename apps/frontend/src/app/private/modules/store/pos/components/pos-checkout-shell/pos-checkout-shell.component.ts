@@ -307,6 +307,19 @@ export class PosCheckoutShellComponent {
     return 'Confirmar Pago';
   });
 
+  /**
+   * Remount key for the projected checkout content. Incremented ONLY by
+   * {@link resetState} (successful finalization) to force Angular to destroy +
+   * recreate the payment-step/collector, shipping-step and consumo-step with a
+   * pristine internal state. Projected content inside <app-modal> is NOT
+   * destroyed on close (only detached from the DOM), and the collector only
+   * resets on `context()` change (fires once), so without this its selected
+   * method / cash amount / mode leak into the next sale — including across
+   * cobro↔envío flows. Cancel never bumps it, so a mid-checkout close preserves
+   * the operator's selections (QUI-482 invariant).
+   */
+  readonly contentEpoch = signal(0);
+
   constructor() {
     // Ensure currency is loaded for the Resumen rail (| currency pipe).
     this.currencyService.loadCurrency();
@@ -402,6 +415,9 @@ export class PosCheckoutShellComponent {
     this.capturedAddressId.set(null);
     this.submittingDraft.set(false);
     this.syncAnonymousSaleState();
+    // Remount the projected content so the child components (collector,
+    // shipping-step, consumo-step) drop their internal state for the next sale.
+    this.contentEpoch.update((n) => n + 1);
   }
 
   // ── Stepper navigation (non-blocking) ────────────────────────────────────
