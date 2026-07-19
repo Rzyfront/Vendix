@@ -6,6 +6,7 @@ import {
   ElementRef,
   inject,
   effect,
+  untracked,
   signal,
   computed,
   DestroyRef } from '@angular/core';
@@ -970,8 +971,14 @@ export class PosShippingModalComponent {
 
     effect(() => {
       if (this.isOpen() === true) {
-        this.resetState();
-        void this.loadAddressesForCartCustomer();
+        // QUI-482: aislar el cuerpo en untracked() para que el effect dependa
+        // SOLO de isOpen() y no rastree cartState() (leído síncronamente en
+        // loadAddressesForCartCustomer). Sin esto, elegir cliente tarde
+        // re-dispara el reset y borra el método de envío ya cargado.
+        untracked(() => {
+          this.resetState();
+          void this.loadAddressesForCartCustomer();
+        });
       }
     });
   }
