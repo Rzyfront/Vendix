@@ -33,7 +33,7 @@ import { PosCartService } from '../../services/pos-cart.service';
 import { CartState, CartItem } from '../../models/cart.model';
 import { PosCustomer } from '../../models/customer.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
-import { PosOrderCreateResult } from '../pos-order-create-modal.component';
+import { PosOrderCreateResult } from '../../models/order.model';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
