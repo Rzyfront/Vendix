@@ -43,6 +43,14 @@ import {
 } from '../../../../../../shared/components/input-buttons/input-buttons.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { OrdersService } from '../../../orders/services/orders.service';
+import { Order } from '../../../orders/interfaces/order.interface';
+import {
+  DispatchNotesService,
+  CreateFromOrdersBatchDto,
+  CreateFromOrdersBatchResultItem,
+} from '../../../dispatch-notes/services/dispatch-notes.service';
 
 interface AvailableNote {
   id: number;
@@ -222,6 +230,24 @@ interface AvailableNote {
           <!-- ============================================================= -->
           @case (2) {
             <div class="space-y-4">
+              <!-- ================================================================ -->
+              <!-- Switch A/B (Plan Despacho Economia FASE 7 paso 12):              -->
+              <!--  Modo A (notes)  = adjuntar remisiones ya existentes.            -->
+              <!--  Modo B (orders) = crear remisiones al vuelo desde ordenes       -->
+              <!--    despachables. Solo se ofrece si el usuario tiene el permiso    -->
+              <!--    store:dispatch_notes:create (ver modeOptions()).               -->
+              <!-- ================================================================ -->
+              <app-input-buttons
+                label="¿Qué quieres agregar a la ruta?"
+                [options]="modeOptions()"
+                [equalWidth]="true"
+                [ngModel]="mode()"
+                [ngModelOptions]="{ standalone: true }"
+                (valueChange)="setMode($event)"
+              ></app-input-buttons>
+
+              @if (mode() === 'notes') {
+              <!-- ======================= MODO A: remisiones ======================= -->
               <!-- Tarjeta-resumen / total (compacta, superficie suave) -->
               <div
                 class="flex items-center justify-between gap-3 rounded-lg p-3"
@@ -266,7 +292,29 @@ interface AvailableNote {
                 <div
                   class="max-h-64 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 space-y-1"
                 >
-                  @for (note of availableForPicking(); track note.id) {
+                  <!-- 3 estados excluyentes: cargando / error / (lista|vacío) -->
+                  @if (notesLoading()) {
+                    <div
+                      class="flex items-center justify-center gap-2 py-8 text-sm text-[var(--color-text-secondary)]"
+                    >
+                      <div
+                        class="w-4 h-4 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin shrink-0"
+                      ></div>
+                      Cargando remisiones...
+                    </div>
+                  } @else if (notesError()) {
+                    <app-empty-state
+                      size="sm"
+                      icon="alert-triangle"
+                      iconColor="error"
+                      title="Error al cargar"
+                      [description]="notesError()!"
+                      [showActionButton]="false"
+                      [showRefreshButton]="true"
+                      (refreshClick)="loadAvailableNotes()"
+                    ></app-empty-state>
+                  } @else {
+                    @for (note of availableForPicking(); track note.id) {
                     <button
                       type="button"
                       (click)="addNote(note.id)"
@@ -313,7 +361,7 @@ interface AvailableNote {
                         class="shrink-0 text-[var(--color-primary)]"
                       />
                     </button>
-                  } @empty {
+                    } @empty {
                     <app-empty-state
                       size="sm"
                       icon="package"
@@ -321,10 +369,11 @@ interface AvailableNote {
                       [description]="
                         noteSearch()
                           ? 'No hay coincidencias.'
-                          : 'No hay remisiones disponibles.'
+                          : 'No hay remisiones disponibles para enviar.'
                       "
                       [showActionButton]="false"
                     ></app-empty-state>
+                    }
                   }
                 </div>
               </div>
@@ -405,6 +454,136 @@ interface AvailableNote {
                   }
                 </div>
               </div>
+              } @else {
+              <!-- ======================= MODO B: órdenes ======================= -->
+              <!-- Resumen de selección de órdenes despachables. -->
+              <div
+                class="flex items-center justify-between gap-3 rounded-lg p-3"
+                style="background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));"
+              >
+                <p class="text-sm text-[var(--color-text-secondary)]">
+                  <strong class="text-[var(--color-text-primary)]">{{
+                    availableOrdersForPicking().length
+                  }}</strong>
+                  disponibles ·
+                  <strong class="text-[var(--color-text-primary)]">{{
+                    selectedOrderIds().length
+                  }}</strong>
+                  seleccionadas
+                </p>
+                <div class="text-right shrink-0">
+                  <p class="text-xs text-[var(--color-text-muted)]">
+                    Total a recaudar
+                  </p>
+                  <p
+                    class="text-base font-semibold tabular-nums text-[var(--color-text-primary)]"
+                  >
+                    {{ selectedOrdersTotal() | currency }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Buscador de órdenes despachables -->
+              <app-inputsearch
+                placeholder="Buscar orden por número o cliente..."
+                [debounceTime]="250"
+                (searchChange)="orderSearch.set($event)"
+              ></app-inputsearch>
+
+              <!-- Órdenes despachables -->
+              <div>
+                <h3
+                  class="text-sm font-semibold text-[var(--color-text-primary)] mb-2"
+                >
+                  Órdenes despachables ({{ availableOrdersForPicking().length }})
+                </h3>
+                <div
+                  class="max-h-64 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 space-y-1"
+                >
+                  <!-- 3 estados excluyentes: cargando / error / (lista|vacío) -->
+                  @if (ordersLoading()) {
+                    <div
+                      class="flex items-center justify-center gap-2 py-8 text-sm text-[var(--color-text-secondary)]"
+                    >
+                      <div
+                        class="w-4 h-4 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin shrink-0"
+                      ></div>
+                      Cargando órdenes...
+                    </div>
+                  } @else if (ordersError()) {
+                    <app-empty-state
+                      size="sm"
+                      icon="alert-triangle"
+                      iconColor="error"
+                      title="Error al cargar"
+                      [description]="ordersError()!"
+                      [showActionButton]="false"
+                      [showRefreshButton]="true"
+                      (refreshClick)="loadDispatchableOrders()"
+                    ></app-empty-state>
+                  } @else {
+                    @for (order of availableOrdersForPicking(); track order.id) {
+                    <button
+                      type="button"
+                      (click)="toggleOrder(order.id)"
+                      class="w-full text-left flex items-center gap-3 p-2 rounded-md hover:bg-[var(--color-primary-light)] transition-colors min-h-[44px]"
+                      [style.background]="
+                        isOrderSelected(order.id)
+                          ? 'var(--color-primary-light)'
+                          : ''
+                      "
+                    >
+                      <span
+                        class="shrink-0 flex items-center"
+                        [style.color]="
+                          isOrderSelected(order.id)
+                            ? 'var(--color-primary)'
+                            : 'var(--color-text-muted)'
+                        "
+                      >
+                        <app-icon
+                          [name]="
+                            isOrderSelected(order.id) ? 'check-circle' : 'circle'
+                          "
+                          [size]="18"
+                        />
+                      </span>
+                      <div class="flex-1 min-w-0">
+                        <p
+                          class="text-sm font-medium text-[var(--color-text-primary)] truncate"
+                        >
+                          {{ order.order_number }}
+                          <span class="text-[var(--color-text-secondary)]"
+                            >· {{ orderCustomerName(order) }}</span
+                          >
+                        </p>
+                      </div>
+                      <span
+                        class="text-sm font-semibold tabular-nums text-[var(--color-text-primary)] shrink-0"
+                        >{{ +order.grand_total | currency }}</span
+                      >
+                    </button>
+                    } @empty {
+                    <app-empty-state
+                      size="sm"
+                      icon="shopping-cart"
+                      title="Sin órdenes"
+                      [description]="
+                        orderSearch()
+                          ? 'No hay coincidencias.'
+                          : 'No hay órdenes despachables.'
+                      "
+                      [showActionButton]="false"
+                    ></app-empty-state>
+                    }
+                  }
+                </div>
+                <p class="mt-2 text-xs text-[var(--color-text-muted)]">
+                  Se crearán las remisiones (en borrador) de las órdenes
+                  seleccionadas y se agregarán como paradas de la ruta.
+                </p>
+              </div>
+              }
             </div>
           }
         }
@@ -459,6 +638,9 @@ export class PlanillaWizardComponent {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly activatedRoute = inject(ActivatedRoute);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly ordersService = inject(OrdersService);
+  private readonly dispatchNotesService = inject(DispatchNotesService);
 
   /** Contexto precargado al llegar desde un método de envío (atajo). */
   readonly prefillNote = input<string | null>(null);
@@ -505,6 +687,84 @@ export class PlanillaWizardComponent {
 
   /** Término de búsqueda para filtrar remisiones disponibles en el paso 2. */
   readonly noteSearch = signal('');
+
+  // ==========================================================================
+  // Estados del picker de remisiones (Modo A) — cargando / error. El vacío lo
+  // resuelve el `@empty` de la lista; estos dos signals distinguen "cargando" y
+  // "falló" de "no hay". Se setean en el next/error de loadAvailableNotes().
+  // ==========================================================================
+  readonly notesLoading = signal(false);
+  readonly notesError = signal<string | null>(null);
+
+  // ==========================================================================
+  // Switch A/B (Plan Despacho Economía FASE 7 paso 12).
+  //  'notes'  = Modo A: adjuntar remisiones existentes (comportamiento previo).
+  //  'orders' = Modo B: crear remisiones al vuelo desde órdenes despachables.
+  // ==========================================================================
+  readonly mode = signal<'notes' | 'orders'>('notes');
+
+  /**
+   * El Modo B (crear remisiones desde órdenes) solo se ofrece si el usuario
+   * tiene el permiso backend `store:dispatch_notes:create`. Reactivo zoneless:
+   * `hasPermission` lee el signal `userPermissions()` del AuthFacade, por lo que
+   * el computed se recalcula cuando las credenciales terminan de cargar.
+   */
+  readonly canCreateFromOrders = computed<boolean>(() =>
+    this.authFacade.hasPermission('store:dispatch_notes:create'),
+  );
+
+  /**
+   * Opciones del segmentado del switch. El Modo B se OCULTA por completo cuando
+   * el usuario no puede crear remisiones (no hay forma de deshabilitar una sola
+   * opción del `app-input-buttons`, así que se filtra del array).
+   */
+  readonly modeOptions = computed<InputButtonOption[]>(() => {
+    const options: InputButtonOption[] = [
+      { value: 'notes', label: 'Remisiones existentes', icon: 'file-text' },
+    ];
+    if (this.canCreateFromOrders()) {
+      options.push({
+        value: 'orders',
+        label: 'Crear desde órdenes',
+        icon: 'shopping-cart',
+      });
+    }
+    return options;
+  });
+
+  // --- Estado del picker de órdenes despachables (Modo B) ---
+  readonly orders = signal<Order[]>([]);
+  readonly ordersLoading = signal(false);
+  readonly ordersError = signal<string | null>(null);
+  /** Guard: solo se cargan las órdenes la primera vez que se entra al Modo B. */
+  private ordersRequested = false;
+  /** Término de búsqueda para filtrar órdenes despachables en el Modo B. */
+  readonly orderSearch = signal('');
+  /** Ids de órdenes seleccionadas para crear remisiones (Modo B). */
+  readonly selectedOrderIds = signal<number[]>([]);
+
+  private readonly selectedOrderIdSet = computed<Set<number>>(
+    () => new Set(this.selectedOrderIds()),
+  );
+
+  /** Órdenes visibles en el Modo B, filtradas por el término de búsqueda. */
+  readonly availableOrdersForPicking = computed<Order[]>(() => {
+    const term = this.orderSearch().trim().toLowerCase();
+    return this.orders().filter((order) => {
+      if (!term) return true;
+      const haystack =
+        `${order.order_number} ${this.orderCustomerName(order)}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  });
+
+  /** Suma del grand_total de las órdenes seleccionadas (vista previa Modo B). */
+  readonly selectedOrdersTotal = computed<number>(() => {
+    const set = this.selectedOrderIdSet();
+    return this.orders()
+      .filter((o) => set.has(o.id))
+      .reduce((sum, o) => sum + Number(o.grand_total || 0), 0);
+  });
 
   /** Excluye al conductor ya elegido de la búsqueda de auxiliares. */
   readonly assistantExcludeIds = computed<number[]>(() => {
@@ -661,7 +921,9 @@ export class PlanillaWizardComponent {
    * time; if a chosen note is blocked, the API returns 400 and the wizard
    * surfaces the error in a toast.
    */
-  private loadAvailableNotes(): void {
+  loadAvailableNotes(): void {
+    this.notesLoading.set(true);
+    this.notesError.set(null);
     this.service
       .listAvailableDispatchNotes()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -670,8 +932,86 @@ export class PlanillaWizardComponent {
           const notes = (res?.data ?? []) as AvailableNote[];
           this.availableNotes.set(notes);
           this.applyPrefillNotes();
+          this.notesLoading.set(false);
+        },
+        error: (e) => {
+          this.notesError.set(
+            e?.message ?? 'No se pudieron cargar las remisiones disponibles.',
+          );
+          this.notesLoading.set(false);
         },
       });
+  }
+
+  /**
+   * Cambia entre Modo A (remisiones) y Modo B (órdenes). El Modo B se ignora si
+   * el usuario no tiene el permiso `store:dispatch_notes:create` (defensa extra
+   * al filtrado de `modeOptions()`). La primera vez que se entra al Modo B se
+   * cargan las órdenes despachables (lazy).
+   */
+  setMode(value: string): void {
+    if (value === 'orders') {
+      if (!this.canCreateFromOrders()) return;
+      this.mode.set('orders');
+      if (!this.ordersRequested) this.loadDispatchableOrders();
+      return;
+    }
+    this.mode.set('notes');
+  }
+
+  /**
+   * Carga las órdenes despachables (state ∈ {processing, pending_payment} y
+   * delivery_type que sí requiere remisión — el backend lo resuelve con
+   * `dispatchable: true`). Solo se usa en el Modo B. Reintentable desde el
+   * empty-state de error.
+   */
+  loadDispatchableOrders(): void {
+    this.ordersRequested = true;
+    this.ordersLoading.set(true);
+    this.ordersError.set(null);
+    this.ordersService
+      .getOrders({ dispatchable: true, page: 1, limit: 50 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          // OrdersService.getOrders ya desenvuelve el envelope → { data, pagination }.
+          const list = Array.isArray(res?.data)
+            ? res.data
+            : Array.isArray(res)
+              ? res
+              : [];
+          this.orders.set(list as Order[]);
+          this.ordersLoading.set(false);
+        },
+        error: (e) => {
+          this.ordersError.set(
+            e?.message ?? 'No se pudieron cargar las órdenes despachables.',
+          );
+          this.ordersLoading.set(false);
+        },
+      });
+  }
+
+  /** Nombre legible del cliente de una orden (fallback a "Cliente #id"). */
+  orderCustomerName(order: Order): string {
+    const u = order.users;
+    const name = u ? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() : '';
+    return name || (order.customer_id ? `Cliente #${order.customer_id}` : 'Sin cliente');
+  }
+
+  /** ¿La orden está seleccionada para crear su remisión (Modo B)? */
+  isOrderSelected(orderId: number): boolean {
+    return this.selectedOrderIdSet().has(orderId);
+  }
+
+  /** Alterna la selección de una orden en el Modo B. */
+  toggleOrder(orderId: number): void {
+    if (!orderId || orderId <= 0) return;
+    this.selectedOrderIds.update((ids) =>
+      ids.includes(orderId)
+        ? ids.filter((id) => id !== orderId)
+        : [...ids, orderId],
+    );
   }
 
   /**
@@ -828,9 +1168,11 @@ export class PlanillaWizardComponent {
     return stops.map((stop, i) => ({ ...stop, stop_sequence: i + 1 }));
   }
 
-  canSubmit(): boolean {
-    if (this.stops().length === 0) return false;
-    if (!this.stops().every((s) => s.dispatch_note_id > 0)) return false;
+  /**
+   * El conductor es válido cuando: interno = usuario seleccionado (> 0);
+   * externo = nombre y cédula no vacíos. Compartido por ambos modos.
+   */
+  private driverValid(): boolean {
     if (this.driverIsExternal()) {
       return !!(this.extName() && this.extId());
     }
@@ -838,17 +1180,29 @@ export class PlanillaWizardComponent {
     return driver !== null && driver > 0;
   }
 
-  submit(): void {
-    if (!this.canSubmit()) return;
-    this.submitting.set(true);
+  canSubmit(): boolean {
+    if (!this.driverValid()) return false;
+    if (this.mode() === 'orders') {
+      // Modo B: al menos una orden seleccionada + permiso vigente.
+      return this.canCreateFromOrders() && this.selectedOrderIds().length > 0;
+    }
+    // Modo A: al menos una parada con remisión válida.
+    if (this.stops().length === 0) return false;
+    return this.stops().every((s) => s.dispatch_note_id > 0);
+  }
+
+  /**
+   * Arma el DTO de la ruta con los campos comunes (conductor, vehículo, fecha,
+   * transportadora, prefill) y las paradas provistas. El backend (`create()`)
+   * sólo dispara el auto-config de vehículo/conductor/transportadora si recibe
+   * `shipping_method_id` (FASE 3 paso 12).
+   */
+  private buildRouteDto(stops: CreateStopDto[]): CreateDispatchRouteDto {
     const isExternal = this.driverIsExternal();
     const assistants = isExternal
       ? undefined
       : this.assistantIds().map((id) => ({ user_id: id }));
-    // El backend (`create()`) sólo dispara el auto-config de vehículo/conductor/
-    // transportadora si recibe `shipping_method_id` (FASE 3 paso 12). Ambos
-    // campos ya están declarados en `CreateDispatchRouteDto`.
-    const dto: CreateDispatchRouteDto = {
+    return {
       route_code: this.routeCode() || undefined,
       vehicle_id: this.vehicleId() ?? undefined,
       planned_date: new Date(this.plannedDate()).toISOString(),
@@ -861,8 +1215,23 @@ export class PlanillaWizardComponent {
       notes: this.prefillNote() || undefined,
       shipping_method_id: this.prefillShippingMethodId() ?? undefined,
       external_carrier_supplier_id: this.carrierSupplierId() ?? undefined,
-      stops: this.orderedStops(),
+      stops,
     };
+  }
+
+  submit(): void {
+    if (!this.canSubmit()) return;
+    if (this.mode() === 'orders') {
+      this.submitFromOrders();
+      return;
+    }
+    this.submitFromNotes();
+  }
+
+  /** Modo A: crea la ruta con las remisiones ya seleccionadas (sin cambios). */
+  private submitFromNotes(): void {
+    this.submitting.set(true);
+    const dto = this.buildRouteDto(this.orderedStops());
     this.service
       .create(dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -874,6 +1243,87 @@ export class PlanillaWizardComponent {
         error: (e) => {
           this.submitting.set(false);
           this.toast.error(e.message);
+        },
+      });
+  }
+
+  /**
+   * Modo B: primero crea (en borrador) una remisión por orden seleccionada vía
+   * el batch idempotente (`batch_key`), luego arma las paradas con las remisiones
+   * efectivamente creadas y crea la ruta. Reglas:
+   *  - `failed`  → toast de error con error_code/message de la primera falla.
+   *  - `skipped` → toast informativo (idempotencia / ya despachadas).
+   *  - `created.length === 0` → ABORTA: no se crea una ruta vacía.
+   */
+  private submitFromOrders(): void {
+    this.submitting.set(true);
+    const batchDto: CreateFromOrdersBatchDto = {
+      orders: this.selectedOrderIds(),
+      target_status: 'draft',
+      batch_key: crypto.randomUUID(),
+    };
+    this.dispatchNotesService
+      .createFromOrdersBatch(batchDto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const created = res.results.filter(
+            (
+              r,
+            ): r is Extract<CreateFromOrdersBatchResultItem, { status: 'created' }> =>
+              r.status === 'created',
+          );
+          const failed = res.results.filter((r) => r.status === 'failed');
+          const skipped = res.results.filter((r) => r.status === 'skipped');
+
+          if (failed.length > 0) {
+            const first = failed[0] as Extract<
+              CreateFromOrdersBatchResultItem,
+              { status: 'failed' }
+            >;
+            this.toast.error(
+              `${failed.length} orden(es) no se pudieron despachar: ${first.error_code} — ${first.message}`,
+            );
+          }
+          if (skipped.length > 0) {
+            this.toast.info(
+              `${skipped.length} orden(es) ya tenían remisión (omitidas).`,
+            );
+          }
+
+          if (created.length === 0) {
+            this.submitting.set(false);
+            this.toast.error(
+              'No se creó ninguna remisión; no se crea la ruta.',
+            );
+            return;
+          }
+
+          const stops: CreateStopDto[] = created.map((c, i) => ({
+            dispatch_note_id: c.dispatch_note_id,
+            stop_sequence: i + 1,
+          }));
+          const dto = this.buildRouteDto(stops);
+          this.service
+            .create(dto)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (r) => {
+                this.submitting.set(false);
+                this.created.emit(r);
+              },
+              error: (e) => {
+                this.submitting.set(false);
+                this.toast.error(e.message);
+              },
+            });
+        },
+        error: (e) => {
+          this.submitting.set(false);
+          this.toast.error(
+            e?.message ??
+              'No se pudieron crear las remisiones desde las órdenes.',
+          );
         },
       });
   }
