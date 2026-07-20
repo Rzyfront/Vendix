@@ -69,7 +69,8 @@ export class BookingCalendarComponent implements OnInit {
 
   readonly monthLabel = computed(() => {
     const c = this.monthCursor();
-    const cap = c.month.charAt(0).toUpperCase() + c.month.slice(1);
+    const name = this.monthName(c.month);
+    const cap = name.charAt(0).toUpperCase() + name.slice(1);
     return `${cap} ${c.year}`;
   });
 
