@@ -172,10 +172,7 @@ export class StoreUsersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SetAppTypeDto,
   ) {
-    const result = await this.storeUserManagementService.setAppType(
-      id,
-      dto.app_type,
-    );
+    const result = await this.storeUserManagementService.setAppType(id, dto);
     return this.responseService.success(
       result,
       'App type updated successfully',

@@ -152,11 +152,21 @@ export class StoreUsersManagementService {
    * (`STORE_ADMIN` | `STORE_DELIVERY`). El backend valida que `STORE_DELIVERY`
    * solo se permita si el usuario tiene el rol `carrier`. Devuelve el usuario
    * actualizado.
+   *
+   * `role_ids` (opcional): cuando se envía, el backend persiste esos roles ANTES
+   * de validar el app_type, de modo que asignar rol carrier + `STORE_DELIVERY`
+   * funcione en un solo guardado (la validación evalúa el estado final, no el
+   * previo en DB).
    */
-  setAppType(id: number, app_type: string): Observable<StoreUserDetail> {
+  setAppType(
+    id: number,
+    app_type: string,
+    role_ids?: number[],
+  ): Observable<StoreUserDetail> {
     return this.http
       .patch<{ data: StoreUserDetail }>(`${this.baseUrl}/${id}/app-type`, {
         app_type,
+        ...(role_ids ? { role_ids } : {}),
       })
       .pipe(
         map((response) => response.data),

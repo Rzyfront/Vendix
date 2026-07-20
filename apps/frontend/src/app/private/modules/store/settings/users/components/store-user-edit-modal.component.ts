@@ -255,47 +255,53 @@ import {
                     </div>
                   }
 
-                  @for (role of sortedRoles(); track role.id) {
-                    <label
-                      class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all min-h-[44px]"
-                      [class]="
-                        isRoleAssigned(role.id)
-                          ? 'border-primary/30 bg-primary/5 hover:bg-primary/10'
-                          : 'border-border hover:bg-surface'
-                      "
-                    >
-                      <input
-                        type="checkbox"
-                        [checked]="isRoleAssigned(role.id)"
-                        (change)="toggleRole(role.id)"
-                        class="w-4 h-4 rounded border-border text-primary focus:ring-primary shrink-0"
-                      />
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-1.5">
-                          <span class="text-sm font-medium text-text-primary">{{
-                            role.name
-                          }}</span>
-                          @if (role.is_system_role) {
-                            <app-badge variant="info" size="xsm"
-                              >Sistema</app-badge
+                  <!-- Cards compactas (<=300px) que se acomodan en el ancho
+                       disponible (flex-wrap) en vez de apilarse verticalmente,
+                       para dejar visible la seccion "Tipo de aplicacion". -->
+                  <div class="flex flex-wrap gap-2">
+                    @for (role of sortedRoles(); track role.id) {
+                      <label
+                        class="flex-1 min-w-[220px] max-w-[300px] flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all min-h-[44px]"
+                        [class]="
+                          isRoleAssigned(role.id)
+                            ? 'border-primary/30 bg-primary/5 hover:bg-primary/10'
+                            : 'border-border hover:bg-surface'
+                        "
+                      >
+                        <input
+                          type="checkbox"
+                          [checked]="isRoleAssigned(role.id)"
+                          (change)="toggleRole(role.id)"
+                          class="w-4 h-4 rounded border-border text-primary focus:ring-primary shrink-0"
+                        />
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center gap-1.5">
+                            <span
+                              class="text-sm font-medium text-text-primary truncate"
+                              >{{ role.name }}</span
                             >
-                          }
-                          @if (isRoleAssigned(role.id)) {
-                            <app-badge variant="success" size="xsm"
-                              >Asignado</app-badge
+                            @if (role.is_system_role) {
+                              <app-badge variant="info" size="xsm"
+                                >Sistema</app-badge
+                              >
+                            }
+                            @if (isRoleAssigned(role.id)) {
+                              <app-badge variant="success" size="xsm"
+                                >Asignado</app-badge
+                              >
+                            }
+                          </div>
+                          @if (role.description) {
+                            <p
+                              class="text-xs text-text-secondary mt-0.5 truncate"
                             >
+                              {{ role.description }}
+                            </p>
                           }
                         </div>
-                        @if (role.description) {
-                          <p
-                            class="text-xs text-text-secondary mt-0.5 truncate"
-                          >
-                            {{ role.description }}
-                          </p>
-                        }
-                      </div>
-                    </label>
-                  }
+                      </label>
+                    }
+                  </div>
 
                   <!-- ── Tipo de aplicacion (app_type) ─────────────── -->
                   <div class="pt-3 mt-1 border-t border-border space-y-2">
@@ -997,8 +1003,12 @@ export class StoreUserEditModalComponent implements OnChanges {
     if (!currentUser || value == null || this.savingAppType()) return;
     const appType = String(value);
     this.savingAppType.set(true);
+    // Enviamos los roles seleccionados localmente (incluye carrier aun sin
+    // guardar) para que el backend los persista ANTES de validar el app_type.
+    // Asi asignar rol carrier + STORE_DELIVERY funciona en un solo paso.
+    const roleIds = Array.from(this.selectedRoleIds());
     this.storeUsersService
-      .setAppType(currentUser.id, appType)
+      .setAppType(currentUser.id, appType, roleIds)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

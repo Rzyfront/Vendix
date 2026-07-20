@@ -16,6 +16,7 @@ import {
   UpdateUserRolesDto,
   UpdateUserPanelUIDto,
   SetCarrierTariffDto,
+  SetAppTypeDto,
 } from './dto';
 import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
@@ -489,12 +490,20 @@ export class StoreUserManagementService {
    * - Upsert por user_id sobre `user_settings.app_type`; el legacy sin fila crea
    *   con el panel_ui por defecto del app_type destino.
    */
-  async setAppType(
-    userId: number,
-    appType: 'STORE_ADMIN' | 'STORE_DELIVERY',
-  ) {
+  async setAppType(userId: number, dto: SetAppTypeDto) {
+    const appType = dto.app_type;
+
     // Verify user belongs to this store (404 si no pertenece).
     await this.findOne(userId);
+
+    // Guardado en un solo paso (rol + app_type): si el request trae `role_ids`,
+    // persistirlos ANTES de validar el app_type. Así la validación de `carrier`
+    // evalúa el estado FINAL (roles entrantes) y no el estado previo en DB, y no
+    // hace falta guardar el rol en una petición separada. Reutiliza `updateRoles`
+    // para conservar los guards de roles inmutables y la reversión carrier.
+    if (dto.role_ids) {
+      await this.updateRoles(userId, { role_ids: dto.role_ids });
+    }
 
     if (appType === 'STORE_DELIVERY') {
       const carrierRole = await this.prisma.user_roles.findFirst({
