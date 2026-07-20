@@ -111,9 +111,6 @@ export class PosCheckoutShellComponent {
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
-  // ── Pay timing (delivery only; owned here, two-way with the Envío step) ──
-  readonly payTiming = signal<'now' | 'later'>('now');
-
   // ── Address capture (moved from the Envío step into the Cliente step) ────
   /** Live address payload emitted by the shell-mounted `app-address-form-fields`. */
   readonly capturedAddress = signal<AddressPayload | null>(null);
@@ -164,17 +161,18 @@ export class PosCheckoutShellComponent {
   );
 
   /**
-   * Dynamic steps by intent + "cuándo paga":
+   * Dynamic steps by intent:
    *  - pickup (no restaurante)   → [Cobro, Cliente]
    *  - pickup (restaurante)      → [Consumo, Cobro, Cliente]
-   *  - delivery + pagar ahora    → [Cobro, Cliente, Envío]
-   *  - delivery + contra-entrega → [Cliente, Envío]  (sin Cobro)
+   *  - delivery                  → [Cliente, Envío, Cobro]  (Cobro SIEMPRE al final)
+   *
+   * "Contra entrega" ya no es un eje aparte: es el método de pago
+   * `cash_on_delivery` (processing_mode ON_DELIVERY) que el paso Cobro ofrece
+   * solo cuando la intención es delivery.
    */
   readonly steps = computed<StepsLineItem[]>(() => {
     if (this.checkoutIntent() === 'delivery') {
-      return this.payTiming() === 'now'
-        ? [{ label: 'Cobro' }, { label: 'Cliente' }, { label: 'Envío' }]
-        : [{ label: 'Cliente' }, { label: 'Envío' }];
+      return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
     }
     return this.showConsumoStep()
       ? [{ label: 'Consumo' }, { label: 'Cobro' }, { label: 'Cliente' }]
@@ -185,9 +183,7 @@ export class PosCheckoutShellComponent {
    *  active body and gate which step components mount. */
   readonly stepKeys = computed<string[]>(() => {
     if (this.checkoutIntent() === 'delivery') {
-      return this.payTiming() === 'now'
-        ? ['cobro', 'cliente', 'envio']
-        : ['cliente', 'envio'];
+      return ['cliente', 'envio', 'cobro'];
     }
     return this.showConsumoStep()
       ? ['consumo', 'cobro', 'cliente']
@@ -208,9 +204,13 @@ export class PosCheckoutShellComponent {
     () => this.shippingStep()?.shippingCost() ?? 0,
   );
 
-  /** Amount the Cobro collector must charge on a pay-now delivery: cart + flete. */
+  /**
+   * Amount the Cobro collector must charge on a delivery: cart + flete. Cobro is
+   * the LAST delivery step, so the flete is already defined by the time we charge
+   * (the monto is correct on first render — no longer depends on pay timing).
+   */
   readonly deliveryAmount = computed<number | null>(() =>
-    this.checkoutIntent() === 'delivery' && this.payTiming() === 'now'
+    this.checkoutIntent() === 'delivery'
       ? (this.cartState()?.summary?.total || 0) + this.shippingCost()
       : null,
   );
@@ -278,15 +278,12 @@ export class PosCheckoutShellComponent {
     if (this.footerProcessing()) return true;
 
     if (this.checkoutIntent() === 'delivery') {
-      const ship = this.shippingStep();
-      if (!ship) return true;
-      if (this.payTiming() === 'now') {
-        const pay = this.paymentStep();
-        if (!pay) return true;
-        return !pay.canSubmit() || !ship.canConfirm();
-      }
-      // contra-entrega: solo requiere envío válido.
-      return !ship.canConfirm();
+      // Cobro es el último paso: la validez del envío ya se garantizó por el gate
+      // de navegación (onConfirm re-valida y redirige a Envío si falta). Aquí solo
+      // gatea el collector — para cash_on_delivery canSubmit() es true sin monto.
+      const pay = this.paymentStep();
+      if (!pay) return true;
+      return !pay.canSubmit();
     }
 
     // pickup (B1): idéntico al collector + gate de mesa del paso Consumo.
@@ -408,7 +405,6 @@ export class PosCheckoutShellComponent {
   private resetState(): void {
     this.currentStep.set(0);
     this.clienteSubStep.set(0);
-    this.payTiming.set('now');
     this.userOverrideAnonymous.set(null);
     this.capturedAddress.set(null);
     this.addressValid.set(false);
@@ -450,7 +446,7 @@ export class PosCheckoutShellComponent {
       return;
     }
 
-    // delivery: shipping must be valid first, regardless of pay timing.
+    // delivery: shipping must be valid first (navigation is non-blocking).
     const ship = this.shippingStep();
     if (!ship?.canConfirm()) {
       this.goToStepKey('envio');
@@ -458,19 +454,16 @@ export class PosCheckoutShellComponent {
       return;
     }
 
-    if (this.payTiming() === 'now') {
-      // Combine Cobro + Envío: the collector runs deferred (autoExecute=false),
-      // emits paymentReady → onPaymentReady → shippingStep.execute(submit).
-      const pay = this.paymentStep();
-      if (!pay?.canSubmit()) {
-        this.goToStepKey('cobro');
-        return;
-      }
-      pay.triggerSubmit();
-    } else {
-      // contra-entrega: process the shipping order with no payment.
-      ship.execute(null);
+    // Cobro is the LAST delivery step and runs deferred (autoExecute=false): the
+    // collector emits paymentReady → onPaymentReady → shippingStep.execute(submit).
+    // For cash_on_delivery the collector still emits a submit (its method carries
+    // the store_payment_method_id); the backend processor returns 'pending'.
+    const pay = this.paymentStep();
+    if (!pay?.canSubmit()) {
+      this.goToStepKey('cobro');
+      return;
     }
+    pay.triggerSubmit();
   }
 
   /** Deferred-payment channel from the Cobro step (delivery pay-now). */

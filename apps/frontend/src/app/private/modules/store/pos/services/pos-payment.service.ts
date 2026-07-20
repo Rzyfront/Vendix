@@ -482,7 +482,11 @@ export class PosPaymentService {
         initial_payment_method_id: creditConfig.initial_payment_method_id,
       };
     } else if (paymentRequest) {
-      // "Pagar ahora" flow
+      // Pago del método elegido. Incluye cash_on_delivery: su
+      // `store_payment_method_id` se envía igual y el processor backend
+      // (cash-on-delivery.processor) devuelve 'pending', dejando la orden en
+      // pending_payment. Ya NO existe el eje "contra entrega" sin pago: siempre
+      // se envía el pago producido por el collector.
       sale_data['requires_payment'] = true;
       sale_data['payment_form'] = '1'; // DIAN: contado
       sale_data['store_payment_method_id'] = parseInt(
@@ -494,10 +498,6 @@ export class PosPaymentService {
         ).toFixed(2),
       );
       sale_data['payment_reference'] = paymentRequest.reference || '';
-    } else {
-      // "Contra entrega" flow
-      sale_data['requires_payment'] = false;
-      sale_data['payment_form'] = '1'; // Contra entrega sigue siendo contado
     }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(

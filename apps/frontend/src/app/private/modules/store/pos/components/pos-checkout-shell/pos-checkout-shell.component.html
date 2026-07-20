@@ -48,6 +48,7 @@
           <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cobro'">
             <app-pos-payment-step
               [cartState]="cartState()"
+              [checkoutIntent]="checkoutIntent()"
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="consumoStep()?.pickedTableId() ?? tableId()"
               [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
@@ -219,7 +220,6 @@
               [cartState]="cartState()"
               [address]="capturedAddress()"
               [addressId]="capturedAddressId()"
-              [(payTiming)]="payTiming"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>

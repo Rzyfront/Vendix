@@ -8,65 +8,13 @@
   }
 
   <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
-       Sub-pasos: 0=¿Cuándo paga? · 1=Método · 2=Costo (terminal). Espeja Cobro. -->
+       Sub-pasos: 0=Método · 1=Costo (terminal). Espeja Cobro. El "cuándo paga"
+       ya no es un sub-paso: contra entrega es el método cash_on_delivery que el
+       paso Cobro ofrece solo en delivery. -->
   <div class="ship-grid">
     <div class="ship-main">
-      <!-- SUB-STEP 0 · ¿Cuándo paga? (toggle ahora / contra-entrega) -->
+      <!-- SUB-STEP 0 · Método de envío -->
       @if (shipSubStep() === 0) {
-        <section class="payment-section">
-          <div class="section-header">
-            <app-icon name="credit-card" [size]="16" class="section-icon"></app-icon>
-            <h2 class="section-title">¿Cuándo paga?</h2>
-          </div>
-
-          <div class="sale-type-options">
-            <button
-              type="button"
-              class="sale-type-btn"
-              [class.selected]="payTiming() === 'now'"
-              (click)="selectPayTiming('now')"
-            >
-              <div class="radio-indicator">
-                @if (payTiming() === 'now') {
-                  <div class="radio-dot"></div>
-                }
-              </div>
-              <app-icon name="credit-card" [size]="20"></app-icon>
-              <div class="sale-type-info">
-                <span class="sale-type-name">Pagar ahora</span>
-                <span class="sale-type-desc">Cobro inmediato al finalizar</span>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              class="sale-type-btn"
-              [class.selected]="payTiming() === 'later'"
-              (click)="selectPayTiming('later')"
-            >
-              <div class="radio-indicator">
-                @if (payTiming() === 'later') {
-                  <div class="radio-dot"></div>
-                }
-              </div>
-              <app-icon name="package" [size]="20"></app-icon>
-              <div class="sale-type-info">
-                <span class="sale-type-name">Contra entrega</span>
-                <span class="sale-type-desc">El cliente paga al recibir</span>
-              </div>
-            </button>
-          </div>
-        </section>
-      } @else {
-        <button type="button" class="ship-collapsed" (click)="goToShipSubStep(0)">
-          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
-          <span class="sw-label">Pago: {{ payTiming() === 'now' ? 'ahora' : 'contra entrega' }}</span>
-          <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
-        </button>
-      }
-
-      <!-- SUB-STEP 1 · Método de envío -->
-      @if (shipSubStep() === 1) {
         <section
           class="payment-section"
           [class.config-flash-warning]="flashSection() === 'shipping-method'"
@@ -110,16 +58,16 @@
             </div>
           }
         </section>
-      } @else if (shipSubStep() > 1 && selectedShippingMethod()) {
-        <button type="button" class="ship-collapsed" (click)="goToShipSubStep(1)">
+      } @else if (shipSubStep() > 0 && selectedShippingMethod()) {
+        <button type="button" class="ship-collapsed" (click)="goToShipSubStep(0)">
           <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
           <span class="sw-label">Método: {{ selectedShippingMethod()?.name }}</span>
           <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
         </button>
       }
 
-      <!-- SUB-STEP 2 · Costo de envío + notas + total (terminal) -->
-      @if (shipSubStep() === 2) {
+      <!-- SUB-STEP 1 · Costo de envío + notas + total (terminal) -->
+      @if (shipSubStep() === 1) {
         @if (selectedShippingMethod()) {
           <section class="payment-section">
             <div class="section-header">
@@ -191,7 +139,7 @@
               <span class="no-methods-desc"
                 >Elige primero un método para calcular el costo del envío.</span
               >
-              <button type="button" class="no-methods-link" (click)="goToShipSubStep(1)">
+              <button type="button" class="no-methods-link" (click)="goToShipSubStep(0)">
                 Volver a Método
               </button>
             </div>

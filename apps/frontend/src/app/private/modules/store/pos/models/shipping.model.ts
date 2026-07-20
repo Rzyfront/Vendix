@@ -35,5 +35,3 @@ export interface PosShippingOption {
   currency: string;
   estimated_days?: { min: number; max: number };
 }
-
-export type PosShippingPaymentMode = 'on_delivery' | 'pay_now';

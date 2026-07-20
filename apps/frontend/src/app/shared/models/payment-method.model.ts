@@ -79,7 +79,7 @@ export function resolvePaymentIcon(type: string): string {
     wompi: 'smartphone',
     voucher: 'wallet',
     wallet: 'wallet',
-    cash_on_delivery: 'cash',
+    cash_on_delivery: 'truck',
   };
   return iconMap[type] || 'credit-card';
 }
@@ -232,6 +232,9 @@ export function fromPosBackendMethod(raw: any): PaymentMethod {
     requiresReference: requiresReferenceFor(type),
     referenceLabel: resolveReferenceLabel(type),
     dianCode: raw?.system_payment_method?.dian_code ?? undefined,
+    // processing_mode carries DIRECT | ONLINE | ON_DELIVERY. Kept so intent-based
+    // gating (e.g. hiding cash_on_delivery outside delivery) can read it.
+    processingMode: raw?.system_payment_method?.processing_mode ?? undefined,
     minAmount: raw?.min_amount ?? undefined,
     maxAmount: raw?.max_amount ?? undefined,
     original: raw,

@@ -6,7 +6,6 @@ import {
   effect,
   inject,
   input,
-  model,
   output,
   signal,
   untracked,
@@ -17,7 +16,6 @@ import {
   ReactiveFormsModule,
   FormsModule,
 } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 
 import {
@@ -37,10 +35,13 @@ import {
 import { CurrencyInputDirective } from '../../../../../../../shared/directives/currency-input.directive';
 import { CountryService } from '../../../../../../../services/country.service';
 import { AddressPayload } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
-import { environment } from '../../../../../../../../environments/environment';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
+import {
+  CustomersService,
+  CustomerAddressPayload,
+} from '../../../../customers/services/customers.service';
 import { CartState } from '../../../models/cart.model';
 import {
   PosShippingMethod,
@@ -49,6 +50,16 @@ import {
 import { PaymentRequest } from '../../../models/payment.model';
 
 type FlashSection = 'shipping-method' | 'address' | 'customer';
+
+/** Installment-shaped credit plan forwarded to `processShippingSale`. */
+type ShippingCreditConfig = {
+  num_installments: number;
+  frequency: 'weekly' | 'biweekly' | 'monthly';
+  first_installment_date: string;
+  interest_rate: number;
+  initial_payment: number;
+  initial_payment_method_id?: number;
+};
 
 /**
  * Fase 5·B2b — `app-pos-shipping-step`.
@@ -60,10 +71,11 @@ type FlashSection = 'shipping-method' | 'address' | 'customer';
  * drill-in overview/method/address del modal viejo queda **aplanada** en un
  * único panel scrollable.
  *
- * El toggle "cuándo paga" (`payTiming`: 'now' | 'later') vive aquí como
- * `model()` two-way con el shell. La ejecución se dispara desde el shell vía
- * {@link execute}, que arma `shippingAddress` + `deliveryType`, mapea el
- * `PaymentSubmit` del collector a `paymentRequest`/`creditConfig` y llama a
+ * Ya NO existe el eje "cuándo paga": "contra entrega" es ahora un método de
+ * pago canónico (`cash_on_delivery`, `processing_mode=ON_DELIVERY`) que vive en
+ * el paso Cobro. La ejecución se dispara desde el shell vía {@link execute}, que
+ * arma `shippingAddress` + `deliveryType`, mapea el `PaymentSubmit` del collector
+ * a `paymentRequest`/`creditConfig` y llama a
  * `PosPaymentService.processShippingSale` (misma firma 1:1 que el modal viejo).
  */
 @Component({
@@ -98,16 +110,14 @@ export class PosShippingStepComponent {
    * create the captured address before processing the order.
    */
   readonly addressId = input<number | null>(null);
-  /** Toggle "cuándo paga": 'now' (pagar ahora) | 'later' (contra entrega). */
-  readonly payTiming = model<'now' | 'later'>('now');
 
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly shippingCompleted = output<any>();
 
-  private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly paymentService = inject(PosPaymentService);
   private readonly shippingService = inject(PosShippingService);
+  private readonly customersService = inject(CustomersService);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly countryService = inject(CountryService);
@@ -123,11 +133,10 @@ export class PosShippingStepComponent {
   readonly isCalculatingShipping = signal<boolean>(false);
 
   // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
-  /** Sub-paso activo del paso Envío: 0=¿Cuándo paga? · 1=Método · 2=Costo. */
+  /** Sub-paso activo del paso Envío: 0=Método · 1=Costo (terminal). */
   readonly shipSubStep = signal<number>(0);
   /** Sub-pasos fijos reflejados en el `app-steps-line` vertical (Costo es terminal). */
   readonly shipSubSteps = computed<StepsLineItem[]>(() => [
-    { label: '¿Cuándo paga?' },
     { label: 'Método' },
     { label: 'Costo' },
   ]);
@@ -214,17 +223,11 @@ export class PosShippingStepComponent {
   // ── Envío sub-wizard (navegación presentacional) ──────────────────────────
   /**
    * Salta el sub-wizard de Envío a un sub-paso (clamp al rango). Presentacional:
-   * volver atrás NO resetea payTiming/método/costo — el estado vive en sus
-   * propios signals; el colapso solo cambia el índice activo.
+   * volver atrás NO resetea método/costo — el estado vive en sus propios
+   * signals; el colapso solo cambia el índice activo.
    */
   goToShipSubStep(i: number): void {
     if (i >= 0 && i < this.shipSubSteps().length) this.shipSubStep.set(i);
-  }
-
-  /** Fija el "cuándo paga" y avanza el sub-wizard al sub-paso Método. */
-  selectPayTiming(timing: 'now' | 'later'): void {
-    this.payTiming.set(timing);
-    this.goToShipSubStep(1);
   }
 
   // ── Shipping methods ──────────────────────────────────────────────────────
@@ -236,8 +239,8 @@ export class PosShippingStepComponent {
     } else {
       this.calculateShippingCost();
     }
-    // Avanza al sub-paso terminal Costo tras seleccionar método.
-    this.goToShipSubStep(2);
+    // Avanza al sub-paso terminal Costo (índice 1) tras seleccionar método.
+    this.goToShipSubStep(1);
   }
 
   getShippingIcon(type: string): string {
@@ -352,9 +355,11 @@ export class PosShippingStepComponent {
   /**
    * Builds the shipping order and processes it via `processShippingSale`.
    *
-   * @param paymentSubmit `null` for contra-entrega (order pending payment,
-   *   `paymentRequest = null`); a `contado` submit → a `PaymentRequest` charged
-   *   for `totalWithShipping`; a `credito` submit → a `creditConfig` plan.
+   * @param paymentSubmit the collector's payload (siempre presente). `contado` →
+   *   un `PaymentRequest` cobrado por `totalWithShipping`; para `cash_on_delivery`
+   *   el request lleva el `store_payment_method_id` del método ON_DELIVERY y el
+   *   processor backend devuelve 'pending' (orden `pending_payment`). `credito` →
+   *   un `creditConfig` plan.
    *
    * Limitation: the legacy `processShippingSale` credit path only models a
    * financed installment plan. A `credito` submit whose `credit.type === 'free'`
@@ -363,7 +368,7 @@ export class PosShippingStepComponent {
    * delivery orders (unlike the pickup Cobro step, which routes 'free' to
    * `processCreditSale`). This mirrors the pre-existing modal behavior.
    */
-  execute(paymentSubmit: PaymentSubmit | null): void {
+  execute(paymentSubmit: PaymentSubmit): void {
     if (this.isProcessing()) return;
 
     if (!this.canConfirm()) {
@@ -390,22 +395,11 @@ export class PosShippingStepComponent {
     };
 
     let paymentRequest: PaymentRequest | null = null;
-    let creditConfig:
-      | {
-          num_installments: number;
-          frequency: 'weekly' | 'biweekly' | 'monthly';
-          first_installment_date: string;
-          interest_rate: number;
-          initial_payment: number;
-          initial_payment_method_id?: number;
-        }
-      | undefined = undefined;
+    let creditConfig: ShippingCreditConfig | undefined = undefined;
 
-    if (paymentSubmit == null) {
-      // Contra-entrega: no payment now.
-      paymentRequest = null;
-      creditConfig = undefined;
-    } else if (paymentSubmit.mode === 'contado') {
+    if (paymentSubmit.mode === 'contado') {
+      // Siempre se ejecuta con el pago del collector (incluye cash_on_delivery,
+      // cuyo `method.id` es el store_payment_method_id del método ON_DELIVERY).
       paymentRequest = {
         orderId: 'ORDER_' + Date.now(),
         amount: this.totalWithShipping(),
@@ -428,62 +422,140 @@ export class PosShippingStepComponent {
         : undefined;
     }
 
-    const existingId = this.addressId();
-    if (!existingId && a?.address_line1 && a?.city && cart.customer) {
-      this.createAddressThenProcessOrder(
-        a,
-        shippingAddress,
-        deliveryType,
-        paymentRequest,
-        creditConfig,
-      );
-    } else {
-      this.processOrder(
-        shippingAddress,
-        deliveryType,
-        paymentRequest,
-        existingId,
-        creditConfig,
-      );
-    }
+    this.persistAddressThenProcess(
+      a,
+      shippingAddress,
+      deliveryType,
+      paymentRequest,
+      creditConfig,
+    );
   }
 
-  private createAddressThenProcessOrder(
-    address: AddressPayload,
+  /**
+   * Persiste la dirección del checkout en el address book del cliente (Paso 8)
+   * y luego procesa la orden. NO bloqueante: un fallo de persistencia muestra un
+   * toast pero la orden continúa (su `shipping_address_snapshot` se guarda igual).
+   *
+   *  - Sin id guardado + dirección utilizable → CREATE via
+   *    `CustomersService.createCustomerAddress` (incluye customer_id, lat/lng,
+   *    postal_code) y usa el nuevo id.
+   *  - Id guardado + payload distinto al guardado → UPDATE via
+   *    `updateCustomerAddress`.
+   *  - Id guardado sin cambios / sin cliente / dirección incompleta → procesa
+   *    sin persistir.
+   */
+  private persistAddressThenProcess(
+    a: AddressPayload | null,
     shippingAddress: PosShippingAddress,
     deliveryType: string,
     paymentRequest: PaymentRequest | null,
-    creditConfig?: any,
+    creditConfig?: ShippingCreditConfig,
   ): void {
-    const customer = this.cartState()!.customer!;
-    const defaultCountryCode = this.countryService.getDefaultCountry();
+    const customer = this.cartState()?.customer;
+    const existingId = this.addressId();
 
-    this.http
-      .post<any>(`${environment.apiUrl}/store/addresses`, {
-        customer_id: customer.id,
-        address_line_1: address.address_line1,
-        city: address.city,
-        state: address.state_province || '',
-        country: defaultCountryCode,
-        type: 'shipping',
+    // Sin cliente o dirección incompleta → procesa sin persistir.
+    if (!customer || !a?.address_line1 || !a?.city) {
+      this.processOrder(shippingAddress, deliveryType, paymentRequest, existingId, creditConfig);
+      return;
+    }
+
+    const dto = this.mapAddressToDto(a, Number(customer.id));
+
+    // Caso 1: sin dirección guardada → CREAR y usar el nuevo id.
+    if (!existingId) {
+      const createDto: CustomerAddressPayload = {
+        ...dto,
         is_primary: !customer.addresses?.length,
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          const newAddressId = response?.data?.id || response?.id || null;
-          this.processOrder(
-            shippingAddress,
-            deliveryType,
-            paymentRequest,
-            newAddressId,
-            creditConfig,
-          );
-        },
-        error: () => {
-          this.processOrder(shippingAddress, deliveryType, paymentRequest, null, creditConfig);
-        },
-      });
+      };
+      this.customersService
+        .createCustomerAddress(createDto)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (created) => {
+            const newId = Number(created?.id) || null;
+            this.processOrder(shippingAddress, deliveryType, paymentRequest, newId, creditConfig);
+          },
+          error: (err) => {
+            this.notifyAddressPersistFailed('No se pudo guardar la dirección');
+            console.error('createCustomerAddress failed', err);
+            this.processOrder(shippingAddress, deliveryType, paymentRequest, null, creditConfig);
+          },
+        });
+      return;
+    }
+
+    // Caso 2: dirección guardada EDITADA → UPDATE antes de procesar.
+    if (this.addressDiffersFromSaved(a, existingId)) {
+      this.customersService
+        .updateCustomerAddress(existingId, dto)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () =>
+            this.processOrder(shippingAddress, deliveryType, paymentRequest, existingId, creditConfig),
+          error: (err) => {
+            this.notifyAddressPersistFailed('No se pudo actualizar la dirección');
+            console.error('updateCustomerAddress failed', err);
+            this.processOrder(shippingAddress, deliveryType, paymentRequest, existingId, creditConfig);
+          },
+        });
+      return;
+    }
+
+    // Caso 3: sin cambios → procesa con el id existente.
+    this.processOrder(shippingAddress, deliveryType, paymentRequest, existingId, creditConfig);
+  }
+
+  /** Toast no-bloqueante cuando la persistencia de dirección falla (ej. 403). */
+  private notifyAddressPersistFailed(title: string): void {
+    this.toastService.show({
+      variant: 'warning',
+      title,
+      description: 'La orden continúa con la dirección de esta venta.',
+    });
+  }
+
+  /**
+   * Mapea `AddressPayload` (claves schema Prisma) al DTO del backend
+   * (`address_line_1`, `state`, `country`), incluyendo GPS. Réplica del mapper
+   * `customer-modal.mapAddressToDto` (mismo contrato `POST/PATCH /store/addresses`).
+   */
+  private mapAddressToDto(
+    p: AddressPayload,
+    customerId: number,
+  ): CustomerAddressPayload {
+    const dto: CustomerAddressPayload = {
+      address_line_1: p.address_line1 ?? '',
+      city: p.city ?? '',
+      state: p.state_province ?? '',
+      country: p.country_code ?? this.countryService.getDefaultCountry(),
+      type: 'shipping',
+      customer_id: customerId,
+    };
+    if (p.address_line2) dto.address_line_2 = p.address_line2;
+    if (p.postal_code) dto.postal_code = p.postal_code;
+    if (p.latitude != null) dto.latitude = String(p.latitude);
+    if (p.longitude != null) dto.longitude = String(p.longitude);
+    return dto;
+  }
+
+  /**
+   * True cuando la dirección capturada difiere de la guardada del cliente
+   * (comparación de campos textuales; lat/lng se omiten porque el seed inicial
+   * llega sin coords y su ausencia no implica una edición del operador).
+   */
+  private addressDiffersFromSaved(a: AddressPayload, savedId: number): boolean {
+    const saved = this.cartState()?.customer?.addresses?.find(
+      (x) => x.id === savedId,
+    );
+    if (!saved) return false; // sin referencia para comparar → sin cambios
+    const norm = (v: unknown) => (v == null ? '' : String(v).trim());
+    return (
+      norm(a.address_line1) !== norm(saved.address_line1) ||
+      norm(a.city) !== norm(saved.city) ||
+      norm(a.state_province) !== norm(saved.state_province) ||
+      norm(a.postal_code) !== norm(saved.postal_code)
+    );
   }
 
   private processOrder(
@@ -491,7 +563,7 @@ export class PosShippingStepComponent {
     deliveryType: string,
     paymentRequest: PaymentRequest | null,
     addressId: number | null,
-    creditConfig?: any,
+    creditConfig?: ShippingCreditConfig,
   ): void {
     this.paymentService
       .processShippingSale(

@@ -138,6 +138,15 @@ export class PaymentCollectorComponent implements OnInit {
   readonly creditTerms = signal<CreditTerms | null>(null);
   private readonly loadedMethods = signal<PaymentMethod[] | null>(null);
 
+  /**
+   * True once the operator manually edits the tendered cash (keypad / typing),
+   * so the re-seed effect stops overwriting their amount. Reset on method change
+   * and on collector reset (context change).
+   */
+  readonly manuallyEditedCash = signal<boolean>(false);
+  /** Guards programmatic cash writes so they don't flip {@link manuallyEditedCash}. */
+  private readonly suppressCashEdit = signal<boolean>(false);
+
   // ── Reactive bridges (never read FormControl.value inside computeds) ────
   readonly cashReceived = toSignal(this.cashReceivedControl.valueChanges, { initialValue: 0 });
   readonly tip = toSignal(this.tipControl.valueChanges, { initialValue: 0 });
@@ -256,6 +265,8 @@ export class PaymentCollectorComponent implements OnInit {
     if (!method || !this.config().allowReference) return false;
     if (this.isManual(method)) return false;
     if (method.type === PaymentMethodType.WOMPI) return false;
+    // Contra entrega no captura referencia: la orden queda pending.
+    if (method.type === PaymentMethodType.CASH_ON_DELIVERY) return false;
     return method.requiresReference ?? requiresReferenceFor(String(method.type));
   });
 
@@ -313,6 +324,12 @@ export class PaymentCollectorComponent implements OnInit {
       return (this.cashReceived() || 0) >= this.effectiveTotal();
     }
 
+    if (type === PaymentMethodType.CASH_ON_DELIVERY) {
+      // Pago contra entrega: la orden queda pending; el processor backend
+      // devuelve 'pending'. No exige monto recibido ni referencia.
+      return true;
+    }
+
     if (this.needsReference()) {
       return this.referenceValue().trim().length >= 1;
     }
@@ -326,6 +343,33 @@ export class PaymentCollectorComponent implements OnInit {
     effect(() => {
       this.context();
       untracked(() => this.resetState());
+    });
+
+    // Flag genuine operator edits to the cash amount (keypad / typing). Skips
+    // programmatic writes guarded by suppressCashEdit. Runs outside any reactive
+    // context, so a plain subscription (not an effect) is correct here.
+    this.cashReceivedControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.suppressCashEdit()) return;
+        this.manuallyEditedCash.set(true);
+      });
+
+    // Re-seed the tendered cash with the live total whenever effectiveTotal()
+    // changes (e.g. a delivery flete edit upstream lifts amountOverride) — but
+    // only while CASH is selected and the operator hasn't manually overridden the
+    // amount. Tracks ONLY effectiveTotal(); every cash read/write is inside
+    // untracked() and reads the raw control value (never the cashReceived signal),
+    // so the effect never re-runs from its own write.
+    effect(() => {
+      const total = this.effectiveTotal();
+      untracked(() => {
+        if (this.selectedMethod()?.type !== PaymentMethodType.CASH) return;
+        if (this.manuallyEditedCash()) return;
+        if ((this.cashReceivedControl.value ?? 0) !== total) {
+          this.setCashProgrammatic(total);
+        }
+      });
     });
   }
 
@@ -368,6 +412,8 @@ export class PaymentCollectorComponent implements OnInit {
     // Reset per-method slices so a previous method never leaks state.
     this.wompiSlice.set(null);
     this.referenceControl.setValue('');
+    // A method switch clears any prior manual cash override.
+    this.manuallyEditedCash.set(false);
 
     if (method.type === PaymentMethodType.WALLET) {
       const customer = this.customer();
@@ -378,7 +424,7 @@ export class PaymentCollectorComponent implements OnInit {
       this.selectedMethod.set(method);
       this.methodSelected.emit(method);
       this.walletLookup.emit({ id: customer.id });
-      this.cashReceivedControl.setValue(0);
+      this.setCashProgrammatic(0);
       // A customer existed → the method was really selected: advance to Monto.
       if (this.layout() === 'stepped') this.subStep.set(this.montoIndex());
       return;
@@ -388,9 +434,9 @@ export class PaymentCollectorComponent implements OnInit {
     this.methodSelected.emit(method);
 
     if (method.type === PaymentMethodType.CASH) {
-      this.cashReceivedControl.setValue(this.effectiveTotal());
+      this.setCashProgrammatic(this.effectiveTotal());
     } else {
-      this.cashReceivedControl.setValue(0);
+      this.setCashProgrammatic(0);
     }
     // In the stepped layout, picking a method advances to the Monto sub-step.
     if (this.layout() === 'stepped') this.subStep.set(this.montoIndex());
@@ -450,16 +496,24 @@ export class PaymentCollectorComponent implements OnInit {
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
+  /** Write the cash control programmatically without flagging a manual edit. */
+  private setCashProgrammatic(value: number): void {
+    this.suppressCashEdit.set(true);
+    this.cashReceivedControl.setValue(value);
+    this.suppressCashEdit.set(false);
+  }
+
   private resetState(): void {
     this.selectedMethod.set(null);
     this.subStep.set(0);
+    this.manuallyEditedCash.set(false);
     // Seed the mode from `initialMode`, but only respect a 'credito' seed when
     // credit is actually enabled; otherwise fall back to 'contado'.
     const seedCredit = this.initialMode() === 'credito' && this.config().allowCredit;
     this.mode.set(seedCredit ? 'credito' : 'contado');
     this.wompiSlice.set(null);
     this.creditTerms.set(null);
-    this.cashReceivedControl.setValue(0);
+    this.setCashProgrammatic(0);
     this.tipControl.setValue(0);
     this.amountOverrideControl.setValue(null);
     this.referenceControl.setValue('');

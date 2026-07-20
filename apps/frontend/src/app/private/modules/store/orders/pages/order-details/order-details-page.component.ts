@@ -591,6 +591,23 @@ export class OrderDetailsPageComponent {
     return !this.isKitchenOrder() && delivery !== 'direct_delivery';
   });
 
+  /**
+   * True only when the order carries an ONLINE payment still awaiting
+   * confirmation (typical ecommerce Wompi/online flow: money not yet captured).
+   * A contra-entrega (COD) order has `processing_mode === 'ON_DELIVERY'` (or no
+   * payment row at all) and therefore returns false — its dispatch is a normal
+   * action, not a "ship without confirming payment" risk. This is the single
+   * structural criterion that gates the dispatch warning UI in
+   * `pending_payment`.
+   */
+  readonly hasPendingOnlinePayment = computed<boolean>(() =>
+    (this.order()?.payments ?? []).some(
+      (p) =>
+        p.state === 'pending' &&
+        p.store_payment_method?.system_payment_method?.processing_mode === 'ONLINE',
+    ),
+  );
+
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
@@ -643,28 +660,41 @@ export class OrderDetailsPageComponent {
         actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
         break;
 
-      case 'pending_payment':
-        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
-        actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
+      case 'pending_payment': {
+        // Only an ONLINE payment pending confirmation (ecommerce) is a real
+        // "money not captured yet" risk. A contra-entrega (COD) — or an order
+        // with no online payment — collects on delivery by design, so its
+        // dispatch is a normal action with NO warning banner/alert.
+        const hasPendingOnline = this.hasPendingOnlinePayment();
 
-        // COD (contra-entrega): dispatching is allowed BEFORE the payment is
-        // confirmed so the route can carry the order and collect on delivery.
+        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
+        if (hasPendingOnline) {
+          actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
+        }
+
+        // Dispatch label/variant: warning only when an ONLINE payment is still
+        // pending. For COD / no online payment, dispatch is a normal primary
+        // action ("Despachar Orden").
+        const dispatchLabel = hasPendingOnline ? 'Despachar sin confirmar pago' : 'Despachar Orden';
+        const dispatchVariant: OrderActionConfig['variant'] = hasPendingOnline ? 'warning' : 'primary';
+
+        // Dispatching is allowed BEFORE the payment is confirmed so the route
+        // can carry the order (COD collects on delivery; online still uncaptured).
         if (this.canGenerateRemision()) {
-          // Unified entry: one button → con/sin-remisión chooser. Both paths
-          // ship the order without confirming payment (collect on delivery).
+          // Unified entry: one button → con/sin-remisión chooser.
           actions.push({
             id: 'dispatch-order',
-            label: 'Despachar sin confirmar pago',
+            label: dispatchLabel,
             icon: 'truck',
-            variant: 'warning',
+            variant: dispatchVariant,
           });
         } else if (isShipping) {
-          // direct_delivery: no remisión; manual ship without confirming payment.
+          // direct_delivery: no remisión; manual ship.
           actions.push({
             id: 'manual-ship',
-            label: 'Despachar sin confirmar pago',
+            label: dispatchLabel,
             icon: 'truck',
-            variant: 'warning',
+            variant: dispatchVariant,
           });
         } else if (isPickup) {
           // Pickup: can mark "ready to pick up" without payment (confirm dialog)
@@ -688,6 +718,7 @@ export class OrderDetailsPageComponent {
           if (infoIdx !== -1) actions.splice(infoIdx, 1);
         }
         break;
+      }
 
       case 'processing':
         if (this.isKitchenOrder()) {
