@@ -22,6 +22,7 @@ interface DayInfo {
 interface CalendarCell {
   iso: string;
   dayNumber: number;
+  dayShort: string;   // 1-char weekday (L M X J V S D), Mon=0
   inMonth: boolean;
   isToday: boolean;
   isPast: boolean;
@@ -89,6 +90,7 @@ export class BookingCalendarComponent implements OnInit {
       cells.push({
         iso: '',
         dayNumber: 0,
+        dayShort: '',
         inMonth: false,
         isToday: false,
         isPast: true,
@@ -100,9 +102,13 @@ export class BookingCalendarComponent implements OnInit {
       const date = new Date(Date.UTC(year, month - 1, d));
       const iso = date.toISOString().split('T')[0];
       const info = map.get(iso);
+      // jsWeekday 0=Sun..6=Sat → SPANISH_DAYS index 0=Mon..6=Sun
+      const jsWeekday = date.getUTCDay();
+      const dayShort = SPANISH_DAYS[(jsWeekday + 6) % 7];
       cells.push({
         iso,
         dayNumber: d,
+        dayShort,
         inMonth: true,
         isToday: iso === today,
         isPast: iso < today,

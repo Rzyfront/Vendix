@@ -45,10 +45,8 @@
         >
           @if (cell.available) {
             <app-icon name="check" [size]="14"></app-icon>
-          } @else if (cell.isPast) {
-            <app-icon name="x" [size]="14"></app-icon>
           } @else {
-            <app-icon name="x" [size]="14"></app-icon>
+            <span class="cal-cell__day">{{ cell.dayShort }}</span>
           }
           <span class="cal-cell__num">{{ cell.dayNumber }}</span>
         </button>
