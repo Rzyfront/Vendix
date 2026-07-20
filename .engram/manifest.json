@@ -672,6 +672,14 @@
       "sessions": 21,
       "memories": 25,
       "prompts": 0
+    },
+    {
+      "id": "2cf46bc4",
+      "created_by": "rzy",
+      "created_at": "2026-07-20T22:16:20Z",
+      "sessions": 37,
+      "memories": 47,
+      "prompts": 0
     }
   ]
 }
