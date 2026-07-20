@@ -265,7 +265,18 @@ export class DispatchNotesService {
     jobId: string,
   ): Promise<ReceiptScanJobStatusResult> {
     const job = await this.receiptScanQueue.getJob(jobId);
-    if (!job) {
+    // Cross-tenant IDOR guard: BullMQ job ids are GLOBAL sequential integers on
+    // a queue shared by every store, so `getJob(id)` alone lets store A read
+    // store B's OCR result (supplier, NIT, amounts, catalog matches). Validate
+    // the job's captured tenant against the caller's store context and return
+    // the SAME 404 as an unknown/evicted job so we never leak that another
+    // tenant's job exists.
+    const callerStoreId = RequestContextService.getContext()?.store_id;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.context?.store_id !== callerStoreId
+    ) {
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
     }
     const status = (await job.getState()) as ReceiptScanJobState;

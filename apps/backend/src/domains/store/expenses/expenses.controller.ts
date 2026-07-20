@@ -40,7 +40,8 @@ export class ExpensesController {
     private readonly expenses_service: ExpensesService,
     private readonly expense_flow_service: ExpenseFlowService,
     private readonly expense_scanner_service: ExpenseScannerService,
-    @InjectQueue('expense-scan') private readonly expense_scan_queue: Queue,
+    @InjectQueue('expense-scan')
+    private readonly expense_scan_queue: Queue<ExpenseScanJob>,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -166,7 +167,21 @@ export class ExpensesController {
   @Permissions('store:expenses:create')
   async getScanStatus(@Param('jobId') job_id: string) {
     const job = await this.expense_scan_queue.getJob(job_id);
-    if (!job) throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    // Cross-tenant IDOR guard: BullMQ job ids are GLOBAL sequential integers on
+    // a queue shared by every store, so `getJob(id)` alone lets store A read
+    // store B's OCR result (supplier, NIT, amounts, matched category). Validate
+    // the job's captured tenant against the caller's store context and return
+    // the SAME 404 as an unknown/evicted job so we never leak that another
+    // tenant's job exists. Uses AI_QUEUE_002 for parity with the dispatch-notes
+    // receipt-scan status endpoint.
+    const callerStoreId = RequestContextService.getContext()?.store_id;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.context?.store_id !== callerStoreId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
 
     const state = await job.getState();
     const status: ExpenseScanJobStatus = {

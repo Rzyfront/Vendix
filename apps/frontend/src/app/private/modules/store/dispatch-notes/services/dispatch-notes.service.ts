@@ -140,8 +140,14 @@ export class DispatchNotesService {
 
   /** Intervalo entre polls de estado del job de escaneo (ms). */
   private readonly RECEIPT_SCAN_POLL_INTERVAL_MS = 1800;
-  /** Timeout de guarda para todo el ciclo enqueue → poll del escaneo (ms). */
-  private readonly RECEIPT_SCAN_TIMEOUT_MS = 60_000;
+  /**
+   * Timeout de guarda para todo el ciclo enqueue → poll del escaneo (ms). Debe
+   * SUPERAR el presupuesto de reintentos del backend (`attempts: 3` + backoff
+   * exponencial 2s/4s): con OCR lento (~15-20s por intento) el peor caso supera
+   * 60s, así que un guard corto cortaría un job que sí terminaría. 120s cubre
+   * los 3 intentos con holgura y es coherente con el staleness de 1-2 min.
+   */
+  private readonly RECEIPT_SCAN_TIMEOUT_MS = 120_000;
 
   constructor(private http: HttpClient) {}
 
