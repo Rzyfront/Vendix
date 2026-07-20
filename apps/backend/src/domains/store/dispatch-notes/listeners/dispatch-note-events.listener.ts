@@ -556,6 +556,26 @@ export class DispatchNoteEventsListener {
         }
       }
 
+      // Reconciliación orden↔despacho al anular. handleDelivered/handleInvoiced
+      // ya reconcilian el estado de la orden (L410-421 / handleInvoiced); el void
+      // era el ÚNICO handler ligado a orden que lo omitía, dejando la orden
+      // colgada en 'shipped'/'delivered' sin remisión activa que lo respalde.
+      // Corre DESPUÉS de revertir stock/seriales/committed para que el
+      // reconciliador lea el estado ya consistente (nota ya persistida como
+      // 'voided'). Best-effort: el reconciliador traga sus propios errores.
+      if (dispatch_note.order_id && this.orderFlowService) {
+        try {
+          await this.orderFlowService.reconcileOrderFromDispatch(
+            dispatch_note.order_id,
+            dispatch_note.store_id,
+          );
+        } catch (err) {
+          this.logger.error(
+            `[voided] Failed to reconcile order #${dispatch_note.order_id}: ${err.message}`,
+          );
+        }
+      }
+
       this.logger.log(
         `[voided] Dispatch note #${event.dispatch_number} processed — reason: ${event.void_reason}`,
       );

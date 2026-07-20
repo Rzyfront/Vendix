@@ -1309,6 +1309,31 @@ export class OrderFlowService {
         select: { id: true, status: true },
       });
       if (notes.length === 0) {
+        // Cero remisiones activas que respalden la orden. Si está en un peldaño
+        // derivado-de-despacho (shipped/delivered/finished), la fuente-de-verdad
+        // de despacho dice "no hay despacho" → revertir al piso pre-despacho.
+        // Este es el ÚNICO caso donde el reconciliador retrocede, y sólo puede
+        // dispararse al anular la última remisión (las demás rutas siempre
+        // entran con notes>0), por lo que no introduce downgrades espurios. Va
+        // por updateOrderState directo (sin validateTransition) para no tener que
+        // abrir 'shipped'→'processing' en VALID_TRANSITIONS. Idempotente: una
+        // segunda corrida ve la orden ya en el piso (currentRank == floorRank) →
+        // NO-OP.
+        const balanceZero = Number(order.remaining_balance) <= 0.01;
+        const floorState: OrderState = balanceZero
+          ? 'processing'
+          : 'pending_payment';
+        const floorRank = RECONCILE_LADDER.indexOf(floorState);
+        const shippedRank = RECONCILE_LADDER.indexOf('shipped');
+        if (currentRank >= shippedRank && currentRank > floorRank) {
+          await this.updateOrderState(order_id, floorState, {
+            reverted_from_dispatch: true,
+            reverted_at: new Date().toISOString(),
+          });
+          this.logger.log(
+            `[reconcileOrderFromDispatch] order #${order_id} reverted '${currentState}' → '${floorState}' (no active remisión) (store #${store_id})`,
+          );
+        }
         return;
       }
 
