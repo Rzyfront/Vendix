@@ -53,15 +53,28 @@ export class SlotGridComponent {
 
   /** Group slots by morning/afternoon/evening for the section headers. */
   readonly groupedSlots = computed(() => {
-    const buckets = { MAÑANA: [] as BookingSlot[], TARDE: [] as BookingSlot[], NOCHE: [] as BookingSlot[] };
+    const buckets = { MANANA: [] as BookingSlot[], TARDE: [] as BookingSlot[], NOCHE: [] as BookingSlot[] };
     for (const s of this.slots()) {
       const hour = parseInt(s.start_time.split(':')[0], 10);
-      if (hour < 12) buckets.MAÑANA.push(s);
+      if (hour < 12) buckets.MANANA.push(s);
       else if (hour < 19) buckets.TARDE.push(s);
       else buckets.NOCHE.push(s);
     }
     return buckets;
   });
+
+  /**
+   * Order of the groups for the @for. Defined here (not inline in the
+   * template) because Angular's template parser rejects non-ASCII chars
+   * like Ñ inside @for expressions, and Ñ escapes are also not
+   * resolved by the parser. We use ASCII-only keys here and the labels
+   * include the tilde for the rendered UI.
+   */
+  readonly groupOrder: ReadonlyArray<{ key: 'MANANA' | 'TARDE' | 'NOCHE'; label: string; icon: string }> = [
+    { key: 'MANANA', label: 'Mañana', icon: '☀️' },
+    { key: 'TARDE',  label: 'Tarde',  icon: '🌤️' },
+    { key: 'NOCHE',  label: 'Noche',  icon: '🌙' },
+  ];
 
   constructor() {
     // Re-fetch when date or provider changes
