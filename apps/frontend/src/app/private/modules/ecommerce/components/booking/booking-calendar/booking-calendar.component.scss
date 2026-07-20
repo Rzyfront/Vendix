@@ -78,14 +78,15 @@
   justify-content: center;
   gap: 2px;
   width: 100%;
+  min-width: 0; // allow the grid to shrink below 44px on narrow screens
   aspect-ratio: 1;
-  min-height: 44px;
-  min-width: 44px;
-  border-radius: 10px;
+  min-height: 36px; // touch target floor that still fits 7 cols in 358px
+  padding: 2px;
+  border-radius: 8px;
   border: 1.5px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text-primary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: transform 120ms ease-out, background 120ms ease-out, color 120ms ease-out;
@@ -93,6 +94,12 @@
   &:focus-visible {
     outline: 3px solid var(--color-primary);
     outline-offset: 2px;
+  }
+
+  @media (min-width: 480px) {
+    min-height: 44px;
+    border-radius: 10px;
+    font-size: 13px;
   }
 }
 
