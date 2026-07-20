@@ -92,6 +92,10 @@ export const appConfig: ApplicationConfig = {
       // avoid stripping the Authorization header on cache-bust clones.
       withInterceptors([
         authInterceptorFn,
+        // M1 — Adds x-store-id to every API request so the backend can
+        // resolve the tenant store context without depending on the Host
+        // header (which the dev frontend strips by pointing at api.vendix.com).
+        tenantStoreIdInterceptor,
         cacheBustingInterceptor,
         subscriptionPaywallInterceptor,
         // F4 — abre el gate "no responsable de IVA" ante FISCAL_VAT_NOT_RESPONSIBLE_001.
