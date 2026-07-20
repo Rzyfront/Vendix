@@ -26,6 +26,13 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 
+import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
+import {
+  ProviderSelectorComponent,
+  BookingProvider,
+} from '../../components/booking/provider-selector/provider-selector.component';
+import { SlotGridComponent } from '../../components/booking/slot-grid/slot-grid.component';
+
 @Component({
   selector: 'app-booking',
   standalone: true,
@@ -37,6 +44,9 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
     ButtonComponent,
     IconComponent,
     CurrencyPipe,
+    BookingCalendarComponent,
+    ProviderSelectorComponent,
+    SlotGridComponent,
   ],
   templateUrl: './booking.component.html',
   styleUrls: ['./booking.component.scss'],
@@ -73,18 +83,21 @@ export class BookingComponent implements OnInit {
     return this.variants().find((v) => v.id === id) ?? null;
   });
 
-  // Step 1 - Calendar
-  currentMonth = signal(new Date());
-  availableSlots = signal<AvailabilitySlot[]>([]);
-  loadingSlots = signal(false);
-
-  // Step 2 - Time selection
+  // Step 1 — Date
   selectedDate = signal<string | null>(null);
+
+  // Step 2 — Provider
+  selectedProvider = signal<BookingProvider | null>(null);
+  readonly providerId = computed(() => this.selectedProvider()?.id ?? null);
+
+  // Step 3 — Slot
   selectedSlot = signal<AvailabilitySlot | null>(null);
+
+  // Free-booking fallback (when product has no provider scheduling).
   isFreeBooking = signal(false);
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
-  freeBookingSlots = computed(() => {
+  readonly freeBookingSlots = computed(() => {
     const duration = this.product()?.service_duration_minutes || 60;
     const slots: { time: string; endTime: string }[] = [];
     for (let mins = 480; mins + duration <= 1080; mins += duration) {
@@ -100,7 +113,21 @@ export class BookingComponent implements OnInit {
     return slots;
   });
 
-  // Step 3 - Customer details
+  // Steps config — 4 steps when the service has providers, 3 when free_booking
+  // (skip the Profesional step because free_booking has no provider assignment).
+  readonly steps = computed(() => {
+    if (this.isFreeBooking()) {
+      return [{ label: 'Fecha' }, { label: 'Horario' }, { label: 'Confirmar' }];
+    }
+    return [
+      { label: 'Fecha' },
+      { label: 'Profesional' },
+      { label: 'Horario' },
+      { label: 'Confirmar' },
+    ];
+  });
+
+  // Step 3 — Customer details
   isLoggedIn = signal(false);
   currentUser = signal<any>(null);
   guestName = signal('');
@@ -110,120 +137,6 @@ export class BookingComponent implements OnInit {
 
   // Confirmation
   bookingResult = signal<any>(null);
-
-  // Steps config
-  steps = [{ label: 'Fecha' }, { label: 'Horario' }, { label: 'Confirmar' }];
-
-  // Computed: calendar grid
-  calendarDays = computed(() => {
-    const month = this.currentMonth();
-    const year = month.getFullYear();
-    const m = month.getMonth();
-
-    const firstDay = new Date(year, m, 1);
-    const lastDay = new Date(year, m + 1, 0);
-
-    const startPad = firstDay.getDay(); // 0=Sun
-    const totalDays = lastDay.getDate();
-
-    const days: {
-      date: string;
-      day: number;
-      isCurrentMonth: boolean;
-      hasAvailability: boolean;
-    }[] = [];
-
-    // Previous month padding
-    const prevMonthLastDay = new Date(year, m, 0).getDate();
-    for (let i = startPad - 1; i >= 0; i--) {
-      const d = prevMonthLastDay - i;
-      const prevMonth = new Date(year, m - 1, d);
-      days.push({
-        date: this.formatDateISO(prevMonth),
-        day: d,
-        isCurrentMonth: false,
-        hasAvailability: false,
-      });
-    }
-
-    // Current month
-    for (let d = 1; d <= totalDays; d++) {
-      const dateObj = new Date(year, m, d);
-      const dateStr = this.formatDateISO(dateObj);
-      const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
-      days.push({
-        date: dateStr,
-        day: d,
-        isCurrentMonth: true,
-        hasAvailability: !isPast && this.dateHasAvailability(dateStr),
-      });
-    }
-
-    // Next month padding to fill 6 rows
-    const remaining = 42 - days.length;
-    for (let d = 1; d <= remaining; d++) {
-      const nextMonth = new Date(year, m + 1, d);
-      days.push({
-        date: this.formatDateISO(nextMonth),
-        day: d,
-        isCurrentMonth: false,
-        hasAvailability: false,
-      });
-    }
-
-    return days;
-  });
-
-  // Computed: slots grouped by time of day
-  groupedSlots = computed(() => {
-    const date = this.selectedDate();
-    if (!date) return { morning: [], afternoon: [], evening: [] };
-
-    const slots = this.availableSlots().filter(
-      (s) => s.date === date && s.available > 0,
-    );
-
-    return {
-      morning: slots.filter((s) => {
-        const h = parseInt(s.start_time.split(':')[0], 10);
-        return h < 12;
-      }),
-      afternoon: slots.filter((s) => {
-        const h = parseInt(s.start_time.split(':')[0], 10);
-        return h >= 12 && h < 18;
-      }),
-      evening: slots.filter((s) => {
-        const h = parseInt(s.start_time.split(':')[0], 10);
-        return h >= 18;
-      }),
-    };
-  });
-
-  hasGroupedSlots = computed(() => {
-    const g = this.groupedSlots();
-    return (
-      g.morning.length > 0 || g.afternoon.length > 0 || g.evening.length > 0
-    );
-  });
-
-  monthLabel = computed(() => {
-    const m = this.currentMonth();
-    const months = [
-      'Enero',
-      'Febrero',
-      'Marzo',
-      'Abril',
-      'Mayo',
-      'Junio',
-      'Julio',
-      'Agosto',
-      'Septiembre',
-      'Octubre',
-      'Noviembre',
-      'Diciembre',
-    ];
-    return `${months[m.getMonth()]} ${m.getFullYear()}`;
-  });
 
   ngOnInit(): void {
     const idParam = this.route.snapshot.paramMap.get('productId');
@@ -258,7 +171,6 @@ export class BookingComponent implements OnInit {
     });
 
     this.loadProduct();
-    this.loadAvailabilityForMonth();
   }
 
   // --- Data loading ---
@@ -274,7 +186,6 @@ export class BookingComponent implements OnInit {
             this.variants.set(response.data.variants ?? []);
             if (!this.selectedVariantId() && response.data.variants?.length) {
               this.selectedVariantId.set(response.data.variants[0].id);
-              this.loadAvailabilityForMonth();
             }
             this.isFreeBooking.set(
               response.data.booking_mode === 'free_booking',
@@ -289,83 +200,62 @@ export class BookingComponent implements OnInit {
       });
   }
 
-  loadAvailabilityForMonth(): void {
-    this.loadingSlots.set(true);
-    const month = this.currentMonth();
-    const year = month.getFullYear();
-    const m = month.getMonth();
-
-    const dateFrom = this.formatDateISO(new Date(year, m, 1));
-    const dateTo = this.formatDateISO(new Date(year, m + 1, 0));
-
-    this.bookingService
-      .getAvailability(this.productId(), dateFrom, dateTo, this.selectedVariantId() ?? undefined)
-      .subscribe({
-        next: (response) => {
-          const rawSlots = response.data || response || [];
-          // Map total_available → available for compatibility
-          const slots = (rawSlots as any[]).map((s) => ({
-            ...s,
-            available: s.available ?? s.total_available ?? 0,
-          }));
-          this.availableSlots.set(slots as AvailabilitySlot[]);
-          this.loadingSlots.set(false);
-        },
-        error: () => {
-          this.loadingSlots.set(false);
-          this.toast.error('No se pudo cargar la disponibilidad', 'Error');
-        },
-      });
-  }
-
-  // --- Calendar navigation ---
-
-  prevMonth(): void {
-    const curr = this.currentMonth();
-    const prev = new Date(curr.getFullYear(), curr.getMonth() - 1, 1);
-    // Don't go before current month
-    const now = new Date();
-    if (
-      prev.getFullYear() < now.getFullYear() ||
-      (prev.getFullYear() === now.getFullYear() &&
-        prev.getMonth() < now.getMonth())
-    ) {
-      return;
-    }
-    this.currentMonth.set(prev);
-    this.loadAvailabilityForMonth();
-  }
-
-  nextMonth(): void {
-    const curr = this.currentMonth();
-    this.currentMonth.set(new Date(curr.getFullYear(), curr.getMonth() + 1, 1));
-    this.loadAvailabilityForMonth();
-  }
-
   // --- Variant selection ---
 
   onVariantSelected(variant: ProductVariantDetail): void {
     this.selectedVariantId.set(variant.id);
-    this.loadAvailabilityForMonth();
+    this.selectedDate.set(null);
+    this.selectedProvider.set(null);
+    this.selectedSlot.set(null);
+  }
+
+  // --- Step navigation ---
+
+  /**
+   * When the service is `free_booking`, the step indices shift: Fecha=0,
+   * Horario=1, Confirmar=2. When the service requires a provider, Fecha=0,
+   * Profesional=1, Horario=2, Confirmar=3.
+   */
+  get profesionalStep(): number {
+    return this.isFreeBooking() ? 1 : 1; // always 1 — Profesional is step 1
+    // When free_booking, the step indicator shows 3 steps and step 1 is
+    // Horario. We hide the Profesional section via @if (currentStep() === 1
+    // && !isFreeBooking()).
+  }
+
+  get horarioStep(): number {
+    return this.isFreeBooking() ? 1 : 2;
+  }
+
+  get confirmStep(): number {
+    return this.isFreeBooking() ? 2 : 3;
   }
 
   // --- Step 1: Date selection ---
 
-  selectDate(dateStr: string): void {
-    if (!this.isFreeBooking() && !this.dateHasAvailability(dateStr)) return;
-    if (this.isPastDate(dateStr)) return;
-    this.selectedDate.set(dateStr);
+  onDateSelected(date: string): void {
+    if (this.isPastDate(date)) return;
+    this.selectedDate.set(date);
     this.selectedSlot.set(null);
     this.freeBookingTime.set(null);
     this.freeBookingEndTime.set(null);
+    // Skip Profesional step when free_booking (no provider scheduling).
     this.currentStep.set(1);
   }
 
-  // --- Step 2: Slot selection ---
+  // --- Step 2: Provider selection ---
 
-  selectSlot(slot: AvailabilitySlot): void {
-    this.selectedSlot.set(slot);
+  onProviderSelected(provider: BookingProvider): void {
+    this.selectedProvider.set(provider);
+    this.selectedSlot.set(null);
     this.currentStep.set(2);
+  }
+
+  // --- Step 3: Slot selection ---
+
+  onSlotSelected(slot: AvailabilitySlot): void {
+    this.selectedSlot.set(slot);
+    this.currentStep.set(3);
   }
 
   selectFreeBookingTime(slot: { time: string; endTime: string }): void {
@@ -374,7 +264,7 @@ export class BookingComponent implements OnInit {
     this.currentStep.set(2);
   }
 
-  // --- Step 3: Confirm ---
+  // --- Step 4: Confirm ---
 
   confirmBooking(): void {
     if (!this.isLoggedIn()) {
@@ -460,13 +350,7 @@ export class BookingComponent implements OnInit {
 
   // --- Helpers ---
 
-  private dateHasAvailability(dateStr: string): boolean {
-    return this.availableSlots().some(
-      (s) => s.date === dateStr && s.available > 0,
-    );
-  }
-
-  private formatDateISO(date: Date): string {
+  formatDateISO(date: Date): string {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const d = String(date.getDate()).padStart(2, '0');
@@ -507,10 +391,6 @@ export class BookingComponent implements OnInit {
       'Diciembre',
     ];
     return `${days[date.getDay()]} ${date.getDate()} de ${months[date.getMonth()]}`;
-  }
-
-  isToday(dateStr: string): boolean {
-    return dateStr === this.formatDateISO(new Date());
   }
 
   isPastDate(dateStr: string): boolean {
