@@ -1309,6 +1309,31 @@ export class OrderFlowService {
         select: { id: true, status: true },
       });
       if (notes.length === 0) {
+        // Cero remisiones activas que respalden la orden. Si está en un peldaño
+        // derivado-de-despacho (shipped/delivered/finished), la fuente-de-verdad
+        // de despacho dice "no hay despacho" → revertir al piso pre-despacho.
+        // Este es el ÚNICO caso donde el reconciliador retrocede, y sólo puede
+        // dispararse al anular la última remisión (las demás rutas siempre
+        // entran con notes>0), por lo que no introduce downgrades espurios. Va
+        // por updateOrderState directo (sin validateTransition) para no tener que
+        // abrir 'shipped'→'processing' en VALID_TRANSITIONS. Idempotente: una
+        // segunda corrida ve la orden ya en el piso (currentRank == floorRank) →
+        // NO-OP.
+        const balanceZero = Number(order.remaining_balance) <= 0.01;
+        const floorState: OrderState = balanceZero
+          ? 'processing'
+          : 'pending_payment';
+        const floorRank = RECONCILE_LADDER.indexOf(floorState);
+        const shippedRank = RECONCILE_LADDER.indexOf('shipped');
+        if (currentRank >= shippedRank && currentRank > floorRank) {
+          await this.updateOrderState(order_id, floorState, {
+            reverted_from_dispatch: true,
+            reverted_at: new Date().toISOString(),
+          });
+          this.logger.log(
+            `[reconcileOrderFromDispatch] order #${order_id} reverted '${currentState}' → '${floorState}' (no active remisión) (store #${store_id})`,
+          );
+        }
         return;
       }
 
@@ -1535,33 +1560,113 @@ export class OrderFlowService {
   }
 
   /**
-   * Cancel an order (from created, pending_payment, or processing)
+   * Cancel an order (from created, pending_payment, or processing).
+   *
+   * Concurrency-safe (BUG-3): the state guard is enforced by an ATOMIC
+   * conditional UPDATE (claim-once pattern, mirrors
+   * OrderStockCommitService:361) instead of a check-then-act read. Two
+   * concurrent cancellations can both pass the cheap fast-path guard, but only
+   * ONE wins the conditional UPDATE (count=1) and runs the one-shot effects
+   * pipeline; the loser matches 0 rows and aborts with the SAME error, never
+   * double-running the pipeline (double payment-cancel / double release / double
+   * event). The claim + payment-cancel + metadata write share ONE
+   * $transaction (pattern of reactivateOrder) so they commit atomically; the
+   * order.status_changed event is emitted only AFTER commit with the REAL
+   * previous state.
    */
   async cancelOrder(orderId: number, dto: CancelOrderDto) {
     const order = await this.getOrder(orderId);
+    const previousState = order.state as OrderState;
 
-    if (!CANCELABLE_STATES.includes(order.state as OrderState)) {
-      throw new BadRequestException(
-        `Cannot cancel order in state '${order.state}'. ` +
+    const notCancelableError = () =>
+      new BadRequestException(
+        `Cannot cancel order in state '${previousState}'. ` +
           `Cancellation is only allowed from: [${CANCELABLE_STATES.join(', ')}]`,
       );
+
+    // Fast-path guard — clean error for the common (non-race) case without
+    // opening a transaction. The authoritative guard is the atomic claim below.
+    if (!CANCELABLE_STATES.includes(previousState)) {
+      throw notCancelableError();
     }
 
-    // Cancel any active payments when the order is cancelled
-    const activePayments = order.payments.filter(
-      (p) => p.state === 'pending' || p.state === 'succeeded',
-    );
-    for (const payment of activePayments) {
-      await this.prisma.payments.update({
-        where: { id: payment.id },
-        data: {
-          state: 'cancelled',
-          updated_at: new Date(),
+    // State-machine edge check (cancelled is a valid target from every
+    // CANCELABLE_STATE) — preserved from the original flow.
+    this.validateTransition(previousState, 'cancelled');
+
+    // Build cancel metadata exactly as updateOrderState would: `orders` has no
+    // cancelled_at/cancellation_reason columns, so these + previous_state live
+    // in internal_notes._flow_metadata (reactivateOrder reads previous_state
+    // back). Merge with any pre-existing _flow_metadata.
+    let existingMetadata: Record<string, any> = {};
+    if (order.internal_notes) {
+      try {
+        const parsed = JSON.parse(order.internal_notes);
+        if (parsed._flow_metadata) {
+          existingMetadata = parsed._flow_metadata;
+        }
+      } catch {
+        existingMetadata = { original_notes: order.internal_notes };
+      }
+    }
+    const internal_notes = JSON.stringify({
+      _flow_metadata: {
+        ...existingMetadata,
+        cancelled_at: new Date(),
+        cancellation_reason: dto.reason,
+        // Persist the previous state so reactivateOrder() can restore it.
+        previous_state: previousState,
+      },
+      notes: existingMetadata.original_notes || '',
+    });
+
+    // CLAIM + payment-cancel + metadata write share ONE transaction so they
+    // commit atomically (pattern of reactivateOrder).
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      // ATOMIC CLAIM — the conditional UPDATE is the source of truth that
+      // serializes concurrent cancellations (double-click / retry). Only ONE
+      // request flips the state out of CANCELABLE_STATES (count=1); a
+      // concurrent request blocks on the row lock, re-evaluates the WHERE
+      // (state is now 'cancelled' ∉ CANCELABLE_STATES) and matches 0 rows →
+      // aborts here WITHOUT running the effects below.
+      const claim = await tx.orders.updateMany({
+        where: { id: orderId, state: { in: CANCELABLE_STATES } },
+        data: { state: 'cancelled', updated_at: new Date() },
+      });
+      if (claim.count === 0) {
+        throw notCancelableError();
+      }
+
+      // Winner: cancel any active payments (one-shot).
+      const activePayments = order.payments.filter(
+        (p) => p.state === 'pending' || p.state === 'succeeded',
+      );
+      for (const payment of activePayments) {
+        await tx.payments.update({
+          where: { id: payment.id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+      }
+
+      // Persist cancel metadata (state/updated_at were already set by the
+      // claim) and return the fully-included order (same shape updateOrderState
+      // returned).
+      return tx.orders.update({
+        where: { id: orderId },
+        data: { internal_notes, updated_at: new Date() },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          payments: true,
         },
       });
-    }
+    });
 
-    // Release reserved stock by reference (no location_id needed — fixes mismatched location bug)
+    // Release reserved stock by reference — kept OUTSIDE the transaction and
+    // best-effort (exactly as before): a release failure must never abort a
+    // cancellation, and swallowing a DB error INSIDE a Postgres tx would poison
+    // it (aborted-transaction). Runs exactly once because only the claim winner
+    // reaches this point.
     try {
       await this.stockLevelManager.releaseReservationsByReference(
         'order',
@@ -1574,13 +1679,14 @@ export class OrderFlowService {
       );
     }
 
-    this.validateTransition(order.state as OrderState, 'cancelled');
-    const updatedOrder = await this.updateOrderState(orderId, 'cancelled', {
-      cancelled_at: new Date(),
-      cancellation_reason: dto.reason,
-      // Persist the previous state so it can be restored by reactivateOrder().
-      // updateOrderState stores unknown keys into internal_notes._flow_metadata.
-      previous_state: order.state,
+    // Emitted AFTER commit (never on rollback) with the REAL previous state,
+    // mirroring updateOrderState's order.status_changed.
+    this.eventEmitter.emit('order.status_changed', {
+      store_id: updatedOrder.store_id,
+      order_id: orderId,
+      order_number: order.order_number,
+      old_state: previousState,
+      new_state: 'cancelled',
     });
 
     this.logger.log(`Order #${orderId} cancelled: ${dto.reason}`);

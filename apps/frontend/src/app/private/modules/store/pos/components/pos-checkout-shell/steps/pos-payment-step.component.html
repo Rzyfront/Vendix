@@ -2,7 +2,7 @@
      pos-payment-interface.html (collector + Wompi awaiting), sin el
      <app-modal> ni Resumen/Cliente. El tipo de servicio (fulfillment) y la
      mesa viven ahora en el paso Consumo (`app-pos-consumo-step`). -->
-<div class="payment-step">
+<div class="payment-step pos-payment-context">
   <!-- Bloque de RECOLECCIÓN de pago delegado al collector headless. La
        orquestación (cliente, caja, horario, polling Wompi POST-submit) vive en
        este step; el fulfillment/mesa los provee el paso Consumo por input. -->
@@ -22,6 +22,7 @@
       (submit)="onCollectorSubmit($event)"
       (requestCustomer)="requestCustomer.emit()"
       (walletLookup)="onWalletLookup($event)"
+      (amountConfirmed)="amountConfirmed.emit()"
     ></app-payment-collector>
   </div>
 

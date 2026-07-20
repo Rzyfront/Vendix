@@ -7040,6 +7040,7 @@ model dispatch_notes {
   subtotal_amount      Decimal                      @default(0) @db.Decimal(12, 2)
   discount_amount      Decimal                      @default(0) @db.Decimal(12, 2)
   tax_amount           Decimal                      @default(0) @db.Decimal(12, 2)
+  shipping_cost        Decimal                      @default(0) @db.Decimal(12, 2)
   grand_total          Decimal                      @default(0) @db.Decimal(12, 2)
   currency             String?                      @db.VarChar(10)
   notes                String?                      @db.Text

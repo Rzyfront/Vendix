@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { notification_type_enum } from '@prisma/client';
+import { notification_type_enum, Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -143,21 +143,38 @@ export class NotificationsService {
    * `data->>'target_user_id' = $userId` for the targeted branch) — no
    * in-memory filtering, no pagination regression.
    */
-  async findAll(user_id: number, query_dto: NotificationQueryDto) {
-    const { page = 1, limit = 20, type, is_read } = query_dto;
-    const skip = (page - 1) * limit;
-
-    const target_filter = {
+  /**
+   * Shared bell target filter (anti-drift). Extracted so `findAll` and
+   * `getUnreadCount` share the SAME `OR` and can never diverge in a single
+   * site — this is what caused BUG-4, where one branch used a bare
+   * `{ data: null }`.
+   *
+   * The bell shows every notification that is EITHER a store-wide broadcast
+   * (the `data` column is SQL NULL, OR its `target_user_id` path is
+   * absent/JSON-null) OR directed at the caller (`data.target_user_id ===
+   * user_id`). The SQL-NULL branch MUST use `Prisma.DbNull`: Prisma 7 rejects
+   * a bare `{ data: null }` on a `Json?` column (throws
+   * PrismaClientValidationError → 500 on every layout load).
+   */
+  private buildBellTargetFilter(user_id: number) {
+    return {
       OR: [
         // Broadcast — `data` column is SQL NULL (createAndBroadcast passed
         // no payload).
-        { data: null },
+        { data: { equals: Prisma.DbNull } },
         // Broadcast — path `target_user_id` is absent OR explicitly JSON null.
         { data: { path: ['target_user_id'], equals: null } },
         // Targeted at the calling user.
         { data: { path: ['target_user_id'], equals: user_id } },
       ],
     };
+  }
+
+  async findAll(user_id: number, query_dto: NotificationQueryDto) {
+    const { page = 1, limit = 20, type, is_read } = query_dto;
+    const skip = (page - 1) * limit;
+
+    const target_filter = this.buildBellTargetFilter(user_id);
 
     const where: any = {
       AND: [
@@ -207,15 +224,7 @@ export class NotificationsService {
     const count = await this.notificationsModel.count({
       where: {
         is_read: false,
-        AND: [
-          {
-            OR: [
-              { data: null },
-              { data: { path: ['target_user_id'], equals: null } },
-              { data: { path: ['target_user_id'], equals: user_id } },
-            ],
-          },
-        ],
+        AND: [this.buildBellTargetFilter(user_id)],
       },
     });
     return { count };

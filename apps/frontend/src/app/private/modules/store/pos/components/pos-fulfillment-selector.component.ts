@@ -156,12 +156,25 @@ export class PosFulfillmentSelectorComponent {
   /** Emits when the operator picks a fulfillment option. */
   readonly selectionChange = output<FulfillmentType>();
 
+  /**
+   * Emits when the operator clicks the option that is ALREADY selected. The
+   * parent uses this to advance the wizard (e.g. re-clicking "Entrega" jumps to
+   * the next step). Kept separate from `selectionChange` so a re-click never
+   * re-runs selection side-effects.
+   */
+  readonly reselected = output<FulfillmentType>();
+
   /** Convenience: same as `consumoBlocked()` but exposed for the parent. */
   readonly isConsumoBlocked = computed(() => this.consumoBlocked());
 
   onPick(type: FulfillmentType): void {
     if (type === 'consumo' && this.isConsumoBlocked()) return;
-    if (type === this.value()) return;
+    // Re-click on the already-selected option → ask the parent to advance
+    // instead of silently ignoring it.
+    if (type === this.value()) {
+      this.reselected.emit(type);
+      return;
+    }
     this.selectionChange.emit(type);
   }
 }

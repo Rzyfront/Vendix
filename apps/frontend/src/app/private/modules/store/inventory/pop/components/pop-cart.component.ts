@@ -18,6 +18,7 @@ import { FormsModule } from '@angular/forms';
 
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { QuantityControlComponent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
+import type { QuantityClampEvent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -379,6 +380,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                       [disabled]="loading()"
                       [size]="'sm'"
                       (valueChange)="updateQuantity(item.id, $event)"
+                      (valueClamped)="onQuantityClamped($event)"
                     ></app-quantity-control>
                   }
                 </div>
@@ -507,6 +509,20 @@ export class PopCartComponent {
 
   trackByItemId(_index: number, item: PopCartItem): string {
     return item.id;
+  }
+
+  /**
+   * Feedback visible cuando `app-quantity-control` clampa un valor fuera de
+   * rango (mismo patrón que POS `onQuantityClamped`). En POP el control solo
+   * define `min=1` (no hay cap de stock en una orden de compra), así que en la
+   * práctica solo se dispara `reason: 'min'`; se cubren ambos por robustez.
+   */
+  onQuantityClamped(event: QuantityClampEvent): void {
+    const message =
+      event.reason === 'min'
+        ? `La cantidad mínima es ${event.limit}.`
+        : `Cantidad ajustada a ${event.limit}.`;
+    this.toastService.info(message, 'Cantidad ajustada', 2200);
   }
 
   updateQuantity(itemId: string, quantity: number): void {

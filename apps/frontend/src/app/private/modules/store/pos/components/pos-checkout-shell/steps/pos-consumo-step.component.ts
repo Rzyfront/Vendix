@@ -70,6 +70,13 @@ export class PosConsumoStepComponent {
   // ── Outputs ──────────────────────────────────────────────────────────────
   readonly fulfillmentChange = output<FulfillmentType>();
   readonly tableSessionOpened = output<OpenTableSessionResult>();
+  /**
+   * Asks the shell to advance to the next top-level step. Fired when:
+   *  - the operator re-clicks the already-selected fulfillment and no further
+   *    input is pending (entrega, or consumo with a table already picked), or
+   *  - a table session was just opened (consumo → mesa selected).
+   */
+  readonly advanceRequested = output<void>();
 
   // ── Handlers (moved verbatim from pos-payment-step) ──────────────────────
   onFulfillmentChange(next: FulfillmentType): void {
@@ -80,6 +87,26 @@ export class PosConsumoStepComponent {
     this.fulfillmentChange.emit(next);
   }
 
+  /**
+   * Re-click on the ALREADY-selected fulfillment option:
+   *  - entrega (para llevar) → nothing else is required, advance.
+   *  - consumo → advance only when a table is already picked; otherwise open the
+   *    table picker so the operator can pick one (which then advances via
+   *    {@link onTableSessionPicked}).
+   */
+  onFulfillmentReselected(type: FulfillmentType): void {
+    if (type === 'entrega') {
+      this.advanceRequested.emit();
+      return;
+    }
+    // consumo
+    if (this.needsTable()) {
+      this.openTablePicker.set(true);
+      return;
+    }
+    this.advanceRequested.emit();
+  }
+
   onTableSessionPicked(result: OpenTableSessionResult): void {
     this.openTablePicker.set(false);
     const session = result?.session ?? result;
@@ -88,5 +115,7 @@ export class PosConsumoStepComponent {
     this.pickedTableId.set(tableId);
     this.pickedSessionId.set(sessionId);
     this.tableSessionOpened.emit(result);
+    // A table was opened (backend marks it occupied) → advance to the next step.
+    if (tableId != null) this.advanceRequested.emit();
   }
 }

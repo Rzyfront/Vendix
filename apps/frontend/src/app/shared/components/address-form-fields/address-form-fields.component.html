@@ -36,13 +36,21 @@
   }
 
   <form [formGroup]="form" class="space-y-4">
-    <app-input
-      label="Dirección"
-      formControlName="address_line1"
-      placeholder="Calle y número"
-      [control]="form.get('address_line1')!"
-      [required]="true"
-    ></app-input>
+    <div class="field-block">
+      <app-input
+        label="Dirección"
+        formControlName="address_line1"
+        placeholder="Calle y número"
+        [control]="form.get('address_line1')!"
+        [required]="true"
+      ></app-input>
+      @if (showErrors() && line1Invalid()) {
+        <p class="field-error" role="alert">
+          <app-icon name="alert-triangle" [size]="14"></app-icon>
+          <span>Ingresa una dirección válida (mínimo 5 caracteres).</span>
+        </p>
+      }
+    </div>
 
     <app-input
       label="Apartamento, oficina, etc. (opcional)"
@@ -52,21 +60,37 @@
     ></app-input>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <app-input
-        label="Ciudad"
-        formControlName="city"
-        placeholder="Ciudad"
-        [control]="form.get('city')!"
-        [required]="true"
-      ></app-input>
+      <div class="field-block">
+        <app-input
+          label="Ciudad"
+          formControlName="city"
+          placeholder="Ciudad"
+          [control]="form.get('city')!"
+          [required]="true"
+        ></app-input>
+        @if (showErrors() && cityInvalid()) {
+          <p class="field-error" role="alert">
+            <app-icon name="alert-triangle" [size]="14"></app-icon>
+            <span>La ciudad es obligatoria.</span>
+          </p>
+        }
+      </div>
 
-      <app-input
-        label="Departamento/Estado"
-        formControlName="state_province"
-        placeholder="Departamento o estado"
-        [control]="form.get('state_province')!"
-        [required]="true"
-      ></app-input>
+      <div class="field-block">
+        <app-input
+          label="Departamento/Estado"
+          formControlName="state_province"
+          placeholder="Departamento o estado"
+          [control]="form.get('state_province')!"
+          [required]="true"
+        ></app-input>
+        @if (showErrors() && stateInvalid()) {
+          <p class="field-error" role="alert">
+            <app-icon name="alert-triangle" [size]="14"></app-icon>
+            <span>El departamento/estado es obligatorio.</span>
+          </p>
+        }
+      </div>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -86,12 +110,21 @@
       ></app-input>
     </div>
 
-    <app-input
-      label="Teléfono"
-      formControlName="phone_number"
-      type="tel"
-      placeholder="Teléfono de contacto"
-      [control]="form.get('phone_number')!"
-    ></app-input>
+    <div class="field-block">
+      <app-input
+        label="Teléfono"
+        formControlName="phone_number"
+        type="tel"
+        placeholder="Teléfono de contacto"
+        [control]="form.get('phone_number')!"
+        [required]="requirePhone()"
+      ></app-input>
+      @if (showErrors() && requirePhone() && phoneInvalid()) {
+        <p class="field-error" role="alert">
+          <app-icon name="alert-triangle" [size]="14"></app-icon>
+          <span>El teléfono es obligatorio para el envío.</span>
+        </p>
+      }
+    </div>
   </form>
 </div>

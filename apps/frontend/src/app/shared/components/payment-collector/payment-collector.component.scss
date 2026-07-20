@@ -340,6 +340,34 @@
     @include subwizard.subwizard-collapsed-row;
   }
 
+  /* In-panel "Aceptar" — confirms the Monto sub-step (collapse + advance).
+     Primary CTA; disabled until the single submit gate (canSubmit) is true. */
+  .pc-confirm-amount {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 16px;
+    border: none;
+    border-radius: 12px;
+    background: var(--color-primary);
+    color: var(--color-on-primary, #fff);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s, opacity 0.2s;
+  }
+
+  .pc-confirm-amount:hover:not(:disabled) {
+    background: var(--color-primary-hover, var(--color-primary));
+  }
+
+  .pc-confirm-amount:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   /* Keypad column: only positions; .keypad/.keypad-btn reuse the flat rules. */
   .pc-keypad-col {
     display: flex;
@@ -367,5 +395,24 @@
 
   .pc-stepped .pc-stepped-grid--with-keypad {
     grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) auto;
+  }
+
+  /* Context-scoped ONLY to the POS checkout shell (pos-payment-step marks its
+     wrapper with .pos-payment-context). Gives the collector's vertical stepper
+     the same 305px min-height as the Cliente/Envío steppers for visual symmetry.
+     Other consumers (e.g. order-detail cobro modal) lack the ancestor class and
+     are unaffected. Desktop-only: on mobile the stepper falls below (DOM-last).*/
+  :host-context(.pos-payment-context) .pc-steps-col {
+    min-height: 305px;
+  }
+}
+
+/* Móvil (solo POS checkout): el stepper vertical se oculta para dar el ancho
+   completo a las opciones de cobro; el header horizontal del shell orienta al
+   usuario. Otros consumidores del collector (membership/table/order/ecommerce)
+   usan el layout FLAT y no tienen .pc-steps-col, así que no se ven afectados. */
+@media (max-width: 767px) {
+  :host-context(.pos-payment-context) .pc-steps-col {
+    display: none;
   }
 }

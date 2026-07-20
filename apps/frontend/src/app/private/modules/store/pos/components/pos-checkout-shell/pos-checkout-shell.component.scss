@@ -250,6 +250,21 @@
   .cliente-grid {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+
+  /* Simetría vertical entre los 3 pasos (Cliente/Envío/Cobro): el stepper fija
+     una altura mínima común. Solo en desktop; en móvil el stepper se OCULTA
+     (ver abajo) para dar todo el ancho a las opciones. */
+  .steps-col {
+    min-height: 305px;
+  }
+}
+
+/* Móvil: el stepper vertical se oculta — las opciones ocupan el ancho completo
+   y el header horizontal (Cliente/Envío/Cobro) ya orienta al usuario. */
+@media (max-width: 767px) {
+  .steps-col {
+    display: none;
+  }
 }
 
 /* Badge "Obligatoria" del sub-paso Dirección (warning amber; no /opacity). */
@@ -261,6 +276,12 @@
   border-radius: 999px;
   background: rgba(245, 158, 11, 0.12);
   color: #d97706;
+}
+
+/* Reforzado a rojo cuando el operador intenta avanzar con dirección inválida. */
+.addr-required-badge--error {
+  background: rgba(var(--color-error-rgb), 0.14);
+  color: var(--color-error);
 }
 
 /* ── Cliente (sale type) ─────────────────────────────── */
@@ -343,6 +364,48 @@
   margin-top: 2px;
 }
 
+/* Disabled sale-type option (e.g. "Venta Anónima" on a delivery sale). Kept
+   visible for context but non-interactive; the [disabled] attr blocks the click
+   and this cancels the hover affordance. */
+.sale-type-btn.is-disabled,
+.sale-type-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sale-type-btn.is-disabled:hover,
+.sale-type-btn:disabled:hover {
+  border-color: var(--color-border);
+}
+
+/* Legend explaining why an option is disabled. */
+.sale-type-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -4px 2px 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+.sale-type-hint app-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-text-muted);
+}
+
+/* Variante de error: se muestra al intentar avanzar sin cliente. */
+.sale-type-hint--error {
+  margin-top: 8px;
+  font-weight: 500;
+  color: var(--color-error);
+}
+
+.sale-type-hint--error app-icon {
+  color: var(--color-error);
+}
+
 /* ── Footer ──────────────────────────────────────────── */
 .checkout-footer {
   display: flex;
@@ -407,20 +470,26 @@
   cursor: not-allowed;
 }
 
+/* Cancelar: extremo IZQUIERDO del footer (margin-right:auto empuja el resto a
+   la derecha) + outline danger claro. */
 .btn-cancel {
+  margin-right: auto;
   padding: 12px 16px;
-  border: 1px solid rgba(var(--color-error-rgb), 0.3);
+  border: 1.5px solid var(--color-error);
   border-radius: 12px;
   background: transparent;
   color: var(--color-error);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
 }
 
 .btn-cancel:hover:not(:disabled) {
-  background: rgba(var(--color-error-rgb), 0.05);
+  background: rgba(var(--color-error-rgb), 0.08);
+  border-color: var(--color-error);
 }
 
 .btn-cancel:disabled {
@@ -503,13 +572,54 @@
   }
 }
 
-@media (max-width: 480px) {
-  .btn-confirm {
-    padding: 12px 16px;
-    font-size: 15px;
+/* Móvil: se quita el total del footer (el rail de Resumen ya lo muestra) y las
+   acciones pasan a un grid simétrico de 2 columnas — Cancelar + Anterior
+   comparten la fila superior; Guardar borrador y la CTA principal ocupan el
+   ancho completo (la CTA queda destacada al fondo). En el primer paso (sin
+   "Anterior") Cancelar toma la fila completa para conservar la simetría. */
+@media (max-width: 640px) {
+  .footer-left {
+    display: none;
   }
 
   .footer-actions {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .btn-cancel {
+    margin-right: 0;
+  }
+
+  .btn-cancel,
+  .btn-prev {
+    grid-column: span 1;
+  }
+
+  .btn-draft,
+  .btn-confirm {
+    grid-column: 1 / -1;
+  }
+
+  /* Primer paso sin "Anterior": Cancelar ocupa la fila completa. */
+  .footer-actions:not(:has(.btn-prev)) .btn-cancel {
+    grid-column: 1 / -1;
+  }
+
+  /* Paddings uniformes → las acciones se ven simétricas y bien ajustadas. */
+  .btn-cancel,
+  .btn-prev,
+  .btn-draft {
+    padding: 12px 14px;
+    font-size: 14px;
+    justify-content: center;
+  }
+
+  .btn-confirm {
+    padding: 14px;
+    font-size: 15px;
   }
 }

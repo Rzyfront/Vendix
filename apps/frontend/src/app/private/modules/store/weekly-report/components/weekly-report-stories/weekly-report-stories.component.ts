@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  HostListener,
   inject,
   input,
   output,
@@ -414,6 +415,15 @@ export class WeeklyReportStoriesComponent {
    * `.stories-shell` para que clicks internos no cierren accidentalmente.
    */
   onBackdropClick(_event: MouseEvent): void {
+    this.onClose();
+  }
+
+  /**
+   * Cierra el diálogo con la tecla Escape (accesibilidad). Replica el mismo
+   * comportamiento que el backdrop-click y el botón X.
+   */
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
     this.onClose();
   }
 

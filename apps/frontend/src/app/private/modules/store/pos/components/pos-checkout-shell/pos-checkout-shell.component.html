@@ -37,6 +37,7 @@
               [cartState]="cartState()"
               [tableId]="tableId()"
               (tableSessionOpened)="onTableSessionOpened($event)"
+              (advanceRequested)="attemptNextStep()"
             ></app-pos-consumo-step>
           </div>
         }
@@ -48,6 +49,7 @@
           <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cobro'">
             <app-pos-payment-step
               [cartState]="cartState()"
+              [checkoutIntent]="checkoutIntent()"
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="consumoStep()?.pickedTableId() ?? tableId()"
               [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
@@ -59,6 +61,7 @@
               [amountOverride]="deliveryAmount()"
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"
+              (amountConfirmed)="onAmountConfirmed()"
               (requestCustomer)="onRequestCustomer()"
             ></app-pos-payment-step>
           </div>
@@ -87,6 +90,8 @@
                         type="button"
                         class="sale-type-btn"
                         [class.selected]="isAnonymousSale()"
+                        [class.is-disabled]="anonymousBlockedByDelivery()"
+                        [disabled]="anonymousBlockedByDelivery()"
                         (click)="onSelectSaleType(true)"
                       >
                         <div class="radio-indicator">
@@ -100,6 +105,15 @@
                           <span class="sale-type-desc">Sin cliente asociado</span>
                         </div>
                       </button>
+                      @if (anonymousBlockedByDelivery()) {
+                        <p class="sale-type-hint">
+                          <app-icon name="info" [size]="14"></app-icon>
+                          <span
+                            >No disponible para ventas con envío: se requiere un
+                            cliente con dirección.</span
+                          >
+                        </p>
+                      }
                     }
 
                     <button
@@ -147,6 +161,13 @@
                     <div class="section-header">
                       <app-icon name="user" [size]="16" class="section-icon"></app-icon>
                       <h2 class="section-title">Cliente</h2>
+                      @if (requiresAddress() && !cartState()?.customer) {
+                        <span
+                          class="addr-required-badge"
+                          [class.addr-required-badge--error]="showCustomerError()"
+                          >Obligatorio</span
+                        >
+                      }
                     </div>
                     <app-pos-customer-selector
                       [selectedCustomer]="cartState()?.customer ?? null"
@@ -155,6 +176,12 @@
                       (customerSelected)="onSelectCustomerAndAdvance($event)"
                       (customerCleared)="onCustomerCleared()"
                     ></app-pos-customer-selector>
+                    @if (showCustomerError() && !cartState()?.customer) {
+                      <p class="sale-type-hint sale-type-hint--error">
+                        <app-icon name="info" [size]="14"></app-icon>
+                        <span>Selecciona un cliente para continuar con el envío.</span>
+                      </p>
+                    }
                   </section>
                 } @else if (clienteSubStep() > 1 && cartState()?.customer) {
                   <button
@@ -183,11 +210,17 @@
                     <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
                     <h2 class="section-title">Dirección de envío</h2>
                     @if (!addressValid()) {
-                      <span class="addr-required-badge">Obligatoria</span>
+                      <span
+                        class="addr-required-badge"
+                        [class.addr-required-badge--error]="showAddressErrors()"
+                        >Obligatoria</span
+                      >
                     }
                   </div>
                   <app-address-form-fields
                     [initialAddress]="customerInitialAddress()"
+                    [requirePhone]="true"
+                    [showErrors]="showAddressErrors()"
                     (addressChange)="onShellAddressChange($event)"
                     (validChange)="addressValid.set($event)"
                   ></app-address-form-fields>
@@ -201,6 +234,8 @@
               <app-steps-line
                 [orientation]="'vertical'"
                 [size]="'sm'"
+                [fillHeight]="true"
+                [minHeightPx]="305"
                 [steps]="clienteSubSteps()"
                 [currentStep]="clienteSubStep()"
                 [clickable]="true"
@@ -219,7 +254,6 @@
               [cartState]="cartState()"
               [address]="capturedAddress()"
               [addressId]="capturedAddressId()"
-              [(payTiming)]="payTiming"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>
@@ -330,6 +364,16 @@
       <span class="footer-total-amount">{{ totalToPay() | currency }}</span>
     </div>
     <div class="footer-actions">
+      <!-- Cancelar al extremo izquierdo (margin-right:auto empuja el resto a la
+           derecha). Outline danger. -->
+      <button
+        type="button"
+        class="btn-cancel"
+        (click)="onModalClosed()"
+        [disabled]="footerProcessing()"
+      >
+        Cancelar
+      </button>
       @if (!isFirstStep()) {
         <button
           type="button"
@@ -343,14 +387,6 @@
       }
       <button
         type="button"
-        class="btn-cancel"
-        (click)="onModalClosed()"
-        [disabled]="footerProcessing()"
-      >
-        Cancelar
-      </button>
-      <button
-        type="button"
         class="btn-draft"
         [disabled]="footerProcessing()"
         (click)="onSaveDraft()"
@@ -362,7 +398,7 @@
         <button
           type="button"
           class="btn-confirm"
-          (click)="nextStep()"
+          (click)="attemptNextStep()"
           [disabled]="footerProcessing()"
         >
           Siguiente

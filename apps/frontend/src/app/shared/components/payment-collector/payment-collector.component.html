@@ -7,7 +7,7 @@
     <div
       class="pc-stepped-grid"
       [class.pc-stepped-grid--with-keypad]="
-        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex()
+        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
       "
     >
       <div class="pc-stepped-main">
@@ -87,6 +87,7 @@
 
           <!-- Panel: Monto -->
           @if (subStep() === montoIndex()) {
+            @if (!amountCollapsed()) {
             <section class="pc-card">
               <p class="total-label">Total a cobrar</p>
               <p class="total-amount">{{ effectiveTotal() | currency }}</p>
@@ -183,6 +184,28 @@
                 />
               </section>
             }
+
+            <!-- Confirmar el monto: colapsa las tarjetas (fill verde one-shot) y
+                 avisa al shell para avanzar/finalizar tras la animación. Gateado
+                 por el único gate de validez (canSubmit). -->
+            <button
+              type="button"
+              class="pc-confirm-amount"
+              [disabled]="!canSubmit()"
+              (click)="confirmAmount()"
+            >
+              <app-icon name="check-circle" [size]="18" />
+              <span>Aceptar</span>
+            </button>
+            } @else {
+              <!-- Fila-resumen colapsada (fill verde one-shot). Clic para volver
+                   a editar el monto. -->
+              <button type="button" class="pc-panel-collapsed" (click)="expandAmount()">
+                <span class="sw-check"><app-icon name="check" [size]="16" /></span>
+                <span class="sw-label">Monto confirmado: {{ effectiveTotal() | currency }}</span>
+                <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
+              </button>
+            }
           }
         } @else {
           <!-- Panel: Plan de crédito -->
@@ -211,7 +234,7 @@
 
       <!-- Keypad column (cash + montoIndex only) -->
       @if (
-        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex()
+        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
       ) {
         <aside class="pc-keypad-col">
           <div class="keypad">
@@ -232,6 +255,8 @@
         <app-steps-line
           [orientation]="'vertical'"
           [size]="'sm'"
+          [fillHeight]="true"
+          [minHeightPx]="305"
           [steps]="subSteps()"
           [currentStep]="subStep()"
           [clickable]="true"

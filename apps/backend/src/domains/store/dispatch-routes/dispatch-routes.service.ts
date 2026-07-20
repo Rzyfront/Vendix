@@ -792,8 +792,14 @@ export class DispatchRoutesService {
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    // State gate: only "hot" routes (draft / dispatched) accept new stops.
-    const EDITABLE_STATES: dispatch_route_status_enum[] = ['draft', 'dispatched'];
+    // State gate: only "hot" routes accept new stops. Las rutas CARRIER admiten
+    // además `in_transit` (tomar-en-recorrido: el repartidor reclama otra orden
+    // pooleada mientras ya está en ruta) — espejo del gate de
+    // DispatchNotesService.attachToExistingRoute. Las rutas admin conservan el
+    // gate original (draft/dispatched), sin efectos colaterales.
+    const EDITABLE_STATES: dispatch_route_status_enum[] = route.is_carrier_route
+      ? ['draft', 'dispatched', 'in_transit']
+      : ['draft', 'dispatched'];
     if (!EDITABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001);
     }
@@ -947,6 +953,18 @@ export class DispatchRoutesService {
           },
           include: DISPATCH_ROUTE_INCLUDE,
         });
+        // Al asignar remisiones a esta ruta, sus órdenes salen del pool de
+        // carriers (misma tx): limpiamos `dispatch_pool_at` y el claim para que
+        // dejen de aparecer como disponibles en los streams SSE de repartidores.
+        const pooled_order_ids = new_notes
+          .map((n) => n.order_id)
+          .filter((oid): oid is number => oid != null);
+        if (pooled_order_ids.length > 0) {
+          await tx.orders.updateMany({
+            where: { id: { in: pooled_order_ids }, store_id },
+            data: { dispatch_pool_at: null, claimed_by_carrier_user_id: null },
+          });
+        }
         const confirmedPayloads = await this.routeFlow.confirmDraftNotesInTx(
           tx,
           new_notes,

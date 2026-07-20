@@ -111,9 +111,6 @@ export class PosCheckoutShellComponent {
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
-  // ── Pay timing (delivery only; owned here, two-way with the Envío step) ──
-  readonly payTiming = signal<'now' | 'later'>('now');
-
   // ── Address capture (moved from the Envío step into the Cliente step) ────
   /** Live address payload emitted by the shell-mounted `app-address-form-fields`. */
   readonly capturedAddress = signal<AddressPayload | null>(null);
@@ -121,6 +118,18 @@ export class PosCheckoutShellComponent {
   readonly addressValid = signal<boolean>(false);
   /** Id of the selected customer's saved address; null → the Envío step creates it. */
   readonly capturedAddressId = signal<number | null>(null);
+  /**
+   * Flash flag that forces `app-address-form-fields` to render its inline
+   * required-field errors. Set when the operator tries to advance past the
+   * Dirección sub-step with an invalid address; auto-cleared once valid.
+   */
+  readonly showAddressErrors = signal<boolean>(false);
+  /**
+   * Flash flag for the Cliente sub-step: forces the "selecciona un cliente"
+   * hint when the operator tries to leave the Cliente selector without having
+   * picked a customer. Cleared once a customer is chosen or on sub-step change.
+   */
+  readonly showCustomerError = signal<boolean>(false);
 
   /** Delivery flows must capture a shipping address in the Cliente step. */
   readonly requiresAddress = computed<boolean>(
@@ -164,17 +173,18 @@ export class PosCheckoutShellComponent {
   );
 
   /**
-   * Dynamic steps by intent + "cuándo paga":
+   * Dynamic steps by intent:
    *  - pickup (no restaurante)   → [Cobro, Cliente]
    *  - pickup (restaurante)      → [Consumo, Cobro, Cliente]
-   *  - delivery + pagar ahora    → [Cobro, Cliente, Envío]
-   *  - delivery + contra-entrega → [Cliente, Envío]  (sin Cobro)
+   *  - delivery                  → [Cliente, Envío, Cobro]  (Cobro SIEMPRE al final)
+   *
+   * "Contra entrega" ya no es un eje aparte: es el método de pago
+   * `cash_on_delivery` (processing_mode ON_DELIVERY) que el paso Cobro ofrece
+   * solo cuando la intención es delivery.
    */
   readonly steps = computed<StepsLineItem[]>(() => {
     if (this.checkoutIntent() === 'delivery') {
-      return this.payTiming() === 'now'
-        ? [{ label: 'Cobro' }, { label: 'Cliente' }, { label: 'Envío' }]
-        : [{ label: 'Cliente' }, { label: 'Envío' }];
+      return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
     }
     return this.showConsumoStep()
       ? [{ label: 'Consumo' }, { label: 'Cobro' }, { label: 'Cliente' }]
@@ -185,9 +195,7 @@ export class PosCheckoutShellComponent {
    *  active body and gate which step components mount. */
   readonly stepKeys = computed<string[]>(() => {
     if (this.checkoutIntent() === 'delivery') {
-      return this.payTiming() === 'now'
-        ? ['cobro', 'cliente', 'envio']
-        : ['cliente', 'envio'];
+      return ['cliente', 'envio', 'cobro'];
     }
     return this.showConsumoStep()
       ? ['consumo', 'cobro', 'cliente']
@@ -208,9 +216,13 @@ export class PosCheckoutShellComponent {
     () => this.shippingStep()?.shippingCost() ?? 0,
   );
 
-  /** Amount the Cobro collector must charge on a pay-now delivery: cart + flete. */
+  /**
+   * Amount the Cobro collector must charge on a delivery: cart + flete. Cobro is
+   * the LAST delivery step, so the flete is already defined by the time we charge
+   * (the monto is correct on first render — no longer depends on pay timing).
+   */
   readonly deliveryAmount = computed<number | null>(() =>
-    this.checkoutIntent() === 'delivery' && this.payTiming() === 'now'
+    this.checkoutIntent() === 'delivery'
       ? (this.cartState()?.summary?.total || 0) + this.shippingCost()
       : null,
   );
@@ -237,6 +249,15 @@ export class PosCheckoutShellComponent {
   /** Anonymous option is hidden when the collector is in credit mode. */
   readonly canBeAnonymous = computed<boolean>(
     () => this.allowAnonymousSales() && this.paymentStep()?.mode() !== 'credito',
+  );
+
+  /**
+   * Delivery sales cannot be anonymous: they require a customer with a shipping
+   * address. The "Venta Anónima" button stays VISIBLE but DISABLED in this case
+   * (with an explanatory legend) — see the template.
+   */
+  readonly anonymousBlockedByDelivery = computed<boolean>(
+    () => this.checkoutIntent() === 'delivery',
   );
 
   get customerDisplayName(): string {
@@ -278,15 +299,12 @@ export class PosCheckoutShellComponent {
     if (this.footerProcessing()) return true;
 
     if (this.checkoutIntent() === 'delivery') {
-      const ship = this.shippingStep();
-      if (!ship) return true;
-      if (this.payTiming() === 'now') {
-        const pay = this.paymentStep();
-        if (!pay) return true;
-        return !pay.canSubmit() || !ship.canConfirm();
-      }
-      // contra-entrega: solo requiere envío válido.
-      return !ship.canConfirm();
+      // Cobro es el último paso: la validez del envío ya se garantizó por el gate
+      // de navegación (onConfirm re-valida y redirige a Envío si falta). Aquí solo
+      // gatea el collector — para cash_on_delivery canSubmit() es true sin monto.
+      const pay = this.paymentStep();
+      if (!pay) return true;
+      return !pay.canSubmit();
     }
 
     // pickup (B1): idéntico al collector + gate de mesa del paso Consumo.
@@ -386,6 +404,26 @@ export class PosCheckoutShellComponent {
         untracked(() => this.isAnonymousSale.set(false));
       }
     });
+
+    // Delivery sales cannot be anonymous (they require a customer + address).
+    // Force the flag off AND pin the override to false so the config-driven
+    // "anonymous as default" sync effect above never flips it back on while the
+    // intent stays delivery. Leaves "Con Cliente" selected in the UI.
+    effect(() => {
+      if (this.anonymousBlockedByDelivery() && this.isAnonymousSale()) {
+        untracked(() => {
+          this.isAnonymousSale.set(false);
+          this.userOverrideAnonymous.set(false);
+        });
+      }
+    });
+
+    // Auto-clear the address-error flash once the captured address becomes valid.
+    effect(() => {
+      if (this.addressValid()) {
+        untracked(() => this.showAddressErrors.set(false));
+      }
+    });
   }
 
   private syncAnonymousSaleState(): void {
@@ -408,11 +446,12 @@ export class PosCheckoutShellComponent {
   private resetState(): void {
     this.currentStep.set(0);
     this.clienteSubStep.set(0);
-    this.payTiming.set('now');
     this.userOverrideAnonymous.set(null);
     this.capturedAddress.set(null);
     this.addressValid.set(false);
     this.capturedAddressId.set(null);
+    this.showAddressErrors.set(false);
+    this.showCustomerError.set(false);
     this.submittingDraft.set(false);
     this.syncAnonymousSaleState();
     // Remount the projected content so the child components (collector,
@@ -429,6 +468,65 @@ export class PosCheckoutShellComponent {
   /** Wizard: advance one top-level step (no-op past the last; state is preserved). */
   nextStep(): void {
     this.goToStep(this.currentStep() + 1);
+  }
+
+  /**
+   * Footer "Siguiente" handler. Drives the mandatory sub-flows so NO required
+   * step advances while incomplete, flashing in the UI what is missing instead
+   * of jumping ahead:
+   *  - Cliente (con-cliente): Tipo → Cliente → (delivery) Dirección. A customer
+   *    is required for delivery before the Dirección sub-step; a valid address
+   *    (with phone) is required before leaving Dirección.
+   *  - Envío: a shipping method + address/cost must satisfy `canConfirm()`
+   *    before reaching Cobro.
+   * Every other step advances normally.
+   */
+  attemptNextStep(): void {
+    const key = this.currentStepKey();
+
+    // ── Cliente: sub-flujo obligatorio (Tipo → Cliente → Dirección) ──────────
+    if (key === 'cliente' && !this.isAnonymousSale()) {
+      const sub = this.clienteSubStep();
+      // Tipo → Cliente (con-cliente ya elegido en este sub-paso).
+      if (sub === 0) {
+        this.goToClienteSubStep(1);
+        return;
+      }
+      // Cliente → en delivery exige cliente antes de la Dirección.
+      if (sub === 1) {
+        if (this.requiresAddress()) {
+          if (!this.cartState()?.customer) {
+            this.showCustomerError.set(true);
+            return;
+          }
+          this.goToClienteSubStep(2);
+          return;
+        }
+        // Pickup con-cliente: Cliente es terminal; el collector valida el resto.
+        this.nextStep();
+        return;
+      }
+      // Dirección → exige dirección válida (con teléfono) antes de avanzar.
+      if (sub === 2 && this.requiresAddress() && !this.addressValid()) {
+        this.showAddressErrors.set(true);
+        return;
+      }
+      this.nextStep();
+      return;
+    }
+
+    // ── Envío: exige método + dirección/costo válidos antes de Cobro ─────────
+    if (key === 'envio') {
+      const ship = this.shippingStep();
+      if (!ship?.canConfirm()) {
+        ship?.flashValidation();
+        return;
+      }
+      this.nextStep();
+      return;
+    }
+
+    this.nextStep();
   }
 
   /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
@@ -450,7 +548,7 @@ export class PosCheckoutShellComponent {
       return;
     }
 
-    // delivery: shipping must be valid first, regardless of pay timing.
+    // delivery: shipping must be valid first (navigation is non-blocking).
     const ship = this.shippingStep();
     if (!ship?.canConfirm()) {
       this.goToStepKey('envio');
@@ -458,24 +556,39 @@ export class PosCheckoutShellComponent {
       return;
     }
 
-    if (this.payTiming() === 'now') {
-      // Combine Cobro + Envío: the collector runs deferred (autoExecute=false),
-      // emits paymentReady → onPaymentReady → shippingStep.execute(submit).
-      const pay = this.paymentStep();
-      if (!pay?.canSubmit()) {
-        this.goToStepKey('cobro');
-        return;
-      }
-      pay.triggerSubmit();
-    } else {
-      // contra-entrega: process the shipping order with no payment.
-      ship.execute(null);
+    // Cobro is the LAST delivery step and runs deferred (autoExecute=false): the
+    // collector emits paymentReady → onPaymentReady → shippingStep.execute(submit).
+    // For cash_on_delivery the collector still emits a submit (its method carries
+    // the store_payment_method_id); the backend processor returns 'pending'.
+    const pay = this.paymentStep();
+    if (!pay?.canSubmit()) {
+      this.goToStepKey('cobro');
+      return;
     }
+    pay.triggerSubmit();
   }
 
   /** Deferred-payment channel from the Cobro step (delivery pay-now). */
   onPaymentReady(submit: PaymentSubmit): void {
     this.shippingStep()?.execute(submit);
+  }
+
+  /**
+   * Bubbled from the Cobro step when the operator confirms the Monto via the
+   * collector's in-panel "Aceptar". The collector already collapsed the amount
+   * cards with the green one-shot fill (~420ms). We wait for that animation to
+   * finish, then finalize (Cobro is the last step) or advance to the next step.
+   * setTimeout is zoneless-safe: the signal writes inside onConfirm/attemptNextStep
+   * schedule change detection through the signal graph.
+   */
+  onAmountConfirmed(): void {
+    setTimeout(() => {
+      if (this.isLastStep()) {
+        this.onConfirm();
+      } else {
+        this.attemptNextStep();
+      }
+    }, 420);
   }
 
   /** Re-emit the Envío step result to the parent (POS). */
@@ -495,6 +608,8 @@ export class PosCheckoutShellComponent {
   goToClienteSubStep(index: number): void {
     const max = Math.max(0, this.clienteSubSteps().length - 1);
     this.clienteSubStep.set(Math.min(Math.max(index, 0), max));
+    // Moving between sub-steps clears the flashed "falta cliente" hint.
+    this.showCustomerError.set(false);
   }
 
   /**
@@ -536,6 +651,8 @@ export class PosCheckoutShellComponent {
   selectCustomer(customer: PosCustomer): void {
     this.userOverrideAnonymous.set(false);
     this.isAnonymousSale.set(false);
+    // A customer is now attached → clear any flashed "falta cliente" hint.
+    this.showCustomerError.set(false);
     // El padre (POS) es dueño del carrito; solo re-emitimos.
     this.customerSelected.emit(customer);
     // Derive the customer's saved primary-address id so the Envío step reuses it
@@ -564,7 +681,13 @@ export class PosCheckoutShellComponent {
         longitude: null,
       };
       this.capturedAddress.set(seeded);
-      this.addressValid.set(!!(seeded.address_line1 && seeded.city));
+      // Delivery requires a phone too (requirePhone on the form-fields). The
+      // form prefills silently (no validChange on hydration), so seed the gate
+      // consistently — phone included — to avoid a stale "valid" that would let
+      // the operator skip an incomplete address.
+      this.addressValid.set(
+        !!(seeded.address_line1 && seeded.city && seeded.phone_number),
+      );
     }
   }
 

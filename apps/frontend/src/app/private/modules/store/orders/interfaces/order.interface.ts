@@ -243,6 +243,15 @@ export interface Payment {
     system_payment_method?: {
       type: string;
       display_name: string;
+      /**
+       * Structural discriminator of how the money is captured, mirrored from
+       * `system_payment_methods.processing_mode` (backend findOne includes the
+       * full system_payment_method). Drives whether a pending payment is a real
+       * ONLINE capture awaiting confirmation (ecommerce) or a contra-entrega
+       * (ON_DELIVERY) that collects at delivery — the latter must NOT show the
+       * "dispatch without confirming payment" warning.
+       */
+      processing_mode?: 'DIRECT' | 'ONLINE' | 'ON_DELIVERY';
     };
   };
   users?: {

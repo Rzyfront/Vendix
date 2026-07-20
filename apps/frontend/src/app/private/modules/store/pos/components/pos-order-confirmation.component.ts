@@ -19,6 +19,7 @@ import {
 import { FiscalRequirementsService } from '../../../../../shared/services/fiscal-requirements.service';
 import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
+import { RepartosService } from '../../../store-delivery/services/repartos.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { Store } from '@ngrx/store';
@@ -220,6 +221,13 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
           <!-- Separador visual entre categorías -->
           <div class="w-px h-5 bg-[var(--color-border)] mx-1"></div>
     
+          @if (orderData()?.isShippingSale && orderId) {
+            <app-button variant="ghost" size="sm" (clicked)="dispatchOrder()" [loading]="dispatching()" title="Enviar la orden a despacho">
+              <app-icon name="send" [size]="16" slot="icon" ></app-icon>
+              <span class="hidden sm:inline">Despachar</span>
+            </app-button>
+          }
+
           <app-button variant="ghost" size="sm" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
             <app-icon name="external-link" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Ver detalle</span>
@@ -330,6 +338,8 @@ export class PosOrderConfirmationComponent {
   printing = false;
   emailing = false;
   creatingInvoice = false;
+  /** Loading del botón "Despachar" (envío al pool de reparto). */
+  readonly dispatching = signal(false);
 
   orderNumber = '';
   orderId: string | null = null;
@@ -364,6 +374,7 @@ private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   readonly fiscalReq = inject(FiscalRequirementsService);
   private ticketService = inject(PosTicketService);
+  private repartosService = inject(RepartosService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   private actions$ = inject(Actions);
@@ -586,6 +597,33 @@ effect(() => {
   goToOrderDetail(): void {
     if (!this.orderId) return;
     this.viewDetail.emit(this.orderId);
+  }
+
+  /**
+   * "Despachar" (solo ventas con envío): publica la orden al pool de reparto
+   * (`POST /store/dispatch-notes/orders/:orderId/send-to-dispatch`, idempotente)
+   * para que un repartidor la tome. En éxito arranca una nueva venta
+   * (`startNewSale()`), replicando el reinicio total de "Nueva compra".
+   */
+  dispatchOrder(): void {
+    if (!this.orderId || this.dispatching()) return;
+    this.dispatching.set(true);
+    this.repartosService
+      .publishToPool(Number(this.orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.dispatching.set(false);
+          this.toastService.success('Orden enviada a despacho');
+          this.startNewSale();
+        },
+        error: (err: any) => {
+          this.dispatching.set(false);
+          this.toastService.error(
+            err?.message || 'No se pudo enviar la orden a despacho',
+          );
+        },
+      });
   }
 
   async createInvoice(): Promise<void> {

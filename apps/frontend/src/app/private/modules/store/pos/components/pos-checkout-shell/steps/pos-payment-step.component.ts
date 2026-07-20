@@ -28,7 +28,9 @@ import {
   PosPaymentService,
   PaymentMethod,
 } from '../../../services/pos-payment.service';
+import { PaymentMethodType } from '../../../../../../../shared/models/payment-method.model';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
+import type { CheckoutIntent } from '../pos-checkout-shell.component';
 import { PosWalletService, WalletInfo } from '../../../services/pos-wallet.service';
 import {
   WompiService,
@@ -73,6 +75,12 @@ export class PosPaymentStepComponent implements OnInit {
 
   // ── Inputs (from shell) ──────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
+  /**
+   * Intención del checkout. Gatea `cash_on_delivery` (processing_mode
+   * ON_DELIVERY): solo se ofrece en `delivery`; en entrega directa (mostrador) y
+   * consumo en mesa se oculta aunque la tienda lo tenga activado.
+   */
+  readonly checkoutIntent = input<CheckoutIntent>('pickup');
   /** Restaurant stores that have at least one `prepared` line in the cart. */
   readonly isRestaurantWithPrepared = input<boolean>(false);
   readonly tableId = input<number | null>(null);
@@ -122,6 +130,11 @@ export class PosPaymentStepComponent implements OnInit {
    * without processing it. The shell forwards it to the shipping step.
    */
   readonly paymentReady = output<PaymentSubmit>();
+  /**
+   * Bubbled from the collector's in-panel "Aceptar" (Monto sub-step). The shell
+   * owns the advance/finalize timing (it waits for the green collapse animation).
+   */
+  readonly amountConfirmed = output<void>();
 
   /** The headless collector — the shell drives it through this step's API. */
   protected readonly collector = viewChild(PaymentCollectorComponent);
@@ -136,8 +149,16 @@ export class PosPaymentStepComponent implements OnInit {
   private readonly loadedMethods = signal<PaymentMethod[]>([]);
   readonly paymentMethods = computed<PaymentMethod[]>(() => {
     const provided = this.paymentMethodsInput();
-    if (provided && provided.length) return provided;
-    return this.loadedMethods();
+    const base = provided && provided.length ? provided : this.loadedMethods();
+    // Gating por processing_mode (réplica de checkout.service.getPaymentMethods):
+    // delivery expone todos los modos (DIRECT + ONLINE + ON_DELIVERY); pickup /
+    // mostrador / consumo en mesa ocultan ON_DELIVERY (cash_on_delivery).
+    if (this.checkoutIntent() === 'delivery') return base;
+    return base.filter(
+      (m) =>
+        m.processingMode !== 'ON_DELIVERY' &&
+        m.type !== PaymentMethodType.CASH_ON_DELIVERY,
+    );
   });
 
   // ── Internal processing state (was paymentState.isProcessing) ────────────

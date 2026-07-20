@@ -10,6 +10,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
+import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
 import { RouteFlowService } from '../dispatch-routes/route-flow/route-flow.service';
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { CreateFromOrderDto } from '../dispatch-notes/dto/create-from-order.dto';
@@ -88,6 +89,11 @@ export class CarrierDeliveryService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly dispatchNotesService: DispatchNotesService,
+    // Reuso del agregador de rutas para ADJUNTAR una remisión ya existente
+    // (pooleada con remisión) a la ruta del carrier, sin duplicarla.
+    // DispatchRoutesModule ya está importado por CarrierModule y exporta este
+    // servicio → inyección directa, sin forwardRef (no hay ciclo de módulos).
+    private readonly dispatchRoutesService: DispatchRoutesService,
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly routeFlowService: RouteFlowService,
     private readonly eventEmitter: EventEmitter2,
@@ -716,20 +722,38 @@ export class CarrierDeliveryService {
       }
     }
 
-    // STEP 3 — Reuso del motor: crear remisión + parada en mi ruta.
+    // STEP 3 — Adjuntar remisión a mi ruta.
+    //
+    // Con el nuevo flujo de despacho, la orden pooleada YA trae una remisión
+    // ACTIVA (creada al enviarla al pool en sendToDispatchPool). En ese caso la
+    // ADJUNTAMOS a mi ruta con addStops en vez de crear otra: un createFromOrder
+    // aquí haría quick-accept SIN unidades pendientes → fallaría (DSP_ORDER_
+    // STATE_001) o duplicaría la remisión. Sólo si NO existe remisión activa
+    // (orden pooleada por un flujo antiguo, sin remisión) creamos una nueva.
     let dispatchNoteId: number;
     try {
-      const items = await this.buildDispatchItems(order_id);
-      const dto: CreateFromOrderDto = {
-        target_status: 'confirmed',
-        items,
-        route_assignment: { mode: 'existing', route_id },
-      };
-      const note = await this.dispatchNotesService.createFromOrder(
-        order_id,
-        dto,
-      );
-      dispatchNoteId = note.id;
+      const existingNote = await this.prisma.dispatch_notes.findFirst({
+        where: { order_id, status: { not: 'voided' } },
+        select: { id: true },
+      });
+      if (existingNote) {
+        await this.dispatchRoutesService.addStops(route_id, {
+          stops: [{ dispatch_note_id: existingNote.id }],
+        });
+        dispatchNoteId = existingNote.id;
+      } else {
+        const items = await this.buildDispatchItems(order_id);
+        const dto: CreateFromOrderDto = {
+          target_status: 'confirmed',
+          items,
+          route_assignment: { mode: 'existing', route_id },
+        };
+        const note = await this.dispatchNotesService.createFromOrder(
+          order_id,
+          dto,
+        );
+        dispatchNoteId = note.id;
+      }
     } catch (err) {
       // STEP 4 — Compensación.
       await this.releaseClaim(order_id, store_id);

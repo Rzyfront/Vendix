@@ -18,6 +18,7 @@ import {
 
 import { CreateTransferRequest, LocationStock, TransferableProduct } from '../interfaces';
 import { TransfersService } from '../services/transfers.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 interface TransferItem {
   product_id: number;
@@ -401,6 +402,7 @@ interface TransferItem {
 export class TransferCreateModalComponent {
   private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
+  private toastService = inject(ToastService);
 
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
@@ -508,9 +510,17 @@ export class TransferCreateModalComponent {
   }
 
   updateQuantity(index: number, event: Event): void {
-    const value = +(event.target as HTMLInputElement).value;
+    const raw = (event.target as HTMLInputElement).value;
+    const value = +raw;
+    const min = 1;
+    const clamped = Math.max(min, value);
+    // Feedback visible cuando el usuario teclea un valor por debajo del mínimo
+    // (ignoramos el campo vacío mientras edita para no spamear toasts).
+    if (raw !== '' && Number.isFinite(value) && value < min) {
+      this.toastService.info(`La cantidad mínima es ${min}.`, 'Cantidad ajustada');
+    }
     this.transferItems = this.transferItems.map((item, i) =>
-      i === index ? { ...item, quantity: Math.max(1, value) } : item,
+      i === index ? { ...item, quantity: clamped } : item,
     );
   }
 

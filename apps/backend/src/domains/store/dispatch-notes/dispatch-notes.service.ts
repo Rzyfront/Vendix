@@ -1845,7 +1845,11 @@ export class DispatchNotesService {
       (sum, item) => sum + Number(item.tax_amount || 0),
       0,
     );
-    const grand_total = subtotal - total_discount + total_tax;
+    // Flete que paga el cliente en la orden. Debe sumarse al grand_total para
+    // que el recaudo COD de la ruta cobre el total real (mercancía + flete);
+    // sin él el repartidor recaudaba `orden - flete`.
+    const shipping_cost = Number(order.shipping_cost || 0);
+    const grand_total = subtotal - total_discount + total_tax + shipping_cost;
 
     // Pending balance on the order means the courier must collect on delivery.
     const needs_collection = Number(order.remaining_balance) > 0;
@@ -1896,6 +1900,7 @@ export class DispatchNotesService {
           subtotal_amount: subtotal,
           discount_amount: total_discount,
           tax_amount: total_tax,
+          shipping_cost,
           grand_total,
           currency: order.currency || 'COP',
           notes: dto.notes,
@@ -2236,6 +2241,8 @@ export class DispatchNotesService {
       where: { id: dispatch_note_id, store_id },
       select: {
         id: true,
+        // order_id → para sacar la orden del pool de carriers al asignarla.
+        order_id: true,
         grand_total: true,
         needs_collection: true,
         invoice: { select: { payment_date: true } },
@@ -2309,6 +2316,16 @@ export class DispatchNotesService {
       where: { id: route_id },
       data: { total_to_collect, total_prepaid, updated_at: new Date() },
     });
+
+    // Al asignar la remisión a una ruta, la orden sale del pool de carriers
+    // (misma tx). Limpiamos `dispatch_pool_at` y el claim para que no siga
+    // apareciendo como disponible en los streams SSE de repartidores.
+    if (new_note.order_id != null) {
+      await tx.orders.updateMany({
+        where: { id: new_note.order_id, store_id },
+        data: { dispatch_pool_at: null, claimed_by_carrier_user_id: null },
+      });
+    }
   }
 
   /**
@@ -2571,7 +2588,12 @@ export class DispatchNotesService {
           (sum, item) => sum + Number(item.tax_amount || 0),
           0,
         );
-        const grand_total = subtotal - total_discount + total_tax;
+        // Preserva el flete ya persistido en la remisión al recomponer un
+        // borrador; NO se recalcula desde la orden aquí para no botarlo en
+        // ediciones de ítems.
+        const shipping_cost = Number(dispatch_note.shipping_cost || 0);
+        const grand_total =
+          subtotal - total_discount + total_tax + shipping_cost;
 
         // Denormalize customer if changed
         let customer_data: any = {};
@@ -2612,6 +2634,7 @@ export class DispatchNotesService {
             subtotal_amount: subtotal,
             discount_amount: total_discount,
             tax_amount: total_tax,
+            shipping_cost,
             grand_total,
             ...customer_data,
             updated_at: new Date(),
@@ -2857,14 +2880,40 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
     }
 
-    // Rechazo si la orden ya tiene una remisión ACTIVA (no anulada): evita
-    // que un admin la mande al pool mientras otro flujo ya la está despachando.
+    // Idempotencia de despacho: la remisión es la primitiva de inventario del
+    // pool. Si la orden aún NO tiene remisión ACTIVA (no anulada), la creamos
+    // ANTES de poolear (confirmada, SIN ruta) para que el carrier sólo la
+    // ADJUNTE al reclamar en vez de crearla. Si ya existe una remisión activa,
+    // NO creamos otra (idempotente): otro flujo ya la despachó.
     const activeNotes = await this.prisma.dispatch_notes.count({
       where: { order_id, status: { not: 'voided' } },
     });
-    if (activeNotes > 0) {
-      throw new VendixHttpException(ErrorCodes.DSP_ORDER_STATE_001);
+    if (activeNotes === 0) {
+      try {
+        // `items: []` → quick-accept de TODAS las unidades pendientes.
+        // `route_assignment.mode: 'none'` → sin parada de ruta.
+        await this.createFromOrder(order_id, {
+          target_status: 'confirmed',
+          route_assignment: { mode: 'none' },
+          items: [],
+        });
+      } catch (err) {
+        // p.ej. DSP_ORDER_STATE_001 (nada pendiente por despachar). Propagamos
+        // con contexto claro para no dejar la orden en el pool sin remisión.
+        throw new VendixHttpException(
+          ErrorCodes.DSP_ORDER_STATE_001,
+          undefined,
+          {
+            order_id,
+            reason: 'send_to_pool_create_note_failed',
+            cause: err instanceof Error ? err.message : String(err),
+          },
+        );
+      }
     }
+    // IMPORTANTE: NO re-leemos `dispatch_fulfillment` tras crear la remisión.
+    // `createFromOrder` lo recomputa (puede quedar 'full') y bloquearía el pool
+    // indebidamente; pooleamos con base en la validación de entrada de arriba.
 
     // Inserción idempotente en el pool: sólo si aún no está pooleada.
     const now = new Date();

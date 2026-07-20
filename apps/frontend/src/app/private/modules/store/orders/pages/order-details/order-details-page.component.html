@@ -1816,13 +1816,13 @@
       (closed)="showShipModal.set(false); isManualShipMode.set(false)"
       [title]="
         isManualShipMode()
-          ? 'Despachar sin confirmar pago'
+          ? (hasPendingOnlinePayment() ? 'Despachar sin confirmar pago' : 'Despachar orden')
           : shipModalConfig().title
       "
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="shipForm">
-        @if (isManualShipMode()) {
+        @if (isManualShipMode() && hasPendingOnlinePayment()) {
           <div
             class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3"
           >
@@ -1838,6 +1838,22 @@
               <p class="text-xs text-orange-600 mt-0.5">
                 La orden se despachara sin que el pago haya sido confirmado.
                 Deberas confirmar el pago antes de marcar la entrega.
+              </p>
+            </div>
+          </div>
+        } @else if (isManualShipMode()) {
+          <div
+            class="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="truck"
+              size="18"
+              class="text-gray-500 mt-0.5"
+            ></app-icon>
+            <div>
+              <p class="text-sm font-bold text-gray-700">Despachar orden</p>
+              <p class="text-xs text-gray-500 mt-0.5">
+                Se cobra al momento de la entrega.
               </p>
             </div>
           </div>
@@ -1938,7 +1954,11 @@
           >Cancelar</app-button
         >
         <app-button
-          [variant]="isManualShipMode() ? 'outline-warning' : 'primary'"
+          [variant]="
+            isManualShipMode() && hasPendingOnlinePayment()
+              ? 'outline-warning'
+              : 'primary'
+          "
           (clicked)="submitShipment()"
           [disabled]="isProcessingAction()"
         >
@@ -1946,7 +1966,7 @@
             isProcessingAction()
               ? "Procesando..."
               : isManualShipMode()
-                ? "Despachar sin pago"
+                ? (hasPendingOnlinePayment() ? "Despachar sin pago" : "Despachar")
                 : shipModalConfig().confirmLabel
           }}
         </app-button>

@@ -55,3 +55,25 @@
   color: var(--color-text-muted, #6b7280);
   font-size: 0.85rem;
 }
+
+/* Wraps a single field + its inline error so the message stays attached to the
+   control. Only renders when the parent opts into `showErrors`. */
+.field-block {
+  display: block;
+}
+
+.field-error {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0.375rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--color-error, #dc2626);
+}
+
+.field-error app-icon {
+  flex-shrink: 0;
+  color: var(--color-error, #dc2626);
+}

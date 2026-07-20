@@ -5,7 +5,8 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 /**
  * Outcome of the dispatch-method chooser.
  * - `with-note`: genera una remisión controlada (documento + ruta opcional).
- * - `direct`: envío directo, marca la orden como enviada sin documento.
+ * - `direct`: entrega completa: crea una remisión, la marca como entregada y
+ *   finaliza la orden.
  * - `to-dispatch`: publica la orden al pool de repartidores (Vendix Repartos).
  */
 export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
@@ -48,7 +49,7 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
             <app-icon name="file-text" [size]="20"></app-icon>
           </div>
           <div class="min-w-0">
-            <div class="font-semibold">Despachar con remisión controlada</div>
+            <div class="font-semibold">Crear remisión con ruta de despacho</div>
             <div class="text-sm text-text-secondary">
               Genera una remisión (documento de despacho) y, opcionalmente,
               asígnala a una ruta. La orden se marca como enviada.
@@ -70,8 +71,7 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
           <div class="min-w-0">
             <div class="font-semibold">Envío directo</div>
             <div class="text-sm text-text-secondary">
-              Marca la orden como enviada sin generar ningún documento de
-              despacho.
+              Crea una remisión, la marca como entregada y finaliza la orden.
             </div>
           </div>
         </button>
