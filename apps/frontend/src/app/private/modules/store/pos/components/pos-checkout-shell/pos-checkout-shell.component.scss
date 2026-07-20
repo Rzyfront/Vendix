@@ -252,10 +252,18 @@
   }
 
   /* Simetría vertical entre los 3 pasos (Cliente/Envío/Cobro): el stepper fija
-     una altura mínima común. Solo en desktop; en móvil el stepper cae debajo
-     (DOM-last) y una altura fija dejaría un hueco. */
+     una altura mínima común. Solo en desktop; en móvil el stepper se OCULTA
+     (ver abajo) para dar todo el ancho a las opciones. */
   .steps-col {
     min-height: 305px;
+  }
+}
+
+/* Móvil: el stepper vertical se oculta — las opciones ocupan el ancho completo
+   y el header horizontal (Cliente/Envío/Cobro) ya orienta al usuario. */
+@media (max-width: 767px) {
+  .steps-col {
+    display: none;
   }
 }
 
@@ -385,6 +393,17 @@
   flex-shrink: 0;
   margin-top: 1px;
   color: var(--color-text-muted);
+}
+
+/* Variante de error: se muestra al intentar avanzar sin cliente. */
+.sale-type-hint--error {
+  margin-top: 8px;
+  font-weight: 500;
+  color: var(--color-error);
+}
+
+.sale-type-hint--error app-icon {
+  color: var(--color-error);
 }
 
 /* ── Footer ──────────────────────────────────────────── */
@@ -553,13 +572,54 @@
   }
 }
 
-@media (max-width: 480px) {
-  .btn-confirm {
-    padding: 12px 16px;
-    font-size: 15px;
+/* Móvil: se quita el total del footer (el rail de Resumen ya lo muestra) y las
+   acciones pasan a un grid simétrico de 2 columnas — Cancelar + Anterior
+   comparten la fila superior; Guardar borrador y la CTA principal ocupan el
+   ancho completo (la CTA queda destacada al fondo). En el primer paso (sin
+   "Anterior") Cancelar toma la fila completa para conservar la simetría. */
+@media (max-width: 640px) {
+  .footer-left {
+    display: none;
   }
 
   .footer-actions {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .btn-cancel {
+    margin-right: 0;
+  }
+
+  .btn-cancel,
+  .btn-prev {
+    grid-column: span 1;
+  }
+
+  .btn-draft,
+  .btn-confirm {
+    grid-column: 1 / -1;
+  }
+
+  /* Primer paso sin "Anterior": Cancelar ocupa la fila completa. */
+  .footer-actions:not(:has(.btn-prev)) .btn-cancel {
+    grid-column: 1 / -1;
+  }
+
+  /* Paddings uniformes → las acciones se ven simétricas y bien ajustadas. */
+  .btn-cancel,
+  .btn-prev,
+  .btn-draft {
+    padding: 12px 14px;
+    font-size: 14px;
+    justify-content: center;
+  }
+
+  .btn-confirm {
+    padding: 14px;
+    font-size: 15px;
   }
 }

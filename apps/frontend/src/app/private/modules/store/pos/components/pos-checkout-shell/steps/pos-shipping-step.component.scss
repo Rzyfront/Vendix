@@ -44,9 +44,17 @@
   }
 
   /* Simetría vertical con los demás pasos del checkout (min-height común del
-     stepper). Solo desktop; en móvil el stepper cae debajo (DOM-last). */
+     stepper). Solo desktop; en móvil el stepper se oculta (ver abajo). */
   .steps-col {
     min-height: 305px;
+  }
+}
+
+/* Móvil: el stepper vertical se oculta para dar el ancho completo a las
+   opciones; el header horizontal del shell orienta al usuario. */
+@media (max-width: 767px) {
+  .steps-col {
+    display: none;
   }
 }
 

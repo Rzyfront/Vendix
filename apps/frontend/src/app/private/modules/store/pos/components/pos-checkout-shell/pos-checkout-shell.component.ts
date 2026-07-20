@@ -124,6 +124,12 @@ export class PosCheckoutShellComponent {
    * Dirección sub-step with an invalid address; auto-cleared once valid.
    */
   readonly showAddressErrors = signal<boolean>(false);
+  /**
+   * Flash flag for the Cliente sub-step: forces the "selecciona un cliente"
+   * hint when the operator tries to leave the Cliente selector without having
+   * picked a customer. Cleared once a customer is chosen or on sub-step change.
+   */
+  readonly showCustomerError = signal<boolean>(false);
 
   /** Delivery flows must capture a shipping address in the Cliente step. */
   readonly requiresAddress = computed<boolean>(
@@ -445,6 +451,7 @@ export class PosCheckoutShellComponent {
     this.addressValid.set(false);
     this.capturedAddressId.set(null);
     this.showAddressErrors.set(false);
+    this.showCustomerError.set(false);
     this.submittingDraft.set(false);
     this.syncAnonymousSaleState();
     // Remount the projected content so the child components (collector,
@@ -464,22 +471,61 @@ export class PosCheckoutShellComponent {
   }
 
   /**
-   * Footer "Siguiente" handler. Blocks leaving the Cliente step's Dirección
-   * sub-step (delivery, con-cliente, clienteSubStep 2) while the captured
-   * address is invalid — flashing the inline errors instead of advancing. Any
-   * other step advances normally.
+   * Footer "Siguiente" handler. Drives the mandatory sub-flows so NO required
+   * step advances while incomplete, flashing in the UI what is missing instead
+   * of jumping ahead:
+   *  - Cliente (con-cliente): Tipo → Cliente → (delivery) Dirección. A customer
+   *    is required for delivery before the Dirección sub-step; a valid address
+   *    (with phone) is required before leaving Dirección.
+   *  - Envío: a shipping method + address/cost must satisfy `canConfirm()`
+   *    before reaching Cobro.
+   * Every other step advances normally.
    */
   attemptNextStep(): void {
-    if (
-      this.currentStepKey() === 'cliente' &&
-      this.requiresAddress() &&
-      !this.isAnonymousSale() &&
-      this.clienteSubStep() === 2 &&
-      !this.addressValid()
-    ) {
-      this.showAddressErrors.set(true);
+    const key = this.currentStepKey();
+
+    // ── Cliente: sub-flujo obligatorio (Tipo → Cliente → Dirección) ──────────
+    if (key === 'cliente' && !this.isAnonymousSale()) {
+      const sub = this.clienteSubStep();
+      // Tipo → Cliente (con-cliente ya elegido en este sub-paso).
+      if (sub === 0) {
+        this.goToClienteSubStep(1);
+        return;
+      }
+      // Cliente → en delivery exige cliente antes de la Dirección.
+      if (sub === 1) {
+        if (this.requiresAddress()) {
+          if (!this.cartState()?.customer) {
+            this.showCustomerError.set(true);
+            return;
+          }
+          this.goToClienteSubStep(2);
+          return;
+        }
+        // Pickup con-cliente: Cliente es terminal; el collector valida el resto.
+        this.nextStep();
+        return;
+      }
+      // Dirección → exige dirección válida (con teléfono) antes de avanzar.
+      if (sub === 2 && this.requiresAddress() && !this.addressValid()) {
+        this.showAddressErrors.set(true);
+        return;
+      }
+      this.nextStep();
       return;
     }
+
+    // ── Envío: exige método + dirección/costo válidos antes de Cobro ─────────
+    if (key === 'envio') {
+      const ship = this.shippingStep();
+      if (!ship?.canConfirm()) {
+        ship?.flashValidation();
+        return;
+      }
+      this.nextStep();
+      return;
+    }
+
     this.nextStep();
   }
 
@@ -544,6 +590,8 @@ export class PosCheckoutShellComponent {
   goToClienteSubStep(index: number): void {
     const max = Math.max(0, this.clienteSubSteps().length - 1);
     this.clienteSubStep.set(Math.min(Math.max(index, 0), max));
+    // Moving between sub-steps clears the flashed "falta cliente" hint.
+    this.showCustomerError.set(false);
   }
 
   /**
@@ -585,6 +633,8 @@ export class PosCheckoutShellComponent {
   selectCustomer(customer: PosCustomer): void {
     this.userOverrideAnonymous.set(false);
     this.isAnonymousSale.set(false);
+    // A customer is now attached → clear any flashed "falta cliente" hint.
+    this.showCustomerError.set(false);
     // El padre (POS) es dueño del carrito; solo re-emitimos.
     this.customerSelected.emit(customer);
     // Derive the customer's saved primary-address id so the Envío step reuses it

@@ -73,12 +73,16 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
 
       <!-- Vertical -->
       @if (orientation() === 'vertical') {
-        <div class="flex flex-col py-2">
+        <div
+          class="flex flex-col py-2"
+          [class.h-full]="fillHeight()"
+          [style.min-height.px]="fillHeight() ? minHeightPx() : null"
+        >
           @for (step of steps(); track step.label; let i = $index) {
             @if (i > 0) {
               <div
                 class="w-0.5 rounded-full transition-colors duration-300 ml-4 my-0.5"
-                [ngClass]="verticalLineClasses"
+                [ngClass]="fillHeight() ? 'flex-1' : verticalLineClasses"
                 [class.bg-primary]="i <= currentStep()"
                 [class.bg-border]="i > currentStep()"
                 [style.background-color]="i <= currentStep() ? primaryColor() : undefined"
@@ -133,6 +137,15 @@ export class StepsLineComponent {
   readonly size = input<StepsLineSize>('md');
   readonly orientation = input<'horizontal' | 'vertical'>('horizontal');
   readonly clickable = input(false);
+  /**
+   * Opt-in (vertical only): stretch the stepper to `minHeightPx` and let the
+   * connector segments grow (`flex-1`) so the dots distribute evenly across the
+   * full height instead of clustering at the top. Default false keeps every
+   * existing horizontal/vertical consumer visually unchanged.
+   */
+  readonly fillHeight = input(false);
+  /** Minimum vertical height (px) applied to the flex-col when `fillHeight` is on. */
+  readonly minHeightPx = input<number | null>(null);
   readonly stepClicked = output<number>();
 
   onStepClick(index: number): void {

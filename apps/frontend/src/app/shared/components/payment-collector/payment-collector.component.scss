@@ -378,3 +378,13 @@
     min-height: 305px;
   }
 }
+
+/* Móvil (solo POS checkout): el stepper vertical se oculta para dar el ancho
+   completo a las opciones de cobro; el header horizontal del shell orienta al
+   usuario. Otros consumidores del collector (membership/table/order/ecommerce)
+   usan el layout FLAT y no tienen .pc-steps-col, así que no se ven afectados. */
+@media (max-width: 767px) {
+  :host-context(.pos-payment-context) .pc-steps-col {
+    display: none;
+  }
+}
