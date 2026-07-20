@@ -109,16 +109,15 @@
   line-height: 1;
 }
 
-// Short weekday label (L M X J V S D) shown on unavailable cells
+// Short weekday label (Lu Ma Mi Ju Vi Sá Do) shown on unavailable cells
 // so the user can tell at a glance WHICH weekday is closed (e.g.
-// "X" for Miércoles). Visible in both --unavailable and --past
-// variants — both already get the X via the parent class.
+// "Mi" for Miércoles). 2 letters at this font size still fit inside
+// the 36-44px cells without overflow.
 .cal-cell__day {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
 }
 
 // Verde + check (regla skill vendix-ui-ux §6 — color + ícono)
