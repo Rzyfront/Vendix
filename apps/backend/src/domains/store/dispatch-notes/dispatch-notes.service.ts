@@ -2241,6 +2241,8 @@ export class DispatchNotesService {
       where: { id: dispatch_note_id, store_id },
       select: {
         id: true,
+        // order_id → para sacar la orden del pool de carriers al asignarla.
+        order_id: true,
         grand_total: true,
         needs_collection: true,
         invoice: { select: { payment_date: true } },
@@ -2314,6 +2316,16 @@ export class DispatchNotesService {
       where: { id: route_id },
       data: { total_to_collect, total_prepaid, updated_at: new Date() },
     });
+
+    // Al asignar la remisión a una ruta, la orden sale del pool de carriers
+    // (misma tx). Limpiamos `dispatch_pool_at` y el claim para que no siga
+    // apareciendo como disponible en los streams SSE de repartidores.
+    if (new_note.order_id != null) {
+      await tx.orders.updateMany({
+        where: { id: new_note.order_id, store_id },
+        data: { dispatch_pool_at: null, claimed_by_carrier_user_id: null },
+      });
+    }
   }
 
   /**
