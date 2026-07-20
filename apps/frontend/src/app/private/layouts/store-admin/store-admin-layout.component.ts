@@ -510,6 +510,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/products/categories',
         },
         { label: 'Marcas', icon: 'tag', route: '/admin/products/brands' },
+        {
+          label: 'Precios y Tarifas',
+          icon: 'circle',
+          route: '/admin/price-tiers',
+        },
       ],
     },
     {
@@ -822,11 +827,6 @@ export class StoreAdminLayoutComponent {
           label: 'Métodos de Pago',
           icon: 'circle',
           route: '/admin/settings/payments',
-        },
-        {
-          label: 'Precios y Tarifas',
-          icon: 'circle',
-          route: '/admin/price-tiers',
         },
         {
           label: 'Apariencia',
