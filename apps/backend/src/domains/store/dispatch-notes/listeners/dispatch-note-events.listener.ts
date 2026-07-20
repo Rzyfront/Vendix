@@ -430,15 +430,21 @@ export class DispatchNoteEventsListener {
         event.dispatch_number,
       );
 
-      // Fase 4 — COGS contable SOLO para customer_delivery STANDALONE (sin
-      // order_id ni sales_order_id). Las remisiones ligadas a orden/SO ya
-      // reconocen COGS vía `order.completed` — postear aquí sería doble COGS.
-      // Los traslados (transfer_out) NO son venta → sin COGS. Usa el costo REAL
-      // devuelto por commitDispatchDelivery (iguala el movimiento de inventario).
+      // Fase 4 — COGS contable para customer_delivery, tanto STANDALONE como
+      // ligada a una orden (order_id). BUG-2: antes se excluían las remisiones
+      // con order_id asumiendo que ya reconocían COGS vía `order.completed`; esa
+      // asunción es FALSA en el camino de despacho. El stock se deduce AQUÍ
+      // (commitDispatchDelivery), así que cuando la orden luego llega a
+      // `finished`, commitOrderDelivery encuentra las líneas ya commiteadas y
+      // devuelve totalCost=0 → `order.completed` NO postea COGS. Resultado: sin
+      // este gate el COGS de un pedido COD despachado nunca se contabilizaba.
+      // Por eso se reconoce aquí con el costo REAL devuelto por
+      // commitDispatchDelivery (iguala el movimiento de inventario). Se siguen
+      // excluyendo: las ligadas a un sales_order (SO), cuyo ciclo contable es
+      // propio, y los traslados (transfer_out) que NO son venta → sin COGS.
       if (
         dispatch_note.subtype === 'customer_delivery' &&
         !dispatch_note.sales_order_id &&
-        !dispatch_note.order_id &&
         Number(res.totalCost) > 0
       ) {
         const organization_id = await this.resolveOrgId(dispatch_note.store_id);
@@ -1120,16 +1126,17 @@ export class DispatchNoteEventsListener {
 
     // Fase 4 — reversa CONTABLE de la anulación. Sólo para los casos cuyo
     // asiento original posteó ESTE módulo (mismos gates que cogs/received):
-    //  - outbound customer_delivery STANDALONE (posteó dispatch_note.delivered)
+    //  - outbound customer_delivery (STANDALONE o ligada a una orden): BUG-2 —
+    //    ambas postean COGS en dispatch_note.delivered, así que anular DEBE
+    //    reversarlo (dispatch_note.void) para mantener el libro balanceado.
     //  - inbound purchase_receipt / customer_return (posteó dispatch_note.received)
-    // Los traslados y las remisiones ligadas a orden/SO NO postearon asiento
-    // propio → no se reversa contablemente (su contabilidad la maneja el
-    // ciclo de la orden / no existe).
+    // Los traslados y las remisiones ligadas a un sales_order (SO) NO postearon
+    // asiento propio en este módulo → no se reversa contablemente (su
+    // contabilidad la maneja su propio ciclo / no existe).
     const shouldReverseAccounting =
       (direction === 'outbound' &&
         subtype === 'customer_delivery' &&
-        !dispatch_note.sales_order_id &&
-        !dispatch_note.order_id) ||
+        !dispatch_note.sales_order_id) ||
       (direction === 'inbound' &&
         (subtype === 'purchase_receipt' || subtype === 'customer_return'));
 
