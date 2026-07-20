@@ -271,13 +271,15 @@ export class DispatchNotesController {
   }
 
   /**
-   * R4c — Scan a purchase receipt / supplier invoice (multipart `file`) and
-   * return AI-suggested line items + supplier, each matched (tenant-scoped)
-   * against the store catalog. Reuses the dispatch-notes create permission.
-   * No persistence — the frontend prefills the create wizard with the result.
+   * R4c (async) — Enqueue an AI scan of a purchase receipt / supplier invoice
+   * (multipart `file`). The image is preprocessed (sharp) INLINE here and the
+   * heavy OCR + tenant-scoped catalog matching runs out-of-band in the
+   * `receipt-scan` worker. Responds 202 with `{ job_id }`; the client then polls
+   * `GET receipt-scan/:jobId` for the terminal `ScanReceiptResult`. Reuses the
+   * dispatch-notes create permission. No persistence.
    */
   @Post('receipt-scan')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   @Permissions('store:dispatch_notes:create')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -301,10 +303,28 @@ export class DispatchNotesController {
     }),
   )
   async receiptScan(@UploadedFile() file?: Express.Multer.File) {
-    const result = await this.dispatchNotesService.scanReceipt(file);
+    const result = await this.dispatchNotesService.enqueueReceiptScan(file);
     return this.responseService.success(
       result,
-      'Recibo de compra escaneado exitosamente',
+      'Escaneo de recibo encolado exitosamente',
+    );
+  }
+
+  /**
+   * R4c (async) — Poll the status of a queued receipt scan. Returns
+   * `{ status, result?, error? }` where `status` is the BullMQ lifecycle state
+   * ('waiting' | 'active' | 'completed' | 'failed' | 'delayed'), `result` is the
+   * unchanged `ScanReceiptResult` (only when completed), and `error` is the
+   * failure reason (only when failed). Same create permission as the enqueue.
+   */
+  @Get('receipt-scan/:jobId')
+  @Permissions('store:dispatch_notes:create')
+  async receiptScanStatus(@Param('jobId') job_id: string) {
+    const result =
+      await this.dispatchNotesService.getReceiptScanJobStatus(job_id);
+    return this.responseService.success(
+      result,
+      'Estado del escaneo de recibo obtenido',
     );
   }
 

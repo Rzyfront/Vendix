@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNotesController } from './dispatch-notes.controller';
+import { ReceiptScanProcessor } from './receipt-scan.processor';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
 import { DispatchNotePdfService } from './pdf/dispatch-note-pdf.service';
 import { DispatchNumberGenerator } from './utils/dispatch-number-generator';
@@ -35,6 +37,11 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     OrderStockCommitModule,
     PurchaseOrdersModule,
     OrderFlowModule,
+    // Async purchase-receipt OCR scanner. BullMQ root is already configured
+    // globally (embeddings/ai-generation); each domain only registers its own
+    // queue. Producer: DispatchNotesService.enqueueReceiptScan; consumer:
+    // ReceiptScanProcessor.
+    BullModule.registerQueue({ name: 'receipt-scan' }),
   ],
   controllers: [DispatchNotesController],
   providers: [
@@ -47,6 +54,9 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     // Bug C — recomputes orders.dispatch_fulfillment on confirm/deliver/void
     // so a fully-remitida order stops showing as despachable.
     DispatchFulfillmentListener,
+    // receipt-scan queue worker — injects DispatchNotesService and restores the
+    // tenant RequestContext from the job payload before running the OCR.
+    ReceiptScanProcessor,
   ],
   exports: [DispatchNotesService],
 })
