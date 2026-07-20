@@ -11,6 +11,7 @@
       [value]="fulfillment()"
       [consumoBlocked]="false"
       (selectionChange)="onFulfillmentChange($event)"
+      (reselected)="onFulfillmentReselected($event)"
     ></app-pos-fulfillment-selector>
 
     @if (fulfillment() === 'consumo') {

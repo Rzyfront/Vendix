@@ -573,6 +573,24 @@ export class PosCheckoutShellComponent {
     this.shippingStep()?.execute(submit);
   }
 
+  /**
+   * Bubbled from the Cobro step when the operator confirms the Monto via the
+   * collector's in-panel "Aceptar". The collector already collapsed the amount
+   * cards with the green one-shot fill (~420ms). We wait for that animation to
+   * finish, then finalize (Cobro is the last step) or advance to the next step.
+   * setTimeout is zoneless-safe: the signal writes inside onConfirm/attemptNextStep
+   * schedule change detection through the signal graph.
+   */
+  onAmountConfirmed(): void {
+    setTimeout(() => {
+      if (this.isLastStep()) {
+        this.onConfirm();
+      } else {
+        this.attemptNextStep();
+      }
+    }, 420);
+  }
+
   /** Re-emit the Envío step result to the parent (POS). */
   onShippingCompleted(shippingData: any): void {
     this.shippingCompleted.emit(shippingData);

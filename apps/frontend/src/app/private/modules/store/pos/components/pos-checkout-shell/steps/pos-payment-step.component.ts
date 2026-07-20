@@ -130,6 +130,11 @@ export class PosPaymentStepComponent implements OnInit {
    * without processing it. The shell forwards it to the shipping step.
    */
   readonly paymentReady = output<PaymentSubmit>();
+  /**
+   * Bubbled from the collector's in-panel "Aceptar" (Monto sub-step). The shell
+   * owns the advance/finalize timing (it waits for the green collapse animation).
+   */
+  readonly amountConfirmed = output<void>();
 
   /** The headless collector — the shell drives it through this step's API. */
   protected readonly collector = viewChild(PaymentCollectorComponent);

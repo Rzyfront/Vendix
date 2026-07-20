@@ -119,6 +119,13 @@ export class PaymentCollectorComponent implements OnInit {
   readonly methodSelected = output<PaymentMethod>();
   readonly requestCustomer = output<void>();
   readonly walletLookup = output<{ id: number | string }>();
+  /**
+   * Emitted when the operator confirms the Monto sub-step via the in-panel
+   * "Aceptar" button (stepped POS layout). The parent (shell) owns the timing:
+   * it waits for the green collapse animation (~420ms) before advancing or
+   * finalizing. Never fires in the flat layout.
+   */
+  readonly amountConfirmed = output<void>();
 
   // ── Form controls (each concern isolated) ──────────────────────────────
   readonly cashReceivedControl = new FormControl<number>(0, { nonNullable: true });
@@ -131,6 +138,14 @@ export class PaymentCollectorComponent implements OnInit {
   readonly mode = signal<PaymentMode>('contado');
   /** Active sub-step index for the `stepped` layout sub-wizard. */
   readonly subStep = signal<number>(0);
+  /**
+   * Presentational one-shot (stepped POS layout only): when the operator hits
+   * "Aceptar" on the Monto sub-step, the Total/detail cards collapse into a
+   * green summary row (the shared `subwizard-fill` keyframe) and
+   * {@link amountConfirmed} fires. Reset on any wizard navigation and on
+   * collector reset.
+   */
+  readonly amountCollapsed = signal<boolean>(false);
   readonly selectedInstallmentId = signal<number | null>(null);
   /** Two-way bound to the Wompi child; null = incomplete. */
   readonly wompiSlice = signal<WompiSlice | null>(null);
@@ -394,6 +409,7 @@ export class PaymentCollectorComponent implements OnInit {
 
   // ── Interaction handlers ─────────────────────────────────────────────────
   setMode(mode: PaymentMode): void {
+    this.amountCollapsed.set(false);
     this.mode.set(mode);
     if (mode === 'credito' && !this.customer()) {
       this.requestCustomer.emit();
@@ -405,10 +421,29 @@ export class PaymentCollectorComponent implements OnInit {
 
   /** Jump the stepped sub-wizard to a given sub-step (clamped to range). */
   goToSubStep(i: number): void {
+    this.amountCollapsed.set(false);
     if (i >= 0 && i < this.subSteps().length) this.subStep.set(i);
   }
 
+  /**
+   * Stepped layout: confirm the Monto sub-step. Guarded by the single submit
+   * gate (canSubmit) so a not-yet-valid amount cannot be confirmed. Collapses
+   * the Total/detail cards (shared green one-shot fill) and emits
+   * {@link amountConfirmed} so the shell advances/finalizes after the animation.
+   */
+  confirmAmount(): void {
+    if (!this.canSubmit()) return;
+    this.amountCollapsed.set(true);
+    this.amountConfirmed.emit();
+  }
+
+  /** Re-expand the Monto cards after a collapse (click on the summary row). */
+  expandAmount(): void {
+    this.amountCollapsed.set(false);
+  }
+
   selectMethod(method: PaymentMethod): void {
+    this.amountCollapsed.set(false);
     // Reset per-method slices so a previous method never leaks state.
     this.wompiSlice.set(null);
     this.referenceControl.setValue('');
@@ -506,6 +541,7 @@ export class PaymentCollectorComponent implements OnInit {
   private resetState(): void {
     this.selectedMethod.set(null);
     this.subStep.set(0);
+    this.amountCollapsed.set(false);
     this.manuallyEditedCash.set(false);
     // Seed the mode from `initialMode`, but only respect a 'credito' seed when
     // credit is actually enabled; otherwise fall back to 'contado'.

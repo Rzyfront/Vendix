@@ -37,6 +37,7 @@
               [cartState]="cartState()"
               [tableId]="tableId()"
               (tableSessionOpened)="onTableSessionOpened($event)"
+              (advanceRequested)="attemptNextStep()"
             ></app-pos-consumo-step>
           </div>
         }
@@ -60,6 +61,7 @@
               [amountOverride]="deliveryAmount()"
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"
+              (amountConfirmed)="onAmountConfirmed()"
               (requestCustomer)="onRequestCustomer()"
             ></app-pos-payment-step>
           </div>
