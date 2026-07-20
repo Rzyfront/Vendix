@@ -14,6 +14,7 @@ const EXCLUDED_PATHS = [
   '/api-docs',
   '/monitoring/performance',
   '/monitoring/overview',
+  '/stream',
 ];
 const UUID_REGEX =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;

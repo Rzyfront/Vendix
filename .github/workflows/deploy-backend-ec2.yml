@@ -141,11 +141,16 @@ jobs:
           echo "🗄️  Ensuring vendix-redis container is running..."
           if ! sudo docker ps --filter name=^/vendix-redis$ --filter status=running -q | grep -q .; then
             sudo docker rm -f vendix-redis 2>/dev/null || true
+            # maxmemory: OOM-protection ceiling for Redis on this SHARED t3.medium (4 GiB nameplate)
+            # host that also runs vendix-backend (~1.5-2 GiB) + nginx + OS. allkeys-lru evicts cold
+            # keys instead of the default 'noeviction' (which rejects writes and can OOM the box).
+            # Size to ~50-60% of AVAILABLE RAM: re-confirm with 'free -m' and adjust if backend is smaller.
             sudo docker run -d --name vendix-redis \\
               --network vendix-net \\
               --restart unless-stopped \\
               -v vendix-redis-data:/data \\
-              redis:7-alpine redis-server --appendonly yes --save 60 1000
+              redis:7-alpine redis-server --appendonly yes --save 60 1000 \\
+              --maxmemory 1gb --maxmemory-policy allkeys-lru
           fi
 
           echo "🛑 Stopping current container..."

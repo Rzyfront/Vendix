@@ -5,6 +5,9 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
@@ -27,6 +30,11 @@ import {
   RawReceiptScan,
   RawReceiptItem,
 } from './dto/scan-receipt.dto';
+import {
+  ReceiptScanJob,
+  ReceiptScanJobStatusResult,
+  ReceiptScanJobState,
+} from './receipt-scan-job.interface';
 import {
   dispatch_note_status_enum,
   dispatch_route_status_enum,
@@ -151,6 +159,11 @@ export class DispatchNotesService {
     // AIEngineService is provided by the @Global() AIEngineModule, so it is
     // injectable here without importing the module (used by scanReceipt — R4c).
     private readonly aiEngine: AIEngineService,
+    // Async receipt-scan queue (registered in DispatchNotesModule). The HTTP
+    // path preprocesses + enqueues here (202 + job_id); the worker restores the
+    // tenant context and runs the OCR out-of-band. See receipt-scan.processor.ts.
+    @InjectQueue('receipt-scan')
+    private readonly receiptScanQueue: Queue<ReceiptScanJob>,
     // Bug C — recompute orders.dispatch_fulfillment inline for the createFromOrder
     // 'draft' path, which does NOT emit an event but whose draft note already
     // counts toward the rollup. Same module provider (only depends on prisma —
@@ -190,14 +203,121 @@ export class DispatchNotesService {
    * NOTE (dev): with 0 rows in ai_engine_configs the AI call fails fast with
    * AI_PROVIDER_002 — expected locally; the wiring/contract is still valid.
    */
-  async scanReceipt(file?: Express.Multer.File): Promise<ScanReceiptResult> {
+  /**
+   * HTTP entrypoint (async path). Validates + preprocesses the upload INLINE
+   * (sharp — the controller owns the multer buffer, which never survives the
+   * queue boundary) and enqueues a `receipt-scan` job. Returns the job id
+   * immediately (the controller responds 202); the heavy OCR + catalog matching
+   * runs out-of-band in `ReceiptScanProcessor` → `scanReceiptFromImage`.
+   *
+   * The tenant context is snapshotted HERE (store/org/user/request-id) and
+   * restored inside the worker so catalog matching stays tenant-scoped.
+   */
+  async enqueueReceiptScan(
+    file?: Express.Multer.File,
+  ): Promise<{ job_id: string }> {
     this.assertValidReceiptFile(file);
 
-    const store_id = RequestContextService.getContext()?.store_id;
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
 
     const { base64, mimeType } = await this.preprocessReceiptImage(file!);
     const dataUri = `data:${mimeType};base64,${base64}`;
+
+    const payload: ReceiptScanJob = {
+      dataUri,
+      mimeType,
+      context: {
+        store_id,
+        organization_id: context?.organization_id,
+        user_id: context?.user_id,
+        // Correlation id for replay-safe downstream logic; fall back to a
+        // fresh uuid so retries of THIS job replay the same id.
+        request_id: context?.request_id ?? `queue-${randomUUID()}`,
+      },
+    };
+
+    try {
+      const job = await this.receiptScanQueue.add('scan', payload, {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 50 },
+      });
+      this.logger.log(
+        `[ReceiptScan] Enqueued job ${job.id} (store_id=${store_id}, size=${file!.size}B)`,
+      );
+      return { job_id: job.id! };
+    } catch (err: any) {
+      this.logger.error(`[ReceiptScan] Failed to enqueue: ${err?.message}`);
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
+    }
+  }
+
+  /**
+   * Poll a queued receipt-scan job. Returns the BullMQ lifecycle `status`, plus
+   * the terminal `result` (the UNCHANGED `ScanReceiptResult`, only when
+   * completed) or the `error` string (only when failed). 404 (AI_QUEUE_002)
+   * when the job id is unknown or already evicted from the retention window.
+   */
+  async getReceiptScanJobStatus(
+    jobId: string,
+  ): Promise<ReceiptScanJobStatusResult> {
+    const job = await this.receiptScanQueue.getJob(jobId);
+    // Cross-tenant IDOR guard: BullMQ job ids are GLOBAL sequential integers on
+    // a queue shared by every store, so `getJob(id)` alone lets store A read
+    // store B's OCR result (supplier, NIT, amounts, catalog matches). Validate
+    // the job's captured tenant against the caller's store context and return
+    // the SAME 404 as an unknown/evicted job so we never leak that another
+    // tenant's job exists.
+    const callerStoreId = RequestContextService.getContext()?.store_id;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.context?.store_id !== callerStoreId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+    const status = (await job.getState()) as ReceiptScanJobState;
+    return {
+      status,
+      result: (job.returnvalue as ScanReceiptResult | undefined) ?? undefined,
+      error: job.failedReason || undefined,
+    };
+  }
+
+  /**
+   * @deprecated Synchronous full path — kept for internal reuse / backward
+   * compatibility only. The HTTP endpoint now enqueues (see
+   * `enqueueReceiptScan`). Preprocesses the upload and delegates the heavy work
+   * to `scanReceiptFromImage`.
+   */
+  async scanReceipt(file?: Express.Multer.File): Promise<ScanReceiptResult> {
+    this.assertValidReceiptFile(file);
+    const { base64, mimeType } = await this.preprocessReceiptImage(file!);
+    const dataUri = `data:${mimeType};base64,${base64}`;
+    return this.scanReceiptFromImage(dataUri, mimeType);
+  }
+
+  /**
+   * Worker-side heavy lifting: run the vision OCR on an already-encoded image
+   * `data:` URI, parse + normalize the JSON defensively, and match
+   * supplier/items against the store catalog (tenant-scoped). Callable from the
+   * BullMQ worker (context restored via `RequestContextService.run`) OR
+   * synchronously (ambient HTTP context). Returns the UNCHANGED
+   * `ScanReceiptResult` contract — this is what lands in `job.returnvalue`.
+   *
+   * IMPORTANT: calls `aiEngine.run('invoice_ocr', {}, [imageMessage])` DIRECTLY
+   * (NOT `runByApplicationType`, which drops extra_messages for image execution
+   * types and would silently lose the image).
+   */
+  async scanReceiptFromImage(
+    dataUri: string,
+    mimeType: string,
+  ): Promise<ScanReceiptResult> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
 
     const imageMessage: AIMessage = {
       role: 'user',
@@ -214,7 +334,7 @@ export class DispatchNotesService {
     };
 
     this.logger.debug(
-      `[ReceiptScan] Sending to AI engine (appKey=invoice_ocr, size=${file!.size}B)...`,
+      `[ReceiptScan] Sending to AI engine (appKey=invoice_ocr, mime=${mimeType})...`,
     );
 
     const response = await this.aiEngine.run('invoice_ocr', {}, [imageMessage]);

@@ -1,10 +1,13 @@
 import {
+  Inject,
   Injectable,
   NotFoundException,
   ConflictException,
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import {
   CreateStoreDto,
@@ -28,6 +31,9 @@ import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 
+// Aggregated store dashboards tolerate 1-2 min of staleness → short TTL (ms).
+const STORE_DASHBOARD_CACHE_TTL_MS = 120_000;
+
 @Injectable()
 export class StoresService {
   private readonly logger = new Logger(StoresService.name);
@@ -39,6 +45,7 @@ export class StoresService {
     private storeBootstrapHelper: StoreBootstrapHelper,
     private readonly subscriptionTrialService: SubscriptionTrialService,
     private readonly staffProvisioning: StaffProvisioningService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
@@ -518,6 +525,26 @@ export class StoresService {
   }
 
   async getDashboard(id: number, query: StoreDashboardDto) {
+    // The store `id` is a global PK → tenant-unique on its own. The raw
+    // date-range inputs capture the period; a request without dates shares a
+    // stable key and relies on the short TTL for freshness.
+    const from = query.start_date
+      ? new Date(query.start_date).toISOString()
+      : '_';
+    const to = query.end_date ? new Date(query.end_date).toISOString() : '_';
+    const cacheKey = `store:dashboard:${id}:${from}:${to}`;
+    const cached =
+      await this.cache.get<
+        Awaited<ReturnType<StoresService['computeDashboard']>>
+      >(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.computeDashboard(id, query);
+    await this.cache.set(cacheKey, result, STORE_DASHBOARD_CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeDashboard(id: number, query: StoreDashboardDto) {
     const { start_date, end_date } = query;
 
     // Default last 30 days
@@ -679,6 +706,28 @@ export class StoresService {
   }
 
   async getGlobalDashboard() {
+    // NOTE: despite the name, these counts are org-scoped by
+    // OrganizationPrismaService (`stores` is an org_scoped_model), so the
+    // result differs per organization. The cache key MUST include
+    // organization_id or one tenant's totals would leak to another. When there
+    // is no org context we skip the cache entirely (never a global key).
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!organizationId) {
+      return this.computeGlobalDashboard();
+    }
+    const cacheKey = `stores:global-dashboard:${organizationId}`;
+    const cached =
+      await this.cache.get<
+        Awaited<ReturnType<StoresService['computeGlobalDashboard']>>
+      >(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.computeGlobalDashboard();
+    await this.cache.set(cacheKey, result, STORE_DASHBOARD_CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeGlobalDashboard() {
     // Get all stores counts by status (only active stores count for metrics)
     const [
       totalStores,

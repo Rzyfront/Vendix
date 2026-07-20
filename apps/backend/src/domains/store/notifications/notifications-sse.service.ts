@@ -16,6 +16,11 @@ export class NotificationsSseService {
     number,
     Map<number, Subject<SseNotificationPayload>>
   >();
+  // Refcount per (store, user), mirroring `subscriberCounts` for the
+  // per-store subject. Without it, the FIRST tab/device disconnect of a user
+  // would `complete()` + `delete()` the SHARED per-user subject, killing
+  // targeted events for that same user's other still-open connections.
+  private userSubscriberCounts = new Map<number, Map<number, number>>();
 
   getOrCreate(store_id: number): Subject<SseNotificationPayload> {
     if (!this.subjects.has(store_id)) {
@@ -69,14 +74,40 @@ export class NotificationsSseService {
     if (!byUser.has(user_id)) {
       byUser.set(user_id, new Subject());
     }
+    // Increment the per-user refcount (create the store bucket lazily).
+    let counts = this.userSubscriberCounts.get(store_id);
+    if (!counts) {
+      counts = new Map();
+      this.userSubscriberCounts.set(store_id, counts);
+    }
+    counts.set(user_id, (counts.get(user_id) || 0) + 1);
     return byUser.get(user_id)!;
   }
 
   /**
    * Decrement the per-user subscriber count and clean up when zero. Called
-   * by the controller on `req.on('close')`.
+   * by the controller on `req.on('close')`. Only the LAST connection for a
+   * given (store, user) completes and removes the shared Subject — earlier
+   * closes (other tabs/devices of the same user) just decrement the count so
+   * the remaining connections keep receiving targeted events.
    */
   unsubscribeUser(store_id: number, user_id: number): void {
+    const counts = this.userSubscriberCounts.get(store_id);
+    const remaining = (counts?.get(user_id) ?? 1) - 1;
+    if (remaining > 0) {
+      counts!.set(user_id, remaining);
+      return;
+    }
+
+    // Last subscriber for this user closed — drop the refcount entry and
+    // tear down the shared per-user subject.
+    if (counts) {
+      counts.delete(user_id);
+      if (counts.size === 0) {
+        this.userSubscriberCounts.delete(store_id);
+      }
+    }
+
     const byUser = this.userSubjects.get(store_id);
     if (!byUser) return;
     const subject = byUser.get(user_id);
@@ -115,5 +146,8 @@ export class NotificationsSseService {
       }
       this.userSubjects.delete(store_id);
     }
+    // Drop any residual per-user refcounts for this store so a full
+    // teardown does not leak the counter map.
+    this.userSubscriberCounts.delete(store_id);
   }
 }
