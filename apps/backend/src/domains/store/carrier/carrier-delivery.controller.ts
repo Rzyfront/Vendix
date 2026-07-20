@@ -16,7 +16,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { Observable, map } from 'rxjs';
+import { Observable, interval, map, merge } from 'rxjs';
 import { CarrierDeliveryService } from './carrier-delivery.service';
 import { CarrierPoolSseService } from './carrier-pool-sse.service';
 import { PoolQueryDto } from './dto/pool-query.dto';
@@ -91,9 +91,19 @@ export class CarrierDeliveryController {
     const subject = this.poolSse.getOrCreate(store_id);
     req.on('close', () => this.poolSse.unsubscribe(store_id));
 
-    return subject.pipe(
+    const events$ = subject.pipe(
       map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
+
+    // Heartbeat every 30s — emitted as an SSE comment (leading ":") so it
+    // keeps proxies/CDNs alive WITHOUT triggering client reconnection. This
+    // is what lets a non-clean disconnect surface as `req.on('close')` and
+    // release the shared Subject (fixes the SSE heap leak).
+    const heartbeat$ = interval(30_000).pipe(
+      map(() => ({ data: `: heartbeat ${Date.now()}` }) as MessageEvent),
+    );
+
+    return merge(events$, heartbeat$);
   }
 
   /** Reclamar una orden (claim atómico primero-gana). */
