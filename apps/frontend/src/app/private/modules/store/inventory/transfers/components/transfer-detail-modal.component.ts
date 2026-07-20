@@ -1,5 +1,6 @@
 import {
   Component,
+  inject,
   input,
   output,
   effect,
@@ -12,6 +13,7 @@ import {
   ButtonComponent,
   IconComponent,
 } from '../../../../../../shared/components/index';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem } from '../interfaces';
 
@@ -279,6 +281,8 @@ export class TransferDetailModalComponent {
   readonly cancelTransfer = output<StockTransfer>();
   readonly completeTransfer = output<CompleteTransferItem[]>();
 
+  private toastService = inject(ToastService);
+
   isCompleting = false;
   confirmingReception = false;
   receivedQuantities: Map<number, number> = new Map();
@@ -307,8 +311,19 @@ export class TransferDetailModalComponent {
   }
 
   updateReceivedQuantity(itemId: number, event: Event): void {
-    const value = +(event.target as HTMLInputElement).value;
-    this.receivedQuantities.set(itemId, Math.max(0, value));
+    const raw = (event.target as HTMLInputElement).value;
+    const value = +raw;
+    const min = 0;
+    const clamped = Math.max(min, value);
+    // Feedback visible cuando el usuario teclea un valor por debajo del mínimo
+    // (ignoramos el campo vacío mientras edita para no spamear toasts).
+    if (raw !== '' && Number.isFinite(value) && value < min) {
+      this.toastService.info(
+        'La cantidad recibida no puede ser negativa.',
+        'Cantidad ajustada',
+      );
+    }
+    this.receivedQuantities.set(itemId, clamped);
   }
 
   onComplete(): void {
