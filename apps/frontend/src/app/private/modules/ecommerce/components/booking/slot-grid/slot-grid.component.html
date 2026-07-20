@@ -10,19 +10,15 @@
       <p>No hay horarios disponibles para esta fecha.</p>
     </div>
   } @else {
-    @for (group of [
-      { label: 'MA\u00d1ANA', items: groupedSlots().MA\u00d1ANA },
-      { label: 'TARDE',  items: groupedSlots().TARDE },
-      { label: 'NOCHE',  items: groupedSlots().NOCHE }
-    ]; track group.label) {
-      @if (group.items.length > 0) {
+    @for (group of groupOrder; track group.key) {
+      @if (groupedSlots()[group.key].length > 0) {
         <div class="slot-grid-section__group">
           <h4 class="slot-grid-section__group-title">
-            <span class="slot-grid-section__group-icon">☀️</span>
+            <span class="slot-grid-section__group-icon">{{ group.icon }}</span>
             {{ group.label }}
           </h4>
           <div class="slot-grid">
-            @for (slot of group.items; track trackByStartTime($index, slot)) {
+            @for (slot of groupedSlots()[group.key]; track trackByStartTime($index, slot)) {
               <button
                 type="button"
                 class="slot"

@@ -31,7 +31,7 @@ import {
   ProviderSelectorComponent,
   BookingProvider,
 } from '../../components/booking/provider-selector/provider-selector.component';
-import { SlotGridComponent } from '../../components/booking/slot-grid/slot-grid.component';
+import { SlotGridComponent, BookingSlot } from '../../components/booking/slot-grid/slot-grid.component';
 
 @Component({
   selector: 'app-booking',
@@ -91,7 +91,7 @@ export class BookingComponent implements OnInit {
   readonly providerId = computed(() => this.selectedProvider()?.id ?? null);
 
   // Step 3 — Slot
-  selectedSlot = signal<AvailabilitySlot | null>(null);
+  selectedSlot = signal<BookingSlot | AvailabilitySlot | null>(null);
 
   // Free-booking fallback (when product has no provider scheduling).
   isFreeBooking = signal(false);
@@ -253,7 +253,7 @@ export class BookingComponent implements OnInit {
 
   // --- Step 3: Slot selection ---
 
-  onSlotSelected(slot: AvailabilitySlot): void {
+  onSlotSelected(slot: BookingSlot): void {
     this.selectedSlot.set(slot);
     this.currentStep.set(3);
   }
