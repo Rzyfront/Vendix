@@ -1845,7 +1845,11 @@ export class DispatchNotesService {
       (sum, item) => sum + Number(item.tax_amount || 0),
       0,
     );
-    const grand_total = subtotal - total_discount + total_tax;
+    // Flete que paga el cliente en la orden. Debe sumarse al grand_total para
+    // que el recaudo COD de la ruta cobre el total real (mercancía + flete);
+    // sin él el repartidor recaudaba `orden - flete`.
+    const shipping_cost = Number(order.shipping_cost || 0);
+    const grand_total = subtotal - total_discount + total_tax + shipping_cost;
 
     // Pending balance on the order means the courier must collect on delivery.
     const needs_collection = Number(order.remaining_balance) > 0;
@@ -1896,6 +1900,7 @@ export class DispatchNotesService {
           subtotal_amount: subtotal,
           discount_amount: total_discount,
           tax_amount: total_tax,
+          shipping_cost,
           grand_total,
           currency: order.currency || 'COP',
           notes: dto.notes,
@@ -2571,7 +2576,12 @@ export class DispatchNotesService {
           (sum, item) => sum + Number(item.tax_amount || 0),
           0,
         );
-        const grand_total = subtotal - total_discount + total_tax;
+        // Preserva el flete ya persistido en la remisión al recomponer un
+        // borrador; NO se recalcula desde la orden aquí para no botarlo en
+        // ediciones de ítems.
+        const shipping_cost = Number(dispatch_note.shipping_cost || 0);
+        const grand_total =
+          subtotal - total_discount + total_tax + shipping_cost;
 
         // Denormalize customer if changed
         let customer_data: any = {};
@@ -2612,6 +2622,7 @@ export class DispatchNotesService {
             subtotal_amount: subtotal,
             discount_amount: total_discount,
             tax_amount: total_tax,
+            shipping_cost,
             grand_total,
             ...customer_data,
             updated_at: new Date(),
