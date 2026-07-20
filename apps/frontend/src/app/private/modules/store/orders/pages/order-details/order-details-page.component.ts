@@ -1596,7 +1596,7 @@ export class OrderDetailsPageComponent {
         this.openDispatchModal();
         break;
       case 'direct':
-        this.startShipWithoutNote();
+        this.directFullDelivery();
         break;
       case 'to-dispatch':
         this.publishOrderToPool();
@@ -1634,6 +1634,45 @@ export class OrderDetailsPageComponent {
           );
         },
       });
+  }
+
+  /**
+   * "Envío directo" (entrega completa): en un solo gesto crea una remisión
+   * confirmada SIN ruta, la marca como entregada y finaliza la orden.
+   * Encadena tres endpoints existentes en secuencia:
+   *   1. `POST /store/dispatch-notes/from-order/:orderId`  (confirmed, mode:none;
+   *      `items: []` = quick-accept de todo lo pendiente).
+   *   2. `POST /store/dispatch-notes/:id/deliver`.
+   *   3. `POST /store/orders/:id/flow/confirm-delivery`.
+   * Ante un fallo en cualquier paso mostramos el toast y abortamos; al terminar
+   * recargamos la orden para reflejar el nuevo estado. Reutiliza el mismo
+   * `isProcessingAction` de los demás flujos para el loading.
+   */
+  private async directFullDelivery(): Promise<void> {
+    const orderId = this.orderId;
+    if (!orderId) return;
+    this.isProcessingAction.set(true);
+    try {
+      const note = await firstValueFrom(
+        this.dispatchNotesService.createFromOrder(Number(orderId), {
+          target_status: 'confirmed',
+          route_assignment: { mode: 'none' },
+          items: [],
+        }),
+      );
+      await firstValueFrom(this.dispatchNotesService.deliver(note.id, {}));
+      await firstValueFrom(this.ordersService.flowConfirmDelivery(orderId));
+      this.toastService.success('Orden entregada y finalizada');
+      this.loadData();
+    } catch (err: any) {
+      this.toastService.error(
+        err?.error?.message ||
+          err?.message ||
+          'No se pudo completar la entrega directa',
+      );
+    } finally {
+      this.isProcessingAction.set(false);
+    }
   }
 
   /**
