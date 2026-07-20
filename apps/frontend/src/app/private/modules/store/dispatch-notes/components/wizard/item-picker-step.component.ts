@@ -843,9 +843,18 @@ export class ItemPickerStepComponent {
   }
 
   // ==========================================================================
-  // IA — receipt scan
+  // IA — receipt scan (async: enqueue → poll)
   // ==========================================================================
 
+  /**
+   * Sube el recibo y lo escanea con IA. `scanReceipt` ahora OCULTA un flujo
+   * ASÍNCRONO (encola job → polling), pero sigue emitiendo UNA sola vez el
+   * `ReceiptScanResult` final: por eso `scanning()` permanece activo durante
+   * TODO el poll y este `next` se dispara una única vez al terminar. Los casos
+   * `failed`, timeout de guarda y 404 tardío por evicción llegan al `error`
+   * handler y se traducen con `extractApiError`. `takeUntilDestroyed` corta el
+   * poll si el paso se destruye a mitad.
+   */
   onAiSelected(event: Event, input: HTMLInputElement): void {
     const file = input.files?.[0];
     input.value = '';
