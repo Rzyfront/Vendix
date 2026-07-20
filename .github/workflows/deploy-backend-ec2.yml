@@ -110,6 +110,11 @@ jobs:
           echo "🔑 Fetching secrets from AWS Secrets Manager..."
           DATABASE_URL=\$(aws secretsmanager get-secret-value --secret-id vendix/production/database --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin)['DATABASE_URL'])")
           JWT_SECRET=\$(aws secretsmanager get-secret-value --secret-id vendix/production/jwt --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin)['JWT_SECRET'])")
+          # Refresh-token HMAC key (lives beside JWT_SECRET). .get(...,'') is tolerant:
+          # if the key is not yet in the secret, this is empty and the backend uses its
+          # documented dev fallback (no deploy break). Add the key once and every future
+          # deploy injects it automatically — mirrors how JWT_SECRET flows.
+          REFRESH_TOKEN_HMAC_SECRET=\$(aws secretsmanager get-secret-value --secret-id vendix/production/jwt --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin).get('REFRESH_TOKEN_HMAC_SECRET', ''))")
           EMAIL_PASSWORD=\$(aws secretsmanager get-secret-value --secret-id vendix/production/email --query SecretString --output text | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('EMAIL_PASSWORD', ''))")
 
           # Fetch app configuration secrets
@@ -151,6 +156,16 @@ jobs:
               -v vendix-redis-data:/data \\
               redis:7-alpine redis-server --appendonly yes --save 60 1000 \\
               --maxmemory 1gb --maxmemory-policy allkeys-lru
+          else
+            # Already running: the guard above never recreates a live container (to
+            # preserve uptime/data), so a Redis started before this ceiling existed
+            # would keep 'noeviction' + maxmemory 0. Reconcile in place — no downtime,
+            # data preserved — so the OOM protection actually applies on every deploy.
+            # CONFIG REWRITE persists it to the container's redis.conf.
+            echo "♻️  vendix-redis already running — reconciling memory ceiling in place..."
+            sudo docker exec vendix-redis redis-cli CONFIG SET maxmemory 1gb || true
+            sudo docker exec vendix-redis redis-cli CONFIG SET maxmemory-policy allkeys-lru || true
+            sudo docker exec vendix-redis redis-cli CONFIG REWRITE || true
           fi
 
           echo "🛑 Stopping current container..."
@@ -164,6 +179,7 @@ jobs:
             --restart unless-stopped \\
             -p 3000:3000 \\
             --env-file /opt/vendix/.env \\
+            -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
             -e BASE_DOMAIN="\$BASE_DOMAIN" \\
             -e FRONTEND_URL="\$FRONTEND_URL" \\
             -e PORT="\$PORT" \\

@@ -144,7 +144,7 @@ export class KitchenFireController {
    *   2) Live events from the per-store subject:
    *        ticket.created | ticket.started | ticket.ready |
    *        ticket.delivered | ticket.cancelled
-   *   3) A heartbeat comment every 30s to keep proxies alive.
+   *   3) A 30s heartbeat keep-alive write to keep proxies alive.
    *
    * Frontend reconciles via ticket id (snapshot = full replace, live
    * events = upsert / remove). The Subject is cleaned up on disconnect
@@ -239,8 +239,8 @@ export class KitchenFireController {
       map(
         () =>
           ({
-            // SSE comment line; the leading ":" makes NestJS treat it
-            // as a comment rather than a typed event.
+            // Keep-alive payload; NestJS emits it as a `data:` event whose
+            // text starts with ":" (not a true SSE comment).
             data: `: heartbeat ${Date.now()}`,
           }) as MessageEvent,
       ),
