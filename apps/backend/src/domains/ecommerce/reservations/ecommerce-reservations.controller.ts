@@ -63,6 +63,41 @@ export class EcommerceReservationsController {
     return { success: true, data: providers };
   }
 
+  /**
+   * Public overview endpoint used by the BookingCalendarComponent to paint
+   * the green/red day grid without making N slot-fetch calls. Returns, for
+   * each day in the requested range, whether the day has any available slot
+   * (after applying provider_schedules + provider_exceptions + existing
+   * bookings + store_business_hours).
+   *
+   * Query params:
+   *   - date_from (ISO), date_to (ISO)  → inclusive range
+   *   - provider_id (int, optional)    → filter by provider
+   *
+   * Response: `Array<{ date: string; has_slots: boolean; slots_count: number }>`
+   */
+  @Public()
+  @Get('availability-overview/:productId')
+  @Header('Cache-Control', 'no-store')
+  async getAvailabilityOverview(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Query('date_from') dateFrom: string,
+    @Query('date_to') dateTo: string,
+    @Query('provider_id') providerId?: string,
+  ) {
+    if (!dateFrom || !dateTo) {
+      throw new BadRequestException('date_from y date_to son obligatorios');
+    }
+    const pid = providerId ? parseInt(providerId, 10) : undefined;
+    const days = await this.availabilityService.getDayAvailabilityOverview(
+      productId,
+      dateFrom,
+      dateTo,
+      pid,
+    );
+    return { success: true, data: days };
+  }
+
   @Post()
   async createBooking(@Req() req: any, @Body() dto: CreateEcommerceBookingDto) {
     const customerId = req.user?.id;

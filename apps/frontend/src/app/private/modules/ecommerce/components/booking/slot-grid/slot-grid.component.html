@@ -1,0 +1,49 @@
+<section class="slot-grid-section">
+  @if (loading()) {
+    <div class="slot-grid-section__loading">
+      <app-spinner size="md"></app-spinner>
+      <span>Cargando horarios...</span>
+    </div>
+  } @else if (slots().length === 0) {
+    <div class="slot-grid-section__empty">
+      <app-icon name="calendar-x" [size]="32"></app-icon>
+      <p>No hay horarios disponibles para esta fecha.</p>
+    </div>
+  } @else {
+    @for (group of [
+      { label: 'MAÑANA', items: groupedSlots().MAÑANA },
+      { label: 'TARDE',  items: groupedSlots().TARDE },
+      { label: 'NOCHE',  items: groupedSlots().NOCHE }
+    ]; track group.label) {
+      @if (group.items.length > 0) {
+        <div class="slot-grid-section__group">
+          <h4 class="slot-grid-section__group-title">
+            <span class="slot-grid-section__group-icon">☀️</span>
+            {{ group.label }}
+          </h4>
+          <div class="slot-grid">
+            @for (slot of group.items; track trackByStartTime($index, slot)) {
+              <button
+                type="button"
+                class="slot"
+                [class.slot--available]="slot.total_available > 0 && selectedKey() !== trackByStartTime($index, slot)"
+                [class.slot--booked]="slot.total_available === 0"
+                [class.slot--selected]="selectedKey() === trackByStartTime($index, slot)"
+                [disabled]="slot.total_available === 0"
+                (click)="selectSlot(slot)"
+              >
+                @if (slot.total_available > 0) {
+                  <app-icon name="check" [size]="12"></app-icon>
+                } @else {
+                  <app-icon name="x" [size]="12"></app-icon>
+                }
+                <span class="slot__time">{{ formatHour(slot.start_time) }} - {{ formatHour(slot.end_time) }}</span>
+                <span class="slot__cupo">{{ cuposLabel(slot) }}</span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+    }
+  }
+</section>

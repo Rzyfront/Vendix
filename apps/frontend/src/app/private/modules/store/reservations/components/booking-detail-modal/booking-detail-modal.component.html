@@ -1,4 +1,11 @@
-<app-modal [isOpen]="isOpen()" (closed)="closed.emit()" (opened)="onOpen()" title="" size="md">
+<app-modal
+  [isOpen]="isOpen()"
+  (closed)="closed.emit()"
+  (opened)="onOpen()"
+  title=""
+  size="md"
+  customClasses="booking-modal-content"
+>
   @if (booking(); as b) {
     <!-- Status accent bar -->
     <div class="accent-bar" [style.background]="statusAccent()"></div>

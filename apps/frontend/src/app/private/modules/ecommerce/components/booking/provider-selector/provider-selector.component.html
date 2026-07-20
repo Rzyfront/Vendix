@@ -1,0 +1,58 @@
+<section class="provider-selector">
+  <header class="provider-selector__header">
+    <h2>Elige tu profesional</h2>
+    <p class="provider-selector__subtitle">
+      Selecciona con quién quieres agendar tu cita. Esto filtra los días y horas disponibles.
+    </p>
+  </header>
+
+  @if (loading()) {
+    <div class="provider-selector__loading">
+      <app-spinner size="md"></app-spinner>
+      <span>Cargando profesionales...</span>
+    </div>
+  } @else if (errorMsg()) {
+    <app-empty-state
+      icon="alert-triangle"
+      title="Error al cargar profesionales"
+      [description]="errorMsg() ?? ''"
+    ></app-empty-state>
+  } @else if (!hasProviders()) {
+    <app-empty-state
+      icon="users"
+      title="Sin profesionales disponibles"
+      description="Este servicio todavía no tiene profesionales asignados. Vuelve más tarde o contacta al local."
+    ></app-empty-state>
+  } @else {
+    <div class="provider-selector__grid">
+      @for (p of providers(); track p.id) {
+        <button
+          type="button"
+          class="provider-card"
+          [class.provider-card--selected]="selectedId() === p.id"
+          (click)="selectProvider(p)"
+          [attr.aria-pressed]="selectedId() === p.id"
+        >
+          <span class="provider-card__check" aria-hidden="true">
+            <app-icon name="check-circle-2" [size]="22"></app-icon>
+          </span>
+          <div class="provider-card__avatar">
+            @if (p.avatar_url) {
+              <img [src]="p.avatar_url" [alt]="p.display_name" loading="lazy" />
+            } @else {
+              <span class="provider-card__initials">{{ initials(p) }}</span>
+            }
+          </div>
+          <h3 class="provider-card__name">{{ p.display_name }}</h3>
+          @if (p.bio) {
+            <p class="provider-card__bio">{{ p.bio }}</p>
+          } @else {
+            <p class="provider-card__bio provider-card__bio--muted">
+              Profesional verificado
+            </p>
+          }
+        </button>
+      }
+    </div>
+  }
+</section>
