@@ -95,10 +95,10 @@ export class CarrierDeliveryController {
       map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
 
-    // Heartbeat every 30s — emitted as an SSE comment (leading ":") so it
-    // keeps proxies/CDNs alive WITHOUT triggering client reconnection. This
-    // is what lets a non-clean disconnect surface as `req.on('close')` and
-    // release the shared Subject (fixes the SSE heap leak).
+    // Heartbeat every 30s — a periodic keep-alive write so proxies/CDNs don't
+    // idle-close the stream. Forcing socket I/O also makes a non-clean
+    // disconnect surface as `req.on('close')`, releasing the shared Subject
+    // (fixes the SSE heap leak).
     const heartbeat$ = interval(30_000).pipe(
       map(() => ({ data: `: heartbeat ${Date.now()}` }) as MessageEvent),
     );

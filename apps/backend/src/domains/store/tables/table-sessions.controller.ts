@@ -131,8 +131,8 @@ export class TableSessionsController {
    *      `item_added`, `guest_count_changed`, `bill.requested`,
    *      `payment.*`, `kitchen.*`, `table_payment_*`). Anything NOT in
    *      `STAFF_EVENT_WHITELIST` is dropped — default-deny.
-   *   3) A 30s heartbeat comment (`: heartbeat <ts>`) so proxies and
-   *      CDNs see the stream is alive.
+   *   3) A 30s heartbeat keep-alive (`data: : heartbeat <ts>`) so proxies
+   *      and CDNs see the stream is alive.
    *
    * Auth: `JwtAuthGuard` is global and accepts `?token=` for SSE
    * clients (EventSource can't set Authorization headers). The store
@@ -218,8 +218,8 @@ export class TableSessionsController {
       ),
     );
 
-    // 3) Heartbeat every 30s — emitted as a comment (": ping") so it
-    //    doesn't trigger client-side reconnection logic.
+    // 3) Heartbeat every 30s — a keep-alive `data:` write so proxies don't
+    //    idle-close the stream.
     const heartbeat$ = interval(30_000).pipe(
       map(
         () =>
