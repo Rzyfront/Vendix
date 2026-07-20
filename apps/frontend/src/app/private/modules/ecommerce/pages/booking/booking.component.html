@@ -87,16 +87,16 @@
         </div>
       </div>
 
-      <!-- Steps indicator -->
+      <!-- Steps indicator (4 steps when not free_booking, 3 when free_booking) -->
       <app-steps-line
-        [steps]="steps"
+        [steps]="steps()"
         [currentStep]="currentStep()"
         [clickable]="true"
         (stepClicked)="goToStep($event)"
         size="sm"
       />
 
-      <!-- Step 1: Calendar -->
+      <!-- Step 1: Calendar (selects date) -->
       @if (currentStep() === 0) {
         <div class="step-content">
           @if (variants().length > 0) {
@@ -120,71 +120,34 @@
           }
           <h2 class="step-title">Selecciona una fecha</h2>
 
-          <!-- Month navigation -->
-          <div class="month-nav">
-            <button class="nav-btn" (click)="prevMonth()">
-              <app-icon name="chevron-left" [size]="20" />
-            </button>
-            <span class="month-label">{{ monthLabel() }}</span>
-            <button class="nav-btn" (click)="nextMonth()">
-              <app-icon name="chevron-right" [size]="20" />
-            </button>
-          </div>
-
-          <!-- Calendar grid -->
-          <div class="calendar">
-            <div class="calendar-header">
-              <span>Dom</span>
-              <span>Lun</span>
-              <span>Mar</span>
-              <span>Mié</span>
-              <span>Jue</span>
-              <span>Vie</span>
-              <span>Sáb</span>
-            </div>
-            <div class="calendar-grid">
-              @for (day of calendarDays(); track day.date) {
-                <button
-                  class="calendar-day"
-                  [class.other-month]="!day.isCurrentMonth"
-                  [class.has-availability]="
-                    day.hasAvailability ||
-                    (isFreeBooking() &&
-                      day.isCurrentMonth &&
-                      !isPastDate(day.date))
-                  "
-                  [class.no-availability]="
-                    day.isCurrentMonth &&
-                    !day.hasAvailability &&
-                    !isFreeBooking()
-                  "
-                  [class.today]="isToday(day.date)"
-                  [class.past]="isPastDate(day.date)"
-                  [class.selected]="selectedDate() === day.date"
-                  [disabled]="
-                    (!day.hasAvailability && !isFreeBooking()) ||
-                    !day.isCurrentMonth ||
-                    isPastDate(day.date)
-                  "
-                  (click)="selectDate(day.date)"
-                >
-                  {{ day.day }}
-                </button>
-              }
-            </div>
-          </div>
-
-          @if (loadingSlots()) {
-            <div class="loading-inline">
-              <div class="spinner-sm"></div>
-              <span>Cargando disponibilidad...</span>
-            </div>
-          }
+          <!-- Mobile-first BookingCalendarComponent: verde/rojo + iconos -->
+          <app-booking-calendar
+            [productId]="productId()"
+            (dateSelected)="onDateSelected($event)"
+          />
         </div>
       }
 
-      <!-- Step 2: Time Slots -->
-      @if (currentStep() === 1) {
+      <!-- Step 2: Provider selection (skipped for free_booking) -->
+      @if (currentStep() === 1 && !isFreeBooking()) {
+        <div class="step-content">
+          <app-provider-selector
+            [productId]="productId()"
+            (providerSelected)="onProviderSelected($event)"
+          />
+          <div class="step-actions">
+            <app-button (clicked)="goToStep(0)" variant="outline" size="sm"
+              >Cambiar fecha</app-button
+            >
+          </div>
+        </div>
+      }
+
+      <!-- Step 3: Time slots (or step 2 for free_booking) -->
+      @if (
+        (currentStep() === 2 && !isFreeBooking()) ||
+        (currentStep() === 1 && isFreeBooking())
+      ) {
         <div class="step-content">
           <h2 class="step-title">Selecciona un horario</h2>
           <p class="selected-date-label">
@@ -212,119 +175,29 @@
                 }
               </div>
             </div>
-          } @else if (!hasGroupedSlots()) {
-            <div class="empty-slots">
-              <app-icon name="clock" [size]="32" />
-              <p>No hay horarios disponibles para esta fecha</p>
-              <app-button (clicked)="goToStep(0)" variant="outline" size="sm"
-                >Elegir otra fecha</app-button
-              >
-            </div>
           } @else {
-            <!-- Morning -->
-            @if (groupedSlots().morning.length > 0) {
-              <div class="slot-group">
-                <h3 class="slot-group-label">
-                  <app-icon name="sunrise" [size]="16" />
-                  Mañana
-                </h3>
-                <div class="slot-list">
-                  @for (slot of groupedSlots().morning; track slot.start_time) {
-                    <button
-                      class="slot-btn"
-                      [class.selected]="
-                        selectedSlot()?.start_time === slot.start_time &&
-                        selectedSlot()?.date === slot.date
-                      "
-                      (click)="selectSlot(slot)"
-                    >
-                      <span class="slot-time">{{
-                        formatTime(slot.start_time)
-                      }}</span>
-                      <span class="slot-availability"
-                        >{{ slot.available }}
-                        {{ slot.available === 1 ? "cupo" : "cupos" }}</span
-                      >
-                    </button>
-                  }
-                </div>
-              </div>
-            }
-
-            <!-- Afternoon -->
-            @if (groupedSlots().afternoon.length > 0) {
-              <div class="slot-group">
-                <h3 class="slot-group-label">
-                  <app-icon name="sun" [size]="16" />
-                  Tarde
-                </h3>
-                <div class="slot-list">
-                  @for (
-                    slot of groupedSlots().afternoon;
-                    track slot.start_time
-                  ) {
-                    <button
-                      class="slot-btn"
-                      [class.selected]="
-                        selectedSlot()?.start_time === slot.start_time &&
-                        selectedSlot()?.date === slot.date
-                      "
-                      (click)="selectSlot(slot)"
-                    >
-                      <span class="slot-time">{{
-                        formatTime(slot.start_time)
-                      }}</span>
-                      <span class="slot-availability"
-                        >{{ slot.available }}
-                        {{ slot.available === 1 ? "cupo" : "cupos" }}</span
-                      >
-                    </button>
-                  }
-                </div>
-              </div>
-            }
-
-            <!-- Evening -->
-            @if (groupedSlots().evening.length > 0) {
-              <div class="slot-group">
-                <h3 class="slot-group-label">
-                  <app-icon name="moon" [size]="16" />
-                  Noche
-                </h3>
-                <div class="slot-list">
-                  @for (slot of groupedSlots().evening; track slot.start_time) {
-                    <button
-                      class="slot-btn"
-                      [class.selected]="
-                        selectedSlot()?.start_time === slot.start_time &&
-                        selectedSlot()?.date === slot.date
-                      "
-                      (click)="selectSlot(slot)"
-                    >
-                      <span class="slot-time">{{
-                        formatTime(slot.start_time)
-                      }}</span>
-                      <span class="slot-availability"
-                        >{{ slot.available }}
-                        {{ slot.available === 1 ? "cupo" : "cupos" }}</span
-                      >
-                    </button>
-                  }
-                </div>
-              </div>
-            }
+            <!-- SlotGridComponent: verde/rojo + iconos + pluralización cupos -->
+            <app-slot-grid
+              [productId]="productId()"
+              [providerId]="providerId()"
+              [date]="selectedDate()!"
+              (slotSelected)="onSlotSelected($event)"
+            />
           }
 
           <div class="step-actions">
-            <app-button (clicked)="goToStep(0)" variant="outline" size="sm"
-              >Cambiar fecha</app-button
+            <app-button (clicked)="goToStep(1)" variant="outline" size="sm"
+              >Volver</app-button
             >
           </div>
         </div>
       }
 
-      <!-- Step 3: Confirm -->
-      @if (currentStep() === 2) {
+      <!-- Step 4: Confirm (or step 3 for free_booking) -->
+      @if (
+        (currentStep() === 3 && !isFreeBooking()) ||
+        (currentStep() === 2 && isFreeBooking())
+      ) {
         <div class="step-content">
           <h2 class="step-title">Confirmar reserva</h2>
 
@@ -338,6 +211,12 @@
               <div class="summary-row">
                 <span class="summary-label">Opción</span>
                 <span class="summary-value">{{ variant.name || variant.sku }}</span>
+              </div>
+            }
+            @if (selectedProvider(); as provider) {
+              <div class="summary-row">
+                <span class="summary-label">Profesional</span>
+                <span class="summary-value">{{ provider.display_name }}</span>
               </div>
             }
             <div class="summary-row">
@@ -425,7 +304,10 @@
             }
 
             <div class="step-actions">
-              <app-button (clicked)="goToStep(1)" variant="outline" size="sm"
+              <app-button
+                (clicked)="goToStep(isFreeBooking() ? 1 : 2)"
+                variant="outline"
+                size="sm"
                 >Cambiar horario</app-button
               >
               <app-button
