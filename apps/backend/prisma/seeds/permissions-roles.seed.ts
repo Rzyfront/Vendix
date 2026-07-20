@@ -4439,11 +4439,13 @@ export async function seedPermissionsAndRoles(
       // Clientes - leer y crear (no actualizar ni eliminar)
       p.name.includes('store:customers:read') ||
       p.name.includes('store:customers:create') ||
-      // Direcciones - leer y crear
+      // Direcciones - leer, crear y actualizar (POS guarda/edita la dirección
+      // del cliente al hacer checkout de envío)
       p.name.includes('organization:addresses:read') ||
       p.name.includes('organization:addresses:create') ||
       p.name.includes('store:addresses:read') ||
       p.name.includes('store:addresses:create') ||
+      p.name.includes('store:addresses:update') ||
       // Impuestos - solo lectura
       p.name.includes('store:taxes:read') ||
       p.name.includes('store:taxes:read:one') ||
