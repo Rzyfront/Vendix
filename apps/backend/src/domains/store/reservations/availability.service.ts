@@ -948,7 +948,11 @@ export class AvailabilityService {
    * provider_schedules, provider_exceptions, store_business_hours and
    * existing bookings).
    *
-   * Used by GET /ecommerce/reservations/availability-overview/:productId.
+   * Used by GET /ecommerce/reservations/availability-overview/:productId
+   * which is @Public — so this implementation uses withoutScope() for all
+   * queries (the default `this.prisma` is StorePrismaService which requires
+   * a store_id in the request context, throwing 403 on public calls).
+   *
    * Cheap: O(days) queries, each scoped to one day.
    */
   async getDayAvailabilityOverview(
@@ -957,7 +961,11 @@ export class AvailabilityService {
     date_to: string,
     provider_id?: number,
   ): Promise<Array<{ date: string; has_slots: boolean; slots_count: number }>> {
-    const product = await this.prisma.products.findFirst({
+    // Use withoutScope() — this method is called from a @Public endpoint
+    // and there is no store_id in the request context.
+    const db = this.prisma.withoutScope();
+
+    const product = await db.products.findFirst({
       where: { id: product_id },
       select: { id: true, store_id: true },
     });
@@ -980,25 +988,130 @@ export class AvailabilityService {
         continue;
       }
 
-      // Use getAvailableSlots scoped to ONE day. We pass date_from = date_to
-      // so the service generates only that day's slots — cheaper than fetching
-      // a month and discarding 29.
+      // Compute slots for this single day using withoutScope(). Mirrors the
+      // core logic of getAvailableSlots but stays unscoped so the public
+      // endpoint works.
       try {
-        const slots = await this.getAvailableSlots(
-          product_id,
+        const slotsCount = await this.computeDaySlotsUnscoped(
+          db,
+          product,
           dateStr,
-          dateStr,
-          { provider_id, include_booked: false },
+          dayOfWeek,
+          storeWindow,
+          provider_id,
         );
-        const slotsCount = slots.filter((s) => s.total_available > 0).length;
-        result.push({ date: dateStr, has_slots: slotsCount > 0, slots_count: slotsCount });
+        result.push({
+          date: dateStr,
+          has_slots: slotsCount > 0,
+          slots_count: slotsCount,
+        });
       } catch {
-        // If the day fails (provider misconfigured, no schedule, etc.) we
-        // surface as no slots rather than 500-ing the whole month.
         result.push({ date: dateStr, has_slots: false, slots_count: 0 });
       }
     }
 
     return result;
+  }
+
+  /**
+   * Computes the number of available slots for a single day, using the
+   * provided unscoped Prisma client. Mirrors getAvailableSlots for the
+   * relevant subset (no provider-exception filter — we approximate by
+   * intersecting the provider schedule with the store window).
+   */
+  private async computeDaySlotsUnscoped(
+    db: any,
+    product: { id: number; store_id: number },
+    dateStr: string,
+    dayOfWeek: number,
+    storeWindow: { start_time: string; end_time: string },
+    provider_id?: number,
+  ): Promise<number> {
+    const productFull = await db.products.findFirst({
+      where: { id: product.id },
+      select: {
+        service_duration_minutes: true,
+        buffer_minutes: true,
+        booking_mode: true,
+      },
+    });
+    if (!productFull) return 0;
+    const duration = productFull.service_duration_minutes ?? 60;
+    const buffer = productFull.buffer_minutes ?? 0;
+
+    // If free_booking mode → all slots in the window are available.
+    if (productFull.booking_mode === 'free_booking') {
+      return this.countTimeSlots(storeWindow.start_time, storeWindow.end_time, duration, buffer);
+    }
+
+    // Find providers for this service (active, offers the product).
+    const providers = await db.service_providers.findMany({
+      where: {
+        store_id: product.store_id,
+        is_active: true,
+        services: { some: { product_id: product.id } },
+        ...(provider_id ? { id: provider_id } : {}),
+      },
+      select: { id: true, display_name: true, avatar_url: true },
+    });
+    if (providers.length === 0) return 0;
+
+    const providerIds = providers.map((p) => p.id);
+
+    // Find any provider that has a schedule for this day and whose schedule
+    // overlaps the store window. Even one such provider = the day has slots.
+    const schedules = await db.provider_schedules.findMany({
+      where: { provider_id: { in: providerIds }, day_of_week: dayOfWeek, is_active: true },
+    });
+    if (schedules.length === 0) return 0;
+
+    // Check for exceptions (provider marked unavailable that day).
+    const targetDate = new Date(`${dateStr}T00:00:00.000Z`);
+    const exception = await db.provider_exceptions.findFirst({
+      where: {
+        provider_id: { in: providerIds },
+        date: targetDate,
+        is_unavailable: true,
+      },
+    });
+    if (exception) return 0;
+
+    // Compute per-provider effective window = schedule ∩ storeWindow.
+    // Return 1 if at least one provider has any positive overlap.
+    for (const s of schedules) {
+      const clamped = this.clampToStoreHours(
+        s.start_time,
+        s.end_time,
+        storeWindow,
+      );
+      if (clamped) {
+        return this.countTimeSlots(
+          clamped.start,
+          clamped.end,
+          duration,
+          buffer,
+        );
+      }
+    }
+    return 0;
+  }
+
+  /** Count how many slots of `duration`+`buffer` fit between start..end. */
+  private countTimeSlots(
+    start: string,
+    end: string,
+    duration: number,
+    buffer: number,
+  ): number {
+    const startMin = this.timeToMinutes(start);
+    const endMin = this.timeToMinutes(end);
+    if (duration <= 0 || endMin <= startMin) return 0;
+    let count = 0;
+    let cur = startMin;
+    while (cur + duration <= endMin) {
+      count++;
+      cur += duration + buffer;
+    }
+    return count;
   }
 }
