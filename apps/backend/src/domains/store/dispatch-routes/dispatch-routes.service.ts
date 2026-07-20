@@ -792,8 +792,14 @@ export class DispatchRoutesService {
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    // State gate: only "hot" routes (draft / dispatched) accept new stops.
-    const EDITABLE_STATES: dispatch_route_status_enum[] = ['draft', 'dispatched'];
+    // State gate: only "hot" routes accept new stops. Las rutas CARRIER admiten
+    // además `in_transit` (tomar-en-recorrido: el repartidor reclama otra orden
+    // pooleada mientras ya está en ruta) — espejo del gate de
+    // DispatchNotesService.attachToExistingRoute. Las rutas admin conservan el
+    // gate original (draft/dispatched), sin efectos colaterales.
+    const EDITABLE_STATES: dispatch_route_status_enum[] = route.is_carrier_route
+      ? ['draft', 'dispatched', 'in_transit']
+      : ['draft', 'dispatched'];
     if (!EDITABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001);
     }
