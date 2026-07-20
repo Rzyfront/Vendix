@@ -19,6 +19,7 @@ import { authInterceptorFn } from './core/interceptors/auth.interceptor';
 import { subscriptionPaywallInterceptor } from './core/interceptors/subscription-paywall.interceptor';
 import { fiscalGateInterceptor } from './core/interceptors/fiscal-gate.interceptor';
 import { cacheBustingInterceptor } from './core/interceptors/cache-busting.interceptor';
+import { tenantStoreIdInterceptor } from './core/interceptors/tenant-store-id.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { tenantReducer, TenantEffects } from './core/store/tenant';
 import { authReducer, AuthEffects } from './core/store/auth';
