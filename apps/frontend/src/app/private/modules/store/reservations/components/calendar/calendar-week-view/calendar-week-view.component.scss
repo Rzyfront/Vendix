@@ -1,9 +1,22 @@
 :host {
   display: block;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .week-view {
+  // Mobile (<768px): the calendar needs ~700px to remain readable. We
+  // let the host scroll horizontally (overflow-x: auto above) so the user
+  // can pan through days without breaking the page layout.
+  // Desktop (≥768px): the calendar fits the viewport without scrolling.
   min-width: 700px;
+  width: 100%;
+
+  @media (min-width: 1024px) {
+    min-width: 0;
+  }
 }
 
 .week-header {
