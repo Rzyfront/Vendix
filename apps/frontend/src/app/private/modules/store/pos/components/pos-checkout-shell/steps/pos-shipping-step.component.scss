@@ -42,6 +42,12 @@
   .ship-grid {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+
+  /* Simetría vertical con los demás pasos del checkout (min-height común del
+     stepper). Solo desktop; en móvil el stepper cae debajo (DOM-last). */
+  .steps-col {
+    min-height: 305px;
+  }
 }
 
 /* ── Flash banner ─────────────────────────────────────── */

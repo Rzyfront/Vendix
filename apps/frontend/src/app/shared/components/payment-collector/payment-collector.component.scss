@@ -368,4 +368,13 @@
   .pc-stepped .pc-stepped-grid--with-keypad {
     grid-template-columns: minmax(0, 1fr) minmax(200px, 260px) auto;
   }
+
+  /* Context-scoped ONLY to the POS checkout shell (pos-payment-step marks its
+     wrapper with .pos-payment-context). Gives the collector's vertical stepper
+     the same 305px min-height as the Cliente/Envío steppers for visual symmetry.
+     Other consumers (e.g. order-detail cobro modal) lack the ancestor class and
+     are unaffected. Desktop-only: on mobile the stepper falls below (DOM-last).*/
+  :host-context(.pos-payment-context) .pc-steps-col {
+    min-height: 305px;
+  }
 }

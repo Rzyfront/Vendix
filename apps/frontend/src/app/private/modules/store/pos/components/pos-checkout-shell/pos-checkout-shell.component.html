@@ -88,6 +88,8 @@
                         type="button"
                         class="sale-type-btn"
                         [class.selected]="isAnonymousSale()"
+                        [class.is-disabled]="anonymousBlockedByDelivery()"
+                        [disabled]="anonymousBlockedByDelivery()"
                         (click)="onSelectSaleType(true)"
                       >
                         <div class="radio-indicator">
@@ -101,6 +103,15 @@
                           <span class="sale-type-desc">Sin cliente asociado</span>
                         </div>
                       </button>
+                      @if (anonymousBlockedByDelivery()) {
+                        <p class="sale-type-hint">
+                          <app-icon name="info" [size]="14"></app-icon>
+                          <span
+                            >No disponible para ventas con envío: se requiere un
+                            cliente con dirección.</span
+                          >
+                        </p>
+                      }
                     }
 
                     <button
@@ -184,11 +195,17 @@
                     <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
                     <h2 class="section-title">Dirección de envío</h2>
                     @if (!addressValid()) {
-                      <span class="addr-required-badge">Obligatoria</span>
+                      <span
+                        class="addr-required-badge"
+                        [class.addr-required-badge--error]="showAddressErrors()"
+                        >Obligatoria</span
+                      >
                     }
                   </div>
                   <app-address-form-fields
                     [initialAddress]="customerInitialAddress()"
+                    [requirePhone]="true"
+                    [showErrors]="showAddressErrors()"
                     (addressChange)="onShellAddressChange($event)"
                     (validChange)="addressValid.set($event)"
                   ></app-address-form-fields>
@@ -330,6 +347,16 @@
       <span class="footer-total-amount">{{ totalToPay() | currency }}</span>
     </div>
     <div class="footer-actions">
+      <!-- Cancelar al extremo izquierdo (margin-right:auto empuja el resto a la
+           derecha). Outline danger. -->
+      <button
+        type="button"
+        class="btn-cancel"
+        (click)="onModalClosed()"
+        [disabled]="footerProcessing()"
+      >
+        Cancelar
+      </button>
       @if (!isFirstStep()) {
         <button
           type="button"
@@ -343,14 +370,6 @@
       }
       <button
         type="button"
-        class="btn-cancel"
-        (click)="onModalClosed()"
-        [disabled]="footerProcessing()"
-      >
-        Cancelar
-      </button>
-      <button
-        type="button"
         class="btn-draft"
         [disabled]="footerProcessing()"
         (click)="onSaveDraft()"
@@ -362,7 +381,7 @@
         <button
           type="button"
           class="btn-confirm"
-          (click)="nextStep()"
+          (click)="attemptNextStep()"
           [disabled]="footerProcessing()"
         >
           Siguiente

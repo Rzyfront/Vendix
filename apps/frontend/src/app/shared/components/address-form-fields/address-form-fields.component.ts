@@ -3,11 +3,13 @@ import {
   Component,
   DestroyRef,
   ViewEncapsulation,
+  computed,
   effect,
   inject,
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -15,8 +17,8 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { debounceTime, distinctUntilChanged, startWith } from 'rxjs/operators';
 
 import { AddressMapPickerComponent } from '../../../private/modules/ecommerce/components/address-map-picker/address-map-picker.component';
 import {
@@ -86,6 +88,19 @@ export class AddressFormFieldsComponent {
   readonly initialAddress = input<AddressPayload | null>(null);
   /** Optional map center coordinate (e.g. existing lat/lng or GPS fix). */
   readonly center = input<LatLng | null>(null);
+  /**
+   * Opt-in: when true, `phone_number` becomes REQUIRED and therefore affects
+   * `validChange` / `form.valid`. Default false keeps the historical behavior
+   * for existing consumers (customer-modal, dispatch-note editor, shipping
+   * address modal) — phone stays optional there.
+   */
+  readonly requirePhone = input<boolean>(false);
+  /**
+   * Opt-in: when true, the component renders inline error feedback for the
+   * required fields (and phone when {@link requirePhone} is set) and marks the
+   * form as touched. Default false → no visual change for existing consumers.
+   */
+  readonly showErrors = input<boolean>(false);
 
   /** Emits the full form value on every change. */
   readonly addressChange = output<AddressPayload>();
@@ -124,6 +139,35 @@ export class AddressFormFieldsComponent {
     longitude: [null as number | null],
   });
 
+  /**
+   * Zoneless bridge of the form's status → signal. ReactiveForms status is a
+   * plain property, not a signal; reading it inside a computed would never
+   * recompute. `toSignal(statusChanges)` makes per-control validity reactive so
+   * the inline error blocks (below) render/refresh in this OnPush component.
+   */
+  private readonly formStatus = toSignal(
+    this.form.statusChanges.pipe(startWith(this.form.status)),
+    { initialValue: this.form.status },
+  );
+
+  /** Inline-error visibility per required field (only meaningful when `showErrors()`). */
+  readonly line1Invalid = computed<boolean>(() => {
+    this.formStatus();
+    return !!this.form.get('address_line1')?.invalid;
+  });
+  readonly cityInvalid = computed<boolean>(() => {
+    this.formStatus();
+    return !!this.form.get('city')?.invalid;
+  });
+  readonly stateInvalid = computed<boolean>(() => {
+    this.formStatus();
+    return !!this.form.get('state_province')?.invalid;
+  });
+  readonly phoneInvalid = computed<boolean>(() => {
+    this.formStatus();
+    return !!this.form.get('phone_number')?.invalid;
+  });
+
   constructor() {
     // Prefill when `initialAddress` arrives (create → null, edit → snapshot).
     effect(() => {
@@ -158,6 +202,24 @@ export class AddressFormFieldsComponent {
       }
     });
 
+    // Opt-in: make phone_number required when `requirePhone()` is true so it
+    // affects form.valid / validChange. Default false leaves the constructor
+    // validators untouched → no behavior change for existing consumers.
+    effect(() => {
+      const require = this.requirePhone();
+      untracked(() => this.applyPhoneRequirement(require));
+    });
+
+    // Opt-in: when the parent flips `showErrors()` on, mark the form touched so
+    // the shared app-input controls surface their own required styling too. The
+    // inline error blocks (driven by `showErrors()` + *Invalid computeds) give
+    // the immediate feedback that does not depend on child re-render.
+    effect(() => {
+      if (this.showErrors()) {
+        untracked(() => this.form.markAllAsTouched());
+      }
+    });
+
     // Emit addressChange + validChange on every value/status change.
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -185,6 +247,26 @@ export class AddressFormFieldsComponent {
   /** Toggles the collapsible map section. */
   toggleMap(): void {
     this.showMap.set(!this.showMap());
+  }
+
+  /**
+   * Applies (or removes) the `Validators.required` on `phone_number` depending
+   * on `requirePhone`. When required, revalidates with `emitEvent:true` so the
+   * parent's `validChange` reflects the stricter gate; when NOT required it
+   * restores the constructor validators silently (`emitEvent:false`) so default
+   * consumers observe no extra emissions.
+   */
+  private applyPhoneRequirement(require: boolean): void {
+    const phone = this.form.get('phone_number');
+    if (!phone) return;
+    const pattern = Validators.pattern(/^[\d+#*\s()-]*$/);
+    if (require) {
+      phone.setValidators([Validators.required, pattern]);
+      phone.updateValueAndValidity({ emitEvent: true });
+    } else {
+      phone.setValidators([pattern]);
+      phone.updateValueAndValidity({ emitEvent: false });
+    }
   }
 
   /**

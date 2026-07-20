@@ -118,6 +118,12 @@ export class PosCheckoutShellComponent {
   readonly addressValid = signal<boolean>(false);
   /** Id of the selected customer's saved address; null → the Envío step creates it. */
   readonly capturedAddressId = signal<number | null>(null);
+  /**
+   * Flash flag that forces `app-address-form-fields` to render its inline
+   * required-field errors. Set when the operator tries to advance past the
+   * Dirección sub-step with an invalid address; auto-cleared once valid.
+   */
+  readonly showAddressErrors = signal<boolean>(false);
 
   /** Delivery flows must capture a shipping address in the Cliente step. */
   readonly requiresAddress = computed<boolean>(
@@ -237,6 +243,15 @@ export class PosCheckoutShellComponent {
   /** Anonymous option is hidden when the collector is in credit mode. */
   readonly canBeAnonymous = computed<boolean>(
     () => this.allowAnonymousSales() && this.paymentStep()?.mode() !== 'credito',
+  );
+
+  /**
+   * Delivery sales cannot be anonymous: they require a customer with a shipping
+   * address. The "Venta Anónima" button stays VISIBLE but DISABLED in this case
+   * (with an explanatory legend) — see the template.
+   */
+  readonly anonymousBlockedByDelivery = computed<boolean>(
+    () => this.checkoutIntent() === 'delivery',
   );
 
   get customerDisplayName(): string {
@@ -383,6 +398,26 @@ export class PosCheckoutShellComponent {
         untracked(() => this.isAnonymousSale.set(false));
       }
     });
+
+    // Delivery sales cannot be anonymous (they require a customer + address).
+    // Force the flag off AND pin the override to false so the config-driven
+    // "anonymous as default" sync effect above never flips it back on while the
+    // intent stays delivery. Leaves "Con Cliente" selected in the UI.
+    effect(() => {
+      if (this.anonymousBlockedByDelivery() && this.isAnonymousSale()) {
+        untracked(() => {
+          this.isAnonymousSale.set(false);
+          this.userOverrideAnonymous.set(false);
+        });
+      }
+    });
+
+    // Auto-clear the address-error flash once the captured address becomes valid.
+    effect(() => {
+      if (this.addressValid()) {
+        untracked(() => this.showAddressErrors.set(false));
+      }
+    });
   }
 
   private syncAnonymousSaleState(): void {
@@ -409,6 +444,7 @@ export class PosCheckoutShellComponent {
     this.capturedAddress.set(null);
     this.addressValid.set(false);
     this.capturedAddressId.set(null);
+    this.showAddressErrors.set(false);
     this.submittingDraft.set(false);
     this.syncAnonymousSaleState();
     // Remount the projected content so the child components (collector,
@@ -425,6 +461,26 @@ export class PosCheckoutShellComponent {
   /** Wizard: advance one top-level step (no-op past the last; state is preserved). */
   nextStep(): void {
     this.goToStep(this.currentStep() + 1);
+  }
+
+  /**
+   * Footer "Siguiente" handler. Blocks leaving the Cliente step's Dirección
+   * sub-step (delivery, con-cliente, clienteSubStep 2) while the captured
+   * address is invalid — flashing the inline errors instead of advancing. Any
+   * other step advances normally.
+   */
+  attemptNextStep(): void {
+    if (
+      this.currentStepKey() === 'cliente' &&
+      this.requiresAddress() &&
+      !this.isAnonymousSale() &&
+      this.clienteSubStep() === 2 &&
+      !this.addressValid()
+    ) {
+      this.showAddressErrors.set(true);
+      return;
+    }
+    this.nextStep();
   }
 
   /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
@@ -557,7 +613,13 @@ export class PosCheckoutShellComponent {
         longitude: null,
       };
       this.capturedAddress.set(seeded);
-      this.addressValid.set(!!(seeded.address_line1 && seeded.city));
+      // Delivery requires a phone too (requirePhone on the form-fields). The
+      // form prefills silently (no validChange on hydration), so seed the gate
+      // consistently — phone included — to avoid a stale "valid" that would let
+      // the operator skip an incomplete address.
+      this.addressValid.set(
+        !!(seeded.address_line1 && seeded.city && seeded.phone_number),
+      );
     }
   }
 
