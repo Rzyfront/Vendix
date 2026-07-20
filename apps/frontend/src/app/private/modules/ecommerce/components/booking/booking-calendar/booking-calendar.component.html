@@ -1,0 +1,80 @@
+<section class="booking-calendar">
+  <header class="booking-calendar__header">
+    <button
+      type="button"
+      class="booking-calendar__nav"
+      [disabled]="!canGoPrev()"
+      (click)="prevMonth()"
+      aria-label="Mes anterior"
+    >
+      <app-icon name="chevron-left" [size]="20"></app-icon>
+    </button>
+    <h3 class="booking-calendar__title">{{ monthLabel() }}</h3>
+    <button
+      type="button"
+      class="booking-calendar__nav"
+      (click)="nextMonth()"
+      aria-label="Mes siguiente"
+    >
+      <app-icon name="chevron-right" [size]="20"></app-icon>
+    </button>
+  </header>
+
+  <div class="booking-calendar__weekdays" role="row">
+    @for (d of weekDays; track d) {
+      <span class="booking-calendar__weekday">{{ d }}</span>
+    }
+  </div>
+
+  <div class="booking-calendar__grid" role="grid">
+    @for (cell of cells(); track $index) {
+      @if (!cell.inMonth) {
+        <span class="cal-cell cal-cell--empty" aria-hidden="true"></span>
+      } @else {
+        <button
+          type="button"
+          class="cal-cell"
+          [class.cal-cell--available]="cell.available && cell.iso !== selectedDate()"
+          [class.cal-cell--unavailable]="!cell.available && !cell.isPast"
+          [class.cal-cell--past]="cell.isPast"
+          [class.cal-cell--selected]="cell.iso === selectedDate()"
+          [class.cal-cell--today]="cell.isToday"
+          [disabled]="!cell.available"
+          (click)="selectCell(cell)"
+          [attr.aria-label]="cell.iso + ' ' + (cell.available ? 'disponible' : 'no disponible')"
+        >
+          @if (cell.available) {
+            <app-icon name="check" [size]="14"></app-icon>
+          } @else if (cell.isPast) {
+            <app-icon name="x" [size]="14"></app-icon>
+          } @else {
+            <app-icon name="x" [size]="14"></app-icon>
+          }
+          <span class="cal-cell__num">{{ cell.dayNumber }}</span>
+        </button>
+      }
+    }
+  </div>
+
+  @if (loading()) {
+    <div class="booking-calendar__loading">
+      <app-spinner size="sm"></app-spinner>
+      <span>Cargando disponibilidad...</span>
+    </div>
+  }
+
+  <footer class="booking-calendar__legend">
+    <span class="booking-calendar__legend-item">
+      <span class="dot dot--available"></span>
+      Disponible
+    </span>
+    <span class="booking-calendar__legend-item">
+      <span class="dot dot--unavailable"></span>
+      No disponible
+    </span>
+    <span class="booking-calendar__legend-item">
+      <span class="dot dot--selected"></span>
+      Seleccionado
+    </span>
+  </footer>
+</section>

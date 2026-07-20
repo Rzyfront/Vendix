@@ -1,0 +1,183 @@
+.booking-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--color-surface);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+}
+
+.booking-calendar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.booking-calendar__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-transform: capitalize;
+  flex: 1;
+  text-align: center;
+}
+
+// Touch target 44×44px
+.booking-calendar__nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--color-background);
+  }
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.booking-calendar__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.booking-calendar__weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 4px 0;
+  letter-spacing: 0.04em;
+}
+
+.booking-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.cal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 44px;
+  min-width: 44px;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease-out, background 120ms ease-out, color 120ms ease-out;
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+.cal-cell__num {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+// Verde + check (regla skill vendix-ui-ux §6 — color + ícono)
+.cal-cell--available {
+  background: var(--color-success-soft, rgba(16, 185, 129, 0.08));
+  color: var(--color-success, #059669);
+  border-color: var(--color-success, #10b981);
+
+  &:hover {
+    transform: scale(1.06);
+    background: var(--color-success, #10b981);
+    color: white;
+  }
+}
+
+// Rojo + X
+.cal-cell--unavailable,
+.cal-cell--past {
+  background: var(--color-danger-soft, rgba(239, 68, 68, 0.06));
+  color: var(--color-danger, #dc2626);
+  border-color: var(--color-danger, #f87171);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.cal-cell--selected {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-alpha, rgba(99, 102, 241, 0.25));
+  transform: scale(1.04);
+}
+
+.cal-cell--today:not(.cal-cell--selected) {
+  font-weight: 800;
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -2px;
+}
+
+.cal-cell--empty {
+  pointer-events: none;
+  border: none;
+  background: transparent;
+}
+
+.booking-calendar__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  padding: 8px 0;
+}
+
+.booking-calendar__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.booking-calendar__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+
+  &--available { background: var(--color-success, #10b981); border-color: var(--color-success, #10b981); }
+  &--unavailable { background: var(--color-danger-soft, rgba(239, 68, 68, 0.1)); border-color: var(--color-danger, #f87171); }
+  &--selected { background: var(--color-primary); border-color: var(--color-primary); }
+}

@@ -15,6 +15,11 @@ export interface AvailabilitySlot {
   end_time: string;
   available_providers: AvailableProvider[];
   total_available: number;
+  /** Total providers offering the service for this product (denominator). */
+  total_capacity?: number;
+  /** Bookings overlapping this slot that are NOT in cancelled status. */
+  booked_count?: number;
+  is_booked?: boolean;
 }
 
 @Injectable()
@@ -32,9 +37,9 @@ export class AvailabilityService {
     product_id: number,
     date_from: string,
     date_to: string,
-    options: { provider_id?: number; product_variant_id?: number } = {},
+    options: { provider_id?: number; product_variant_id?: number; include_booked?: boolean } = {},
   ): Promise<AvailabilitySlot[]> {
-    const { provider_id, product_variant_id } = options;
+    const { provider_id, product_variant_id, include_booked } = options;
     // 1. Obtener producto con duracion y booking_mode
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
@@ -183,6 +188,7 @@ export class AvailabilityService {
         start_time: string;
         end_time: string;
         providers: AvailableProvider[];
+        is_booked: boolean;
       }
     >();
 
@@ -230,16 +236,16 @@ export class AvailabilityService {
           );
 
           for (const slot of timeSlots) {
-            // Verificar si este provider ya tiene booking en este slot
+            // Verificar si este provider ya tiene booking que se superpone con este slot
             const providerBooked = existingBookings.some(
               (b) =>
                 this.formatDate(new Date(b.date)) === dateStr &&
-                b.start_time === slot.start_time &&
-                b.end_time === slot.end_time &&
-                b.provider_id === provider.id,
+                b.provider_id === provider.id &&
+                b.start_time < slot.end_time &&
+                b.end_time > slot.start_time,
             );
 
-            if (providerBooked) continue;
+            if (providerBooked && !include_booked) continue;
 
             const key = `${dateStr}|${slot.start_time}|${slot.end_time}`;
             if (!slotMap.has(key)) {
@@ -248,13 +254,16 @@ export class AvailabilityService {
                 start_time: slot.start_time,
                 end_time: slot.end_time,
                 providers: [],
+                is_booked: providerBooked,
               });
             }
-            slotMap.get(key)!.providers.push({
-              id: provider.id,
-              display_name: provider.display_name || '',
-              avatar_url: provider.avatar_url,
-            });
+            if (!providerBooked) {
+              slotMap.get(key)!.providers.push({
+                id: provider.id,
+                display_name: provider.display_name || '',
+                avatar_url: provider.avatar_url,
+              });
+            }
           }
         }
       }
@@ -268,6 +277,7 @@ export class AvailabilityService {
         end_time: entry.end_time,
         available_providers: entry.providers,
         total_available: entry.providers.length,
+        is_booked: entry.is_booked,
       });
     }
 
@@ -926,6 +936,67 @@ export class AvailabilityService {
         booking_count: dayBookings.length,
         bookings: dayBookings,
       });
+    }
+
+    return result;
+  }
+
+  /**
+   * Public-facing day-by-day overview used by the BookingCalendarComponent
+   * to paint the green/red calendar. For each day in [date_from, date_to]
+   * returns whether there is at least one slot available (after applying
+   * provider_schedules, provider_exceptions, store_business_hours and
+   * existing bookings).
+   *
+   * Used by GET /ecommerce/reservations/availability-overview/:productId.
+   * Cheap: O(days) queries, each scoped to one day.
+   */
+  async getDayAvailabilityOverview(
+    product_id: number,
+    date_from: string,
+    date_to: string,
+    provider_id?: number,
+  ): Promise<Array<{ date: string; has_slots: boolean; slots_count: number }>> {
+    const product = await this.prisma.products.findFirst({
+      where: { id: product_id },
+      select: { id: true, store_id: true },
+    });
+    if (!product) return [];
+
+    const dates = this.getDatesInRange(date_from, date_to);
+    const result: Array<{ date: string; has_slots: boolean; slots_count: number }> = [];
+
+    for (const currentDate of dates) {
+      const dateStr = this.formatDate(currentDate);
+      const dayOfWeek = currentDate.getUTCDay();
+
+      // Skip days the store is closed (master calendar).
+      const storeHoursMap = await this.businessHoursService.loadStoreHours(
+        product.store_id,
+      );
+      const storeWindow = storeHoursMap.get(dayOfWeek);
+      if (!storeWindow) {
+        result.push({ date: dateStr, has_slots: false, slots_count: 0 });
+        continue;
+      }
+
+      // Use getAvailableSlots scoped to ONE day. We pass date_from = date_to
+      // so the service generates only that day's slots — cheaper than fetching
+      // a month and discarding 29.
+      try {
+        const slots = await this.getAvailableSlots(
+          product_id,
+          dateStr,
+          dateStr,
+          { provider_id, include_booked: false },
+        );
+        const slotsCount = slots.filter((s) => s.total_available > 0).length;
+        result.push({ date: dateStr, has_slots: slotsCount > 0, slots_count: slotsCount });
+      } catch {
+        // If the day fails (provider misconfigured, no schedule, etc.) we
+        // surface as no slots rather than 500-ing the whole month.
+        result.push({ date: dateStr, has_slots: false, slots_count: 0 });
+      }
     }
 
     return result;
