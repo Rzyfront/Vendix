@@ -1,4 +1,6 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Inject, Injectable, ForbiddenException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -19,9 +21,15 @@ import {
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
+// Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
+const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
+
 @Injectable()
 export class SalesAnalyticsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
 
   // States that count as completed sales
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
@@ -40,6 +48,27 @@ export class SalesAnalyticsService {
   }
 
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
+    const storeId = RequestContextService.getContext()?.store_id;
+
+    // Only cache when a tenant is in scope; a store-less key could leak data
+    // across tenants. store_id isolates the tenant; the date-range inputs plus
+    // the channel filter capture the period/filter.
+    if (!storeId) {
+      return this.computeSalesSummary(query);
+    }
+    const cacheKey = `analytics:sales:summary:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
+    const cached =
+      await this.cache.get<
+        Awaited<ReturnType<SalesAnalyticsService['computeSalesSummary']>>
+      >(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.computeSalesSummary(query);
+    await this.cache.set(cacheKey, result, SALES_SUMMARY_CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeSalesSummary(query: SalesAnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(
