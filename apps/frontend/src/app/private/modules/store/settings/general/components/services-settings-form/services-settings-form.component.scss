@@ -95,9 +95,17 @@
   cursor: pointer;
 
   input {
+    // Cover the whole label so any click on the label area toggles the
+    // checkbox. opacity 0 keeps it invisible; z-index puts it on top of
+    // the slider so clicks land on it first.
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
     opacity: 0;
-    width: 0;
-    height: 0;
+    cursor: pointer;
+    z-index: 1;
   }
 
   &__slider {
@@ -106,6 +114,7 @@
     background: var(--color-border, #d1d5db);
     border-radius: 24px;
     transition: background 160ms ease-out;
+    pointer-events: none;  // clicks pass through to the input
 
     &::before {
       content: '';
@@ -121,7 +130,7 @@
     }
   }
 
-  input:checked + &__slider {
+  input:checked ~ &__slider {
     background: var(--color-primary, #6366f1);
 
     &::before {
