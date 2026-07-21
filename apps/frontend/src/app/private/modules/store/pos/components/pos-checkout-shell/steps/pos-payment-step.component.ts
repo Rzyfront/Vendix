@@ -245,6 +245,54 @@ export class PosPaymentStepComponent implements OnInit {
     () => this.collector()?.canSubmit() ?? false,
   );
 
+  // ── Sub-wizard (stepped) projections + footer driver ─────────────────────
+  /** Current collector sub-step index (0-based; 0 while unmounted). */
+  readonly subStep = computed<number>(() => this.collector()?.subStep() ?? 0);
+  /** Index of the first sub-step after the mode picker (Método / Plan). */
+  readonly modoOffset = computed<number>(() => this.collector()?.modoOffset() ?? 0);
+  /** Index of the Monto sub-step (contado). */
+  readonly montoIndex = computed<number>(() => this.collector()?.montoIndex() ?? 1);
+  /** Display name of the selected payment method (null until one is picked). */
+  readonly selectedMethodName = computed<string | null>(
+    () => this.collector()?.selectedMethod()?.name ?? null,
+  );
+
+  /**
+   * Footer "Siguiente" driver for the stepped Cobro sub-wizard (pickup flows,
+   * where Cobro is NOT the last major step). Advances Forma de pago → Método →
+   * Monto using the current selection — mirroring the auto-advance-on-tap model
+   * so a user who leaves the default selected still moves forward. Returns:
+   *  - `true`  → handled internally (an intermediate sub-step advanced, a
+   *              required method is missing, or the amount was confirmed); the
+   *              shell must NOT advance the major step now.
+   *  - `false` → the collector is done for this footer press (credito plan,
+   *              which finalizes at a later step); the shell may advance.
+   * On the last contado sub-step it confirms the amount (guarded by canSubmit),
+   * which bubbles `amountConfirmed` so the shell advances after the collapse.
+   */
+  advanceSubStepOrConfirm(): boolean {
+    const c = this.collector();
+    if (!c) return false;
+    const last = c.subSteps().length - 1;
+    const cur = c.subStep();
+    if (cur < last) {
+      if (cur < c.modoOffset()) {
+        c.goToSubStep(c.modoOffset()); // Forma de pago → Método / Plan
+      } else if (!c.selectedMethod()) {
+        return true; // Método sub-step, no method chosen → stay on the grid
+      } else {
+        c.goToSubStep(c.montoIndex()); // Método → Monto
+      }
+      return true;
+    }
+    // Last sub-step:
+    if (c.amountCollapsed()) return true; // already confirmed; advance is pending
+    if (c.mode() === 'credito') return false; // credit finalizes at a later step
+    if (!c.canSubmit()) return true; // amount still invalid → stay put
+    c.confirmAmount(); // → amountConfirmed → shell advances after the collapse
+    return true;
+  }
+
   constructor() {
     inject(DestroyRef).onDestroy(() => {
       this.wompiPollingSubscription?.unsubscribe();

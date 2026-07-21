@@ -211,6 +211,52 @@ export class PosCheckoutShellComponent {
     () => this.currentStep() === this.stepKeys().length - 1,
   );
 
+  /**
+   * Barras de progreso (móvil, estilo Pencil): un item por paso con su estado
+   * (done | active | todo). Reemplaza los círculos numerados de `app-steps-line`
+   * en <767px; en desktop se sigue usando `app-steps-line`.
+   */
+  readonly progressBars = computed<{ label: string; done: boolean; active: boolean }[]>(() => {
+    const cur = this.currentStep();
+    return this.steps().map((s, i) => ({
+      label: s.label ?? '',
+      done: i < cur,
+      active: i === cur,
+    }));
+  });
+
+  /**
+   * Subtítulo dinámico del header (estilo Pencil: "<Paso> · <Sub-paso>"). Los
+   * sub-pasos de Cliente/Envío se leen de los childs (señales públicas); Cobro
+   * se distingue por modo. Lazy-eval: aunque referencie señales declaradas más
+   * abajo, la función solo corre al leerse (ya inicializadas).
+   */
+  readonly stepSubtitle = computed<string>(() => {
+    switch (this.currentStepKey()) {
+      case 'consumo':
+        return 'Consumo · Tipo de servicio';
+      case 'cliente': {
+        const sub = this.clienteSubSteps()[this.clienteSubStep()]?.label ?? 'Tipo';
+        return `Cliente · ${sub}`;
+      }
+      case 'envio':
+        return `Envío · ${(this.shippingStep()?.shipSubStep() ?? 0) === 0 ? 'Método' : 'Costo'}`;
+      case 'cobro': {
+        const pay = this.paymentStep();
+        if (!pay) return 'Cobro';
+        if (pay.mode() === 'credito') return 'Cobro · Crédito';
+        // Forma de pago → Método → Monto (frames PyHka / a7mp1 / G0dg6). En el
+        // sub-paso Forma se muestra "Forma de pago"; una vez elegido el método,
+        // el subtítulo refleja su nombre (p. ej. "Cobro · Efectivo").
+        if (pay.subStep() < pay.modoOffset()) return 'Cobro · Forma de pago';
+        const method = pay.selectedMethodName();
+        return method ? `Cobro · ${method}` : 'Cobro · Método de pago';
+      }
+      default:
+        return 'Finalizar venta';
+    }
+  });
+
   /** Live shipping cost projected from the Envío step (0 when not mounted). */
   readonly shippingCost = computed<number>(
     () => this.shippingStep()?.shippingCost() ?? 0,
@@ -536,12 +582,36 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    // ── Cobro: conduce el sub-wizard del collector (Forma → Método → Monto)
+    // antes de saltar al siguiente paso mayor. En pickup, Cobro NO es el último
+    // paso (Consumo → Cobro → Cliente); sin esto, "Siguiente" saltaba directo a
+    // Cliente omitiendo Método y Monto (frames a7mp1 / G0dg6). El paso confirma
+    // el monto en el último sub-paso, cuyo amountConfirmed avanza el paso mayor.
+    if (key === 'cobro') {
+      if (this.paymentStep()?.advanceSubStepOrConfirm()) return;
+      this.nextStep();
+      return;
+    }
+
     this.nextStep();
   }
 
   /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
   prevStep(): void {
     this.goToStep(this.currentStep() - 1);
+  }
+
+  /**
+   * Botón "Atrás" del footer móvil (estilo Pencil): retrocede un paso, o cierra
+   * el modal cuando ya está en el primero (equivale a Cancelar). En desktop el
+   * footer conserva Cancelar/Anterior por separado.
+   */
+  onBackMobile(): void {
+    if (this.isFirstStep()) {
+      this.onModalClosed();
+    } else {
+      this.prevStep();
+    }
   }
 
   /** Navigate by step key; no-op when the key is not part of the current flow. */
@@ -596,7 +666,10 @@ export class PosCheckoutShellComponent {
       if (this.isLastStep()) {
         this.onConfirm();
       } else {
-        this.attemptNextStep();
+        // El monto ya se confirmó dentro del collector: avanzamos el paso mayor
+        // directamente. Usar nextStep() (no attemptNextStep) evita re-entrar en
+        // la rama Cobro del sub-wizard, que volvería a confirmar y se colgaría.
+        this.nextStep();
       }
     }, 420);
   }

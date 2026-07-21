@@ -20,8 +20,8 @@ import { Router } from '@angular/router';
 
 import {
   IconComponent,
-  InputComponent,
   StepsLineComponent,
+  ToggleComponent,
 } from '../../../../../../../shared/components';
 import type {
   PaymentSubmit,
@@ -86,10 +86,10 @@ type ShippingCreditConfig = {
     ReactiveFormsModule,
     FormsModule,
     IconComponent,
-    InputComponent,
     CurrencyPipe,
     CurrencyInputDirective,
     StepsLineComponent,
+    ToggleComponent,
   ],
   templateUrl: './pos-shipping-step.component.html',
   styleUrl: './pos-shipping-step.component.scss',
@@ -169,8 +169,15 @@ export class PosShippingStepComponent {
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
   }
 
+  /**
+   * Cart total before shipping — the "Subtotal" line of the totals card. Mirrors
+   * the base used by {@link totalWithShipping} (`summary.total` = subtotal + tax
+   * − discount, i.e. the grand total pre-envío).
+   */
+  readonly subtotal = computed<number>(() => this.cartState()?.summary?.total || 0);
+
   readonly totalWithShipping = computed<number>(
-    () => (this.cartState()?.summary?.total || 0) + this.shippingCost(),
+    () => this.subtotal() + this.shippingCost(),
   );
 
   /**

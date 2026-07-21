@@ -1,68 +1,196 @@
-/* Paso · Consumo — estilos extraídos del paso Cobro (fulfillment-section) para
-   preservar la apariencia tras mover el tipo de servicio a un paso dedicado. */
+/* Paso · Consumo — "Tipo de servicio".
+   Réplica 1:1 del diseño Pencil: fondo blanco (sin card gris), section-title,
+   dos option-rows apiladas con radio, y CTA "Elegir mesa" full-width.
+   Se usan tokens del design system donde existen (--color-primary, --color-*),
+   y los hex de Pencil solo donde el contraste sobre el fondo verde lo exige. */
 .consumo-step {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  background: transparent;
 }
 
-/* Fulfillment selector (Restaurant stores) */
-.fulfillment-section {
+/* ── Section title (fondo blanco, icono verde + texto ink-900) ────────────── */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.section-title__icon {
+  color: var(--color-primary);
+  display: inline-flex;
+}
+
+.section-title__text {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text-primary);
+}
+
+/* ── Option rows (stack vertical, gap 12px) ──────────────────────────────── */
+.option-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 12px;
-  background: var(--color-muted);
-  border: 1px solid var(--color-border);
+  gap: 12px;
 }
 
-.fulfillment-section-title {
+.option-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--color-text-primary);
+  gap: 12px;
+  width: 100%;
+  min-height: 76px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
 }
 
-.fulfillment-hint {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 12px;
-  color: rgb(194, 65, 12);
+.option-row:hover:not(.option-row--selected) {
+  border-color: var(--color-primary);
 }
 
-.open-table-cta {
+.option-row:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.option-row--selected {
+  border-color: var(--color-primary);
+  background: #dcfce7;
+}
+
+/* Icon box 48×48 */
+.option-row__icon {
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.18s ease;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--color-surface-secondary);
+  color: #475467;
+  border: 1px solid transparent;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
 }
 
-.open-table-cta:hover {
-  border-color: var(--color-primary);
+.option-row--selected .option-row__icon {
+  background: #ffffff;
   color: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
+/* Text column */
+.option-row__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.option-row__title {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+}
+
+.option-row--selected .option-row__title {
+  color: #15803d;
+}
+
+.option-row__desc {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--color-text-secondary);
+}
+
+.option-row--selected .option-row__desc {
+  color: #166534;
+}
+
+/* Radio (derecha) */
+.option-row__radio {
+  position: relative;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #d0d5dd;
+  transition: border-color 150ms ease;
+}
+
+.option-row__radio--checked {
+  border-color: var(--color-primary);
+}
+
+.option-row__radio--checked::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-primary);
+}
+
+/* ── CTA "Elegir mesa" (outline verde, full-width) ───────────────────────── */
+.choose-table-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--color-primary);
+  border-radius: 12px;
+  background: #f0fdf4;
+  color: var(--color-primary);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.choose-table-btn:hover {
+  background: #dcfce7;
+}
+
+.choose-table-btn:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Confirmación de mesa seleccionada */
 .table-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  align-self: flex-start;
+  padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(var(--color-primary-rgb), 0.08);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.3);
-  color: var(--color-primary);
+  background: #dcfce7;
+  border: 1px solid var(--color-primary);
+  color: #15803d;
   font-size: 13px;
   font-weight: 600;
 }
