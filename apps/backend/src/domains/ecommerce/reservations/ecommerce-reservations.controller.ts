@@ -150,8 +150,10 @@ export class EcommerceReservationsController {
    *
    * The booking flow's ServiceLocationSelectorComponent reads this to
    * decide whether to render the 'A domicilio' radio card and which
-   * address to use for the 'En el local' option.
+   * address to use for the 'En el local' option. Public because the
+   * booking flow runs before the customer logs in.
    */
+  @Public()
   @Get('store/services')
   async getStoreServices(@Req() req: any) {
     const storeId = req.store_id;
