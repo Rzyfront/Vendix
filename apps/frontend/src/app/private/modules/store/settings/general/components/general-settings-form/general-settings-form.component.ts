@@ -119,10 +119,22 @@ export class GeneralSettingsForm implements OnInit {
         if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
           sanitized.industries = ['retail'];
         }
+        // The backend stores the services sub-form as a nested object
+        // under `services: { offer_home_service, local_address: {...} }`.
+        // patchValue handles nested FormGroups by walking the path.
         this.form.patchValue(sanitized, { emitEvent: false });
         this.modulesHiddenByIndustries.set(
           getModulesHiddenByIndustries(sanitized.industries),
         );
+      }
+    });
+
+    // Propagate changes from the services sub-form up to the parent's
+    // settingsChange output. The nested FormGroup's valueChanges does
+    // NOT bubble automatically to the FormGroup, so we listen here.
+    this.servicesForm.valueChanges.subscribe(() => {
+      if (this.form.valid) {
+        this.settingsChange.emit(this.form.value);
       }
     });
   }
@@ -139,6 +151,28 @@ export class GeneralSettingsForm implements OnInit {
     ),
     language: new FormControl('es'),
     tax_included: new FormControl(false),
+    // Sub-form 'services' (solo visible cuando 'service' está en industries)
+    services: new FormGroup({
+      offer_home_service: new FormControl<boolean>(true, { nonNullable: true }),
+      local_address: new FormGroup({
+        address_line1: new FormControl(''),
+        address_line2: new FormControl(''),
+        city: new FormControl(''),
+        state_province: new FormControl(''),
+        country_code: new FormControl('CO', { nonNullable: true }),
+        postal_code: new FormControl(''),
+      }),
+    }),
+  });
+
+  // Convenience accessor for the services sub-form.
+  get servicesForm(): FormGroup {
+    return this.form.get('services') as FormGroup;
+  }
+
+  /** Show the services sub-form when the store has 'service' in its industries. */
+  readonly showServicesSection = computed(() => {
+    return (this.industriesControl.value ?? []).includes('service');
   });
 
   storeTypes: SelectorOption[] = [
