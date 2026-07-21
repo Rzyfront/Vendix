@@ -29,17 +29,4 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 export class ServicesSettingsForm {
   /** The FormGroup containing the services sub-fields. */
   readonly servicesForm = input.required<FormGroup>();
-
-  /**
-   * Explicit change handler for the offer_home_service toggle.
-   *
-   * For some reason the [formGroup] directive does not seem to be
-   * propagating the change to the FormControl when the toggle is
-   * clicked, so this fallback toggles the value directly. The same
-   * emit goes through valueChanges → settingsChange on the parent.
-   */
-  onOfferHomeServiceChange(event: Event): void {
-    // eslint-disable-next-line no-console
-    console.log('[services-settings-form] toggle change:', event);
-  }
 }
