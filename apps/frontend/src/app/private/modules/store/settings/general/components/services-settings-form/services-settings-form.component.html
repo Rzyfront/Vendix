@@ -11,23 +11,13 @@
   </div>
 
   <div class="settings-section__body">
-    <!-- Toggle: ofrece a domicilio -->
-    <div class="settings-row">
-      <div class="settings-row__label">
-        <span class="settings-row__title">¿Ofrece servicio a domicilio?</span>
-        <span class="settings-row__sub">
-          Si está activo, el cliente puede elegir entre ir a tu local
-          o que tú vayas a su casa.
-        </span>
-      </div>
-      <label class="settings-toggle">
-        <input
-          type="checkbox"
-          formControlName="offer_home_service"
-        />
-        <span class="settings-toggle__slider"></span>
-      </label>
-    </div>
+    <!-- Toggle: ofrece a domicilio (mismo componente que Notificaciones) -->
+    <app-setting-toggle
+      [formControl]="offerHomeServiceControl"
+      label="¿Ofrece servicio a domicilio?"
+      description="Si está activo, el cliente puede elegir entre ir a tu local o que tú vayas a su casa."
+      (changed)="onFieldChange()"
+    />
 
     <!-- Dirección del local -->
     <div formGroupName="local_address" class="settings-subsection">
