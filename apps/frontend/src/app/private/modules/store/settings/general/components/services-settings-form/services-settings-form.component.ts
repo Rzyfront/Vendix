@@ -119,15 +119,15 @@ export class ServicesSettingsForm {
   }
 
   /**
-   * Toggle required validators on the three mandatory address fields
-   * (calle, ciudad, país) when the user enables home service. When
-   * the toggle is OFF, the validators are cleared and the sub-form
-   * is disabled, so the user can save without filling in an
-   * address they don't need.
+   * Apply Required validators on the three mandatory address fields
+   * (calle, ciudad, país). The address is always required because:
+   * - 'En el local' needs the shop address to show where the
+   *   customer should go.
+   * - 'A domicilio' needs the same address as the dispatch origin.
    *
-   * Also calls updateValueAndValidity({ emitEvent: false }) so the
-   * status change doesn't fire a valueChanges for every field on
-   * every toggle flip.
+   * updateValueAndValidity({ emitEvent: false }) so the status
+   * change doesn't fire valueChanges for every field on every
+   * patchValue cycle.
    */
   private applyAddressValidation(required: boolean): void {
     const address = this.localAddressGroup;
