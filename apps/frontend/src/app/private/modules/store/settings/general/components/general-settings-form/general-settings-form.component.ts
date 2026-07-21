@@ -153,7 +153,8 @@ export class GeneralSettingsForm implements OnInit {
     ),
     language: new FormControl('es'),
     tax_included: new FormControl(false),
-    // Sub-form 'services' (solo visible cuando 'service' está en industries)
+    // Sub-form 'services' — rendered as a separate card by the parent
+    // (GeneralSettingsComponent) using <app-services-settings-form>.
     services: new FormGroup({
       offer_home_service: new FormControl<boolean>(true, { nonNullable: true }),
       local_address: new FormGroup({
@@ -167,15 +168,11 @@ export class GeneralSettingsForm implements OnInit {
     }),
   });
 
-  // Convenience accessor for the services sub-form.
+  /** Expose the services sub-form so the parent can pass it to the
+   * standalone ServicesSettingsForm card. */
   get servicesForm(): FormGroup {
     return this.form.get('services') as FormGroup;
   }
-
-  /** Show the services sub-form when the store has 'service' in its industries. */
-  readonly showServicesSection = computed(() => {
-    return (this.industriesControl.value ?? []).includes('service');
-  });
 
   storeTypes: SelectorOption[] = [
     { value: 'physical', label: 'Tienda Física' },
