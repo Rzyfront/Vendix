@@ -177,7 +177,7 @@ export class GeneralSettingsForm implements OnInit {
         address_line2: new FormControl(''),
         city: new FormControl('', Validators.required),
         state_province: new FormControl(''),
-        country_code: new FormControl('CO', { nonNullable: true, validators: [Validators.required] }),
+        country_code: new FormControl('CO', Validators.required),
         postal_code: new FormControl(''),
       }),
     }),
