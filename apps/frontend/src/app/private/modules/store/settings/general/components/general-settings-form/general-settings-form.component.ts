@@ -13,6 +13,7 @@ import {
   ReactiveFormsModule,
   FormGroup,
   FormControl,
+  Validators,
   ValidatorFn,
 } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
