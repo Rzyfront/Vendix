@@ -46,14 +46,14 @@ export class ServicesSettingsForm {
   readonly servicesForm = input.required<FormGroup>();
 
   /**
-   * Direct FormGroup getter. Returns the input signal's resolved
-   * FormGroup instance synchronously — no local mirror needed.
-   * The parent's servicesForm getter resolves to a stable reference
-   * so this never changes after first render.
+   * Cache the FormGroup as a local signal so the template can read
+   * it synchronously and the [formGroup] directive receives a
+   * concrete (non-signal) value on every change detection cycle.
+   * The parent's servicesForm input signal is the source of truth
+   * but it can only be read as a function (this.servicesForm()),
+   * so we cache the resolved value here.
    */
-  get form(): FormGroup {
-    return this.servicesForm();
-  }
+  readonly form = signal<FormGroup | null>(null);
 
   /**
    * Reactive signal of the offer_home_service FormControl value.
@@ -67,23 +67,32 @@ export class ServicesSettingsForm {
    * Typed accessor for the offer_home_service FormControl.
    */
   get offerHomeServiceControl(): FormControl<boolean> {
-    return this.form.get('offer_home_service') as FormControl<boolean>;
+    return this.form()!.get('offer_home_service') as FormControl<boolean>;
   }
 
   /**
    * Typed accessor for the local_address sub-FormGroup.
    */
   get localAddressGroup(): FormGroup {
-    return this.form.get('local_address') as FormGroup;
+    return this.form()!.get('local_address') as FormGroup;
   }
 
   constructor() {
-    // When the input FormGroup is available, project the
+    // Cache the FormGroup from the input signal so the template and
+    // effects can read it synchronously without invoking a function
+    // call on every change detection cycle.
+    effect(() => {
+      this.form.set(this.servicesForm());
+    });
+
+    // When the input signal resolves, project the
     // offer_home_service FormControl's valueChanges into a local
-    // signal. We use the onCleanup callback from the effect API
-    // for safe subscription cleanup.
+    // signal so the disable/enable effect below actually fires when
+    // the user toggles. We use the onCleanup callback from the
+    // effect API for safe subscription cleanup.
     effect((onCleanup) => {
-      const root = this.form;
+      const root = this.form();
+      if (!root) return;
       const sub = root
         .get('offer_home_service')
         ?.valueChanges.subscribe((v: boolean | null) => {
