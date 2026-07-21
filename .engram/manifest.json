@@ -634,19 +634,11 @@
       "prompts": 0
     },
     {
-      "id": "c9ef28fb",
-      "created_by": "rzy",
-      "created_at": "2026-07-21T22:46:51Z",
-      "sessions": 6,
-      "memories": 11,
-      "prompts": 0
-    },
-    {
-      "id": "bf502160",
-      "created_by": "rzy",
-      "created_at": "2026-07-22T04:31:55Z",
-      "sessions": 3,
-      "memories": 3,
+      "id": "b1e91afe",
+      "created_by": "yoner",
+      "created_at": "2026-07-21T17:33:14Z",
+      "sessions": 11,
+      "memories": 15,
       "prompts": 0
     }
   ]
