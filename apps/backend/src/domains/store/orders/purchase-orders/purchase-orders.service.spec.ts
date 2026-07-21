@@ -81,7 +81,16 @@ describe('PurchaseOrdersService.receive()', () => {
     const buildTxMock = () => ({
       purchase_order_receptions: { create: jest.fn().mockResolvedValue({ id: 1 }) },
       purchase_order_reception_items: { create: jest.fn().mockResolvedValue({}) },
-      purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+      purchase_order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        // FASE 0/FASE 2 — receive() now calls findMany for the over-receipt guard
+        // (purchase-orders.service.ts:1420). Pre-existing mock missed this; the
+        // guard validates each line belongs to this order and stays within the
+        // (ordered - already_received) envelope.
+        findMany: jest.fn().mockResolvedValue([
+          { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+        ]),
+      },
       // Pre-existing dependencies this spec never mocked:
       // - findFirst: Fase 2 UoM conversion (resolveUoMConversion).
       //   is_ingredient=false preserves the exact retail behaviour the
@@ -391,7 +400,13 @@ describe('PurchaseOrdersService.receive()', () => {
         purchase_order_reception_items: {
           create: jest.fn().mockResolvedValue({}),
         },
-        purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+        purchase_order_items: {
+          update: jest.fn().mockResolvedValue({}),
+          // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
+          findMany: jest.fn().mockResolvedValue([
+            { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+          ]),
+        },
         products: {
           findFirst: jest.fn().mockResolvedValue({
             id: PRODUCT_ID,
@@ -651,7 +666,13 @@ describe('PurchaseOrdersService.receive()', () => {
           purchase_order_reception_items: {
             create: jest.fn().mockResolvedValue({}),
           },
-          purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+          purchase_order_items: {
+            update: jest.fn().mockResolvedValue({}),
+            // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
+            findMany: jest.fn().mockResolvedValue([
+              { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+            ]),
+          },
           products: {
             findFirst: jest.fn().mockResolvedValue({
               id: PRODUCT_ID,
