@@ -288,6 +288,16 @@ export class PosCheckoutShellComponent {
   // ── Draft-order (Guardar borrador) submission state ──────────────────────
   readonly submittingDraft = signal(false);
 
+  // ── Mobile summary accordion (Resumen colapsable, solo <767px) ───────────
+  /** Collapsed by default on mobile; the header chip covers the total. Has
+   *  no visual effect on desktop — the CSS collapse rule only applies inside
+   *  `@media (max-width: 767px)`, so the rail stays always-expanded there. */
+  readonly summaryExpanded = signal<boolean>(false);
+
+  toggleSummary(): void {
+    this.summaryExpanded.update((v) => !v);
+  }
+
   // ── Footer projections (read from the Cobro + Envío steps) ───────────────
   readonly footerProcessing = computed<boolean>(
     () =>

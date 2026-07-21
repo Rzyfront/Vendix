@@ -3,6 +3,7 @@
   [size]="'xl'"
   [title]="'Finalizar venta'"
   [subtitle]="'Cobro y cliente'"
+  [fullScreenOnMobile]="true"
   (closed)="onModalClosed()"
 >
   <!-- Contenido proyectado envuelto en @for keyed por contentEpoch(): al
@@ -268,7 +269,26 @@
             <h2 class="section-title">Resumen</h2>
           </div>
 
-          <div class="product-list">
+          <!-- Accordion toggle (solo móvil): el resumen inicia colapsado en
+               móvil para que el chip de total del header sea la fuente
+               principal; en desktop el rail siempre está expandido. -->
+          <button
+            type="button"
+            class="summary-toggle md:hidden"
+            (click)="toggleSummary()"
+            [attr.aria-expanded]="summaryExpanded()"
+            aria-label="Mostrar u ocultar el resumen del pedido"
+          >
+            <span>{{ summaryExpanded() ? 'Ocultar resumen' : 'Ver resumen' }}</span>
+            <app-icon
+              name="chevron-down"
+              [size]="16"
+              class="summary-toggle-icon"
+              [class.expanded]="summaryExpanded()"
+            ></app-icon>
+          </button>
+
+          <div class="product-list" [class.expanded]="summaryExpanded()">
             @for (item of cartState()?.items; track item) {
               <div class="product-item">
                 <div class="product-info">
@@ -314,7 +334,7 @@
             }
           </div>
 
-          <div class="summary-details">
+          <div class="summary-details" [class.expanded]="summaryExpanded()">
             <div class="summary-row">
               <span>Productos</span>
               <span class="summary-value">{{ cartState()?.summary?.itemCount || 0 }}</span>
@@ -356,6 +376,27 @@
     </div>
   </div>
   }
+
+  <!-- Header-end (móvil): total siempre visible + acceso rápido a "Guardar
+       borrador" (movido del footer al header). Fuera del @for de
+       contentEpoch() para que se muestre sin depender del paso activo.
+       Oculto en desktop (md:hidden) — el rail de resumen sticky y el footer
+       de 4 botones ya cubren ese caso. -->
+  <div slot="header-end" class="md:hidden flex items-center gap-2 shrink-0 pl-2">
+    <button
+      type="button"
+      class="header-draft-btn"
+      [disabled]="footerProcessing()"
+      (click)="onSaveDraft()"
+      aria-label="Guardar borrador"
+    >
+      <app-icon name="save" [size]="18"></app-icon>
+    </button>
+    <div class="flex flex-col items-end">
+      <span class="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] font-semibold">Total</span>
+      <span class="text-base font-bold text-[var(--color-primary)]">{{ totalToPay() | currency }}</span>
+    </div>
+  </div>
 
   <!-- Footer -->
   <div slot="footer" class="checkout-footer">

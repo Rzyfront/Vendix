@@ -54,6 +54,63 @@
   }
 }
 
+/* ── Header (móvil): botón "Guardar borrador" icon-only, proyectado en
+   [slot=header-end] junto al chip de total. Oculto en desktop vía md:hidden
+   en el template. ─────────────────────────────────────────────────────── */
+.header-draft-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-primary);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.header-draft-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Resumen: botón acordeón (solo móvil vía md:hidden en el template) ── */
+.summary-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 2px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary-toggle-icon {
+  transition: transform 0.2s ease;
+}
+
+.summary-toggle-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* Resumen colapsable: solo aplica bajo 767px — en desktop el rail siempre
+   se muestra expandido, sin importar el valor de summaryExpanded(). */
+@media (max-width: 767px) {
+  .product-list,
+  .summary-details {
+    &:not(.expanded) {
+      display: none;
+    }
+  }
+}
+
 /* ── Section shell (reutilizado de la interfaz vieja) ─ */
 .payment-section {
   background: var(--color-surface);
@@ -572,12 +629,13 @@
   }
 }
 
-/* Móvil: se quita el total del footer (el rail de Resumen ya lo muestra) y las
-   acciones pasan a un grid simétrico de 2 columnas — Cancelar + Anterior
-   comparten la fila superior; Guardar borrador y la CTA principal ocupan el
-   ancho completo (la CTA queda destacada al fondo). En el primer paso (sin
+/* Móvil: se quita el total del footer (el chip del header ya lo muestra, ver
+   header-draft-btn / [slot=header-end]) y las acciones pasan a un grid
+   simétrico de 2 columnas — Cancelar + Anterior comparten la fila superior;
+   la CTA principal ocupa el ancho completo al fondo. "Guardar borrador" se
+   ocultó aquí porque se movió al header (icon-only). En el primer paso (sin
    "Anterior") Cancelar toma la fila completa para conservar la simetría. */
-@media (max-width: 640px) {
+@media (max-width: 767px) {
   .footer-left {
     display: none;
   }
@@ -599,7 +657,10 @@
     grid-column: span 1;
   }
 
-  .btn-draft,
+  .btn-draft {
+    display: none;
+  }
+
   .btn-confirm {
     grid-column: 1 / -1;
   }
@@ -611,8 +672,7 @@
 
   /* Paddings uniformes → las acciones se ven simétricas y bien ajustadas. */
   .btn-cancel,
-  .btn-prev,
-  .btn-draft {
+  .btn-prev {
     padding: 12px 14px;
     font-size: 14px;
     justify-content: center;
