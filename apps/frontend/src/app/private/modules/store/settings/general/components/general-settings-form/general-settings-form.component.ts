@@ -173,11 +173,11 @@ export class GeneralSettingsForm implements OnInit {
       // offer_home_service toggle, because the address is the
       // dispatch origin for both 'En el local' and 'A domicilio' flows.
       local_address: new FormGroup({
-        address_line1: new FormControl('', Validators.required),
+        address_line1: new FormControl('', [Validators.required]),
         address_line2: new FormControl(''),
-        city: new FormControl('', Validators.required),
+        city: new FormControl('', [Validators.required]),
         state_province: new FormControl(''),
-        country_code: new FormControl('CO', Validators.required),
+        country_code: new FormControl('CO', [Validators.required]),
         postal_code: new FormControl(''),
       }),
     }),
