@@ -356,6 +356,18 @@ export class GeneralSettingsComponent implements OnInit {
         return acc;
       }, {} as Partial<StoreSettings>);
 
+      // The 'services' sub-form lives outside the top-level sections
+      // (it's a sub-form rendered as its own card). Take the current
+      // value from the GeneralSettingsForm and persist it as
+      // `store_settings.settings.services.*` on the backend.
+      const generalForm = this.generalForm();
+      if (generalForm) {
+        const servicesValue = generalForm.form.get('services')?.value;
+        if (servicesValue) {
+          (sanitizedSettings as any).services = servicesValue;
+        }
+      }
+
       // Save all settings
       this.settings_service.saveSettingsNow(sanitizedSettings).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
