@@ -307,12 +307,12 @@ export default function SessionsScreen() {
             <OrgResponsiveCard
               title={formatSessionUser(item)}
               subtitle={[
-                getDeviceIcon(item.device) === 'smartphone' ? 'Móvil' : 'Escritorio',
+                getDeviceIcon(item.device_info) === 'smartphone' ? 'Móvil' : 'Escritorio',
                 item.location ?? item.ip_address,
               ]
                 .filter(Boolean)
                 .join(' · ')}
-              leftIcon={getDeviceIcon(item.device)}
+              leftIcon={getDeviceIcon(item.device_info)}
               leftIconColor={active ? colorScales.green[500] : colorScales.gray[400]}
               badge={
                 item.is_current
@@ -418,7 +418,7 @@ export default function SessionsScreen() {
                 ]}
               >
                 <Icon
-                  name={getDeviceIcon(selected.device)}
+                  name={getDeviceIcon(selected.device_info)}
                   size={22}
                   color={
                     isSessionActive(selected)
@@ -453,7 +453,7 @@ export default function SessionsScreen() {
               <OrgDetailRow
                 icon="monitor"
                 label="Dispositivo"
-                value={selected.device ?? selected.user_agent ?? 'N/A'}
+                value={selected.device_info ?? selected.user_agent ?? 'N/A'}
               />
               <OrgDetailRow
                 icon="map-pin"

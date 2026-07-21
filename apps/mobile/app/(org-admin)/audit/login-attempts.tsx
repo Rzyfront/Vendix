@@ -340,7 +340,7 @@ export default function LoginAttemptsScreen() {
                 {
                   label: 'Fecha',
                   value: new Date(
-                    item.created_at ?? (item as any).attempted_at ?? new Date().toISOString(),
+                    item.attempted_at ?? new Date().toISOString(),
                   ).toLocaleString(),
                   icon: 'calendar',
                 },
@@ -431,7 +431,7 @@ export default function LoginAttemptsScreen() {
                 icon="calendar"
                 label="Fecha"
                 value={new Date(
-                  selected.created_at ?? (selected as any).attempted_at ?? new Date().toISOString(),
+                  selected.attempted_at ?? new Date().toISOString(),
                 ).toLocaleString()}
               />
               <OrgDetailRow

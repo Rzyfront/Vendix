@@ -389,10 +389,8 @@ export const Endpoints = {
       LOGIN_ATTEMPTS: '/organization/login-attempts',
       LOGIN_ATTEMPTS_STATS: '/organization/login-attempts/stats',
       SESSIONS: '/organization/sessions',
-      SESSIONS_USER: '/organization/sessions/user/:userId',
       SESSIONS_TERMINATE: '/organization/sessions/:id',
       SESSIONS_TERMINATE_USER: '/organization/sessions/user/:userId',
-      STATS: '/organization/audit/stats',
     },
     ACCOUNTING: {
       CHART_OF_ACCOUNTS: {

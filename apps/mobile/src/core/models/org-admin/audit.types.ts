@@ -117,7 +117,7 @@ export interface PaginatedAuditResponse {
 // Login Attempt
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type LoginAttemptStatus = 'SUCCESS' | 'FAILED' | 'BLOCKED';
+export type LoginAttemptStatus = 'SUCCESS' | 'FAILED';
 
 export interface LoginAttempt {
   id: string | number;
@@ -128,8 +128,8 @@ export interface LoginAttempt {
   /** Espejo del backend NestJS que serializa booleanos, no enums. */
   success?: boolean;
   failure_reason?: string;
-  created_at: ISODateString;
-  attempted_at?: ISODateString;
+  /** Prisma `login_attempts.attempted_at` (no hay `created_at`). */
+  attempted_at: ISODateString;
   stores?: AuditStore;
 }
 
@@ -164,7 +164,8 @@ export interface ActiveSession {
   user_name?: string;
   ip_address?: string;
   user_agent?: string;
-  device?: string;
+  /** Prisma `user_sessions.device_info` (no hay campo `device`). */
+  device_info?: string;
   location?: string;
   /** El backend serializa booleanos. `true` = activa, `false` = revocada/expirada. */
   is_active?: boolean;

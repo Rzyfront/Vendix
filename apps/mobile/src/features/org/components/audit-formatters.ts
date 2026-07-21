@@ -235,8 +235,6 @@ export function getLoginAttemptStatusColor(status: LoginAttempt['status']): stri
       return colorScales.green[600];
     case 'FAILED':
       return colorScales.red[600];
-    case 'BLOCKED':
-      return colorScales.amber[600];
     default:
       return colorScales.gray[500];
   }
@@ -248,8 +246,6 @@ export function getLoginAttemptStatusIcon(status: LoginAttempt['status']): strin
       return 'check-circle';
     case 'FAILED':
       return 'x-circle';
-    case 'BLOCKED':
-      return 'shield-alert';
     default:
       return 'help-circle';
   }

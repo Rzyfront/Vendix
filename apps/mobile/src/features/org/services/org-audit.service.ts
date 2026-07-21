@@ -2,7 +2,6 @@ import {
   apiGet,
   apiGetRaw,
   apiDelete,
-  buildQuery,
   ListParams,
 } from '@/core/api/http';
 import { Endpoints } from '@/core/api/endpoints';
@@ -27,7 +26,6 @@ import type {
  *   GET    /organization/login-attempts?page&limit&email&success&store_id
  *   GET    /organization/login-attempts/stats
  *   GET    /organization/sessions?page&limit&user_id&status(active|inactive)
- *   GET    /organization/sessions/user/:userId
  *   DELETE /organization/sessions/:id
  *   DELETE /organization/sessions/user/:userId
  *
@@ -106,11 +104,6 @@ export const OrgAuditService = {
   ): Promise<PaginatedSessionsResponse> =>
     fetchPaginated<ActiveSession>(Endpoints.ORGANIZATION.AUDIT.SESSIONS, params ?? {}),
 
-  getUserSessions: async (userId: string | number): Promise<ActiveSession[]> =>
-    apiGet<ActiveSession[]>(
-      Endpoints.ORGANIZATION.AUDIT.SESSIONS_USER.replace(':userId', String(userId)),
-    ),
-
   terminateSession: async (id: string | number): Promise<void> => {
     await apiDelete<void>(
       Endpoints.ORGANIZATION.AUDIT.SESSIONS_TERMINATE.replace(':id', String(id)),
@@ -124,7 +117,5 @@ export const OrgAuditService = {
   },
 };
 
-// Re-export util para los screens que quieran componer queries custom.
-export { buildQuery };
 // Suppress unused warnings de tipos solo consumidos en service.
 export type { AuditLog };

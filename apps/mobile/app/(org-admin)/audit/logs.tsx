@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -7,8 +7,6 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
-  Dimensions,
-  Modal,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Sharing from 'expo-sharing';
@@ -73,7 +71,6 @@ import { toastError, toastSuccess } from '@/shared/components/toast/toast.store'
  */
 
 const PAGE_SIZE = 10;
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 // Empty-string sentinels ('') en lugar de null para que `FilterValues` (que
 // permite string | string[] | null) pueda representar "Todos" sin ambigüedad.
