@@ -173,7 +173,10 @@ export class PoPaymentDetailModalComponent implements OnInit {
             }
             // download_url viene firmado por el backend (patrón getAttachments).
             const rawUrl: string = att.download_url ?? att.file_url;
-            const mime: string = att.mime_type ?? guessMime(rawUrl);
+            // El backend expone el mimetype como `file_type` (schema
+            // purchase_order_attachments.file_type); `mime_type` no existe en
+            // el registro, así que sin este fallback siempre caíamos a guessMime.
+            const mime: string = att.file_type ?? att.mime_type ?? guessMime(rawUrl);
             this.attachmentMime.set(mime);
             // Cargar via fetch → blob URL → sanitizer (calque dispatch-note-pdf-viewer).
             this.fetchAsBlobUrl(rawUrl).then(blobUrl => {
