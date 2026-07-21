@@ -7,6 +7,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
+import { BaseReportQueryDto } from '@common/reports/base-report-query.dto';
 
 export enum DatePreset {
   TODAY = 'today',
@@ -28,15 +29,13 @@ export enum Granularity {
   YEAR = 'year',
 }
 
-export class AnalyticsQueryDto {
-  @IsOptional()
-  @IsDateString()
-  date_from?: string;
-
-  @IsOptional()
-  @IsDateString()
-  date_to?: string;
-
+/**
+ * Full analytics filter DTO. Extends {@link BaseReportQueryDto} (which owns the
+ * shared `date_from` / `date_to` / `page` / `limit` fields with identical
+ * validation) and adds the analytics-only fields: date preset, granularity, and
+ * sorting. Field semantics for the inherited fields are unchanged.
+ */
+export class AnalyticsQueryDto extends BaseReportQueryDto {
   @IsOptional()
   @IsEnum(DatePreset)
   date_preset?: DatePreset;
@@ -44,16 +43,6 @@ export class AnalyticsQueryDto {
   @IsOptional()
   @IsEnum(Granularity)
   granularity?: Granularity;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  page?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  limit?: number;
 
   @IsOptional()
   @IsString()
