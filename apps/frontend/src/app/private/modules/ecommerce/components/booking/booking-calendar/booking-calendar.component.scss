@@ -109,15 +109,15 @@
   line-height: 1;
 }
 
-// Short weekday label (Lu Ma Mi Ju Vi Sá Do) shown on unavailable cells
-// so the user can tell at a glance WHICH weekday is closed (e.g.
-// "Mi" for Miércoles). 2 letters at this font size still fit inside
-// the 36-44px cells without overflow.
+// Full weekday label (Lun Mar Mié Jue Vie Sáb Dom) shown on unavailable
+// cells so the user can tell at a glance WHICH weekday is closed
+// (e.g. "Mié" for Miércoles). 3-letter words at 8px still fit inside
+// the 36-44px cells on narrow viewports.
 .cal-cell__day {
-  font-size: 11px;
+  font-size: 8px;
   font-weight: 700;
   line-height: 1;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 // Verde + check (regla skill vendix-ui-ux §6 — color + ícono)
