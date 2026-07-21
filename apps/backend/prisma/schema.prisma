@@ -947,6 +947,7 @@ model addresses {
   orders_orders_billing_address_idToaddresses  orders[]              @relation("orders_billing_address_idToaddresses")
   orders_orders_shipping_address_idToaddresses orders[]              @relation("orders_shipping_address_idToaddresses")
   sales_orders                                 sales_orders[]        @relation("sales_orders_shipping_address")
+  bookings_service_address                     bookings[]            @relation("booking_service_address")
 }
 
 model brands {
@@ -6236,6 +6237,15 @@ enum booking_status_enum {
   no_show
 }
 
+/// Where the service will be performed. The customer picks at
+/// checkout time whether the technician goes to the customer
+/// (`home`) or the customer goes to the technician's shop
+/// (`shop`). `shop` is the safe default for historical bookings.
+enum booking_service_location_enum {
+  home
+  shop
+}
+
 enum booking_mode_enum {
   provider_required
   free_booking
@@ -6917,6 +6927,14 @@ model bookings {
   queue_position            Int                 @default(0)
   /// Manual priority override for queue ordering. Lower = sooner. 0 = default.
   priority                  Int                 @default(0)
+  /// Where the service will be performed. `home` = technician goes to the
+  /// customer's address; `shop` = customer goes to the technician's shop.
+  /// Historical bookings all default to `shop`.
+  service_location_type     booking_service_location_enum @default(shop)
+  /// FK to the customer's `addresses` row when service_location_type =
+  /// `home`. NULL for `shop` bookings.
+  service_address_id        Int?
+  service_address           addresses?          @relation("booking_service_address", fields: [service_address_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   created_at                DateTime?           @default(now()) @db.Timestamp(6)
   updated_at                DateTime?           @default(now()) @db.Timestamp(6)
 
