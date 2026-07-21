@@ -320,6 +320,14 @@ export class ReservationsService {
             provider_id: resolvedProviderId,
             product_variant_id: dto.product_variant_id ?? null,
             created_by_user_id: context?.user_id,
+            // Phase 1 of service-location feature: 'home' = technician
+            // goes to the customer; 'shop' = customer goes to the local.
+            // service_address_id is only meaningful when home.
+            service_location_type: dto.service_location_type || 'shop',
+            service_address_id:
+              dto.service_location_type === 'home'
+                ? (dto.service_address_id ?? null)
+                : null,
             updated_at: new Date(),
           },
           include: this.BOOKING_INCLUDE,

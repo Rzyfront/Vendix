@@ -98,6 +98,48 @@ export class EcommerceReservationsController {
     return { success: true, data: days };
   }
 
+  /**
+   * Returns the addresses saved for the currently-authenticated customer
+   * so the booking flow can show them when the customer picks "a domicilio".
+   * Customer auth via JWT (EcommerceAuthGuard on the route layer).
+   */
+  @Get('customer/addresses')
+  async getCustomerAddresses(@Req() req: any) {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      throw new ForbiddenException(
+        'Debe iniciar sesion para ver sus direcciones',
+      );
+    }
+    // Reuse the existing EcommerceBookingService if it has the helper;
+    // otherwise inline a scoped query here. We use the unscoped client
+    // because addresses is store-scoped and the customer only sees their
+    // own rows.
+    const rows = await this.availabilityService['prisma'].addresses.findMany({
+      where: { user_id: customerId },
+      orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+    });
+    return { success: true, data: rows };
+  }
+
+  /**
+   * Returns the technician's local address (the store's primary
+   * shipping address) so the booking flow can show it when the customer
+   * picks "en el local".
+   */
+  @Get('store/address')
+  async getStoreAddress(@Req() req: any) {
+    const storeId = req.store_id;
+    if (!storeId) {
+      return { success: true, data: null };
+    }
+    const row = await this.availabilityService['prisma'].addresses.findFirst({
+      where: { store_id: storeId, is_primary: true },
+      orderBy: { id: 'asc' },
+    });
+    return { success: true, data: row };
+  }
+
   @Post()
   async createBooking(@Req() req: any, @Body() dto: CreateEcommerceBookingDto) {
     const customerId = req.user?.id;
