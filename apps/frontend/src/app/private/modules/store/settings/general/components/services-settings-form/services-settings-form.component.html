@@ -37,37 +37,29 @@
       </label>
 
       <div class="settings-field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">Ciudad <span class="req">*</span></span>
-          <input
-            type="text"
-            class="settings-field__input"
-            placeholder="Bogotá"
-            formControlName="city"
-          />
-        </label>
-        <label class="settings-field">
-          <span class="settings-field__label">Departamento</span>
-          <input
-            type="text"
-            class="settings-field__input"
-            placeholder="Cundinamarca"
-            formControlName="state_province"
-          />
-        </label>
+        <app-selector
+          label="País"
+          formControlName="country_code"
+          [options]="countryOptions()"
+          [required]="true"
+        ></app-selector>
+        <app-selector
+          label="Departamento"
+          formControlName="state_province"
+          [options]="departmentOptions()"
+          placeholder="Seleccionar departamento"
+          [required]="true"
+        ></app-selector>
       </div>
 
       <div class="settings-field-grid">
-        <label class="settings-field">
-          <span class="settings-field__label">País <span class="req">*</span></span>
-          <input
-            type="text"
-            class="settings-field__input"
-            placeholder="CO"
-            maxlength="3"
-            formControlName="country_code"
-          />
-        </label>
+        <app-selector
+          label="Ciudad"
+          formControlName="city"
+          [options]="cityOptions()"
+          placeholder="Seleccionar ciudad"
+          [required]="true"
+        ></app-selector>
         <label class="settings-field">
           <span class="settings-field__label">Código postal</span>
           <input
