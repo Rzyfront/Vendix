@@ -164,8 +164,11 @@ export class GeneralSettingsForm implements OnInit {
     tax_included: new FormControl(false),
     // Sub-form 'services' — rendered as a separate card by the parent
     // (GeneralSettingsComponent) using <app-services-settings-form>.
+    // offer_home_service starts as null (not 'true') so the UI does not
+    // assume the feature is on when the backend has no value yet.
+    // patchValue from the parent sets the real persisted value.
     services: new FormGroup({
-      offer_home_service: new FormControl<boolean>(true, { nonNullable: true }),
+      offer_home_service: new FormControl<boolean | null>(null),
       local_address: new FormGroup({
         address_line1: new FormControl(''),
         address_line2: new FormControl(''),
