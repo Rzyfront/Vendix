@@ -384,8 +384,8 @@ export const Endpoints = {
     },
     AUDIT: {
       LOGS: '/organization/audit/logs',
-      LOGS_STATS: '/organization/audit/logs/stats',
-      LOGS_EXPORT: '/organization/audit/logs/export',
+      LOGS_STATS: '/organization/audit/stats',
+      LOGS_EXPORT: '/organization/audit/export',
       LOGIN_ATTEMPTS: '/organization/login-attempts',
       LOGIN_ATTEMPTS_STATS: '/organization/login-attempts/stats',
       SESSIONS: '/organization/sessions',
