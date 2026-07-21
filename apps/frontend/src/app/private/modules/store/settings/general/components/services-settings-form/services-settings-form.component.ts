@@ -85,11 +85,11 @@ export class ServicesSettingsForm {
       this.form.set(this.servicesForm());
     });
 
-    // When the input signal resolves, project the
-    // offer_home_service FormControl's valueChanges into a local
-    // signal so the disable/enable effect below actually fires when
-    // the user toggles. We use the onCleanup callback from the
-    // effect API for safe subscription cleanup.
+    // Project offer_home_service's valueChanges into a local signal so
+    // the parent (BookingComponent) can react to the toggle in real
+    // time. The address fields stay editable regardless of the toggle
+    // because the local address is the dispatch origin for BOTH
+    // 'En el local' and 'A domicilio' flows.
     effect((onCleanup) => {
       const root = this.form();
       if (!root) return;
@@ -97,24 +97,8 @@ export class ServicesSettingsForm {
         .get('offer_home_service')
         ?.valueChanges.subscribe((v: boolean | null) => {
           this.offerHomeServiceValue.set(v);
-          this.applyAddressValidation(v === true);
         });
       onCleanup(() => sub?.unsubscribe());
-    });
-
-    // Wire up: when the '¿Ofrece servicio a domicilio?' toggle is OFF,
-    // disable the 'Dirección del local' sub-form so the inputs go gray
-    // and can't be edited. Same pattern as the rest of the General
-    // Settings screen (e.g. 'Habilitar Caja Registradora' grays out
-    // its dependent options).
-    effect(() => {
-      const offer = this.offerHomeServiceValue() === true;
-      const address = this.localAddressGroup;
-      if (offer && address.disabled) {
-        address.enable({ emitEvent: false });
-      } else if (!offer && address.enabled) {
-        address.disable({ emitEvent: false });
-      }
     });
   }
 
