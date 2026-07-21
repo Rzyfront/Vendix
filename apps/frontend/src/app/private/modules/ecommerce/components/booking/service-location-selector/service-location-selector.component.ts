@@ -75,6 +75,13 @@ export class ServiceLocationSelectorComponent {
   readonly storeAddress = input<StoreAddress | null>(null);
   readonly customerAddresses = input<CustomerAddress[]>([]);
   readonly selectedAddressId = input<number | null>(null);
+  /**
+   * Whether the store offers 'A domicilio' service. When false, the
+   * 'A domicilio' radio card is hidden and only 'En el local' shows.
+   * Defaults to true so existing callers don't accidentally hide
+   * the option.
+   */
+  readonly offerHomeService = input<boolean>(true);
 
   readonly valueChange = output<ServiceLocation>();
   readonly addressChange = output<number | null>();

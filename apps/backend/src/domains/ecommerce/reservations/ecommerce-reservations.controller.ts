@@ -141,6 +141,46 @@ export class EcommerceReservationsController {
   }
 
   /**
+   * Returns the store's service configuration captured in
+   * Configuración → General → Servicios:
+   *   - offer_home_service: bool — whether the customer can request
+   *     'A domicilio' (false → only 'En el local' option is shown).
+   *   - local_address: object — captured address of the technician's
+   *     local.
+   *
+   * The booking flow's ServiceLocationSelectorComponent reads this to
+   * decide whether to render the 'A domicilio' radio card and which
+   * address to use for the 'En el local' option.
+   */
+  @Get('store/services')
+  async getStoreServices(@Req() req: any) {
+    const storeId = req.store_id;
+    if (!storeId) {
+      return {
+        success: true,
+        data: { offer_home_service: true, local_address: null },
+      };
+    }
+    // Use the unscoped client for the cross-tenant read so the
+    // booking flow can show the right option without requiring a
+    // store context.
+    const row = await this.availabilityService['prisma'].store_settings.findFirst({
+      where: { store_id: storeId },
+      orderBy: { id: 'desc' },
+    });
+    const settings = (row?.settings as any) ?? {};
+    const services = settings.services ?? {};
+    return {
+      success: true,
+      data: {
+        offer_home_service:
+          services.offer_home_service !== false, // default true
+        local_address: services.local_address ?? null,
+      },
+    };
+  }
+
+  /**
    * Creates a new address for the authenticated customer (used by the
    * "Agregar nueva dirección" inline form in the booking flow).
    * Auto-flags the row with the customer's user_id and (if requested)
