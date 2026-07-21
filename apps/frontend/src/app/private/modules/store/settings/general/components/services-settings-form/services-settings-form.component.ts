@@ -4,7 +4,10 @@ import {
   input,
   effect,
   signal,
+  DestroyRef,
+  inject,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -45,6 +48,14 @@ export class ServicesSettingsForm {
   readonly form = signal<FormGroup | null>(null);
 
   /**
+   * Reactive signal of the offer_home_service FormControl value.
+   * The FormControl itself isn't a signal, but we can project its
+   * valueChanges Observable into a signal with `toSignal` so the
+   * effect below can react to user toggles in real time.
+   */
+  private readonly offerHomeServiceValue = signal<boolean | null>(null);
+
+  /**
    * Typed accessor for the offer_home_service FormControl. Used by
    * the template's <app-setting-toggle [formControl]="..."> binding.
    */
@@ -60,9 +71,27 @@ export class ServicesSettingsForm {
     return this.form()!.get('local_address') as FormGroup;
   }
 
+  private readonly destroyRef = inject(DestroyRef);
+
   constructor() {
+    // Mirror the input FormGroup into a local signal so the template
+    // can read it synchronously.
     effect(() => {
       this.form.set(this.servicesForm());
+    });
+
+    // When the input signal resolves, project the offer_home_service
+    // FormControl's valueChanges into a local signal so the
+    // disable/enable effect below actually fires when the user toggles.
+    effect((onCleanup) => {
+      const root = this.form();
+      if (!root) return;
+      const sub = root
+        .get('offer_home_service')
+        ?.valueChanges.subscribe((v: boolean | null) => {
+          this.offerHomeServiceValue.set(v);
+        });
+      onCleanup(() => sub?.unsubscribe());
     });
 
     // Wire up: when the '¿Ofrece servicio a domicilio?' toggle is OFF,
@@ -73,7 +102,7 @@ export class ServicesSettingsForm {
     effect(() => {
       const root = this.form();
       if (!root) return;
-      const offer = this.offerHomeServiceControl.value === true;
+      const offer = this.offerHomeServiceValue() === true;
       const address = this.localAddressGroup;
       if (offer && address.disabled) {
         address.enable({ emitEvent: false });
