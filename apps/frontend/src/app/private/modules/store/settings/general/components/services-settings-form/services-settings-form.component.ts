@@ -121,7 +121,7 @@ export class ServicesSettingsForm {
           if (dep) {
             this.countryService
               .getCitiesByDepartment(dep.id)
-              .then((c) => this.cities.set(c));
+              .then((c: City[]) => this.cities.set(c));
           } else {
             this.cities.set([]);
           }
