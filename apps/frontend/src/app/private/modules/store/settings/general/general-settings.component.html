@@ -33,12 +33,21 @@
             <h2 class="section-title">Identidad y General</h2>
           </div>
           <div class="section-body">
-            <app-general-settings-form [settings]="settings().general"
+            <app-general-settings-form #generalForm [settings]="settings().general"
               [panelUi]="settings().panel_ui"
               (settingsChange)="onSectionChange('general', $event)"
               (panelUiChange)="onSectionChange('panel_ui', $event)" />
           </div>
         </section>
+
+        <!-- Servicios (own card, only when 'service' industry is selected) -->
+        @if (showServicesSection()) {
+          <section class="settings-card mt-6">
+            <app-services-settings-form
+              [servicesForm]="generalForm.servicesForm"
+            />
+          </section>
+        }
 
         <!-- Branding & Customization -->
         <section id="section-branding" class="settings-section">
