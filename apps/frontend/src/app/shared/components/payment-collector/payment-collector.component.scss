@@ -415,4 +415,31 @@
   :host-context(.pos-payment-context) .pc-steps-col {
     display: none;
   }
+
+  /* Se oculta el teclado numérico en pantalla y la fila de montos rápidos
+     ("Quick"/parcializar pago) en móvil — el input de efectivo ya fuerza
+     inputmode="decimal" (appCurrencyInput), así que el teclado nativo del
+     celular sigue permitiendo escribir el monto; ocultar el keypad visual no
+     rompe el cálculo de cambio. quickAmounts() y los handlers del keypad
+     siguen intactos para desktop. */
+  .keypad,
+  .quick-amounts {
+    display: none;
+  }
+
+  /* Grid de métodos de pago: en vez de forzar siempre 2 columnas (se ve
+     apretado/vacío con 1-2 métodos habilitados), se adapta al ancho
+     disponible. Tabs y nombre de método ajustados al touch target mínimo de
+     44px (vendix-ui-ux). */
+  .payment-methods-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .tab-btn {
+    min-height: 44px;
+  }
+
+  .method-name {
+    font-size: 13px;
+  }
 }
