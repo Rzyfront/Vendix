@@ -1,4 +1,5 @@
 import { Component, inject, OnInit, computed, signal, DestroyRef, effect, viewChild } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
@@ -305,14 +306,19 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   /**
-   * The Recibos section edits `pos.auto_print_receipt`, which belongs to the POS
-   * block. Routed here instead of copying the flag into `receipts` so the setting
-   * keeps a single home.
+   * Recursively mark every control in the form (and nested sub-groups)
+   * as touched + dirty so the red error messages surface under each
+   * invalid field. Used right before showing the 'incomplete form'
+   * toast so the user can see WHICH fields are missing.
    */
-  onPosAutoPrintChange(value: boolean): void {
-    this.onSectionChange('pos', {
-      ...(this.settings().pos ?? {}),
-      auto_print_receipt: value,
+  private markAllAsTouched(form: FormGroup): void {
+    form.markAllAsTouched();
+    Object.values(form.controls).forEach((ctrl) => {
+      if (ctrl instanceof FormGroup) {
+        this.markAllAsTouched(ctrl);
+      } else {
+        ctrl.markAsDirty();
+      }
     });
   }
 
@@ -348,6 +354,22 @@ export class GeneralSettingsComponent implements OnInit {
 
   async saveAllSettings() {
     this.isSaving.set(true);
+
+    // Validate the GeneralSettingsForm (which embeds the services
+    // sub-form) before any save. If the user has enabled
+    // '¿Ofrece servicio a domicilio?' but left the required address
+    // fields empty, the form is invalid and the toast surfaces the
+    // specific reason.
+    const generalForm = this.generalForm();
+    if (generalForm && generalForm.form.invalid) {
+      this.markAllAsTouched(generalForm.form);
+      this.toast_service.error(
+        'Ingrese la dirección en el apartado de Servicio',
+      );
+      this.isSaving.set(false);
+      return;
+    }
+
     if ((this.settings() as any).shipping) {
       this.settings.update((s) => {
         const { shipping, ...rest } = s as any;
