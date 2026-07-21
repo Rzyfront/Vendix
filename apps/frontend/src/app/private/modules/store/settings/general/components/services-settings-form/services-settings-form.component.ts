@@ -42,7 +42,7 @@ export class ServicesSettingsForm {
    * it synchronously and the [formGroup] directive receives a
    * concrete (non-signal) value on every change detection cycle.
    */
-  private readonly form = signal<FormGroup | null>(null);
+  readonly form = signal<FormGroup | null>(null);
 
   /**
    * Typed accessor for the offer_home_service FormControl. Used by
