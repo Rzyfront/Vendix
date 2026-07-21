@@ -1,6 +1,13 @@
 // ============================================================================
 // Servicios sub-form card (extracted into its own component)
 // ============================================================================
+// Outer card gets a bottom margin so it doesn't sit flush against the
+// next settings section (Personalización) below it.
+:host {
+  display: block;
+  margin-bottom: 24px;
+}
+
 .settings-section {
   display: flex;
   flex-direction: column;
