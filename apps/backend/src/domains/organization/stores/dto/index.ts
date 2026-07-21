@@ -11,8 +11,10 @@ import {
   IsIn,
   IsDecimal,
   IsArray,
+  ArrayMinSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { StoreIndustry } from '../../../store/stores/dto';
 
 export enum StoreType {
   PHYSICAL = 'physical',
@@ -75,6 +77,12 @@ export class CreateStoreDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean = true;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 
   @IsOptional()
   @IsInt()
@@ -148,6 +156,12 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 
   @IsOptional()
   @IsInt()

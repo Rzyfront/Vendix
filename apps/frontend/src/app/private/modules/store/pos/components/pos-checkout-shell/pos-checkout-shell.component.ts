@@ -382,6 +382,20 @@ export class PosCheckoutShellComponent {
   });
 
   /**
+   * True while the major step is 'cobro' AND the Cobro sub-wizard still has
+   * sub-steps pending before Monto. Lets the footer keep showing "Siguiente"
+   * (driving Forma de pago → Método → Monto via {@link attemptNextStep}) instead
+   * of the terminal CTA — even in delivery, where Cobro is the LAST major step
+   * and {@link isLastStep} would otherwise force "Finalizar venta" from the very
+   * first sub-step, leaving the payment sub-wizard un-navigable (the bug).
+   */
+  readonly cobroNeedsAdvance = computed<boolean>(
+    () =>
+      this.currentStepKey() === 'cobro' &&
+      (this.paymentStep()?.hasPendingSubSteps() ?? false),
+  );
+
+  /**
    * Remount key for the projected checkout content. Incremented ONLY by
    * {@link resetState} (successful finalization) to force Angular to destroy +
    * recreate the payment-step/collector, shipping-step and consumo-step with a
