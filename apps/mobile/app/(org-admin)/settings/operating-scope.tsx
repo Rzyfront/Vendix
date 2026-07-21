@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -71,6 +72,7 @@ const SCOPE_ICON_FG: Record<OperatingScopeValue, string> = {
 };
 
 export default function OperatingScopeScreen() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -105,10 +107,9 @@ export default function OperatingScopeScreen() {
     try {
       const user = await AuthService.getMe();
       useAuthStore.getState().setUser(user);
-    } catch (e) {
+    } catch {
       // No bloqueamos el flujo si el refresh falla — el pull-to-refresh
-      // lo recuperará. Logueamos para visibilidad.
-      console.warn('[operating-scope] failed to refresh user after apply:', e);
+      // lo recuperará. Silencioso: el toast de éxito ya confirmó el cambio.
     }
   };
 
@@ -145,7 +146,13 @@ export default function OperatingScopeScreen() {
         <View style={styles.titleRow}>
           <View style={styles.titleLeft}>
             <Pressable
-              onPress={() => {}}
+              onPress={() => {
+                if (router.canGoBack()) {
+                  router.back();
+                } else {
+                  router.replace('/(org-admin)/settings' as never);
+                }
+              }}
               hitSlop={8}
               style={styles.backBtn}
               accessibilityLabel="Volver"
