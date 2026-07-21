@@ -4,7 +4,7 @@ import { Store } from '@ngrx/store';
 import { of, EMPTY } from 'rxjs';
 import { map, mergeMap, catchError, tap, withLatestFrom } from 'rxjs/operators';
 import { ReportsActions } from './reports.actions';
-import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectReportData, selectCurrentPage, selectItemsPerPage } from './reports.selectors';
+import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectCurrentPage, selectItemsPerPage } from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
 import { ReportExportService } from '../services/report-export.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -84,50 +84,29 @@ export class ReportsEffects {
       withLatestFrom(
         this.store.select(selectSelectedReport),
         this.store.select(selectDateRange),
-        this.store.select(selectReportData),
       ),
-      mergeMap(([, report, dateRange, data]) => {
-        if (!report) {
-          return of(ReportsActions.exportReportFailure({ error: 'No hay reporte seleccionado' }));
+      mergeMap(([, report, dateRange]) => {
+        // Export is a single, authoritative flow: the backend generates the XLSX
+        // (full dataset, store-TZ dates, correct aggregation). The UI only offers
+        // the button when the report declares an `exportEndpoint`, so a missing
+        // endpoint here is a programming error, not a user-facing path.
+        if (!report || !report.exportEndpoint) {
+          return of(ReportsActions.exportReportFailure({ error: 'Este reporte no admite exportación' }));
         }
 
-        // If backend has export endpoint, use it
-        if (report.exportEndpoint) {
-          return this.reportsDataService.exportFromBackend(report.exportEndpoint, dateRange).pipe(
-            tap((blob) => {
-              this.reportExportService.downloadBlob(blob, report.exportFilename);
-              this.toastService.success('Reporte exportado correctamente');
-            }),
-            map(() => ReportsActions.exportReportSuccess()),
-            catchError((error) =>
-              of(
-                ReportsActions.exportReportFailure({
-                  error: error.error?.message || error.message || 'Error al exportar el reporte',
-                }),
-              ),
-            ),
-          );
-        }
-
-        // Otherwise, generate XLSX locally from current data
-        if (data && data.length > 0) {
-          try {
-            this.reportExportService.exportToXlsx(data, report.columns, report.exportFilename);
+        return this.reportsDataService.exportFromBackend(report.exportEndpoint, dateRange).pipe(
+          tap((blob) => {
+            this.reportExportService.downloadBlob(blob, report.exportFilename);
             this.toastService.success('Reporte exportado correctamente');
-            return of(ReportsActions.exportReportSuccess());
-          } catch (error: any) {
-            return of(
-              ReportsActions.exportReportFailure({
-                error: error.message || 'Error al generar el archivo',
-              }),
-            );
-          }
-        }
-
-        return of(
-          ReportsActions.exportReportFailure({
-            error: 'No hay datos para exportar. Genera el reporte primero.',
           }),
+          map(() => ReportsActions.exportReportSuccess()),
+          catchError((error) =>
+            of(
+              ReportsActions.exportReportFailure({
+                error: error.error?.message || error.message || 'Error al exportar el reporte',
+              }),
+            ),
+          ),
         );
       }),
     ),

@@ -55,6 +55,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-pila-flatfile` |
 | -- | `vendix-prisma-scopes` |
 | -- | `vendix-redis-quota` |
+| -- | `vendix-report-xlsx` |
 | -- | `vendix-restaurant-ops` |
 | -- | `vendix-restaurant-table-qr` |
 | -- | `vendix-saas-billing` |
@@ -69,6 +70,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
+| Adding an exportEndpoint to the report registry | `vendix-report-xlsx` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding chat features | `vendix-ai-chat` |
 | Adding dependencies to apps/mobile/package.json | `mobile-dev` |
@@ -87,6 +89,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding new settings sections to stores or organizations | `vendix-settings-system` |
 | Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes | `vendix-restaurant-ops` |
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
+| Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
 | Adding or editing per-industry module rules | `vendix-panel-ui` |
@@ -143,6 +146,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Seeds | `vendix-prisma-seed` |
 | Creating a QA sprint report as a web presentation | `qa-report` |
 | Creating a bug in Linear for Vendix | `linear-issues` |
+| Creating a new downloadable report (backend export endpoint + frontend registry entry) | `vendix-report-xlsx` |
 | Creating a new skill | `skill-creator` |
 | Creating a ticket in Linear | `linear-issues` |
 | Creating an issue in Linear | `linear-issues` |
@@ -207,15 +211,18 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
+| Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Exposing a job-status poll endpoint that returns job.returnvalue | `vendix-ai-queue` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | Fixing bugs where variants are hidden or blocked because stock_quantity is zero | `vendix-product-variants` |
 | Fixing currency display issues or hardcoded $ symbols | `vendix-currency-formatting` |
 | Fixing date display off-by-one bugs | `vendix-date-timezone` |
+| Fixing report dates, timezone, formatting or wrong/incomplete data | `vendix-report-xlsx` |
 | Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
 | Formatting chart axis labels with dates | `vendix-date-timezone` |
 | General Development | `how-to-dev` |
+| Generating an XLSX file from a backend service | `vendix-report-xlsx` |
 | Generating or editing the PILA flat file (Resolución 2388/2016) | `vendix-pila-flatfile` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
@@ -364,6 +371,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with PILA record types 1/2, positional layout, or IBC caps | `vendix-pila-flatfile` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Working with RAG pipeline | `vendix-ai-embeddings-rag` |
+| Working with ReportBuilder, buildReportBuffer, sendXlsxReport or buildReportFilename | `vendix-report-xlsx` |
+| Working with ReportDataAdapterService (summary/list/nested adaptation) | `vendix-report-xlsx` |
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
 | Working with SubscriptionAccessService or SubscriptionResolverService | `vendix-subscription-gate` |
 | Working with SubscriptionBillingService or SubscriptionPaymentService | `vendix-saas-billing` |
@@ -389,6 +398,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
+| Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend) | `vendix-report-xlsx` |
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
