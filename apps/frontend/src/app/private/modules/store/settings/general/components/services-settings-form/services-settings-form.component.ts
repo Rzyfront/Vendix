@@ -52,9 +52,34 @@ export class ServicesSettingsForm {
     return this.form()!.get('offer_home_service') as FormControl<boolean>;
   }
 
+  /**
+   * Typed accessor for the local_address sub-FormGroup. Used by the
+   * template's formGroupName="local_address" binding.
+   */
+  get localAddressGroup(): FormGroup {
+    return this.form()!.get('local_address') as FormGroup;
+  }
+
   constructor() {
     effect(() => {
       this.form.set(this.servicesForm());
+    });
+
+    // Wire up: when the '¿Ofrece servicio a domicilio?' toggle is OFF,
+    // disable the 'Dirección del local' sub-form so the inputs go gray
+    // and can't be edited. Same pattern as the rest of the General
+    // Settings screen (e.g. 'Habilitar Caja Registradora' grays out
+    // its dependent options).
+    effect(() => {
+      const root = this.form();
+      if (!root) return;
+      const offer = this.offerHomeServiceControl.value === true;
+      const address = this.localAddressGroup;
+      if (offer && address.disabled) {
+        address.enable({ emitEvent: false });
+      } else if (!offer && address.enabled) {
+        address.disable({ emitEvent: false });
+      }
     });
   }
 
