@@ -77,9 +77,15 @@ export class GeneralSettingsComponent implements OnInit {
     // the industries FormControl's valueChanges to our local signal.
     effect(() => {
       const form = this.generalForm();
+      // eslint-disable-next-line no-console
+      console.log('[general-settings] effect tick, form =', form ? 'PRESENT' : 'undefined');
       if (!form) return;
       const sub = form.industriesControl.valueChanges.subscribe(
-        (value: string[] | null | undefined) => this.industriesSignal.set(value ?? []),
+        (value: string[] | null | undefined) => {
+          // eslint-disable-next-line no-console
+          console.log('[general-settings] industries changed:', value);
+          this.industriesSignal.set(value ?? []);
+        },
       );
       // Seed the signal with the current value so we don't need to
       // wait for the first change to render correctly.
