@@ -458,9 +458,8 @@ export class CustomersAnalyticsService {
         phone: user.phone || '',
         total_orders: agg?._count?.id || 0,
         total_spent: Number(agg?._sum?.grand_total || 0),
-        last_order_date:
-          agg?._max?.created_at?.toISOString().split('T')[0] || 'N/A',
-        registration_date: user.created_at?.toISOString().split('T')[0] || '',
+        last_order_date: agg?._max?.created_at ?? null,
+        registration_date: user.created_at ?? null,
         state: user.state,
       };
     });
@@ -772,8 +771,8 @@ export class CustomersAnalyticsService {
         email: customer?.email || '',
         abandonment_reason: 'No especificada',
         value: Number(cart.subtotal || 0),
-        created_at: cart.created_at?.toISOString().split('T')[0] || '',
-        abandoned_at: cart.created_at?.toISOString().split('T')[0] || '',
+        created_at: cart.created_at ?? null,
+        abandoned_at: cart.created_at ?? null,
       };
     });
   }
