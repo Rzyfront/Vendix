@@ -212,3 +212,51 @@
     </div>
   }
 </section>
+
+<!-- Modal: surface the shop address when 'En el local' is picked. -->
+@if (showStoreAddressModal() && storeAddress(); as addr) {
+  <div class="modal-backdrop" (click)="closeStoreAddressModal()">
+    <div
+      class="modal-card"
+      role="dialog"
+      aria-labelledby="store-address-title"
+      (click)="$event.stopPropagation()"
+    >
+      <header class="modal-card__header">
+        <app-icon name="map-pin" [size]="20"></app-icon>
+        <h3 id="store-address-title" class="modal-card__title">
+          Dirección del local
+        </h3>
+      </header>
+      <div class="modal-card__body">
+        <p class="modal-card__lead">
+          Visitarás el local del técnico. Esta es la dirección a la que
+          debes asistir:
+        </p>
+        <div class="modal-card__address">
+          <div class="modal-card__line">{{ formatAddressLine(addr) }}</div>
+          @if (addr.address_line2) {
+            <div class="modal-card__line modal-card__line--sub">
+              {{ addr.address_line2 }}
+            </div>
+          }
+          <div class="modal-card__line modal-card__line--sub">
+            {{ formatAddressCity(addr) }} · {{ addr.country_code }}
+            @if (addr.postal_code) {
+              · {{ addr.postal_code }}
+            }
+          </div>
+        </div>
+      </div>
+      <footer class="modal-card__footer">
+        <button
+          type="button"
+          class="modal-card__close"
+          (click)="closeStoreAddressModal()"
+        >
+          Entendido
+        </button>
+      </footer>
+    </div>
+  </div>
+}
