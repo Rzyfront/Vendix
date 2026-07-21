@@ -169,12 +169,15 @@ export class GeneralSettingsForm implements OnInit {
     // patchValue from the parent sets the real persisted value.
     services: new FormGroup({
       offer_home_service: new FormControl<boolean | null>(null),
+      // Local address — always captured (required) regardless of the
+      // offer_home_service toggle, because the address is the
+      // dispatch origin for both 'En el local' and 'A domicilio' flows.
       local_address: new FormGroup({
-        address_line1: new FormControl(''),
+        address_line1: new FormControl('', Validators.required),
         address_line2: new FormControl(''),
-        city: new FormControl(''),
+        city: new FormControl('', Validators.required),
         state_province: new FormControl(''),
-        country_code: new FormControl('CO', { nonNullable: true }),
+        country_code: new FormControl('CO', { nonNullable: true, validators: [Validators.required] }),
         postal_code: new FormControl(''),
       }),
     }),
