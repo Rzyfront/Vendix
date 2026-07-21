@@ -63,6 +63,10 @@ export class ServicesSettingsForm {
    */
   private readonly offerHomeServiceValue = signal<boolean | null>(null);
 
+  /** Countries + departments + cities for the local-address selectors. */
+  readonly departments = signal<Department[]>([]);
+  readonly cities = signal<City[]>([]);
+
   /**
    * Typed accessor for the offer_home_service FormControl.
    */
