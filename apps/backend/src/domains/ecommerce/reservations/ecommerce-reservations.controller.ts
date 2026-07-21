@@ -156,7 +156,15 @@ export class EcommerceReservationsController {
   @Public()
   @Get('store/services')
   async getStoreServices(@Req() req: any) {
-    const storeId = req.store_id;
+    // The booking flow on the public ecommerce runs before the
+    // customer logs in. The frontend's tenantStoreIdInterceptor
+    // sets an `x-store-id` header that we should prefer over
+    // req.store_id (which the DomainResolverMiddleware only sets when
+    // the Host header matches a registered domain in domain_settings).
+    const headerStoreId = parseInt(req.headers?.['x-store-id'] as string, 10);
+    const storeId = !isNaN(headerStoreId) && headerStoreId > 0
+      ? headerStoreId
+      : req.store_id;
     if (!storeId) {
       return {
         success: true,
