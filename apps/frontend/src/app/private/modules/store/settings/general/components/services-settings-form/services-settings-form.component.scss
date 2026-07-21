@@ -66,12 +66,19 @@
 }
 
 .settings-subsection__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 4px 0;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--color-text-muted, #6b7280);
+  color: var(--color-text-primary, #111827);
+
+  app-icon {
+    color: var(--color-primary, #6366f1);
+  }
 }
 
 .settings-field {
