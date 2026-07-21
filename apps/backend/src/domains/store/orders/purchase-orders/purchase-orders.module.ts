@@ -7,6 +7,7 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
 import { InventoryModule } from '../../inventory/inventory.module';
 import { S3Module } from '@common/services/s3.module';
 import { SettingsModule } from '../../settings/settings.module';
+import { AccountsPayableModule } from '../../accounts-payable/accounts-payable.module';
 
 @Module({
   imports: [
@@ -15,6 +16,9 @@ import { SettingsModule } from '../../settings/settings.module';
     InventoryModule,
     S3Module,
     SettingsModule,
+    // FASE 3 — el PurchaseOrdersService inyecta AccountsPayableService para
+    // espejar pagos PO→AP y backfill de anticipos.
+    AccountsPayableModule,
   ],
   controllers: [PurchaseOrdersController],
   providers: [PurchaseOrdersService, InvoiceScannerService],

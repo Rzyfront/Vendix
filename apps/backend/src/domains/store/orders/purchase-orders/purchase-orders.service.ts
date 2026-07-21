@@ -19,6 +19,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -59,6 +60,9 @@ export class PurchaseOrdersService {
     private settingsService: SettingsService,
     private fiscalScopeService: FiscalScopeService,
     private eventEmitter: EventEmitter2,
+    // FASE 3 — accountsPayableService provee el espejo PO→AP (mirrorPoPaymentToAp)
+    // y el backfill de anticipos. Inyectado vía módulo AccountsPayableModule.
+    private accountsPayableService: AccountsPayableService,
   ) {}
 
   /**
@@ -2611,6 +2615,63 @@ export class PurchaseOrdersService {
             source: 'po_modal',
           },
         });
+
+        // FASE 3 — PUENTE PO→AP: si la OC ya tiene una CxP, espejar el pago
+        // hacia ap_payments (source='po_bridge') y bajar balance/paid_amount.
+        // El espejo NO emite ap.payment_registered (no doble caja contable).
+        // Esta llamada requiere el AccountsPayableService — se hace vía tx
+        // compartido para no romper la atomicidad. La búsqueda de la CxP y
+        // el espejo se ejecutan dentro del mismo $transaction.
+        const ap = await tx.accounts_payable.findFirst({
+          where: {
+            source_type: 'purchase_order',
+            source_id: purchaseOrderId,
+          },
+          select: { id: true },
+        });
+        if (ap) {
+          const mirror = await this.accountsPayableService.mirrorPoPaymentToAp(
+            {
+              purchase_order_payment_id: created.id,
+              accounts_payable_id: ap.id,
+              amount: Number(dto.amount),
+              payment_date: created.payment_date,
+              payment_method: dto.payment_method,
+              reference: dto.reference,
+              notes: dto.notes,
+              user_id: userId ?? undefined,
+            },
+            tx,
+          );
+          // Bajar balance / paid_amount de la CxP (in-line; evita invocar
+          // applyPoPaymentToApBalance para no armar dos $transactions).
+          const apRow = await tx.accounts_payable.findUnique({
+            where: { id: ap.id },
+            select: { original_amount: true, paid_amount: true, balance: true, status: true },
+          });
+          if (apRow) {
+            const newPaid = Number(apRow.paid_amount) + Number(dto.amount);
+            const newBalance = Math.max(
+              Number(apRow.original_amount) - newPaid,
+              0,
+            );
+            const newStatus =
+              newBalance <= 0
+                ? 'paid'
+                : Number(apRow.balance) <= 0
+                  ? 'partial'
+                  : apRow.status;
+            await tx.accounts_payable.update({
+              where: { id: ap.id },
+              data: {
+                paid_amount: newPaid,
+                balance: newBalance,
+                status: newStatus,
+              },
+            });
+          }
+          void mirror; // referenced; carries ap_payment_id if needed
+        }
 
         const status = await this.recalculatePaymentStatus(
           purchaseOrderId,
