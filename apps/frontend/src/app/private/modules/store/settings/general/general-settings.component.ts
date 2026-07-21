@@ -368,12 +368,19 @@ export class GeneralSettingsComponent implements OnInit {
         }
       }
 
-      // Save all settings
+      // Save all settings. After the save succeeds, re-read the
+      // settings from the backend so the `settings` signal reflects
+      // the canonical state — including any defaults the backend
+      // might apply to fields the frontend didn't send. Without this
+      // re-read, navigating away and back would re-mount the
+      // GeneralSettingsForm with the in-memory 'settings' value,
+      // which can be stale if the backend normalized anything.
       this.settings_service.saveSettingsNow(sanitizedSettings).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.isSaving.set(false);
           this.hasUnsavedChanges.set(false);
           this.lastSaved.set(new Date());
+          this.loadSettings();
         },
         error: (error) => {
           this.isSaving.set(false);
