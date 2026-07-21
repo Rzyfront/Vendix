@@ -756,17 +756,32 @@ export class PurchaseOrdersService {
         });
       }
 
-      // Calculate totals using processed items
-      const subtotal = processedItems.reduce(
-        (sum, item) => sum + item.quantity * item.unit_price,
-        0,
-      );
-
-      const totalAmount =
+      // FASE 4 — total_amount BRUTO consistente. Antes se sumaba
+      // Σ(qty×unit_price) (bruto en modo include-tax, neto en exclude-tax) + un
+      // `tax_amount` de header, dando un total inconsistente entre modos (y a
+      // veces doble-contando el IVA). Ahora derivamos neto + IVA por línea vía
+      // `deriveLineTax` (la MISMA derivación que persiste cada línea en :848),
+      // de modo que:
+      //   subtotal_amount = Σ neto           (base independiente del modo)
+      //   total_amount    = neto + IVA − descuento + flete   (BRUTO)
+      // La contabilidad NO lee estos campos (deriva neto de unit_cost, ver
+      // :1921); recalculatePaymentStatus SÍ lee total_amount → ahora bruto
+      // consistente frente a los pagos (que pagan el bruto de factura).
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      let netSubtotal = 0;
+      let lineTax = 0;
+      for (const item of processedItems) {
+        const d = this.deriveLineTax(item, createPurchaseOrderDto);
+        netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+        lineTax += d.tax_amount;
+      }
+      const subtotal = round2(netSubtotal);
+      const totalAmount = round2(
         subtotal -
-        (createPurchaseOrderDto.discount_amount || 0) +
-        (createPurchaseOrderDto.tax_amount || 0) +
-        (createPurchaseOrderDto.shipping_cost || 0);
+          (createPurchaseOrderDto.discount_amount || 0) +
+          round2(lineTax) +
+          (createPurchaseOrderDto.shipping_cost || 0),
+      );
 
       // Generate order number
       const date = new Date();
@@ -1028,20 +1043,29 @@ export class PurchaseOrdersService {
 
   async update(id: number, updatePurchaseOrderDto: UpdatePurchaseOrderDto) {
     return this.prisma.$transaction(async (tx) => {
-      // If items are being updated, recalculate totals
+      // If items are being updated, recalculate totals.
+      // FASE 4 — misma derivación bruta consistente que create(): neto por línea
+      // vía deriveLineTax → subtotal_amount = Σ neto, total_amount = neto + IVA −
+      // descuento + flete (BRUTO). Corrige además la columna: antes escribía
+      // `.subtotal` (inexistente; la columna real es `subtotal_amount`, ver :838).
       if (updatePurchaseOrderDto.items) {
-        const subtotal = updatePurchaseOrderDto.items.reduce(
-          (sum, item) => sum + item.quantity * item.unit_price,
-          0,
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        let netSubtotal = 0;
+        let lineTax = 0;
+        for (const item of updatePurchaseOrderDto.items) {
+          const d = this.deriveLineTax(item, updatePurchaseOrderDto);
+          netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+          lineTax += d.tax_amount;
+        }
+        const subtotal = round2(netSubtotal);
+        const totalAmount = round2(
+          subtotal -
+            (updatePurchaseOrderDto.discount_amount || 0) +
+            round2(lineTax) +
+            (updatePurchaseOrderDto.shipping_cost || 0),
         );
 
-        const totalAmount =
-          subtotal -
-          (updatePurchaseOrderDto.discount_amount || 0) +
-          (updatePurchaseOrderDto.tax_amount || 0) +
-          (updatePurchaseOrderDto.shipping_cost || 0);
-
-        (updatePurchaseOrderDto as any).subtotal = subtotal;
+        (updatePurchaseOrderDto as any).subtotal_amount = subtotal;
         (updatePurchaseOrderDto as any).total_amount = totalAmount;
       }
 
