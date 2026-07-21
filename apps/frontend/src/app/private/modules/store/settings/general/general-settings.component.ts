@@ -1,4 +1,5 @@
 import { Component, inject, OnInit, computed, signal, DestroyRef, effect, viewChild } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
@@ -239,6 +240,23 @@ export class GeneralSettingsComponent implements OnInit {
     this.lastSaved.set(null);
   }
 
+  /**
+   * Recursively mark every control in the form (and nested sub-groups)
+   * as touched + dirty so the red error messages surface under each
+   * invalid field. Used right before showing the 'incomplete form'
+   * toast so the user can see WHICH fields are missing.
+   */
+  private markAllAsTouched(form: FormGroup): void {
+    form.markAllAsTouched();
+    Object.values(form.controls).forEach((ctrl) => {
+      if (ctrl instanceof FormGroup) {
+        this.markAllAsTouched(ctrl);
+      } else {
+        ctrl.markAsDirty();
+      }
+    });
+  }
+
   onPendingAppLogo(event: { file: File; preview: string } | null): void {
     this.pendingAppLogo.set(event);
     this.hasUnsavedChanges.set(true);
@@ -271,6 +289,22 @@ export class GeneralSettingsComponent implements OnInit {
 
   async saveAllSettings() {
     this.isSaving.set(true);
+
+    // Validate the GeneralSettingsForm (which embeds the services
+    // sub-form) before any save. If the user has enabled
+    // '¿Ofrece servicio a domicilio?' but left the required address
+    // fields empty, the form is invalid and the toast surfaces the
+    // specific reason.
+    const generalForm = this.generalForm();
+    if (generalForm && generalForm.form.invalid) {
+      this.markAllAsTouched(generalForm.form);
+      this.toast_service.error(
+        'Ingrese la dirección en el apartado de Servicio',
+      );
+      this.isSaving.set(false);
+      return;
+    }
+
     if ((this.settings() as any).shipping) {
       this.settings.update((s) => {
         const { shipping, ...rest } = s as any;
