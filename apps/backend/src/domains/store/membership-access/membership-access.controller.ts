@@ -16,7 +16,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { Observable, filter, map } from 'rxjs';
+import { Observable, filter, interval, map, merge } from 'rxjs';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -110,7 +110,7 @@ export class MembershipAccessController {
     const subject = this.sseService.getOrCreate(store_id);
     req.on('close', () => this.sseService.unsubscribe(store_id));
 
-    return subject.pipe(
+    const events$ = subject.pipe(
       filter(
         (payload: any) =>
           payload?.type === 'membership-access' ||
@@ -119,6 +119,16 @@ export class MembershipAccessController {
       ),
       map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
+
+    // Heartbeat every 30s — a periodic keep-alive write so proxies/CDNs don't
+    // idle-close the stream. Forcing socket I/O also makes a non-clean
+    // disconnect surface as `req.on('close')`, releasing the shared Subject
+    // (fixes the SSE heap leak).
+    const heartbeat$ = interval(30_000).pipe(
+      map(() => ({ data: `: heartbeat ${Date.now()}` }) as MessageEvent),
+    );
+
+    return merge(events$, heartbeat$);
   }
 
   /**

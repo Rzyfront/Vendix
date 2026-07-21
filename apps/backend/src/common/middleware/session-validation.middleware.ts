@@ -5,7 +5,10 @@ import {
 } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
-import * as bcrypt from 'bcrypt';
+import {
+  hmacSha256,
+  getRefreshTokenHmacSecret,
+} from '../../domains/auth/constants/token.constants';
 
 @Injectable()
 export class SessionValidationMiddleware implements NestMiddleware {
@@ -18,8 +21,14 @@ export class SessionValidationMiddleware implements NestMiddleware {
 
       if (refresh_token) {
         try {
-          // Hashear el token para comparación
-          const hashedToken = await bcrypt.hash(refresh_token, 12);
+          // Hash determinista (HMAC-SHA256) alineado con el esquema de
+          // almacenamiento de refresh tokens (ver token.constants.ts). NUNCA
+          // usar bcrypt.hash aquí: genera un salt aleatorio por llamada, así que
+          // el hash jamás igualaría al almacenado y este lookup fallaría siempre.
+          const hashedToken = hmacSha256(
+            refresh_token,
+            getRefreshTokenHmacSecret(),
+          );
 
           // Verificar si el token existe y no está revocado
           const tokenRecord = await this.prismaService.refresh_tokens.findFirst(

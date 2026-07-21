@@ -48,7 +48,13 @@ describe('FinancialAnalyticsService', () => {
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 1, is_super_admin: false, is_owner: false });
 
-    service = new FinancialAnalyticsService(prisma as any);
+    // Cache mock: get() -> undefined forces a cache miss so the real compute
+    // path runs and the existing assertions hold; set() is a no-op.
+    const mockCache = {
+      get: jest.fn().mockResolvedValue(undefined),
+      set: jest.fn().mockResolvedValue(undefined),
+    };
+    service = new FinancialAnalyticsService(prisma as any, mockCache as any);
   });
 
   afterEach(() => {

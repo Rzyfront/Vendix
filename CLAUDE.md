@@ -68,6 +68,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a new AI provider | `vendix-ai-platform-core` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
+| Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding chat features | `vendix-ai-chat` |
 | Adding dependencies to apps/mobile/package.json | `mobile-dev` |
@@ -207,6 +208,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
+| Exposing a job-status poll endpoint that returns job.returnvalue | `vendix-ai-queue` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | Fixing bugs where variants are hidden or blocked because stock_quantity is zero | `vendix-product-variants` |
 | Fixing currency display issues or hardcoded $ symbols | `vendix-currency-formatting` |
@@ -241,6 +243,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Managing State | `vendix-frontend-state` |
 | Mapping PILA novelties ING/RET/VSP/LMA/IGE/VAC/IRL | `vendix-pila-flatfile` |
 | Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
+| Migrating an OCR/image scanner to async (202 + job_id + poll) | `vendix-ai-queue` |
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |

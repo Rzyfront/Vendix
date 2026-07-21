@@ -37,8 +37,42 @@ export class ExpenseScannerService {
     private readonly prisma: StorePrismaService,
   ) {}
 
-  async scanInvoice(file: Express.Multer.File): Promise<ExpenseScanResponse> {
-    const scan = await this.runOcr(file);
+  /**
+   * ENQUEUE path (HTTP). Corre el preprocesamiento sharp sobre el buffer multer
+   * (que solo existe en el request) y devuelve el data URI listo para encolar.
+   * NO hace OCR síncrono: la parte pesada la ejecuta el worker vía
+   * `scanFromImage`.
+   */
+  async prepareImage(
+    file: Express.Multer.File,
+  ): Promise<{ dataUri: string; mimeType: string }> {
+    this.logger.debug(
+      `[ExpenseScan] Preparing image: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+    );
+
+    const { base64, mimeType } = await this.preprocessImage(file);
+    const dataUri = `data:${mimeType};base64,${base64}`;
+
+    this.logger.debug(
+      `[ExpenseScan] DataURI length: ${dataUri.length} chars`,
+    );
+
+    return { dataUri, mimeType };
+  }
+
+  /**
+   * WORKER path (BullMQ). Parte pesada del escaneo: OCR (run) + parse + matching
+   * de categoría. Debe correr dentro de `RequestContextService.run(...)` (lo hace
+   * el processor) para que el matching organization-scoped funcione.
+   *
+   * El retorno es exactamente `ExpenseScanResponse` (misma forma que el camino
+   * síncrono anterior) y queda persistido en `job.returnvalue`.
+   */
+  async scanFromImage(
+    dataUri: string,
+    mimeType: string,
+  ): Promise<ExpenseScanResponse> {
+    const scan = await this.runOcr(dataUri, mimeType);
     const matched_category = await this.matchCategory(
       scan.supplier_name,
       scan.line_items,
@@ -49,17 +83,11 @@ export class ExpenseScannerService {
   // --- Private helpers ---
 
   private async runOcr(
-    file: Express.Multer.File,
+    dataUri: string,
+    mimeType: string,
   ): Promise<ExpenseScanResult> {
     this.logger.debug(
-      `[ExpenseScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
-    );
-
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    this.logger.debug(
-      `[ExpenseScan] DataURI length: ${dataUri.length} chars`,
+      `[ExpenseScan] Worker OCR: mimeType=${mimeType}, dataUri length=${dataUri.length} chars`,
     );
 
     const imageMessage: AIMessage = {

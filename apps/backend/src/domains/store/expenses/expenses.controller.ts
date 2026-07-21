@@ -14,9 +14,16 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { ExpensesService } from './expenses.service';
 import { ExpenseFlowService } from './expense-flow/expense-flow.service';
 import { ExpenseScannerService } from './expense-scanner.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
+import {
+  ExpenseScanJob,
+  ExpenseScanJobStatus,
+} from './expense-scan-job.interface';
 import { ResponseService } from '../../../common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { CreateExpenseDto } from './dto/create-expense.dto';
@@ -33,6 +40,8 @@ export class ExpensesController {
     private readonly expenses_service: ExpensesService,
     private readonly expense_flow_service: ExpenseFlowService,
     private readonly expense_scanner_service: ExpenseScannerService,
+    @InjectQueue('expense-scan')
+    private readonly expense_scan_queue: Queue<ExpenseScanJob>,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -107,6 +116,7 @@ export class ExpensesController {
 
   @Post('scan')
   @Permissions('store:expenses:create')
+  @HttpCode(HttpStatus.ACCEPTED)
   @UseInterceptors(FileInterceptor('file'))
   async scanInvoice(@UploadedFile() file: Express.Multer.File) {
     if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
@@ -118,11 +128,68 @@ export class ExpensesController {
     ];
     if (!allowed.includes(file.mimetype))
       throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
-    const result = await this.expense_scanner_service.scanInvoice(file);
-    return this.response_service.success(
-      result,
-      'Factura de gasto escaneada exitosamente',
-    );
+
+    // Preprocesamiento sharp en el ENQUEUE: el buffer multer solo existe en el
+    // request, así que la imagen se serializa aquí como data URI y se encola.
+    // El OCR pesado corre en el worker (`ExpenseScanProcessor`).
+    const { dataUri, mimeType } =
+      await this.expense_scanner_service.prepareImage(file);
+
+    const context = RequestContextService.getContext();
+    const payload: ExpenseScanJob = {
+      dataUri,
+      mimeType,
+      context: {
+        store_id: context?.store_id,
+        organization_id: context?.organization_id,
+        user_id: context?.user_id,
+        request_id: context?.request_id,
+      },
+    };
+
+    try {
+      const job = await this.expense_scan_queue.add('scan', payload, {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 50 },
+      });
+      return this.response_service.success(
+        { job_id: job.id! },
+        'Escaneo de factura de gasto encolado',
+      );
+    } catch {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
+    }
+  }
+
+  @Get('scan/:jobId')
+  @Permissions('store:expenses:create')
+  async getScanStatus(@Param('jobId') job_id: string) {
+    const job = await this.expense_scan_queue.getJob(job_id);
+    // Cross-tenant IDOR guard: BullMQ job ids are GLOBAL sequential integers on
+    // a queue shared by every store, so `getJob(id)` alone lets store A read
+    // store B's OCR result (supplier, NIT, amounts, matched category). Validate
+    // the job's captured tenant against the caller's store context and return
+    // the SAME 404 as an unknown/evicted job so we never leak that another
+    // tenant's job exists. Uses AI_QUEUE_002 for parity with the dispatch-notes
+    // receipt-scan status endpoint.
+    const callerStoreId = RequestContextService.getContext()?.store_id;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.context?.store_id !== callerStoreId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+
+    const state = await job.getState();
+    const status: ExpenseScanJobStatus = {
+      status: state as ExpenseScanJobStatus['status'],
+      result: job.returnvalue ?? undefined,
+      error: job.failedReason ?? undefined,
+    };
+    return this.response_service.success(status);
   }
 
   // --- Parameter Routes (MUST be last) ---

@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
@@ -9,9 +11,15 @@ import {
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
+// Aggregated P&L tolerates 1-2 min of staleness → short TTL (ms).
+const PROFIT_LOSS_CACHE_TTL_MS = 120_000;
+
 @Injectable()
 export class FinancialAnalyticsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
@@ -250,14 +258,33 @@ export class FinancialAnalyticsService {
   }
 
   async getProfitLossSummary(query: AnalyticsQueryDto) {
-    const tz = await this.getStoreTimezone();
-    const { startDate, endDate } = parseDateRange(query, tz);
-
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
+
+    // Tenant + period scoped key: store_id isolates the tenant; the date-range
+    // inputs (preset/from/to) capture the period. Relative presets like "today"
+    // keep a stable key and rely on the short TTL for freshness.
+    const cacheKey = `analytics:financial:profit-loss:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    const cached =
+      await this.cache.get<
+        Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
+      >(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.computeProfitLossSummary(query, storeId);
+    await this.cache.set(cacheKey, result, PROFIT_LOSS_CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeProfitLossSummary(
+    query: AnalyticsQueryDto,
+    storeId: number,
+  ) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const [
       orderAggregates,

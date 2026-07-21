@@ -8,7 +8,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Creating AI-powered features"
@@ -63,8 +63,11 @@ if (!response.success) {
 ## Real Integrations
 
 - Product descriptions: `apps/backend/src/domains/store/products/products.service.ts`.
-- Invoice OCR/multimodal image input: `apps/backend/src/domains/store/orders/purchase-orders/invoice-scanner.service.ts`.
+- Invoice OCR/multimodal image input (SYNC): `apps/backend/src/domains/store/orders/purchase-orders/invoice-scanner.service.ts`.
+- Async OCR scans (202 + `job_id` + poll, dedicated BullMQ queues): dispatch-notes `receipt-scan` and expenses `expense-scan` → see `vendix-ai-queue` ("Per-domain OCR scan queues"). Prefer this pattern for new heavy image scans so the OCR does not block the HTTP request.
 - Chat routing: `apps/backend/src/domains/store/ai-chat/ai-chat.service.ts`.
+
+> **Multimodal gotcha:** image scans must call `aiEngine.run(appKey, {}, [imageMessage])` DIRECTLY. `runByApplicationType` drops `extra_messages` on `image` execution types and silently loses the image.
 
 ## AI Applications
 

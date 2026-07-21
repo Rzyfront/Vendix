@@ -57,7 +57,7 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
           </div>
         </button>
 
-        <!-- Envío directo -->
+        <!-- Entrega completa -->
         <button
           type="button"
           (click)="selected.emit('direct')"
@@ -69,7 +69,7 @@ export type DispatchMethod = 'with-note' | 'direct' | 'to-dispatch';
             <app-icon name="truck" [size]="20"></app-icon>
           </div>
           <div class="min-w-0">
-            <div class="font-semibold">Envío directo</div>
+            <div class="font-semibold">Entrega completa</div>
             <div class="text-sm text-text-secondary">
               Crea una remisión, la marca como entregada y finaliza la orden.
             </div>

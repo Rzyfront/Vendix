@@ -1,7 +1,17 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
-import { catchError, map, shareReplay, tap } from 'rxjs/operators';
+import { Observable, throwError, timer } from 'rxjs';
+import {
+  catchError,
+  filter,
+  map,
+  shareReplay,
+  switchMap,
+  take,
+  takeWhile,
+  tap,
+  timeout,
+} from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   DispatchNote,
@@ -86,6 +96,39 @@ export interface CreateFromOrdersBatchResult {
   partial: boolean;
 }
 
+// ============================================================================
+// Receipt scan (R4c) — el escaneo OCR del recibo ya es ASÍNCRONO en el backend:
+// el POST responde 202 con un `job_id` y el resultado se obtiene por polling.
+// Tipos del job declarados inline aquí (espejo del backend BullMQ). El
+// resultado final (`ReceiptScanResult`) vive en el archivo de interfaces del
+// dominio y se importa arriba.
+// ============================================================================
+
+/** Estados del job de escaneo expuestos por el backend (espejo BullMQ). */
+type ReceiptScanJobState = 'waiting' | 'active' | 'completed' | 'failed' | 'delayed';
+
+/**
+ * Forma de `data` del polling `GET store/dispatch-notes/receipt-scan/:jobId`.
+ * `result` SOLO viene con `status === 'completed'`; `error` con `'failed'`.
+ */
+interface ReceiptScanJobStatus {
+  status: ReceiptScanJobState;
+  result?: ReceiptScanResult;
+  error?: string;
+}
+
+/** Envelope de `ResponseService` para el enqueue (`POST` → HTTP 202). */
+interface ReceiptScanEnqueueEnvelope {
+  success?: boolean;
+  message?: string;
+  data: { job_id: string };
+}
+
+/** Envelope de `ResponseService` para el poll de estado (`GET`). */
+interface ReceiptScanStatusEnvelope {
+  data: ReceiptScanJobStatus;
+}
+
 let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
 
 @Injectable({
@@ -94,6 +137,17 @@ let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } |
 export class DispatchNotesService {
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000;
+
+  /** Intervalo entre polls de estado del job de escaneo (ms). */
+  private readonly RECEIPT_SCAN_POLL_INTERVAL_MS = 1800;
+  /**
+   * Timeout de guarda para todo el ciclo enqueue → poll del escaneo (ms). Debe
+   * SUPERAR el presupuesto de reintentos del backend (`attempts: 3` + backoff
+   * exponencial 2s/4s): con OCR lento (~15-20s por intento) el peor caso supera
+   * 60s, así que un guard corto cortaría un job que sí terminaría. 120s cubre
+   * los 3 intentos con holgura y es coherente con el staleness de 1-2 min.
+   */
+  private readonly RECEIPT_SCAN_TIMEOUT_MS = 120_000;
 
   constructor(private http: HttpClient) {}
 
@@ -374,21 +428,99 @@ export class DispatchNotesService {
 
   /**
    * Scan a purchase receipt (image or PDF) with the backend AI/OCR pipeline
-   * (R4c). Sends `file` as multipart/form-data to
-   * `POST /store/dispatch-notes/receipt-scan` and returns detected supplier +
-   * line items best-effort matched against the store catalog. Do NOT set a
-   * `Content-Type` header manually — the browser sets the multipart boundary.
+   * (R4c). El backend ya es ASÍNCRONO: `POST store/dispatch-notes/receipt-scan`
+   * (multipart, campo `file`) responde **202** con un `job_id` dentro del
+   * envelope de `ResponseService` (`response.data.job_id`), y el resultado se
+   * obtiene por polling en `GET store/dispatch-notes/receipt-scan/:jobId`.
+   *
+   * Este método OCULTA la asincronía: encola → hace polling → emite UNA sola
+   * vez el `ReceiptScanResult` final (la MISMA forma que devolvía el POST
+   * síncrono), de modo que el componente consumidor no cambia. NO fijar el
+   * header `Content-Type` a mano — el navegador pone el boundary multipart.
+   *
+   * - Al primer `status === 'completed'` captura `result` y DETIENE el polling
+   *   (takeWhile inclusivo + take(1)), evitando la carrera de evicción del job
+   *   (poll tardío tras completarse → 404).
+   * - Lanza error en `status === 'failed'` (con el `error` del backend) y en el
+   *   timeout de guarda (~60s). Un 404 tardío por evicción llega CRUDO al
+   *   componente como error suave (toast vía `extractApiError`), nunca crash.
    */
   scanReceipt(file: File): Observable<ReceiptScanResult> {
+    return this.enqueueReceiptScan(file).pipe(
+      switchMap((jobId) =>
+        timer(0, this.RECEIPT_SCAN_POLL_INTERVAL_MS).pipe(
+          switchMap(() => this.pollReceiptScan(jobId)),
+          // Inclusivo: emite también el primer estado terminal y luego completa.
+          takeWhile(
+            (s) => s.status !== 'completed' && s.status !== 'failed',
+            true,
+          ),
+          // Descarta los estados intermedios (waiting/active/delayed).
+          filter((s) => s.status === 'completed' || s.status === 'failed'),
+          map((s) => {
+            if (s.status === 'failed') {
+              throw new Error(s.error || 'La IA no pudo procesar el recibo.');
+            }
+            if (!s.result) {
+              throw new Error('El escaneo finalizó sin datos extraídos.');
+            }
+            return s.result;
+          }),
+        ),
+      ),
+      // Guarda: si el job nunca termina, aborta en vez de pollear indefinidamente.
+      timeout({
+        first: this.RECEIPT_SCAN_TIMEOUT_MS,
+        with: () =>
+          throwError(
+            () =>
+              new Error(
+                'El escaneo del recibo tardó demasiado. Intenta de nuevo.',
+              ),
+          ),
+      }),
+      // El observable emite una sola vez; take(1) blinda y completa la cadena.
+      take(1),
+      // Re-lanza el HttpErrorResponse CRUDO (enqueue/poll, incl. 404 tardío) — o
+      // el Error sintético de 'failed'/timeout — para preservar
+      // error_code/status; la traducción a mensaje la hace el componente vía
+      // extractApiError(). (NO lo aplastamos a `new Error(msg)`.)
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  /**
+   * Encola el escaneo asíncrono del recibo. `POST store/dispatch-notes/receipt-scan`
+   * responde 202 con el `job_id` dentro del envelope de `ResponseService`
+   * (`response.data.job_id`). No fija `Content-Type` (boundary multipart del
+   * navegador). Emite el `job_id` o lanza si el envelope no lo trae.
+   */
+  private enqueueReceiptScan(file: File): Observable<string> {
     const formData = new FormData();
     formData.append('file', file);
     const url = `${this.apiUrl}/store/dispatch-notes/receipt-scan`;
-    return this.http.post<any>(url, formData).pipe(
-      map((r) => r.data || r),
-      // Re-lanza el HttpErrorResponse crudo para preservar error_code/status;
-      // la traducción a mensaje la hace el componente vía extractApiError().
-      catchError((error) => throwError(() => error)),
+    return this.http.post<ReceiptScanEnqueueEnvelope>(url, formData).pipe(
+      map((response) => {
+        const jobId = response?.data?.job_id;
+        if (!jobId) {
+          throw new Error(
+            response?.message || 'No se pudo encolar el escaneo del recibo.',
+          );
+        }
+        return jobId;
+      }),
     );
+  }
+
+  /**
+   * Consulta el estado del job de escaneo. Lee `response.data` (envelope de
+   * `ResponseService`): `{ status, result?, error? }`.
+   */
+  private pollReceiptScan(jobId: string): Observable<ReceiptScanJobStatus> {
+    const url = `${this.apiUrl}/store/dispatch-notes/receipt-scan/${jobId}`;
+    return this.http
+      .get<ReceiptScanStatusEnvelope>(url)
+      .pipe(map((response) => response.data));
   }
 
   invalidateCache(): void {

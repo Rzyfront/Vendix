@@ -727,22 +727,19 @@ export class ExpenseScannerModalComponent {
     this.currentStep.set(1);
     this.isScanning.set(true);
 
+    // El servicio encola el job y hace polling internamente; emite UNA sola vez
+    // el resultado final, por lo que `isScanning` permanece true durante todo el
+    // poll (solo se apaga en next/error) y este `next` prellena las señales igual
+    // que antes.
     this.expenseScannerService
-      .scanInvoice(file)
+      .scanInvoiceAsync(file)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: response => {
+        next: result => {
           this.isScanning.set(false);
-          if (!response.success || !response.data) {
-            this.toastService.error(
-              response.message || 'Error al escanear la factura',
-            );
-            this.currentStep.set(0);
-            return;
-          }
 
-          const scan = response.data.scan;
-          const matched = response.data.matched_category;
+          const scan = result.scan;
+          const matched = result.matched_category;
 
           this.scanResult.set(scan);
           this.matchedCategory.set(matched);
@@ -793,10 +790,12 @@ export class ExpenseScannerModalComponent {
           }));
           this.currentStep.set(2);
         },
-        error: err => {
+        error: (err: unknown) => {
+          // El servicio normaliza failed/timeout/404-evicción a Error con mensaje
+          // legible; se muestra en toast y se resetea al paso inicial.
           this.isScanning.set(false);
           this.toastService.error(
-            err?.error?.message || err?.message || 'Error al procesar la factura',
+            err instanceof Error ? err.message : 'Error al procesar la factura',
           );
           this.currentStep.set(0);
         },
