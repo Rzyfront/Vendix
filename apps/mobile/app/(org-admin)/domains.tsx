@@ -34,7 +34,6 @@ import {
   OptionsDropdown,
   type FilterConfig,
   type FilterValues,
-  type DropdownAction,
 } from '@/shared/components/options-dropdown';
 import { borderRadius, colorScales, colors, spacing, typography, interFonts } from '@/shared/theme';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
@@ -76,7 +75,6 @@ export default function DomainsScreen() {
 
   // ───── Modales del header (espejo del patrón users/stores) ─────────────────
   const [actionsModalOpen, setActionsModalOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
 
   // ───── Datos ───────────────────────────────────────────────────────────────
   const { data: domains = [], isLoading, refetch } = useQuery({
@@ -111,7 +109,9 @@ export default function DomainsScreen() {
     queryFn: () => OrgStoreService.list({ pageSize: 200 }).then((r) => r.data ?? []),
     staleTime: 5 * 60 * 1000, // 5 min — la lista de tiendas no cambia en cada interacción.
   });
-  const stores: StoreListItem[] = storesQuery.data ?? [];
+  // useMemo evita recrear la referencia en cada render para que
+  // `filterConfigs` (más abajo) no se invalide por un cambio de identidad.
+  const stores = useMemo<StoreListItem[]>(() => storesQuery.data ?? [], [storesQuery.data]);
 
   // ───── Filtros del header (popover tipo web, NO modal) ───────────────────
   // El `<app-options-dropdown>` de la web se colapsa a un popover anclado
@@ -199,19 +199,10 @@ export default function DomainsScreen() {
   }, [domains, sort]);
 
   // ───── Mutations ───────────────────────────────────────────────────────────
-  const verifyMutation = useMutation({
-    mutationFn: (hostname: string) => OrgDomainsService.verify(hostname),
-    onSuccess: (r) => {
-      if (r.verified) {
-        queryClient.invalidateQueries({ queryKey: ['org-domains-list'] });
-        queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
-        toastSuccess('Propiedad verificada. Certificado pendiente de emisión.');
-      } else {
-        toastError(r.message ?? 'No se pudo verificar');
-      }
-    },
-    onError: () => toastError('Error al verificar el dominio'),
-  });
+  // NOTA: la verificación del dominio se hace DENTRO de `DomainVerifyModal`
+  // (que muestra el resultado inline). Aquí sólo refrescamos queries desde
+  // `onVerified` del modal. No exponemos `verifyMutation` para evitar una
+  // segunda llamada accidental a POST /verify.
 
   const provisionMutation = useMutation({
     mutationFn: (id: string) => OrgDomainsService.provisionNextById(id),
@@ -280,7 +271,7 @@ export default function DomainsScreen() {
       actions.push({
         key: 'provision',
         label: 'Provisionar',
-        icon: 'refresh-cw',
+        icon: 'refresh',
         variant: 'warning',
         onPress: () => provisionMutation.mutate(String(domain.id)),
       });
@@ -392,7 +383,12 @@ export default function DomainsScreen() {
         domain={verifying}
         onClose={() => setVerifying(null)}
         onVerified={() => {
-          verifyMutation.mutate(verifying!.hostname);
+          // El modal ya llamó OrgDomainsService.verify() inline y mostró el
+          // resultado en su propio `resultBlock`. Aquí sólo sincronizamos
+          // la query y mostramos el toast de éxito en pantalla (sin re-mutar).
+          refetch();
+          queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
+          toastSuccess('Propiedad verificada. Certificado pendiente de emisión.');
           setVerifying(null);
         }}
       />
@@ -444,7 +440,7 @@ export default function DomainsScreen() {
             }}
           >
             <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
-              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
+              <Icon name="refresh" size={16} color={colorScales.gray[700]} />
             </View>
             <View style={styles.actionsModalTextWrap}>
               <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
