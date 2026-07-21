@@ -460,12 +460,12 @@
           <app-icon name="save" [size]="16"></app-icon>
           Guardar borrador
         </button>
-        @if (!isLastStep()) {
+        @if (!isLastStep() || cobroNeedsAdvance()) {
           <button
             type="button"
             class="btn-confirm"
             (click)="attemptNextStep()"
-            [disabled]="footerProcessing()"
+            [disabled]="footerProcessing() || (isLastStep() && cobroNeedsAdvance() && !paymentStep()?.canAdvanceSubStep())"
           >
             Siguiente
             <app-icon name="arrow-right" [size]="18"></app-icon>
@@ -501,12 +501,12 @@
         <app-icon name="arrow-left" [size]="18"></app-icon>
         Atrás
       </button>
-      @if (!isLastStep()) {
+      @if (!isLastStep() || cobroNeedsAdvance()) {
         <button
           type="button"
           class="btn-cta-mobile"
           (click)="attemptNextStep()"
-          [disabled]="footerProcessing()"
+          [disabled]="footerProcessing() || (isLastStep() && cobroNeedsAdvance() && !paymentStep()?.canAdvanceSubStep())"
         >
           Siguiente
           <app-icon name="arrow-right" [size]="18"></app-icon>

@@ -258,6 +258,29 @@ export class PosPaymentStepComponent implements OnInit {
   );
 
   /**
+   * True while the collector sub-wizard still has sub-steps BEFORE Monto
+   * (`subStep < montoIndex`). The shell footer reads this to keep showing
+   * "Siguiente" (instead of the terminal CTA) even when Cobro is the last major
+   * step (delivery), so the operator can walk Forma de pago → Método → Monto.
+   */
+  readonly hasPendingSubSteps = computed<boolean>(
+    () => this.subStep() < this.montoIndex(),
+  );
+  /**
+   * Whether the CURRENT sub-step can advance from the footer "Siguiente":
+   * Forma de pago (`subStep < modoOffset`) always advances; Método
+   * (`subStep === modoOffset`) requires a chosen method; at/after Monto it no
+   * longer advances (it confirms). Mirrors {@link advanceSubStepOrConfirm}'s
+   * per-sub-step gate so the footer's disabled state matches the driver.
+   */
+  readonly canAdvanceSubStep = computed<boolean>(() => {
+    const cur = this.subStep();
+    if (cur < this.modoOffset()) return true; // Forma de pago → siempre avanza
+    if (cur === this.modoOffset()) return this.collector()?.selectedMethod() != null; // Método → requiere selección
+    return false; // en/paso Monto ya no avanza; se confirma
+  });
+
+  /**
    * Footer "Siguiente" driver for the stepped Cobro sub-wizard (pickup flows,
    * where Cobro is NOT the last major step). Advances Forma de pago → Método →
    * Monto using the current selection — mirroring the auto-advance-on-tap model
