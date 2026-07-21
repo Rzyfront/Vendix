@@ -19,6 +19,14 @@ interface AdminShellProps {
   title?: string;
   breadcrumb?: string;
   variant?: 'store' | 'org' | 'super';
+  /** Etiqueta del breadcrumb padre (super-admin). */
+  parentLabel?: string;
+  /** Icono del breadcrumb padre (super-admin). */
+  parentIcon?: string;
+  /** Etiqueta del breadcrumb actual (super-admin). */
+  currentLabel?: string;
+  /** Icono del breadcrumb actual (super-admin). */
+  currentIcon?: string;
 }
 
 export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = 'store' }: AdminShellProps) {
