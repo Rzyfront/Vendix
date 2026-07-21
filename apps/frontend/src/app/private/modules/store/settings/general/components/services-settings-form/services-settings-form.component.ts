@@ -33,7 +33,7 @@ import { SettingToggleComponent } from '../../../../../../../shared/components/s
   selector: 'app-services-settings-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, SettingToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, IconComponent, SettingToggleComponent, SelectorComponent],
   templateUrl: './services-settings-form.component.html',
   styleUrls: ['./services-settings-form.component.scss'],
 })
@@ -97,6 +97,29 @@ export class ServicesSettingsForm {
         .get('offer_home_service')
         ?.valueChanges.subscribe((v: boolean | null) => {
           this.offerHomeServiceValue.set(v);
+        });
+      onCleanup(() => sub?.unsubscribe());
+    });
+
+    // Load departments once for Colombia. Most LATAM stores default
+    // to CO; if the user changes country later we re-load.
+    this.countryService.getDepartments().then((d) => this.departments.set(d));
+
+    // Reload cities whenever the user picks a department.
+    effect((onCleanup) => {
+      const root = this.form();
+      if (!root) return;
+      const sub = root
+        .get('state_province')
+        ?.valueChanges.subscribe((depName: string) => {
+          const dep = this.departments().find((d) => d.name === depName);
+          if (dep) {
+            this.countryService
+              .getCitiesByDepartment(dep.id)
+              .then((c) => this.cities.set(c));
+          } else {
+            this.cities.set([]);
+          }
         });
       onCleanup(() => sub?.unsubscribe());
     });
