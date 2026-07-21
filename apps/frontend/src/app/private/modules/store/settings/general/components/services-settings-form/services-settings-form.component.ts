@@ -6,12 +6,9 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import {
-  ReactiveFormsModule,
-  FormGroup,
-  ControlContainer,
-} from '@angular/forms';
+import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
 /**
  * ServicesSettingsForm
@@ -28,7 +25,7 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
   selector: 'app-services-settings-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent],
+  imports: [CommonModule, ReactiveFormsModule, IconComponent, SettingToggleComponent],
   templateUrl: './services-settings-form.component.html',
   styleUrls: ['./services-settings-form.component.scss'],
 })
@@ -41,19 +38,34 @@ export class ServicesSettingsForm {
   readonly servicesForm = input.required<FormGroup>();
 
   /**
-   * Track the most-recently seen FormGroup via a writable signal so
-   * the template can read it synchronously. The input signal from
-   * the parent is the source of truth, but inside the child we copy
-   * it into a local signal so [formGroup]="form()" resolves
-   * synchronously even when the parent's getter returns the same
-   * reference (input signals are not always unwrapped automatically
-   * by directives that need a non-signal value).
+   * Local mirror of the FormGroup signal so the template can read
+   * it synchronously and the [formGroup] directive receives a
+   * concrete (non-signal) value on every change detection cycle.
    */
   private readonly form = signal<FormGroup | null>(null);
+
+  /**
+   * Typed accessor for the offer_home_service FormControl. Used by
+   * the template's <app-setting-toggle [formControl]="..."> binding.
+   */
+  get offerHomeServiceControl(): FormControl<boolean> {
+    return this.form()!.get('offer_home_service') as FormControl<boolean>;
+  }
 
   constructor() {
     effect(() => {
       this.form.set(this.servicesForm());
     });
+  }
+
+  /**
+   * Propagate field changes to the parent so the GeneralSettingsForm
+   * persists them via its settingsChange output.
+   */
+  onFieldChange(): void {
+    // The form is a sub-FormGroup of the GeneralSettingsForm; the
+    // parent's existing settingsChange output fires from the form
+    // valueChanges pipeline. We don't need to emit here — the parent
+    // listens to the form directly.
   }
 }
