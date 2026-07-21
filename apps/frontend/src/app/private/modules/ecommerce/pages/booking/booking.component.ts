@@ -32,6 +32,10 @@ import {
   BookingProvider,
 } from '../../components/booking/provider-selector/provider-selector.component';
 import { SlotGridComponent, BookingSlot } from '../../components/booking/slot-grid/slot-grid.component';
+import {
+  ServiceLocationSelectorComponent,
+  ServiceLocation,
+} from '../../components/booking/service-location-selector/service-location-selector.component';
 
 @Component({
   selector: 'app-booking',
@@ -43,6 +47,7 @@ import { SlotGridComponent, BookingSlot } from '../../components/booking/slot-gr
     StepsLineComponent,
     ButtonComponent,
     IconComponent,
+    ServiceLocationSelectorComponent,
     CurrencyPipe,
     BookingCalendarComponent,
     ProviderSelectorComponent,
@@ -135,6 +140,12 @@ export class BookingComponent implements OnInit {
   guestPhone = signal('');
   bookingNotes = signal('');
 
+  // Service location (where the technician will perform the work)
+  readonly serviceLocation = signal<ServiceLocation | null>(null);
+  readonly customerAddresses = signal<any[]>([]);
+  readonly storeAddress = signal<any | null>(null);
+  readonly selectedAddressId = signal<number | null>(null);
+
   // Confirmation
   bookingResult = signal<any>(null);
 
@@ -171,6 +182,29 @@ export class BookingComponent implements OnInit {
     });
 
     this.loadProduct();
+    this.loadServiceLocation();
+  }
+
+  /**
+   * Preload the customer's saved addresses and the store's primary
+   * address so the "Dónde quieres que se preste el servicio?" selector
+   * in step 4 (Confirmar) has data ready.
+   */
+  private loadServiceLocation(): void {
+    this.bookingService.getCustomerAddresses().subscribe({
+      next: (list) => this.customerAddresses.set(list ?? []),
+    });
+    this.bookingService.getStoreAddress().subscribe({
+      next: (addr) => this.storeAddress.set(addr ?? null),
+    });
+  }
+
+  onServiceLocationChange(value: ServiceLocation): void {
+    this.serviceLocation.set(value);
+  }
+
+  onServiceAddressChange(id: number | null): void {
+    this.selectedAddressId.set(id);
   }
 
   // --- Data loading ---
@@ -298,6 +332,15 @@ export class BookingComponent implements OnInit {
     };
     if (variantId) {
       bookingSelection['product_variant_id'] = variantId;
+    }
+    // Persist the service-location choice so the checkout (which calls
+    // /ecommerce/reservations/ POST) can forward it.
+    const svcLocation = this.serviceLocation();
+    if (svcLocation) {
+      bookingSelection['service_location_type'] = svcLocation;
+    }
+    if (svcLocation === 'home' && this.selectedAddressId() != null) {
+      bookingSelection['service_address_id'] = this.selectedAddressId();
     }
     sessionStorage.setItem('pending_booking', JSON.stringify(bookingSelection));
 

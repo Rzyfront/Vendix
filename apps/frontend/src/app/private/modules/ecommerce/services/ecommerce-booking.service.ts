@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -77,6 +78,27 @@ export class EcommerceBookingService {
     return new HttpHeaders({
       'x-store-id': storeId?.toString() || '',
     });
+  }
+
+  /**
+   * Returns the authenticated customer's saved addresses (sorted by
+   * is_primary DESC). Used by the booking flow to show when the customer
+   * picks "A domicilio".
+   */
+  getCustomerAddresses(): Observable<any[]> {
+    return this.http
+      .get<any>(`${this.api_url}/customer/addresses`, { headers: this.getHeaders() })
+      .pipe(map((r) => r?.data ?? r ?? []));
+  }
+
+  /**
+   * Returns the store's primary address (the technician's local) for
+   * the "En el local" option in the booking flow.
+   */
+  getStoreAddress(): Observable<any | null> {
+    return this.http
+      .get<any>(`${this.api_url}/store/address`, { headers: this.getHeaders() })
+      .pipe(map((r) => r?.data ?? r ?? null));
   }
 
   getAvailability(

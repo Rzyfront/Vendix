@@ -219,6 +219,14 @@
                 <span class="summary-value">{{ provider.display_name }}</span>
               </div>
             }
+            @if (serviceLocation(); as loc) {
+              <div class="summary-row">
+                <span class="summary-label">Ubicación</span>
+                <span class="summary-value">
+                  {{ loc === 'home' ? 'A domicilio' : 'En el local' }}
+                </span>
+              </div>
+            }
             <div class="summary-row">
               <span class="summary-label">Fecha</span>
               <span class="summary-value">{{
@@ -265,6 +273,16 @@
               >
             </div>
           } @else {
+            <!-- Service location selector (a domicilio vs en el local) -->
+            <app-service-location-selector
+              [value]="serviceLocation()"
+              [storeAddress]="storeAddress()"
+              [customerAddresses]="customerAddresses()"
+              [selectedAddressId]="selectedAddressId()"
+              (valueChange)="onServiceLocationChange($event)"
+              (addressChange)="onServiceAddressChange($event)"
+            />
+
             <!-- Customer info (pre-filled) -->
             <div class="customer-info">
               <h3>Tus datos</h3>
