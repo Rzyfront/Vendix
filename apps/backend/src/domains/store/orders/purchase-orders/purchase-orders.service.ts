@@ -2010,21 +2010,44 @@ export class PurchaseOrdersService {
       }
 
       if (batch_amount > 0) {
+        // O-48 subledger gross-up (decisión de negocio jul-2026, confirmada por
+        // el usuario): la CxP (accounts_payable) DEBE reflejar el BRUTO que se le
+        // debe al proveedor (= neto + IVA descontable), no el neto. El GL 2205 ya
+        // llega a bruto vía DOS asientos: `purchase_order.received` (neto) + el
+        // complemento `purchase.vat_recognized` (IVA, solo en la recepción final,
+        // ver :2154). El subledger se alimenta ÚNICAMENTE de `gross_reception_share`,
+        // así que espejamos ese complemento aquí: en la recepción final de una
+        // compra O-48 sumamos el IVA descontable total del pedido a la porción del
+        // subledger — SIN tocar `total_amount`, que consume el asiento GL de
+        // recepción y debe seguir neto para no doble-contar el CR 2205.
+        // (O-49 nunca entra: su IVA ya viene capitalizado en batch_amount.)
+        let subledger_gross_share = batch_amount;
+        if (result.vat_responsible && result.all_items_received) {
+          const deductible_iva =
+            Math.round(
+              result.updated_po.purchase_order_items.reduce(
+                (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
+                0,
+              ) * 100,
+            ) / 100;
+          subledger_gross_share =
+            Math.round((batch_amount + deductible_iva) * 100) / 100;
+        }
         this.eventEmitter.emit('purchase_order.received', {
           purchase_order_id: result.updated_po.id,
           reception_id: result.reception_id,
           organization_id: result.updated_po.organization_id,
           store_id,
           accounting_entity_id,
-          // BRUTO de esta recepción (= emit_total proporcional al batch para
-          // O-49, o neto del batch para O-48 ya que el VAT complement va
-          // aparte en DR 240804). ApEventsListener.create→upsertPayableForReception
-          // usa esto como gross_amount y crea 1 sola CxP por OC
-          // (incrementa original/balance en cada recepción, idempotente por
-          // ap_reception_links.reception_id @unique).
-          gross_reception_share: batch_amount,
-          // Alias legacy para listeners que aún lean `total_amount`; los
-          // nuevos deben migrar a `gross_reception_share`.
+          // BRUTO real de la CxP: para O-49 = batch_amount (IVA ya capitalizado);
+          // para O-48 en recepción final = batch_amount + IVA descontable total.
+          // ApEventsListener.create→upsertPayableForReception lo usa como
+          // gross_amount y crea 1 sola CxP por OC (incrementa original/balance en
+          // cada recepción, idempotente por ap_reception_links.reception_id @unique).
+          gross_reception_share: subledger_gross_share,
+          // GL de recepción (DR 1435 / CR 2205): SIEMPRE neto del batch para O-48
+          // (el IVA va por el complemento vat_recognized) y bruto para O-49.
+          // Alias legacy para listeners que aún lean `total_amount`.
           total_amount: batch_amount,
           user_id: RequestContextService.getUserId(),
           // ApEventsListener maps the scalar `supplier_id` into the required
