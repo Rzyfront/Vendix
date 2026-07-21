@@ -2012,6 +2012,15 @@ export class PurchaseOrdersService {
           organization_id: result.updated_po.organization_id,
           store_id,
           accounting_entity_id,
+          // BRUTO de esta recepción (= emit_total proporcional al batch para
+          // O-49, o neto del batch para O-48 ya que el VAT complement va
+          // aparte en DR 240804). ApEventsListener.create→upsertPayableForReception
+          // usa esto como gross_amount y crea 1 sola CxP por OC
+          // (incrementa original/balance en cada recepción, idempotente por
+          // ap_reception_links.reception_id @unique).
+          gross_reception_share: batch_amount,
+          // Alias legacy para listeners que aún lean `total_amount`; los
+          // nuevos deben migrar a `gross_reception_share`.
           total_amount: batch_amount,
           user_id: RequestContextService.getUserId(),
           // ApEventsListener maps the scalar `supplier_id` into the required

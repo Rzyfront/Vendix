@@ -321,4 +321,104 @@ export class AccountsPayableService {
       },
     });
   }
+
+  // ─── UPSERT PAYABLE FOR OC RECEPTION (Fase 2) ─────────────
+  // A single OC may be received in N partial batches. The OLD createFromEvent
+  // spawned a fresh `accounts_payable` per reception, creating duplicate CxP
+  // rows for the same supplier × same OC. This method guarantees ONE CxP per
+  // (source_type='purchase_order', source_id=poId), increments the gross on
+  // each subsequent reception (never decreasing `original_amount` or
+  // `balance` below what has already been paid), and is idempotent per
+  // reception via `ap_reception_links.reception_id @unique`.
+  //
+  // `grossReceptionShare` is the BRUTO (= neto + vat_deductible, for O-48)
+  // or the NETO alone (for O-49 where VAT is non-deductible and already
+  // capitalized at cost). Per `vendix-tax-typing`: purchases post only the
+  // scalar `vat_deductible`; no `tax_breakdown` is built here.
+  async upsertPayableForReception(data: {
+    supplier_id: number;
+    source_id: number; // purchase_order_id
+    reception_id: number;
+    gross_reception_share: number; // gross amount contributed by THIS reception
+    document_number?: string;
+    currency?: string;
+    due_date?: Date;
+    organization_id: number;
+    store_id?: number;
+  }) {
+    const due_date =
+      data.due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const contribution = Math.max(Number(data.gross_reception_share), 0);
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Idempotency: if this reception is already linked to a CxP, return it.
+      const existing_link = await tx.ap_reception_links.findUnique({
+        where: { reception_id: data.reception_id },
+        include: { accounts_payable: true },
+      });
+      if (existing_link) {
+        return existing_link.accounts_payable;
+      }
+
+      // 2. Find or create the single CxP for this (OC, supplier).
+      const ap = await tx.accounts_payable.findFirst({
+        where: {
+          source_type: 'purchase_order',
+          source_id: data.source_id,
+        },
+      });
+
+      let result_ap: { id: number; original_amount: any; balance: any };
+      if (!ap) {
+        result_ap = await tx.accounts_payable.create({
+          data: {
+            organization_id: data.organization_id,
+            store_id: data.store_id ?? null,
+            supplier_id: data.supplier_id,
+            source_type: 'purchase_order',
+            source_id: data.source_id,
+            document_number: data.document_number ?? null,
+            original_amount: contribution,
+            paid_amount: 0,
+            balance: contribution,
+            currency: data.currency ?? 'COP',
+            issue_date: new Date(),
+            due_date,
+            status: 'open',
+            days_overdue: 0,
+            priority: 'normal',
+            notes: null,
+          },
+        });
+      } else {
+        // 3. Increment gross / balance, but NEVER below `paid_amount` (a
+        // partial payment has already shrunk the balance; a subsequent
+        // reception cannot underflow that).
+        const newOriginal = Number(ap.original_amount) + contribution;
+        const projectedBalance = Number(ap.balance) + contribution;
+        const newBalance = Math.max(projectedBalance, 0);
+        result_ap = await tx.accounts_payable.update({
+          where: { id: ap.id },
+          data: {
+            original_amount: newOriginal,
+            balance: newBalance,
+            // status moves back to open/partial if it had been marked paid by a
+            // prior interim balance, but typically it's still open/partial here.
+            status: Number(ap.balance) <= 0 ? 'open' : ap.status,
+          },
+        });
+      }
+
+      // 4. Link this reception to the CxP (UNIQUE on reception_id → safe).
+      await tx.ap_reception_links.create({
+        data: {
+          accounts_payable_id: result_ap.id,
+          reception_id: data.reception_id,
+          gross_amount: contribution,
+        },
+      });
+
+      return result_ap;
+    });
+  }
 }
