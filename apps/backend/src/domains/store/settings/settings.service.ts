@@ -53,6 +53,7 @@ const KNOWN_SECTIONS = [
   'dispatch',
   'restaurant',
   'membership',
+  'services', // appointment redesign phase 1: offer_home_service + local_address
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
