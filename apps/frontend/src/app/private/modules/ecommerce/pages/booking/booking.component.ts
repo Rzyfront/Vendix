@@ -314,6 +314,14 @@ export class BookingComponent implements OnInit {
       return;
     }
 
+    // The customer must pick where the service will be performed before
+    // we can persist the booking. This blocks the submit and surfaces a
+    // toast so the user knows what to do.
+    if (this.serviceLocation() == null) {
+      this.toast.error('Elige dónde quieres que se presente el servicio');
+      return;
+    }
+
     const date = this.selectedDate();
     if (!date) return;
 
