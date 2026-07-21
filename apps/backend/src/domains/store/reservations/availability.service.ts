@@ -249,7 +249,24 @@ export class AvailabilityService {
                 b.end_time >= slot.start_time,
             );
 
-            if (providerBooked && !include_booked) continue;
+            if (providerBooked) {
+              // The slot is blocked by an existing booking on this provider.
+              // We still emit it (with total_available=0 and is_booked=true)
+              // so the ecommerce UI can render it in red with an X and the
+              // customer sees WHY that time is not selectable. Previously
+              // we `continue`d which hid the slot entirely.
+              const blockedKey = `${dateStr}|${slot.start_time}|${slot.end_time}`;
+              if (!slotMap.has(blockedKey)) {
+                slotMap.set(blockedKey, {
+                  date: dateStr,
+                  start_time: slot.start_time,
+                  end_time: slot.end_time,
+                  providers: [],
+                  is_booked: true,
+                });
+              }
+              continue;
+            }
 
             const key = `${dateStr}|${slot.start_time}|${slot.end_time}`;
             if (!slotMap.has(key)) {
@@ -258,16 +275,14 @@ export class AvailabilityService {
                 start_time: slot.start_time,
                 end_time: slot.end_time,
                 providers: [],
-                is_booked: providerBooked,
+                is_booked: false,
               });
             }
-            if (!providerBooked) {
-              slotMap.get(key)!.providers.push({
-                id: provider.id,
-                display_name: provider.display_name || '',
-                avatar_url: provider.avatar_url,
-              });
-            }
+            slotMap.get(key)!.providers.push({
+              id: provider.id,
+              display_name: provider.display_name || '',
+              avatar_url: provider.avatar_url,
+            });
           }
         }
       }
