@@ -26,6 +26,7 @@
 
 // Radio card pattern (mirrors app-pos-fulfillment-selector)
 .svc-option {
+  margin-bottom: 0;
   position: relative;
   display: flex;
   align-items: flex-start;
@@ -117,8 +118,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 24px;       // visible gap below the radio cards
+  padding-top: 20px;
   border-top: 1px solid var(--color-border);
 }
 
@@ -222,6 +223,7 @@
   align-self: flex-start;
   padding: 8px 12px;
   min-height: 44px;
+  margin-top: 12px;        // visible gap from the address pills above
   border-radius: 8px;
   border: 1px dashed var(--color-border);
   background: transparent;
