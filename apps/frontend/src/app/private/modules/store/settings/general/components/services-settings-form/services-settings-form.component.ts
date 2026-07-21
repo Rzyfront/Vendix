@@ -17,6 +17,7 @@ import {
 } from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
+import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 
 /**
  * ServicesSettingsForm
