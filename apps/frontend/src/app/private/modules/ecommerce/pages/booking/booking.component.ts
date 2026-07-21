@@ -207,6 +207,14 @@ export class BookingComponent implements OnInit {
     this.selectedAddressId.set(id);
   }
 
+  /**
+   * Called when the child selector creates a new address inline
+   * and wants the parent to refresh its local copy of the list.
+   */
+  onServiceAddressesChanged(list: any[]): void {
+    this.customerAddresses.set(list);
+  }
+
   // --- Data loading ---
 
   private loadProduct(): void {

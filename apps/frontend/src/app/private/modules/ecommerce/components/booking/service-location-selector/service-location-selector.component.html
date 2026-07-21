@@ -76,9 +76,123 @@
         </ul>
       } @else {
         <p class="service-location__empty">
-          No tienes direcciones guardadas. Agrega una desde tu perfil antes
-          de reservar a domicilio.
+          No tienes direcciones guardadas. Agrega una desde el formulario
+          de abajo antes de reservar a domicilio.
         </p>
+      }
+
+      <!-- "Agregar nueva dirección" toggle + inline form -->
+      <button
+        type="button"
+        class="add-address-toggle"
+        (click)="toggleNewAddressForm()"
+        [attr.aria-expanded]="showNewAddressForm()"
+      >
+        <app-icon [name]="showNewAddressForm() ? 'x' : 'plus'" [size]="14"></app-icon>
+        {{ showNewAddressForm() ? 'Cancelar' : 'Agregar nueva dirección' }}
+      </button>
+
+      @if (showNewAddressForm()) {
+        <div class="new-address-form">
+          <div class="new-address-form__row">
+            <label class="new-address-form__field">
+              <span>Calle y número <span class="req">*</span></span>
+              <input
+                type="text"
+                [ngModel]="draft().address_line1"
+                (ngModelChange)="patchDraft('address_line1', $event)"
+                placeholder="Calle 123 #45-67"
+                autocomplete="address-line1"
+              />
+            </label>
+          </div>
+          <div class="new-address-form__row new-address-form__row--cols">
+            <label class="new-address-form__field">
+              <span>Detalle (opcional)</span>
+              <input
+                type="text"
+                [ngModel]="draft().address_line2"
+                (ngModelChange)="patchDraft('address_line2', $event)"
+                placeholder="Apto 301, Torre B"
+                autocomplete="address-line2"
+              />
+            </label>
+            <label class="new-address-form__field">
+              <span>Ciudad <span class="req">*</span></span>
+              <input
+                type="text"
+                [ngModel]="draft().city"
+                (ngModelChange)="patchDraft('city', $event)"
+                placeholder="Bogotá"
+                autocomplete="address-level2"
+              />
+            </label>
+          </div>
+          <div class="new-address-form__row new-address-form__row--cols">
+            <label class="new-address-form__field">
+              <span>Departamento (opcional)</span>
+              <input
+                type="text"
+                [ngModel]="draft().state_province"
+                (ngModelChange)="patchDraft('state_province', $event)"
+                placeholder="Cundinamarca"
+                autocomplete="address-level1"
+              />
+            </label>
+            <label class="new-address-form__field">
+              <span>País <span class="req">*</span></span>
+              <input
+                type="text"
+                [ngModel]="draft().country_code"
+                (ngModelChange)="patchDraft('country_code', $event)"
+                placeholder="CO"
+                maxlength="3"
+              />
+            </label>
+          </div>
+          <div class="new-address-form__row new-address-form__row--cols">
+            <label class="new-address-form__field">
+              <span>Código postal (opcional)</span>
+              <input
+                type="text"
+                [ngModel]="draft().postal_code"
+                (ngModelChange)="patchDraft('postal_code', $event)"
+                placeholder="110111"
+                autocomplete="postal-code"
+              />
+            </label>
+            <label class="new-address-form__field">
+              <span>Teléfono (opcional)</span>
+              <input
+                type="tel"
+                [ngModel]="draft().phone_number"
+                (ngModelChange)="patchDraft('phone_number', $event)"
+                placeholder="3001234567"
+                autocomplete="tel"
+              />
+            </label>
+          </div>
+          <label class="new-address-form__checkbox">
+            <input
+              type="checkbox"
+              [ngModel]="draft().is_primary"
+              (ngModelChange)="patchDraft('is_primary', $event)"
+            />
+            <span>Marcar como dirección principal</span>
+          </label>
+          <button
+            type="button"
+            class="new-address-form__submit"
+            [disabled]="savingAddress()"
+            (click)="saveNewAddress()"
+          >
+            @if (savingAddress()) {
+              Guardando...
+            } @else {
+              Guardar dirección
+            }
+          </button>
+        </div>
       }
     </div>
   }

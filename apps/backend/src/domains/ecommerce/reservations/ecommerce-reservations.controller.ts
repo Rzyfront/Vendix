@@ -140,6 +140,42 @@ export class EcommerceReservationsController {
     return { success: true, data: row };
   }
 
+  /**
+   * Creates a new address for the authenticated customer (used by the
+   * "Agregar nueva dirección" inline form in the booking flow).
+   * Auto-flags the row with the customer's user_id and (if requested)
+   * is_primary = true.
+   */
+  @Post('customer/addresses')
+  async createCustomerAddress(@Req() req: any, @Body() dto: any) {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      throw new ForbiddenException(
+        'Debe iniciar sesion para crear una direccion',
+      );
+    }
+    if (!dto?.address_line1 || !dto?.city || !dto?.country_code) {
+      throw new BadRequestException(
+        'address_line1, city y country_code son obligatorios',
+      );
+    }
+    const created = await this.availabilityService['prisma'].addresses.create({
+      data: {
+        address_line1: dto.address_line1,
+        address_line2: dto.address_line2 ?? null,
+        city: dto.city,
+        state_province: dto.state_province ?? null,
+        country_code: dto.country_code,
+        postal_code: dto.postal_code ?? null,
+        phone_number: dto.phone_number ?? null,
+        user_id: customerId,
+        is_primary: !!dto.is_primary,
+        type: 'shipping',
+      },
+    });
+    return { success: true, data: created };
+  }
+
   @Post()
   async createBooking(@Req() req: any, @Body() dto: CreateEcommerceBookingDto) {
     const customerId = req.user?.id;

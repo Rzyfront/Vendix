@@ -101,6 +101,25 @@ export class EcommerceBookingService {
       .pipe(map((r) => r?.data ?? r ?? null));
   }
 
+  /**
+   * Creates a new address for the authenticated customer. The new row
+   * is auto-linked to the customer's user_id on the backend.
+   */
+  createCustomerAddress(dto: {
+    address_line1: string;
+    address_line2?: string;
+    city: string;
+    state_province?: string;
+    country_code: string;
+    postal_code?: string;
+    phone_number?: string;
+    is_primary?: boolean;
+  }): Observable<any> {
+    return this.http
+      .post<any>(`${this.api_url}/customer/addresses`, dto, { headers: this.getHeaders() })
+      .pipe(map((r) => r?.data ?? r));
+  }
+
   getAvailability(
     productId: number,
     dateFrom: string,

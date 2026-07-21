@@ -5,9 +5,15 @@ import {
   output,
   signal,
   computed,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { environment } from '../../../../../../../environments/environment';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 export type ServiceLocation = 'home' | 'shop';
 
@@ -23,6 +29,17 @@ export interface CustomerAddress {
 }
 
 export interface StoreAddress extends CustomerAddress {}
+
+interface NewAddressDraft {
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state_province: string;
+  country_code: string;
+  postal_code: string;
+  phone_number: string;
+  is_primary: boolean;
+}
 
 /**
  * ServiceLocationSelectorComponent
@@ -45,11 +62,15 @@ export interface StoreAddress extends CustomerAddress {}
   selector: 'app-service-location-selector',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, FormsModule, IconComponent],
   templateUrl: './service-location-selector.component.html',
   styleUrls: ['./service-location-selector.component.scss'],
 })
 export class ServiceLocationSelectorComponent {
+  private http = inject(HttpClient);
+  private tenantFacade = inject(TenantFacade);
+  private toast = inject(ToastService);
+
   readonly value = input<ServiceLocation | null>(null);
   readonly storeAddress = input<StoreAddress | null>(null);
   readonly customerAddresses = input<CustomerAddress[]>([]);
@@ -57,15 +78,32 @@ export class ServiceLocationSelectorComponent {
 
   readonly valueChange = output<ServiceLocation>();
   readonly addressChange = output<number | null>();
+  readonly addressesChanged = output<CustomerAddress[]>();
+
+  readonly showNewAddressForm = signal(false);
+  readonly savingAddress = signal(false);
+  readonly draft = signal<NewAddressDraft>({
+    address_line1: '',
+    address_line2: '',
+    city: '',
+    state_province: '',
+    country_code: 'CO',
+    postal_code: '',
+    phone_number: '',
+    is_primary: false,
+  });
+
+  private get apiUrl(): string {
+    return `${environment.apiUrl}/ecommerce/reservations/customer/addresses`;
+  }
+
+  private get headers(): HttpHeaders {
+    const storeId = this.tenantFacade.getCurrentDomainConfig()?.store_id;
+    return new HttpHeaders({ 'x-store-id': storeId?.toString() || '' });
+  }
 
   /** True when home addresses are missing — the parent can show a hint. */
   readonly hasAddresses = computed(() => this.customerAddresses().length > 0);
-
-  /** Address list shown when value === 'home'. Empty if user has none. */
-  readonly addressesToShow = computed(() => {
-    if (this.value() !== 'home') return [];
-    return this.customerAddresses();
-  });
 
   pickHome(): void {
     this.valueChange.emit('home');
@@ -89,6 +127,56 @@ export class ServiceLocationSelectorComponent {
 
   selectAddress(id: number): void {
     this.addressChange.emit(id);
+  }
+
+  toggleNewAddressForm(): void {
+    this.showNewAddressForm.update((v) => !v);
+  }
+
+  /** Update a single field of the new-address draft (signal-friendly). */
+  patchDraft<K extends keyof NewAddressDraft>(key: K, value: NewAddressDraft[K]): void {
+    this.draft.update((d) => ({ ...d, [key]: value }));
+  }
+
+  saveNewAddress(): void {
+    const d = this.draft();
+    if (!d.address_line1?.trim() || !d.city?.trim() || !d.country_code?.trim()) {
+      this.toast.error('Calle, ciudad y país son obligatorios');
+      return;
+    }
+    this.savingAddress.set(true);
+    this.http
+      .post<any>(this.apiUrl, d, { headers: this.headers })
+      .subscribe({
+        next: (created) => {
+          const list = [...this.customerAddresses(), created];
+          // Sort by is_primary DESC.
+          list.sort((a, b) => Number(!!b.is_primary) - Number(!!a.is_primary));
+          this.addressesChanged.emit(list);
+          this.addressChange.emit(created.id);
+          this.resetDraft();
+          this.showNewAddressForm.set(false);
+          this.savingAddress.set(false);
+          this.toast.success('Dirección agregada');
+        },
+        error: () => {
+          this.savingAddress.set(false);
+          this.toast.error('No se pudo guardar la dirección');
+        },
+      });
+  }
+
+  private resetDraft(): void {
+    this.draft.set({
+      address_line1: '',
+      address_line2: '',
+      city: '',
+      state_province: '',
+      country_code: 'CO',
+      postal_code: '',
+      phone_number: '',
+      is_primary: false,
+    });
   }
 
   formatAddressLine(a: CustomerAddress): string {
