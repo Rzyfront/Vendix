@@ -89,6 +89,11 @@ export class ServiceLocationSelectorComponent {
 
   readonly showNewAddressForm = signal(false);
   readonly savingAddress = signal(false);
+  /** When the user picks 'En el local' AND the store has a configured
+   * address, surface it in a modal so the customer sees WHERE to go
+   * before continuing. Mirrors the requirement that 'Dirección del
+   * local' is always shown / captured in the admin Configuración. */
+  readonly showStoreAddressModal = signal(false);
   readonly draft = signal<NewAddressDraft>({
     address_line1: '',
     address_line2: '',
@@ -130,6 +135,20 @@ export class ServiceLocationSelectorComponent {
     if (this.selectedAddressId() != null) {
       this.addressChange.emit(null);
     }
+    // Surface the shop address in a modal so the customer can confirm
+    // where to go. The modal is dismissable; closing it doesn't change
+    // the selection (the customer is still picking 'En el local').
+    if (this.storeAddress() && this.hasAddressContent(this.storeAddress()!)) {
+      this.showStoreAddressModal.set(true);
+    }
+  }
+
+  closeStoreAddressModal(): void {
+    this.showStoreAddressModal.set(false);
+  }
+
+  private hasAddressContent(addr: StoreAddress): boolean {
+    return !!(addr.address_line1 || addr.city);
   }
 
   selectAddress(id: number): void {
