@@ -237,6 +237,52 @@
                   {{ loc === 'home' ? 'A domicilio' : 'En el local' }}
                 </span>
               </div>
+              @if (loc === 'shop' && storeAddress(); as addr) {
+                <div class="summary-row summary-row--address">
+                  <span class="summary-label">Dirección del local</span>
+                  <span class="summary-value">
+                    {{ addr.address_line1 }}
+                    @if (addr.address_line2) {
+                      , {{ addr.address_line2 }}
+                    }
+                    <br />
+                    {{ addr.city }}
+                    @if (addr.state_province) {
+                      , {{ addr.state_province }}
+                    }
+                    <br />
+                    {{ addr.country_code }}
+                    @if (addr.postal_code) {
+                      · {{ addr.postal_code }}
+                    }
+                  </span>
+                </div>
+              }
+              @if (loc === 'home' && selectedAddressId() != null) {
+                <div class="summary-row summary-row--address">
+                  <span class="summary-label">Tu dirección</span>
+                  <span class="summary-value">
+                    @for (a of customerAddresses(); track a.id) {
+                      @if (a.id === selectedAddressId()) {
+                        {{ a.address_line1 }}
+                        @if (a.address_line2) {
+                          , {{ a.address_line2 }}
+                        }
+                        <br />
+                        {{ a.city }}
+                        @if (a.state_province) {
+                          , {{ a.state_province }}
+                        }
+                        <br />
+                        {{ a.country_code }}
+                        @if (a.postal_code) {
+                          · {{ a.postal_code }}
+                        }
+                      }
+                    }
+                  </span>
+                </div>
+              }
             }
             <div class="summary-row">
               <span class="summary-label">Fecha</span>
