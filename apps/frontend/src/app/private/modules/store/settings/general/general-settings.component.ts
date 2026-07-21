@@ -62,15 +62,37 @@ export class GeneralSettingsComponent implements OnInit {
    * ServicesSettingsForm card. */
   readonly generalForm = viewChild<GeneralSettingsForm>('generalForm');
 
+  /**
+   * Signal that mirrors the current value of `industriesControl`
+   * inside the GeneralSettingsForm sub-form. We need this because
+   * FormControl.value is a getter, not a signal — so reading it
+   * inside a `computed` only samples the initial value, not later
+   * user changes. An `effect` subscribes to `valueChanges` and
+   * pushes every emit into a `signal` that the template can react to.
+   */
+  private readonly industriesSignal = signal<string[]>([]);
+
+  constructor() {
+    // Whenever the GeneralSettingsForm sub-form mounts, wire up
+    // the industries FormControl's valueChanges to our local signal.
+    effect(() => {
+      const form = this.generalForm();
+      if (!form) return;
+      const sub = form.industriesControl.valueChanges.subscribe(
+        (value: string[] | null | undefined) => this.industriesSignal.set(value ?? []),
+      );
+      // Seed the signal with the current value so we don't need to
+      // wait for the first change to render correctly.
+      this.industriesSignal.set(form.industriesControl.value ?? []);
+      this.destroyRef.onDestroy(() => sub.unsubscribe());
+    });
+  }
+
   /** Show the 'Servicios' card only when 'service' is one of the
-   * selected industries. The industries FormControl lives inside the
-   * GeneralSettingsForm sub-form, so we read it through viewChild. */
-  readonly showServicesSection = computed(() => {
-    const form = this.generalForm();
-    if (!form) return false;
-    const industries = form.industriesControl.value ?? [];
-    return industries.includes('service');
-  });
+   * selected industries. */
+  readonly showServicesSection = computed(() =>
+    this.industriesSignal().includes('service'),
+  );
 
   isVendixDomain = signal(false);
   storeAppUrl = signal<string | null>(null);
