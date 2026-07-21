@@ -56,6 +56,20 @@ export function getDefaultStoreSettings(): StoreSettings {
       tax_included: false,
       industries: [StoreIndustry.RETAIL],
     },
+    // Phase 1 of the appointment redesign: offer_home_service + the
+    // technician's shop address. Captured in Configuración → General →
+    // Servicios and consumed by the ecommerce booking flow.
+    services: {
+      offer_home_service: true,
+      local_address: {
+        address_line1: '',
+        address_line2: '',
+        city: '',
+        state_province: '',
+        country_code: 'CO',
+        postal_code: '',
+      },
+    },
     inventory: {
       low_stock_threshold: 10,
       out_of_stock_action: 'hide',
