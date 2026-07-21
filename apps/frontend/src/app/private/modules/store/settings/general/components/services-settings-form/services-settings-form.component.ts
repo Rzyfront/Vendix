@@ -9,7 +9,12 @@ import {
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
+import {
+  ReactiveFormsModule,
+  FormGroup,
+  FormControl,
+  Validators,
+} from '@angular/forms';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
@@ -83,6 +88,7 @@ export class ServicesSettingsForm {
         .get('offer_home_service')
         ?.valueChanges.subscribe((v: boolean | null) => {
           this.offerHomeServiceValue.set(v);
+          this.applyAddressValidation(v === true);
         });
       onCleanup(() => sub?.unsubscribe());
     });
@@ -101,6 +107,28 @@ export class ServicesSettingsForm {
         address.disable({ emitEvent: false });
       }
     });
+  }
+
+  /**
+   * Toggle required validators on the three mandatory address fields
+   * (calle, ciudad, país) when the user enables home service. When
+   * the toggle is OFF, the validators are cleared and the sub-form
+   * is disabled, so the user can save without filling in an
+   * address they don't need.
+   *
+   * Also calls updateValueAndValidity({ emitEvent: false }) so the
+   * status change doesn't fire a valueChanges for every field on
+   * every toggle flip.
+   */
+  private applyAddressValidation(required: boolean): void {
+    const address = this.localAddressGroup;
+    const fields = ['address_line1', 'city', 'country_code'] as const;
+    for (const name of fields) {
+      const ctrl = address.get(name) as FormControl;
+      if (!ctrl) continue;
+      ctrl.setValidators(required ? [Validators.required] : []);
+      ctrl.updateValueAndValidity({ emitEvent: false });
+    }
   }
 
   /**
