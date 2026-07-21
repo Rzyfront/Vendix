@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, computed, signal, DestroyRef, effect } from '@angular/core';
+import { Component, inject, OnInit, computed, signal, DestroyRef, effect, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
@@ -8,6 +8,7 @@ import { DianEmissionStatus } from '../../invoicing/interfaces/invoice.interface
 import { EmissionStage } from './components/receipts-settings-form/receipts-settings-form.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
+import { ServicesSettingsForm } from './components/services-settings-form/services-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
 import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
@@ -34,6 +35,7 @@ import { firstValueFrom } from 'rxjs';
     LucideAngularModule,
     IconComponent,
     GeneralSettingsForm,
+    ServicesSettingsForm,
     InventorySettingsForm,
     NotificationsSettingsForm,
     PosSettingsForm,
@@ -58,6 +60,21 @@ export class GeneralSettingsComponent implements OnInit {
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private invoicingService = inject(InvoicingService);
+
+  /** Reference to the embedded GeneralSettingsForm so we can read
+   * the services FormGroup and pass it to the standalone
+   * ServicesSettingsForm card. */
+  readonly generalForm = viewChild<GeneralSettingsForm>('generalForm');
+
+  /** Show the 'Servicios' card only when 'service' is one of the
+   * selected industries. The industries FormControl lives inside the
+   * GeneralSettingsForm sub-form, so we read it through viewChild. */
+  readonly showServicesSection = computed(() => {
+    const form = this.generalForm();
+    if (!form) return false;
+    const industries = form.industriesControl.value ?? [];
+    return industries.includes('service');
+  });
 
   isVendixDomain = signal(false);
   storeAppUrl = signal<string | null>(null);
