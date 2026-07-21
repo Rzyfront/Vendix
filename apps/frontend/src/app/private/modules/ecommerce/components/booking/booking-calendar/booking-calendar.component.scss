@@ -56,12 +56,11 @@
 
 .booking-calendar__weekday {
   text-align: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
   color: var(--color-text-muted);
   padding: 4px 0;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
 }
 
 .booking-calendar__grid {

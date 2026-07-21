@@ -30,12 +30,10 @@ interface CalendarCell {
   slots_count: number;
 }
 
-const SPANISH_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
-// Full weekday labels for the body of unavailable cells (L M X J V S D
-// in the header are 1-letter; the body shows the full word — "Mié" for
-// Miércoles, "Jue" for Jueves, etc.). 3-letter words at 8-9px still
-// fit inside the 36-44px cells on narrow viewports.
-const SPANISH_DAYS_FULL = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+// Full weekday labels used BOTH in the header (above the grid) and
+// inside unavailable cells. 3-letter words fit at 9-10px on mobile and
+// give the user consistent context for what weekday each column is.
+const SPANISH_DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const SPANISH_MONTHS = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
@@ -107,9 +105,9 @@ export class BookingCalendarComponent implements OnInit {
       const date = new Date(Date.UTC(year, month - 1, d));
       const iso = date.toISOString().split('T')[0];
       const info = map.get(iso);
-      // jsWeekday 0=Sun..6=Sat → SPANISH_DAYS_FULL index 0=Mon..6=Sun
+      // jsWeekday 0=Sun..6=Sat → SPANISH_DAYS index 0=Mon..6=Sun
       const jsWeekday = date.getUTCDay();
-      const dayShort = SPANISH_DAYS_FULL[(jsWeekday + 6) % 7];
+      const dayShort = SPANISH_DAYS[(jsWeekday + 6) % 7];
       cells.push({
         iso,
         dayNumber: d,
