@@ -1,0 +1,98 @@
+<section class="service-location">
+  <h3 class="service-location__title">¿Dónde quieres que se preste el servicio?</h3>
+  <p class="service-location__subtitle">
+    Elige si el técnico va a tu casa o si vas al local.
+  </p>
+
+  <div class="service-location__grid" role="radiogroup" aria-label="Ubicación del servicio">
+    <button
+      type="button"
+      role="radio"
+      [attr.aria-checked]="value() === 'home'"
+      class="svc-option"
+      [class.svc-option--selected]="value() === 'home'"
+      (click)="pickHome()"
+    >
+      <span class="svc-option__icon">
+        <app-icon name="home" [size]="22"></app-icon>
+      </span>
+      <span class="svc-option__body">
+        <span class="svc-option__title">A domicilio</span>
+        <span class="svc-option__hint">El técnico va a tu casa</span>
+      </span>
+      <span class="svc-option__check" aria-hidden="true">
+        <app-icon name="check-circle-2" [size]="18"></app-icon>
+      </span>
+    </button>
+
+    <button
+      type="button"
+      role="radio"
+      [attr.aria-checked]="value() === 'shop'"
+      class="svc-option"
+      [class.svc-option--selected]="value() === 'shop'"
+      (click)="pickShop()"
+    >
+      <span class="svc-option__icon">
+        <app-icon name="store" [size]="22"></app-icon>
+      </span>
+      <span class="svc-option__body">
+        <span class="svc-option__title">En el local</span>
+        <span class="svc-option__hint">Visitas el local del técnico</span>
+      </span>
+      <span class="svc-option__check" aria-hidden="true">
+        <app-icon name="check-circle-2" [size]="18"></app-icon>
+      </span>
+    </button>
+  </div>
+
+  @if (value() === 'home') {
+    <div class="service-location__addresses">
+      <h4 class="service-location__sub">¿A dónde vamos?</h4>
+      @if (hasAddresses()) {
+        <ul class="address-list">
+          @for (a of customerAddresses(); track a.id) {
+            <li>
+              <button
+                type="button"
+                class="address-pill"
+                [class.address-pill--selected]="selectedAddressId() === a.id"
+                (click)="selectAddress(a.id)"
+                [attr.aria-pressed]="selectedAddressId() === a.id"
+              >
+                @if (a.is_primary) {
+                  <span class="address-pill__badge">Principal</span>
+                }
+                <span class="address-pill__line1">{{ formatAddressLine(a) }}</span>
+                <span class="address-pill__line2">{{ formatAddressCity(a) }} {{ a.country_code }}</span>
+                <app-icon
+                  [name]="selectedAddressId() === a.id ? 'check-circle-2' : 'circle'"
+                  [size]="18"
+                  class="address-pill__check"
+                ></app-icon>
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="service-location__empty">
+          No tienes direcciones guardadas. Agrega una desde tu perfil antes
+          de reservar a domicilio.
+        </p>
+      }
+    </div>
+  }
+
+  @if (value() === 'shop' && storeAddress()) {
+    <div class="service-location__addresses">
+      <h4 class="service-location__sub">El local del técnico</h4>
+      <div class="store-address">
+        <app-icon name="map-pin" [size]="20"></app-icon>
+        <div>
+          <div class="store-address__line1">{{ formatAddressLine(storeAddress()!) }}</div>
+          <div class="store-address__line2">{{ formatAddressCity(storeAddress()!) }} {{ storeAddress()!.country_code }}</div>
+        </div>
+      </div>
+    </div>
+  }
+</section>
