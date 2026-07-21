@@ -20,6 +20,7 @@ import {
   AccountingFlowsSettingsDto,
   ModuleFlowsSettingsDto,
   AvailabilitySettingsDto,
+  ServicesSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
@@ -138,6 +139,17 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ModuleFlowsSettingsDto)
   module_flows?: ModuleFlowsSettingsDto;
+
+  @ApiProperty({
+    type: ServicesSettingsDto,
+    required: false,
+    description:
+      'Services sub-form: whether the technician offers home service and the shop address',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ServicesSettingsDto)
+  services?: ServicesSettingsDto;
 
   @ApiProperty({ required: false, description: 'Semantic fiscal status block' })
   @IsOptional()

@@ -1118,3 +1118,34 @@ export class ModuleFlowsSettingsDto {
   @Type(() => InvoicingModuleFlowsDto)
   invoicing?: InvoicingModuleFlowsDto;
 }
+
+/**
+ * Services sub-form: where the technician performs the work.
+ * Mirrors `store_settings.settings.services` on the backend.
+ *
+ * Captured in Configuración → General → Servicios. The ecommerce
+ * booking flow reads `offer_home_service` to decide whether to
+ * show the 'A domicilio' option, and `local_address` as the
+ * technician's shop address for the 'En el local' option.
+ */
+export class ServicesAddressDto {
+  @IsOptional() @IsString() address_line1?: string;
+  @IsOptional() @IsString() address_line2?: string;
+  @IsOptional() @IsString() city?: string;
+  @IsOptional() @IsString() state_province?: string;
+  @IsOptional() @IsString() country_code?: string;
+  @IsOptional() @IsString() postal_code?: string;
+}
+
+export class ServicesSettingsDto {
+  /**
+   * Whether the technician goes to the customer's address. When
+   * false, the ecommerce booking flow only shows the 'En el local'
+   * option. Defaults to true.
+   */
+  @IsOptional() @IsBoolean() offer_home_service?: boolean;
+
+  /** The technician's shop address (the 'En el local' option). */
+  @IsOptional() @ValidateNested() @Type(() => ServicesAddressDto)
+  local_address?: ServicesAddressDto;
+}
