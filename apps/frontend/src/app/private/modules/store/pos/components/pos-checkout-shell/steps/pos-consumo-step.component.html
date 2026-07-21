@@ -1,41 +1,83 @@
-<!-- Paso · Consumo. Réplica del bloque "fulfillment-section" del paso Cobro,
-     SIN el gate @if(isRestaurantWithPrepared()): el shell decide montarlo o no
-     (restaurante ∧ intent ≠ delivery). -->
+<!-- Paso · Consumo — "Tipo de servicio". Réplica exacta del diseño Pencil:
+     section-title sobre fondo blanco + dos option-rows apiladas con radio a la
+     derecha + CTA "Elegir mesa" full-width visible solo en modo consumo.
+     El shell decide montar este paso (restaurante ∧ intent ≠ delivery); por eso
+     aquí no hay gate por industria. -->
 <div class="consumo-step">
-  <div class="fulfillment-section">
-    <div class="fulfillment-section-title">
-      <app-icon name="utensils" [size]="16"></app-icon>
-      <span>Tipo de servicio</span>
-    </div>
-    <app-pos-fulfillment-selector
-      [value]="fulfillment()"
-      [consumoBlocked]="false"
-      (selectionChange)="onFulfillmentChange($event)"
-      (reselected)="onFulfillmentReselected($event)"
-    ></app-pos-fulfillment-selector>
-
-    @if (fulfillment() === 'consumo') {
-      @if (tableId() == null && pickedTableId() == null) {
-        <button
-          type="button"
-          class="open-table-cta"
-          (click)="openTablePicker.set(true)"
-        >
-          <app-icon name="layout-grid" [size]="16"></app-icon>
-          <span>Abrir mesa</span>
-        </button>
-        <div class="fulfillment-hint">
-          <app-icon name="info" [size]="14"></app-icon>
-          <span>Selecciona una mesa antes de continuar como consumo.</span>
-        </div>
-      } @else {
-        <div class="table-pill">
-          <app-icon name="layout-grid" [size]="14"></app-icon>
-          <span>Mesa #{{ tableId() ?? pickedTableId() }}</span>
-        </div>
-      }
-    }
+  <div class="section-title">
+    <app-icon
+      name="utensils-crossed"
+      [size]="18"
+      class="section-title__icon"
+    ></app-icon>
+    <h3 class="section-title__text">Tipo de servicio</h3>
   </div>
+
+  <div class="option-list" role="radiogroup" aria-label="Tipo de servicio">
+    <!-- Consumo en mesa -->
+    <button
+      type="button"
+      role="radio"
+      [attr.aria-checked]="fulfillment() === 'consumo'"
+      class="option-row"
+      [class.option-row--selected]="fulfillment() === 'consumo'"
+      (click)="onOptionClick('consumo')"
+    >
+      <span class="option-row__icon">
+        <app-icon name="utensils" [size]="24"></app-icon>
+      </span>
+      <span class="option-row__body">
+        <span class="option-row__title">Consumo en mesa</span>
+        <span class="option-row__desc">Requiere abrir una mesa</span>
+      </span>
+      <span
+        class="option-row__radio"
+        [class.option-row__radio--checked]="fulfillment() === 'consumo'"
+        aria-hidden="true"
+      ></span>
+    </button>
+
+    <!-- Para llevar -->
+    <button
+      type="button"
+      role="radio"
+      [attr.aria-checked]="fulfillment() === 'entrega'"
+      class="option-row"
+      [class.option-row--selected]="fulfillment() === 'entrega'"
+      (click)="onOptionClick('entrega')"
+    >
+      <span class="option-row__icon">
+        <app-icon name="shopping-bag" [size]="24"></app-icon>
+      </span>
+      <span class="option-row__body">
+        <span class="option-row__title">Para llevar</span>
+        <span class="option-row__desc">Entrega en mostrador</span>
+      </span>
+      <span
+        class="option-row__radio"
+        [class.option-row__radio--checked]="fulfillment() === 'entrega'"
+        aria-hidden="true"
+      ></span>
+    </button>
+  </div>
+
+  @if (fulfillment() === 'consumo') {
+    <button
+      type="button"
+      class="choose-table-btn"
+      (click)="openTablePicker.set(true)"
+    >
+      <app-icon name="grid" [size]="20"></app-icon>
+      <span>Elegir mesa</span>
+    </button>
+
+    @if ((tableId() ?? pickedTableId()) != null) {
+      <div class="table-pill">
+        <app-icon name="check" [size]="14"></app-icon>
+        <span>Mesa #{{ tableId() ?? pickedTableId() }} seleccionada</span>
+      </div>
+    }
+  }
 </div>
 
 <!-- Picker de mesa inline. Reutiliza el mismo PosOpenTableModalComponent del

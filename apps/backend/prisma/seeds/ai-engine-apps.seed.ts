@@ -154,6 +154,46 @@ RULES:
       prompt_template: null,
     },
     {
+      // FASE TRACK B2 — Escáner de comprobantes de pago (POP). Acompaña al
+      // modal "Registrar Pago" del módulo de compras: el usuario sube la foto
+      // del recibo/transferencia y pre-rellena los campos del formulario.
+      // Salida JSON estricta consumida por el processor `payment-receipt-scan`.
+      key: 'payment_receipt_ocr',
+      name: 'Escaner de Comprobantes de Pago (POP)',
+      description:
+        'Extrae datos de comprobantes de pago (transferencias, recibos, vouchers) para pre-rellenar el modal "Registrar Pago" de órdenes de compra.',
+      output_format: 'json',
+      // Vision OCR — modelo text-output vision-capable (mismo patrón que
+      // invoice_ocr). Se enlaza al config MiniMax-VL en el bloque VISION_APP_KEYS.
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 1500,
+      is_active: true,
+      system_prompt: `You are a payment-receipt data extraction system for purchase orders. You analyze images of payment vouchers / bank transfers / cash receipts and return structured JSON.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "amount": number,
+  "payment_date": "YYYY-MM-DD",
+  "payment_method": "string — one of: cash, transfer, card, check, other",
+  "reference": "string or null — transaction reference, authorization code, check number, or any printed ID",
+  "currency": "string or null — ISO 4217 code if visible (default null = infer COP)",
+  "notes": "string or null — beneficiary name or any extra context visible",
+  "confidence": number (0-100)
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields.
+2. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Never return formatted numbers.
+3. "payment_date": if only DD/MM/YY is visible, expand to YYYY-MM-DD (assume 20YY for 00-69, 19YY for 70-99).
+4. "payment_method": pick the closest standard value. Map "efectivo"→cash, "transferencia"/"consignación"/"PSE"→transfer, "tarjeta"/"datáfono"→card, "cheque"→check, else "other".
+5. "amount": ALWAYS the payment amount (the value moved). Never the invoice total.
+6. Use null when a field is not visible. Never invent data.
+7. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.`,
+      prompt_template: null,
+    },
+    {
       key: 'expense_invoice_ocr',
       name: 'Escaner de Facturas de Gasto',
       description:
@@ -930,7 +970,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1049,7 +1089,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

@@ -10,31 +10,37 @@
   <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
        Sub-pasos: 0=Método · 1=Costo (terminal). Espeja Cobro. El "cuándo paga"
        ya no es un sub-paso: contra entrega es el método cash_on_delivery que el
-       paso Cobro ofrece solo en delivery. -->
+       paso Cobro ofrece solo en delivery. La fila-resumen del CLIENTE (frame
+       "Envío · Método") la provee el paso Cliente del shell — aquí NO se
+       duplica. -->
   <div class="ship-grid">
     <div class="ship-main">
       <!-- SUB-STEP 0 · Método de envío -->
       @if (shipSubStep() === 0) {
         <section
-          class="payment-section"
+          class="method-section"
           [class.config-flash-warning]="flashSection() === 'shipping-method'"
         >
           <div class="section-header">
-            <app-icon name="package" [size]="16" class="section-icon"></app-icon>
+            <app-icon name="truck" [size]="20" class="section-icon"></app-icon>
             <h2 class="section-title">Método de envío</h2>
           </div>
 
           @if (shippingMethods().length > 0) {
-            <div class="payment-methods-grid">
+            <div class="method-grid">
               @for (method of shippingMethods(); track method.id) {
                 <button
                   type="button"
                   (click)="selectShippingMethod(method)"
-                  class="payment-method-btn"
+                  class="method-card"
                   [class.selected]="selectedShippingMethod()?.id === method.id"
                 >
-                  <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
-                  <span class="method-name">{{ method.name }}</span>
+                  <app-icon
+                    [name]="getShippingIcon(method.type)"
+                    [size]="30"
+                    class="method-card-icon"
+                  ></app-icon>
+                  <span class="method-card-label">{{ method.name }}</span>
                 </button>
               }
             </div>
@@ -66,70 +72,81 @@
         </button>
       }
 
-      <!-- SUB-STEP 1 · Costo de envío + notas + total (terminal) -->
+      <!-- SUB-STEP 1 · Costo de envío + notas + totales (terminal) -->
       @if (shipSubStep() === 1) {
         @if (selectedShippingMethod()) {
-          <section class="payment-section">
-            <div class="section-header">
-              <app-icon name="calculator" [size]="16" class="section-icon"></app-icon>
-              <h2 class="section-title">Costo de envío</h2>
+          <!-- Card · Costo de envío -->
+          <div class="cost-card">
+            <div class="cost-row">
+              <span class="cost-row-label"
+                >Costo de envío
+                {{ manualCostOverride() ? '(manual)' : '(automático)' }}</span
+              >
+              @if (isCalculatingShipping()) {
+                <span class="cost-calculating">
+                  <span class="spinner-sm"></span>
+                  <span>Calculando…</span>
+                </span>
+              } @else {
+                <span class="cost-row-amount">{{ shippingCost() | currency }}</span>
+              }
             </div>
 
-            @if (isCalculatingShipping()) {
-              <div class="calculating-indicator">
-                <span class="spinner-sm"></span>
-                <span>Calculando...</span>
-              </div>
-            } @else {
-              <div class="cost-display">
-                @if (!manualCostOverride() && calculatedShippingCost() !== null) {
-                  <div class="calculated-cost">
-                    <span class="cost-label">Calculado:</span>
-                    <span class="cost-value">{{ calculatedShippingCost() | currency }}</span>
-                  </div>
-                }
-                @if (calculatedShippingCost() !== null) {
-                  <div class="manual-toggle">
-                    <label class="toggle-label">
-                      <input
-                        type="checkbox"
-                        [checked]="manualCostOverride()"
-                        (change)="toggleManualCost()"
-                      />
-                      <span>Editar costo manualmente</span>
-                    </label>
-                  </div>
-                }
-                @if (manualCostOverride() || calculatedShippingCost() === null) {
-                  <div class="manual-cost-input">
-                    <div class="cash-input">
-                      <span class="currency">{{ currencySymbol() }}</span>
-                      <input
-                        appCurrencyInput
-                        [ngModel]="shippingCost()"
-                        (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-                }
+            @if (calculatedShippingCost() !== null) {
+              <div class="cost-divider"></div>
+              <div class="cost-row cost-row--toggle">
+                <span class="cost-toggle-label">Editar costo manualmente</span>
+                <app-toggle
+                  [checked]="manualCostOverride()"
+                  [ariaLabel]="'Editar costo de envío manualmente'"
+                  (changed)="toggleManualCost()"
+                ></app-toggle>
               </div>
             }
 
-            <div class="delivery-notes">
-              <app-input
-                [formControl]="deliveryNotesControl"
-                [label]="'Notas de envío'"
-                [placeholder]="'Instrucciones especiales de entrega...'"
-                [size]="'sm'"
-              ></app-input>
-            </div>
+            @if (manualCostOverride() || calculatedShippingCost() === null) {
+              <div class="manual-cost-input">
+                <div class="cash-input">
+                  <span class="currency">{{ currencySymbol() }}</span>
+                  <input
+                    appCurrencyInput
+                    [ngModel]="shippingCost()"
+                    (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            }
+          </div>
 
-            <div class="ship-total">
-              <span class="ship-total-label">Total (con envío)</span>
-              <span class="ship-total-amount">{{ totalWithShipping() | currency }}</span>
+          <!-- Notas de envío (opcional) -->
+          <div class="notes-block">
+            <label class="notes-label" for="ship-notes">Notas de envío (opcional)</label>
+            <textarea
+              id="ship-notes"
+              class="notes-textarea"
+              [formControl]="deliveryNotesControl"
+              rows="2"
+              placeholder="Dejar en portería, timbre 2"
+            ></textarea>
+          </div>
+
+          <!-- Card · Totales -->
+          <div class="totals-card">
+            <div class="totals-row">
+              <span class="totals-label">Subtotal</span>
+              <span class="totals-amount">{{ subtotal() | currency }}</span>
             </div>
-          </section>
+            <div class="totals-row">
+              <span class="totals-label">Envío</span>
+              <span class="totals-amount">{{ shippingCost() | currency }}</span>
+            </div>
+            <div class="totals-divider"></div>
+            <div class="totals-row totals-row--grand">
+              <span class="totals-grand-label">Total a pagar</span>
+              <span class="totals-grand-amount">{{ totalWithShipping() | currency }}</span>
+            </div>
+          </div>
         } @else {
           <!-- Terminal sin método: prompt para volver a elegir uno -->
           <div class="no-methods-alert">
@@ -148,7 +165,8 @@
       }
     </div>
 
-    <!-- Columna del stepper: a la derecha en desktop; debajo (DOM-last) en móvil. -->
+    <!-- Columna del stepper: a la derecha en desktop; oculta en móvil (el header
+         horizontal del shell orienta al usuario). -->
     <aside class="steps-col">
       <app-steps-line
         [orientation]="'vertical'"

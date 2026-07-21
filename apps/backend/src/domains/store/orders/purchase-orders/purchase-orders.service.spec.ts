@@ -12,6 +12,7 @@ import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 
 /**
  * Step 5 — PurchaseOrdersService.receive() unit tests.
@@ -80,7 +81,16 @@ describe('PurchaseOrdersService.receive()', () => {
     const buildTxMock = () => ({
       purchase_order_receptions: { create: jest.fn().mockResolvedValue({ id: 1 }) },
       purchase_order_reception_items: { create: jest.fn().mockResolvedValue({}) },
-      purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+      purchase_order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        // FASE 0/FASE 2 — receive() now calls findMany for the over-receipt guard
+        // (purchase-orders.service.ts:1420). Pre-existing mock missed this; the
+        // guard validates each line belongs to this order and stays within the
+        // (ordered - already_received) envelope.
+        findMany: jest.fn().mockResolvedValue([
+          { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+        ]),
+      },
       // Pre-existing dependencies this spec never mocked:
       // - findFirst: Fase 2 UoM conversion (resolveUoMConversion).
       //   is_ingredient=false preserves the exact retail behaviour the
@@ -199,6 +209,21 @@ describe('PurchaseOrdersService.receive()', () => {
         { provide: SettingsService, useValue: mockSettingsService },
         { provide: FiscalScopeService, useValue: mockFiscalScopeService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        // FASE 3 — mock de AccountsPayableService (no-op). El PO service ahora
+        // lo inyecta para el puente PO→AP y backfill. Cada test que active el
+        // camino de pago con CxP puede sobreescribir este mock si necesita.
+        {
+          provide: AccountsPayableService,
+          useValue: {
+            mirrorPoPaymentToAp: jest.fn().mockResolvedValue({ ap_payment_id: 0 }),
+            mirrorApPaymentToPo: jest.fn().mockResolvedValue({ purchase_order_payment_id: 0 }),
+            backfillAdvancePayments: jest.fn().mockResolvedValue(0),
+            findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+            applyPoPaymentToApBalance: jest.fn().mockResolvedValue({ applied: false }),
+            createFromEvent: jest.fn(),
+            upsertPayableForReception: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -375,7 +400,13 @@ describe('PurchaseOrdersService.receive()', () => {
         purchase_order_reception_items: {
           create: jest.fn().mockResolvedValue({}),
         },
-        purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+        purchase_order_items: {
+          update: jest.fn().mockResolvedValue({}),
+          // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
+          findMany: jest.fn().mockResolvedValue([
+            { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+          ]),
+        },
         products: {
           findFirst: jest.fn().mockResolvedValue({
             id: PRODUCT_ID,
@@ -489,6 +520,18 @@ describe('PurchaseOrdersService.receive()', () => {
             },
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
+          {
+            provide: AccountsPayableService,
+            useValue: {
+              mirrorPoPaymentToAp: jest.fn().mockResolvedValue({ ap_payment_id: 0 }),
+              mirrorApPaymentToPo: jest.fn().mockResolvedValue({ purchase_order_payment_id: 0 }),
+              backfillAdvancePayments: jest.fn().mockResolvedValue(0),
+              findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+              applyPoPaymentToApBalance: jest.fn().mockResolvedValue({ applied: false }),
+              createFromEvent: jest.fn(),
+              upsertPayableForReception: jest.fn(),
+            },
+          },
         ],
       }).compile();
 
@@ -623,7 +666,13 @@ describe('PurchaseOrdersService.receive()', () => {
           purchase_order_reception_items: {
             create: jest.fn().mockResolvedValue({}),
           },
-          purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+          purchase_order_items: {
+            update: jest.fn().mockResolvedValue({}),
+            // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
+            findMany: jest.fn().mockResolvedValue([
+              { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+            ]),
+          },
           products: {
             findFirst: jest.fn().mockResolvedValue({
               id: PRODUCT_ID,
@@ -833,6 +882,18 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: AccountsPayableService,
+          useValue: {
+            mirrorPoPaymentToAp: jest.fn().mockResolvedValue({ ap_payment_id: 0 }),
+            mirrorApPaymentToPo: jest.fn().mockResolvedValue({ purchase_order_payment_id: 0 }),
+            backfillAdvancePayments: jest.fn().mockResolvedValue(0),
+            findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+            applyPoPaymentToApBalance: jest.fn().mockResolvedValue({ applied: false }),
+            createFromEvent: jest.fn(),
+            upsertPayableForReception: jest.fn(),
+          },
+        },
       ],
     }).compile();
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, throwError } from 'rxjs';
+import { Observable, catchError, throwError, timer, map, switchMap, filter, takeWhile, take, timeout } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
     PurchaseOrder,
@@ -162,6 +162,89 @@ export class PurchaseOrdersService {
     }
 
     // ============================================================
+    // FASE TRACK B5 — AI scan async de comprobantes de pago (enqueue → poll)
+    // ============================================================
+    // Calque del patron expenses `scanInvoiceAsync` (apps/frontend/src/app/
+    // private/modules/store/expenses/services/expense-scanner.service.ts).
+    //
+    //   POST .../payments/scan       → 202 {job_id}        (enqueue)
+    //   GET  .../payments/scan/:jobId → {status, result?}   (poll con IDOR backend)
+    //
+    // `scanPaymentReceipt()` es el helper que el componente llama: hace enqueue
+    // + poll en un Observable unico, con timeout 120s (skill vendix-ai-queue v2.2:
+    // debe exceder el presupuesto de retry backend attempts:3 + backoff exponencial).
+
+    private readonly PAYMENT_SCAN_POLL_INTERVAL_MS = 1800;
+    private readonly PAYMENT_SCAN_TIMEOUT_MS = 120_000;
+
+    enqueuePaymentScan(poId: number, file: File): Observable<string> {
+        const formData = new FormData();
+        formData.append('file', file);
+        return this.http
+            .post<ApiResponse<{ job_id: string }>>(
+                `${this.api_url}/${poId}/payments/scan`,
+                formData,
+            )
+            .pipe(
+                map(res => {
+                    const jobId = res?.data?.job_id;
+                    if (!jobId) throw new Error('enqueuePaymentScan: missing job_id');
+                    return String(jobId);
+                }),
+                catchError(this.handleError),
+            );
+    }
+
+    pollPaymentScan(poId: number, jobId: string): Observable<PaymentScanJobStatus> {
+        return this.http
+            .get<ApiResponse<PaymentScanJobStatus>>(
+                `${this.api_url}/${poId}/payments/scan/${jobId}`,
+            )
+            .pipe(
+                map(res => res.data),
+                catchError(this.handleError),
+            );
+    }
+
+    scanPaymentReceipt(poId: number, file: File): Observable<PaymentScanResult> {
+        return this.enqueuePaymentScan(poId, file).pipe(
+            switchMap(jobId =>
+                timer(0, this.PAYMENT_SCAN_POLL_INTERVAL_MS).pipe(
+                    switchMap(() => this.pollPaymentScan(poId, jobId)),
+                    takeWhile(
+                        s => s.status !== 'completed' && s.status !== 'failed',
+                        /* inclusive */ true,
+                    ),
+                    filter(s => s.status === 'completed' || s.status === 'failed'),
+                    take(1),
+                    // Mapear de {status, result?, error?} a PaymentScanResult.
+                    // En 'failed' no hay result → throw para que el componente
+                    // lo maneje como error suave (no destructivo).
+                    map((s): PaymentScanResult => {
+                        if (s.status === 'completed' && s.result) {
+                            return s.result;
+                        }
+                        throw new Error(s.error || 'scan_payment_failed');
+                    }),
+                ),
+            ),
+            timeout({
+                first: this.PAYMENT_SCAN_TIMEOUT_MS,
+                with: () =>
+                    throwError(() => new Error('scan_payment_timeout')),
+            }),
+            take(1),
+            catchError(err => {
+                // 404 tardío por eviction de Redis → error suave (job ya paso)
+                if (err?.status === 404) {
+                    return throwError(() => new Error('scan_payment_not_found'));
+                }
+                throw err;
+            }),
+        );
+    }
+
+    // ============================================================
     // Payments
     // ============================================================
 
@@ -212,4 +295,34 @@ export class PurchaseOrdersService {
 
         return throwError(() => error_message);
     }
+}
+
+// =================================================================
+// FASE TRACK B5 — tipos para el AI scan async de comprobantes de pago
+// =================================================================
+// Espejo del `PaymentReceiptScanJobStatusResult` del backend (skill vendix-ai-queue v2.2).
+// Solo declaramos lo que el frontend consume: el estado de la cola, el resultado
+// parseado, y el mensaje de error si el processor revento.
+
+export type PaymentScanStatus =
+    | 'waiting'
+    | 'active'
+    | 'completed'
+    | 'failed'
+    | 'delayed';
+
+export interface PaymentScanResult {
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+    reference: string | null;
+    currency: string | null;
+    notes: string | null;
+    confidence: number;
+}
+
+export interface PaymentScanJobStatus {
+    status: PaymentScanStatus;
+    result?: PaymentScanResult;
+    error?: string;
 }

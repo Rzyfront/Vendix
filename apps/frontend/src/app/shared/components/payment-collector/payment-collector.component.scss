@@ -383,6 +383,288 @@
   .pc-steps-col {
     @include subwizard.subwizard-steps-col;
   }
+
+  /* ── Pencil redesign (frames PyHka / a7mp1 / G0dg6) — STEPPED ONLY ──────────
+     Todo lo siguiente vive dentro de `.pc-stepped`, por lo que NUNCA alcanza la
+     rama flat (membership / table / order / ecommerce). Tokens del proyecto:
+     verde = var(--color-primary); relleno claro (#DCFCE7) =
+     rgba(var(--color-success-rgb), .15); superficie tenue (#F2F4F7) =
+     var(--color-muted); ink-900 = var(--color-text-primary). */
+
+  /* Section title con icono verde (reemplaza la barra .section-indicator). */
+  .pc-section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .pc-section-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  .pc-section-label {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+  }
+
+  /* Forma de pago — OptionRows (frame PyHka) */
+  .pc-option-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pc-option-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 76px;
+    padding: 14px 16px;
+    border: 1.5px solid var(--color-border);
+    border-radius: 16px;
+    background: var(--color-surface);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.18s ease, background 0.18s ease;
+  }
+
+  .pc-option-row:hover {
+    border-color: var(--color-primary);
+  }
+
+  .pc-option-row.selected {
+    border-color: var(--color-primary);
+    background: rgba(var(--color-success-rgb), 0.15);
+  }
+
+  /* Crédito sin cliente: atenuado (se conserva el click → requestCustomer). */
+  .pc-option-row--muted {
+    opacity: 0.6;
+  }
+
+  .pc-option-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--color-muted);
+    color: var(--color-text-primary);
+    flex-shrink: 0;
+  }
+
+  .pc-option-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .pc-option-title {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--color-text-primary);
+  }
+
+  .pc-option-desc {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--color-text-secondary);
+  }
+
+  .pc-option-row.selected .pc-option-icon,
+  .pc-option-row.selected .pc-option-title,
+  .pc-option-row.selected .pc-option-desc {
+    color: var(--color-primary);
+  }
+
+  .pc-option-radio {
+    position: relative;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid var(--color-border);
+    flex-shrink: 0;
+    transition: border-color 0.18s ease;
+  }
+
+  .pc-option-radio.checked {
+    border-color: var(--color-primary);
+  }
+
+  .pc-option-radio.checked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--color-primary);
+  }
+
+  /* Método de pago — MethodCards 2×2 (frame a7mp1). Override del .payment-method-btn
+     base SOLO dentro de stepped (mayor especificidad que la regla base flat). */
+  .pc-method-step {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .payment-method-btn {
+    min-height: 120px;
+    padding: 20px 12px;
+    border-width: 1.5px;
+    border-radius: 16px;
+    gap: 8px;
+    color: var(--color-text-primary);
+  }
+
+  .payment-method-btn .method-name {
+    margin-top: 12px;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .payment-method-btn.selected {
+    border-width: 1.5px;
+    border-color: var(--color-primary);
+    background: rgba(var(--color-success-rgb), 0.15);
+    color: var(--color-primary);
+  }
+
+  .payment-method-btn.selected .method-name {
+    color: var(--color-primary);
+  }
+
+  /* Banner informativo bajo el grid (superficie tenue + texto secundario). */
+  .pc-method-info {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: var(--color-muted);
+  }
+
+  .pc-method-info-icon {
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .pc-method-info-text {
+    font-size: 14px;
+    line-height: 1.4;
+    color: var(--color-text-secondary);
+  }
+
+  /* Monto — TOTAL A COBRAR (frame G0dg6): monto grande ink-900 (no verde). */
+  .pc-total-card {
+    border-width: 1.5px;
+  }
+
+  .pc-total-card .total-label {
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+
+  .pc-total-card .total-amount {
+    margin-top: 6px;
+    font-size: 34px;
+    color: var(--color-text-primary);
+  }
+
+  /* Input de efectivo: superficie tenue con prefijo $ y sufijo COP. */
+  .pc-cash-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .pc-cash-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .pc-cash-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 64px;
+    padding: 0 16px;
+    border-radius: 12px;
+    background: var(--color-muted);
+    border: 1.5px solid transparent;
+    transition: border-color 0.18s ease;
+  }
+
+  .pc-cash-field:focus-within {
+    border-color: var(--color-primary);
+  }
+
+  .pc-cash-field.error {
+    border-color: var(--color-error);
+  }
+
+  .pc-cash-prefix {
+    flex-shrink: 0;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-text-muted);
+  }
+
+  .pc-cash-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: transparent;
+    outline: none;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--color-text-primary);
+  }
+
+  .pc-cash-suffix {
+    flex-shrink: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+
+  /* Card verde "Cambio a entregar" (frame G0dg6). */
+  .pc-change-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(var(--color-success-rgb), 0.15);
+  }
+
+  .pc-change-label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+
+  .pc-change-amount {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--color-primary);
+  }
 }
 
 /* Desktop columns. Mobile stays the base single column (steps-col falls below
@@ -414,5 +696,32 @@
 @media (max-width: 767px) {
   :host-context(.pos-payment-context) .pc-steps-col {
     display: none;
+  }
+
+  /* Se oculta el teclado numérico en pantalla y la fila de montos rápidos
+     ("Quick"/parcializar pago) en móvil — el input de efectivo ya fuerza
+     inputmode="decimal" (appCurrencyInput), así que el teclado nativo del
+     celular sigue permitiendo escribir el monto; ocultar el keypad visual no
+     rompe el cálculo de cambio. quickAmounts() y los handlers del keypad
+     siguen intactos para desktop. */
+  .keypad,
+  .quick-amounts {
+    display: none;
+  }
+
+  /* Grid de métodos de pago: en vez de forzar siempre 2 columnas (se ve
+     apretado/vacío con 1-2 métodos habilitados), se adapta al ancho
+     disponible. Tabs y nombre de método ajustados al touch target mínimo de
+     44px (vendix-ui-ux). */
+  .payment-methods-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .tab-btn {
+    min-height: 44px;
+  }
+
+  .method-name {
+    font-size: 13px;
   }
 }

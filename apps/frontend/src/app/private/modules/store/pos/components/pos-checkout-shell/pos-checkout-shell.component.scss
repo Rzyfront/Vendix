@@ -16,6 +16,102 @@
   width: 100%;
 }
 
+/* ── Progress móvil (Pencil): barras horizontales + TOTAL A PAGAR ──────────
+   Reemplaza los círculos numerados de app-steps-line en <768px. Cada paso es
+   una barra de ancho flexible; el total se ancla a la derecha. */
+.checkout-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 2px 0 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.progress-bars {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+.progress-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.progress-bar-fill {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--color-border);
+  transition: background 0.2s ease;
+}
+
+.progress-bar-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-item.done .progress-bar-fill,
+.progress-item.active .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+.progress-item.active .progress-bar-label {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.progress-item.done .progress-bar-label {
+  color: var(--color-text-secondary);
+}
+
+.progress-total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 1px;
+}
+
+.progress-total-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.progress-total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+/* Conmutación de chrome móvil/desktop. Se maneja con media queries (no con
+   utilities .hidden/.md:* de Tailwind) porque la ViewEncapsulation de Angular
+   eleva la especificidad de los selectores del componente y estos GANAN a las
+   utilities globales — el `display` propio del componente vencería a `.hidden`. */
+@media (min-width: 768px) {
+  .checkout-progress {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .checkout-stepper {
+    display: none;
+  }
+}
+
 /* ── Body grid ─────────────────────────────────────── */
 .checkout-grid {
   display: grid;
@@ -51,6 +147,121 @@
     order: -1;
     position: sticky;
     top: 0;
+  }
+}
+
+/* ── Header (móvil): botón "Guardar borrador" icon-only, proyectado en
+   [slot=header-end] junto al chip de total. Oculto en desktop vía md:hidden
+   en el template. ─────────────────────────────────────────────────────── */
+.header-draft-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-primary);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.header-draft-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Resumen: botón acordeón (solo móvil vía md:hidden en el template) ── */
+/* Barra "Ver resumen" (móvil, Pencil): fila surface-muted con icono + label +
+   conteo + total inline + chevron. */
+.summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--color-muted, var(--color-surface-secondary, #f2f4f7));
+  cursor: pointer;
+}
+
+.summary-toggle-lead {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.summary-toggle-label {
+  flex: 1;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-toggle-total {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.summary-toggle-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.summary-toggle-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* La barra "Ver resumen" es solo móvil; el título "Resumen" del rail es solo
+   desktop (media queries por la razón de encapsulación explicada arriba). */
+@media (min-width: 768px) {
+  .summary-toggle {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Doble clase para ganar a `.section-header { display:flex }` (misma
+     especificidad base pero definida después en el archivo). */
+  .section-header.summary-rail-header {
+    display: none;
+  }
+}
+
+/* Resumen colapsable: solo aplica bajo 767px — en desktop el rail siempre
+   se muestra expandido, sin importar el valor de summaryExpanded(). */
+@media (max-width: 767px) {
+  .product-list,
+  .summary-details {
+    &:not(.expanded) {
+      display: none;
+    }
+  }
+
+  /* La barra "Ver resumen" va standalone (sin card wrapper), como en Pencil. */
+  .summary-rail .payment-section {
+    border: none;
+    padding: 0;
+    background: transparent;
+  }
+
+  /* El total ya vive en la barra de progreso y en la barra "Ver resumen". */
+  .total-section {
+    display: none;
+  }
+
+  /* Detalle expandido separado del toggle. */
+  .product-list.expanded {
+    margin-top: 12px;
   }
 }
 
@@ -408,12 +619,76 @@
 
 /* ── Footer ──────────────────────────────────────────── */
 .checkout-footer {
+  display: block;
+  width: 100%;
+}
+
+/* Vista desktop: total + acciones completas (Cancelar / Anterior / Guardar /
+   Siguiente|Confirmar). */
+.footer-desktop {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   width: 100%;
   flex-wrap: wrap;
+}
+
+/* Vista móvil (Pencil): "← Atrás" + CTA verde ancho completo. Oculta en
+   desktop; se muestra <768px (ver media query al final). */
+.footer-mobile {
+  display: none;
+}
+
+/* Footer móvil — botón "Atrás" (texto, sin borde) + CTA verde full-width. */
+.btn-back-mobile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 14px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-back-mobile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-cta-mobile {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 54px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 12px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+  transition:
+    filter 0.2s,
+    transform 0.1s;
+}
+
+.btn-cta-mobile:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.btn-cta-mobile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .footer-left {
@@ -572,54 +847,18 @@
   }
 }
 
-/* Móvil: se quita el total del footer (el rail de Resumen ya lo muestra) y las
-   acciones pasan a un grid simétrico de 2 columnas — Cancelar + Anterior
-   comparten la fila superior; Guardar borrador y la CTA principal ocupan el
-   ancho completo (la CTA queda destacada al fondo). En el primer paso (sin
-   "Anterior") Cancelar toma la fila completa para conservar la simetría. */
-@media (max-width: 640px) {
-  .footer-left {
+/* Móvil (Pencil): se oculta la vista desktop completa y se muestra la barra de
+   acción "Atrás + CTA verde ancho completo". El total ya vive en la barra de
+   progreso; "Guardar borrador" se movió al header (icon-only). */
+@media (max-width: 767px) {
+  .footer-desktop {
     display: none;
   }
 
-  .footer-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    flex: 1 1 100%;
+  .footer-mobile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     width: 100%;
-  }
-
-  .btn-cancel {
-    margin-right: 0;
-  }
-
-  .btn-cancel,
-  .btn-prev {
-    grid-column: span 1;
-  }
-
-  .btn-draft,
-  .btn-confirm {
-    grid-column: 1 / -1;
-  }
-
-  /* Primer paso sin "Anterior": Cancelar ocupa la fila completa. */
-  .footer-actions:not(:has(.btn-prev)) .btn-cancel {
-    grid-column: 1 / -1;
-  }
-
-  /* Paddings uniformes → las acciones se ven simétricas y bien ajustadas. */
-  .btn-cancel,
-  .btn-prev,
-  .btn-draft {
-    padding: 12px 14px;
-    font-size: 14px;
-    justify-content: center;
-  }
-
-  .btn-confirm {
-    padding: 14px;
-    font-size: 15px;
   }
 }

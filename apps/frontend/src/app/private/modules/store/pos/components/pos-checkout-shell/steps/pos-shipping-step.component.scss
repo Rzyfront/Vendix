@@ -1,7 +1,9 @@
 @use '../../../../../../../shared/components/payment-collector/subwizard' as subwizard;
 
 /* Fase 5·B2b — POS Shipping Step. Recolección de envío aplanada (sin modal).
-   Estilos extraídos de pos-shipping-modal (sección Pago interna descartada). */
+   Rediseño Pencil (frames Envío·Método / Envío·Costo): grid 2×2 de MethodCards,
+   card de costo automático con toggle manual, notas y card de totales.
+   Tokens del proyecto (var(--color-*)); nunca Tailwind /opacity. */
 
 .shipping-step {
   display: flex;
@@ -11,7 +13,7 @@
 }
 
 /* ── Sub-wizard grid (opciones | stepper) ─────────────────
-   Móvil: una columna, steps-col ABAJO (DOM-last).
+   Móvil: una columna, steps-col ABAJO (DOM-last) pero oculta.
    Desktop (≥768px): ship-main | steps-col. */
 .ship-grid {
   display: grid;
@@ -23,11 +25,11 @@
 .ship-main {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
 }
 
-/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso). Verde "completado".
    Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
 .ship-collapsed {
   @include subwizard.subwizard-collapsed-row;
@@ -72,19 +74,18 @@
   font-weight: 600;
 }
 
-/* ── Section shell ────────────────────────────────────── */
-.payment-section {
-  background: var(--color-surface);
-  border-radius: 16px;
-  border: 1px solid var(--color-border);
-  padding: 16px;
+/* ── Método · section header ──────────────────────────── */
+.method-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .section-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
 }
 
 .section-icon {
@@ -92,131 +93,64 @@
 }
 
 .section-title {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--color-text-primary);
   margin: 0;
 }
 
-/* ── Sale type (payTiming toggle) ─────────────────────── */
-.sale-type-options {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.sale-type-btn {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px;
-  border: 2px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-surface);
-  cursor: pointer;
-  transition: all 0.2s;
-  width: 100%;
-  text-align: left;
-}
-
-.sale-type-btn:hover {
-  border-color: var(--color-primary);
-}
-
-.sale-type-btn.selected {
-  border-color: var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.05);
-}
-
-.radio-indicator {
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--color-border);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.sale-type-btn.selected .radio-indicator {
-  border-color: var(--color-primary);
-}
-
-.radio-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--color-primary);
-  border-radius: 50%;
-}
-
-.sale-type-btn app-icon {
-  color: var(--color-text-muted);
-  flex-shrink: 0;
-}
-
-.sale-type-btn.selected app-icon {
-  color: var(--color-primary);
-}
-
-.sale-type-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.sale-type-name {
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.sale-type-desc {
-  display: block;
-  font-size: 11px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
-}
-
-/* ── Methods grid ─────────────────────────────────────── */
-.payment-methods-grid {
+/* ── Método · grid 2×2 de cards ───────────────────────── */
+.method-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
 
-.payment-method-btn {
+.method-card {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
+  gap: 12px;
+  min-height: 120px;
+  padding: 20px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
   background: var(--color-surface);
   cursor: pointer;
-  transition: all 0.2s ease;
-  color: var(--color-text-muted);
-}
-
-.payment-method-btn:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
-.payment-method-btn.selected {
-  border: 2px solid var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.05);
-  color: var(--color-primary);
-}
-
-.method-name {
-  font-size: 12px;
-  font-weight: 600;
-  margin-top: 8px;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
   color: var(--color-text-primary);
-  text-align: center;
+}
+
+.method-card-icon {
+  color: var(--color-text-primary);
+  transition: color 0.18s ease;
+}
+
+.method-card-label {
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1.2;
+  text-align: center;
+  color: var(--color-text-primary);
+  transition: color 0.18s ease;
+}
+
+.method-card:hover {
+  border-color: var(--color-primary);
+}
+
+.method-card.selected {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-success-rgb), 0.14);
+}
+
+.method-card.selected .method-card-icon,
+.method-card.selected .method-card-label {
+  color: var(--color-primary);
 }
 
 /* ── No methods alert ─────────────────────────────────── */
@@ -227,7 +161,7 @@
   padding: 12px 14px;
   background: rgba(var(--color-error-rgb, 220, 38, 38), 0.08);
   border: 1px solid rgba(var(--color-error-rgb, 220, 38, 38), 0.25);
-  border-radius: 10px;
+  border-radius: 12px;
 }
 
 .no-methods-icon {
@@ -266,128 +200,63 @@
   text-decoration: underline;
 }
 
-/* ── Address ──────────────────────────────────────────── */
-.addr-badge {
+/* ── Costo · card ─────────────────────────────────────── */
+.cost-card {
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  padding: 18px;
+}
+
+.cost-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  margin-bottom: 8px;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.addr-badge-fill {
-  background: rgba(var(--color-success-rgb), 0.1);
-  border: 1px solid rgba(var(--color-success-rgb), 0.3);
-  color: var(--color-success);
-}
-
-.addr-badge-fill app-icon {
-  color: var(--color-success);
-}
-
-.addr-badge-new {
-  background: rgba(var(--color-primary-rgb), 0.05);
-  border: 1px solid rgba(var(--color-primary-rgb), 0.2);
-  color: var(--color-text-secondary);
-}
-
-.addr-badge-new app-icon {
-  color: var(--color-primary);
-}
-
-.address-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-/* ── Shipping cost ────────────────────────────────────── */
-.calculating-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.spinner-sm {
-  width: 16px;
-  height: 16px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-primary);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-.cost-display {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.calculated-cost {
-  display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  background: rgba(var(--color-success-rgb), 0.1);
-  border: 1px solid rgba(var(--color-success-rgb), 0.3);
-  border-radius: 10px;
+  gap: 12px;
 }
 
-.cost-label {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-
-.cost-value {
+.cost-row-label {
   font-size: 16px;
+  color: var(--color-text-secondary);
+}
+
+.cost-row-amount {
+  font-size: 18px;
   font-weight: 700;
-  color: var(--color-success);
+  color: var(--color-text-primary);
 }
 
-.manual-toggle {
-  display: flex;
-  align-items: center;
+.cost-toggle-label {
+  font-size: 16px;
+  color: var(--color-text-primary);
 }
 
-.toggle-label {
-  display: flex;
+.cost-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 14px 0;
+}
+
+.cost-calculating {
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
-.toggle-label input[type='checkbox'] {
-  accent-color: var(--color-primary);
-  width: 16px;
-  height: 16px;
-}
-
+/* Input de costo manual (aparece con el toggle activo o sin cálculo automático) */
 .manual-cost-input {
-  margin-top: 4px;
+  margin-top: 12px;
 }
 
 .cash-input {
   display: flex;
   align-items: center;
-  background: var(--color-background);
-  border: 2px solid var(--color-border);
-  border-radius: 10px;
-  padding: 8px 12px;
+  background: var(--color-surface-secondary);
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  padding: 10px 12px;
   transition: border-color 0.2s;
 }
 
@@ -414,33 +283,95 @@
   min-width: 0;
 }
 
-/* ── Delivery notes ───────────────────────────────────── */
-.delivery-notes {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border);
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
-/* ── Total con envío ──────────────────────────────────── */
-.ship-total {
+/* ── Notas de envío ───────────────────────────────────── */
+.notes-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.notes-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--color-surface-secondary);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.notes-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.notes-textarea:focus {
+  border-color: var(--color-primary);
+}
+
+/* ── Totales · card ───────────────────────────────────── */
+.totals-card {
+  border-radius: 16px;
+  background: var(--color-surface-secondary);
+  padding: 18px;
+}
+
+.totals-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--color-border);
+  gap: 12px;
 }
 
-.ship-total-label {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-text-muted);
-  font-weight: 600;
+.totals-row + .totals-row {
+  margin-top: 10px;
 }
 
-.ship-total-amount {
-  font-size: 20px;
+.totals-label {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+}
+
+.totals-amount {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.totals-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 14px 0;
+}
+
+.totals-grand-label {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.totals-grand-amount {
+  font-size: 24px;
   font-weight: 700;
   color: var(--color-primary);
 }
