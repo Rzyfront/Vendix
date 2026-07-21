@@ -26,6 +26,7 @@ import {
 import { ChangeScopeWizard } from './_components/change-scope-wizard';
 import { AuthService } from '@/core/auth/auth.service';
 import { useAuthStore } from '@/core/store/auth.store';
+import { hasOperatingScopeWritePermission } from '@/features/org/components/operating-scope-permissions';
 import type {
   OperatingScopeValue,
   OperatingScopeAuditLogEntry,
@@ -107,9 +108,10 @@ export default function OperatingScopeScreen() {
     try {
       const user = await AuthService.getMe();
       useAuthStore.getState().setUser(user);
-    } catch {
+    } catch (e) {
       // No bloqueamos el flujo si el refresh falla — el pull-to-refresh
-      // lo recuperará. Silencioso: el toast de éxito ya confirmó el cambio.
+      // lo recuperará. Logueamos para visibilidad sin romper el éxito.
+      console.warn('[operating-scope] failed to refresh user after apply:', e);
     }
   };
 
@@ -127,7 +129,13 @@ export default function OperatingScopeScreen() {
   // Paridad con web `editable = state?.editable === true && !loading()`.
   // No añadimos !isFetching — durante un pull-to-refresh el toggle debe
   // seguir disponible si el servidor ya dijo que es editable.
-  const editable = !!data?.editable && !isLoading;
+  // Combinamos con hasOperatingScopeWritePermission() para que la UI
+  // oculte/deshabilite la acción de cambio cuando el usuario no tiene
+  // el permiso `organization:settings:operating_scope:write` en su sesión.
+  // El backend sigue siendo la fuente de verdad (controllers decorados con
+  // @Permissions() rechazan con 403) — esto es solo UI gating.
+  const canWriteScope = hasOperatingScopeWritePermission();
+  const editable = !!data?.editable && !isLoading && canWriteScope;
   const auditLog = data?.audit_log_recent ?? [];
 
   const targetForWizard: OperatingScopeValue =
@@ -261,9 +269,11 @@ export default function OperatingScopeScreen() {
                       title={
                         isPartner
                           ? 'Modo bloqueado (Partner)'
-                          : !editable
-                            ? 'Modo no editable'
-                            : 'Cambiar modo operativo'
+                          : !canWriteScope
+                            ? 'Sin permisos para cambiar modo'
+                            : !editable
+                              ? 'Modo no editable'
+                              : 'Cambiar modo operativo'
                       }
                       variant="primary"
                       onPress={() => openWizardFor(targetForWizard)}

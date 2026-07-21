@@ -28,13 +28,12 @@ import { Icon } from '@/shared/components/icon/icon';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
-import { RowActionsMenu, type RowAction } from '@/shared/components/row-actions-menu/row-actions-menu';
+import { type RowAction } from '@/shared/components/row-actions-menu/row-actions-menu';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import {
   OptionsDropdown,
   type FilterConfig,
   type FilterValues,
-  type DropdownAction,
 } from '@/shared/components/options-dropdown';
 import { borderRadius, colorScales, colors, spacing, typography, interFonts } from '@/shared/theme';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
@@ -76,7 +75,6 @@ export default function DomainsScreen() {
 
   // ───── Modales del header (espejo del patrón users/stores) ─────────────────
   const [actionsModalOpen, setActionsModalOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
 
   // ───── Datos ───────────────────────────────────────────────────────────────
   const { data: domains = [], isLoading, refetch } = useQuery({
@@ -111,7 +109,7 @@ export default function DomainsScreen() {
     queryFn: () => OrgStoreService.list({ pageSize: 200 }).then((r) => r.data ?? []),
     staleTime: 5 * 60 * 1000, // 5 min — la lista de tiendas no cambia en cada interacción.
   });
-  const stores: StoreListItem[] = storesQuery.data ?? [];
+  const stores = useMemo<StoreListItem[]>(() => storesQuery.data ?? [], [storesQuery.data]);
 
   // ───── Filtros del header (popover tipo web, NO modal) ───────────────────
   // El `<app-options-dropdown>` de la web se colapsa a un popover anclado
@@ -199,19 +197,10 @@ export default function DomainsScreen() {
   }, [domains, sort]);
 
   // ───── Mutations ───────────────────────────────────────────────────────────
-  const verifyMutation = useMutation({
-    mutationFn: (hostname: string) => OrgDomainsService.verify(hostname),
-    onSuccess: (r) => {
-      if (r.verified) {
-        queryClient.invalidateQueries({ queryKey: ['org-domains-list'] });
-        queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
-        toastSuccess('Propiedad verificada. Certificado pendiente de emisión.');
-      } else {
-        toastError(r.message ?? 'No se pudo verificar');
-      }
-    },
-    onError: () => toastError('Error al verificar el dominio'),
-  });
+  // NOTA: la verificación de DNS se ejecuta dentro del DomainVerifyModal
+  // (muestra resultado inline + tabla de records DNS). El parent solo
+  // invalida queries cuando `onVerified` se dispara — ver M3 fix en
+  // <DomainVerifyModal onVerified={...}> más abajo.
 
   const provisionMutation = useMutation({
     mutationFn: (id: string) => OrgDomainsService.provisionNextById(id),
@@ -392,8 +381,12 @@ export default function DomainsScreen() {
         domain={verifying}
         onClose={() => setVerifying(null)}
         onVerified={() => {
-          verifyMutation.mutate(verifying!.hostname);
+          // M3 fix: la verificación ya se ejecutó dentro del modal y mostró
+          // el resultado inline. NO re-llamar al endpoint acá para evitar
+          // doble toast + doble invalidación. Solo refrescar la lista.
           setVerifying(null);
+          queryClient.invalidateQueries({ queryKey: ['org-domains-list'] });
+          queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
         }}
       />
       <DomainDeleteModal

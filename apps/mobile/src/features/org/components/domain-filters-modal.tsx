@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { Icon } from '@/shared/components/icon/icon';
@@ -41,18 +41,34 @@ export function DomainFiltersModal({ visible, initial, onClose, onApply }: Domai
   const [stores, setStores] = useState<StoreListItem[]>([]);
   const [storesLoading, setStoresLoading] = useState(false);
   const [openSelect, setOpenSelect] = useState<null | 'status' | 'ownership' | 'store'>(null);
+  const storesAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!visible) return;
     setDraft(initial);
     setOpenSelect(null);
     if (stores.length === 0) {
+      storesAbortRef.current?.abort();
+      const ac = new AbortController();
+      storesAbortRef.current = ac;
       setStoresLoading(true);
       OrgStoreService.list({ pageSize: 200 })
-        .then((r) => setStores(r.data ?? []))
-        .catch(() => setStores([]))
-        .finally(() => setStoresLoading(false));
+        .then((r) => {
+          if (ac.signal.aborted) return;
+          setStores(r.data ?? []);
+        })
+        .catch(() => {
+          if (ac.signal.aborted) return;
+          setStores([]);
+        })
+        .finally(() => {
+          if (ac.signal.aborted) return;
+          setStoresLoading(false);
+        });
     }
+    return () => {
+      storesAbortRef.current?.abort();
+    };
   }, [visible, initial, stores.length]);
 
   const handleApply = () => {
