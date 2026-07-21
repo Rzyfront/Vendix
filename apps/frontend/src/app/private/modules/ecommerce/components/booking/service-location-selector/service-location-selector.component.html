@@ -5,25 +5,27 @@
   </p>
 
   <div class="service-location__grid" role="radiogroup" aria-label="Ubicación del servicio">
-    <button
-      type="button"
-      role="radio"
-      [attr.aria-checked]="value() === 'home'"
-      class="svc-option"
-      [class.svc-option--selected]="value() === 'home'"
-      (click)="pickHome()"
-    >
-      <span class="svc-option__icon">
-        <app-icon name="home" [size]="22"></app-icon>
-      </span>
-      <span class="svc-option__body">
-        <span class="svc-option__title">A domicilio</span>
-        <span class="svc-option__hint">El técnico va a tu casa</span>
-      </span>
-      <span class="svc-option__check" aria-hidden="true">
-        <app-icon name="check-circle-2" [size]="18"></app-icon>
-      </span>
-    </button>
+    @if (offerHomeService()) {
+      <button
+        type="button"
+        role="radio"
+        [attr.aria-checked]="value() === 'home'"
+        class="svc-option"
+        [class.svc-option--selected]="value() === 'home'"
+        (click)="pickHome()"
+      >
+        <span class="svc-option__icon">
+          <app-icon name="home" [size]="22"></app-icon>
+        </span>
+        <span class="svc-option__body">
+          <span class="svc-option__title">A domicilio</span>
+          <span class="svc-option__hint">El técnico va a tu casa</span>
+        </span>
+        <span class="svc-option__check" aria-hidden="true">
+          <app-icon name="check-circle-2" [size]="18"></app-icon>
+        </span>
+      </button>
+    }
 
     <button
       type="button"

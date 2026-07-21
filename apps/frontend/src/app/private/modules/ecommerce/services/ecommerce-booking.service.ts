@@ -102,6 +102,28 @@ export class EcommerceBookingService {
   }
 
   /**
+   * Returns the store's service config (offer_home_service + local
+   * address). Used by the booking flow to decide whether to render
+   * the 'A domicilio' radio card.
+   */
+  getStoreServices(): Observable<{
+    offer_home_service: boolean;
+    local_address: any | null;
+  }> {
+    return this.http
+      .get<any>(`${this.api_url}/store/services`, { headers: this.getHeaders() })
+      .pipe(
+        map((r) => {
+          const data = r?.data ?? r ?? {};
+          return {
+            offer_home_service: data.offer_home_service !== false,
+            local_address: data.local_address ?? null,
+          };
+        }),
+      );
+  }
+
+  /**
    * Creates a new address for the authenticated customer. The new row
    * is auto-linked to the customer's user_id on the backend.
    */

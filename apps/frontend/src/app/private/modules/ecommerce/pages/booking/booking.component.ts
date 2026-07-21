@@ -145,6 +145,11 @@ export class BookingComponent implements OnInit {
   readonly customerAddresses = signal<any[]>([]);
   readonly storeAddress = signal<any | null>(null);
   readonly selectedAddressId = signal<number | null>(null);
+  /**
+   * From the store's service config. When false, the ecommerce
+   * booking flow hides the 'A domicilio' option.
+   */
+  readonly offerHomeService = signal<boolean>(true);
 
   // Confirmation
   bookingResult = signal<any>(null);
@@ -196,6 +201,21 @@ export class BookingComponent implements OnInit {
     });
     this.bookingService.getStoreAddress().subscribe({
       next: (addr) => this.storeAddress.set(addr ?? null),
+    });
+    this.bookingService.getStoreServices().subscribe({
+      next: (svc) => {
+        this.offerHomeService.set(svc.offer_home_service);
+        // If the store doesn't offer home service, force-pick 'shop'
+        // (the only legal value) and clear any previously-picked
+        // home address so the booking can't be saved against a
+        // disabled option.
+        if (!svc.offer_home_service) {
+          this.serviceLocation.set('shop');
+          if (this.selectedAddressId() != null) {
+            this.selectedAddressId.set(null);
+          }
+        }
+      },
     });
   }
 
