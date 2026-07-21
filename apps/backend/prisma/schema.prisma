@@ -2250,6 +2250,7 @@ model purchase_order_items {
 model purchase_order_attachments {
   id                      Int       @id @default(autoincrement())
   purchase_order_id       Int
+  payment_id              Int?
   file_url                String    @db.VarChar(500)
   file_name               String    @db.VarChar(255)
   file_type               String    @db.VarChar(100)
@@ -2261,25 +2262,32 @@ model purchase_order_attachments {
   uploaded_by_user_id     Int?
   created_at              DateTime  @default(now())
 
-  purchase_order purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  uploaded_by    users?          @relation("po_attachment_uploader", fields: [uploaded_by_user_id], references: [id])
+  purchase_order purchase_orders          @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  uploaded_by    users?                   @relation("po_attachment_uploader", fields: [uploaded_by_user_id], references: [id])
+  payment        purchase_order_payments? @relation("po_payment_attachments", fields: [payment_id], references: [id])
 
   @@index([purchase_order_id])
+  @@index([payment_id])
 }
 
 model purchase_order_payments {
   id                 Int      @id @default(autoincrement())
   purchase_order_id  Int
+  ap_payment_id      Int?
   amount             Decimal  @db.Decimal(12, 2)
   payment_date       DateTime
   payment_method     String   @db.VarChar(50)
   reference          String?  @db.VarChar(255)
+  source             String   @default("po_modal")
   notes              String?  @db.Text
   created_by_user_id Int?
   created_at         DateTime @default(now())
 
-  purchase_order purchase_orders @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  created_by     users?          @relation("po_payment_creator", fields: [created_by_user_id], references: [id])
+  purchase_order     purchase_orders              @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  created_by         users?                       @relation("po_payment_creator", fields: [created_by_user_id], references: [id])
+  ap_payment         ap_payments?                 @relation("po_payment_ap_payment", fields: [ap_payment_id], references: [id])
+  ap_payment_mirrors ap_payments[]                @relation("ap_payment_po_payment")
+  attachments        purchase_order_attachments[] @relation("po_payment_attachments")
 
   @@index([purchase_order_id])
 }
@@ -2291,9 +2299,10 @@ model purchase_order_receptions {
   notes               String?  @db.Text
   received_at         DateTime @default(now())
 
-  purchase_order purchase_orders                  @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
-  received_by    users?                           @relation("po_reception_receiver", fields: [received_by_user_id], references: [id])
-  items          purchase_order_reception_items[]
+  purchase_order    purchase_orders                 @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  received_by       users?                          @relation("po_reception_receiver", fields: [received_by_user_id], references: [id])
+  items             purchase_order_reception_items[]
+  ap_reception_link ap_reception_links?
 
   @@index([purchase_order_id])
 }
@@ -7322,24 +7331,43 @@ model accounts_payable {
   supplier             suppliers              @relation("supplier_accounts_payable", fields: [supplier_id], references: [id])
   ap_payments          ap_payments[]
   ap_payment_schedules ap_payment_schedules[]
+  ap_reception_links   ap_reception_links[]
 
   @@index([organization_id, supplier_id])
   @@index([due_date, status])
 }
 
 model ap_payments {
+  id                        Int      @id @default(autoincrement())
+  accounts_payable_id       Int
+  purchase_order_payment_id Int?
+  amount                    Decimal  @db.Decimal(12, 2)
+  payment_date              DateTime @db.Timestamp(6)
+  payment_method            String   @db.VarChar(50)
+  reference                 String?  @db.VarChar(255)
+  bank_export_ref           String?  @db.VarChar(100)
+  source                    String   @default("ap_ui")
+  notes                     String?  @db.Text
+  created_by                Int?
+  created_at                DateTime @default(now()) @db.Timestamp(6)
+
+  accounts_payable               accounts_payable          @relation(fields: [accounts_payable_id], references: [id])
+  purchase_order_payment         purchase_order_payments?  @relation("ap_payment_po_payment", fields: [purchase_order_payment_id], references: [id])
+  purchase_order_payment_mirrors purchase_order_payments[] @relation("po_payment_ap_payment")
+
+  @@index([accounts_payable_id])
+}
+
+model ap_reception_links {
   id                  Int      @id @default(autoincrement())
   accounts_payable_id Int
-  amount              Decimal  @db.Decimal(12, 2)
-  payment_date        DateTime @db.Timestamp(6)
-  payment_method      String   @db.VarChar(50)
-  reference           String?  @db.VarChar(255)
-  bank_export_ref     String?  @db.VarChar(100)
-  notes               String?  @db.Text
-  created_by          Int?
+  reception_id        Int      @unique
+  gross_amount        Decimal  @db.Decimal(12, 2)
   created_at          DateTime @default(now()) @db.Timestamp(6)
+  updated_at          DateTime @default(now()) @db.Timestamp(6)
 
-  accounts_payable accounts_payable @relation(fields: [accounts_payable_id], references: [id])
+  accounts_payable accounts_payable          @relation(fields: [accounts_payable_id], references: [id], onDelete: Cascade)
+  reception        purchase_order_receptions @relation(fields: [reception_id], references: [id], onDelete: Cascade)
 
   @@index([accounts_payable_id])
 }
