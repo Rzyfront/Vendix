@@ -2996,9 +2996,7 @@ export class AutoEntryService {
       source_type: data.is_advance
         ? 'purchase_order.advance_payment'
         : 'purchase_order.payment',
-      source_id: data.is_advance
-        ? (data.payment_id ?? data.purchase_order_id)
-        : data.purchase_order_id,
+      source_id: data.payment_id ?? data.purchase_order_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
       accounting_entity_id: data.accounting_entity_id,
@@ -4328,6 +4326,7 @@ export class AutoEntryService {
    */
   async onApPaymentRegistered(data: {
     ap_id: number;
+    ap_payment_id: number;
     organization_id: number;
     store_id: number;
     amount: number;
@@ -4368,7 +4367,7 @@ export class AutoEntryService {
 
     return this.createAutoEntry({
       source_type: 'ap_payment',
-      source_id: data.ap_id,
+      source_id: data.ap_payment_id ?? data.ap_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
       lines,

@@ -2566,47 +2566,55 @@ export class PurchaseOrdersService {
       throw new NotFoundException('Purchase order not found');
     }
 
-    // Get existing payments total
-    const existingPayments =
-      await this.prisma.purchase_order_payments.aggregate({
-        where: { purchase_order_id: purchaseOrderId },
-        _sum: { amount: true },
-      });
-
-    const totalPaid =
-      Number(existingPayments._sum.amount || 0) + Number(dto.amount);
-    const totalAmount = Number(po.total_amount);
-
-    if (totalPaid > totalAmount) {
-      throw new BadRequestException(
-        'El pago excedería el monto total de la orden',
-      );
-    }
-
     const userId = RequestContextService.getUserId();
 
-    // Create payment record
-    const payment = await this.prisma.purchase_order_payments.create({
-      data: {
-        purchase_order_id: purchaseOrderId,
-        amount: dto.amount,
-        payment_date: new Date(dto.payment_date),
-        payment_method: dto.payment_method,
-        reference: dto.reference,
-        notes: dto.notes,
-        created_by_user_id: userId,
+    // Atomic: validate overpay → create payment row → recalc payment_status.
+    // Mirrors and backfill (Fase 3) MUST run inside the same $transaction so
+    // the helper's SUM() sees the new row before committing — and so a failed
+    // recompute rolls back the payment insert (no half-state on disk).
+    const { payment, paymentStatus } = await this.prisma.$transaction(
+      async (tx) => {
+        // Overpay guard — must run INSIDE the tx so a concurrent registerPayment
+        // can't slip past the check (without the lock two payments summing to
+        // > total_amount would each see the pre-state and both commit).
+        const totalAmount = Number(po.total_amount);
+        const currentAgg = await tx.purchase_order_payments.aggregate({
+          where: { purchase_order_id: purchaseOrderId },
+          _sum: { amount: true },
+        });
+        const projectedTotal =
+          Number(currentAgg._sum.amount || 0) + Number(dto.amount);
+        if (projectedTotal > totalAmount + 0.005) {
+          throw new BadRequestException(
+            'El pago excedería el monto total de la orden',
+          );
+        }
+
+        const created = await tx.purchase_order_payments.create({
+          data: {
+            purchase_order_id: purchaseOrderId,
+            amount: dto.amount,
+            payment_date: new Date(dto.payment_date),
+            payment_method: dto.payment_method,
+            reference: dto.reference,
+            notes: dto.notes,
+            created_by_user_id: userId,
+            source: 'po_modal',
+          },
+        });
+
+        const status = await this.recalculatePaymentStatus(
+          purchaseOrderId,
+          tx,
+        );
+        await tx.purchase_orders.update({
+          where: { id: purchaseOrderId },
+          data: { payment_status: status as any },
+        });
+
+        return { payment: created, paymentStatus: status };
       },
-    });
-
-    // Update payment_status on PO
-    let paymentStatus: 'unpaid' | 'partial' | 'paid' = 'unpaid';
-    if (totalPaid >= totalAmount) paymentStatus = 'paid';
-    else if (totalPaid > 0) paymentStatus = 'partial';
-
-    await this.prisma.purchase_orders.update({
-      where: { id: purchaseOrderId },
-      data: { payment_status: paymentStatus as any },
-    });
+    );
 
     // Audit log
     try {
@@ -2935,5 +2943,41 @@ export class PurchaseOrdersService {
     return this.prisma.purchase_orders.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Canonical helper for `purchase_orders.payment_status`. Single writer.
+   *
+   * Sums ALL payment rows attached to the PO (primary `po_modal` + any mirror
+   * from the AP↔OC bridge in Fase 3 + any advance backfill) and compares to
+   * the gross `total_amount`. Use inside an existing `$transaction` so the
+   * SUM sees uncommitted rows in the same tx; passing the `prisma` client as
+   * `tx` is what makes that work.
+   *
+   * Exported via `as any` on the call site to satisfy the schema enum without
+   * importing the Prisma-generated enum (avoids circular enum imports in
+   * downstream services that may consume this helper in Fase 3).
+   */
+  async recalculatePaymentStatus(
+    purchaseOrderId: number,
+    tx: any,
+  ): Promise<'unpaid' | 'partial' | 'paid'> {
+    const EPS = 0.005;
+    const po = await tx.purchase_orders.findUnique({
+      where: { id: purchaseOrderId },
+      select: { total_amount: true },
+    });
+    if (!po) {
+      throw new NotFoundException('Purchase order not found');
+    }
+    const grossTotal = Number(po.total_amount);
+    const agg = await tx.purchase_order_payments.aggregate({
+      where: { purchase_order_id: purchaseOrderId },
+      _sum: { amount: true },
+    });
+    const totalPaid = Number(agg._sum.amount || 0);
+    if (totalPaid >= grossTotal - EPS) return 'paid';
+    if (totalPaid > EPS) return 'partial';
+    return 'unpaid';
   }
 }

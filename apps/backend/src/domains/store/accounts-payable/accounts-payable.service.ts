@@ -227,6 +227,7 @@ export class AccountsPayableService {
     // 4. Emit event for accounting entry
     this.event_emitter.emit('ap.payment_registered', {
       ap_id: ap.id,
+      ap_payment_id: result.payment.id,
       organization_id: ap.organization_id,
       store_id: ap.store_id,
       supplier_id: ap.supplier_id,
