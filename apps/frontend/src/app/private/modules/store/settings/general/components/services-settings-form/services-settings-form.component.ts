@@ -45,6 +45,12 @@ import {
   styleUrls: ['./services-settings-form.component.scss'],
 })
 export class ServicesSettingsForm {
+  /** Inject the CountryService to load departments + cities for
+   * the País / Departamento / Ciudad selectors. Same service the
+   * ecommerce address-modal uses, so the data and the auth context
+   * match. */
+  private readonly countryService = inject(CountryService);
+
   /**
    * The FormGroup containing the services sub-fields. Exposed as an
    * input signal; the parent's `servicesForm` getter resolves it
