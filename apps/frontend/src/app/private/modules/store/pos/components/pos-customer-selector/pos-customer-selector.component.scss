@@ -71,6 +71,13 @@
   }
 }
 
+@media (max-width: 767px) {
+  .change-customer-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* ── Overview sin cliente: prompt con acciones ──────────────────── */
 .overview-empty {
   display: flex;

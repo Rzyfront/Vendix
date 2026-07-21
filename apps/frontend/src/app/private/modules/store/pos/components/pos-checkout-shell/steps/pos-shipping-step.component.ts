@@ -245,11 +245,11 @@ export class PosShippingStepComponent {
 
   getShippingIcon(type: string): string {
     const iconMap: Record<string, string> = {
-      own_fleet: 'truck',
-      carrier: 'package',
+      own_fleet: 'bike',
+      carrier: 'truck',
       pickup: 'store',
       custom: 'settings',
-      third_party_provider: 'globe',
+      third_party_provider: 'truck',
     };
     return iconMap[type] || 'truck';
   }
