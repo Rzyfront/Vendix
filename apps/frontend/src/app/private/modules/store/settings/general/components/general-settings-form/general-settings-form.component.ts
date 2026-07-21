@@ -121,10 +121,19 @@ export class GeneralSettingsForm implements OnInit {
         if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
           sanitized.industries = ['retail'];
         }
-        // The backend stores the services sub-form as a nested object
-        // under `services: { offer_home_service, local_address: {...} }`.
-        // patchValue handles nested FormGroups by walking the path.
         this.form.patchValue(sanitized, { emitEvent: false });
+
+        // Explicitly set the 'services' sub-form (the patchValue
+        // recursive path can leave the toggle control stale when the
+        // parent re-mounts after navigation; setValue on the nested
+        // FormGroup guarantees the offer_home_service control is
+        // updated to the persisted value).
+        const servicesGroup = this.form.get('services') as FormGroup | null;
+        const servicesValue = (sanitized as any).services;
+        if (servicesGroup && servicesValue) {
+          servicesGroup.patchValue(servicesValue, { emitEvent: false });
+        }
+
         this.modulesHiddenByIndustries.set(
           getModulesHiddenByIndustries(sanitized.industries),
         );
