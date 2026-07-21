@@ -640,6 +640,14 @@
       "sessions": 17,
       "memories": 21,
       "prompts": 0
+    },
+    {
+      "id": "278f5f64",
+      "created_by": "yoner",
+      "created_at": "2026-07-21T23:58:15Z",
+      "sessions": 3,
+      "memories": 9,
+      "prompts": 0
     }
   ]
 }
