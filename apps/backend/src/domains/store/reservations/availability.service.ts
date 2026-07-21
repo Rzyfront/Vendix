@@ -237,16 +237,18 @@ export class AvailabilityService {
 
           for (const slot of timeSlots) {
             // Verificar si este provider ya tiene booking que se superpone con este slot.
-            // Usamos `<=` en AMBOS lados (closed intervals) para que slots adyacentes
-            // sin gap se consideren en colisión. Si el provider tiene un booking
-            // 8:00-8:20, el slot 8:20-8:40 también queda bloqueado porque termina
-            // exactamente cuando empieza — no hay tiempo de setup entre clientes.
+            // Usamos `<` y `>` (strict half-open intervals) — el slot solo se
+            // bloquea si su rango INTERIOR se solapa con el de la reserva.
+            // Slots adyacentes (booking 8:00-8:20 + slot 8:20-8:40) NO se
+            // bloquean: el cliente puede reservar back-to-back si lo desea.
+            // Si quieres buffer entre clientes, configura `buffer_minutes`
+            // en el producto y se aplicará automáticamente.
             const providerBooked = existingBookings.some(
               (b) =>
                 this.formatDate(new Date(b.date)) === dateStr &&
                 b.provider_id === provider.id &&
-                b.start_time <= slot.end_time &&
-                b.end_time >= slot.start_time,
+                b.start_time < slot.end_time &&
+                b.end_time > slot.start_time,
             );
 
             if (providerBooked) {
