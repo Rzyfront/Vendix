@@ -12,6 +12,7 @@ import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 
 /**
  * Step 5 — PurchaseOrdersService.receive() unit tests.
@@ -199,6 +200,21 @@ describe('PurchaseOrdersService.receive()', () => {
         { provide: SettingsService, useValue: mockSettingsService },
         { provide: FiscalScopeService, useValue: mockFiscalScopeService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        // FASE 3 — mock de AccountsPayableService (no-op). El PO service ahora
+        // lo inyecta para el puente PO→AP y backfill. Cada test que active el
+        // camino de pago con CxP puede sobreescribir este mock si necesita.
+        {
+          provide: AccountsPayableService,
+          useValue: {
+            mirrorPoPaymentToAp: jest.fn().mockResolvedValue({ ap_payment_id: 0 }),
+            mirrorApPaymentToPo: jest.fn().mockResolvedValue({ purchase_order_payment_id: 0 }),
+            backfillAdvancePayments: jest.fn().mockResolvedValue(0),
+            findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+            applyPoPaymentToApBalance: jest.fn().mockResolvedValue({ applied: false }),
+            createFromEvent: jest.fn(),
+            upsertPayableForReception: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -489,6 +505,18 @@ describe('PurchaseOrdersService.receive()', () => {
             },
           },
           { provide: EventEmitter2, useValue: mockEventEmitter },
+          {
+            provide: AccountsPayableService,
+            useValue: {
+              mirrorPoPaymentToAp: jest.fn().mockResolvedValue({ ap_payment_id: 0 }),
+              mirrorApPaymentToPo: jest.fn().mockResolvedValue({ purchase_order_payment_id: 0 }),
+              backfillAdvancePayments: jest.fn().mockResolvedValue(0),
+              findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+              applyPoPaymentToApBalance: jest.fn().mockResolvedValue({ applied: false }),
+              createFromEvent: jest.fn(),
+              upsertPayableForReception: jest.fn(),
+            },
+          },
         ],
       }).compile();
 
@@ -833,6 +861,18 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
           },
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: AccountsPayableService,
+          useValue: {
+            mirrorPoPaymentToAp: jest.fn().mockResolvedValue({ ap_payment_id: 0 }),
+            mirrorApPaymentToPo: jest.fn().mockResolvedValue({ purchase_order_payment_id: 0 }),
+            backfillAdvancePayments: jest.fn().mockResolvedValue(0),
+            findPayableForPurchaseOrder: jest.fn().mockResolvedValue(null),
+            applyPoPaymentToApBalance: jest.fn().mockResolvedValue({ applied: false }),
+            createFromEvent: jest.fn(),
+            upsertPayableForReception: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
