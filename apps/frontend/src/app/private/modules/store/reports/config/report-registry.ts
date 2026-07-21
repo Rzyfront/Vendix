@@ -93,6 +93,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'average_order_value', label: 'Ticket Promedio', type: 'currency', icon: 'calculator' },
     ],
     dataEndpoint: 'store/analytics/purchases/summary',
+    exportEndpoint: 'store/analytics/purchases/export',
   },
   {
     id: 'purchase-by-supplier',
@@ -156,6 +157,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'total_helpful_votes', label: 'Votos Utiles', type: 'number', icon: 'thumbs-up' },
     ],
     dataEndpoint: 'store/analytics/reviews/summary',
+    exportEndpoint: 'store/analytics/reviews/export',
   },
 
   // ─── VENTAS (6) ───────────────────────────────────────────────────────────────
@@ -416,6 +418,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'quantity_reserved', label: 'Reservado', type: 'number', icon: 'lock' },
     ],
     dataEndpoint: 'store/analytics/inventory/stock-levels',
+    exportEndpoint: 'store/analytics/inventory/export',
   },
 
   {
@@ -478,6 +481,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'reference_id', label: 'Referencias', type: 'number', icon: 'file-text' },
     ],
     dataEndpoint: 'store/analytics/inventory/movements',
+    exportEndpoint: 'store/analytics/inventory/movements/export',
   },
 
   {
@@ -541,6 +545,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'return_rate', label: 'Tasa Devolucion', type: 'percentage', icon: 'rotate-ccw' },
     ],
     dataEndpoint: 'store/analytics/products/performance',
+    exportEndpoint: 'store/analytics/products/performance/export',
   },
 
   {
@@ -602,6 +607,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'margin', label: 'Margen', type: 'percentage', icon: 'percent' },
     ],
     dataEndpoint: 'store/analytics/products/profitability',
+    exportEndpoint: 'store/analytics/products/profitability/export',
   },
 
   // ─── CLIENTES (3) ─────────────────────────────────────────────────────────────
@@ -641,6 +647,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'average_spend', label: 'Gasto Promedio', type: 'currency', icon: 'dollar-sign' },
     ],
     dataEndpoint: 'store/analytics/customers/summary',
+    exportEndpoint: 'store/analytics/customers/export',
   },
   {
     id: 'customer-acquisition',
@@ -702,6 +709,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'recovered_value', label: 'Valor Recuperado', type: 'currency', icon: 'check-circle' },
     ],
     dataEndpoint: 'store/analytics/customers/abandoned-carts/summary',
+    exportEndpoint: 'store/analytics/customers/abandoned-carts/export',
   },
 
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────
@@ -869,6 +877,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'effective_tax_rate', label: 'Tasa Efectiva', type: 'percentage', icon: 'percent' },
     ],
     dataEndpoint: 'store/analytics/financial/tax-summary',
+    exportEndpoint: 'store/analytics/financial/tax-summary/export',
   },
 
   {
@@ -927,6 +936,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'net_margin', label: 'Margen Neto', type: 'percentage', icon: 'percent' },
     ],
     dataEndpoint: 'store/analytics/financial/profit-loss',
+    exportEndpoint: 'store/analytics/financial/export',
   },
 
   // ─── NÓMINA (3) ───────────────────────────────────────────────────────────────
