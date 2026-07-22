@@ -2,7 +2,7 @@ import { Component, inject, OnInit, computed, signal, DestroyRef, effect, viewCh
 import { FormGroup } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { StoreSettingsService } from './services/store-settings.service';
+import { StoreSettingsService, StoreSettingsRequestOptions } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { DianEmissionStatus } from '../../invoicing/interfaces/invoice.interface';
@@ -267,8 +267,8 @@ export class GeneralSettingsComponent implements OnInit {
     }
   }
 
-  loadSettings() {
-    this.settings_service.getSettings().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+  loadSettings(options: StoreSettingsRequestOptions = {}) {
+    this.settings_service.getSettings(options).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const data = { ...(response.data as StoreSettings) };
         if ((data as any).shipping) {
@@ -445,7 +445,12 @@ export class GeneralSettingsComponent implements OnInit {
           this.isSaving.set(false);
           this.hasUnsavedChanges.set(false);
           this.lastSaved.set(new Date());
-          this.loadSettings();
+          // CRITICAL: forceRefresh: true to bypass the 60s settings cache.
+          // Without this, loadSettings() returns the stale pre-save
+          // response (which lacks `services`), and the form re-mounts
+          // with the address fields empty even though the save
+          // persisted correctly.
+          this.loadSettings({ forceRefresh: true });
         },
         error: (error) => {
           this.isSaving.set(false);

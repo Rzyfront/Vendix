@@ -37,6 +37,7 @@ import {
 import type { PanelUISettings } from '../../../../../../../core/models/store-settings.interface';
 import { CurrencyService } from '../../../../../../../services/currency.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { debounceTime } from 'rxjs';
 
 export interface GeneralSettings {
   // Campos de store_settings (existentes)
@@ -75,6 +76,7 @@ const nonEmptyArray: ValidatorFn = (control) => {
 })
 export class GeneralSettingsForm implements OnInit {
   readonly settings = input.required<GeneralSettings>();
+  readonly services = input<any>();
   readonly settingsChange = output<GeneralSettings>();
 
   readonly panelUi = input<PanelUISettings | undefined>(undefined);
@@ -131,7 +133,7 @@ export class GeneralSettingsForm implements OnInit {
         // FormGroup guarantees the offer_home_service control is
         // updated to the persisted value).
         const servicesGroup = this.form.get('services') as FormGroup | null;
-        const servicesValue = (sanitized as any).services;
+        const servicesValue = this.services();
         if (servicesGroup && servicesValue) {
           servicesGroup.patchValue(servicesValue, { emitEvent: false });
         }
@@ -145,11 +147,22 @@ export class GeneralSettingsForm implements OnInit {
     // Propagate changes from the services sub-form up to the parent's
     // settingsChange output. The nested FormGroup's valueChanges does
     // NOT bubble automatically to the FormGroup, so we listen here.
-    this.servicesForm.valueChanges.subscribe(() => {
-      if (this.form.valid) {
-        this.settingsChange.emit(this.form.value);
-      }
-    });
+    //
+    // debounceTime(50) is critical: without it, every keystroke
+    // triggered a `settingsChange.emit` → settings signal update in
+    // the parent facade → `effect(() => form.patchValue(...))` cycle
+    // in THIS component, which reset the input on every keystroke
+    // and made typing feel laggy. With 50ms debounce, the emit only
+    // fires when the user pauses typing — the cycle breaks and the
+    // input stays responsive. Lower than 300ms so that "Guardar
+    // Cambios" sees fresh data if clicked right after a keystroke.
+    this.servicesForm.valueChanges
+      .pipe(debounceTime(50))
+      .subscribe(() => {
+        if (this.form.valid) {
+          this.settingsChange.emit(this.form.value);
+        }
+      });
   }
 
   form: FormGroup = new FormGroup({

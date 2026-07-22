@@ -33,7 +33,7 @@
             <h2 class="section-title">Identidad y General</h2>
           </div>
           <div class="section-body">
-            <app-general-settings-form #generalForm [settings]="settings().general"
+            <app-general-settings-form #generalForm [settings]="settings().general" [services]="settings().services"
               [panelUi]="settings().panel_ui"
               (settingsChange)="onSectionChange('general', $event)"
               (panelUiChange)="onSectionChange('panel_ui', $event)" />
