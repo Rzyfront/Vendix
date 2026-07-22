@@ -14,7 +14,7 @@
  * Pattern idéntico a PromotionsListScreen.
  */
 import { useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { View, FlatList, RefreshControl, Pressable, Text, StyleSheet } from 'react-native';
 import {
   useQuery,
   useMutation,
@@ -36,7 +36,8 @@ import { CuponStatsCards } from '@/features/store/components/coupon-stats-cards'
 import { CuponCard } from '@/features/store/components/coupon-card';
 import { CuponUpsertModal } from '@/features/store/components/coupon-upsert-modal';
 import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
-import { spacing } from '@/shared/theme';
+import { spacing, colors, borderRadius, typography } from '@/shared/theme';
+import { Icon } from '@/shared/components/icon/icon';
 
 export default function CuponsListScreen() {
   const queryClient = useQueryClient();
@@ -169,6 +170,17 @@ export default function CuponsListScreen() {
                 placeholder={COUPON_LABELS.ctaSearch}
                 debounceMs={300}
               />
+              <Pressable
+                onPress={handleCreate}
+                accessibilityLabel={COUPON_LABELS.ctaNew}
+                style={({ pressed }) => [
+                  styles.createBtn,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Icon name="plus" size={18} color={colors.background} />
+                <Text style={styles.createBtnText}>{COUPON_LABELS.ctaNew}</Text>
+              </Pressable>
             </View>
           </View>
         }
@@ -238,5 +250,22 @@ const styles = StyleSheet.create({
   searchRow: {
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  createBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
+  },
+  createBtnText: {
+    color: colors.background,
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
   },
 });
