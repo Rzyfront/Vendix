@@ -116,6 +116,3 @@ export const OrgAuditService = {
     );
   },
 };
-
-// Suppress unused warnings de tipos solo consumidos en service.
-export type { AuditLog };

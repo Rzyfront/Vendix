@@ -377,7 +377,7 @@ export default function SessionsScreen() {
         title="Detalle de sesión"
         size="md"
         footer={
-          isSessionActive(selected ?? undefined as any) ? (
+          selected && isSessionActive(selected) ? (
             <View style={styles.modalActions}>
               <Pressable
                 style={[styles.modalBtn, styles.modalBtnSecondary]}

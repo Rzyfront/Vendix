@@ -17,7 +17,6 @@ import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-r
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Icon } from '@/shared/components/icon/icon';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import {
   OptionsDropdown,
   type FilterConfig,
@@ -36,7 +35,6 @@ import {
   getActionBadgeVariant,
   getActionColor,
   getActionIcon,
-  getResourceIcon,
 } from '@/features/org/components/audit-formatters';
 import type {
   AuditLogAction,
@@ -157,8 +155,6 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
 interface ListHeaderProps {
   stats: AuditStats | null | undefined;
   count: number;
-  search: string;
-  onSearchChange: (v: string) => void;
   onActionsPress: () => void;
   filterConfigs: FilterConfig[];
   filterValues: FilterValues;
@@ -170,8 +166,6 @@ interface ListHeaderProps {
 function ListHeader({
   stats,
   count,
-  search,
-  onSearchChange,
   onActionsPress,
   filterConfigs,
   filterValues,
@@ -195,19 +189,13 @@ function ListHeader({
           </Text>
         </View>
 
-        {/* Search + 2 icon-only triggers en UNA sola línea.
+        {/* 2 icon-only triggers en UNA sola línea.
             Espejo del `<app-options-dropdown>` web mobile responsive
             (max-width: 1023px): cada trigger es 40x40, primary border,
-            primary icon. */}
+            primary icon. NO hay SearchBar — el backend audit.controller
+            no acepta @Query('search') y la web tampoco lo expone
+            (paridad 1:1 confirmada). */}
         <View style={styles.searchRow}>
-          <View style={{ flex: 1 }}>
-            <SearchBar
-              value={search}
-              onChangeText={onSearchChange}
-              placeholder="Buscar registros..."
-              style={styles.searchInput}
-            />
-          </View>
           {/* Actions trigger (+ button) — abre modal con Actualizar/Exportar */}
           <Pressable
             style={({ pressed }) => [styles.optionsTrigger, pressed && { opacity: 0.85 }]}
@@ -239,7 +227,6 @@ export default function AuditLogsScreen() {
   const queryClient = useQueryClient();
 
   const [filters, setFilters] = useState<LocalFilters>(DEFAULT_FILTERS);
-  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<AuditLog | null>(null);
@@ -250,18 +237,17 @@ export default function AuditLogsScreen() {
     () => ({
       offset: (page - 1) * PAGE_SIZE,
       limit: PAGE_SIZE,
-      ...(search ? { search } : {}),
       ...(filters.resource ? { resource: filters.resource as AuditLogResource } : {}),
       ...(filters.action ? { action: filters.action as AuditLogAction } : {}),
       ...(filters.from ? { from_date: filters.from } : {}),
       ...(filters.to ? { to_date: filters.to } : {}),
     }),
-    [page, search, filters],
+    [page, filters],
   );
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['org-audit-logs', queryParams],
-    queryFn: () => OrgAuditService.listLogs(queryParams as any),
+    queryFn: () => OrgAuditService.listLogs(queryParams),
   });
 
   const { data: stats } = useQuery({
@@ -275,7 +261,7 @@ export default function AuditLogsScreen() {
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const hasFilters =
-    !!search || !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
+    !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
   const activeFilterCount = !!(filters.resource || filters.action || filters.from || filters.to);
 
   // ───── Filter configs (espejo del `filterConfigs` web) ─────────────────
@@ -390,14 +376,8 @@ export default function AuditLogsScreen() {
     setRefreshing(false);
   };
 
-  const handleSearchChange = (v: string) => {
-    setSearch(v);
-    setPage(1);
-  };
-
   const handleClearAll = () => {
     handleClearAllFilters();
-    setSearch('');
   };
 
   return (
@@ -409,8 +389,6 @@ export default function AuditLogsScreen() {
           <ListHeader
             stats={stats}
             count={total}
-            search={search}
-            onSearchChange={handleSearchChange}
             onActionsPress={() => setActionsModalOpen(true)}
             filterConfigs={filterConfigs}
             filterValues={filterValues}
@@ -524,7 +502,7 @@ export default function AuditLogsScreen() {
             }}
           >
             <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
-              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
+              <Icon name="refresh" size={16} color={colorScales.gray[700]} />
             </View>
             <View style={styles.actionsModalTextWrap}>
               <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
@@ -608,15 +586,8 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: spacing[2],
-  },
-  searchInput: {
-    width: '100%',
-    height: 40,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    borderRadius: borderRadius.lg,
   },
   // Espejo del `.options-dropdown-trigger` web mobile responsive (40x40,
   // primary border, primary icon, 12px radius).

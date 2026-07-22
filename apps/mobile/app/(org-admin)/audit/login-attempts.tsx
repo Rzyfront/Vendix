@@ -248,7 +248,7 @@ export default function LoginAttemptsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetch()]);
+    await refetch();
     setRefreshing(false);
   };
 
