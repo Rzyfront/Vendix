@@ -167,7 +167,7 @@ const OverviewScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const dateRange = useMemo(() => presetToDateRange(preset), [preset]);
 
-  const { data: summary, isLoading, isError, refetch } = useQuery({
+  const { data: summary, isLoading, refetch } = useQuery({
     queryKey: ['analytics-overview', preset],
     queryFn: () => AnalyticsDetailService.getOverviewSummary(dateRange),
   });
@@ -177,10 +177,6 @@ const OverviewScreen = () => {
     await refetch();
     setRefreshing(false);
   }, [refetch]);
-
-  if (isError) {
-    toastError('Error cargando analíticas');
-  }
 
   const expenseRatio = summary ? summary.total_revenue > 0 ? summary.total_expenses / summary.total_revenue : 0 : 0;
   const profitMargin = summary?.profit_margin ?? 0;
@@ -210,6 +206,26 @@ const OverviewScreen = () => {
     { label: 'Financiero', icon: 'dollar-sign' as const, route: '/analytics/financial', bg: colorScales.blue[50], border: colorScales.blue[500], text: colorScales.blue[700] },
     { label: 'Productos', icon: 'bar-chart' as const, route: '/analytics/products', bg: colorScales.gray[100], border: colorScales.gray[500], text: colorScales.gray[700] },
   ];
+
+  // Watch individual section queries to surface errores como friendly empty
+  // states (no son crashes; antes un solo `isError` colapsaba toda la pantalla).
+  const salesQ = useQuery({ queryKey: ['analytics-sales', preset], queryFn: () => AnalyticsDetailService.getSalesAnalytics(dateRange), retry: false });
+  const inventoryQ = useQuery({ queryKey: ['analytics-inventory', preset], queryFn: () => AnalyticsDetailService.getInventoryAnalytics(dateRange), retry: false });
+  const financialQ = useQuery({ queryKey: ['analytics-financial', preset], queryFn: () => AnalyticsDetailService.getFinancialAnalytics(dateRange), retry: false });
+  const productsQ = useQuery({ queryKey: ['analytics-products', preset], queryFn: () => AnalyticsDetailService.getProductsAnalytics(dateRange), retry: false });
+  const anyError = salesQ.isError || inventoryQ.isError || financialQ.isError || productsQ.isError;
+
+  if (anyError) {
+    // Antes: un solo toast genérico colapsaba toda la pantalla.
+    // Ahora: cada sección consulta su propio endpoint y muestra
+    // un EmptyState sin tirar el resto del dashboard.
+    const failed: string[] = [];
+    if (salesQ.isError) failed.push('Ventas');
+    if (inventoryQ.isError) failed.push('Inventario');
+    if (financialQ.isError) failed.push('Financiero');
+    if (productsQ.isError) failed.push('Productos');
+    toastError(`Sin datos: ${failed.join(', ')}`);
+  }
 
   return (
     <View style={styles.root}>
