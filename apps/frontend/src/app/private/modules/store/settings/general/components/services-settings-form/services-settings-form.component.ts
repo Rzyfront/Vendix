@@ -4,6 +4,7 @@ import {
   input,
   effect,
   signal,
+  computed,
   DestroyRef,
   inject,
 } from '@angular/core';
@@ -23,7 +24,7 @@ import {
   Country,
   Department,
   City,
-} from '../../../../../services/country.service';
+} from '../../../../../../../services/country.service';
 
 /**
  * ServicesSettingsForm
@@ -77,8 +78,26 @@ export class ServicesSettingsForm {
   private readonly offerHomeServiceValue = signal<boolean | null>(null);
 
   /** Countries + departments + cities for the local-address selectors. */
+  readonly countries = signal<Country[]>(this.countryService.getCountries());
   readonly departments = signal<Department[]>([]);
   readonly cities = signal<City[]>([]);
+
+  /**
+   * SelectorOption[] derivations for the <app-selector> bindings.
+   * The form's country_code / state_province / city controls store
+   * the human-readable `name` (not the `id`), so we map `value` to
+   * the same field used as label. (Swap these mappings if the parent
+   * ever migrates to id-stored values.)
+   */
+  readonly countryOptions = computed<SelectorOption[]>(() =>
+    this.countries().map((c) => ({ value: c.code, label: c.name })),
+  );
+  readonly departmentOptions = computed<SelectorOption[]>(() =>
+    this.departments().map((d) => ({ value: d.name, label: d.name })),
+  );
+  readonly cityOptions = computed<SelectorOption[]>(() =>
+    this.cities().map((c) => ({ value: c.name, label: c.name })),
+  );
 
   /**
    * Typed accessor for the offer_home_service FormControl.
@@ -123,10 +142,15 @@ export class ServicesSettingsForm {
     this.countryService.getDepartments().then((d) => this.departments.set(d));
 
     // Reload cities whenever the user picks a department.
+    // NOTE: state_province lives at root.local_address.state_province,
+    // not at root.state_province. Looking it up on `root` directly
+    // returns null and the subscription is never created.
     effect((onCleanup) => {
       const root = this.form();
       if (!root) return;
-      const sub = root
+      const localAddress = root.get('local_address') as FormGroup | null;
+      if (!localAddress) return;
+      const sub = localAddress
         .get('state_province')
         ?.valueChanges.subscribe((depName: string) => {
           const dep = this.departments().find((d) => d.name === depName);
