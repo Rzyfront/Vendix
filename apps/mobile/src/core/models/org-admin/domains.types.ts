@@ -139,13 +139,23 @@ export interface DomainStats {
 }
 
 export interface VerifyDomainResult {
+  hostname: string;
+  status_before: string;
+  status_after: string;
+  ssl_status: string;
   verified: boolean;
-  checks: {
-    type: 'cname' | 'a' | 'txt';
-    expected?: string;
-    actual?: string;
-    pass: boolean;
-  }[];
+  next_action?: string;
+  /**
+   * Map de checks DNS ejecutados en la verificación. La clave es el nombre del
+   * check (ej. `cname_root`, `a_record`, `txt_verification`) y el valor es
+   * arbitrario a nivel DTO (el backend lo trata como `Record<string, any>`).
+   * No se itera desde la UI actual — se mantiene el shape del backend para
+   * evitar un `Object is possibly undefined` y permitir futuras vistas de detalle.
+   */
+  checks: Record<string, unknown>;
+  suggested_fixes?: string[];
+  timestamp: string;
+  error_code?: string;
   message?: string;
 }
 
