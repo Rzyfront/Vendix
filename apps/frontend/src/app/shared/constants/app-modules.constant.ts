@@ -425,8 +425,8 @@ export const APP_MODULES: {
     },
 
     // Memberships (Membership Suite). Parent module hidden by
-    // `INDUSTRY_HIDDEN_MODULES` for retail/restaurant/manufacturing;
-    // visible only when the store's industry includes `gym` or `service`.
+    // `INDUSTRY_HIDDEN_MODULES` for retail/restaurant/manufacturing/service;
+    // visible only when the store's industry includes `gym`.
     {
       key: 'memberships',
       label: 'Zona Fit',
