@@ -68,16 +68,16 @@ export default function SuperAdminLayout() {
   const title = routeTitles[currentSegment] || 'Vendix';
   const parent = routeBreadcrumbParent[currentSegment];
   const currentLabel = routeBreadcrumbCurrent[currentSegment];
+  // Paridad con web `BreadcrumbService.routes`: "parent / current" como string
+  // se pasa por `breadcrumb` (que sí renderiza AdminShell → PosHeader).
+  // Los props `parentIcon`/`currentIcon` aún no se renderizan — PosHeader
+  // no los soporta. TODO cuando se implemente el breadcrumb con iconos.
+  const breadcrumb = parent
+    ? `${parent.label} / ${currentLabel}`
+    : currentLabel;
 
   return (
-    <AdminShell
-      title={title}
-      parentLabel={parent?.label}
-      parentIcon={parent?.icon}
-      currentLabel={currentLabel}
-      currentIcon="home"
-      variant="super"
-    >
+    <AdminShell title={title} breadcrumb={breadcrumb} variant="super">
       <Slot />
     </AdminShell>
   );
