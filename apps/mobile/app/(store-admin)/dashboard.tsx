@@ -353,6 +353,8 @@ const DashboardScreen = () => {
     { label: 'Gastos', icon: 'credit-card', route: '/expenses' },
     { label: 'Clientes', icon: 'users', route: '/customers' },
     { label: 'Compras', icon: 'shopping-bag', route: '/inventory/pop' },
+    { label: 'POS', icon: 'shopping-bag', route: '/pos' },
+    { label: 'Marketing', icon: 'megaphone', route: '/marketing/promotions' },
   ];
 
   if (summaryError) {
