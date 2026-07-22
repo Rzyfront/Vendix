@@ -62,10 +62,26 @@ function signFor(item: StockMovement): '+' | '-' | '' {
   return '';
 }
 
+/**
+ * Normaliza el signo de `quantity` para que los `signFor`/`quantityToneFor`
+ * no dependan del signo crudo del backend. Los tipos `sale`/`return` pueden
+ * llegar con signo invertido entre la vista web y mobile; la convención
+ * canónica es: entrantes positivos, salientes negativos.
+ */
+function normalizeQuantity(item: StockMovement): StockMovement {
+  const inbound = MOVEMENT_INBOUND_TYPES.has(item.movement_type);
+  const outbound = MOVEMENT_OUTBOUND_TYPES.has(item.movement_type);
+  let normalized = item.quantity;
+  if (inbound && item.quantity < 0) normalized = Math.abs(item.quantity);
+  if (outbound && item.quantity > 0) normalized = -Math.abs(item.quantity);
+  return { ...item, quantity: normalized };
+}
+
 function quantityToneFor(item: StockMovement): 'success' | 'error' | 'default' {
+  const normalized = normalizeQuantity(item).quantity;
   if (MOVEMENT_INBOUND_TYPES.has(item.movement_type)) return 'success';
   if (MOVEMENT_OUTBOUND_TYPES.has(item.movement_type)) return 'error';
-  if (item.movement_type === 'adjustment') return item.quantity < 0 ? 'error' : 'success';
+  if (item.movement_type === 'adjustment') return normalized < 0 ? 'error' : 'success';
   return 'default';
 }
 
@@ -240,8 +256,9 @@ const MovementCard = ({
 }) => {
   const variant = TYPE_VARIANT[item.movement_type] ?? 'default';
   const label = MOVEMENT_TYPE_LABELS[item.movement_type] ?? item.movement_type;
-  const sign = signFor(item);
-  const absQty = Math.abs(item.quantity);
+  const normalized = normalizeQuantity(item);
+  const sign = signFor(normalized);
+  const absQty = Math.abs(normalized.quantity);
 
   return (
     <View style={styles.movementCard}>
