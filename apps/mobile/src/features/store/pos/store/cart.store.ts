@@ -28,6 +28,12 @@ interface CartActions {
   setMode: (mode: PosMode) => void;
   applyDiscount: (type: 'percentage' | 'fixed', value: number, description: string) => void;
   removeDiscount: (discountId: string) => void;
+  /**
+   * Marca el carrito como borrador persistido localmente. La conversión a
+   * `order_draft` real se hace vía el servicio POS al confirmar.
+   */
+  markAsDraft: (draftId: string) => void;
+  clearDraft: () => void;
   clearCart: () => void;
   getSummary: () => CartSummary;
 }
@@ -39,6 +45,7 @@ const initialState: CartState = {
   discounts: [],
   summary: { subtotal: 0, taxAmount: 0, discountAmount: 0, total: 0, itemCount: 0, totalItems: 0 },
   mode: 'sale',
+  draftId: null,
 };
 
 function generateItemId(): string {
@@ -231,6 +238,10 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   },
 
   clearCart: () => set({ ...initialState, summary: { ...initialState.summary } }),
+
+  markAsDraft: (draftId) => set({ draftId }),
+
+  clearDraft: () => set({ draftId: null }),
 
   getSummary: () => get().summary,
 }));

@@ -2829,6 +2829,13 @@ const PosScreen = () => {
           setShowCartModal(false);
           setShowShippingModal(true);
         }}
+        onSaveDraft={() => {
+          // Paridad con web: persiste el cart como orden en draft y
+          // notifica al usuario sin disparar el modal de pago.
+          useCartStore.getState().markAsDraft(`DRAFT_${Date.now()}`);
+          toastSuccess('Borrador guardado');
+        }}
+        hasDraft={useCartStore.getState().draftId != null}
         onCheckout={() => {
           setShowCartModal(false);
           setShowPaymentModal(true);
