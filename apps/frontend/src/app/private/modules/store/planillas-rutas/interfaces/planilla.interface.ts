@@ -2,7 +2,6 @@ export type DispatchRouteStatus =
   | 'draft'
   | 'dispatched'
   | 'in_transit'
-  | 'settling'
   | 'closed'
   | 'voided';
 
@@ -214,6 +213,48 @@ export interface PaginatedDispatchRoutesResponse {
   pagination: { total: number; page: number; limit: number; totalPages: number };
 }
 
+// ============================================================================
+// Dispatch monitor (GET /store/dispatch-routes/monitor)
+// ============================================================================
+
+/**
+ * One row of the shipping mini-P&L monitor. Mirrors EXACTLY the backend
+ * `data.data[]` shape returned by `GET /store/dispatch-routes/monitor`.
+ *
+ * The four economic fields are pre-aggregated by the backend as plain numbers:
+ * - `recaudo`         — cash collected on the route (COD).
+ * - `ingreso_flete`   — freight revenue charged to the customer.
+ * - `costo_transporte`— transport cost incurred (own fleet or external carrier).
+ * - `margen_flete`    — `ingreso_flete - costo_transporte` (can be NEGATIVE).
+ *
+ * `ejecutor` is the human-readable executor label (driver / carrier) or null,
+ * and `estado_liquidacion` reflects whether the route freight is settled.
+ * The endpoint accepts only `page` / `limit` (no `search`).
+ */
+export interface DispatchRouteMonitorRow {
+  id: number;
+  route_number: string;
+  store_id: number;
+  status: DispatchRouteStatus;
+  planned_date: string;
+  closed_at: string | null;
+  shipping_method: { id: number; name: string } | null;
+  external_carrier_supplier_id: number | null;
+  vehicle_id: number | null;
+  recaudo: number;
+  ingreso_flete: number;
+  costo_transporte: number;
+  margen_flete: number;
+  ejecutor: string | null;
+  estado_liquidacion: 'paid' | 'pending';
+}
+
+/** `GET /store/dispatch-routes/monitor` → unwrapped `data`. */
+export interface PaginatedMonitorResponse {
+  data: DispatchRouteMonitorRow[];
+  pagination: { total: number; page: number; limit: number; totalPages: number };
+}
+
 export interface SettleStopDto {
   result: DispatchRouteStopResult;
   collected_amount?: number;
@@ -231,6 +272,20 @@ export interface CreateStopDto {
   is_extra_route?: boolean;
 }
 
+/**
+ * One stop APPENDED to an already-existing route via `POST /:id/stops`.
+ *
+ * Unlike `CreateStopDto` (used at route creation, where the operator sets the
+ * visiting order), `stop_sequence` is OPTIONAL here: when omitted the backend
+ * appends the stop after the route's current max sequence (see
+ * `AddStopItemDto` / `addStops()` on the backend). `CreateStopDto` is still
+ * assignable to this type, so existing callers passing a full stop keep working.
+ */
+export interface AddStopDto {
+  dispatch_note_id: number;
+  stop_sequence?: number;
+}
+
 export interface CreateDispatchRouteDto {
   route_code?: string;
   vehicle_id?: number;
@@ -244,6 +299,14 @@ export interface CreateDispatchRouteDto {
   currency?: string;
   notes?: string;
   stops: CreateStopDto[];
+  /**
+   * Método de envío elegido para la ruta. Dispara el auto-config de ejecutor
+   * (vehículo/conductor/carrier) en el backend a partir de la política del
+   * método. Plan Despacho Economía — FASE 3 paso 12.
+   */
+  shipping_method_id?: number;
+  /** Proveedor transportador externo (tercero de la CxP — FASE 5). */
+  external_carrier_supplier_id?: number;
 }
 
 export interface CloseDispatchRouteDto {
@@ -298,6 +361,10 @@ export interface MapStopUnlocated {
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id of the backing dispatch note; when present the UI offers "Fijar en mapa". */
+  dispatchNoteId?: number | null;
+  /** Raw customer_address snapshot (AddressPayload | null) from the dispatch note. */
+  customerAddress?: any | null;
 }
 
 /**

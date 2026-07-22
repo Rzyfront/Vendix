@@ -4,6 +4,7 @@ import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
+  AddStopDto,
   CloseDispatchRouteDto,
   ConfirmRouteSheetDto,
   ConfirmRouteSheetResult,
@@ -15,6 +16,7 @@ import {
   DispatchRouteStop,
   MapStopsResponse,
   PaginatedDispatchRoutesResponse,
+  PaginatedMonitorResponse,
   ReleaseStopDto,
   ReorderStopEntry,
   RouteSheetMatchResult,
@@ -43,6 +45,30 @@ export class PlanillasRutasService {
       .get<any>(`${this.apiUrl}/store/dispatch-routes?${params.toString()}`)
       .pipe(
         map((r) => r.data as PaginatedDispatchRoutesResponse),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Fetches the shipping mini-P&L monitor slice (recaudo, freight revenue,
+   * transport cost, freight margin and settlement status per route). Same
+   * unwrap pattern as the other reads — `ResponseService` wraps the body as
+   * `{ success, message, data: { data, pagination } }`, so we `map(r => r.data)`.
+   * `GET /store/dispatch-routes/monitor` accepts only `page` / `limit`.
+   */
+  getMonitor(
+    query: { page?: number; limit?: number } = {},
+  ): Observable<PaginatedMonitorResponse> {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) {
+        params.append(k, String(v));
+      }
+    });
+    return this.http
+      .get<any>(`${this.apiUrl}/store/dispatch-routes/monitor?${params.toString()}`)
+      .pipe(
+        map((r) => r.data as PaginatedMonitorResponse),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }
@@ -123,10 +149,12 @@ export class PlanillasRutasService {
    * Append stops (dispatch notes) to an existing route.
    * `POST /store/dispatch-routes/:id/stops`.
    * Used by the "Generar Remisión" wizard when assigning a freshly-created
-   * dispatch note to an already-existing route. The backend de-duplicates and
-   * appends to the tail of the stop sequence.
+   * dispatch note to an already-existing route, and by the "Agregar remisiones"
+   * modal on the planilla detail. The backend de-duplicates and appends to the
+   * tail of the stop sequence, so callers may omit `stop_sequence`
+   * (`AddStopDto`); `CreateStopDto` is still assignable for legacy callers.
    */
-  addStops(routeId: number, dto: { stops: CreateStopDto[] }): Observable<DispatchRouteStop[]> {
+  addStops(routeId: number, dto: { stops: AddStopDto[] }): Observable<DispatchRouteStop[]> {
     return this.http
       .post<any>(`${this.apiUrl}/store/dispatch-routes/${routeId}/stops`, dto)
       .pipe(

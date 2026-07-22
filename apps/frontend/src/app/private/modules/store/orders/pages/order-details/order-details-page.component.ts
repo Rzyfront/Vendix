@@ -9,7 +9,9 @@ import { switchMap } from 'rxjs/operators';
 import {
   StoreOrdersService,
   CreateAddressPayload,
+  UpdateAddressPayload,
 } from '../../services/store-orders.service';
+import { AddressPayload } from '../../../../../../shared/components';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
@@ -35,7 +37,7 @@ import {
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
-import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
+import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent, type PaymentSubmit } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -59,6 +61,10 @@ import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import {
+  RepartosService,
+  RepartosApiError,
+} from '../../../../store-delivery/services/repartos.service';
 import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
 
 export interface LifecycleStep {
@@ -185,6 +191,17 @@ export class OrderDetailsPageComponent {
   showShippingAddressModal = signal(false);
   /** True mientras se persiste la dirección (POST address + PATCH order). */
   savingShippingAddress = signal(false);
+  /**
+   * ID de la dirección en edición. `null` = modo crear (POST). No-null = modo
+   * editar (`PATCH /store/addresses/:id`). Alimenta el binding `[addressId]`
+   * del modal y disambigua el output a escuchar.
+   */
+  editingAddressId = signal<number | null>(null);
+  /**
+   * Dirección existente mapeada a `AddressPayload` para prefill el modal en
+   * modo editar. `null` en modo crear.
+   */
+  editingInitialAddress = signal<AddressPayload | null>(null);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -574,6 +591,23 @@ export class OrderDetailsPageComponent {
     return !this.isKitchenOrder() && delivery !== 'direct_delivery';
   });
 
+  /**
+   * True only when the order carries an ONLINE payment still awaiting
+   * confirmation (typical ecommerce Wompi/online flow: money not yet captured).
+   * A contra-entrega (COD) order has `processing_mode === 'ON_DELIVERY'` (or no
+   * payment row at all) and therefore returns false — its dispatch is a normal
+   * action, not a "ship without confirming payment" risk. This is the single
+   * structural criterion that gates the dispatch warning UI in
+   * `pending_payment`.
+   */
+  readonly hasPendingOnlinePayment = computed<boolean>(() =>
+    (this.order()?.payments ?? []).some(
+      (p) =>
+        p.state === 'pending' &&
+        p.store_payment_method?.system_payment_method?.processing_mode === 'ONLINE',
+    ),
+  );
+
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
@@ -626,28 +660,41 @@ export class OrderDetailsPageComponent {
         actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
         break;
 
-      case 'pending_payment':
-        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
-        actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
+      case 'pending_payment': {
+        // Only an ONLINE payment pending confirmation (ecommerce) is a real
+        // "money not captured yet" risk. A contra-entrega (COD) — or an order
+        // with no online payment — collects on delivery by design, so its
+        // dispatch is a normal action with NO warning banner/alert.
+        const hasPendingOnline = this.hasPendingOnlinePayment();
 
-        // COD (contra-entrega): dispatching is allowed BEFORE the payment is
-        // confirmed so the route can carry the order and collect on delivery.
+        actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
+        if (hasPendingOnline) {
+          actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
+        }
+
+        // Dispatch label/variant: warning only when an ONLINE payment is still
+        // pending. For COD / no online payment, dispatch is a normal primary
+        // action ("Despachar Orden").
+        const dispatchLabel = hasPendingOnline ? 'Despachar sin confirmar pago' : 'Despachar Orden';
+        const dispatchVariant: OrderActionConfig['variant'] = hasPendingOnline ? 'warning' : 'primary';
+
+        // Dispatching is allowed BEFORE the payment is confirmed so the route
+        // can carry the order (COD collects on delivery; online still uncaptured).
         if (this.canGenerateRemision()) {
-          // Unified entry: one button → con/sin-remisión chooser. Both paths
-          // ship the order without confirming payment (collect on delivery).
+          // Unified entry: one button → con/sin-remisión chooser.
           actions.push({
             id: 'dispatch-order',
-            label: 'Despachar sin confirmar pago',
+            label: dispatchLabel,
             icon: 'truck',
-            variant: 'warning',
+            variant: dispatchVariant,
           });
         } else if (isShipping) {
-          // direct_delivery: no remisión; manual ship without confirming payment.
+          // direct_delivery: no remisión; manual ship.
           actions.push({
             id: 'manual-ship',
-            label: 'Despachar sin confirmar pago',
+            label: dispatchLabel,
             icon: 'truck',
-            variant: 'warning',
+            variant: dispatchVariant,
           });
         } else if (isPickup) {
           // Pickup: can mark "ready to pick up" without payment (confirm dialog)
@@ -671,6 +718,7 @@ export class OrderDetailsPageComponent {
           if (infoIdx !== -1) actions.splice(infoIdx, 1);
         }
         break;
+      }
 
       case 'processing':
         if (this.isKitchenOrder()) {
@@ -1015,6 +1063,8 @@ export class OrderDetailsPageComponent {
   private sanitizer = inject(DomSanitizer);
   // Bug 4 — traceability order → dispatch note → route.
   private dispatchNotesService = inject(DispatchNotesService);
+  // Fase F8 — publicar la orden al pool de reparto (Vendix Repartos).
+  private repartosService = inject(RepartosService);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -1271,11 +1321,36 @@ export class OrderDetailsPageComponent {
     this.showPayModal.set(true);
   }
 
-  onPaymentSubmitted(dto: PayOrderDto): void {
+  onPaymentSubmitted(submit: PaymentSubmit): void {
     if (!this.orderId) return;
+
+    // Map the collector's normalized submit → PayOrderDto. A null method id would
+    // mean a manual method, which this order context never enables.
+    if (submit.storePaymentMethodId == null) {
+      this.toastService.error('Selecciona un método de pago válido');
+      return;
+    }
+
+    const isCredit = this.isCreditOrder();
+
+    const dto: PayOrderDto = {
+      store_payment_method_id: submit.storePaymentMethodId,
+      payment_type: submit.methodType === 'wompi' ? 'online' : 'direct',
+      ...(submit.amountReceived != null ? { amount_received: submit.amountReceived } : {}),
+      ...(submit.reference ? { payment_reference: submit.reference } : {}),
+    };
+
+    // Credit abono: carry the amount (override ?? remaining balance) and, when the
+    // operator picked one, the target installment. `flow/pay` ignores `amount`
+    // (it charges the full order total), so only attach it for the credit path.
+    if (isCredit) {
+      dto.amount = submit.amount;
+      if (submit.installmentId != null) dto.installment_id = submit.installmentId;
+    }
+
     this.isProcessingAction.set(true);
 
-    const request$ = this.isCreditOrder()
+    const request$ = isCredit
       ? this.ordersService.flowCreditPayment(this.orderId, dto)
       : this.ordersService.flowPayOrder(this.orderId, dto);
 
@@ -1397,7 +1472,78 @@ export class OrderDetailsPageComponent {
    */
   promptAddShippingAddress(): void {
     if (!this.order()) return;
+    // Reset a modo crear: sin addressId, sin prefill.
+    this.editingAddressId.set(null);
+    this.editingInitialAddress.set(null);
     this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Abre el modal de dirección en modo **editar** a partir de la dirección de
+   * envío ya asignada a la orden. Mapea la relación
+   * `addresses_orders_shipping_address_idToaddresses` (claves Prisma:
+   * `address_line1`, `state_province`, `country_code`, `postal_code`,
+   * `phone_number`, `latitude`, `longitude` — Decimal llega como string|number)
+   * a `AddressPayload` para prefill el formulario hijo.
+   */
+  promptEditShippingAddress(addr: {
+    id?: number | string;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state_province?: string | null;
+    country_code?: string | null;
+    postal_code?: string | null;
+    phone_number?: string | null;
+    latitude?: string | number | null;
+    longitude?: string | number | null;
+  }): void {
+    const id = addr.id != null ? Number(addr.id) : null;
+    if (id == null || isNaN(id)) return;
+    const lat = addr.latitude != null ? Number(addr.latitude) : null;
+    const lng = addr.longitude != null ? Number(addr.longitude) : null;
+    this.editingAddressId.set(id);
+    this.editingInitialAddress.set({
+      address_line1: addr.address_line1 ?? null,
+      address_line2: addr.address_line2 ?? null,
+      city: addr.city ?? null,
+      state_province: addr.state_province ?? null,
+      country_code: addr.country_code ?? null,
+      postal_code: addr.postal_code ?? null,
+      phone_number: addr.phone_number ?? null,
+      latitude: lat != null && !isNaN(lat) ? lat : null,
+      longitude: lng != null && !isNaN(lng) ? lng : null,
+    });
+    this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Persiste la edición de la dirección de envío: `PATCH /store/addresses/:id`
+   * con el payload mapeado, y refretea la orden para que el detalle read-only
+   * refleje los cambios. A diferencia del modo crear, NO hace
+   * `PATCH /store/orders/:id` (la relación ya existe — solo mutamos la address).
+   */
+  onShippingAddressEdit(event: { addressId: number; payload: UpdateAddressPayload }): void {
+    const order = this.order();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.ordersService
+      .updateAddress(event.addressId, event.payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.refreshOrder();
+          this.toastService.success('Dirección de entrega actualizada');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          const message =
+            err instanceof Error ? err.message : 'No se pudo actualizar la dirección';
+          this.toastService.error(message);
+        },
+      });
   }
 
   /**
@@ -1437,13 +1583,95 @@ export class OrderDetailsPageComponent {
       });
   }
 
-  /** Route the chooser outcome to the wizard or the plain ship flow. */
+  /**
+   * Route the chooser outcome to the wizard, the plain ship flow, or the
+   * carrier pool. The switch is exhaustive over the three `DispatchMethod`
+   * values (the `never` default gives a compile-time guarantee if a new
+   * variant is added without wiring it here).
+   */
   onDispatchMethodSelected(method: DispatchMethod): void {
     this.showDispatchSelector.set(false);
-    if (method === 'with-note') {
-      this.openDispatchModal();
-    } else {
-      this.startShipWithoutNote();
+    switch (method) {
+      case 'with-note':
+        this.openDispatchModal();
+        break;
+      case 'direct':
+        this.directFullDelivery();
+        break;
+      case 'to-dispatch':
+        this.publishOrderToPool();
+        break;
+      default: {
+        const _exhaustive: never = method;
+        return _exhaustive;
+      }
+    }
+  }
+
+  /**
+   * Fase F8 — "Enviar a despacho": publica la orden al pool de reparto
+   * (`POST /store/dispatch-notes/orders/:orderId/send-to-dispatch`). Un
+   * repartidor podrá tomarla desde la app Carrier y agregarla a su ruta. La
+   * operación es idempotente en backend; al terminar recargamos la orden para
+   * reflejar el nuevo estado.
+   */
+  private publishOrderToPool(): void {
+    if (!this.orderId) return;
+    this.isProcessingAction.set(true);
+    this.repartosService
+      .publishToPool(Number(this.orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isProcessingAction.set(false);
+          this.toastService.success('Orden enviada a despacho');
+          this.loadData();
+        },
+        error: (err: RepartosApiError) => {
+          this.isProcessingAction.set(false);
+          this.toastService.error(
+            err?.message || 'No se pudo enviar la orden a despacho',
+          );
+        },
+      });
+  }
+
+  /**
+   * "Envío directo" (entrega completa): en un solo gesto crea una remisión
+   * confirmada SIN ruta, la marca como entregada y finaliza la orden.
+   * Encadena tres endpoints existentes en secuencia:
+   *   1. `POST /store/dispatch-notes/from-order/:orderId`  (confirmed, mode:none;
+   *      `items: []` = quick-accept de todo lo pendiente).
+   *   2. `POST /store/dispatch-notes/:id/deliver`.
+   *   3. `POST /store/orders/:id/flow/confirm-delivery`.
+   * Ante un fallo en cualquier paso mostramos el toast y abortamos; al terminar
+   * recargamos la orden para reflejar el nuevo estado. Reutiliza el mismo
+   * `isProcessingAction` de los demás flujos para el loading.
+   */
+  private async directFullDelivery(): Promise<void> {
+    const orderId = this.orderId;
+    if (!orderId) return;
+    this.isProcessingAction.set(true);
+    try {
+      const note = await firstValueFrom(
+        this.dispatchNotesService.createFromOrder(Number(orderId), {
+          target_status: 'confirmed',
+          route_assignment: { mode: 'none' },
+          items: [],
+        }),
+      );
+      await firstValueFrom(this.dispatchNotesService.deliver(note.id, {}));
+      await firstValueFrom(this.ordersService.flowConfirmDelivery(orderId));
+      this.toastService.success('Orden entregada y finalizada');
+      this.loadData();
+    } catch (err: any) {
+      this.toastService.error(
+        err?.error?.message ||
+          err?.message ||
+          'No se pudo completar la entrega directa',
+      );
+    } finally {
+      this.isProcessingAction.set(false);
     }
   }
 

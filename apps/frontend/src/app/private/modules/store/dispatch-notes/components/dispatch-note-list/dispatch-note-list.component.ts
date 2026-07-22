@@ -32,11 +32,20 @@ import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import {
   STATUS_LABELS,
   STATUS_COLORS,
+  DIRECTION_LABELS,
+  SUBTYPE_LABELS,
+  SUBTYPE_COLORS,
+  SUBTYPE_BG_CLASSES,
+  REASON_LABELS,
 } from '../../constants/dispatch-note.constants';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
+import { AssignRouteModalComponent } from '../assign-route-modal/assign-route-modal.component';
 import {
   DispatchNote,
   DispatchNoteStatus,
+  DispatchNoteDirection,
+  DispatchNoteSubtype,
+  DispatchNoteReason,
 } from '../../interfaces/dispatch-note.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -52,6 +61,7 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     PaginationComponent,
     EmptyStateComponent,
     CardComponent,
+    AssignRouteModalComponent,
   ],
   templateUrl: './dispatch-note-list.component.html',
   styleUrls: ['./dispatch-note-list.component.scss'],
@@ -73,12 +83,19 @@ export class DispatchNoteListComponent {
   loading = signal(false);
   total_items = signal(0);
 
+  // Assign-route modal state
+  readonly showAssignModal = signal(false);
+  readonly assignTargetNote = signal<DispatchNote | null>(null);
+
   // Pagination
   readonly filters = signal<{ page: number; limit: number }>({ page: 1, limit: 10 });
 
   // Filter state
   search_term = signal('');
   selected_status = '';
+  selected_direction = '';
+  selected_subtype = '';
+  selected_reason = '';
 
   // Filter configuration
   filter_configs: FilterConfig[] = [
@@ -91,8 +108,57 @@ export class DispatchNoteListComponent {
         { value: 'draft', label: 'Borrador' },
         { value: 'confirmed', label: 'Confirmada' },
         { value: 'delivered', label: 'Entregada' },
+        { value: 'received', label: 'Recibida' },
         { value: 'invoiced', label: 'Facturada' },
         { value: 'voided', label: 'Anulada' },
+      ],
+    },
+    {
+      key: 'direction',
+      label: 'Dirección',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas las Direcciones' },
+        { value: 'outbound', label: 'Salida' },
+        { value: 'inbound', label: 'Entrada' },
+      ],
+    },
+    {
+      key: 'subtype',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Tipos' },
+        { value: 'customer_delivery', label: 'Entrega a cliente' },
+        { value: 'customer_return', label: 'Devolución de cliente' },
+        { value: 'transfer_out', label: 'Traslado saliente' },
+        { value: 'transfer_in', label: 'Traslado entrante' },
+        { value: 'purchase_receipt', label: 'Recepción de compra' },
+      ],
+    },
+    {
+      key: 'reason',
+      label: 'Razón',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas las Razones' },
+        { value: 'sale', label: 'Venta' },
+        { value: 'sample', label: 'Muestra' },
+        { value: 'consignment', label: 'Consignación' },
+        { value: 'replacement_shipment', label: 'Envío de reposición' },
+        { value: 'loan', label: 'Préstamo' },
+        { value: 'transfer_to_consignee', label: 'Traslado a consignatario' },
+        { value: 'defective', label: 'Producto defectuoso' },
+        { value: 'wrong_item', label: 'Producto equivocado' },
+        { value: 'cancellation', label: 'Cancelación' },
+        { value: 'warranty', label: 'Garantía' },
+        { value: 'overdelivery_return', label: 'Devolución por sobre-entrega' },
+        { value: 'returned_from_consignee', label: 'Retorno de consignatario' },
+        { value: 'replenishment', label: 'Reabastecimiento' },
+        { value: 'rebalancing', label: 'Rebalanceo' },
+        { value: 'normal_purchase', label: 'Compra normal' },
+        { value: 'replacement_for_damage', label: 'Reposición por daño' },
+        { value: 'sample_received', label: 'Muestra recibida' },
       ],
     },
   ];
@@ -116,6 +182,39 @@ export class DispatchNoteListComponent {
       sortable: true,
       width: '130px',
       priority: 1,
+    },
+    {
+      key: 'direction',
+      label: 'Dir.',
+      sortable: false,
+      width: '90px',
+      priority: 1,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          outbound: '#3b82f6',
+          inbound: '#f59e0b',
+        },
+      },
+      transform: (value: DispatchNoteDirection) =>
+        DIRECTION_LABELS[value] ?? value ?? '—',
+    },
+    {
+      key: 'subtype',
+      label: 'Tipo',
+      sortable: false,
+      width: '130px',
+      priority: 1,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: SUBTYPE_COLORS,
+      },
+      transform: (value: DispatchNoteSubtype) =>
+        SUBTYPE_LABELS[value] ?? value ?? '—',
     },
     {
       key: 'customer_name',
@@ -147,11 +246,6 @@ export class DispatchNoteListComponent {
       transform: (value: any) => this.formatCurrency(value),
     },
     {
-      // Active parent dispatch route. The note can be assigned to multiple
-      // routes over time (after release + reassign), so we surface the
-      // ACTIVE one — the stop whose status is not 'released'. If there is
-      // no active assignment, the cell shows a dash. The list view
-      // renders this as a clickable chip via the tableActions handler.
       key: 'dispatch_route_stops',
       label: 'Planilla',
       priority: 2,
@@ -191,7 +285,22 @@ export class DispatchNoteListComponent {
       icon: 'truck',
       action: (dn: DispatchNote) => this.deliverDispatchNote(dn),
       variant: 'primary',
-      show: (dn: DispatchNote) => dn.status === 'confirmed',
+      show: (dn: DispatchNote) => dn.status === 'confirmed' && dn.direction === 'outbound',
+    },
+    {
+      label: 'Recibir',
+      icon: 'package-check',
+      action: (dn: DispatchNote) => this.receiveDispatchNote(dn),
+      variant: 'primary',
+      show: (dn: DispatchNote) => dn.status === 'confirmed' && dn.direction === 'inbound',
+    },
+    {
+      label: 'Asignar a ruta',
+      icon: 'map-pin',
+      action: (dn: DispatchNote) => this.openAssignModal(dn),
+      variant: 'secondary',
+      show: (dn: DispatchNote) =>
+        !this.activeRoute(dn) && ['draft', 'confirmed'].includes(dn.status),
     },
     {
       label: 'Facturar',
@@ -226,7 +335,11 @@ export class DispatchNoteListComponent {
   card_config: ItemListCardConfig = {
     titleKey: 'dispatch_number',
     titleTransform: (item: any) => `#${item.dispatch_number}`,
-    subtitleTransform: (item: any) => item.customer_name || 'Sin cliente',
+    subtitleTransform: (item: any) => {
+      const sub = item.subtype ? (SUBTYPE_LABELS[item.subtype as DispatchNoteSubtype] ?? '') : '';
+      const name = item.customer_name || (item.supplier_id ? `Proveedor #${item.supplier_id}` : 'Sin cliente');
+      return sub ? `${sub} · ${name}` : name;
+    },
     avatarFallbackIcon: 'file-text',
     avatarShape: 'square',
     badgeKey: 'status',
@@ -242,6 +355,12 @@ export class DispatchNoteListComponent {
     footerTransform: (val: any) => this.formatCurrency(val),
     detailKeys: [
       {
+        key: 'direction',
+        label: 'Dir.',
+        transform: (val: any) =>
+          val ? (DIRECTION_LABELS[val as DispatchNoteDirection] ?? val) : '—',
+      },
+      {
         key: 'emission_date',
         label: 'Fecha',
         transform: (val: any) =>
@@ -254,8 +373,6 @@ export class DispatchNoteListComponent {
           val ? formatDateOnlyUTC(val) : '-',
       },
       {
-        // Active parent dispatch route (or '—' if not assigned). Mirrors
-        // the table column so the mobile card view stays consistent.
         key: 'dispatch_route_stops',
         label: 'Planilla',
         transform: (_val: any, item: DispatchNote) =>
@@ -278,6 +395,15 @@ export class DispatchNoteListComponent {
     };
     if (this.selected_status) {
       query.status = this.selected_status;
+    }
+    if (this.selected_direction) {
+      query.direction = this.selected_direction;
+    }
+    if (this.selected_subtype) {
+      query.subtype = this.selected_subtype;
+    }
+    if (this.selected_reason) {
+      query.reason = this.selected_reason;
     }
     if (this.search_term()) {
       query.search = this.search_term();
@@ -336,6 +462,9 @@ export class DispatchNoteListComponent {
   onFilterChange(values: FilterValues): void {
     this.filter_values.set(values);
     this.selected_status = (values['status'] as string) || '';
+    this.selected_direction = (values['direction'] as string) || '';
+    this.selected_subtype = (values['subtype'] as string) || '';
+    this.selected_reason = (values['reason'] as string) || '';
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadDispatchNotes();
   }
@@ -343,6 +472,9 @@ export class DispatchNoteListComponent {
   clearFilters(): void {
     this.search_term.set('');
     this.selected_status = '';
+    this.selected_direction = '';
+    this.selected_subtype = '';
+    this.selected_reason = '';
     this.filter_values.set({});
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadDispatchNotes();
@@ -357,7 +489,7 @@ export class DispatchNoteListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.search_term() || this.selected_status);
+    return !!(this.search_term() || this.selected_status || this.selected_direction || this.selected_subtype || this.selected_reason);
   }
 
   getEmptyStateTitle(): string {
@@ -397,12 +529,24 @@ export class DispatchNoteListComponent {
   }
 
   async deliverDispatchNote(dn: DispatchNote): Promise<void> {
-    const confirmed = await this.dialogService.confirm({
-      title: 'Marcar como Entregada',
-      message: `Marcar la remision ${dn.dispatch_number} como entregada?`,
-      confirmText: 'Entregar',
-      cancelText: 'Volver',
-    });
+    // When the remisión has no active route, delivering is irreversible: the
+    // goods leave the warehouse, stock is deducted and COGS is recorded. Warn
+    // with a danger dialog before proceeding.
+    const hasRoute = !!this.activeRoute(dn);
+    const confirmed = hasRoute
+      ? await this.dialogService.confirm({
+          title: 'Marcar como Entregada',
+          message: `Marcar la remision ${dn.dispatch_number} como entregada?`,
+          confirmText: 'Entregar',
+          cancelText: 'Volver',
+        })
+      : await this.dialogService.confirm({
+          title: 'Entregar sin ruta',
+          message: `Vas a entregar la remisión ${dn.dispatch_number} directamente, sin ruta. Esta acción no se puede deshacer: la mercancía sale de bodega, se descuenta el stock y se registra el costo de venta (COGS). ¿Continuar?`,
+          confirmText: 'Entregar',
+          cancelText: 'Cancelar',
+          confirmVariant: 'danger',
+        });
     if (!confirmed) return;
 
     this.dispatchNotesService
@@ -414,6 +558,27 @@ export class DispatchNoteListComponent {
           this.loadDispatchNotes();
         },
         error: () => this.toastService.error('Error al entregar la remision'),
+      });
+  }
+
+  async receiveDispatchNote(dn: DispatchNote): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Recibir Remisión',
+      message: `Marcar la remisión ${dn.dispatch_number} como recibida?`,
+      confirmText: 'Recibir',
+      cancelText: 'Volver',
+    });
+    if (!confirmed) return;
+
+    this.dispatchNotesService
+      .receive(dn.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Remisión marcada como recibida');
+          this.loadDispatchNotes();
+        },
+        error: () => this.toastService.error('Error al recibir la remisión'),
       });
   }
 
@@ -525,6 +690,27 @@ export class DispatchNoteListComponent {
   activeRouteLabel(dn: DispatchNote): string {
     const a = this.activeRoute(dn);
     return a ? a.route_number : '—';
+  }
+
+  // ── Assign-route modal ─────────────────────────────
+  /** Opens the assign-route modal for an orphan remisión. */
+  openAssignModal(dn: DispatchNote): void {
+    this.assignTargetNote.set(dn);
+    this.showAssignModal.set(true);
+  }
+
+  onAssignModalOpenChange(open: boolean): void {
+    this.showAssignModal.set(open);
+    if (!open) {
+      this.assignTargetNote.set(null);
+    }
+  }
+
+  /** The remisión was assigned to a route → reload the list so the "Planilla"
+   *  column reflects the new assignment. */
+  onRouteAssigned(): void {
+    this.loadDispatchNotes();
+    this.refresh.emit();
   }
 
   /** Returns a clickable HTML string for the table cell. We bypass the

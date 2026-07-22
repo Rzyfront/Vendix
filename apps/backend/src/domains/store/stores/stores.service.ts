@@ -342,7 +342,7 @@ export class StoresService {
     }
 
     // Single source of truth for "pending dispatch" (ref 2026-06-25).
-    // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery.
+    // state ∈ {processing, pending_payment} + delivery_type ∉ {direct_delivery, dine_in}.
     // pending_payment cubre el contraentrega (COD): se despacha antes de cobrar.
     // Coincide con orders.service.ts findAll(query.dispatchable) y con el
     // filtro "Por enviar" del frontend.
@@ -350,9 +350,15 @@ export class StoresService {
       state: { in: ['processing', 'pending_payment'] },
       // Alineado con orders.service.ts findAll(query.dispatchable) — ref 2026-06-25
       // (plan wizard remisión order-first). Excluye direct_delivery
-      // (counter-handover, no genera remisión) e incluye home_delivery,
-      // pickup y other. Coincide con el filtro "Por enviar" del frontend.
-      delivery_type: { not: 'direct_delivery' },
+      // (counter-handover) y dine_in (comer en mesa) — ambos se consumen/entregan
+      // en sitio y no generan remisión — e incluye home_delivery, pickup y other.
+      // Coincide con el filtro "Por enviar" del frontend.
+      delivery_type: { notIn: ['direct_delivery', 'dine_in'] },
+      // Bug C — excluir las órdenes totalmente remitidas, igual que
+      // orders.service.ts:396. Antes el comentario decía "alineado" pero el
+      // filtro faltaba, así que el dashboard contaba como despachables órdenes
+      // ya 100% remitidas.
+      dispatch_fulfillment: { not: 'full' },
     };
 
     const [

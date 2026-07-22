@@ -1,7 +1,6 @@
 import {
   Component,
   DestroyRef,
-  HostListener,
   inject,
   input,
   output,
@@ -9,7 +8,7 @@ import {
   computed,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { switchMap, of } from 'rxjs';
+import { Router } from '@angular/router';
 
 import {
   ModalComponent,
@@ -17,30 +16,58 @@ import {
   IconComponent,
   StepsLineComponent,
   ToastService,
+  DialogService,
 } from '../../../../../../shared/components';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 
 import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.service';
+import type {
+  WizardTerminalAction,
+  WizardItem,
+  WizardDetails,
+} from '../../services/dispatch-note-wizard.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
-import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
+import type {
+  DispatchNote,
+  CreateDispatchFromOrderDto,
+  CreateDispatchFromOrderItemDto,
+  CreateTransferDispatchDto,
+  CreateReturnDispatchDto,
+  CreatePurchaseReceiptDispatchDto,
+  CreateDispatchNoteItemDto,
+  ConfirmDispatchNoteDto,
+  ConfirmDispatchNoteItemSerialsDto,
+} from '../../interfaces/dispatch-note.interface';
 
 import { OrderStepComponent } from './order-step.component';
 import { OrderItemsStepComponent } from './order-items-step.component';
-import { DetailsStepComponent } from './details-step.component';
+import { PartyStepComponent } from './party-step.component';
+import { ItemPickerStepComponent } from './item-picker-step.component';
 import { RouteStepComponent } from './route-step.component';
 import { ReviewStepComponent } from './review-step.component';
+import { TypeStepComponent } from './type-step.component';
 import {
   DispatchNoteSerialsModalComponent,
   DispatchNoteSerialLine,
 } from '../dispatch-note-serials-modal/dispatch-note-serials-modal.component';
 
 /**
- * Dispatch note wizard (ref 2026-06-25, plan wizard remisión order-first).
+ * Dispatch note wizard (ref plan wizard remisión — Ola 3, orquestador).
  *
- * 5 steps: Orden → Items → Detalles → Ruta → Revisión.
- * The wizard always creates a `draft` remisión via `createFromOrder` and
- * then chains `confirm` (with serial gate) and optionally `deliver` based
- * on the operator's terminal action.
+ * customer_delivery (5): Tipo → Orden → Ítems y bodega → Ruta → Revisión.
+ * inbound subtypes  (4): Tipo → Party → Ítems y bodega → Revisión.
+ *
+ * Regla de negocio derivada (ya NO hay "acción terminal" manual):
+ *   - customer_delivery: se crea SIEMPRE `draft` vía `createFromOrder`. Si el
+ *     operario asignó ruta (`routeMode() !== 'none'`) se CONFIRMA la remisión
+ *     vía `confirm()` (que sí enlaza seriales — `createFromOrder` con
+ *     `target_status:'confirmed'` NO los enlaza). Sin ruta → queda `draft`.
+ *   - inbound (transfer_out/in, purchase_receipt, customer_return): se crea
+ *     `draft` con el `create*` correspondiente; sin encadenar confirm/receive.
+ *
+ * Cada paso renderiza su propia cabecera (`app-wizard-step-section`), por eso
+ * el chrome del modal ya no pinta subtítulo por paso (evita doble cabecera).
  */
 @Component({
   selector: 'app-dispatch-note-wizard',
@@ -50,9 +77,11 @@ import {
     ButtonComponent,
     IconComponent,
     StepsLineComponent,
+    TypeStepComponent,
     OrderStepComponent,
     OrderItemsStepComponent,
-    DetailsStepComponent,
+    PartyStepComponent,
+    ItemPickerStepComponent,
     RouteStepComponent,
     ReviewStepComponent,
     DispatchNoteSerialsModalComponent,
@@ -67,7 +96,7 @@ import {
       size="lg"
       [showCloseButton]="true"
     >
-      <!-- Steps Header -->
+      <!-- Steps Header (sin subtítulo por paso: cada paso pinta su cabecera) -->
       <div class="px-4 py-2 border-b border-[var(--color-border)]">
         <app-steps-line
           [steps]="wizardService.stepsConfig()"
@@ -76,24 +105,43 @@ import {
           (stepClicked)="onStepClicked($event)"
           size="md"
         ></app-steps-line>
-        <p class="text-xs text-[var(--color-text-muted)] mt-1.5 mb-0.5">
-          @switch (wizardService.currentStep()) {
-            @case (0) { Selecciona la orden a despachar }
-            @case (1) { Ajusta las cantidades a despachar }
-            @case (2) { Configura bodega, fecha y notas }
-            @case (3) { Asigna la remisión a una ruta (opcional) }
-            @case (4) { Revisa y elige la acción terminal }
-          }
-        </p>
       </div>
 
       <!-- Step Content -->
       <div class="p-4 max-h-[55vh] overflow-y-auto">
         @switch (wizardService.currentStep()) {
-          @case (0) { <app-dispatch-wizard-order-step /> }
-          @case (1) { <app-dispatch-wizard-order-items-step /> }
-          @case (2) { <app-dispatch-wizard-details-step /> }
-          @case (3) { <app-dispatch-wizard-route-step /> }
+          @case (0) {
+            <app-dispatch-wizard-type-step />
+          }
+          @case (1) {
+            @if (wizardService.subtype() === 'customer_delivery') {
+              <app-dispatch-wizard-order-step />
+            } @else {
+              <app-dispatch-wizard-party-step />
+            }
+          }
+          @case (2) {
+            @if (wizardService.subtype() === 'customer_delivery') {
+              <app-dispatch-wizard-order-items-step />
+            } @else {
+              <app-dispatch-wizard-item-picker-step />
+            }
+          }
+          @case (3) {
+            @if (wizardService.subtype() === 'customer_delivery') {
+              <app-dispatch-wizard-route-step />
+            } @else {
+              <app-dispatch-wizard-review-step
+                [created]="isCreated()"
+                [createdNote]="createdNote()"
+                [completedAction]="completedAction()"
+                (goToStep)="wizardService.goToStep($event)"
+                (viewDetail)="onViewDetail($event)"
+                (createAnother)="onCreateAnother()"
+                (printNote)="onPrint($event)"
+              />
+            }
+          }
           @case (4) {
             <app-dispatch-wizard-review-step
               [created]="isCreated()"
@@ -123,7 +171,7 @@ import {
             <div></div>
           }
 
-          @if (wizardService.currentStep() < 4 && !isCreated()) {
+          @if (wizardService.currentStep() < wizardService.lastStepIndex() && !isCreated()) {
             <app-button
               variant="primary"
               (clicked)="wizardService.nextStep()"
@@ -141,7 +189,7 @@ import {
                 [loading]="isSubmitting()"
                 [showTextWhileLoading]="true"
               >
-                {{ createActionLabel() }}
+                Crear remisión
               </app-button>
             </div>
           }
@@ -163,6 +211,8 @@ export class DispatchNoteWizardComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
   private readonly toast = inject(ToastService);
+  private readonly dialog = inject(DialogService);
+  private readonly router = inject(Router);
   private readonly printService = inject(DispatchNotePrintService);
 
   // Inputs
@@ -177,25 +227,27 @@ export class DispatchNoteWizardComponent {
   readonly isCreated = signal(false);
   readonly createdNote = signal<DispatchNote | null>(null);
 
-  /** Mirrors `wizardService.terminalAction()` for the review step. */
-  readonly completedAction = computed(() => this.wizardService.terminalAction());
+  /**
+   * Acción "completada" DERIVADA (no lee `terminalAction`). Sólo alimenta el
+   * título de la pantalla de éxito del `review-step`, cuyo input es
+   * `WizardTerminalAction`. Mapeo del estado destino derivado:
+   *   - customer_delivery con ruta (`deriveTargetStatus()==='confirmed'`)
+   *     → 'confirm_route' (título "Remisión confirmada y asignada").
+   *   - customer_delivery sin ruta / inbound → 'draft' (título "Remisión creada").
+   */
+  readonly completedAction = computed<WizardTerminalAction>(() => {
+    if (this.wizardService.subtype() === 'customer_delivery') {
+      return this.wizardService.deriveTargetStatus() === 'confirmed'
+        ? 'confirm_route'
+        : 'draft';
+    }
+    return 'draft';
+  });
 
-  // QUI-431 — serial-selection state.
+  // QUI-431 — serial-selection state (sólo customer_delivery con ruta).
   readonly showSerialsModal = signal(false);
   readonly serialLines = signal<DispatchNoteSerialLine[]>([]);
   private pendingSerialNote: DispatchNote | null = null;
-  private pendingSerialAction: 'confirm_route' | 'deliver' | null = null;
-
-  readonly createActionLabel = computed(() => {
-    switch (this.wizardService.terminalAction()) {
-      case 'confirm_route':
-        return 'Confirmar y Asignar a Ruta';
-      case 'deliver':
-        return 'Confirmar y Entregar';
-      default:
-        return 'Crear como Borrador';
-    }
-  });
 
   onStepClicked(index: number): void {
     if (index <= this.wizardService.currentStep()) {
@@ -206,16 +258,11 @@ export class DispatchNoteWizardComponent {
   onCreate(): void {
     this.isSubmitting.set(true);
 
-    const order = this.wizardService.selectedOrder();
+    const sub = this.wizardService.subtype();
     const items = this.wizardService.items();
     const details = this.wizardService.details();
-    const terminal = this.wizardService.terminalAction();
 
-    if (!order) {
-      this.toast.error('Debes seleccionar una orden');
-      this.isSubmitting.set(false);
-      return;
-    }
+    // Defensive guard (canProceed ya lo gatea en el paso 'Ítems y bodega').
     if (items.length === 0) {
       this.toast.error('Debes despachar al menos un ítem');
       this.isSubmitting.set(false);
@@ -227,95 +274,255 @@ export class DispatchNoteWizardComponent {
       return;
     }
 
-    const dto: any = {
+    // Branch by subtype — each builds a different DTO and calls a different endpoint.
+    switch (sub) {
+      case 'customer_delivery':
+        this._submitCustomerDelivery(items, details);
+        break;
+      case 'transfer_out':
+      case 'transfer_in':
+        this._submitTransfer(sub, items, details);
+        break;
+      case 'customer_return':
+        this._submitReturn(items, details);
+        break;
+      case 'purchase_receipt':
+        this._submitPurchaseReceipt(items, details);
+        break;
+      default:
+        this.toast.error('Tipo de remisión no soportado');
+        this.isSubmitting.set(false);
+        break;
+    }
+  }
+
+  // --- customer_delivery: order-first flow (createFromOrder → optional confirm) ---
+
+  private _submitCustomerDelivery(items: WizardItem[], details: WizardDetails): void {
+    const order = this.wizardService.selectedOrder();
+    if (!order) {
+      this.toast.error('Debes seleccionar una orden');
+      this.isSubmitting.set(false);
+      return;
+    }
+    // Siempre se crea como `draft`; el estado final se decide después con
+    // `confirm()` (regla de negocio derivada de la asignación de ruta).
+    const dto: CreateDispatchFromOrderDto = {
       target_status: 'draft',
       dispatch_location_id: details.dispatch_location_id,
       agreed_delivery_date: details.agreed_delivery_date || undefined,
       notes: details.notes || undefined,
       route_assignment: this.wizardService.buildRouteAssignment(),
-      items: items.map((i) => ({
-        order_item_id: i.order_item_id,
-        dispatched_quantity: i.dispatched_quantity,
-        location_id: i.location_id || undefined,
-      })),
+      items: items.map(
+        (i): CreateDispatchFromOrderItemDto => ({
+          order_item_id: i.order_item_id!,
+          dispatched_quantity: i.dispatched_quantity,
+          location_id: i.location_id || undefined,
+        }),
+      ),
     };
-
     this.dispatchNotesService
       .createFromOrder(order.id, dto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (note) => this._afterCreate(note, terminal),
+        next: (note) => this._afterCustomerDeliveryCreate(note),
         error: (err) => this._onCreateError(err),
       });
   }
 
-  private _afterCreate(note: DispatchNote, terminal: 'draft' | 'confirm_route' | 'deliver'): void {
-    if (terminal === 'draft') {
-      this._onCreateSuccess(note, 'draft');
+  /**
+   * Post-creación customer_delivery. Regla derivada:
+   *   - sin ruta (`routeMode()==='none'`) → queda `draft`, no se confirma.
+   *   - con ruta → CONFIRMAR reutilizando el gate de seriales existente.
+   */
+  private _afterCustomerDeliveryCreate(note: DispatchNote): void {
+    if (this.wizardService.routeMode() === 'none') {
+      this._finishCreated(note);
       this.toast.success('Remisión creada como borrador');
       return;
     }
 
-    // Build serial lines (reused from the previous wizard version).
+    // Ruta asignada → confirmar. Si hay líneas serializadas, primero se
+    // capturan los seriales (confirm() los enlaza; createFromOrder no).
     const lines = this._buildSerialLines(note);
     if (lines.length > 0) {
       this.pendingSerialNote = note;
-      this.pendingSerialAction = terminal;
       this.serialLines.set(lines);
       this.showSerialsModal.set(true);
       return;
     }
 
-    this._continueAfterCreate(note, terminal, { item_serials: [] });
+    this._confirmNote(note, {});
   }
 
-  onSerialsConfirmed(item_serials: any[]): void {
+  private _confirmNote(note: DispatchNote, body: ConfirmDispatchNoteDto): void {
+    this.dispatchNotesService
+      .confirm(note.id, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (confirmed) => {
+          this._finishCreated(confirmed);
+          this.toast.success('Remisión confirmada y asignada a la ruta');
+        },
+        error: (err) => this._onConfirmError(err),
+      });
+  }
+
+  onSerialsConfirmed(item_serials: ConfirmDispatchNoteItemSerialsDto[]): void {
     const note = this.pendingSerialNote;
-    const action = this.pendingSerialAction;
     this.showSerialsModal.set(false);
-    if (!note || !action) {
+    if (!note) {
       this.isSubmitting.set(false);
       return;
     }
     this.pendingSerialNote = null;
-    this.pendingSerialAction = null;
-    this._continueAfterCreate(note, action, { item_serials });
+    this._confirmNote(note, { item_serials });
   }
 
   onSerialsCancelled(): void {
     const note = this.pendingSerialNote;
     this.showSerialsModal.set(false);
     this.pendingSerialNote = null;
-    this.pendingSerialAction = null;
     if (note) {
-      this._onCreateSuccess(note, 'draft');
+      // La remisión ya existe como `draft`; sólo faltó confirmarla.
+      this._finishCreated(note);
       this.toast.info('Remisión creada como borrador. Confírmala asignando los seriales.');
     } else {
       this.isSubmitting.set(false);
     }
   }
 
-  private _continueAfterCreate(
-    note: DispatchNote,
-    action: 'confirm_route' | 'deliver',
-    body: { item_serials: any[] },
+  // --- transfer_out / transfer_in: createTransfer (crea draft, sin confirm) ---
+
+  private _submitTransfer(
+    sub: 'transfer_out' | 'transfer_in',
+    items: WizardItem[],
+    details: WizardDetails,
   ): void {
-    this.dispatchNotesService
-      .confirm(note.id, body)
-      .pipe(
-        switchMap((confirmed) => {
-          if (action === 'deliver') {
-            return this.dispatchNotesService
-              .deliver(confirmed.id, { actual_delivery_date: new Date().toISOString() })
-              .pipe(switchMap((delivered) => of(delivered)));
-          }
-          return of(confirmed);
+    const fromId = this.wizardService.fromLocationId();
+    const toId = this.wizardService.toLocationId();
+    if (!fromId || !toId) {
+      this.toast.error('Selecciona las bodegas de origen y destino');
+      this.isSubmitting.set(false);
+      return;
+    }
+    const dto: CreateTransferDispatchDto = {
+      direction: this.wizardService.direction(),
+      subtype: sub,
+      reason: this.wizardService.reason() || undefined,
+      from_location_id: fromId,
+      to_location_id: toId,
+      dispatch_location_id: details.dispatch_location_id,
+      notes: details.notes || undefined,
+      internal_notes: details.internal_notes || undefined,
+      currency: details.currency,
+      target_status: 'draft',
+      items: items.map(
+        (i): CreateDispatchNoteItemDto => ({
+          product_id: i.product_id,
+          product_variant_id: i.product_variant_id || undefined,
+          location_id: i.location_id || details.dispatch_location_id,
+          ordered_quantity: i.dispatched_quantity,
+          dispatched_quantity: i.dispatched_quantity,
+          unit_price: i.unit_price || undefined,
         }),
-        takeUntilDestroyed(this.destroyRef),
-      )
+      ),
+    };
+    this.dispatchNotesService
+      .createTransfer(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (final) => this._onCreateSuccess(final, action),
-        error: (err) => this._onCreateError(err, action),
+        next: (note) => {
+          this._finishCreated(note);
+          this.toast.success('Remisión creada');
+        },
+        error: (err) => this._onCreateError(err),
+      });
+  }
+
+  // --- customer_return: createReturn (crea draft, sin confirm/receive) ---
+
+  private _submitReturn(items: WizardItem[], details: WizardDetails): void {
+    const customerId = this.wizardService.customerId();
+    if (!customerId) {
+      this.toast.error('Selecciona un cliente');
+      this.isSubmitting.set(false);
+      return;
+    }
+    const dto: CreateReturnDispatchDto = {
+      direction: 'inbound',
+      subtype: 'customer_return',
+      reason: this.wizardService.reason() || undefined,
+      customer_id: customerId,
+      related_dispatch_id: this.wizardService.relatedDispatchId() || undefined,
+      dispatch_location_id: details.dispatch_location_id,
+      notes: details.notes || undefined,
+      internal_notes: details.internal_notes || undefined,
+      currency: details.currency,
+      target_status: 'draft',
+      items: items.map(
+        (i): CreateDispatchNoteItemDto => ({
+          product_id: i.product_id,
+          product_variant_id: i.product_variant_id || undefined,
+          location_id: i.location_id || details.dispatch_location_id,
+          ordered_quantity: i.dispatched_quantity,
+          dispatched_quantity: i.dispatched_quantity,
+          unit_price: i.unit_price || undefined,
+        }),
+      ),
+    };
+    this.dispatchNotesService
+      .createReturn(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => {
+          this._finishCreated(note);
+          this.toast.success('Remisión creada');
+        },
+        error: (err) => this._onCreateError(err),
+      });
+  }
+
+  // --- purchase_receipt: createPurchaseReceipt (crea draft, sin confirm/receive) ---
+
+  private _submitPurchaseReceipt(items: WizardItem[], details: WizardDetails): void {
+    const supplierId = this.wizardService.supplierId();
+    if (!supplierId) {
+      this.toast.error('Selecciona un proveedor');
+      this.isSubmitting.set(false);
+      return;
+    }
+    const dto: CreatePurchaseReceiptDispatchDto = {
+      direction: 'inbound',
+      subtype: 'purchase_receipt',
+      reason: this.wizardService.reason() || undefined,
+      supplier_id: supplierId,
+      purchase_order_id: this.wizardService.purchaseOrderId() || undefined,
+      dispatch_location_id: details.dispatch_location_id,
+      notes: details.notes || undefined,
+      internal_notes: details.internal_notes || undefined,
+      currency: details.currency,
+      target_status: 'draft',
+      items: items.map(
+        (i): CreateDispatchNoteItemDto => ({
+          product_id: i.product_id,
+          product_variant_id: i.product_variant_id || undefined,
+          location_id: i.location_id || details.dispatch_location_id,
+          ordered_quantity: i.dispatched_quantity,
+          dispatched_quantity: i.dispatched_quantity,
+          unit_price: i.unit_price || undefined,
+        }),
+      ),
+    };
+    this.dispatchNotesService
+      .createPurchaseReceipt(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => {
+          this._finishCreated(note);
+          this.toast.success('Remisión creada');
+        },
+        error: (err) => this._onCreateError(err),
       });
   }
 
@@ -332,29 +539,57 @@ export class DispatchNoteWizardComponent {
       }));
   }
 
-  private _onCreateSuccess(note: DispatchNote, action: 'draft' | 'confirm_route' | 'deliver'): void {
+  private _finishCreated(note: DispatchNote): void {
     this.isSubmitting.set(false);
     this.isCreated.set(true);
     this.createdNote.set(note);
     this.created.emit(note);
-    const messages: Record<string, string> = {
-      draft: 'Remisión creada',
-      confirm_route: 'Remisión confirmada y asignada a la ruta',
-      deliver: 'Remisión entregada',
-    };
-    this.toast.success(messages[action] ?? 'Remisión creada');
   }
 
-  private _onCreateError(err: unknown, reachedAction?: 'confirm_route' | 'deliver'): void {
+  private _onCreateError(err: unknown): void {
     this.isSubmitting.set(false);
-    const messages: Record<string, string> = {
-      confirm_route: 'Remisión creada, pero falló la confirmación',
-      deliver: 'Remisión confirmada, pero falló la entrega',
-    };
-    const msg = reachedAction
-      ? messages[reachedAction]
-      : (err as Error)?.message || 'Error al crear la remisión';
-    this.toast.error(msg);
+    const { code, message } = extractApiError(err);
+
+    // Error de negocio bloqueante: la orden no tiene dirección de entrega. Un
+    // toast se pierde; se muestra un diálogo claro y accionable que lleva a la
+    // orden para capturar la dirección antes de reintentar.
+    if (code === 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS') {
+      const order = this.wizardService.selectedOrder();
+      const ref =
+        order?.order_number ?? (order?.id ? `#${order.id}` : 'seleccionada');
+      this.dialog
+        .confirm(
+          {
+            title: 'La orden no tiene dirección de entrega',
+            message:
+              `No se puede generar la remisión porque la orden ${ref} no tiene ` +
+              `una dirección de envío registrada. Agrega una dirección de ` +
+              `entrega a la orden y vuelve a intentarlo.`,
+            confirmText: 'Ir a la orden',
+            cancelText: 'Cerrar',
+            confirmVariant: 'primary',
+          },
+          { size: 'sm' },
+        )
+        .then((goToOrder) => {
+          if (goToOrder && order?.id) {
+            this.onClose();
+            this.router.navigate(['/admin/orders', order.id]);
+          }
+        });
+      return;
+    }
+
+    this.toast.error(message || 'No se pudo crear la remisión');
+  }
+
+  private _onConfirmError(err: unknown): void {
+    // La remisión ya se creó como `draft`; sólo falló la confirmación.
+    this.isSubmitting.set(false);
+    const { message } = extractApiError(err);
+    this.toast.error(
+      message || 'Remisión creada, pero falló la confirmación',
+    );
   }
 
   onClose(): void {
@@ -376,7 +611,6 @@ export class DispatchNoteWizardComponent {
     this.showSerialsModal.set(false);
     this.serialLines.set([]);
     this.pendingSerialNote = null;
-    this.pendingSerialAction = null;
   }
 
   onViewDetail(_id: number): void {

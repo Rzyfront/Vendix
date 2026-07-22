@@ -7,6 +7,7 @@ import {
   ViewEncapsulation,
   effect,
   input,
+  model,
   output,
   signal,
   viewChild,
@@ -53,8 +54,9 @@ const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/bright';
 /** Native MapLibre source/layer ids for the suggested-route polyline. */
 const ROUTE_SOURCE_ID = 'mv-route';
 const ROUTE_LAYER_ID = 'mv-route-line';
-/** Route polyline color (distinct from stop pins). */
-const ROUTE_COLOR = '#2563eb';
+/** Route polyline color (violet — distinct from stop pins and the green
+ *  COMPLETED_ROUTE_COLOR; same family as the NEXT stop highlight). */
+const ROUTE_COLOR = '#7c3aed';
 
 /** Native MapLibre source/layer ids for the completed (delivered) route leg. */
 const COMPLETED_ROUTE_SOURCE_ID = 'mv-completed-route';
@@ -66,7 +68,7 @@ const COMPLETED_ROUTE_COLOR = '#16a34a';
 const DEFAULT_MARKER_COLOR = '#16a34a';
 const STATE_COLORS: Readonly<Record<string, string>> = {
   pending: '#f59e0b',
-  in_progress: '#2563eb',
+  in_progress: '#ea580c',
   delivered: '#16a34a',
   failed: '#dc2626',
   cancelled: '#6b7280',
@@ -179,6 +181,25 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
    * full-screen/immersive hosts. Default `false` → exact legacy behavior.
    */
   readonly fill = input<boolean>(false);
+  /**
+   * Camera rotation (degrees, clockwise from north) applied on every framing.
+   * `null` (default) → north-up, i.e. exact legacy behavior; the admin modal,
+   * which never passes this, is therefore unaffected. Immersive hosts pass a
+   * live heading (e.g. bearing toward the next stop) to orient the map.
+   */
+  readonly bearing = input<number | null>(null);
+  /**
+   * When `true`, renders a floating "center on me" control over the map. Default
+   * `false` → no control (legacy behavior; the admin modal stays button-less).
+   */
+  readonly showRecenterControl = input<boolean>(false);
+  /**
+   * Two-way "follow me" mode. When `true` (and a `userLocation` is present) the
+   * camera eases to keep the live location centered instead of fitting all
+   * points. A manual pan/rotate gesture turns it back off. Default `false` →
+   * exact legacy fit-to-data framing (the admin modal never opts in).
+   */
+  readonly followUser = model<boolean>(false);
 
   /** Emitted when a stop pin is clicked. */
   readonly markerClick = output<MapMarker>();
@@ -203,6 +224,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Delays collapsing the map credit so it flashes briefly (~0.3s) on load. */
   private attribTimer: ReturnType<typeof setTimeout> | null = null;
+  /** ResizeObserver que monitorea cambios de tamaño del contenedor del mapa (fix para mobile). */
+  private resizeObserver: ResizeObserver | null = null;
 
   constructor() {
     // Re-render stops + route + framing whenever any input changes, once the
@@ -218,6 +241,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
       // Reading `fill()` re-renders (and thus re-`resize()`s the canvas) if the
       // container's sizing mode flips at runtime.
       this.fill();
+      // Register camera-orientation + follow-mode as deps so a bearing change or
+      // a recenter (followUser → true) re-frames the map through `renderData`.
+      this.bearing();
+      this.followUser();
       if (this.mapReady) this.renderData();
     });
   }
@@ -247,6 +274,12 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         'bottom-right',
       );
 
+      // A manual pan/rotate breaks "follow me": the camera stops chasing the
+      // live location until the user re-centers. A programmatic `easeTo` does
+      // NOT emit `dragstart`/`rotatestart`, so this only fires on real gestures.
+      this.map.on('dragstart', () => this.followUser.set(false));
+      this.map.on('rotatestart', () => this.followUser.set(false));
+
       this.map.on('load', () => {
         this.mapReady = true;
         this.loading.set(false);
@@ -260,6 +293,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
         this.renderData();
         // Ensure correct sizing after the container transitions into view.
         this.map.resize();
+        // Arranca ResizeObserver para mapa fullscreen (mobile): el contenedor puede
+        // cambiar de tamaño por barra de direcciones, teclado virtual, orientación.
+        this.startResizeObserver();
       });
 
       // If the basemap never loads (tiles unreachable), fall back to the
@@ -270,12 +306,53 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
           this.error.set(true);
         }
       }, LOAD_TIMEOUT_MS);
-    } catch {
+    } catch (err) {
       // WebGL unsupported / dynamic import failed / init threw → show the
       // placeholder instead of a broken canvas.
+      console.error('MapViewComponent: error initializing MapLibre:', err);
       this.loading.set(false);
       this.error.set(true);
     }
+  }
+
+  /** Arranca el ResizeObserver para detectar cambios de tamaño del contenedor. */
+  private startResizeObserver(): void {
+    if (!('ResizeObserver' in window) || this.resizeObserver) return;
+    try {
+      this.resizeObserver = new ResizeObserver(() => {
+        if (this.map && this.mapReady) {
+          try {
+            this.map.resize();
+          } catch {
+            // ignore if context lost
+          }
+        }
+      });
+      this.resizeObserver.observe(this.mapContainer().nativeElement);
+    } catch {
+      // ResizeObserver not supported or init failed; map will degrade gracefully.
+    }
+  }
+
+  /** Detiene el ResizeObserver al destruir el componente. */
+  private stopResizeObserver(): void {
+    if (this.resizeObserver) {
+      try {
+        this.resizeObserver.disconnect();
+      } catch {
+        // ignore
+      }
+      this.resizeObserver = null;
+    }
+  }
+
+  /**
+   * Re-enables "follow me" (e.g. from the floating recenter control) and re-runs
+   * the render so the camera snaps to the live location on the next frame.
+   */
+  onRecenterClick(): void {
+    this.followUser.set(true);
+    if (this.mapReady) this.renderData();
   }
 
   /**
@@ -320,7 +397,20 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     this.drawMarkers();
     // Drawn last so the live "you are here" dot always sits on top of the pins.
     this.drawUserLocation();
-    this.fitToData();
+    // Final framing: in follow mode (immersive hosts) keep the live location
+    // centered and oriented; otherwise fit ALL points (legacy behavior, and
+    // what the admin modal always gets since it never opts into follow/bearing).
+    const user = this.userLocation();
+    if (this.followUser() && user) {
+      this.map.easeTo({
+        center: [user.lng, user.lat],
+        bearing: this.bearing() ?? this.map.getBearing(),
+        zoom: Math.max(this.map.getZoom(), 15.5),
+        duration: 500,
+      });
+    } else {
+      this.fitToData();
+    }
   }
 
   /** Removes and forgets every custom marker (stops + origin) to avoid leaks. */
@@ -483,20 +573,33 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
     const completedRoute = this.completedRoute();
     if (completedRoute) points.push(...completedRoute);
 
+    // `bearing() ?? 0` → north-up when no host bearing is supplied (legacy
+    // behavior; the admin modal never passes one), or the host heading otherwise.
+    const bearing = this.bearing() ?? 0;
     if (points.length === 0) {
       this.map.jumpTo({
         center: [COLOMBIA_CENTER.lng, COLOMBIA_CENTER.lat],
         zoom: COUNTRY_ZOOM,
+        bearing,
       });
       return;
     }
     if (points.length === 1) {
-      this.map.jumpTo({ center: [points[0].lng, points[0].lat], zoom: POINT_ZOOM });
+      this.map.jumpTo({
+        center: [points[0].lng, points[0].lat],
+        zoom: POINT_ZOOM,
+        bearing,
+      });
       return;
     }
     const bounds = new this.maplibregl.LngLatBounds();
     for (const point of points) bounds.extend([point.lng, point.lat]);
-    this.map.fitBounds(bounds, { padding: 56, maxZoom: 16, duration: 400 });
+    this.map.fitBounds(bounds, {
+      padding: 56,
+      maxZoom: 16,
+      duration: 400,
+      bearing,
+    });
   }
 
   /** Builds a numbered stop pin element, colored by `color` → `state` → default. */
@@ -559,6 +662,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.stopResizeObserver();
     this.clearLoadTimer();
     if (this.attribTimer) clearTimeout(this.attribTimer);
     try {

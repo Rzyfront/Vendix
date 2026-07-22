@@ -459,6 +459,7 @@ export class CreateDomainSettingDto {
     'STORE_LANDING',
     'STORE_ADMIN',
     'STORE_ECOMMERCE',
+    'STORE_DELIVERY',
   ])
   app_type?: string;
 
@@ -542,6 +543,7 @@ export class UpdateDomainSettingDto {
     'STORE_LANDING',
     'STORE_ADMIN',
     'STORE_ECOMMERCE',
+    'STORE_DELIVERY',
   ])
   app_type?: string;
 

@@ -1,6 +1,32 @@
 <div class="map-view" [class.map-view--fill]="fill()">
   <div class="mv-map" #mapContainer></div>
 
+  @if (showRecenterControl()) {
+    <!-- Floating "center on my location" control (immersive/follow hosts only).
+         Gated by `showRecenterControl` so the admin modal never shows it. -->
+    <button
+      type="button"
+      class="mv-recenter"
+      [class.mv-recenter--active]="followUser()"
+      (click)="onRecenterClick()"
+      aria-label="Centrar en mi ubicación"
+      title="Centrar en mi ubicación"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+      </svg>
+    </button>
+  }
+
   @if (loading()) {
     <!-- Skeleton reserves the exact map space (shimmer) while tiles load. -->
     <div class="mv-skeleton" aria-live="polite" aria-busy="true">

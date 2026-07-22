@@ -22,6 +22,8 @@ import {
   ItemListCardConfig,
 } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { DispatchNoteAddressEditorComponent } from '../../../../../../shared/components';
+import type { AddressPayload } from '../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { DispatchNote, DispatchNoteStatus } from '../../interfaces/dispatch-note.interface';
 
@@ -29,6 +31,7 @@ const STATUS_LABELS: Record<DispatchNoteStatus, string> = {
   draft: 'Borrador',
   confirmed: 'Confirmada',
   delivered: 'Entregada',
+  received: 'Recibida',
   invoiced: 'Facturada',
   voided: 'Anulada',
 };
@@ -37,8 +40,22 @@ const BADGE_COLOR_MAP: Record<DispatchNoteStatus, StickyHeaderBadgeColor> = {
   draft: 'gray',
   confirmed: 'blue',
   delivered: 'green',
+  received: 'blue',
   invoiced: 'blue',
   voided: 'red',
+};
+
+/** Plantilla de dirección vacía para normalizar strings legacy → AddressPayload. */
+const EMPTY_ADDRESS: AddressPayload = {
+  address_line1: null,
+  address_line2: null,
+  city: null,
+  state_province: null,
+  country_code: null,
+  postal_code: null,
+  phone_number: null,
+  latitude: null,
+  longitude: null,
 };
 
 @Component({
@@ -50,7 +67,8 @@ const BADGE_COLOR_MAP: Record<DispatchNoteStatus, StickyHeaderBadgeColor> = {
     CardComponent,
     TimelineComponent,
     ResponsiveDataViewComponent,
-    IconComponent
+    IconComponent,
+    DispatchNoteAddressEditorComponent,
 ],
   templateUrl: './dispatch-note-detail.component.html',
 })
@@ -67,6 +85,9 @@ export class DispatchNoteDetailComponent {
   readonly voidAction = output<DispatchNote>();
   readonly invoiceAction = output<DispatchNote>();
   readonly printAction = output<DispatchNote>();
+  readonly assignRouteAction = output<DispatchNote>();
+  /** Emite cuando el editor de dirección guarda — el parent debe refrescar la nota. */
+  readonly addressSaved = output<void>();
 
   // ── StickyHeader computed ───────────────────────────
   readonly headerTitle = computed(() => `Remision ${this.dispatch_note().dispatch_number}`);
@@ -76,8 +97,10 @@ export class DispatchNoteDetailComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const status = this.dispatch_note().status;
+    const canAssignRoute = !this.activeRoute() && ['draft', 'confirmed'].includes(status);
     return [
       { id: 'confirm', label: 'Confirmar', variant: 'primary', icon: 'check', visible: status === 'draft' },
+      { id: 'assign-route', label: 'Asignar a ruta', variant: 'outline', icon: 'map-pin', visible: canAssignRoute },
       { id: 'deliver', label: 'Entregar', variant: 'primary', icon: 'truck', visible: status === 'confirmed' },
       { id: 'invoice', label: 'Facturar', variant: 'primary', icon: 'file-plus', visible: status === 'delivered' },
       { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer', visible: ['confirmed', 'delivered', 'invoiced'].includes(status) },
@@ -129,6 +152,33 @@ export class DispatchNoteDetailComponent {
   });
 
   readonly hasCustomerAddress = computed<boolean>(() => this.customerAddressLines().length > 0);
+
+  /**
+   * Id de la remisión pasado al editor de dirección shared
+   * (`app-dispatch-note-address-editor`) para que ejecute el PATCH.
+   */
+  readonly noteId = computed<number>(() => this.dispatch_note().id);
+
+  /**
+   * Snapshot crudo de `customer_address` (objeto con claves address_line1,
+   * address_line2, city, state_province, country_code, postal_code,
+   * phone_number, latitude, longitude) pasado al editor. El editor mapea
+   * 1:1 a `AddressPayload`; aquí solo normalizamos string→null y el cast.
+   */
+  readonly customerAddress = computed<AddressPayload | null>(() => {
+    const a = this.dispatch_note().customer_address as
+      | AddressPayload
+      | string
+      | null
+      | undefined;
+    if (!a) return null;
+    if (typeof a === 'string') {
+      // Dirección legacy como string plano → solo poblamos address_line1.
+      const trimmed = a.trim();
+      return trimmed ? { ...EMPTY_ADDRESS, address_line1: trimmed } : null;
+    }
+    return a;
+  });
 
   // ── Ruta activa (planilla) ─────────────────────────
   /**
@@ -261,11 +311,21 @@ export class DispatchNoteDetailComponent {
     const dn = this.dispatch_note();
     switch (id) {
       case 'confirm': this.confirmAction.emit(dn); break;
+      case 'assign-route': this.assignRouteAction.emit(dn); break;
       case 'deliver': this.deliverAction.emit(dn); break;
       case 'invoice': this.invoiceAction.emit(dn); break;
       case 'print': this.printAction.emit(dn); break;
       case 'void': this.voidAction.emit(dn); break;
     }
+  }
+
+  /**
+   * Tras guardar la dirección desde `app-dispatch-note-address-editor`,
+   * emite `addressSaved` para que la página padre refresque la remisión
+   * (el detalle no inyecta `DispatchNotesService` ni HttpClient directo).
+   */
+  onAddressSaved(): void {
+    this.addressSaved.emit();
   }
 
   // ── Navigation ──────────────────────────────────────

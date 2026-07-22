@@ -108,6 +108,67 @@ export class CustomersService {
     return bcrypt.hash(random, 12);
   }
 
+  /**
+   * Build the `users.create` payload for a guest customer (rol `customer`,
+   * unreachable password, `pending_verification`, STORE_ECOMMERCE settings).
+   * Single source of truth shared by `resolveGuestCustomerForCheckout`
+   * (guest ecommerce checkout) and `resolveTableGuestCustomer` (QR dine-in),
+   * so the guest-user shape never diverges between the two entry points.
+   * `email` is nullable — the diner may identify by name + phone/document only.
+   */
+  private buildGuestUserData(args: {
+    username: string;
+    email: string | null;
+    hashedPassword: string;
+    firstName: string;
+    lastName: string;
+    phone: string | null;
+    documentType: string | null;
+    documentNumber: string | null;
+    organizationId: number;
+    storeId: number;
+    customerRoleId: number;
+  }) {
+    return {
+      email: args.email,
+      password: args.hashedPassword,
+      first_name: args.firstName,
+      last_name: args.lastName,
+      phone: this.normalizeOptionalString(args.phone),
+      document_type: args.documentType,
+      document_number: args.documentNumber,
+      username: args.username,
+      email_verified: false,
+      state: 'pending_verification' as const,
+      organizations: { connect: { id: args.organizationId } },
+      user_roles: {
+        create: {
+          role_id: args.customerRoleId,
+        },
+      },
+      store_users: {
+        create: {
+          store_id: args.storeId,
+        },
+      },
+      user_settings: {
+        create: {
+          app_type: 'STORE_ECOMMERCE' as const,
+          config: {
+            panel_ui: {
+              profile: true,
+              history: true,
+              dashboard: true,
+              favorites: true,
+              orders: true,
+              settings: true,
+            },
+          },
+        },
+      },
+    };
+  }
+
   async resolveGuestCustomerForCheckout(
     storeId: number,
     guest: {
@@ -184,44 +245,20 @@ export class CustomersService {
       const formattedLastName =
         toTitleCase(guest.last_name ?? '') || 'Invitado';
 
-      const buildUserData = (username: string) => ({
-        email: normalizedEmail,
-        password: hashedPassword,
-        first_name: formattedFirstName,
-        last_name: formattedLastName,
-        phone: this.normalizeOptionalString(normalizedPhone),
-        document_type: normalizedDoc.type,
-        document_number: normalizedDoc.number,
-        username,
-        email_verified: false,
-        state: 'pending_verification' as const,
-        organizations: { connect: { id: store.organization_id } },
-        user_roles: {
-          create: {
-            role_id: customerRole.id,
-          },
-        },
-        store_users: {
-          create: {
-            store_id: store.id,
-          },
-        },
-        user_settings: {
-          create: {
-            app_type: 'STORE_ECOMMERCE' as const,
-            config: {
-              panel_ui: {
-                profile: true,
-                history: true,
-                dashboard: true,
-                favorites: true,
-                orders: true,
-                settings: true,
-              },
-            },
-          },
-        },
-      });
+      const buildUserData = (username: string) =>
+        this.buildGuestUserData({
+          username,
+          email: normalizedEmail,
+          hashedPassword,
+          firstName: formattedFirstName,
+          lastName: formattedLastName,
+          phone: normalizedPhone,
+          documentType: normalizedDoc.type,
+          documentNumber: normalizedDoc.number,
+          organizationId: store.organization_id,
+          storeId: store.id,
+          customerRoleId: customerRole.id,
+        });
 
       let user: {
         id: number;
@@ -311,6 +348,162 @@ export class CustomersService {
       customer_id: existing.id,
       was_created: false,
       was_updated: hasUpdates,
+    };
+  }
+
+  /**
+   * Resolve (or create) a guest `users` row (rol `customer`) for a diner who
+   * identifies at a restaurant table (QR dine-in "cliente presentado").
+   *
+   * Unlike `resolveGuestCustomerForCheckout`, the email is OPTIONAL: a diner
+   * is identified by name plus phone/document. Dedupe order:
+   *   1. by email (case-insensitive), when provided;
+   *   2. else by phone, when provided;
+   *   3. otherwise a fresh guest is created (identified by name only).
+   *
+   * The created row mirrors the guest-checkout shape via `buildGuestUserData`
+   * (unreachable password, `state: 'pending_verification'`,
+   * `email_verified: false`, org connect, rol customer, store link,
+   * STORE_ECOMMERCE settings). Tenant-safe: uses the same `StorePrismaService`
+   * as `resolveGuestCustomerForCheckout`.
+   */
+  async resolveTableGuestCustomer(
+    store_id: number,
+    data: {
+      first_name: string;
+      last_name?: string;
+      phone?: string;
+      email?: string;
+      document_type?: string;
+      document_number?: string;
+    },
+  ): Promise<{ customer_id: number; name: string; was_created: boolean }> {
+    const normalizedEmail = data.email?.toLowerCase().trim() || null;
+    const normalizedPhone = data.phone?.replace(/\s+/g, '').trim() || null;
+    const normalizedDoc = this.normalizeDocument({
+      type: data.document_type ?? null,
+      number: data.document_number ?? null,
+    });
+
+    const store = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: { id: true, organization_id: true },
+    });
+
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    // Dedupe against store-scoped customer rows: email first (when present),
+    // else phone. A diner without email or phone always creates a fresh row.
+    let existing: {
+      id: number;
+      first_name: string;
+      last_name: string | null;
+    } | null = null;
+
+    if (normalizedEmail) {
+      existing = await this.prisma.users.findFirst({
+        where: {
+          email: { equals: normalizedEmail, mode: 'insensitive' },
+          store_users: { some: { store_id } },
+          user_roles: { some: { roles: { name: 'customer' } } },
+        },
+        select: { id: true, first_name: true, last_name: true },
+      });
+    }
+
+    if (!existing && normalizedPhone) {
+      existing = await this.prisma.users.findFirst({
+        where: {
+          phone: normalizedPhone,
+          store_users: { some: { store_id } },
+          user_roles: { some: { roles: { name: 'customer' } } },
+        },
+        select: { id: true, first_name: true, last_name: true },
+      });
+    }
+
+    if (existing) {
+      return {
+        customer_id: existing.id,
+        name: [existing.first_name, existing.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim(),
+        was_created: false,
+      };
+    }
+
+    const customerRole = await this.prisma.roles.findFirst({
+      where: { name: 'customer' },
+    });
+
+    if (!customerRole) {
+      throw new VendixHttpException(ErrorCodes.CUST_CREATE_001);
+    }
+
+    const hashedPassword = await this.generateUnreachablePassword();
+    const formattedFirstName = toTitleCase(data.first_name ?? '') || 'Cliente';
+    const formattedLastName = toTitleCase(data.last_name ?? '') || 'Invitado';
+
+    // Username seed: email → phone → document → first name. The while-counter
+    // in `generateUniqueUsername` guarantees real uniqueness against `users`.
+    const usernameSeed =
+      normalizedEmail ??
+      normalizedPhone ??
+      normalizedDoc.number ??
+      formattedFirstName;
+
+    const buildUserData = (username: string) =>
+      this.buildGuestUserData({
+        username,
+        email: normalizedEmail,
+        hashedPassword,
+        firstName: formattedFirstName,
+        lastName: formattedLastName,
+        phone: normalizedPhone,
+        documentType: normalizedDoc.type,
+        documentNumber: normalizedDoc.number,
+        organizationId: store.organization_id,
+        storeId: store.id,
+        customerRoleId: customerRole.id,
+      });
+
+    let user: { id: number; first_name: string; last_name: string | null };
+    try {
+      const username = await this.generateUniqueUsername(usernameSeed);
+      user = await this.prisma.users.create({
+        data: buildUserData(username),
+        select: { id: true, first_name: true, last_name: true },
+      });
+    } catch (error: any) {
+      const isUsernameConflict =
+        error?.code === 'P2002' &&
+        Array.isArray(error?.meta?.target) &&
+        error.meta.target.includes('username');
+
+      if (!isUsernameConflict) throw error;
+
+      const retryUsername = await this.generateUniqueUsername(usernameSeed);
+      user = await this.prisma.users.create({
+        data: buildUserData(retryUsername),
+        select: { id: true, first_name: true, last_name: true },
+      });
+    }
+
+    this.eventEmitter.emit('customer.created', {
+      store_id: store.id,
+      customer_id: user.id,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: normalizedEmail,
+    });
+
+    return {
+      customer_id: user.id,
+      name: [user.first_name, user.last_name].filter(Boolean).join(' ').trim(),
+      was_created: true,
     };
   }
 
@@ -509,6 +702,81 @@ export class CustomersService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Top-N clientes de la tienda ordenados por NÚMERO de órdenes `finished`.
+   * Pensado para pre-mostrar en el buscador de clientes del POS.
+   *
+   * 1. Agrega órdenes finished por `customer_id` (store-scoped, ignora null).
+   * 2. Carga los usuarios con la MISMA forma PosCustomer que `findAll`
+   *    (rol customer + store link + direcciones shipping primarias).
+   * 3. Devuelve el arreglo en el MISMO orden del ranking, cada item con
+   *    `order_count` (= _count._all). Sin clientes con órdenes → `[]`.
+   */
+  async getTopCustomers(storeId: number, limit = 5) {
+    const grouped = await this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: {
+        store_id: storeId,
+        state: 'finished',
+        customer_id: { not: null },
+      },
+      _count: { _all: true, customer_id: true },
+      orderBy: { _count: { customer_id: 'desc' } },
+      take: limit,
+    });
+
+    const ranking = grouped
+      .filter((g) => g.customer_id != null)
+      .map((g) => ({
+        customer_id: g.customer_id as number,
+        order_count: g._count._all,
+      }));
+
+    if (ranking.length === 0) {
+      return [];
+    }
+
+    const customerIds = ranking.map((r) => r.customer_id);
+
+    // Misma forma PosCustomer que `findAll`: rol customer + store link +
+    // direcciones shipping ordenadas por is_primary. `users` no está scoped
+    // por StorePrismaService (getter baseClient), de ahí el filtro manual.
+    const users = await this.prisma.users.findMany({
+      where: {
+        id: { in: customerIds },
+        store_users: {
+          some: {
+            store_id: storeId,
+          },
+        },
+        user_roles: {
+          some: {
+            roles: {
+              name: 'customer',
+            },
+          },
+        },
+      },
+      include: {
+        addresses: {
+          where: { type: 'shipping' },
+          orderBy: { is_primary: 'desc' },
+        },
+      },
+    });
+
+    const usersById = new Map(users.map((u) => [u.id, u]));
+
+    // Preserva el orden del ranking del groupBy y adjunta order_count.
+    return ranking
+      .map((r) => {
+        const user = usersById.get(r.customer_id);
+        if (!user) return null;
+        return { ...user, order_count: r.order_count };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
   }
 
   async findOne(storeId: number, id: number) {

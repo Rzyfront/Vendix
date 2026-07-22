@@ -11,7 +11,7 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { Observable, map, merge, filter } from 'rxjs';
+import { Observable, interval, map, merge, filter } from 'rxjs';
 import { NotificationsService } from './notifications.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
@@ -36,7 +36,14 @@ export class NotificationsController {
 
   @Get()
   async findAll(@Query() query_dto: NotificationQueryDto) {
-    const result = await this.notifications_service.findAll(query_dto);
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    if (!user_id) throw new ForbiddenException('User context required');
+
+    const result = await this.notifications_service.findAll(
+      user_id,
+      query_dto,
+    );
     return this.response_service.success(
       result.data,
       'Notifications retrieved',
@@ -49,7 +56,11 @@ export class NotificationsController {
 
   @Get('unread-count')
   async unreadCount() {
-    const result = await this.notifications_service.getUnreadCount();
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    if (!user_id) throw new ForbiddenException('User context required');
+
+    const result = await this.notifications_service.getUnreadCount(user_id);
     return this.response_service.success(result);
   }
 
@@ -167,7 +178,7 @@ export class NotificationsController {
     // emitir notificaciones reales — se excluyen los eventos foráneos para no
     // inflar el badge ni disparar sonido. El stream dedicado
     // /store/memberships/access/stream sí filtra su propio 'membership-access'.
-    return merged.pipe(
+    const events$ = merged.pipe(
       filter(
         (payload) =>
           (payload as { type?: string })?.type !== 'membership-access',
@@ -179,5 +190,15 @@ export class NotificationsController {
           }) as MessageEvent,
       ),
     );
+
+    // Heartbeat every 30s — a periodic keep-alive write so proxies/CDNs don't
+    // idle-close the stream. Forcing socket I/O also makes a non-clean
+    // disconnect surface as `req.on('close')`, releasing the shared Subject
+    // (fixes the SSE heap leak).
+    const heartbeat$ = interval(30_000).pipe(
+      map(() => ({ data: `: heartbeat ${Date.now()}` }) as MessageEvent),
+    );
+
+    return merge(events$, heartbeat$);
   }
 }

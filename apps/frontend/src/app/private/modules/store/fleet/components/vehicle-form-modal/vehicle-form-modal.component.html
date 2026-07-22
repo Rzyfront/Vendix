@@ -97,6 +97,46 @@
       <textarea formControlName="notes" rows="3" placeholder="Observaciones del vehículo..."
         class="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"></textarea>
     </div>
+
+    <!-- Plan Despacho Economía — FASE 1 paso 6.
+         Tarifa del ejecutor (vehículo propio). Si settlement_type ≠ 'none',
+         settlement_rate es obligatorio y define el costo de transporte. -->
+    <div class="rounded-lg border border-dashed border-blue-300 bg-blue-50/50 p-4 space-y-3">
+      <p class="text-xs text-blue-800 font-medium">
+        Tarifa de liquidación del vehículo
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-text-secondary mb-1">Tipo de tarifa</label>
+          <select formControlName="settlement_type"
+            (change)="onSettlementTypeChange()"
+            class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
+            @for (opt of settlement_type_options; track opt.value) {
+              <option [value]="opt.value">{{ opt.label }}</option>
+            }
+          </select>
+        </div>
+        @if (showSettlementRate()) {
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-1">
+              Tarifa (COP) <span class="text-red-500">*</span>
+            </label>
+            <input type="number" formControlName="settlement_rate" min="0" step="100"
+              placeholder="5000"
+              class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+            @if (form.get('settlement_rate')?.touched && form.get('settlement_rate')?.invalid) {
+              <p class="mt-1 text-xs text-red-500">
+                @if (form.get('settlement_rate')?.errors?.['required']) {
+                  La tarifa es obligatoria si el tipo no es "Sin tarifa".
+                } @else if (form.get('settlement_rate')?.errors?.['min']) {
+                  La tarifa no puede ser negativa.
+                }
+              </p>
+            }
+          </div>
+        }
+      </div>
+    </div>
   </form>
 
   <div slot="footer" class="flex justify-end gap-3">

@@ -92,6 +92,7 @@
   (isOpenChange)="isCustomerModalOpen.set($event)"
   (closed)="isCustomerModalOpen.set(false)"
   (save)="onCustomerCreated($event)"
+  (addressData)="onAddressData($event)"
 ></app-customer-modal>
 
 <!-- Optional post-alta charge (reuses the renew modal) -->

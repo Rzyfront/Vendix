@@ -12,8 +12,12 @@ export class ApEventsListener {
   @OnEvent('purchase_order.received')
   async handlePurchaseOrderReceived(event: {
     purchase_order_id: number;
+    reception_id: number;
     supplier_id: number;
-    total_amount: number;
+    /** BRUTO contributed by this reception (neto + vat_deductible for O-48,
+     *  or net alone for O-49). Per `vendix-tax-typing` compras post solo el
+     *  escalar `vat_deductible`, sin `tax_breakdown`. */
+    gross_reception_share: number;
     document_number?: string;
     organization_id: number;
     store_id?: number;
@@ -21,12 +25,12 @@ export class ApEventsListener {
     currency?: string;
   }) {
     try {
-      const ap = await this.ap_service.createFromEvent({
+      const ap = await this.ap_service.upsertPayableForReception({
         supplier_id: event.supplier_id,
-        source_type: 'purchase_order',
         source_id: event.purchase_order_id,
+        reception_id: event.reception_id,
+        gross_reception_share: event.gross_reception_share,
         document_number: event.document_number,
-        original_amount: event.total_amount,
         currency: event.currency,
         due_date: event.due_date,
         organization_id: event.organization_id,
@@ -34,11 +38,11 @@ export class ApEventsListener {
       });
 
       this.logger.log(
-        `AP #${ap.id} created for purchase_order #${event.purchase_order_id}`,
+        `AP #${ap.id} upserted for purchase_order #${event.purchase_order_id} (reception #${event.reception_id})`,
       );
     } catch (error) {
       this.logger.error(
-        `Failed to create AP for purchase_order #${event.purchase_order_id}: ${error.message}`,
+        `Failed to upsert AP for purchase_order #${event.purchase_order_id}: ${error.message}`,
         error.stack,
       );
     }

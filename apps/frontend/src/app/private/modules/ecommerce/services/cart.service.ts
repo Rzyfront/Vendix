@@ -1,15 +1,18 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, Subject } from 'rxjs';
-import { tap } from 'rxjs/operators';
+import { Observable, Subject, of } from 'rxjs';
+import { catchError, tap } from 'rxjs/operators';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { CatalogService, EcommerceProduct } from './catalog.service';
+import { TableContextService } from './table-context.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { PriceResolverService } from '../../../../shared/services/pricing';
 import { StoreAvailabilityService } from '../../../../core/services/store-availability.service';
+import { ToastService } from '../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 export interface CartItem {
   id: number;
@@ -130,6 +133,13 @@ export class CartService {
   // Public storefront availability — used to re-surface the "store unavailable"
   // banner when a customer tries to add to cart while the store is closed.
   private readonly store_availability = inject(StoreAvailabilityService);
+  // QR dine-in (D1/D3): single source of truth for mesa state. Injected here so
+  // `addProduct` can route the call to `addOrder` (table tab) instead of the
+  // ecommerce cart when the diner is in an `open_tab` session.
+  private readonly tableContext = inject(TableContextService);
+  // Shared toast service — used by `addProduct` for mesa success/error and for
+  // the "Sal de la mesa" warning in reserved `isActive && !isOpenTab` modes.
+  private readonly toastService = inject(ToastService);
   /**
    * Monotonic token guaranteeing last-response-wins for the central
    * promotional enrichment: a slow summary from a superseded cart state can
@@ -620,6 +630,91 @@ export class CartService {
         variantInfo,
       );
     }
+  }
+
+  /**
+   * Chokepoint for ALL "agregar producto" entry points (D3). Routes the call
+   * to the correct sink so no other component has to re-implement the
+   * mesa-vs-cart branch:
+   *
+   *   1. `isOpenTab()`  → `tableContext.addOrder([...])` (mesa tab) — returns
+   *                       the underlying Observable so callers can chain their
+   *                       own post-processing (e.g. reset local qty stepper).
+   *   2. `isActive() && !isOpenTab()` → reserved enum values (`menu_only`,
+   *                       `mark_occupied`) without a UI driver today; surface a
+   *                       toast so the diner doesn't see a silent no-op and
+   *                       return early.
+   *   3. else           → legacy `addToCart` (auth-aware, dual storage).
+   *
+   * Signature mirrors `addToCart` so the 12 call sites migrate with a single
+   * token rename. The mesa success/error toast is centralised here (was
+   * previously duplicated in product-card / menus-showcase / menus-page via
+   * the D5 ad-hoc branches).
+   */
+  addProduct(
+    product_id: number,
+    quantity: number,
+    product_variant_id?: number,
+    variantInfo?: { name: string; sku: string; price: number },
+  ): Observable<any> | void {
+    // Store closed: re-show the branded banner. The backend still hard-blocks
+    // checkout; this reinforces the UX at the earliest customer action.
+    if (this.store_availability.unavailable()) {
+      this.store_availability.reopen();
+    }
+
+    // (1) QR dine-in — open_tab: dish belongs on the table tab, NOT the
+    // ecommerce cart. Mirrors the D5 ad-hoc branches in product-card /
+    // menus-showcase / menus-page that this method centralises.
+    if (this.tableContext.isOpenTab()) {
+      return this.tableContext
+        .addOrder([
+          {
+            product_id,
+            quantity,
+            product_variant_id,
+          },
+        ])
+        .pipe(
+          tap((res) => {
+            if (res?.success) {
+              const msg = this.tableContext.autoFire()
+                ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
+                : `Agregado a la mesa ${this.tableContext.tableName()}`;
+              this.toastService.success(msg);
+            }
+          }),
+          catchError((err) => {
+            const { userMessage, devMessage } = parseApiError(err);
+            this.toastService.error(userMessage);
+            if (devMessage) console.error('[table addOrder]', devMessage);
+            // Return a null sentinel so the caller's `result.subscribe(cb)`
+            // still fires its next handler (e.g. qty stepper reset) without
+            // rethrowing — keeps the chokepoint signature compatible.
+            return of(null);
+          }),
+        );
+    }
+
+    // (2) QR dine-in — table active but NOT in open_tab mode.
+    // (Step 7) The purchase CTAs are now hidden at the surface level via
+    // `tableContext.hideDineInPurchase()`, so this branch is unreachable
+    // from the UI in `menu_only` / pre-session `mark_occupied` /
+    // pre-session `require_staff`. Defensive guard retained: if a
+    // programmatic caller reaches here (e.g. test, future surface that
+    // forgets to gate), silently no-op rather than spilling the dish
+    // into the regular cart while the diner is "occupying" the mesa.
+    if (this.tableContext.isActive()) {
+      return;
+    }
+
+    // (3) Standard ecommerce path — auth-aware (API vs localStorage).
+    return this.addToCart(
+      product_id,
+      quantity,
+      product_variant_id,
+      variantInfo,
+    );
   }
 
   /**

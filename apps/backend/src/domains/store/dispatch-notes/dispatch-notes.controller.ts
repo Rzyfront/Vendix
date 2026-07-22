@@ -9,10 +9,14 @@ import {
   Query,
   Res,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
@@ -23,17 +27,32 @@ import {
   DispatchNoteQueryDto,
   CreateFromSalesOrderDto,
   CreateFromOrderDto,
+  CreateFromOrdersBatchDto,
   VoidDispatchNoteDto,
   DeliverDispatchNoteDto,
   ConfirmDispatchNoteDto,
+  CreateTransferDispatchDto,
+  CreateReturnDispatchDto,
+  CreatePurchaseReceiptDispatchDto,
+  UpdateDispatchNoteAddressDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 @Controller('store/dispatch-notes')
 @UseGuards(PermissionsGuard)
 export class DispatchNotesController {
+  private static readonly RECEIPT_SCAN_ALLOWED_MIMETYPES = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
+
+  private static readonly RECEIPT_SCAN_MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+
   constructor(
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchNoteFlowService: DispatchNoteFlowService,
@@ -123,6 +142,55 @@ export class DispatchNotesController {
     );
   }
 
+  /**
+   * Vendix Repartos — Fase B5. Admin publica una orden al pool de repartidores
+   * (carriers) de la tienda. Marca la orden como disponible (dispatch_pool_at)
+   * y emite `order.awaiting_carrier` → notifica a los carriers. Idempotente.
+   */
+  @Post('orders/:orderId/send-to-dispatch')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_notes:create')
+  async sendToDispatch(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.dispatchNotesService.sendToDispatchPool(order_id);
+    return this.responseService.success(
+      result,
+      'Orden enviada al pool de despacho exitosamente',
+    );
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 7 paso 23.
+   * Crea remisiones en lote desde N órdenes con resultado parcial por orden.
+   */
+  @Post('from-orders')
+  @Permissions('store:dispatch_notes:create')
+  async createFromOrdersBatch(@Body() dto: CreateFromOrdersBatchDto) {
+    const result = await this.dispatchNotesService.createFromOrdersBatch(dto);
+    return this.responseService.success(
+      result,
+      result.partial
+        ? 'Batch procesado con resultados parciales'
+        : 'Batch procesado completamente',
+    );
+  }
+
+  /**
+   * Validación en lote sin crear (2 agregaciones, no N×M).
+   */
+  @Post('from-orders/validate')
+  @Permissions('store:dispatch_notes:read')
+  async validateFromOrdersBatch(@Body() body: { order_ids: number[] }) {
+    const result = await this.dispatchNotesService.validateFromOrdersBatch(
+      body?.order_ids ?? [],
+    );
+    return this.responseService.success(
+      result,
+      result.ok
+        ? 'Todas las órdenes tienen stock suficiente'
+        : 'Hay órdenes con problemas de stock',
+    );
+  }
+
   @Get('reports/pending')
   @Permissions('store:dispatch_notes:read')
   async getPendingInvoicing(@Query() query: DispatchNoteQueryDto) {
@@ -154,6 +222,112 @@ export class DispatchNotesController {
     );
   }
 
+  // ── Bidirectional dispatch note endpoints ──────────────────────────
+
+  /**
+   * Create a transfer dispatch note (outbound transfer_out or inbound
+   * transfer_in). Reuses the 'create' permission — internal gating by
+   * direction/subtype is in the service (no separate inbound permission
+   * to avoid a seed migration in v1).
+   */
+  @Post('transfer')
+  @Permissions('store:dispatch_notes:create')
+  async createTransfer(@Body() dto: CreateTransferDispatchDto) {
+    const result = await this.dispatchNotesService.createTransfer(dto);
+    return this.responseService.created(
+      result,
+      'Remisión de transferencia creada exitosamente',
+    );
+  }
+
+  /**
+   * Create a customer return dispatch note (inbound, subtype customer_return).
+   * Reuses the 'create' permission — financial refund is decoupled (v1).
+   */
+  @Post('return')
+  @Permissions('store:dispatch_notes:create')
+  async createReturn(@Body() dto: CreateReturnDispatchDto) {
+    const result = await this.dispatchNotesService.createReturn(dto);
+    return this.responseService.created(
+      result,
+      'Remisión de devolución creada exitosamente',
+    );
+  }
+
+  /**
+   * Create a purchase receipt dispatch note (inbound, subtype purchase_receipt).
+   * When purchase_order_id is present, delegates to PurchaseOrdersService.receive.
+   * Reuses the 'create' permission.
+   */
+  @Post('purchase-receipt')
+  @Permissions('store:dispatch_notes:create')
+  async createPurchaseReceipt(@Body() dto: CreatePurchaseReceiptDispatchDto) {
+    const result =
+      await this.dispatchNotesService.createPurchaseReceipt(dto);
+    return this.responseService.created(
+      result,
+      'Remisión de recepción de compra creada exitosamente',
+    );
+  }
+
+  /**
+   * R4c (async) — Enqueue an AI scan of a purchase receipt / supplier invoice
+   * (multipart `file`). The image is preprocessed (sharp) INLINE here and the
+   * heavy OCR + tenant-scoped catalog matching runs out-of-band in the
+   * `receipt-scan` worker. Responds 202 with `{ job_id }`; the client then polls
+   * `GET receipt-scan/:jobId` for the terminal `ScanReceiptResult`. Reuses the
+   * dispatch-notes create permission. No persistence.
+   */
+  @Post('receipt-scan')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('store:dispatch_notes:create')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: DispatchNotesController.RECEIPT_SCAN_MAX_FILE_BYTES },
+      fileFilter: (_req, file, cb) => {
+        if (
+          !DispatchNotesController.RECEIPT_SCAN_ALLOWED_MIMETYPES.includes(
+            file.mimetype,
+          )
+        ) {
+          return cb(
+            new VendixHttpException(
+              ErrorCodes.DISPATCH_RECEIPT_SCAN_INVALID_FILE,
+            ),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async receiptScan(@UploadedFile() file?: Express.Multer.File) {
+    const result = await this.dispatchNotesService.enqueueReceiptScan(file);
+    return this.responseService.success(
+      result,
+      'Escaneo de recibo encolado exitosamente',
+    );
+  }
+
+  /**
+   * R4c (async) — Poll the status of a queued receipt scan. Returns
+   * `{ status, result?, error? }` where `status` is the BullMQ lifecycle state
+   * ('waiting' | 'active' | 'completed' | 'failed' | 'delayed'), `result` is the
+   * unchanged `ScanReceiptResult` (only when completed), and `error` is the
+   * failure reason (only when failed). Same create permission as the enqueue.
+   */
+  @Get('receipt-scan/:jobId')
+  @Permissions('store:dispatch_notes:create')
+  async receiptScanStatus(@Param('jobId') job_id: string) {
+    const result =
+      await this.dispatchNotesService.getReceiptScanJobStatus(job_id);
+    return this.responseService.success(
+      result,
+      'Estado del escaneo de recibo obtenido',
+    );
+  }
+
   @Get(':id')
   @Permissions('store:dispatch_notes:read:one')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -174,6 +348,25 @@ export class DispatchNotesController {
     return this.responseService.updated(
       result,
       'Remisión actualizada exitosamente',
+    );
+  }
+
+  /**
+   * Re-snapshotear la dirección de entrega de una remisión. Independiente
+   * del status: `customer_address` es solo display+mapa (no afecta inventario
+   * ni contabilidad). Ver `updateCustomerAddressSnapshot` en el service.
+   */
+  @Patch(':id/address')
+  @Permissions('store:dispatch_notes:update')
+  async updateAddressSnapshot(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateDispatchNoteAddressDto,
+  ) {
+    const result =
+      await this.dispatchNotesService.updateCustomerAddressSnapshot(id, dto);
+    return this.responseService.updated(
+      result,
+      'Dirección de remisión actualizada',
     );
   }
 
@@ -207,6 +400,20 @@ export class DispatchNotesController {
     return this.responseService.success(
       result,
       'Remisión entregada exitosamente',
+    );
+  }
+
+  /**
+   * Receive an inbound dispatch note (confirmed → received).
+   * Reuses the 'deliver' permission — semantically equivalent (goods handed over).
+   */
+  @Post(':id/receive')
+  @Permissions('store:dispatch_notes:deliver')
+  async receive(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dispatchNoteFlowService.receive(id);
+    return this.responseService.success(
+      result,
+      'Remisión recibida exitosamente',
     );
   }
 

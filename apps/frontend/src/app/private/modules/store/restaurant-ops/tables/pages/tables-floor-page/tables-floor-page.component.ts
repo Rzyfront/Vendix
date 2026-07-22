@@ -17,8 +17,12 @@ import {
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { Table, TableStatus } from '../../interfaces';
+import { Table, TableStatus, OpenTableSessionDto } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+import {
+  AdminTablesLivePayload,
+  AdminTablesSseService,
+} from '../../services/admin-tables-sse.service';
 import { TableFloorMapComponent } from '../../components/table-floor-map/table-floor-map.component';
 import { OpenTableModalComponent } from '../../components/open-table-modal/open-table-modal.component';
 import { SeatBookingModalComponent } from '../../components/seat-booking-modal/seat-booking-modal.component';
@@ -59,6 +63,7 @@ interface TablesStats {
 })
 export class TablesFloorPageComponent implements OnInit {
   private readonly tablesService = inject(TablesService);
+  private readonly adminTablesSseService = inject(AdminTablesSseService);
   private readonly router = inject(Router);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -72,6 +77,20 @@ export class TablesFloorPageComponent implements OnInit {
   readonly seatTable = signal<Table | null>(null);
   readonly isQuickStatusOpen = signal(false);
   readonly quickStatusTable = signal<Table | null>(null);
+
+  /**
+   * Live counts de mesas con sesión abierta, alimentados por el SSE
+   * staff. Se renderizan como badges sobre la celda correspondiente.
+   * Vacío hasta que llegue el primer `snapshot` o un `item_added` con
+   * `session_id` conocido.
+   */
+  readonly liveCounts = computed<Map<number, AdminTablesLivePayload>>(
+    () => this.adminTablesSseService.tablesLive(),
+  );
+  readonly sseConnectionState = computed(
+    () => this.adminTablesSseService.connectionState(),
+  );
+  readonly sseMode = computed(() => this.adminTablesSseService.mode());
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
@@ -101,6 +120,13 @@ export class TablesFloorPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadFloor();
+    // Conectar el SSE staff al entrar a la página. La desconexión
+    // ocurre en `DestroyRef.onDestroy` (zoneless-safe; equivalente a
+    // ngOnDestroy sin la sobrecarga del ciclo de vida Angular clásico).
+    this.adminTablesSseService.connect();
+    this.destroyRef.onDestroy(() => {
+      this.adminTablesSseService.disconnect();
+    });
   }
 
   loadFloor(): void {
@@ -153,9 +179,19 @@ export class TablesFloorPageComponent implements OnInit {
       this.isOpenModalOpen.set(true);
       return;
     }
-    // Everything else (cleaning, reserved without bookings, occupied
-    // without session, etc.) opens the quick-status modal so the operator
-    // can flip the mesa to another state without leaving the floor page.
+    // Shortcut 4: mesa marcada como `occupied` por un escaneo de QR-mesa
+    // pero sin sesión POS abierta todavía. El operador adopta la mesa
+    // abriendo una sesión sobre la misma fila (backend ya lo permite
+    // en `openTableSessionPublic` / `openSession`; el form del modal
+    // reusa el mismo flujo POS estándar).
+    if (t.status === 'occupied' && !t.active_session) {
+      this.selectedTable.set(t);
+      this.isOpenModalOpen.set(true);
+      return;
+    }
+    // Everything else (cleaning, reserved without bookings, etc.) opens
+    // the quick-status modal so the operator can flip the mesa to another
+    // state without leaving the floor page.
     this.openQuickStatus(t);
   }
 
@@ -185,7 +221,10 @@ export class TablesFloorPageComponent implements OnInit {
     this.loadFloor();
   }
 
-  onOpenSession(dto: { table_id: number; guest_count?: number }): void {
+  onOpenSession(dto: OpenTableSessionDto): void {
+    // The modal emits the full `OpenTableSessionDto` (including the optional
+    // `customer_id`); forward it verbatim so the chosen client reaches the
+    // backend instead of being dropped by a narrower local type (Paso 10).
     this.isOpeningSession.set(true);
     this.tablesService
       .openSession(dto)

@@ -71,6 +71,13 @@
   }
 }
 
+@media (max-width: 767px) {
+  .change-customer-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* ── Overview sin cliente: prompt con acciones ──────────────────── */
 .overview-empty {
   display: flex;
@@ -112,6 +119,11 @@
     text-transform: uppercase;
     color: var(--color-text-muted);
   }
+
+  /* Botón "Crear cliente" pegado al extremo derecho de la barra */
+  app-button {
+    margin-left: auto;
+  }
 }
 
 .back-btn {
@@ -120,7 +132,7 @@
   gap: 4px;
   background: none;
   border: none;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -166,6 +178,21 @@
   gap: 8px;
   max-height: 220px;
   overflow-y: auto;
+}
+
+/* ── Sugerencias top-5 (clientes frecuentes) ────────────────────── */
+.suggestions-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.suggestions-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-text-muted);
 }
 
 .customer-result {

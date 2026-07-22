@@ -14,6 +14,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { S3Module } from '@common/services/s3.module';
 import { GeocodingModule } from '../../ecommerce/geocoding/geocoding.module';
+import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 
 @Module({
   imports: [
@@ -24,6 +25,11 @@ import { GeocodingModule } from '../../ecommerce/geocoding/geocoding.module';
     // Provides GeocodingService.forward() for resolving stop coordinates on
     // the route map (fallback when no lat/lng is stored on the address).
     GeocodingModule,
+    // QUI-498: provides OrderFlowService so RouteFlowService reconciles the
+    // linked COD order state post-commit via the single reconciler
+    // (reconcileOrderFromDispatch) instead of writing orders.state directly.
+    // OrderFlowModule does NOT import DispatchRoutesModule → acyclic.
+    OrderFlowModule,
   ],
   controllers: [
     DispatchRoutesController,

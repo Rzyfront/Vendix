@@ -140,7 +140,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
       </div>
 
       <div slot="footer" class="flex justify-end">
-        <app-button variant="primary" size="sm" (clicked)="isOpen.set(false)">
+        <app-button variant="primary" size="sm" (clicked)="onDone()">
           Listo
         </app-button>
       </div>
@@ -170,4 +170,15 @@ export class PopOrderConfigModalComponent {
   readonly shippingMethodChange = output<string>();
   readonly openSupplierModal = output<void>();
   readonly openWarehouseModal = output<void>();
+
+  /**
+   * Emitido al pulsar "Listo". El host (pop-header) decide si propagar la
+   * reconexión de la acción pendiente según `isConfigured()`.
+   */
+  readonly done = output<void>();
+
+  onDone(): void {
+    this.isOpen.set(false);
+    this.done.emit();
+  }
 }

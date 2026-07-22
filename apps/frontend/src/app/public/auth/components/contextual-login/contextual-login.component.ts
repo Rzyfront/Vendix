@@ -26,6 +26,7 @@ import {
   ButtonComponent,
   CardComponent,
   IconComponent} from '../../../../shared/components';
+import { RateLimitLockModalComponent } from '../../../../shared/components/rate-limit-lock-modal/rate-limit-lock-modal.component';
 
 export type LoginState =
   | 'idle'
@@ -63,7 +64,8 @@ export interface OrganizationCandidate {
     InputComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent
+    IconComponent,
+    RateLimitLockModalComponent
 ],
   template: `
     <div
@@ -562,6 +564,14 @@ export interface OrganizationCandidate {
         </div>
       </div>
     }
+
+    <!-- Rate Limit Lock Modal (HTTP 429) -->
+    <app-rate-limit-lock-modal
+      [(isOpen)]="rateLimitOpen"
+      [retrySeconds]="rateLimitSeconds()"
+      [attemptedEmail]="loginForm.get('email')?.value"
+      context="admin"
+      (closed)="onRateLimitClosed()" />
   `,
   styles: [
     `
@@ -592,6 +602,11 @@ export class ContextualLoginComponent {
     slug: string;
   } | null>(null);
 
+  // QUI-489 — Rate limit (HTTP 429): reemplaza el toast genérico por el modal
+  // compartido con countdown + contacto a soporte.
+  readonly rateLimitOpen = signal(false);
+  readonly rateLimitSeconds = signal(0);
+
   private toast = inject(ToastService);
   private appConfigFacade = inject(ConfigFacade);
 
@@ -619,6 +634,15 @@ export class ContextualLoginComponent {
     effect(() => {
       const error = this.authFacade.authError();
       if (error) {
+        // QUI-489 — 429: interceptar sobre el objeto crudo ANTES de aplanar el
+        // mensaje. Mostramos el modal de bloqueo en vez del toast genérico.
+        if (
+          typeof error !== 'string' &&
+          (error.statusCode === 429 || typeof error.retryAfter === 'number')
+        ) {
+          this.handleRateLimited(error.retryAfter ?? 900); // fallback = ventana 15 min
+          return;
+        }
         if (this.isDisambiguationError(error)) {
           this.handleDisambiguationRequired(error);
         } else {
@@ -732,6 +756,13 @@ export class ContextualLoginComponent {
     }
   }
 
+  private handleRateLimited(seconds: number): void {
+    // QUI-489 — sin toast: el modal de bloqueo es la única superficie de error.
+    this.loginState.set('too_many_attempts');
+    this.rateLimitSeconds.set(seconds);
+    this.rateLimitOpen.set(true);
+  }
+
   private handleLoginError(error: string): void {
     this.setLoginError({ type: 'error', message: error, apiError: error });
   }
@@ -804,6 +835,13 @@ export class ContextualLoginComponent {
     this.authFacade.setAuthError(null);
   }
 
+  onRateLimitClosed(): void {
+    // Limpia el error para no dejar el estado 429 colgado tras cerrar el modal.
+    this.rateLimitOpen.set(false);
+    this.authFacade.setAuthError(null);
+    this.loginState.set('idle');
+  }
+
   openCommerceSelector(): void {
     const current = this.selectedCommerceSlug();
     if (current) {
@@ -836,7 +874,9 @@ export class ContextualLoginComponent {
       s !== 'idle' &&
       s !== 'loading' &&
       s !== 'success' &&
-      s !== 'disambiguation_required'
+      s !== 'disambiguation_required' &&
+      // QUI-489 — el 429 se muestra en el modal de bloqueo, no en el box inline.
+      s !== 'too_many_attempts'
     );
   });
   readonly isLoading = computed(() => this.loginState() === 'loading');

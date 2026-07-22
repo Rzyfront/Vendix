@@ -22,6 +22,25 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Cuentas por Cobrar',
   },
   'invoice.validated.revenue': { code: '4135', description: 'Ingresos' },
+  // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado
+  // en 414505 "Transporte Terrestre". Se reconoce al validar la factura
+  // (shipping_amount > 0) y al recibir un pago POS con flete sin factura.
+  'invoice.validated.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'payment.received.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'credit_sale.created.shipping_income': {
+    code: '414505',
+    description: 'Transporte Terrestre (Ingresos por Fletes)',
+  },
+  'refund.completed.shipping_income_reversal': {
+    code: '414505',
+    description: 'Transporte Terrestre (Reversión Ingresos por Fletes)',
+  },
   'invoice.validated.vat_payable': {
     code: '2408',
     description: 'IVA por Pagar',
@@ -131,6 +150,33 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'payroll.paid.bank': { code: '1110', description: 'Banco' },
   'order.completed.cogs': { code: '6135', description: 'Costo de Ventas' },
   'order.completed.inventory': { code: '1435', description: 'Inventario' },
+  // Remisiones bidireccionales (Fase 4). Reutilizan las mismas cuentas PUC que
+  // order.completed / purchase_order.received; separadas por mapping key para
+  // permitir override por tienda sin tocar los flujos existentes.
+  'dispatch_note.delivered.cogs': {
+    code: '6135',
+    description: 'Costo de ventas (remisión)',
+  },
+  'dispatch_note.delivered.inventory': {
+    code: '1435',
+    description: 'Inventario (remisión entregada)',
+  },
+  'dispatch_note.received.inventory': {
+    code: '1435',
+    description: 'Inventario (recepción remisión)',
+  },
+  'dispatch_note.received.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (recepción remisión)',
+  },
+  'dispatch_note.return.inventory': {
+    code: '1435',
+    description: 'Inventario (devolución de cliente)',
+  },
+  'dispatch_note.return.cogs': {
+    code: '6135',
+    description: 'Reversa costo de ventas (devolución)',
+  },
   'refund.completed.revenue': {
     code: '4135',
     description: 'Ingresos (reversa)',
@@ -186,6 +232,14 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'purchase_order.payment.cash_bank': {
     code: '1110',
     description: 'Banco (pago OC)',
+  },
+  // Anticipo a proveedores: pagar una OC ANTES de recibirla no extingue un
+  // pasivo (aún no existe CxP), sino que crea un ACTIVO (anticipo). El pago
+  // anticipado debita 133005 en vez de 2205; al recibir, una reclasificación
+  // (DR 2205 / CR 133005) traslada el anticipo contra la CxP creada.
+  'purchase_order.payment.supplier_advance': {
+    code: '133005',
+    description: 'Anticipos a proveedores',
   },
   'inventory.adjusted.inventory': { code: '1435', description: 'Inventario' },
   'inventory.adjusted.shrinkage': {
@@ -867,6 +921,16 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'dispatch_route.closed.shortage_receivable': {
     code: '1365',
     description: 'Cuentas por Cobrar a Trabajadores (faltante de ruta, conductor)',
+  },
+  // Plan Despacho Economía — FASE 5 paso 17. Costo del transportador al
+  // liquidar la ruta. DR 523550 (gross), CR 2205→banco (pago neto).
+  'dispatch_route.settlement.transport_cost': {
+    code: '523550',
+    description: 'Servicio de Transporte (costo de la ruta)',
+  },
+  'dispatch_route.settlement.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (transportador por pagar)',
   },
   'cash_register.movement.cash': {
     code: '1105',

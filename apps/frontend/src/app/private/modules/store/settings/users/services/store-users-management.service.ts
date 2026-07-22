@@ -13,6 +13,17 @@ import {
   Role,
 } from '../interfaces/store-user.interface';
 
+/**
+ * Tarifa de reparto por repartidor (Vendix Repartos F9 / backend B8). Se
+ * persiste bajo `user_settings.config.carrier_tariff` vía merge. `amount` es
+ * SIEMPRE un Decimal string (nunca float); `currency` la fija el backend a 'COP'.
+ */
+export interface CarrierTariff {
+  mode: 'per_stop' | 'per_route';
+  amount: string;
+  currency?: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -113,6 +124,50 @@ export class StoreUsersManagementService {
   updateUserPanelUI(id: number, panel_ui: Record<string, Record<string, boolean>>): Observable<StoreUserDetail> {
     return this.http
       .patch<{ data: StoreUserDetail }>(`${this.baseUrl}/${id}/panel-ui`, { panel_ui })
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => throwError(() => error)),
+      );
+  }
+
+  /**
+   * `PATCH management/:id/carrier-tariff` — fija la tarifa de reparto del
+   * usuario (rol `carrier`). Persiste en `user_settings.config.carrier_tariff`
+   * (merge). `amount` debe ir como Decimal string (ej. "1500.00").
+   */
+  setCarrierTariff(
+    id: number,
+    data: { mode: 'per_stop' | 'per_route'; amount: string },
+  ): Observable<CarrierTariff> {
+    return this.http
+      .patch<{ data: CarrierTariff }>(`${this.baseUrl}/${id}/carrier-tariff`, data)
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => throwError(() => error)),
+      );
+  }
+
+  /**
+   * `PATCH management/:id/app-type` — fija el app_type del usuario
+   * (`STORE_ADMIN` | `STORE_DELIVERY`). El backend valida que `STORE_DELIVERY`
+   * solo se permita si el usuario tiene el rol `carrier`. Devuelve el usuario
+   * actualizado.
+   *
+   * `role_ids` (opcional): cuando se envía, el backend persiste esos roles ANTES
+   * de validar el app_type, de modo que asignar rol carrier + `STORE_DELIVERY`
+   * funcione en un solo guardado (la validación evalúa el estado final, no el
+   * previo en DB).
+   */
+  setAppType(
+    id: number,
+    app_type: string,
+    role_ids?: number[],
+  ): Observable<StoreUserDetail> {
+    return this.http
+      .patch<{ data: StoreUserDetail }>(`${this.baseUrl}/${id}/app-type`, {
+        app_type,
+        ...(role_ids ? { role_ids } : {}),
+      })
       .pipe(
         map((response) => response.data),
         catchError((error) => throwError(() => error)),

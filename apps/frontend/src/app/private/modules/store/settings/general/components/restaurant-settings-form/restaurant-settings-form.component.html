@@ -19,16 +19,39 @@
   <div>
     <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Mesas</h4>
     <div class="space-y-4">
-      <app-selector
-        [formControl]="qrScanBehaviorControl"
-        label="Modo de escaneo QR"
-        [options]="qrScanBehaviors"
-        (valueChange)="onFieldChange()"
-        size="sm"
-      ></app-selector>
-      <p class="text-xs text-[var(--color-text-muted)]">
-        Define qué ocurre cuando un cliente escanea el código QR de una mesa.
-      </p>
+      <div>
+        <p class="text-sm font-medium text-[var(--color-text-primary)]">Modo de escaneo QR</p>
+        <p class="text-xs text-[var(--color-text-muted)] mt-1">
+          Define qué ocurre cuando un cliente escanea el código QR de una mesa.
+        </p>
+      </div>
+      <div class="qr-behavior-grid" role="radiogroup" aria-label="Modo de escaneo QR" [formGroup]="form">
+        @for (opt of qrScanBehaviors; track opt.value) {
+          <label
+            class="qr-behavior-card"
+            [class.selected]="opt.value === qrScanBehaviorControl.value"
+          >
+            <input
+              type="radio"
+              formControlName="qr_scan_behavior"
+              [value]="opt.value"
+              class="sr-only"
+              (change)="onFieldChange()"
+            />
+            <span class="qr-behavior-icon" aria-hidden="true">
+              <app-icon [name]="opt.icon" [size]="20" />
+            </span>
+            <h3 class="qr-behavior-title">{{ opt.title }}</h3>
+            <p class="qr-behavior-desc">{{ opt.description }}</p>
+            @if (opt.value === qrScanBehaviorControl.value) {
+              <span class="qr-behavior-check" aria-hidden="true">
+                <app-icon name="check" [size]="14" />
+              </span>
+            }
+          </label>
+        }
+      </div>
+
       <div class="flex items-start justify-between gap-4 pt-2">
         <div class="flex-1">
           <p class="text-sm font-medium text-[var(--color-text-primary)]">Auto-disparar a cocina</p>

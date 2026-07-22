@@ -1,136 +1,80 @@
 import {
   Component,
-  DestroyRef,
   computed,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
-import {
-  FormBuilder,
-  FormGroup,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import {
-  SelectorComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/selector/selector.component';
+  AddressFormFieldsComponent,
+  AddressPayload,
+} from '../../../../../../shared/components';
+
 import {
-  CountryService,
-  Country,
-  Department,
-  City,
-} from '../../../../../../services/country.service';
-import { CreateAddressPayload } from '../../services/store-orders.service';
+  CreateAddressPayload,
+  UpdateAddressPayload,
+} from '../../services/store-orders.service';
 
 /**
- * Modal de captura de dirección de envío para una orden (A3-edit).
+ * Modal de captura / edición de dirección de envío para una orden (A3-edit).
  *
- * Presentacional: NO realiza llamadas HTTP. Captura y valida la dirección con
- * el vocabulario del DTO backend (`address_line_1`, `state`, `country`) y la
- * emite por `submitForm`; el padre (order-details) la persiste
- * (`POST /store/addresses` → `PATCH /store/orders/:id`) y controla `saving`.
+ * Presentacional: NO realiza llamadas HTTP. Delega la captura + validación al
+ * componente reutilizable `app-address-form-fields` (mapa opcional, geocoding,
+ * warning no bloqueante) y emite el payload listo para persistir.
  *
- * Cascada país → departamento → ciudad reutilizando `CountryService`
- * (Colombia), igual que el modal de direcciones de ecommerce. En submit los
- * IDs de departamento/ciudad se convierten a nombre, que es lo que el backend
- * almacena en `state_province`/`city`.
+ * Dos modos:
+ * - **Crear** (`addressId === null`): emite `submitForm` con un
+ *   `CreateAddressPayload` (claves DTO backend `address_line_1`, `state`,
+ *   `country`, más `type:'shipping'` y `customer_id`). El padre hace
+ *   `POST /store/addresses` → `PATCH /store/orders/:id`.
+ * - **Editar** (`addressId` no null): emite `submitEdit` con
+ *   `{ addressId, payload: UpdateAddressPayload }` (mismas claves DTO, sin
+ *   `customer_id` ni `type` requeridos). El padre hace
+ *   `PATCH /store/addresses/:id`.
  *
- * Zoneless-clean: signals + ReactiveForms, sin APIs legacy de CD.
+ * Zoneless-clean: signals + computed + input/output, sin NgZone/markForCheck,
+ * sin @Input/@Output tradicionales, sin subscribe sin takeUntilDestroyed.
  */
 @Component({
   selector: 'app-shipping-address-modal',
   standalone: true,
   imports: [
-    ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    InputComponent,
-    TextareaComponent,
-    SelectorComponent,
+    AddressFormFieldsComponent,
   ],
   template: `
     <app-modal
       [isOpen]="true"
-      title="Agregar dirección de entrega"
+      [title]="modalTitle()"
       [subtitle]="customerName() || 'Cliente'"
       size="md"
       (cancel)="close.emit()"
       (closed)="close.emit()"
     >
-      <form [formGroup]="form" class="space-y-3" (ngSubmit)="submit()">
-        <div
-          class="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-700"
-        >
-          <app-icon name="info" [size]="14" class="mt-0.5 flex-shrink-0"></app-icon>
-          <span>
-            La dirección quedará vinculada al cliente y se asignará como destino
-            de envío de esta orden.
-          </span>
-        </div>
+      <div
+        class="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 text-xs text-blue-700 mb-3"
+      >
+        <app-icon name="info" [size]="14" class="mt-0.5 flex-shrink-0"></app-icon>
+        <span>
+          {{ addressId()
+            ? 'Edita la dirección de entrega vinculada a esta orden.'
+            : 'La dirección quedará vinculada al cliente y se asignará como destino de envío de esta orden.'
+          }}
+        </span>
+      </div>
 
-        <app-input
-          label="Dirección"
-          placeholder="Calle 123 #45-67"
-          formControlName="address_line_1"
-          [control]="form.get('address_line_1')"
-        ></app-input>
-
-        <app-input
-          label="Complemento (opcional)"
-          placeholder="Apto, torre, barrio…"
-          formControlName="address_line_2"
-        ></app-input>
-
-        <app-selector
-          label="País"
-          placeholder="Selecciona el país"
-          [options]="countryOptions()"
-          [searchable]="true"
-          formControlName="country_code"
-        ></app-selector>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <app-selector
-            label="Departamento"
-            [placeholder]="loadingDepartments() ? 'Cargando…' : 'Selecciona'"
-            [options]="departmentOptions()"
-            [searchable]="true"
-            formControlName="state_province"
-          ></app-selector>
-
-          <app-selector
-            label="Ciudad"
-            [placeholder]="loadingCities() ? 'Cargando…' : 'Selecciona'"
-            [options]="cityOptions()"
-            [searchable]="true"
-            formControlName="city"
-          ></app-selector>
-        </div>
-
-        <app-input
-          label="Código postal (opcional)"
-          placeholder="000000"
-          formControlName="postal_code"
-        ></app-input>
-
-        <app-textarea
-          label="Instrucciones de entrega (opcional)"
-          placeholder="Dejar con portería, timbre dañado, etc."
-          [rows]="2"
-          formControlName="delivery_instructions"
-        ></app-textarea>
-      </form>
+      <app-address-form-fields
+        [initialAddress]="initialAddress()"
+        (addressChange)="onAddressChange($event)"
+        (validChange)="onAddressValid($event)"
+      ></app-address-form-fields>
 
       <div slot="footer" class="flex items-center justify-end gap-2">
         <app-button
@@ -145,155 +89,103 @@ import { CreateAddressPayload } from '../../services/store-orders.service';
           variant="primary"
           type="button"
           [loading]="saving()"
-          [disabled]="form.invalid || saving()"
+          [disabled]="!addressValid() || saving()"
           (clicked)="submit()"
         >
-          Guardar dirección
+          {{ addressId() ? 'Guardar cambios' : 'Guardar dirección' }}
         </app-button>
       </div>
     </app-modal>
   `,
 })
 export class ShippingAddressModalComponent {
-  private readonly fb = inject(FormBuilder);
-  private readonly destroyRef = inject(DestroyRef);
-  private readonly countryService = inject(CountryService);
-
   /** Cliente al que se vinculará la dirección (de `order.customer_id`). */
   readonly customerId = input<number | null>(null);
   /** Nombre del cliente, solo para el subtítulo del modal. */
   readonly customerName = input<string>('');
-  /** True mientras el padre persiste (POST + PATCH). */
+  /** True mientras el padre persiste (POST+PATCH o PATCH). */
   readonly saving = input<boolean>(false);
+  /**
+   * ID de la dirección a editar. `null` = modo crear (POST). No-null = modo
+   * editar (PATCH `/store/addresses/:id`).
+   */
+  readonly addressId = input<number | null>(null);
+  /**
+   * Dirección existente mapeada a `AddressPayload` para prefill el hijo
+   * `app-address-form-fields`. En modo crear es `null`.
+   */
+  readonly initialAddress = input<AddressPayload | null>(null);
 
   /** Cierra el modal sin guardar. */
   readonly close = output<void>();
-  /** Emite el payload listo para `POST /store/addresses`. */
+  /** Emite el payload listo para `POST /store/addresses` (modo crear). */
   readonly submitForm = output<CreateAddressPayload>();
+  /** Emite `{ addressId, payload }` listo para `PATCH /store/addresses/:id` (modo editar). */
+  readonly submitEdit = output<{ addressId: number; payload: UpdateAddressPayload }>();
 
-  readonly form: FormGroup = this.fb.group({
-    address_line_1: ['', [Validators.required, Validators.minLength(5)]],
-    address_line_2: [''],
-    country_code: ['CO', Validators.required],
-    state_province: [
-      { value: '', disabled: true },
-      [Validators.required],
-    ],
-    city: [{ value: '', disabled: true }, [Validators.required]],
-    postal_code: [''],
-    delivery_instructions: [''],
-  });
+  /** Última dirección emitida por el formulario hijo. */
+  readonly addressPayload = signal<AddressPayload | null>(null);
+  /** Validez del formulario hijo (síncrono, signal-based). */
+  readonly addressValid = signal(false);
 
-  // Datos de ubicación — signals
-  readonly countries = signal<Country[]>([]);
-  readonly departments = signal<Department[]>([]);
-  readonly cities = signal<City[]>([]);
-  readonly loadingDepartments = signal(false);
-  readonly loadingCities = signal(false);
-
-  readonly countryOptions = computed<SelectorOption[]>(() =>
-    this.countries().map((c) => ({ value: c.code, label: c.name })),
-  );
-  readonly departmentOptions = computed<SelectorOption[]>(() =>
-    this.departments().map((d) => ({ value: d.id, label: d.name })),
-  );
-  readonly cityOptions = computed<SelectorOption[]>(() =>
-    this.cities().map((c) => ({ value: c.id, label: c.name })),
+  /** Título dinámico según modo crear/editar. */
+  readonly modalTitle = computed(() =>
+    this.addressId()
+      ? 'Editar dirección de entrega'
+      : 'Agregar dirección de entrega',
   );
 
-  constructor() {
-    this.countries.set(this.countryService.getCountries());
-    this.setupLocationListeners();
-    this.loadDepartments();
+  /** Handler del hijo: actualiza la última dirección emitida. */
+  onAddressChange(payload: AddressPayload): void {
+    this.addressPayload.set(payload);
   }
 
-  private setupLocationListeners(): void {
-    const countryControl = this.form.get('country_code');
-    const depControl = this.form.get('state_province');
-    const cityControl = this.form.get('city');
-
-    countryControl?.valueChanges
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((code: string) => {
-        if (code === 'CO') {
-          this.loadDepartments();
-        } else {
-          this.departments.set([]);
-          this.cities.set([]);
-          depControl?.setValue('');
-          cityControl?.setValue('');
-          depControl?.disable({ emitEvent: false });
-          cityControl?.disable({ emitEvent: false });
-        }
-      });
-
-    depControl?.valueChanges
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((depId: unknown) => {
-        if (depId) {
-          const numericDepId = Number(depId);
-          if (!isNaN(numericDepId)) this.loadCities(numericDepId);
-        } else {
-          this.cities.set([]);
-          cityControl?.setValue('');
-          cityControl?.disable({ emitEvent: false });
-        }
-      });
+  /** Handler del hijo: actualiza la validez del formulario de dirección. */
+  onAddressValid(valid: boolean): void {
+    this.addressValid.set(valid);
   }
 
-  private async loadDepartments(): Promise<void> {
-    const ctrl = this.form.get('state_province');
-    ctrl?.disable({ emitEvent: false });
-    this.loadingDepartments.set(true);
-    const deps = await this.countryService.getDepartments();
-    this.departments.set(deps);
-    this.loadingDepartments.set(false);
-    if (this.departments().length > 0) ctrl?.enable({ emitEvent: false });
-  }
-
-  private async loadCities(depId: number): Promise<void> {
-    const ctrl = this.form.get('city');
-    ctrl?.disable({ emitEvent: false });
-    this.loadingCities.set(true);
-    const cities = await this.countryService.getCitiesByDepartment(depId);
-    this.cities.set(cities);
-    this.loadingCities.set(false);
-    if (this.cities().length > 0) ctrl?.enable({ emitEvent: false });
-  }
-
+  /**
+   * Construye el payload desde la última `AddressPayload` emitida por el hijo
+   * (claves Prisma: `address_line1`, `state_province`, `country_code`,
+   * `postal_code`, `phone_number`, `latitude`, `longitude`) al DTO del backend
+   * (`address_line_1`, `state`, `country` con guion bajo y nombres cortos).
+   */
   submit(): void {
-    if (this.form.invalid || this.saving()) {
-      this.form.markAllAsTouched();
-      return;
-    }
+    if (!this.addressValid() || this.saving()) return;
+    const payload = this.addressPayload();
+    if (!payload) return;
 
-    // `getRawValue` incluye los controles deshabilitados por la cascada.
-    const raw = this.form.getRawValue();
-
-    // Para Colombia los selectores manejan IDs; el backend almacena nombres.
-    let stateName = String(raw.state_province ?? '');
-    let cityName = String(raw.city ?? '');
-    if (raw.country_code === 'CO') {
-      const dep = this.departments().find((d) => d.id === Number(raw.state_province));
-      if (dep) stateName = dep.name;
-      const city = this.cities().find((c) => c.id === Number(raw.city));
-      if (city) cityName = city.name;
-    }
-
-    const payload: CreateAddressPayload = {
-      address_line_1: String(raw.address_line_1).trim(),
-      city: cityName,
-      state: stateName,
-      country: String(raw.country_code),
-      type: 'shipping',
-    };
-    if (raw.address_line_2?.trim()) payload.address_line_2 = raw.address_line_2.trim();
-    if (raw.postal_code?.trim()) payload.postal_code = raw.postal_code.trim();
-    if (raw.delivery_instructions?.trim())
-      payload.delivery_instructions = raw.delivery_instructions.trim();
     const cid = this.customerId();
-    if (cid != null) payload.customer_id = cid;
+    const id = this.addressId();
 
-    this.submitForm.emit(payload);
+    if (id != null) {
+      // Modo editar: PATCH /store/addresses/:id (sin customer_id ni type).
+      const update: UpdateAddressPayload = {
+        address_line_1: payload.address_line1 ?? '',
+        city: payload.city ?? '',
+        state: payload.state_province ?? '',
+        country: payload.country_code ?? '',
+      };
+      if (payload.address_line2) update.address_line_2 = payload.address_line2;
+      if (payload.postal_code) update.postal_code = payload.postal_code;
+      // El DTO backend usa @IsString @IsLatLong → convertimos number → string.
+      if (payload.latitude != null) update.latitude = String(payload.latitude);
+      if (payload.longitude != null) update.longitude = String(payload.longitude);
+      this.submitEdit.emit({ addressId: id, payload: update });
+    } else {
+      // Modo crear: POST /store/addresses con type + customer_id.
+      const create: CreateAddressPayload = {
+        address_line_1: payload.address_line1 ?? '',
+        city: payload.city ?? '',
+        state: payload.state_province ?? '',
+        country: payload.country_code ?? '',
+        type: 'shipping',
+      };
+      if (payload.address_line2) create.address_line_2 = payload.address_line2;
+      if (payload.postal_code) create.postal_code = payload.postal_code;
+      if (cid != null) create.customer_id = cid;
+      this.submitForm.emit(create);
+    }
   }
 }

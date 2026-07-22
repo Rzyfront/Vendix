@@ -509,4 +509,12 @@
     [membership]="membership()"
     (renewed)="onRenewed($event)"
   />
+
+  @if (canEditMembership()) {
+    <app-edit-membership-modal
+      [(open)]="showEditModal"
+      [membership]="membership()"
+      (saved)="onEdited($event)"
+    />
+  }
 </div>

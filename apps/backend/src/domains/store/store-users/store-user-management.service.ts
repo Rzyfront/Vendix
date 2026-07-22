@@ -15,6 +15,8 @@ import {
   ResetPasswordStoreUserDto,
   UpdateUserRolesDto,
   UpdateUserPanelUIDto,
+  SetCarrierTariffDto,
+  SetAppTypeDto,
 } from './dto';
 import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
@@ -70,6 +72,14 @@ export class StoreUserManagementService {
       dto.username ||
       `${formatted_first_name.toLowerCase()}_${formatted_last_name.toLowerCase()}_${Date.now()}`;
 
+    // El rol es parametrizable (default `employee`). Regla de negocio:
+    // `app_type` es MANUAL únicamente — asignar el rol `carrier` NO mueve al
+    // usuario a la app de reparto (evita dejarlo atrapado por error). Todo
+    // usuario nuevo nace en STORE_ADMIN; STORE_DELIVERY se fija después a mano
+    // vía PATCH management/:id/app-type (que exige rol carrier).
+    const roleName = dto.role ?? 'employee';
+    const appType: 'STORE_ADMIN' | 'STORE_DELIVERY' = 'STORE_ADMIN';
+
     // Create the user and provision its staff membership atomically. The
     // StaffProvisioningService handles store_users + user_roles + user_settings
     // (default panel_ui) + users.main_store_id, satisfying CD7 (role +
@@ -101,8 +111,8 @@ export class StoreUserManagementService {
         userId: user.id,
         storeId: store_id,
         organizationId: organization_id,
-        roleName: 'employee',
-        appType: 'STORE_ADMIN',
+        roleName,
+        appType,
         setMainStore: true,
       });
 
@@ -229,7 +239,7 @@ export class StoreUserManagementService {
               },
             },
             user_settings: {
-              select: { config: true },
+              select: { config: true, app_type: true },
             },
           },
         },
@@ -266,6 +276,7 @@ export class StoreUserManagementService {
       store_user_id: store_user.id,
       roles,
       panel_ui: mergedPanelUI,
+      app_type: user_settings?.app_type ?? 'STORE_ADMIN',
     };
   }
 
@@ -396,6 +407,139 @@ export class StoreUserManagementService {
       });
     }
 
+    // Salvaguarda de reversión (Vendix Repartos): asignar `carrier` YA NO mueve
+    // al usuario a STORE_DELIVERY — esa decisión es explícita vía `setAppType`.
+    // Aquí sólo SACAMOS: si un carrier "puro" (app_type STORE_DELIVERY y sin rol
+    // de alto privilegio) pierde el rol `carrier`, lo devolvemos a STORE_ADMIN
+    // para que no quede atrapado en la app de reparto sin ser repartidor.
+    await this.revertAppTypeOnCarrierLoss(userId);
+
+    return this.findOne(userId);
+  }
+
+  /**
+   * Salvaguarda de reversión de `user_settings.app_type` tras un cambio de
+   * roles (Vendix Repartos).
+   *
+   * Regla (sólo SACA, nunca METE):
+   * - Asignar/conservar `carrier` NO mueve a `STORE_DELIVERY`. Esa promoción es
+   *   explícita mediante el endpoint/servicio `setAppType`.
+   * - Quitar `carrier` a un carrier puro (app_type actual `STORE_DELIVERY` y sin
+   *   rol de alto privilegio) ⇒ revierte a `STORE_ADMIN`, para que no quede
+   *   atrapado en la app de reparto.
+   * - En cualquier otro caso, `app_type` se deja intacto.
+   */
+  private async revertAppTypeOnCarrierLoss(userId: number): Promise<void> {
+    const finalRoles = await this.prisma.user_roles.findMany({
+      where: { user_id: userId },
+      select: { roles: { select: { name: true } } },
+    });
+    const finalRoleNames = finalRoles.map((r) => r.roles.name.toLowerCase());
+    const willHaveCarrier = finalRoleNames.includes('carrier');
+    const isHighPrivilege =
+      StaffProvisioningService.hasHighPrivilege(finalRoleNames);
+
+    const settings = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId },
+      select: { app_type: true },
+    });
+
+    // Sólo reversión: carrier puro que pierde el rol recupera el panel de tienda.
+    let nextAppType: 'STORE_ADMIN' | null = null;
+    if (
+      !willHaveCarrier &&
+      settings?.app_type === 'STORE_DELIVERY' &&
+      !isHighPrivilege
+    ) {
+      nextAppType = 'STORE_ADMIN';
+    }
+
+    if (!nextAppType) return;
+    if (settings && settings.app_type === nextAppType) return;
+
+    if (settings) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { app_type: nextAppType as any, updated_at: new Date() },
+      });
+    } else {
+      // Caso legacy sin user_settings: crear con el app_type derivado.
+      const defaultConfig =
+        await this.defaultPanelUIService.generatePanelUI(nextAppType);
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: nextAppType as any,
+          config: defaultConfig as any,
+        },
+      });
+    }
+  }
+
+  /**
+   * Vendix Repartos: setea manualmente `user_settings.app_type` de un usuario de
+   * tienda (STORE_ADMIN | STORE_DELIVERY). Desacopla el app_type del rol
+   * `carrier`: mover a la app de reparto es una acción explícita, no un efecto
+   * colateral de asignar el rol.
+   *
+   * Reglas:
+   * - `findOne` valida que el usuario pertenece a la tienda del contexto (404).
+   * - `STORE_DELIVERY` sólo es válido si el usuario TIENE el rol `carrier`
+   *   (de lo contrario ⇒ BadRequest). No tiene sentido mandar a la app de
+   *   reparto a quien no es repartidor.
+   * - Upsert por user_id sobre `user_settings.app_type`; el legacy sin fila crea
+   *   con el panel_ui por defecto del app_type destino.
+   */
+  async setAppType(userId: number, dto: SetAppTypeDto) {
+    const appType = dto.app_type;
+
+    // Verify user belongs to this store (404 si no pertenece).
+    await this.findOne(userId);
+
+    // Guardado en un solo paso (rol + app_type): si el request trae `role_ids`,
+    // persistirlos ANTES de validar el app_type. Así la validación de `carrier`
+    // evalúa el estado FINAL (roles entrantes) y no el estado previo en DB, y no
+    // hace falta guardar el rol en una petición separada. Reutiliza `updateRoles`
+    // para conservar los guards de roles inmutables y la reversión carrier.
+    if (dto.role_ids) {
+      await this.updateRoles(userId, { role_ids: dto.role_ids });
+    }
+
+    if (appType === 'STORE_DELIVERY') {
+      const carrierRole = await this.prisma.user_roles.findFirst({
+        where: { user_id: userId, roles: { name: 'carrier' } },
+        select: { role_id: true },
+      });
+      if (!carrierRole) {
+        throw new BadRequestException(
+          'Solo un usuario con rol carrier puede acceder a la app de reparto (STORE_DELIVERY)',
+        );
+      }
+    }
+
+    const settings = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId },
+      select: { app_type: true },
+    });
+
+    if (settings) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { app_type: appType as any, updated_at: new Date() },
+      });
+    } else {
+      // Caso legacy sin user_settings: crear con el panel_ui del app_type destino.
+      const defaultConfig =
+        await this.defaultPanelUIService.generatePanelUI(appType);
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: appType as any,
+          config: defaultConfig as any,
+        },
+      });
+    }
+
     return this.findOne(userId);
   }
 
@@ -424,6 +568,52 @@ export class StoreUserManagementService {
         data: {
           user_id: userId,
           app_type: 'STORE_ADMIN',
+          config: newConfig,
+        },
+      });
+    }
+
+    return this.findOne(userId);
+  }
+
+  /**
+   * Vendix Repartos (B8): setear la tarifa configurable de un repartidor.
+   *
+   * MERGE en `user_settings.config` (upsert por user_id): NO sobreescribe el
+   * resto del JSON de config, sólo la clave `carrier_tariff`. Dinero SIEMPRE
+   * string (nunca float); `currency` fijado a 'COP'. `findOne` valida que el
+   * usuario pertenece a la tienda del contexto (lanza 404 si no).
+   */
+  async setCarrierTariff(userId: number, dto: SetCarrierTariffDto) {
+    // Verify user belongs to this store (404 si no pertenece).
+    await this.findOne(userId);
+
+    const existing = await this.prisma.user_settings.findFirst({
+      where: { user_id: userId },
+    });
+
+    const existingConfig = (existing?.config as Record<string, any>) || {};
+    const newConfig = {
+      ...existingConfig,
+      carrier_tariff: {
+        mode: dto.mode,
+        amount: dto.amount,
+        currency: 'COP',
+      },
+    };
+
+    if (existing) {
+      await this.prisma.user_settings.update({
+        where: { user_id: userId },
+        data: { config: newConfig, updated_at: new Date() },
+      });
+    } else {
+      // Legacy sin user_settings: crear con app_type carrier (STORE_DELIVERY),
+      // coherente con que la tarifa es propia del rol de reparto.
+      await this.prisma.user_settings.create({
+        data: {
+          user_id: userId,
+          app_type: 'STORE_DELIVERY',
           config: newConfig,
         },
       });

@@ -16,7 +16,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { Observable, filter, map } from 'rxjs';
+import { Observable, filter, interval, map, merge } from 'rxjs';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -30,6 +30,7 @@ import {
   AccessLogQueryDto,
   AdjustOccupancyDto,
   RegisterExitDto,
+  EnrollmentPingDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -44,9 +45,11 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   - POST /credentials        → store:membership_access:create
  *   - PATCH /credentials/:id   → store:membership_access:update
  *   - DELETE /credentials/:id  → store:membership_access:update (soft baja)
+ *   - POST   /credentials/:id/archive → store:membership_access:update (soft archive: hide + free partial unique slot)
  *   - GET  /occupancy          → store:membership_access:read
  *   - POST /exit               → store:membership_access:create (occupancy −1)
  *   - PATCH /occupancy/adjust  → store:membership_access:update (manual delta)
+ *   - POST /enrollment-ping    → store:membership_access:create (live fingerprint enrollment fan-out)
  */
 @Controller('store/memberships/access')
 @UseGuards(PermissionsGuard)
@@ -107,14 +110,52 @@ export class MembershipAccessController {
     const subject = this.sseService.getOrCreate(store_id);
     req.on('close', () => this.sseService.unsubscribe(store_id));
 
-    return subject.pipe(
+    const events$ = subject.pipe(
       filter(
         (payload: any) =>
           payload?.type === 'membership-access' ||
-          payload?.type === 'occupancy',
+          payload?.type === 'occupancy' ||
+          payload?.type === 'enrollment',
       ),
       map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
+
+    // Heartbeat every 30s — a periodic keep-alive write so proxies/CDNs don't
+    // idle-close the stream. Forcing socket I/O also makes a non-clean
+    // disconnect surface as `req.on('close')`, releasing the shared Subject
+    // (fixes the SSE heap leak).
+    const heartbeat$ = interval(30_000).pipe(
+      map(() => ({ data: `: heartbeat ${Date.now()}` }) as MessageEvent),
+    );
+
+    return merge(events$, heartbeat$);
+  }
+
+  /**
+   * POST /store/memberships/access/enrollment-ping
+   *
+   * Endpoint the biometric device (or a stub integration) calls when it
+   * reads a raw fingerprint template. The backend just fans out an
+   * `enrollment` SSE event to current subscribers so the credential-creation
+   * modal can capture `external_ref` in real time.
+   *
+   * NOT a verification — we do not check the fingerprint against any
+   * existing credential. That happens later when the user assigns the
+   * captured template to a credential.
+   */
+  @Post('enrollment-ping')
+  @Permissions('store:membership_access:create')
+  async enrollmentPing(@Body() dto: EnrollmentPingDto) {
+    try {
+      const storeId = this.requireStoreId();
+      await this.service.publishEnrollment(storeId, dto.external_ref, dto.device_id);
+      return this.responseService.success(
+        { published: true },
+        'Enrollment ping publicado',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al publicar enrollment ping');
+    }
   }
 
   /**
@@ -212,6 +253,29 @@ export class MembershipAccessController {
     }
   }
 
+  /**
+   * POST /store/memberships/access/credentials/:id/resend-email
+   *
+   * Re-send the credential notification email for an existing credential.
+   * Reuses `sendCredentialEmail` so the `external_ref` (biometric) branch
+   * sends the enrollment notice ONLY — the device reference is never leaked.
+   * Same permission as the create endpoint: a re-send is a re-issuance of the
+   * credential notification.
+   */
+  @Post('credentials/:id/resend-email')
+  @Permissions('store:membership_access:create')
+  async resendCredentialEmail(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.service.resendCredentialEmail(id);
+      return this.responseService.success(
+        result,
+        'Correo de credencial reenviado',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al reenviar el correo de la credencial');
+    }
+  }
+
   @Patch('credentials/:id')
   @Permissions('store:membership_access:update')
   async updateCredential(
@@ -240,6 +304,32 @@ export class MembershipAccessController {
       );
     } catch (error: any) {
       return this.fail(error, 'Error al dar de baja la credencial');
+    }
+  }
+
+  /**
+   * Soft-archive a credential — hides it from listings AND frees the partial
+   * unique slot (`membership_access_cred_active_uq`) so the operator can
+   * re-issue a credential with the same (store, customer, type). Atomic via
+   * the service: sets BOTH `deleted_at = now()` AND `is_active = false` in a
+   * single UPDATE.
+   *
+   * Differs from `deactivateCredential` (DELETE /credentials/:id) which only
+   * flips `is_active = false` and keeps the row visible to listings/history
+   * queries. Archive is the irreversible-feeling "borrar del catálogo" action;
+   * deactivate is the reversible "suspender".
+   */
+  @Post('credentials/:id/archive')
+  @Permissions('store:membership_access:update')
+  async archiveCredential(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.service.archiveCredential(id);
+      return this.responseService.success(
+        result,
+        'Credencial archivada exitosamente',
+      );
+    } catch (error: any) {
+      return this.fail(error, 'Error al archivar la credencial');
     }
   }
 }

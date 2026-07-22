@@ -1,0 +1,65 @@
+<!-- Fase 5·B1 — Paso Cobro. Réplica de la sección "Pago" de
+     pos-payment-interface.html (collector + Wompi awaiting), sin el
+     <app-modal> ni Resumen/Cliente. El tipo de servicio (fulfillment) y la
+     mesa viven ahora en el paso Consumo (`app-pos-consumo-step`). -->
+<div class="payment-step pos-payment-context">
+  <!-- Bloque de RECOLECCIÓN de pago delegado al collector headless. La
+       orquestación (cliente, caja, horario, polling Wompi POST-submit) vive en
+       este step; el fulfillment/mesa los provee el paso Consumo por input. -->
+  <div [style.display]="wompiAwaitingPayment() ? 'none' : 'block'">
+    <app-payment-collector
+      context="pos"
+      [layout]="'stepped'"
+      [amount]="effectiveAmount()"
+      [paymentMethods]="paymentMethods()"
+      [autoLoad]="false"
+      [isProcessing]="isProcessing()"
+      [initialMode]="defaultPaymentForm()"
+      [showKeypad]="showOnscreenKeypad()"
+      [customer]="collectorCustomer()"
+      [requireCustomer]="!isAnonymous()"
+      [walletInfo]="collectorWalletInfo()"
+      (submit)="onCollectorSubmit($event)"
+      (requestCustomer)="requestCustomer.emit()"
+      (walletLookup)="onWalletLookup($event)"
+      (amountConfirmed)="amountConfirmed.emit()"
+    ></app-payment-collector>
+  </div>
+
+  <!-- Wompi Awaiting Payment UI (POST-submit polling vive en este step). -->
+  @if (wompiAwaitingPayment()) {
+    <div class="wompi-awaiting">
+      <app-spinner></app-spinner>
+      <p class="awaiting-message">{{ wompiAwaitingMessage() }}</p>
+      @if (wompiPollingState().active) {
+        <p class="awaiting-attempts">
+          Verificando con Wompi… intento
+          {{ wompiPollingState().attempts }} /
+          {{ wompiPollingState().maxAttempts }}
+        </p>
+      }
+      <div class="awaiting-actions">
+        <app-button
+          label="Verificar pago ahora"
+          variant="outline"
+          size="sm"
+          (clicked)="manualVerifyPayment()"
+        ></app-button>
+        @if (!wompiPollingState().active) {
+          <app-button
+            label="Continuar esperando"
+            variant="ghost"
+            size="sm"
+            (clicked)="startWompiPolling()"
+          ></app-button>
+        }
+        <app-button
+          label="Cancelar espera"
+          variant="ghost"
+          size="sm"
+          (clicked)="cancelWompiAwait()"
+        ></app-button>
+      </div>
+    </div>
+  }
+</div>

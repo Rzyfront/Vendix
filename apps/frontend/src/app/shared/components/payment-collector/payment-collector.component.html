@@ -1,0 +1,561 @@
+<div class="pc-root" [class.pc-stepped]="layout() === 'stepped'">
+  @if (layout() === 'stepped') {
+    <!-- ══════════════════════════════ STEPPED ══════════════════════════════
+         Opt-in vertical sub-wizard: mode → method → amount. Collapse-on-select
+         panels on the left, touch keypad docked to the right (cash + montoIndex
+         only). All handlers/computeds are shared with the flat branch. -->
+    <div
+      class="pc-stepped-grid"
+      [class.pc-stepped-grid--with-keypad]="
+        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
+      "
+    >
+      <div class="pc-stepped-main">
+        <!-- Panel: Forma de pago (mode) -->
+        @if (hasModoStep()) {
+          @if (subStep() === 0) {
+            <!-- Cobro · Forma de pago (frame PyHka): título con icono + 2 OptionRows
+                 (Contado / Crédito). Reutiliza setMode() — el click en Crédito sin
+                 cliente conserva la lógica actual (emite requestCustomer); solo se
+                 atenúa visualmente. -->
+            <div class="pc-section-title">
+              <app-icon name="wallet" [size]="20" class="pc-section-icon" />
+              <h3 class="pc-section-label">Forma de pago</h3>
+            </div>
+
+            <div class="pc-option-rows">
+              <button
+                type="button"
+                class="pc-option-row"
+                [class.selected]="mode() === 'contado'"
+                [attr.aria-pressed]="mode() === 'contado'"
+                (click)="setMode('contado')"
+              >
+                <span class="pc-option-icon"><app-icon name="banknote" [size]="22" /></span>
+                <span class="pc-option-body">
+                  <span class="pc-option-title">Contado</span>
+                  <span class="pc-option-desc">Pago inmediato en caja</span>
+                </span>
+                <span
+                  class="pc-option-radio"
+                  [class.checked]="mode() === 'contado'"
+                  aria-hidden="true"
+                ></span>
+              </button>
+
+              <button
+                type="button"
+                class="pc-option-row"
+                [class.selected]="mode() === 'credito'"
+                [class.pc-option-row--muted]="!customer()"
+                [attr.aria-pressed]="mode() === 'credito'"
+                (click)="setMode('credito')"
+              >
+                <span class="pc-option-icon"><app-icon name="calendar-clock" [size]="22" /></span>
+                <span class="pc-option-body">
+                  <span class="pc-option-title">Crédito</span>
+                  <span class="pc-option-desc">Fiado o cuotas · requiere cliente</span>
+                </span>
+                <span
+                  class="pc-option-radio"
+                  [class.checked]="mode() === 'credito'"
+                  aria-hidden="true"
+                ></span>
+              </button>
+            </div>
+          } @else {
+            <button type="button" class="pc-panel-collapsed" (click)="goToSubStep(0)">
+              <span class="sw-check"><app-icon name="check" [size]="16" /></span>
+              <span class="sw-label">Forma de pago: {{ mode() === 'contado' ? 'Contado' : 'Crédito' }}</span>
+              <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
+            </button>
+          }
+        }
+
+        @if (mode() === 'contado') {
+          <!-- Panel: Método -->
+          @if (subStep() === modoOffset()) {
+            <!-- Cobro · Método de pago (frame a7mp1): título con icono + grid 2×2
+                 de MethodCards + banner informativo según método seleccionado. -->
+            <div class="pc-method-step">
+              <div class="pc-section-title">
+                <app-icon name="wallet" [size]="20" class="pc-section-icon" />
+                <h3 class="pc-section-label">Método de pago</h3>
+              </div>
+
+              @if (allCards().length > 0) {
+                <div class="payment-methods-grid">
+                  @for (m of allCards(); track m.id) {
+                    <button
+                      type="button"
+                      class="payment-method-btn"
+                      [class.selected]="isSelected(m)"
+                      [attr.aria-pressed]="isSelected(m)"
+                      (click)="selectMethod(m)"
+                    >
+                      <app-icon [name]="iconFor(m)" [size]="28" />
+                      <span class="method-name">{{ m.name }}</span>
+                    </button>
+                  }
+                </div>
+
+                @if (selectedMethod(); as sm) {
+                  <div class="pc-method-info">
+                    <app-icon name="box" [size]="18" class="pc-method-info-icon" />
+                    <span class="pc-method-info-text">
+                      @switch (sm.type) {
+                        @case (PaymentMethodType.CASH_ON_DELIVERY) {
+                          El cliente paga al recibir. La orden queda pendiente de pago hasta la entrega.
+                        }
+                        @case (PaymentMethodType.CASH) {
+                          Pago en efectivo. En el siguiente paso registras lo recibido y calculamos el cambio.
+                        }
+                        @case (PaymentMethodType.WOMPI) {
+                          Pago digital con Wompi (Nequi, tarjetas, PSE).
+                        }
+                        @case (PaymentMethodType.BANK_TRANSFER) {
+                          Transferencia bancaria. Registra la referencia del pago.
+                        }
+                        @case (PaymentMethodType.WALLET) {
+                          Se descuenta del saldo disponible del cliente.
+                        }
+                        @default {
+                          Continúa para registrar el detalle del pago.
+                        }
+                      }
+                    </span>
+                  </div>
+                }
+              } @else {
+                <div class="no-methods">
+                  <app-icon name="credit-card" [size]="24" />
+                  <p>No hay métodos de pago disponibles</p>
+                </div>
+              }
+            </div>
+          } @else if (subStep() > modoOffset()) {
+            <button
+              type="button"
+              class="pc-panel-collapsed"
+              (click)="goToSubStep(modoOffset())"
+            >
+              <span class="sw-check"><app-icon name="check" [size]="16" /></span>
+              <span class="sw-label">Método: {{ selectedMethod()?.name }}</span>
+              <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
+            </button>
+          }
+
+          <!-- Panel: Monto -->
+          @if (subStep() === montoIndex()) {
+            @if (!amountCollapsed()) {
+            <!-- Cobro · Efectivo/Monto (frame G0dg6): card TOTAL A COBRAR (34px
+                 ink-900), input de efectivo con prefijo $ y sufijo COP, y card
+                 verde "Cambio a entregar" (solo si change() > 0). -->
+            <section class="pc-card pc-total-card">
+              <p class="total-label">Total a cobrar</p>
+              <p class="total-amount">{{ effectiveTotal() | currency }}</p>
+            </section>
+
+            <!-- Cash -->
+            @if (isCashSelected()) {
+              <div class="pc-cash-block">
+                <label class="pc-cash-label" for="pc-cash-received">Efectivo recibido</label>
+                <div class="pc-cash-field" [class.error]="isCashInsufficient()">
+                  <span class="pc-cash-prefix" aria-hidden="true">$</span>
+                  <input
+                    id="pc-cash-received"
+                    appCurrencyInput
+                    [currencyDecimals]="currencyDecimals()"
+                    [formControl]="cashReceivedControl"
+                    class="pc-cash-input"
+                  />
+                  <span class="pc-cash-suffix" aria-hidden="true">COP</span>
+                </div>
+
+                @if (isCashInsufficient()) {
+                  <span class="error-text">Faltan: {{ missingAmount() | currency }}</span>
+                }
+              </div>
+
+              @if (!isCashInsufficient() && change() > 0) {
+                <div class="pc-change-card">
+                  <span class="pc-change-label">Cambio a entregar</span>
+                  <span class="pc-change-amount">{{ change() | currency }}</span>
+                </div>
+              }
+            }
+
+            <!-- Wallet -->
+            @if (isWalletSelected()) {
+              <section class="pc-card">
+                <div class="section-header">
+                  <div class="section-indicator"></div>
+                  <h3 class="section-title">Saldo Wallet</h3>
+                </div>
+                @if (walletInfo(); as info) {
+                  <div class="credit-balance">
+                    <span>Saldo disponible</span>
+                    <span>{{ info.balance | currency }}</span>
+                  </div>
+                  @if (!walletSufficient()) {
+                    <span class="error-text">Saldo insuficiente para cubrir el total.</span>
+                  }
+                } @else {
+                  <div class="pc-loading">Consultando saldo…</div>
+                }
+              </section>
+            }
+
+            <!-- Wompi -->
+            @if (isWompiSelected()) {
+              <section class="pc-card">
+                <div class="section-header">
+                  <div class="section-indicator"></div>
+                  <h3 class="section-title">Wompi</h3>
+                </div>
+                <app-payment-wompi-fields [(slice)]="wompiSlice" />
+              </section>
+            }
+
+            <!-- Reference -->
+            @if (needsReference()) {
+              <section class="pc-card">
+                <div class="section-header">
+                  <div class="section-indicator"></div>
+                  <h3 class="section-title">{{ referenceLabel() }}</h3>
+                </div>
+                <input
+                  type="text"
+                  [formControl]="referenceControl"
+                  [placeholder]="referenceLabel()"
+                  class="pc-input"
+                />
+              </section>
+            }
+
+            <!-- Tip -->
+            @if (config().allowTip) {
+              <section class="pc-card">
+                <div class="section-header">
+                  <div class="section-indicator"></div>
+                  <h3 class="section-title">Propina (opcional)</h3>
+                </div>
+                <input
+                  appCurrencyInput
+                  [currencyDecimals]="currencyDecimals()"
+                  [formControl]="tipControl"
+                  placeholder="0"
+                  class="pc-input"
+                />
+              </section>
+            }
+
+            <!-- Sin botón "Aceptar" in-panel: en el diseño Pencil (frame G0dg6) el
+                 monto se confirma con el CTA del footer del shell, que invoca
+                 advanceSubStepOrConfirm() → confirmAmount() (gateado por canSubmit)
+                 → colapsa las tarjetas (fill verde) y avanza/finaliza. -->
+            } @else {
+              <!-- Fila-resumen colapsada (fill verde one-shot). Clic para volver
+                   a editar el monto. -->
+              <button type="button" class="pc-panel-collapsed" (click)="expandAmount()">
+                <span class="sw-check"><app-icon name="check" [size]="16" /></span>
+                <span class="sw-label">Monto confirmado: {{ effectiveTotal() | currency }}</span>
+                <span class="sw-edit"><app-icon name="pencil" [size]="16" /></span>
+              </button>
+            }
+          }
+        } @else {
+          <!-- Panel: Plan de crédito -->
+          @if (subStep() >= modoOffset()) {
+            <section class="pc-card">
+              <div class="section-header">
+                <div class="section-indicator"></div>
+                <h3 class="section-title">Plan de crédito</h3>
+              </div>
+              @if (!customer()) {
+                <div class="pc-warn">
+                  <app-icon name="alert-triangle" [size]="18" />
+                  <span>Selecciona un cliente para vender a crédito.</span>
+                </div>
+              }
+              <app-payment-credit-fields
+                [(terms)]="creditTerms"
+                [financeBase]="effectiveBase()"
+                [paymentMethods]="resolvedMethods()"
+                [currencyDecimals]="currencyDecimals()"
+              />
+            </section>
+          }
+        }
+      </div>
+
+      <!-- Keypad column (cash + montoIndex only) -->
+      @if (
+        mode() === 'contado' && isCashSelected() && config().showKeypad && subStep() === montoIndex() && !amountCollapsed()
+      ) {
+        <aside class="pc-keypad-col">
+          <div class="keypad">
+            @for (n of [1, 2, 3, 4, 5, 6, 7, 8, 9]; track n) {
+              <button type="button" class="keypad-btn" (click)="appendDigit(n)">{{ n }}</button>
+            }
+            <button type="button" class="keypad-btn clear" (click)="clearCash()">C</button>
+            <button type="button" class="keypad-btn" (click)="appendDigit(0)">0</button>
+            <button type="button" class="keypad-btn" (click)="backspace()">
+              <app-icon name="delete" [size]="18" />
+            </button>
+          </div>
+        </aside>
+      }
+
+      <!-- Stepper column: own column to the right (below the options on mobile). -->
+      <aside class="pc-steps-col">
+        <app-steps-line
+          [orientation]="'vertical'"
+          [size]="'sm'"
+          [fillHeight]="true"
+          [minHeightPx]="305"
+          [steps]="subSteps()"
+          [currentStep]="subStep()"
+          [clickable]="true"
+          (stepClicked)="goToSubStep($event)"
+        ></app-steps-line>
+      </aside>
+    </div>
+  } @else {
+    <!-- ═══════════════════════════════ FLAT ═══════════════════════════════
+         Verbatim classic layout — unchanged for the 4 non-POS-stepped
+         consumers (membership / table / order / ecommerce). -->
+    <!-- Mode tabs: contado vs credito -->
+    @if (config().allowCredit) {
+      <div class="tab-headers">
+        <button
+          type="button"
+          class="tab-btn"
+          [class.active]="mode() === 'contado'"
+          (click)="setMode('contado')"
+        >
+          <app-icon name="banknote" [size]="16" />
+          Contado
+        </button>
+        <button
+          type="button"
+          class="tab-btn"
+          [class.active]="mode() === 'credito'"
+          (click)="setMode('credito')"
+        >
+          <app-icon name="calendar" [size]="16" />
+          Crédito
+        </button>
+      </div>
+    }
+
+    <!-- Amount override -->
+    @if (config().allowAmountOverride) {
+      <section class="pc-card">
+        <div class="section-header">
+          <div class="section-indicator"></div>
+          <h3 class="section-title">Monto</h3>
+        </div>
+        <input
+          appCurrencyInput
+          [currencyDecimals]="currencyDecimals()"
+          [formControl]="amountOverrideControl"
+          placeholder="Usar monto sugerido"
+          class="pc-input"
+        />
+        <span class="pc-hint">Si lo dejas vacío se cobra el monto sugerido.</span>
+      </section>
+    }
+
+    <!-- Existing installment selector -->
+    @if (installmentOptions().length > 0) {
+      <section class="pc-card">
+        <div class="section-header">
+          <div class="section-indicator"></div>
+          <h3 class="section-title">Cuota a pagar</h3>
+        </div>
+        <select
+          class="pc-input"
+          (change)="onInstallmentChange($any($event.target).value)"
+        >
+          <option [value]="0">Selecciona una cuota…</option>
+          @for (opt of installmentOptions(); track opt.value) {
+            <option [value]="opt.value">{{ opt.label }}</option>
+          }
+        </select>
+      </section>
+    }
+
+    <!-- Prominent total -->
+    <section class="pc-card">
+      <p class="total-label">Total a cobrar</p>
+      <p class="total-amount">{{ effectiveTotal() | currency }}</p>
+    </section>
+
+    @if (mode() === 'contado') {
+      <!-- Payment-method grid -->
+      <section class="pc-card">
+        <div class="section-header">
+          <div class="section-indicator"></div>
+          <h3 class="section-title">Método de pago</h3>
+        </div>
+
+        @if (allCards().length > 0) {
+          <div class="payment-methods-grid">
+            @for (m of allCards(); track m.id) {
+              <button
+                type="button"
+                class="payment-method-btn"
+                [class.selected]="isSelected(m)"
+                (click)="selectMethod(m)"
+              >
+                <app-icon [name]="iconFor(m)" [size]="24" />
+                <span class="method-name">{{ m.name }}</span>
+              </button>
+            }
+          </div>
+        } @else {
+          <div class="no-methods">
+            <app-icon name="credit-card" [size]="24" />
+            <p>No hay métodos de pago disponibles</p>
+          </div>
+        }
+      </section>
+
+      <!-- Cash -->
+      @if (isCashSelected()) {
+        <section class="pc-card">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h3 class="section-title">Efectivo recibido</h3>
+          </div>
+
+          <input
+            appCurrencyInput
+            [currencyDecimals]="currencyDecimals()"
+            [formControl]="cashReceivedControl"
+            class="pc-input pc-input-lg"
+            [class.error]="isCashInsufficient()"
+          />
+
+          @if (quickAmounts().length > 0) {
+            <div class="quick-amounts">
+              @for (q of quickAmounts(); track q) {
+                <button type="button" class="quick-btn" (click)="setCash(q)">
+                  {{ q | currency }}
+                </button>
+              }
+            </div>
+          }
+
+          @if (config().showKeypad) {
+            <div class="keypad">
+              @for (n of [1, 2, 3, 4, 5, 6, 7, 8, 9]; track n) {
+                <button type="button" class="keypad-btn" (click)="appendDigit(n)">{{ n }}</button>
+              }
+              <button type="button" class="keypad-btn clear" (click)="clearCash()">C</button>
+              <button type="button" class="keypad-btn" (click)="appendDigit(0)">0</button>
+              <button type="button" class="keypad-btn" (click)="backspace()">
+                <app-icon name="delete" [size]="18" />
+              </button>
+            </div>
+          }
+
+          @if (isCashInsufficient()) {
+            <span class="error-text">Faltan: {{ missingAmount() | currency }}</span>
+          } @else if (change() > 0) {
+            <div class="change-display">
+              <span>Cambio</span>
+              <span>{{ change() | currency }}</span>
+            </div>
+          }
+        </section>
+      }
+
+      <!-- Wallet -->
+      @if (isWalletSelected()) {
+        <section class="pc-card">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h3 class="section-title">Saldo Wallet</h3>
+          </div>
+          @if (walletInfo(); as info) {
+            <div class="credit-balance">
+              <span>Saldo disponible</span>
+              <span>{{ info.balance | currency }}</span>
+            </div>
+            @if (!walletSufficient()) {
+              <span class="error-text">Saldo insuficiente para cubrir el total.</span>
+            }
+          } @else {
+            <div class="pc-loading">Consultando saldo…</div>
+          }
+        </section>
+      }
+
+      <!-- Wompi -->
+      @if (isWompiSelected()) {
+        <section class="pc-card">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h3 class="section-title">Wompi</h3>
+          </div>
+          <app-payment-wompi-fields [(slice)]="wompiSlice" />
+        </section>
+      }
+
+      <!-- Reference -->
+      @if (needsReference()) {
+        <section class="pc-card">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h3 class="section-title">{{ referenceLabel() }}</h3>
+          </div>
+          <input
+            type="text"
+            [formControl]="referenceControl"
+            [placeholder]="referenceLabel()"
+            class="pc-input"
+          />
+        </section>
+      }
+
+      <!-- Tip -->
+      @if (config().allowTip) {
+        <section class="pc-card">
+          <div class="section-header">
+            <div class="section-indicator"></div>
+            <h3 class="section-title">Propina (opcional)</h3>
+          </div>
+          <input
+            appCurrencyInput
+            [currencyDecimals]="currencyDecimals()"
+            [formControl]="tipControl"
+            placeholder="0"
+            class="pc-input"
+          />
+        </section>
+      }
+    } @else {
+      <!-- Credito -->
+      <section class="pc-card">
+        <div class="section-header">
+          <div class="section-indicator"></div>
+          <h3 class="section-title">Plan de crédito</h3>
+        </div>
+        @if (!customer()) {
+          <div class="pc-warn">
+            <app-icon name="alert-triangle" [size]="18" />
+            <span>Selecciona un cliente para vender a crédito.</span>
+          </div>
+        }
+        <app-payment-credit-fields
+          [(terms)]="creditTerms"
+          [financeBase]="effectiveBase()"
+          [paymentMethods]="resolvedMethods()"
+          [currencyDecimals]="currencyDecimals()"
+        />
+      </section>
+    }
+  }
+</div>

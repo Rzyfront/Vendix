@@ -68,6 +68,30 @@ export { DomainResolutionErrorComponent } from './domain-resolution-error/domain
 export type { DomainResolutionErrorKind } from './domain-resolution-error/domain-resolution-error.component';
 export { MapViewComponent } from './map-view/map-view.component';
 export type { LatLng, MapMarker } from './map-view/map-view.component';
+export { AddressFormFieldsComponent } from './address-form-fields/address-form-fields.component';
+export type {
+  LatLng as AddressLatLng,
+  AddressPayload,
+} from './address-form-fields/address-form-fields.component';
+export { DispatchNoteAddressEditorComponent } from './dispatch-note-address-editor/dispatch-note-address-editor.component';
+export { DispatchNoteAddressService } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
+export type { DispatchNoteAddressPayload } from './dispatch-note-address-editor/dispatch-note-address-editor.service';
+
+// Payment collector (reusable, capability-driven charge widget — Phase 3)
+export { PaymentCollectorComponent } from './payment-collector/payment-collector.component';
+export { PaymentModalComponent } from './payment-collector/payment-modal.component';
+export { PaymentWompiFieldsComponent } from './payment-collector/payment-wompi-fields.component';
+export { PaymentCreditFieldsComponent } from './payment-collector/payment-credit-fields.component';
+export { DEFAULT_CONFIG_BY_CONTEXT } from './payment-collector/payment-collector.model';
+export type {
+  PaymentCollectorConfig,
+  PaymentSubmit,
+  PaymentContext,
+  PaymentMode,
+  CreditTerms,
+  WompiSlice,
+  ManualPaymentMethod,
+} from './payment-collector/payment-collector.model';
 
 // Services
 export { TourService } from './tour/services/tour.service';

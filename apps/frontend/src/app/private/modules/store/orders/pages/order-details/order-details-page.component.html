@@ -278,6 +278,15 @@
                           {{ addr.country_code }}
                         </span>
                       }
+                      <button
+                        type="button"
+                        (click)="promptEditShippingAddress(addr)"
+                        class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                        title="Editar dirección de entrega"
+                      >
+                        <app-icon name="edit-3" size="13"></app-icon>
+                        Editar dirección
+                      </button>
                     </div>
                   } @else {
                     <button
@@ -1783,20 +1792,22 @@
     </app-modal>
 
     @defer (when showPayModal()) {
-      <app-order-payment-modal
-        [isOpen]="showPayModal()"
-        [order]="orderData"
-        [paymentMethods]="paymentMethods()"
-        [isCreditOrder]="isCreditOrder()"
-        [remainingBalance]="remainingBalance()"
-        [installments]="orderData.order_installments || []"
-        [creditType]="orderData.credit_type || ''"
-        [preSelectedInstallment]="preSelectedInstallment()"
-        [isProcessing]="isProcessingAction()"
-        (isOpenChange)="showPayModal.set($event)"
-        (closed)="showPayModal.set(false)"
-        (paymentSubmitted)="onPaymentSubmitted($event)"
-      />
+      @if (showPayModal()) {
+        <app-order-payment-modal
+          [isOpen]="showPayModal()"
+          [order]="orderData"
+          [paymentMethods]="paymentMethods()"
+          [isCreditOrder]="isCreditOrder()"
+          [remainingBalance]="remainingBalance()"
+          [installments]="orderData.order_installments || []"
+          [creditType]="orderData.credit_type || ''"
+          [preSelectedInstallment]="preSelectedInstallment()"
+          [isProcessing]="isProcessingAction()"
+          (isOpenChange)="showPayModal.set($event)"
+          (closed)="showPayModal.set(false)"
+          (paymentSubmitted)="onPaymentSubmitted($event)"
+        />
+      }
     }
 
     <!-- SHIP MODAL (delivery-type aware) -->
@@ -1805,13 +1816,13 @@
       (closed)="showShipModal.set(false); isManualShipMode.set(false)"
       [title]="
         isManualShipMode()
-          ? 'Despachar sin confirmar pago'
+          ? (hasPendingOnlinePayment() ? 'Despachar sin confirmar pago' : 'Despachar orden')
           : shipModalConfig().title
       "
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="shipForm">
-        @if (isManualShipMode()) {
+        @if (isManualShipMode() && hasPendingOnlinePayment()) {
           <div
             class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3"
           >
@@ -1827,6 +1838,22 @@
               <p class="text-xs text-orange-600 mt-0.5">
                 La orden se despachara sin que el pago haya sido confirmado.
                 Deberas confirmar el pago antes de marcar la entrega.
+              </p>
+            </div>
+          </div>
+        } @else if (isManualShipMode()) {
+          <div
+            class="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="truck"
+              size="18"
+              class="text-gray-500 mt-0.5"
+            ></app-icon>
+            <div>
+              <p class="text-sm font-bold text-gray-700">Despachar orden</p>
+              <p class="text-xs text-gray-500 mt-0.5">
+                Se cobra al momento de la entrega.
               </p>
             </div>
           </div>
@@ -1927,7 +1954,11 @@
           >Cancelar</app-button
         >
         <app-button
-          [variant]="isManualShipMode() ? 'outline-warning' : 'primary'"
+          [variant]="
+            isManualShipMode() && hasPendingOnlinePayment()
+              ? 'outline-warning'
+              : 'primary'
+          "
           (clicked)="submitShipment()"
           [disabled]="isProcessingAction()"
         >
@@ -1935,7 +1966,7 @@
             isProcessingAction()
               ? "Procesando..."
               : isManualShipMode()
-                ? "Despachar sin pago"
+                ? (hasPendingOnlinePayment() ? "Despachar sin pago" : "Despachar")
                 : shipModalConfig().confirmLabel
           }}
         </app-button>
@@ -2001,14 +2032,17 @@
       </div>
     </app-modal>
 
-    <!-- A3-edit: CAPTURA DE DIRECCIÓN DE ENVÍO EN PÁGINA -->
+    <!-- A3-edit: CAPTURA / EDICIÓN DE DIRECCIÓN DE ENVÍO EN PÁGINA -->
     @if (showShippingAddressModal()) {
       <app-shipping-address-modal
         [customerId]="order()?.customer_id ?? null"
         [customerName]="shippingAddressCustomerName()"
         [saving]="savingShippingAddress()"
+        [addressId]="editingAddressId()"
+        [initialAddress]="editingInitialAddress()"
         (close)="showShippingAddressModal.set(false)"
         (submitForm)="onShippingAddressSubmit($event)"
+        (submitEdit)="onShippingAddressEdit($event)"
       ></app-shipping-address-modal>
     }
 

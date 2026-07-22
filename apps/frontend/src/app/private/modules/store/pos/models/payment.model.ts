@@ -1,14 +1,10 @@
-export interface PaymentMethod {
-  id: string;
-  name: string;
-  type: 'cash' | 'card' | 'transfer' | 'digital_wallet' | string;
-  icon: string;
-  enabled: boolean;
-  requiresReference?: boolean;
-  referenceLabel?: string;
-  dian_code?: string;
-  original?: any;
-}
+// Phase 2 normalization: `PaymentMethod` now points to the canonical, cross-app
+// model in `shared/models`. This is a structural superset of the legacy POS
+// shape, so existing POS/table consumers keep compiling unchanged.
+import type { PaymentMethod } from '../../../../../shared/models/payment-method.model';
+
+export type { PaymentMethod } from '../../../../../shared/models/payment-method.model';
+export { PaymentMethodType } from '../../../../../shared/models/payment-method.model';
 
 export interface PaymentRequest {
   orderId: string;

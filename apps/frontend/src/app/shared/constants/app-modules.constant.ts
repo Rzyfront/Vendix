@@ -150,6 +150,12 @@ export const APP_MODULES: {
           label: 'Marcas',
           description: 'Gestionar marcas de productos',
         },
+        {
+          key: 'settings_price_tiers',
+          label: 'Precios y Tarifas',
+          description:
+            'Tarifas por tienda (mayorista, detal, por caja) para productos multi-tarifa',
+        },
       ],
     },
     {
@@ -652,12 +658,6 @@ export const APP_MODULES: {
           key: 'settings_payments',
           label: 'M\u00e9todos de Pago',
           description: 'M\u00e9todos de pago aceptados',
-        },
-        {
-          key: 'settings_price_tiers',
-          label: 'Precios y Tarifas',
-          description:
-            'Tarifas por tienda (mayorista, detal, por caja) para productos multi-tarifa',
         },
         {
           key: 'settings_appearance',

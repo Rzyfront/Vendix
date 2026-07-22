@@ -19,6 +19,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -59,6 +60,9 @@ export class PurchaseOrdersService {
     private settingsService: SettingsService,
     private fiscalScopeService: FiscalScopeService,
     private eventEmitter: EventEmitter2,
+    // FASE 3 — accountsPayableService provee el espejo PO→AP (mirrorPoPaymentToAp)
+    // y el backfill de anticipos. Inyectado vía módulo AccountsPayableModule.
+    private accountsPayableService: AccountsPayableService,
   ) {}
 
   /**
@@ -752,17 +756,32 @@ export class PurchaseOrdersService {
         });
       }
 
-      // Calculate totals using processed items
-      const subtotal = processedItems.reduce(
-        (sum, item) => sum + item.quantity * item.unit_price,
-        0,
-      );
-
-      const totalAmount =
+      // FASE 4 — total_amount BRUTO consistente. Antes se sumaba
+      // Σ(qty×unit_price) (bruto en modo include-tax, neto en exclude-tax) + un
+      // `tax_amount` de header, dando un total inconsistente entre modos (y a
+      // veces doble-contando el IVA). Ahora derivamos neto + IVA por línea vía
+      // `deriveLineTax` (la MISMA derivación que persiste cada línea en :848),
+      // de modo que:
+      //   subtotal_amount = Σ neto           (base independiente del modo)
+      //   total_amount    = neto + IVA − descuento + flete   (BRUTO)
+      // La contabilidad NO lee estos campos (deriva neto de unit_cost, ver
+      // :1921); recalculatePaymentStatus SÍ lee total_amount → ahora bruto
+      // consistente frente a los pagos (que pagan el bruto de factura).
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      let netSubtotal = 0;
+      let lineTax = 0;
+      for (const item of processedItems) {
+        const d = this.deriveLineTax(item, createPurchaseOrderDto);
+        netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+        lineTax += d.tax_amount;
+      }
+      const subtotal = round2(netSubtotal);
+      const totalAmount = round2(
         subtotal -
-        (createPurchaseOrderDto.discount_amount || 0) +
-        (createPurchaseOrderDto.tax_amount || 0) +
-        (createPurchaseOrderDto.shipping_cost || 0);
+          (createPurchaseOrderDto.discount_amount || 0) +
+          round2(lineTax) +
+          (createPurchaseOrderDto.shipping_cost || 0),
+      );
 
       // Generate order number
       const date = new Date();
@@ -1024,20 +1043,29 @@ export class PurchaseOrdersService {
 
   async update(id: number, updatePurchaseOrderDto: UpdatePurchaseOrderDto) {
     return this.prisma.$transaction(async (tx) => {
-      // If items are being updated, recalculate totals
+      // If items are being updated, recalculate totals.
+      // FASE 4 — misma derivación bruta consistente que create(): neto por línea
+      // vía deriveLineTax → subtotal_amount = Σ neto, total_amount = neto + IVA −
+      // descuento + flete (BRUTO). Corrige además la columna: antes escribía
+      // `.subtotal` (inexistente; la columna real es `subtotal_amount`, ver :838).
       if (updatePurchaseOrderDto.items) {
-        const subtotal = updatePurchaseOrderDto.items.reduce(
-          (sum, item) => sum + item.quantity * item.unit_price,
-          0,
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        let netSubtotal = 0;
+        let lineTax = 0;
+        for (const item of updatePurchaseOrderDto.items) {
+          const d = this.deriveLineTax(item, updatePurchaseOrderDto);
+          netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
+          lineTax += d.tax_amount;
+        }
+        const subtotal = round2(netSubtotal);
+        const totalAmount = round2(
+          subtotal -
+            (updatePurchaseOrderDto.discount_amount || 0) +
+            round2(lineTax) +
+            (updatePurchaseOrderDto.shipping_cost || 0),
         );
 
-        const totalAmount =
-          subtotal -
-          (updatePurchaseOrderDto.discount_amount || 0) +
-          (updatePurchaseOrderDto.tax_amount || 0) +
-          (updatePurchaseOrderDto.shipping_cost || 0);
-
-        (updatePurchaseOrderDto as any).subtotal = subtotal;
+        (updatePurchaseOrderDto as any).subtotal_amount = subtotal;
         (updatePurchaseOrderDto as any).total_amount = totalAmount;
       }
 
@@ -1406,6 +1434,37 @@ export class PurchaseOrdersService {
     const result = await this.prisma.$transaction(async (tx) => {
       // Create reception record
       const user_id = RequestContextService.getUserId();
+
+      // Guard: every incoming line must belong to THIS purchase order and must
+      // not exceed its pending quantity (ordered − already received). Without
+      // this, receive() blindly increments quantity_received, so an over-receipt
+      // (e.g. 99 against 1 ordered) is accepted and inflates stock, and a line
+      // id from another order could be received against this one. A throw here
+      // rolls back the whole transaction (no partial reception is persisted).
+      const poLines = await tx.purchase_order_items.findMany({
+        where: { purchase_order_id: id },
+        select: { id: true, quantity_ordered: true, quantity_received: true },
+      });
+      const poLineById = new Map<
+        number,
+        { id: number; quantity_ordered: number; quantity_received: number }
+      >(poLines.map((l) => [l.id, l]));
+      for (const item of dto.items) {
+        if (item.quantity_received <= 0) continue;
+        const poLine = poLineById.get(item.id);
+        if (!poLine) {
+          throw new BadRequestException(
+            `La línea ${item.id} no pertenece a esta orden de compra`,
+          );
+        }
+        const pending = poLine.quantity_ordered - poLine.quantity_received;
+        if (item.quantity_received > pending) {
+          throw new BadRequestException(
+            `No se puede recibir ${item.quantity_received} unidad(es) de la línea ${item.id}: solo quedan ${pending} pendiente(s) de ${poLine.quantity_ordered} pedida(s)`,
+          );
+        }
+      }
+
       const reception = await tx.purchase_order_receptions.create({
         data: {
           purchase_order_id: id,
@@ -1905,6 +1964,11 @@ export class PurchaseOrdersService {
     // ACTUALLY posted so far (sum of total_debit for this order's previous
     // reception ids), so a prior reception whose emit failed is naturally
     // recovered here instead of being silently lost.
+    //
+    // `batch_amount` (monto contabilizado como CxP en 2205 por ESTA recepción)
+    // se declara en el scope externo para reutilizarlo luego en la
+    // reclasificación de anticipos (DR 2205 / CR 133005).
+    let batch_amount = 0;
     try {
       // NET order total (Σ quantity_ordered × unit_cost, unit_cost = net). The
       // authoritative net value, independent of the inconsistent total_amount.
@@ -1929,7 +1993,6 @@ export class PurchaseOrdersService {
           ) / 100;
       const emit_total = Math.round((net_total + capitalized_iva) * 100) / 100;
 
-      let batch_amount: number;
       if (result.all_items_received) {
         // Sum what accounting already posted (NET) for THIS order's earlier
         // receptions (source_type is fixed; source_id ranges over this
@@ -1971,14 +2034,50 @@ export class PurchaseOrdersService {
       }
 
       if (batch_amount > 0) {
+        // O-48 subledger gross-up (decisión de negocio jul-2026, confirmada por
+        // el usuario): la CxP (accounts_payable) DEBE reflejar el BRUTO que se le
+        // debe al proveedor (= neto + IVA descontable), no el neto. El GL 2205 ya
+        // llega a bruto vía DOS asientos: `purchase_order.received` (neto) + el
+        // complemento `purchase.vat_recognized` (IVA, solo en la recepción final,
+        // ver :2154). El subledger se alimenta ÚNICAMENTE de `gross_reception_share`,
+        // así que espejamos ese complemento aquí: en la recepción final de una
+        // compra O-48 sumamos el IVA descontable total del pedido a la porción del
+        // subledger — SIN tocar `total_amount`, que consume el asiento GL de
+        // recepción y debe seguir neto para no doble-contar el CR 2205.
+        // (O-49 nunca entra: su IVA ya viene capitalizado en batch_amount.)
+        let subledger_gross_share = batch_amount;
+        if (result.vat_responsible && result.all_items_received) {
+          const deductible_iva =
+            Math.round(
+              result.updated_po.purchase_order_items.reduce(
+                (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
+                0,
+              ) * 100,
+            ) / 100;
+          subledger_gross_share =
+            Math.round((batch_amount + deductible_iva) * 100) / 100;
+        }
         this.eventEmitter.emit('purchase_order.received', {
           purchase_order_id: result.updated_po.id,
           reception_id: result.reception_id,
           organization_id: result.updated_po.organization_id,
           store_id,
           accounting_entity_id,
+          // BRUTO real de la CxP: para O-49 = batch_amount (IVA ya capitalizado);
+          // para O-48 en recepción final = batch_amount + IVA descontable total.
+          // ApEventsListener.create→upsertPayableForReception lo usa como
+          // gross_amount y crea 1 sola CxP por OC (incrementa original/balance en
+          // cada recepción, idempotente por ap_reception_links.reception_id @unique).
+          gross_reception_share: subledger_gross_share,
+          // GL de recepción (DR 1435 / CR 2205): SIEMPRE neto del batch para O-48
+          // (el IVA va por el complemento vat_recognized) y bruto para O-49.
+          // Alias legacy para listeners que aún lean `total_amount`.
           total_amount: batch_amount,
           user_id: RequestContextService.getUserId(),
+          // ApEventsListener maps the scalar `supplier_id` into the required
+          // accounts_payable relation; without it createFromEvent receives
+          // `undefined` and the AP row is never created (no CxP on reception).
+          supplier_id: result.updated_po.supplier_id,
           // C4-followup: result.updated_po.suppliers ya viene completo del
           // include de la transacción — sin lookup adicional.
           supplier,
@@ -1987,6 +2086,104 @@ export class PurchaseOrdersService {
     } catch (error) {
       this.logger.error(
         `Failed to emit purchase_order.received for PO #${id} (reception #${result.reception_id}): ${error.message}`,
+      );
+    }
+
+    // ===== ANTICIPO A PROVEEDORES: reclasificación al recibir =====
+    // Si la OC tuvo pagos ANTICIPADOS (posteados a 133005 con
+    // source_type='purchase_order.advance_payment'), al crear la CxP (CR 2205)
+    // en la recepción hay que trasladar el anticipo contra ese pasivo:
+    //   DR 2205 Proveedores / CR 133005 Anticipos, por
+    //   min(monto_recibido_de_esta_recepción, saldo_anticipo_disponible).
+    //
+    // El SALDO se calcula desde la contabilidad REALMENTE posteada (fuente de
+    // verdad, no desde flags de dominio), sin acoplarse a códigos de cuenta:
+    //   saldo = Σ total_debit(advance_payment de esta OC)
+    //         − Σ total_credit(advance_reclass ya posteadas de esta OC)
+    // Así nunca deja 133005 en negativo aunque un pago anticipado aún no haya
+    // posteado (quedaría en cola de reintento y se reclasificaría después).
+    //
+    // IDEMPOTENCIA: el asiento usa source_id=reception_id, así que cada
+    // recepción reclasifica una sola vez (el guard de createAutoEntry lo cubre);
+    // re-emitir esta recepción no duplica.
+    //
+    // LIMITACIÓN (parciales): con múltiples recepciones, cada una consume el
+    // saldo restante en orden (FIFO por recepción) hasta agotarlo. `batch_amount`
+    // es el neto (O-48) o bruto (O-49) contabilizado en 2205 por esta recepción;
+    // para O-48 el complemento de IVA (240804/2205) se maneja aparte y NO se
+    // reclasifica contra el anticipo (que fue caja real).
+    try {
+      if (batch_amount > 0) {
+        // Débitos realmente posteados a 133005 por pagos anticipados de esta OC.
+        const paymentIds = (
+          await this.prisma.purchase_order_payments.findMany({
+            where: { purchase_order_id: id },
+            select: { id: true },
+          })
+        ).map((p) => p.id);
+
+        let advanceDebits = 0;
+        if (paymentIds.length > 0) {
+          const advanceEntries =
+            await this.prisma.accounting_entries.findMany({
+              where: {
+                source_type: 'purchase_order.advance_payment',
+                source_id: { in: paymentIds },
+              },
+              select: { total_debit: true },
+            });
+          advanceDebits = advanceEntries.reduce(
+            (sum, e) => sum + Number(e.total_debit || 0),
+            0,
+          );
+        }
+
+        // Anticipo ya reclasificado en recepciones previas (y la actual, si se
+        // reintentara) de esta OC.
+        const receptionIds = (
+          await this.prisma.purchase_order_receptions.findMany({
+            where: { purchase_order_id: id },
+            select: { id: true },
+          })
+        ).map((r) => r.id);
+
+        let alreadyReclassified = 0;
+        if (receptionIds.length > 0) {
+          const reclassEntries =
+            await this.prisma.accounting_entries.findMany({
+              where: {
+                source_type: 'purchase_order.advance_reclass',
+                source_id: { in: receptionIds },
+              },
+              select: { total_credit: true },
+            });
+          alreadyReclassified = reclassEntries.reduce(
+            (sum, e) => sum + Number(e.total_credit || 0),
+            0,
+          );
+        }
+
+        const advanceBalance =
+          Math.round((advanceDebits - alreadyReclassified) * 100) / 100;
+        const reclassAmount =
+          Math.round(Math.min(batch_amount, advanceBalance) * 100) / 100;
+
+        if (reclassAmount > 0) {
+          this.eventEmitter.emit('purchase_order.advance_reclass', {
+            purchase_order_id: id,
+            reception_id: result.reception_id,
+            organization_id: result.updated_po.organization_id,
+            store_id,
+            accounting_entity_id,
+            amount: reclassAmount,
+            user_id: RequestContextService.getUserId(),
+            supplier,
+          });
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit purchase_order.advance_reclass for PO #${id} (reception #${result.reception_id}): ${error.message}`,
       );
     }
 
@@ -2345,6 +2542,10 @@ export class PurchaseOrdersService {
           : null,
         supplier_invoice_amount: dto.supplier_invoice_amount,
         notes: dto.notes,
+        // FASE TRACK B2/B4 — liga el adjunto a un pago concreto cuando el modal
+        // de pago sube el comprobante tras registrar el pago. Nullable: los
+        // adjuntos de factura/OC normales siguen sin payment_id.
+        payment_id: dto.payment_id ?? null,
         uploaded_by_user_id: userId,
       },
     });
@@ -2423,52 +2624,118 @@ export class PurchaseOrdersService {
   async registerPayment(purchaseOrderId: number, dto: RegisterPaymentDto) {
     const po = await this.prisma.purchase_orders.findUnique({
       where: { id: purchaseOrderId },
+      include: { suppliers: true, location: true },
     });
     if (!po) {
       throw new NotFoundException('Purchase order not found');
     }
 
-    // Get existing payments total
-    const existingPayments =
-      await this.prisma.purchase_order_payments.aggregate({
-        where: { purchase_order_id: purchaseOrderId },
-        _sum: { amount: true },
-      });
-
-    const totalPaid =
-      Number(existingPayments._sum.amount || 0) + Number(dto.amount);
-    const totalAmount = Number(po.total_amount);
-
-    if (totalPaid > totalAmount) {
-      throw new BadRequestException(
-        'El pago excedería el monto total de la orden',
-      );
-    }
-
     const userId = RequestContextService.getUserId();
 
-    // Create payment record
-    const payment = await this.prisma.purchase_order_payments.create({
-      data: {
-        purchase_order_id: purchaseOrderId,
-        amount: dto.amount,
-        payment_date: new Date(dto.payment_date),
-        payment_method: dto.payment_method,
-        reference: dto.reference,
-        notes: dto.notes,
-        created_by_user_id: userId,
+    // Atomic: validate overpay → create payment row → recalc payment_status.
+    // Mirrors and backfill (Fase 3) MUST run inside the same $transaction so
+    // the helper's SUM() sees the new row before committing — and so a failed
+    // recompute rolls back the payment insert (no half-state on disk).
+    const { payment, paymentStatus } = await this.prisma.$transaction(
+      async (tx) => {
+        // Overpay guard — must run INSIDE the tx so a concurrent registerPayment
+        // can't slip past the check (without the lock two payments summing to
+        // > total_amount would each see the pre-state and both commit).
+        const totalAmount = Number(po.total_amount);
+        const currentAgg = await tx.purchase_order_payments.aggregate({
+          where: { purchase_order_id: purchaseOrderId },
+          _sum: { amount: true },
+        });
+        const projectedTotal =
+          Number(currentAgg._sum.amount || 0) + Number(dto.amount);
+        if (projectedTotal > totalAmount + 0.005) {
+          throw new BadRequestException(
+            'El pago excedería el monto total de la orden',
+          );
+        }
+
+        const created = await tx.purchase_order_payments.create({
+          data: {
+            purchase_order_id: purchaseOrderId,
+            amount: dto.amount,
+            payment_date: new Date(dto.payment_date),
+            payment_method: dto.payment_method,
+            reference: dto.reference,
+            notes: dto.notes,
+            created_by_user_id: userId,
+            source: 'po_modal',
+          },
+        });
+
+        // FASE 3 — PUENTE PO→AP: si la OC ya tiene una CxP, espejar el pago
+        // hacia ap_payments (source='po_bridge') y bajar balance/paid_amount.
+        // El espejo NO emite ap.payment_registered (no doble caja contable).
+        // Esta llamada requiere el AccountsPayableService — se hace vía tx
+        // compartido para no romper la atomicidad. La búsqueda de la CxP y
+        // el espejo se ejecutan dentro del mismo $transaction.
+        const ap = await tx.accounts_payable.findFirst({
+          where: {
+            source_type: 'purchase_order',
+            source_id: purchaseOrderId,
+          },
+          select: { id: true },
+        });
+        if (ap) {
+          const mirror = await this.accountsPayableService.mirrorPoPaymentToAp(
+            {
+              purchase_order_payment_id: created.id,
+              accounts_payable_id: ap.id,
+              amount: Number(dto.amount),
+              payment_date: created.payment_date,
+              payment_method: dto.payment_method,
+              reference: dto.reference,
+              notes: dto.notes,
+              user_id: userId ?? undefined,
+            },
+            tx,
+          );
+          // Bajar balance / paid_amount de la CxP (in-line; evita invocar
+          // applyPoPaymentToApBalance para no armar dos $transactions).
+          const apRow = await tx.accounts_payable.findUnique({
+            where: { id: ap.id },
+            select: { original_amount: true, paid_amount: true, balance: true, status: true },
+          });
+          if (apRow) {
+            const newPaid = Number(apRow.paid_amount) + Number(dto.amount);
+            const newBalance = Math.max(
+              Number(apRow.original_amount) - newPaid,
+              0,
+            );
+            const newStatus =
+              newBalance <= 0
+                ? 'paid'
+                : Number(apRow.balance) <= 0
+                  ? 'partial'
+                  : apRow.status;
+            await tx.accounts_payable.update({
+              where: { id: ap.id },
+              data: {
+                paid_amount: newPaid,
+                balance: newBalance,
+                status: newStatus,
+              },
+            });
+          }
+          void mirror; // referenced; carries ap_payment_id if needed
+        }
+
+        const status = await this.recalculatePaymentStatus(
+          purchaseOrderId,
+          tx,
+        );
+        await tx.purchase_orders.update({
+          where: { id: purchaseOrderId },
+          data: { payment_status: status as any },
+        });
+
+        return { payment: created, paymentStatus: status };
       },
-    });
-
-    // Update payment_status on PO
-    let paymentStatus: 'unpaid' | 'partial' | 'paid' = 'unpaid';
-    if (totalPaid >= totalAmount) paymentStatus = 'paid';
-    else if (totalPaid > 0) paymentStatus = 'partial';
-
-    await this.prisma.purchase_orders.update({
-      where: { id: purchaseOrderId },
-      data: { payment_status: paymentStatus as any },
-    });
+    );
 
     // Audit log
     try {
@@ -2491,12 +2758,49 @@ export class PurchaseOrdersService {
 
     // Emit event for accounting
     try {
+      // ANTICIPO A PROVEEDORES: si la OC NO tiene recepciones al momento del
+      // pago, es un pago anticipado (no extingue una CxP inexistente sino que
+      // crea un activo 133005). El EMISOR resuelve la bandera `is_advance` y el
+      // snapshot del proveedor/entidad; el handler contable NUNCA lo detecta.
+      const receptionsCount = await this.prisma.purchase_order_receptions.count({
+        where: { purchase_order_id: purchaseOrderId },
+      });
+      const is_advance = receptionsCount === 0;
+
+      const store_id = po.location?.store_id ?? undefined;
+      const supplier = po.suppliers
+        ? {
+            id: po.suppliers.id,
+            name: po.suppliers.name,
+            tax_id: po.suppliers.tax_id ?? undefined,
+          }
+        : undefined;
+
+      let accounting_entity_id: number | undefined;
+      try {
+        const entity =
+          await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+            organization_id: po.organization_id,
+            store_id,
+          });
+        accounting_entity_id = entity?.id;
+      } catch (error: any) {
+        this.logger.warn(
+          `Could not resolve fiscal accounting entity for PO payment #${purchaseOrderId}: ${error?.message}`,
+        );
+      }
+
       this.eventEmitter.emit('purchase_order.payment', {
         purchase_order_id: purchaseOrderId,
+        payment_id: payment.id,
         organization_id: po.organization_id,
+        store_id,
+        accounting_entity_id,
         amount: Number(dto.amount),
         payment_method: dto.payment_method,
+        is_advance,
         user_id: userId,
+        supplier,
       });
     } catch (error) {
       this.logger.error(
@@ -2760,5 +3064,41 @@ export class PurchaseOrdersService {
     return this.prisma.purchase_orders.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Canonical helper for `purchase_orders.payment_status`. Single writer.
+   *
+   * Sums ALL payment rows attached to the PO (primary `po_modal` + any mirror
+   * from the AP↔OC bridge in Fase 3 + any advance backfill) and compares to
+   * the gross `total_amount`. Use inside an existing `$transaction` so the
+   * SUM sees uncommitted rows in the same tx; passing the `prisma` client as
+   * `tx` is what makes that work.
+   *
+   * Exported via `as any` on the call site to satisfy the schema enum without
+   * importing the Prisma-generated enum (avoids circular enum imports in
+   * downstream services that may consume this helper in Fase 3).
+   */
+  async recalculatePaymentStatus(
+    purchaseOrderId: number,
+    tx: any,
+  ): Promise<'unpaid' | 'partial' | 'paid'> {
+    const EPS = 0.005;
+    const po = await tx.purchase_orders.findUnique({
+      where: { id: purchaseOrderId },
+      select: { total_amount: true },
+    });
+    if (!po) {
+      throw new NotFoundException('Purchase order not found');
+    }
+    const grossTotal = Number(po.total_amount);
+    const agg = await tx.purchase_order_payments.aggregate({
+      where: { purchase_order_id: purchaseOrderId },
+      _sum: { amount: true },
+    });
+    const totalPaid = Number(agg._sum.amount || 0);
+    if (totalPaid >= grossTotal - EPS) return 'paid';
+    if (totalPaid > EPS) return 'partial';
+    return 'unpaid';
   }
 }

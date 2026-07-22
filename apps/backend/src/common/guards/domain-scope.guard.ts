@@ -38,6 +38,7 @@ export class DomainScopeGuard implements CanActivate {
   // Comparamos contra `req.path` u `originalUrl` con normalización.
   private readonly STORE_PATH_MARKER = '/store/';
   private readonly ORG_PATH_MARKER = '/organization/';
+  private readonly CARRIER_PATH_MARKER = '/store/carrier/';
 
   constructor(private readonly reflector: Reflector) {}
 
@@ -112,6 +113,14 @@ export class DomainScopeGuard implements CanActivate {
       throw new ForbiddenException(
         'STORE_ADMIN no puede acceder a endpoints /organization/*',
       );
+    }
+
+    // 6b. STORE_DELIVERY: solo el namespace carrier. Blast-radius mínimo.
+    // Habilita el flujo del transportador en Vendix Repartos sin exponer el
+    // resto del árbol /store/*. El match es por substring: ningún endpoint
+    // admin sensible cuelga de /store/carrier/ (namespace nuevo).
+    if (appType === 'STORE_DELIVERY') {
+      return path.includes(this.CARRIER_PATH_MARKER);
     }
 
     // 7. app_type fuera de ORG_ADMIN/STORE_ADMIN (p. ej. STORE_ECOMMERCE,

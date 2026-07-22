@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { app_type_enum } from '@prisma/client';
 import { DomainConfigService } from '../config/domain.config';
 
 /**
@@ -126,6 +127,31 @@ export class DomainGeneratorHelper {
     };
 
     return suffixes[context];
+  }
+
+  /**
+   * Map a domain context to its corresponding application type (app_type_enum).
+   *
+   * Centralizes the single source of truth for which app a store /
+   * organization / ecommerce subdomain must resolve to, so creation sites do
+   * NOT fall back to the schema default `VENDIX_LANDING` (which must only be
+   * used by Vendix core domains).
+   *
+   * - STORE        → STORE_LANDING
+   * - ORGANIZATION → ORG_LANDING
+   * - ECOMMERCE    → STORE_ECOMMERCE
+   *
+   * @param context - The domain context (org, store, shop)
+   * @returns The app_type_enum value for the given context
+   */
+  appTypeForContext(context: DomainContext): app_type_enum {
+    const appTypes: Record<DomainContext, app_type_enum> = {
+      [DomainContext.ORGANIZATION]: 'ORG_LANDING',
+      [DomainContext.STORE]: 'STORE_LANDING',
+      [DomainContext.ECOMMERCE]: 'STORE_ECOMMERCE',
+    };
+
+    return appTypes[context];
   }
 
   /**

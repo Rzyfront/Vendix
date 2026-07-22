@@ -1,11 +1,9 @@
 export { PosStatsComponent } from './pos-stats.component';
 export { PosProductSelectionComponent } from './pos-product-selection.component';
 export { PosCustomerModalComponent } from './pos-customer-modal.component';
-export { PosPaymentInterfaceComponent } from './pos-payment-interface.component';
 export { PosOrderConfirmationComponent } from './pos-order-confirmation.component';
 export { PosMobileFooterComponent } from './pos-mobile-footer.component';
 export { PosCartModalComponent } from './pos-cart-modal.component';
-export { PosShippingModalComponent } from './pos-shipping-modal/pos-shipping-modal.component';
 export { PosReservationsPanelComponent } from './pos-reservations-panel/pos-reservations-panel.component';
 export { PosQuickBookComponent } from './pos-quick-book/pos-quick-book.component';
 export { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';

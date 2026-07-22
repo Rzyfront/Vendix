@@ -510,6 +510,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/products/categories',
         },
         { label: 'Marcas', icon: 'tag', route: '/admin/products/brands' },
+        {
+          label: 'Precios y Tarifas',
+          icon: 'circle',
+          route: '/admin/price-tiers',
+        },
       ],
     },
     {
@@ -564,7 +569,7 @@ export class StoreAdminLayoutComponent {
         },
         {
           label: 'Reseñas',
-          icon: 'circle',
+          icon: 'star',
           route: '/admin/customers/reviews',
         },
         {
@@ -641,13 +646,13 @@ export class StoreAdminLayoutComponent {
         },
         {
           label: 'Compras',
-          icon: 'circle',
+          icon: 'shopping-cart',
           route: '/admin/analytics/purchases',
           alwaysVisible: true,
         },
         {
           label: 'Reseñas',
-          icon: 'circle',
+          icon: 'star',
           route: '/admin/analytics/reviews',
           alwaysVisible: true,
         },
@@ -822,11 +827,6 @@ export class StoreAdminLayoutComponent {
           label: 'Métodos de Pago',
           icon: 'circle',
           route: '/admin/settings/payments',
-        },
-        {
-          label: 'Precios y Tarifas',
-          icon: 'circle',
-          route: '/admin/price-tiers',
         },
         {
           label: 'Apariencia',

@@ -1,0 +1,52 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [showCloseButton]="!loading()"
+  [closeOnBackdrop]="!loading()"
+  [closeOnEscape]="!loading()"
+  [size]="'sm'"
+  [title]="title()"
+  [subtitle]="'Confirmación requerida · ' + tableName()"
+>
+  <div class="staff-scan-modal">
+    <div class="row">
+      <div class="icon-wrap" aria-hidden="true">
+        <app-icon name="bell-ring" [size]="22"></app-icon>
+      </div>
+      <div class="content">
+        <p class="headline">
+          <strong>{{ tableName() }}</strong>
+        </p>
+        <p class="body">{{ body() }}</p>
+      </div>
+    </div>
+
+    @if (!publicToken()) {
+      <p class="warn">
+        Falta el token público en la notificación — no se puede aprobar.
+        Cierra esta ventana y re-escanea la mesa.
+      </p>
+    }
+  </div>
+
+  <div slot="footer" class="footer-actions">
+    <app-button
+      variant="outline"
+      [disabled]="loading()"
+      (clicked)="onCancel()"
+    >
+      <app-icon slot="icon" name="close" [size]="16"></app-icon>
+      Cerrar
+    </app-button>
+    <app-button
+      variant="primary"
+      [loading]="loading()"
+      [disabled]="!canApprove()"
+      (clicked)="onApprove()"
+    >
+      @if (!loading()) {
+        <app-icon slot="icon" name="check" [size]="16"></app-icon>
+      }
+      Aprobar
+    </app-button>
+  </div>
+</app-modal>

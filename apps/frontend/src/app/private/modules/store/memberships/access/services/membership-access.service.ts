@@ -62,6 +62,7 @@ export class MembershipAccessService {
     if (query.result) params = params.set('result', query.result);
     if (query.date_from) params = params.set('date_from', query.date_from);
     if (query.date_to) params = params.set('date_to', query.date_to);
+    if (query.search) params = params.set('search', query.search);
 
     return this.http
       .get<PaginatedApiResponse<GymAccessLog>>(
@@ -84,6 +85,10 @@ export class MembershipAccessService {
     if (query.is_active != null) {
       params = params.set('is_active', String(query.is_active));
     }
+    if (query.credential_type) {
+      params = params.set('credential_type', query.credential_type);
+    }
+    if (query.search) params = params.set('search', query.search);
 
     return this.http
       .get<PaginatedApiResponse<GymAccessCredential>>(
@@ -126,6 +131,40 @@ export class MembershipAccessService {
     return this.http
       .delete<ApiResponse<{ deactivated: boolean }>>(
         `${this.apiUrl}${this.basePath}/credentials/${id}`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Archive a credential (soft-delete). Unlike `deactivateCredential` — which
+   * only flips `is_active` — this removes it from the listing entirely. The
+   * member can no longer use it to enter.
+   */
+  archiveCredential(id: number): Observable<{ archived: boolean; id: number }> {
+    return this.http
+      .post<ApiResponse<{ archived: boolean; id: number }>>(
+        `${this.apiUrl}${this.basePath}/credentials/${id}/archive`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Re-send the credential-creation email for an existing credential. Mirrors
+   * `POST /store/memberships/access/credentials/:id/resend-email`. Returns the
+   * delivery outcome so the caller can surface a success/warning toast.
+   */
+  resendCredentialEmail(id: number): Observable<{ email_sent: boolean; email_error: string | null }> {
+    return this.http
+      .post<ApiResponse<{ email_sent: boolean; email_error: string | null }>>(
+        `${this.apiUrl}${this.basePath}/credentials/${id}/resend-email`,
+        {},
       )
       .pipe(
         map((res) => res.data),

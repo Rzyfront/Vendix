@@ -20,7 +20,10 @@ export type GymAccessResult =
   | 'denied_frozen'
   | 'denied_quota_exceeded'
   | 'denied_outside_schedule'
-  | 'denied_capacity_full';
+  | 'denied_capacity_full'
+  // Access denied because the member already entered within the configured
+  // re-entry window and `membership.re_entry_mode` is `'block'`.
+  | 'denied_re_entry';
 
 export interface GymAccessCredential {
   id: number;
@@ -70,6 +73,11 @@ export interface CreateCredentialDto {
 export interface CreateCredentialResponse extends GymAccessCredential {
   credential_value: string;
   email_sent: boolean;
+  /**
+   * Backend reason when `email_sent` is false (e.g. missing customer email,
+   * provider failure). Null when the email was sent successfully.
+   */
+  email_error?: string | null;
 }
 
 export interface UpdateCredentialDto {
@@ -82,6 +90,8 @@ export interface CredentialQuery {
   limit?: number;
   customer_id?: number;
   is_active?: boolean;
+  credential_type?: GymCredentialType;
+  search?: string;
 }
 
 export interface GymAccessLog {
@@ -114,6 +124,7 @@ export interface AccessLogQuery {
   result?: GymAccessResult;
   date_from?: string;
   date_to?: string;
+  search?: string;
 }
 
 export interface ValidateAccessDto {
@@ -128,6 +139,17 @@ export interface AccessValidationResult {
   reason: string | null;
   customer_id: number | null;
   membership_id: number | null;
+  /**
+   * True when access is GRANTED but it is a RE-ENTRY within the configured
+   * window (`membership.re_entry_mode: 'warn'`). Entry is allowed, yet the
+   * operator should be alerted the member is coming back in.
+   */
+  warning?: boolean;
+  /**
+   * Minutes elapsed since the member's last granted entry. Present on the
+   * warn-grant path (`warning: true`) and on `denied_re_entry`.
+   */
+  re_entry_minutes?: number;
 }
 
 /**
@@ -173,6 +195,7 @@ export const GYM_ACCESS_RESULT_LABELS: Record<GymAccessResult, string> = {
   denied_quota_exceeded: 'Límite alcanzado',
   denied_outside_schedule: 'Fuera de horario',
   denied_capacity_full: 'Aforo lleno',
+  denied_re_entry: 'Reingreso bloqueado',
 };
 
 /** Result → 7-char hex color (colorMap requires hex, not Tailwind classes). */
@@ -185,4 +208,5 @@ export const GYM_ACCESS_RESULT_COLORS: Record<GymAccessResult, string> = {
   denied_quota_exceeded: '#7c3aed',
   denied_outside_schedule: '#0891b2',
   denied_capacity_full: '#db2777',
+  denied_re_entry: '#e11d48',
 };

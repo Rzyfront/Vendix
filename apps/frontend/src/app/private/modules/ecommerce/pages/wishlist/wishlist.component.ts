@@ -63,7 +63,12 @@ export class WishlistComponent implements OnInit {
   }
 
   addToCart(item: WishlistItem): void {
-    const result = this.cart_service.addToCart(item.product_id, 1, item.product_variant_id || undefined);
+    // Chokepoint (D3): mesa-vs-cart routing lives in `cartService.addProduct`.
+    const result = this.cart_service.addProduct(
+      item.product_id,
+      1,
+      item.product_variant_id || undefined,
+    );
     if (result) {
       result.subscribe();
     }

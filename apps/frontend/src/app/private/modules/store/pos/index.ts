@@ -6,5 +6,4 @@ export * from './services/pos-cart.service';
 export * from './services/pos-payment.service';
 export * from './components/pos-product-selection.component';
 export * from './components/pos-customer-modal.component';
-export * from './components/pos-payment-interface.component';
 export * from './components/pos-order-confirmation.component';

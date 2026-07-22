@@ -13,7 +13,12 @@ import {
 } from '../../../../../../shared/components/index';
 
 // Interfaces
-import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces';
+import {
+  Supplier,
+  CreateSupplierDto,
+  UpdateSupplierDto,
+  SupplierCategory,
+} from '../../interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { CurrencyService } from '../../../../../../services/currency.service';
 
@@ -152,6 +157,46 @@ import { CurrencyService } from '../../../../../../services/currency.service';
             [control]="form.get('notes')"
           ></app-textarea>
 
+          <!-- Plan Despacho Economía — FASE 1 paso 7.
+               Categoría transportista + banco destino del pago inmediato
+               al cerrar la ruta (paso 17). El bloque banco se muestra solo
+               cuando la categoría es 'carrier'. -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 border-t pt-3">
+            <app-selector
+              label="Categoría"
+              formControlName="supplier_category"
+              [options]="supplierCategoryOptions"
+              placeholder="Seleccionar"
+            ></app-selector>
+            <div></div>
+          </div>
+
+          @if (form.get('supplier_category')?.value === 'carrier') {
+            <div class="rounded-lg border border-dashed border-amber-300 bg-amber-50/50 p-3 space-y-3">
+              <p class="text-xs text-amber-800 font-medium">
+                Datos bancarios del transportista (requeridos para liquidar rutas de despacho)
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <app-input
+                  label="Banco"
+                  formControlName="bank_name"
+                  placeholder="Ej: Bancolombia"
+                ></app-input>
+                <app-input
+                  label="Número de Cuenta"
+                  formControlName="bank_account_number"
+                  placeholder="000-000000-00"
+                ></app-input>
+              </div>
+              <app-selector
+                label="Tipo de Cuenta"
+                formControlName="bank_account_type"
+                [options]="bankAccountTypeOptions"
+                placeholder="Seleccionar"
+              ></app-selector>
+            </div>
+          }
+
           <!-- Active Toggle -->
           <app-setting-toggle
             formControlName="is_active"
@@ -206,6 +251,18 @@ export class SupplierFormModalComponent {
     { value: 'JURIDICA', label: 'Persona Jurídica' },
   ];
 
+  // Plan Despacho Economía — FASE 1 paso 7.
+  readonly supplierCategoryOptions: { value: SupplierCategory; label: string }[] = [
+    { value: 'goods', label: 'Bienes / Insumos' },
+    { value: 'carrier', label: 'Transportista' },
+    { value: 'service', label: 'Servicios' },
+  ];
+
+  readonly bankAccountTypeOptions: { value: string; label: string }[] = [
+    { value: 'savings', label: 'Ahorros' },
+    { value: 'checking', label: 'Corriente' },
+  ];
+
   form: FormGroup;
 
   constructor(private fb: FormBuilder) {
@@ -254,6 +311,11 @@ export class SupplierFormModalComponent {
       currency: [this.currencyFormatService.currencyCode() || 'COP'],
       lead_time_days: [null],
       notes: [''],
+      // Plan Despacho Economía — FASE 1 paso 7.
+      supplier_category: ['goods' as SupplierCategory],
+      bank_name: [''],
+      bank_account_number: [''],
+      bank_account_type: [''],
       is_active: [true],
     });
   }
@@ -275,6 +337,10 @@ export class SupplierFormModalComponent {
       currency: supplier.currency || this.currencyFormatService.currencyCode() || 'COP',
       lead_time_days: supplier.lead_time_days || null,
       notes: supplier.notes || '',
+      supplier_category: (supplier.supplier_category ?? 'goods') as SupplierCategory,
+      bank_name: supplier.bank_name || '',
+      bank_account_number: supplier.bank_account_number || '',
+      bank_account_type: supplier.bank_account_type || '',
       is_active: supplier.is_active,
     });
   }

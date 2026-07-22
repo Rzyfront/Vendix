@@ -1,0 +1,864 @@
+@use '../../../../../../shared/components/payment-collector/subwizard' as subwizard;
+
+/* Fase 5·B1 — POS Checkout Shell. Layout stepper + paso activo + resumen.
+   Estilos de Resumen / Cliente / footer extraídos de pos-payment-interface. */
+
+.checkout-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.checkout-stepper {
+  max-width: 560px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── Progress móvil (Pencil): barras horizontales + TOTAL A PAGAR ──────────
+   Reemplaza los círculos numerados de app-steps-line en <768px. Cada paso es
+   una barra de ancho flexible; el total se ancla a la derecha. */
+.checkout-progress {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 2px 0 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.progress-bars {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  min-width: 0;
+}
+
+.progress-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.progress-bar-fill {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--color-border);
+  transition: background 0.2s ease;
+}
+
+.progress-bar-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-item.done .progress-bar-fill,
+.progress-item.active .progress-bar-fill {
+  background: var(--color-primary);
+}
+
+.progress-item.active .progress-bar-label {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.progress-item.done .progress-bar-label {
+  color: var(--color-text-secondary);
+}
+
+.progress-total {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 1px;
+}
+
+.progress-total-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.progress-total-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+/* Conmutación de chrome móvil/desktop. Se maneja con media queries (no con
+   utilities .hidden/.md:* de Tailwind) porque la ViewEncapsulation de Angular
+   eleva la especificidad de los selectores del componente y estos GANAN a las
+   utilities globales — el `display` propio del componente vencería a `.hidden`. */
+@media (min-width: 768px) {
+  .checkout-progress {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .checkout-stepper {
+    display: none;
+  }
+}
+
+/* ── Body grid ─────────────────────────────────────── */
+.checkout-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  min-height: 0;
+}
+
+.checkout-main {
+  min-width: 0;
+}
+
+.step-panel {
+  min-width: 0;
+}
+
+.step-hidden {
+  display: none;
+}
+
+/* Rail de resumen: en móvil va debajo; en desktop columna fija sticky. */
+.summary-rail {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .checkout-grid {
+    grid-template-columns: 360px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .summary-rail {
+    order: -1;
+    position: sticky;
+    top: 0;
+  }
+}
+
+/* ── Header (móvil): botón "Guardar borrador" icon-only, proyectado en
+   [slot=header-end] junto al chip de total. Oculto en desktop vía md:hidden
+   en el template. ─────────────────────────────────────────────────────── */
+.header-draft-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-primary);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.header-draft-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Resumen: botón acordeón (solo móvil vía md:hidden en el template) ── */
+/* Barra "Ver resumen" (móvil, Pencil): fila surface-muted con icono + label +
+   conteo + total inline + chevron. */
+.summary-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 14px;
+  border: none;
+  border-radius: 12px;
+  background: var(--color-muted, var(--color-surface-secondary, #f2f4f7));
+  cursor: pointer;
+}
+
+.summary-toggle-lead {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.summary-toggle-label {
+  flex: 1;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.summary-toggle-total {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+}
+
+.summary-toggle-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.summary-toggle-icon.expanded {
+  transform: rotate(180deg);
+}
+
+/* La barra "Ver resumen" es solo móvil; el título "Resumen" del rail es solo
+   desktop (media queries por la razón de encapsulación explicada arriba). */
+@media (min-width: 768px) {
+  .summary-toggle {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Doble clase para ganar a `.section-header { display:flex }` (misma
+     especificidad base pero definida después en el archivo). */
+  .section-header.summary-rail-header {
+    display: none;
+  }
+}
+
+/* Resumen colapsable: solo aplica bajo 767px — en desktop el rail siempre
+   se muestra expandido, sin importar el valor de summaryExpanded(). */
+@media (max-width: 767px) {
+  .product-list,
+  .summary-details {
+    &:not(.expanded) {
+      display: none;
+    }
+  }
+
+  /* La barra "Ver resumen" va standalone (sin card wrapper), como en Pencil. */
+  .summary-rail .payment-section {
+    border: none;
+    padding: 0;
+    background: transparent;
+  }
+
+  /* El total ya vive en la barra de progreso y en la barra "Ver resumen". */
+  .total-section {
+    display: none;
+  }
+
+  /* Detalle expandido separado del toggle. */
+  .product-list.expanded {
+    margin-top: 12px;
+  }
+}
+
+/* ── Section shell (reutilizado de la interfaz vieja) ─ */
+.payment-section {
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  padding: 14px;
+}
+
+.cliente-section {
+  background: var(--color-surface);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  padding: 14px;
+}
+
+/* Rail de resumen: fondo sutil (muted) para jerarquía. Fallback a surface
+   mantiene el look actual si el tema no define --color-muted. */
+.summary-rail .payment-section {
+  background: var(--color-muted, var(--color-surface));
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.section-indicator {
+  width: 4px;
+  height: 20px;
+  background: var(--color-primary);
+  border-radius: 2px;
+}
+
+.section-icon {
+  color: var(--color-primary);
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* ── Product list / summary ──────────────────────────── */
+.product-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.product-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.product-info {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.product-name {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tier-badge,
+.item-package-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.tier-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.item-package-badge {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.product-qty {
+  color: var(--color-text-muted);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.empty-cart {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-style: italic;
+  padding: 16px 0;
+}
+
+.summary-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.summary-value {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.summary-value.discount {
+  color: var(--color-error);
+}
+
+.total-section {
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.total-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  margin: 0;
+}
+
+.total-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin: 4px 0 0 0;
+}
+
+/* ── Cliente sub-wizard (opciones | stepper vertical) ─────
+   Móvil: una columna, steps-col ABAJO (DOM-last).
+   Desktop (≥768px): cliente-main | steps-col. */
+.cliente-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.cliente-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso).
+   Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
+.cliente-collapsed {
+  @include subwizard.subwizard-collapsed-row;
+}
+
+/* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
+.steps-col {
+  @include subwizard.subwizard-steps-col;
+}
+
+@media (min-width: 768px) {
+  .cliente-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* Simetría vertical entre los 3 pasos (Cliente/Envío/Cobro): el stepper fija
+     una altura mínima común. Solo en desktop; en móvil el stepper se OCULTA
+     (ver abajo) para dar todo el ancho a las opciones. */
+  .steps-col {
+    min-height: 305px;
+  }
+}
+
+/* Móvil: el stepper vertical se oculta — las opciones ocupan el ancho completo
+   y el header horizontal (Cliente/Envío/Cobro) ya orienta al usuario. */
+@media (max-width: 767px) {
+  .steps-col {
+    display: none;
+  }
+}
+
+/* Badge "Obligatoria" del sub-paso Dirección (warning amber; no /opacity). */
+.addr-required-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+/* Reforzado a rojo cuando el operador intenta avanzar con dirección inválida. */
+.addr-required-badge--error {
+  background: rgba(var(--color-error-rgb), 0.14);
+  color: var(--color-error);
+}
+
+/* ── Cliente (sale type) ─────────────────────────────── */
+.sale-type-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sale-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 2px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+  text-align: left;
+}
+
+.sale-type-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.sale-type-btn.selected {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.radio-indicator {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--color-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sale-type-btn.selected .radio-indicator {
+  border-color: var(--color-primary);
+}
+
+.radio-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--color-primary);
+  border-radius: 50%;
+}
+
+.sale-type-btn app-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.sale-type-btn.selected app-icon {
+  color: var(--color-primary);
+}
+
+.sale-type-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sale-type-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.sale-type-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* Disabled sale-type option (e.g. "Venta Anónima" on a delivery sale). Kept
+   visible for context but non-interactive; the [disabled] attr blocks the click
+   and this cancels the hover affordance. */
+.sale-type-btn.is-disabled,
+.sale-type-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sale-type-btn.is-disabled:hover,
+.sale-type-btn:disabled:hover {
+  border-color: var(--color-border);
+}
+
+/* Legend explaining why an option is disabled. */
+.sale-type-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -4px 2px 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+.sale-type-hint app-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--color-text-muted);
+}
+
+/* Variante de error: se muestra al intentar avanzar sin cliente. */
+.sale-type-hint--error {
+  margin-top: 8px;
+  font-weight: 500;
+  color: var(--color-error);
+}
+
+.sale-type-hint--error app-icon {
+  color: var(--color-error);
+}
+
+/* ── Footer ──────────────────────────────────────────── */
+.checkout-footer {
+  display: block;
+  width: 100%;
+}
+
+/* Vista desktop: total + acciones completas (Cancelar / Anterior / Guardar /
+   Siguiente|Confirmar). */
+.footer-desktop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+/* Vista móvil (Pencil): "← Atrás" + CTA verde ancho completo. Oculta en
+   desktop; se muestra <768px (ver media query al final). */
+.footer-mobile {
+  display: none;
+}
+
+/* Footer móvil — botón "Atrás" (texto, sin borde) + CTA verde full-width. */
+.btn-back-mobile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 14px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-back-mobile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-cta-mobile {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 54px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 12px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+  transition:
+    filter 0.2s,
+    transform 0.1s;
+}
+
+.btn-cta-mobile:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.btn-cta-mobile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.footer-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.footer-total-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.footer-total-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.footer-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.btn-prev {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-prev:hover:not(:disabled) {
+  background: rgba(var(--color-primary-rgb), 0.05);
+}
+
+.btn-prev:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Cancelar: extremo IZQUIERDO del footer (margin-right:auto empuja el resto a
+   la derecha) + outline danger claro. */
+.btn-cancel {
+  margin-right: auto;
+  padding: 12px 16px;
+  border: 1.5px solid var(--color-error);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-error);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: rgba(var(--color-error-rgb), 0.08);
+  border-color: var(--color-error);
+}
+
+.btn-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-draft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-primary);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-draft:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 24px;
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+}
+
+.btn-confirm:hover:not(:disabled) {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.btn-confirm:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Desktop: el rail ya muestra el total, ocultamos el total del footer. */
+@media (min-width: 1024px) {
+  .footer-left {
+    display: none;
+  }
+}
+
+/* Móvil (Pencil): se oculta la vista desktop completa y se muestra la barra de
+   acción "Atrás + CTA verde ancho completo". El total ya vive en la barra de
+   progreso; "Guardar borrador" se movió al header (icon-only). */
+@media (max-width: 767px) {
+  .footer-desktop {
+    display: none;
+  }
+
+  .footer-mobile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+}

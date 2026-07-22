@@ -30,23 +30,41 @@ import {
 } from './dto';
 
 /**
- * Live SSE event pushed on EVERY access decision (granted or denied) so an
- * ambient-access screen can react in real time. Reuses the per-store hub
- * (`NotificationsSseService`); it does not conform to the bell's
- * `SseNotificationPayload` shape (this is a domain event), so it is cast at the
- * push site — the hub only `JSON.stringify`s the payload.
+ * Live SSE events pushed to the per-store hub. Reuses
+ * (`NotificationsSseService`); they do not conform to the bell's
+ * `SseNotificationPayload` shape (these are domain events), so they are cast at
+ * the push site — the hub only `JSON.stringify`s the payload.
+ *
+ *   - `membership-access`: pushed on EVERY access decision (granted or denied).
+ *   - `enrollment`: fanned out when the biometric device (or stub integration)
+ *     reads a raw fingerprint via `POST /store/memberships/access/enrollment-ping`.
+ *     No validation against credentials — this is live enrollment only, the
+ *     credential-creation modal captures the `external_ref` in real time.
  */
-export interface MembershipAccessSseEvent {
-  type: 'membership-access';
-  granted: boolean;
-  result: membership_access_result_enum;
-  customer_name: string | null;
-  status: membership_status_enum | null;
-  days_remaining: number | null;
-  period_end: string | null;
-  membership_id: number | null;
-  at: string;
-}
+export type MembershipAccessSseEvent =
+  | {
+      type: 'membership-access';
+      granted: boolean;
+      result: membership_access_result_enum;
+      customer_name: string | null;
+      status: membership_status_enum | null;
+      days_remaining: number | null;
+      period_end: string | null;
+      membership_id: number | null;
+      at: string;
+      // Re-entry detection (optional): `warning` is true when access is GRANTED
+      // but a re-entry was detected (`re_entry_mode = 'warn'`). `re_entry_minutes`
+      // is the minutes since the last `granted` access — present on a warn-grant
+      // AND on a `denied_re_entry`.
+      warning?: boolean;
+      re_entry_minutes?: number;
+    }
+  | {
+      type: 'enrollment';
+      external_ref: string;
+      device_id: string | null;
+      at: string;
+    };
 
 export interface AccessValidationResult {
   granted: boolean;
@@ -54,6 +72,17 @@ export interface AccessValidationResult {
   reason: string | null;
   customer_id: number | null;
   membership_id: number | null;
+  // Re-entry detection (optional). `warning` = granted despite a re-entry within
+  // the window (`re_entry_mode = 'warn'`). `re_entry_minutes` = minutes since the
+  // last `granted` access; present on a warn-grant AND on a `denied_re_entry`.
+  warning?: boolean;
+  re_entry_minutes?: number;
+}
+
+/** Re-entry policy resolved from `store_settings.membership`. */
+export interface ReEntryConfig {
+  mode: 'off' | 'warn' | 'block';
+  windowHours: number;
 }
 
 /**
@@ -342,6 +371,81 @@ export class MembershipAccessService {
       }
     }
 
+    // 4.6 Re-entry detection — configurable per gym. Runs AFTER the membership
+    //     is confirmed active and BEFORE the grant side-effects (quota consume +
+    //     aforo increment). Looks for the member's most recent `granted` access
+    //     within the configured window:
+    //       - `block` → deny (`denied_re_entry`), no aforo/quota mutation.
+    //       - `warn`  → still grant, flagged (`warning: true` + `re_entry_minutes`),
+    //                   and SKIP the aforo/quota side-effects (same session — the
+    //                   member is presumed already counted, so re-entry must not
+    //                   double count nor re-consume the period quota). It also
+    //                   bypasses the capacity gate for the same reason.
+    //       - `off` / no prior access → normal flow continues untouched.
+    const reEntry = await this.getReEntryConfig(storeId);
+    if (reEntry.mode !== 'off' && customerId != null) {
+      const windowStart = new Date(
+        now.getTime() - reEntry.windowHours * 60 * 60 * 1000,
+      );
+      let lastGranted: { access_at: Date } | null = null;
+      try {
+        lastGranted = await this.accessLogs.findFirst({
+          where: {
+            store_id: storeId,
+            customer_id: customerId,
+            result: membership_access_result_enum.granted,
+            access_at: { gte: windowStart },
+          },
+          orderBy: { access_at: 'desc' },
+          select: { access_at: true },
+        });
+      } catch (err) {
+        // Fail-open: a log-read failure must never break the access decision.
+        this.logger.warn(
+          `membership access re-entry lookup failed store=${storeId} customer=${customerId}: ${(err as Error).message}`,
+        );
+        lastGranted = null;
+      }
+
+      if (lastGranted) {
+        const reEntryMinutes = Math.floor(
+          (now.getTime() - lastGranted.access_at.getTime()) / 60000,
+        );
+
+        if (reEntry.mode === 'block') {
+          return this.logAndReturn(storeId, {
+            result: membership_access_result_enum.denied_re_entry,
+            reason: `Reingreso hace ${reEntryMinutes} min`,
+            customer_id: customerId,
+            membership_id: active.id,
+            credential_id: credential.id,
+            device_id: dto.device_id,
+            customer_name: customerName,
+            status: active.status,
+            period_end: active.period_end,
+            days_remaining: this.daysRemaining(active.period_end, timezone),
+            re_entry_minutes: reEntryMinutes,
+          });
+        }
+
+        // warn → grant but flag it and skip the grant side-effects.
+        return this.logAndReturn(storeId, {
+          result: membership_access_result_enum.granted,
+          reason: 're_entry',
+          customer_id: customerId,
+          membership_id: active.id,
+          credential_id: credential.id,
+          device_id: dto.device_id,
+          customer_name: customerName,
+          status: active.status,
+          period_end: active.period_end,
+          days_remaining: this.daysRemaining(active.period_end, timezone),
+          warning: true,
+          re_entry_minutes: reEntryMinutes,
+        });
+      }
+    }
+
     // 4.5 Capacity (aforo) gate — read the store capacity config ONCE and, when
     //     control is enabled with a positive cap, DENY before granting if the
     //     area is already full (no quota consume, no increment). A stale
@@ -498,6 +602,9 @@ export class MembershipAccessService {
       status?: membership_status_enum | null;
       period_end?: Date | null;
       days_remaining?: number | null;
+      // Re-entry detection (optional).
+      warning?: boolean;
+      re_entry_minutes?: number;
     },
   ): Promise<AccessValidationResult> {
     try {
@@ -535,6 +642,10 @@ export class MembershipAccessService {
         period_end: entry.period_end ? entry.period_end.toISOString() : null,
         membership_id: entry.membership_id,
         at: new Date().toISOString(),
+        ...(entry.warning !== undefined && { warning: entry.warning }),
+        ...(entry.re_entry_minutes !== undefined && {
+          re_entry_minutes: entry.re_entry_minutes,
+        }),
       };
       this.sseService.push(storeId, event as unknown as SseNotificationPayload);
     } catch (err) {
@@ -549,6 +660,10 @@ export class MembershipAccessService {
       reason: entry.reason,
       customer_id: entry.customer_id,
       membership_id: entry.membership_id,
+      ...(entry.warning !== undefined && { warning: entry.warning }),
+      ...(entry.re_entry_minutes !== undefined && {
+        re_entry_minutes: entry.re_entry_minutes,
+      }),
     };
   }
 
@@ -576,12 +691,17 @@ export class MembershipAccessService {
           ? randomBytes(16).toString('hex') // 32 chars
           : randomInt(0, 1_000_000).toString().padStart(6, '0'); // 6 digits
 
+      // Check against ALL rows (not just active): the DB constraint
+      // `membership_access_cred_uq` is on (store_id, credential_type,
+      // credential_value) regardless of `is_active`/`deleted_at`, so an
+      // inactive/archived credential still occupies the value. Filtering by
+      // `is_active` here would let the loop return a value that then collides
+      // with an archived row on insert (P2002).
       const existing = await this.credentials.findFirst({
         where: {
           store_id: storeId,
           credential_type: type,
           credential_value: value,
-          is_active: true,
         },
         select: { id: true },
       });
@@ -600,19 +720,32 @@ export class MembershipAccessService {
    * The biometric (`external_ref`) email NEVER includes the device reference —
    * the template is an enrollment notice only, in compliance with Ley 1581.
    */
+  /**
+   * Detects placeholder emails used when a member is created without a real
+   * email (empty/null, or the `@noemail.local` / `@placeholder.vendix.com`
+   * placeholders emitted by the bulk-import scanner). Operators must update
+   * the customer's ficha with a real email before a credential can be created
+   * or resent.
+   */
+  private isPlaceholderEmail(email: string | null | undefined): boolean {
+    const e = (email ?? '').trim().toLowerCase();
+    if (!e) return true; // empty counts as missing
+    return e.endsWith('@noemail.local') || e.endsWith('@placeholder.vendix.com');
+  }
+
   private async sendCredentialEmail(args: {
     storeId: number;
     customer: { id: number; first_name: string | null; last_name: string | null; email: string | null };
     credentialType: 'qr' | 'pin' | 'external_ref';
     credentialValue: string;
-  }): Promise<boolean> {
+  }): Promise<{ sent: boolean; error?: string }> {
     const { storeId, customer, credentialType, credentialValue } = args;
     const to = customer.email?.trim();
     if (!to) {
       this.logger.warn(
         `membership-access: no email for customer_id=${customer.id} (store=${storeId}); skipping credential email`,
       );
-      return false;
+      return { sent: false, error: 'El socio no tiene email' };
     }
 
     const { storeName, organizationName } =
@@ -651,7 +784,7 @@ export class MembershipAccessService {
           ],
           text,
         );
-        return result.success;
+        return { sent: result.success, error: result.success ? undefined : result.error };
       }
 
       if (credentialType === 'pin') {
@@ -662,7 +795,7 @@ export class MembershipAccessService {
             pin: credentialValue,
           });
         const result = await this.emailService.sendEmail(to, subject, html, text);
-        return result.success;
+        return { sent: result.success, error: result.success ? undefined : result.error };
       }
 
       // external_ref (fingerprint) — enrollment notice ONLY. No value leaked.
@@ -672,12 +805,13 @@ export class MembershipAccessService {
           storeName: storeLabel,
         });
       const result = await this.emailService.sendEmail(to, subject, html, text);
-      return result.success;
+      return { sent: result.success, error: result.success ? undefined : result.error };
     } catch (err) {
+      const message = (err as Error).message;
       this.logger.warn(
-        `membership-access: credential email failed (store=${storeId}, customer=${customer.id}, type=${credentialType}): ${(err as Error).message}`,
+        `membership-access: credential email failed (store=${storeId}, customer=${customer.id}, type=${credentialType}): ${message}`,
       );
-      return false;
+      return { sent: false, error: message };
     }
   }
 
@@ -717,6 +851,21 @@ export class MembershipAccessService {
       throw new VendixHttpException(
         ErrorCodes.SYS_NOT_FOUND_001,
         'El cliente (socio) no existe',
+      );
+    }
+
+    // 1b. Reject placeholder/missing emails BEFORE creating the credential.
+    //     Members can be created with `email = null` (CustomersService.create
+    //     allows optional email) or with a `@noemail.local` placeholder from
+    //     the bulk-import scanner. Without this guard the credential is
+    //     created but the email silently never arrives, leaving the operator
+    //     with no way to know why.
+    if (this.isPlaceholderEmail(customer.email)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        customer.email
+          ? 'El socio tiene un correo de marcador (sin email real). Actualiza su ficha de cliente con un correo válido antes de crear la credencial.'
+          : 'El socio no tiene correo electrónico. Agrégalo en su ficha de cliente antes de crear la credencial.',
       );
     }
 
@@ -775,6 +924,38 @@ export class MembershipAccessService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
+        // Disambiguate WHICH unique constraint was violated so the operator
+        // gets a precise message. Prisma's `meta.target` is the constraint/
+        // index name (string) or the column list (array) depending on driver.
+        const target = (error.meta as { target?: unknown } | undefined)?.target;
+        const targetStr = Array.isArray(target)
+          ? target.join(',')
+          : String(target ?? '');
+
+        // Partial active-uniqueness index (store_id, customer_id, type) WHERE
+        // is_active = true → same member already has an active credential of
+        // this type.
+        if (targetStr.includes('membership_access_cred_active_uq')) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Ya existe una credencial activa de este tipo para este socio',
+          );
+        }
+
+        // Global value-uniqueness index (store_id, credential_type,
+        // credential_value) → the generated/supplied value already exists in
+        // this store (active OR archived).
+        if (
+          targetStr.includes('membership_access_cred_uq') ||
+          targetStr.includes('credential_value')
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Ya existe una credencial con ese valor en esta tienda',
+          );
+        }
+
+        // Unknown target → keep the previous (safe) message.
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
           'Ya existe una credencial activa de este tipo para este socio',
@@ -787,31 +968,152 @@ export class MembershipAccessService {
     //    fails, the operator still sees the returned `email_sent: false`
     //    and can re-share the value manually (it is the only time it is
     //    exposed in clear text).
-    const emailSent = await this.sendCredentialEmail({
+    const emailResult = await this.sendCredentialEmail({
       storeId,
       customer,
       credentialType: dto.credential_type as 'qr' | 'pin' | 'external_ref',
       credentialValue,
     });
 
+    // Privacy: mask the raw `credential_value` for `external_ref` (biometric
+    // device fingerprint ref) so it NEVER leaks in the HTTP response. The DB
+    // row keeps the value untouched. For `qr` and `pin` the raw value is
+    // intentionally returned ONE-SHOT so the operator can confirm/display
+    // it on the same screen (per DTO Anotación 2b). The masking policy
+    // mirrors `maskCredentialValue()` used by `listCredentials`.
+    let responseCredentialValue: string | null = created.credential_value;
+    if (dto.credential_type === membership_credential_type_enum.external_ref) {
+      responseCredentialValue = this.maskCredentialValue(
+        dto.credential_type,
+        created.credential_value,
+      );
+    }
+
     return {
       ...created,
+      credential_value: responseCredentialValue,
       // The raw value is one-shot — the list endpoint masks it. Frontend
       // uses it to confirm/display the generated QR/PIN or the fingerprint
       // reference on the same screen.
-      email_sent: emailSent,
+      email_sent: emailResult.sent,
+      email_error: emailResult.error ?? null,
     };
+  }
+
+  /**
+   * Re-send the credential email for an existing credential row. Used by the
+   * operator when the original create email never arrived (provider outage,
+   * transient failure) or when the member's email was fixed after the
+   * credential was created. Reuses `sendCredentialEmail`, which for
+   * `external_ref` (biometric) sends the enrollment notice ONLY — the device
+   * reference is never leaked.
+   *
+   * Permission: same `store:membership_access:create` as the create endpoint
+   * (a re-send is a re-issuance of the credential notification).
+   */
+  async resendCredentialEmail(credentialId: number) {
+    const storeId = this.requireStoreId();
+
+    const credential = await this.credentials.findFirst({
+      where: { id: credentialId, store_id: storeId },
+      select: {
+        id: true,
+        credential_type: true,
+        credential_value: true,
+        customer_id: true,
+      },
+    });
+    if (!credential) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'La credencial no existe',
+      );
+    }
+
+    const customer = await this.prisma.users.findUnique({
+      where: { id: credential.customer_id },
+      select: { id: true, first_name: true, last_name: true, email: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'El cliente (socio) no existe',
+      );
+    }
+    if (this.isPlaceholderEmail(customer.email)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        customer.email
+          ? 'El socio tiene un correo de marcador (sin email real). Actualiza su ficha de cliente con un correo válido.'
+          : 'El socio no tiene correo electrónico. Agrégalo en su ficha de cliente.',
+      );
+    }
+
+    const result = await this.sendCredentialEmail({
+      storeId,
+      customer,
+      credentialType: credential.credential_type as 'qr' | 'pin' | 'external_ref',
+      credentialValue: credential.credential_value,
+    });
+    return { email_sent: result.sent, email_error: result.error ?? null };
   }
 
   async listCredentials(query: CredentialQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 10, customer_id, is_active } = query ?? {};
+    const {
+      page = 1,
+      limit = 10,
+      customer_id,
+      is_active,
+      search,
+      credential_type,
+    } = query ?? {};
     const skip = (page - 1) * limit;
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict credentials to that set.
+    // Mirrors `memberships.service.ts::findAll` (lines 200-233).
+    const term = (search ?? '').trim();
+    let customerFilter:
+      | Prisma.membership_access_credentialsWhereInput['customer_id']
+      | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store credentials list.
+      const customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      customerFilter = customer_id;
+    }
 
     const where: Prisma.membership_access_credentialsWhereInput = {
       store_id: storeId,
-      ...(customer_id !== undefined && { customer_id }),
+      deleted_at: null,
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(is_active !== undefined && { is_active }),
+      ...(credential_type !== undefined && { credential_type }),
     };
 
     const [rows, total] = await Promise.all([
@@ -910,17 +1212,97 @@ export class MembershipAccessService {
     return { deactivated: true };
   }
 
+  /**
+   * Soft-archive a credential (HIDE from listings + free the partial unique
+   * slot for re-use). Atomic single UPDATE that flips BOTH:
+   *   - `deleted_at = now()`  → excluded from `listCredentials` (filters
+   *                              `deleted_at IS NULL`) and excluded from any
+   *                              future "not archived" partial index.
+   *   - `is_active = false`   → excluded from the partial unique index
+   *                              `membership_access_cred_active_uq`
+   *                              (WHERE is_active = true), freeing the slot
+   *                              so the operator can re-issue a credential with
+   *                              the same `(store, customer, type)` tuple
+   *                              without manual DB cleanup.
+   *
+   * Both changes ride the same `updateMany` so they commit atomically — there
+   * is no observable state where the credential is half-archived.
+   *
+   * The `deleted_at: null` predicate in the where clause makes the operation
+   * IDEMPOTENT: archiving an already-archived credential returns NOT_FOUND
+   * instead of silently re-stamping `deleted_at`.
+   */
+  async archiveCredential(id: number) {
+    const storeId = this.requireStoreId();
+    const result = await this.credentials.updateMany({
+      where: { id, store_id: storeId, deleted_at: null },
+      data: { deleted_at: new Date(), is_active: false },
+    });
+    if (result.count === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Credencial no encontrada o ya archivada',
+      );
+    }
+    return { archived: true, id };
+  }
+
   // ------------------------------------------------------------------ Logs
 
   async listLogs(query: AccessLogQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 20, customer_id, result, date_from, date_to } =
-      query ?? {};
+    const {
+      page = 1,
+      limit = 20,
+      customer_id,
+      result,
+      date_from,
+      date_to,
+      search,
+    } = query ?? {};
     const skip = (page - 1) * limit;
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict logs to that set.
+    // Mirrors `memberships.service.ts::findAll` (lines 200-233).
+    const term = (search ?? '').trim();
+    let customerFilter:
+      | Prisma.membership_access_logsWhereInput['customer_id']
+      | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store logs list.
+      const customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      customerFilter = customer_id;
+    }
 
     const where: Prisma.membership_access_logsWhereInput = {
       store_id: storeId,
-      ...(customer_id !== undefined && { customer_id }),
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(result !== undefined && { result }),
       ...((date_from || date_to) && {
         access_at: {
@@ -1058,6 +1440,34 @@ export class MembershipAccessService {
     }
   }
 
+  /**
+   * Read the store's re-entry policy from `store_settings.membership`. Mirrors
+   * `getCapacityConfig`: `withoutScope()` + explicit `store_id`, never throws.
+   * Defaults are `mode = 'warn'` and `windowHours = 2` (per the contract), also
+   * applied when the settings read fails or the stored values are invalid.
+   */
+  private async getReEntryConfig(storeId: number): Promise<ReEntryConfig> {
+    try {
+      const row = await this.prisma
+        .withoutScope()
+        .store_settings.findFirst({
+          where: { store_id: storeId },
+          select: { settings: true },
+        });
+      const settings = mergeStoreSettingsWithDefaults(row?.settings);
+      const m = settings.membership;
+      const rawMode = m?.re_entry_mode;
+      const mode: 'off' | 'warn' | 'block' =
+        rawMode === 'off' || rawMode === 'block' ? rawMode : 'warn';
+      const rawWindow = Number(m?.re_entry_window_hours);
+      const windowHours =
+        Number.isFinite(rawWindow) && rawWindow > 0 ? rawWindow : 2;
+      return { mode, windowHours };
+    } catch {
+      return { mode: 'warn', windowHours: 2 };
+    }
+  }
+
   /** Local calendar day 'YYYY-MM-DD' in the store timezone. */
   private localDay(timezone: string): string {
     return new Intl.DateTimeFormat('en-CA', {
@@ -1187,6 +1597,34 @@ export class MembershipAccessService {
       select: { current_count: true, updated_at: true },
     });
     this.pushOccupancy(storeId, row, cfg);
+  }
+
+  /**
+   * Fan out an `enrollment` SSE event so a listening credential-creation modal
+   * can capture a live fingerprint `external_ref` from the biometric device.
+   *
+   * Enrollment is intentionally NOT validated against any credential — it is a
+   * raw read, the user decides later which credential receives it. Never
+   * throws: a broken hub must not block the device's enrollment pings.
+   */
+  async publishEnrollment(
+    storeId: number,
+    externalRef: string,
+    deviceId?: string,
+  ): Promise<void> {
+    try {
+      const event: MembershipAccessSseEvent = {
+        type: 'enrollment',
+        external_ref: externalRef,
+        device_id: deviceId ?? null,
+        at: new Date().toISOString(),
+      };
+      this.sseService.push(storeId, event as unknown as SseNotificationPayload);
+    } catch (err) {
+      this.logger.warn(
+        `membership-access enrollment SSE push failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /** Current occupancy snapshot for the store. */

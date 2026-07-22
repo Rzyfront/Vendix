@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { notification_type_enum } from '@prisma/client';
+import { notification_type_enum, Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -130,13 +130,61 @@ export class NotificationsService {
     }
   }
 
-  async findAll(query_dto: NotificationQueryDto) {
+  /**
+   * Step 3 (QR-mesa) — bell filter. The bell shows every notification
+   * that is EITHER a store-wide broadcast (no `data.target_user_id` set
+   * or the `data` column itself is SQL NULL) OR directed at the caller
+   * (`data.target_user_id === user_id`). Notifications targeted at
+   * another user are filtered out so a mesero who is NOT assigned to a
+   * table does not see the call-waiter bell.
+   *
+   * Filtering is done in SQL via the Prisma JSON-path `equals` operator
+   * (`data->>'target_user_id' IS NULL` for the broadcast branch and
+   * `data->>'target_user_id' = $userId` for the targeted branch) — no
+   * in-memory filtering, no pagination regression.
+   */
+  /**
+   * Shared bell target filter (anti-drift). Extracted so `findAll` and
+   * `getUnreadCount` share the SAME `OR` and can never diverge in a single
+   * site — this is what caused BUG-4, where one branch used a bare
+   * `{ data: null }`.
+   *
+   * The bell shows every notification that is EITHER a store-wide broadcast
+   * (the `data` column is SQL NULL, OR its `target_user_id` path is
+   * absent/JSON-null) OR directed at the caller (`data.target_user_id ===
+   * user_id`). The SQL-NULL branch MUST use `Prisma.DbNull`: Prisma 7 rejects
+   * a bare `{ data: null }` on a `Json?` column (throws
+   * PrismaClientValidationError → 500 on every layout load).
+   */
+  private buildBellTargetFilter(user_id: number) {
+    return {
+      OR: [
+        // Broadcast — `data` column is SQL NULL (createAndBroadcast passed
+        // no payload).
+        { data: { equals: Prisma.DbNull } },
+        // Broadcast — path `target_user_id` is absent OR explicitly JSON null.
+        { data: { path: ['target_user_id'], equals: null } },
+        // Targeted at the calling user.
+        { data: { path: ['target_user_id'], equals: user_id } },
+      ],
+    };
+  }
+
+  async findAll(user_id: number, query_dto: NotificationQueryDto) {
     const { page = 1, limit = 20, type, is_read } = query_dto;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
-    if (type) where.type = type;
-    if (is_read !== undefined) where.is_read = is_read;
+    const target_filter = this.buildBellTargetFilter(user_id);
+
+    const where: any = {
+      AND: [
+        {
+          ...(type && { type }),
+          ...(is_read !== undefined && { is_read }),
+        },
+        target_filter,
+      ],
+    };
 
     const [data, total] = await Promise.all([
       this.notificationsModel.findMany({
@@ -149,7 +197,10 @@ export class NotificationsService {
     ]);
 
     const unread_count = await this.notificationsModel.count({
-      where: { is_read: false },
+      where: {
+        is_read: false,
+        AND: [target_filter],
+      },
     });
 
     return {
@@ -164,9 +215,17 @@ export class NotificationsService {
     };
   }
 
-  async getUnreadCount() {
+  /**
+   * Step 3 (QR-mesa) — unread count applies the same per-user bell
+   * filter as `findAll` so the bell badge doesn't inflate with
+   * notifications targeted at other users.
+   */
+  async getUnreadCount(user_id: number) {
     const count = await this.notificationsModel.count({
-      where: { is_read: false },
+      where: {
+        is_read: false,
+        AND: [this.buildBellTargetFilter(user_id)],
+      },
     });
     return { count };
   }

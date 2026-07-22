@@ -120,6 +120,9 @@ export class AccountingEventsListener {
         accounting_entity_id: event.accounting_entity_id,
         subtotal: event.subtotal_amount,
         tax_amount: event.tax_amount,
+        // Plan Despacho Economía — FASE 4 paso 14. Propagar el monto del flete
+        // para que el split producto/flete se contabilice correctamente.
+        shipping_amount: (event as any).shipping_amount ?? 0,
         tax_breakdown: event.tax_breakdown,
         withholding_breakdown: event.withholding_breakdown,
         total: event.total_amount,
@@ -250,6 +253,12 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4. Monto del flete de la venta a crédito.
+     * En crédito, `subtotal_amount` YA excluye el flete y `total_amount` lo
+     * incluye; sin esta línea CR el asiento no cuadra (DR CxC = grand_total).
+     */
+    shipping_amount?: number;
     total_amount: number;
     user_id?: number;
   }) {
@@ -268,6 +277,7 @@ export class AccountingEventsListener {
           event.discount_amount != null
             ? Number(event.discount_amount)
             : undefined,
+        shipping_amount: Number(event.shipping_amount ?? 0),
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
       });
@@ -689,27 +699,80 @@ export class AccountingEventsListener {
   @OnEvent('purchase_order.payment')
   async handlePurchaseOrderPayment(event: {
     purchase_order_id: number;
+    payment_id?: number;
     organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
     amount: number;
     payment_method: string;
+    /** Resuelto por el emisor: la OC no tenía recepciones al pagar (anticipo). */
+    is_advance?: boolean;
     user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
-      if (!(await this.isFlowEnabled((event as any).store_id, 'purchases')))
-        return;
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
       await this.auto_entry_service.onPurchaseOrderPayment({
         purchase_order_id: event.purchase_order_id,
+        payment_id: event.payment_id,
         organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
         amount: Number(event.amount),
         payment_method: event.payment_method,
+        is_advance: event.is_advance,
         user_id: event.user_id,
+        supplier: event.supplier,
       });
       this.logger.log(
-        `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}`,
+        `Auto-entry created for purchase_order.payment PO #${event.purchase_order_id}` +
+          (event.is_advance ? ' (anticipo)' : ''),
       );
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.payment PO #${event.purchase_order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * purchase_order.advance_reclass: reclasifica el anticipo a proveedor contra
+   * la CxP al recibir la OC → DR 2205 / CR 133005. El emisor
+   * (purchase-orders.service.ts::receive) ya calculó `amount` como
+   * min(monto_recibido_de_esta_recepción, saldo_anticipo). Gateado por el mismo
+   * subflow `purchases`. Fallos contables se loguean y nunca revierten la
+   * recepción ya completada.
+   */
+  @OnEvent('purchase_order.advance_reclass')
+  async handlePurchaseOrderAdvanceReclass(event: {
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    amount: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
+      await this.auto_entry_service.onPurchaseOrderAdvanceReclass({
+        purchase_order_id: event.purchase_order_id,
+        reception_id: event.reception_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        amount: Number(event.amount),
+        user_id: event.user_id,
+        supplier: event.supplier,
+      });
+      this.logger.log(
+        `Auto-entry created for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for purchase_order.advance_reclass PO #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
         error.stack,
       );
     }
@@ -1155,6 +1218,126 @@ export class AccountingEventsListener {
     }
   }
 
+  // ===== DISPATCH NOTES (remisiones bidireccionales — Fase 4) =====
+
+  /**
+   * COGS de una remisión de salida STANDALONE (sin orden ni sales_order). El
+   * stock listener sólo emite este evento cuando la remisión no está ligada a
+   * una orden/SO (esas reconocen COGS vía order.completed) — aquí no hay que
+   * re-gatear el anti-doble-COGS. total_cost es el costo REAL devuelto por
+   * commitDispatchDelivery.
+   */
+  @OnEvent('dispatch_note.accounting.cogs')
+  async handleDispatchNoteCogs(event: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      await this.auto_entry_service.onDispatchNoteDelivered({
+        dispatch_note_id: event.dispatch_note_id,
+        dispatch_number: event.dispatch_number,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for dispatch_note.delivered #${event.dispatch_note_id} (COGS)`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for dispatch_note.delivered #${event.dispatch_note_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * Entrada de inventario de una remisión de entrada: purchase_receipt
+   * (DR inventario / CR proveedores) o customer_return (DR inventario /
+   * CR reversa COGS). transfer_in NO emite este evento (diferido).
+   */
+  @OnEvent('dispatch_note.accounting.received')
+  async handleDispatchNoteReceived(event: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    subtype: string;
+    total_cost: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      await this.auto_entry_service.onDispatchNoteReceived({
+        dispatch_note_id: event.dispatch_note_id,
+        dispatch_number: event.dispatch_number,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        subtype: event.subtype,
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+        supplier: event.supplier,
+      });
+      this.logger.log(
+        `Auto-entry created for dispatch_note.received #${event.dispatch_note_id} (${event.subtype})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for dispatch_note.received #${event.dispatch_note_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * Reversa contable al anular una remisión ya materializada. Sólo llega para
+   * los casos cuyo asiento original posteó este módulo (customer_delivery
+   * standalone, purchase_receipt, customer_return). Postea el asiento espejo
+   * (débito↔crédito invertidos) con source_type='dispatch_note.void'.
+   */
+  @OnEvent('dispatch_note.accounting.void')
+  async handleDispatchNoteVoid(event: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    direction: string;
+    subtype: string;
+    total_cost: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      await this.auto_entry_service.onDispatchNoteVoided({
+        dispatch_note_id: event.dispatch_note_id,
+        dispatch_number: event.dispatch_number,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        direction: event.direction,
+        subtype: event.subtype,
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+        supplier: event.supplier,
+      });
+      this.logger.log(
+        `Auto-entry created for dispatch_note.void #${event.dispatch_note_id} (${event.direction}/${event.subtype})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for dispatch_note.void #${event.dispatch_note_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== CASH REGISTER =====
 
   @OnEvent('cash_register.opened')
@@ -1333,6 +1516,7 @@ export class AccountingEventsListener {
   @OnEvent('ap.payment_registered')
   async handleApPaymentRegistered(event: {
     ap_id: number;
+    ap_payment_id?: number;
     organization_id: number;
     store_id: number;
     supplier_id: number;
@@ -1345,6 +1529,7 @@ export class AccountingEventsListener {
       if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
       await this.auto_entry_service.onApPaymentRegistered({
         ap_id: event.ap_id,
+        ap_payment_id: event.ap_payment_id ?? event.ap_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
         amount: Number(event.amount),

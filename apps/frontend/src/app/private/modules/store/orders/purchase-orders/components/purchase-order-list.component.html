@@ -53,7 +53,7 @@
     <div class="px-2 pb-2 pt-3 md:p-4">
       <app-responsive-data-view [data]="orders()" [columns]="table_columns" [actions]="table_actions"
         [cardConfig]="cardConfig" [loading]="loading()" [sortable]="true"
-        (rowClick)="viewOrder.emit($event)"></app-responsive-data-view>
+        (rowClick)="viewOrderDetails($event)"></app-responsive-data-view>
 
       <!-- Pagination -->
       <app-pagination

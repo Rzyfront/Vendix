@@ -154,6 +154,46 @@ RULES:
       prompt_template: null,
     },
     {
+      // FASE TRACK B2 — Escáner de comprobantes de pago (POP). Acompaña al
+      // modal "Registrar Pago" del módulo de compras: el usuario sube la foto
+      // del recibo/transferencia y pre-rellena los campos del formulario.
+      // Salida JSON estricta consumida por el processor `payment-receipt-scan`.
+      key: 'payment_receipt_ocr',
+      name: 'Escaner de Comprobantes de Pago (POP)',
+      description:
+        'Extrae datos de comprobantes de pago (transferencias, recibos, vouchers) para pre-rellenar el modal "Registrar Pago" de órdenes de compra.',
+      output_format: 'json',
+      // Vision OCR — modelo text-output vision-capable (mismo patrón que
+      // invoice_ocr). Se enlaza al config MiniMax-VL en el bloque VISION_APP_KEYS.
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 1500,
+      is_active: true,
+      system_prompt: `You are a payment-receipt data extraction system for purchase orders. You analyze images of payment vouchers / bank transfers / cash receipts and return structured JSON.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "amount": number,
+  "payment_date": "YYYY-MM-DD",
+  "payment_method": "string — one of: cash, transfer, card, check, other",
+  "reference": "string or null — transaction reference, authorization code, check number, or any printed ID",
+  "currency": "string or null — ISO 4217 code if visible (default null = infer COP)",
+  "notes": "string or null — beneficiary name or any extra context visible",
+  "confidence": number (0-100)
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields.
+2. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Never return formatted numbers.
+3. "payment_date": if only DD/MM/YY is visible, expand to YYYY-MM-DD (assume 20YY for 00-69, 19YY for 70-99).
+4. "payment_method": pick the closest standard value. Map "efectivo"→cash, "transferencia"/"consignación"/"PSE"→transfer, "tarjeta"/"datáfono"→card, "cheque"→check, else "other".
+5. "amount": ALWAYS the payment amount (the value moved). Never the invoice total.
+6. Use null when a field is not visible. Never invent data.
+7. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.`,
+      prompt_template: null,
+    },
+    {
       key: 'expense_invoice_ocr',
       name: 'Escaner de Facturas de Gasto',
       description:
@@ -434,8 +474,8 @@ RULES:
 10. "detected_plans": list UNIQUE plans referenced anywhere in the document. If the document defines a plan (name + price + period) once and mentions it in many member rows, list it ONCE. Dedupe by canonical name (case-insensitive trim).
 11. "raw_period_label": keep the original label (e.g. "Mensual", "Trimestral", "30 días", "1 mes + 1 semana"). "duration_days": map common labels: diario→1, semanal→7, quincenal→15, mensual→30, trimestral→90, cuatrimestral→120, semestral→180, anual→365. If the label gives a specific day count ("30 días"), use that. Use null when the period is not specified or not confidently derivable.
 12. "currency": ISO 4217 alpha-3. Default to "COP" for Colombian documents when only a number is shown and the country is CO. Use null when ambiguous.
-13. "plan_name" in each member MUST reference a name that appears in detected_plans[]. If the member's row only references a plan by abbreviation or variant (e.g. "Plan Gold", "Gold"), normalize it to the canonical name in detected_plans[]. If no plan is referenced, leave null and add a warning.
-14. "membership_start_date" / "membership_end_date": extract explicitly when shown in the document. Convert DD/MM/YYYY → YYYY-MM-DD. Use null when not shown. These are independent of the plan's duration_days — they reflect THIS member's actual term dates as printed.
+13. "plan_name": copy it verbatim as printed for each member (keep it as written, e.g. "Élite", "elite", "Estudiante"). Still list each plan ONCE in detected_plans[] deduped by canonical name; the server matches accent/case/plural-insensitively, so per-member spelling variations are fine. If no plan is referenced, omit it.
+14. "membership_start_date" / "membership_end_date": extract explicitly when shown; independent of the plan's duration_days — they reflect THIS member's printed term dates. Convert DD/MM/YYYY → YYYY-MM-DD when a year is present. If the source shows a day and month but NO explicit year (e.g. "4 de julio", "6 Ago"), output the SENTINEL year 0000 (e.g. 0000-07-04); NEVER guess or invent a year — the server injects the current year. Only emit a real 4-digit year when it is explicitly printed. Column/label mapping: "próximo pago"/"vencimiento"/"vence"/"renovación"/"corte"/"hasta"/"fin"/"expira" → membership_end_date; "inicio"/"ingreso"/"desde"/"fecha de ingreso"/"alta" → membership_start_date; "cumpleaños"/"nacimiento"/"fecha de nacimiento"/"f. nac" → date_of_birth (NOT a membership date; it keeps its real year per rule 7 and NEVER uses the sentinel). Do NOT confuse the class schedule/time (e.g. "5:am", "3:pm") or the amount paid with any date. Omit when not shown.
 15. Do NOT echo the source text. There is no verbatim/raw field — never add one. Keep each member object limited to the fields you actually extracted.
 16. Extract EVERY visible row. Never invent rows, plans, or members.
 17. "medical_notes" / "goals": free-text strings. Trim whitespace. Use null when absent.
@@ -930,7 +970,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1049,7 +1089,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

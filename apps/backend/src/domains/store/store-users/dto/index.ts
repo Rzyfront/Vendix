@@ -4,3 +4,5 @@ export * from './update-store-user.dto';
 export * from './reset-password-store-user.dto';
 export * from './update-user-roles.dto';
 export * from './update-user-panel-ui.dto';
+export * from './set-carrier-tariff.dto';
+export * from './set-app-type.dto';

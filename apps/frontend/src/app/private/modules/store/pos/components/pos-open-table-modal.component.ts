@@ -27,6 +27,7 @@ import {
   OpenTableSessionResult,
 } from '../services/pos-restaurant-integration.service';
 import { PosCustomer } from '../services/pos-customer.service';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import type { Table } from '../../restaurant-ops/tables/interfaces';
@@ -161,6 +162,14 @@ interface TableGroup {
         </form>
       }
 
+      @if (!customerRequirementMet()) {
+        <p class="anon-hint">
+          <app-icon name="circle-alert" [size]="14"></app-icon>
+          Selecciona un cliente antes de abrir la mesa (ventas anónimas
+          deshabilitadas).
+        </p>
+      }
+
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="secondary" size="md" (clicked)="onCancel()">
           Cancelar
@@ -289,6 +298,15 @@ interface TableGroup {
       .floor-tile.selected .status-pill {
         background: rgba(255, 255, 255, 0.2);
       }
+
+      .anon-hint {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        margin: 0.75rem 0 0;
+        font-size: 0.78rem;
+        color: var(--color-error);
+      }
     `,
   ],
 })
@@ -296,6 +314,7 @@ export class PosOpenTableModalComponent {
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private integration = inject(PosRestaurantIntegrationService);
+  private settingsFacade = inject(StoreSettingsFacade);
   private toastService = inject(ToastService);
 
   readonly isOpen = input<boolean>(false);
@@ -340,7 +359,28 @@ export class PosOpenTableModalComponent {
     return t ? `${t.name}${t.zone ? ' · ' + t.zone : ''}` : '';
   });
 
-  readonly canConfirm = computed(() => this.selectedTableId() != null);
+  /**
+   * Anonymous-sale gate (same rule as the POS payment interface). A table
+   * can only be opened without a client when `pos.allow_anonymous_sales` is
+   * enabled; otherwise the backend rejects with 422
+   * (`TABLE_SESSION_CUSTOMER_REQUIRED`). The `customer` is supplied by the
+   * parent POS component.
+   */
+  readonly allowAnonymousSales = computed(
+    () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
+  );
+  readonly hasCustomer = computed<boolean>(() => {
+    const c = this.customer();
+    return !!c && Number.isFinite(Number(c.id)) && Number(c.id) > 0;
+  });
+  /** True when the client requirement is satisfied (anon allowed OR client set). */
+  readonly customerRequirementMet = computed(
+    () => this.allowAnonymousSales() || this.hasCustomer(),
+  );
+
+  readonly canConfirm = computed(
+    () => this.selectedTableId() != null && this.customerRequirementMet(),
+  );
 
   constructor() {
     effect(() => {

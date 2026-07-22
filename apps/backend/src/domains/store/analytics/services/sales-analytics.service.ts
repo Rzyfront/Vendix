@@ -1,5 +1,7 @@
-import { Injectable, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Inject, Injectable, ForbiddenException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
+import { Prisma, order_channel_enum, order_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -19,9 +21,84 @@ import {
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
+// Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
+const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
+
+// getOrdersForExport pages the full range instead of a silent `take` cap. Rows
+// are pulled in stable id-descending batches until exhausted; a safety ceiling
+// guards against unbounded memory and surfaces truncation explicitly (never a
+// mute cut) via `OrdersExportResult.truncated`.
+const ORDER_EXPORT_BATCH_SIZE = 1000;
+const ORDER_EXPORT_HARD_LIMIT = 100_000;
+
+/**
+ * One row per ORDER, with the order-level monetary totals stated EXACTLY ONCE.
+ * Values are raw: money as `number`, dates as raw `Date` instants (the
+ * ReportBuilder formats them in the store timezone in the emission phase).
+ */
+export interface OrderExportRow {
+  order_number: string;
+  /** Raw creation instant. NOT formatted — emission phase renders it in TZ. */
+  created_at: Date | null;
+  /** Raw payment instant of the first succeeded payment, if any. */
+  paid_at: Date | null;
+  customer_name: string;
+  customer_document: string;
+  customer_document_type: string;
+  customer_email: string;
+  channel: order_channel_enum;
+  payment_method: string;
+  currency: string | null;
+  subtotal: number;
+  discount: number;
+  tax: number;
+  shipping: number;
+  tip: number;
+  grand_total: number;
+  state: order_state_enum;
+}
+
+/**
+ * One row per ORDER LINE. Carries NO order-level totals (that lives in
+ * {@link OrderExportRow}); `order_number` is the join key back to the order.
+ */
+export interface OrderItemExportRow {
+  order_number: string;
+  product_name: string;
+  sku: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
+
+/**
+ * Split export payload. `orders` holds order-level totals once each (summing
+ * `grand_total` over `orders` is the true revenue — no ×items over-count);
+ * `items` holds the line-level detail. `truncated` is true only if the hard
+ * safety ceiling was reached (explicit signal, never a silent cut).
+ */
+export interface OrdersExportResult {
+  orders: OrderExportRow[];
+  items: OrderItemExportRow[];
+  truncated: boolean;
+}
+
+/** Options for {@link SalesAnalyticsService.getOrdersForExport}. */
+export interface GetOrdersForExportOptions {
+  /**
+   * Order states to include. Defaults to COMPLETED_STATES
+   * (`['delivered', 'finished']`). Pass e.g. `['created', 'cancelled',
+   * 'refunded']` to include pending / cancelled / refunded orders.
+   */
+  states?: order_state_enum[];
+}
+
 @Injectable()
 export class SalesAnalyticsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
 
   // States that count as completed sales
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
@@ -40,6 +117,27 @@ export class SalesAnalyticsService {
   }
 
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
+    const storeId = RequestContextService.getContext()?.store_id;
+
+    // Only cache when a tenant is in scope; a store-less key could leak data
+    // across tenants. store_id isolates the tenant; the date-range inputs plus
+    // the channel filter capture the period/filter.
+    if (!storeId) {
+      return this.computeSalesSummary(query);
+    }
+    const cacheKey = `analytics:sales:summary:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
+    const cached =
+      await this.cache.get<
+        Awaited<ReturnType<SalesAnalyticsService['computeSalesSummary']>>
+      >(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.computeSalesSummary(query);
+    await this.cache.set(cacheKey, result, SALES_SUMMARY_CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeSalesSummary(query: SalesAnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(
@@ -886,71 +984,180 @@ export class SalesAnalyticsService {
     return allResults.slice(0, query.limit || allResults.length);
   }
 
-  async getOrdersForExport(query: SalesAnalyticsQueryDto) {
+  /**
+   * Raw dataset for the sales export, split into two coherent shapes so the
+   * emission phase never double-counts:
+   *
+   * - `orders`: one row per order with the order-level totals (subtotal,
+   *   discount, tax, shipping, grand_total) stated EXACTLY ONCE. Summing
+   *   `grand_total` here yields the true period revenue.
+   * - `items`: one row per order line (no order-level totals).
+   *
+   * All values are RAW: money as `number`, dates as raw `Date` instants (the
+   * ReportBuilder formats them in the store timezone downstream). No values are
+   * pre-formatted here.
+   *
+   * Filters honored (all optional, all through the store-scoped client — no
+   * manual `store_id`): `channel`, `category_id` (orders containing an item in
+   * that category), `brand_id` (orders containing an item of that brand),
+   * `payment_method` (orders with a succeeded payment whose canonical system
+   * payment-method `name` matches). When `category_id`/`brand_id` is set, the
+   * `items` dataset is narrowed to the matching lines; order-level totals in
+   * `orders` always reflect the whole order (they cannot be decomposed by
+   * category/brand).
+   *
+   * State defaults to COMPLETED_STATES (`['delivered', 'finished']`); pass
+   * `options.states` to include pending / cancelled / refunded orders.
+   *
+   * The whole range is paged (no silent `take` cap). If the hard safety ceiling
+   * ({@link ORDER_EXPORT_HARD_LIMIT}) is reached, `truncated` is set true — an
+   * explicit signal, never a mute cut.
+   */
+  async getOrdersForExport(
+    query: SalesAnalyticsQueryDto,
+    options?: GetOrdersForExportOptions,
+  ): Promise<OrdersExportResult> {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    const orders = await this.prisma.orders.findMany({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        ...(query.channel && { channel: query.channel }),
-        created_at: { gte: startDate, lte: endDate },
-      },
-      include: {
-        order_items: {
-          include: {
-            products: { select: { name: true, sku: true } },
-          },
-        },
-        users: {
-          select: { first_name: true, last_name: true, email: true },
-        },
+    const states: order_state_enum[] =
+      options?.states ?? (this.COMPLETED_STATES as order_state_enum[]);
+
+    // Product-level filter reused for both the order membership predicate and
+    // the item-include narrowing.
+    const hasProductFilter =
+      query.category_id != null || query.brand_id != null;
+    const productMatch: Prisma.productsWhereInput = {
+      ...(query.category_id != null && {
+        product_categories: { some: { category_id: query.category_id } },
+      }),
+      ...(query.brand_id != null && { brand_id: query.brand_id }),
+    };
+
+    const where: Prisma.ordersWhereInput = {
+      state: { in: states },
+      ...(query.channel && { channel: query.channel }),
+      created_at: { gte: startDate, lte: endDate },
+      ...(hasProductFilter && {
+        order_items: { some: { products: { is: productMatch } } },
+      }),
+      ...(query.payment_method && {
         payments: {
-          where: { state: 'succeeded' },
-          include: {
+          some: {
+            state: 'succeeded',
             store_payment_method: {
-              include: {
-                system_payment_method: { select: { display_name: true } },
-              },
+              system_payment_method: { name: query.payment_method },
             },
           },
-          take: 1,
         },
-      },
-      orderBy: { created_at: 'desc' },
-      take: 10000,
-    });
+      }),
+    };
 
-    // Flatten: one row per order_item
-    return orders.flatMap((order) => {
-      const customer = order.users;
-      const customerName = customer
-        ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
-          'Cliente'
-        : 'Anónimo';
-      const paymentMethod =
-        order.payments?.[0]?.store_payment_method?.system_payment_method
-          ?.display_name || 'N/A';
+    const orders: OrderExportRow[] = [];
+    const items: OrderItemExportRow[] = [];
+    let truncated = false;
+    let cursorId: number | undefined;
 
-      return order.order_items.map((item) => ({
-        order_number: order.order_number,
-        date: order.created_at?.toISOString().split('T')[0] || '',
-        customer_name: customerName,
-        customer_email: customer?.email || '',
-        channel: order.channel,
-        product_name: item.product_name,
-        sku: item.products?.sku || item.variant_sku || '',
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        item_total: Number(item.total_price),
-        subtotal: Number(order.subtotal_amount),
-        discount: Number(order.discount_amount),
-        tax: Number(order.tax_amount),
-        shipping: Number(order.shipping_cost),
-        grand_total: Number(order.grand_total),
-        payment_method: paymentMethod,
-        state: order.state,
-      }));
-    });
+    // Cursor pagination on the unique `id` (stable, unique) pulls the FULL range
+    // without an offset penalty and without dropping rows silently.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const batch = await this.prisma.orders.findMany({
+        where,
+        include: {
+          order_items: {
+            ...(hasProductFilter && {
+              where: { products: { is: productMatch } },
+            }),
+            include: {
+              products: { select: { name: true, sku: true } },
+            },
+          },
+          users: {
+            select: {
+              first_name: true,
+              last_name: true,
+              email: true,
+              document_number: true,
+              document_type: true,
+            },
+          },
+          payments: {
+            where: { state: 'succeeded' },
+            include: {
+              store_payment_method: {
+                select: {
+                  display_name: true,
+                  system_payment_method: { select: { display_name: true } },
+                },
+              },
+            },
+            orderBy: { paid_at: 'desc' },
+            take: 1,
+          },
+        },
+        orderBy: { id: 'desc' },
+        take: ORDER_EXPORT_BATCH_SIZE,
+        ...(cursorId !== undefined && {
+          cursor: { id: cursorId },
+          skip: 1,
+        }),
+      });
+
+      for (const order of batch) {
+        const customer = order.users;
+        const customerName = customer
+          ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+            'Cliente'
+          : 'Anónimo';
+        const payment = order.payments?.[0];
+        const paymentMethod =
+          payment?.store_payment_method?.display_name ||
+          payment?.store_payment_method?.system_payment_method?.display_name ||
+          'N/A';
+
+        orders.push({
+          order_number: order.order_number,
+          // RAW instant — do NOT format here (emission phase renders in TZ).
+          created_at: order.created_at ?? null,
+          paid_at: payment?.paid_at ?? null,
+          customer_name: customerName,
+          customer_document: customer?.document_number || '',
+          customer_document_type: customer?.document_type || '',
+          customer_email: customer?.email || '',
+          channel: order.channel,
+          payment_method: paymentMethod,
+          currency: order.currency ?? null,
+          subtotal: Number(order.subtotal_amount),
+          discount: Number(order.discount_amount),
+          tax: Number(order.tax_amount),
+          shipping: Number(order.shipping_cost),
+          tip: Number(order.tip_amount ?? 0),
+          grand_total: Number(order.grand_total),
+          state: order.state,
+        });
+
+        for (const item of order.order_items) {
+          items.push({
+            order_number: order.order_number,
+            product_name: item.product_name,
+            sku: item.products?.sku || item.variant_sku || '',
+            quantity: Number(item.quantity),
+            unit_price: Number(item.unit_price),
+            line_total: Number(item.total_price),
+          });
+        }
+      }
+
+      if (batch.length < ORDER_EXPORT_BATCH_SIZE) break;
+      cursorId = batch[batch.length - 1].id;
+
+      if (orders.length >= ORDER_EXPORT_HARD_LIMIT) {
+        truncated = true;
+        break;
+      }
+    }
+
+    return { orders, items, truncated };
   }
 }

@@ -21,6 +21,7 @@ import { RouteNumberGenerator } from './utils/route-number-generator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { GeocodingService } from '../../ecommerce/geocoding/geocoding.service';
+import { RouteFlowService } from './route-flow/route-flow.service';
 import {
   buildStopsData,
   computeRouteTotals,
@@ -221,6 +222,10 @@ export interface MapStopUnlocated {
   sequence: number;
   customerName: string | null;
   addressText: string | null;
+  /** Id of the dispatch note backing the stop, if any (drives the "Fijar en mapa" flow). */
+  dispatchNoteId: number | null;
+  /** Raw customer_address JSON snapshot from the dispatch note (AddressPayload | null). */
+  customerAddress: Prisma.JsonValue | null;
 }
 
 /** Full response body of `GET /store/dispatch-routes/:id/map-stops`. */
@@ -242,7 +247,31 @@ export class DispatchRoutesService {
     private readonly prisma: StorePrismaService,
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly geocoding: GeocodingService,
+    private readonly routeFlow: RouteFlowService,
   ) {}
+
+  /**
+   * Guard that every dispatch_note about to be planned is still eligible to
+   * join a route. A note is planificable only while it is 'draft' or
+   * 'confirmed'; a note already 'delivered' / 'received' / 'invoiced' /
+   * 'voided' is terminal for this flow and must be rejected (409) instead of
+   * silently attached. Reuses the notes the caller already loaded (no extra
+   * query). Surfaces the offending `dispatch_number`(s) in the error detail.
+   */
+  private assertNotesEligible(
+    notes: ReadonlyArray<{ dispatch_number: string; status: string }>,
+  ): void {
+    const ineligible = notes.filter(
+      (n) => n.status !== 'draft' && n.status !== 'confirmed',
+    );
+    if (ineligible.length === 0) return;
+    const numbers = ineligible.map((n) => n.dispatch_number).join(', ');
+    throw new VendixHttpException(
+      ErrorCodes.DSP_NOTE_NOT_ELIGIBLE_001,
+      `La remisión ${numbers} no puede planillarse porque ya fue entregada, recibida, facturada o anulada.`,
+      { dispatch_numbers: numbers },
+    );
+  }
 
   private getStoreId(): number {
     const context = RequestContextService.getContext();
@@ -362,8 +391,12 @@ export class DispatchRoutesService {
       select: {
         id: true,
         store_id: true,
+        // dispatch_number + order_id feed both the eligibility error detail and
+        // the `dispatch_note.confirmed` auto-confirm payload (no extra query).
+        dispatch_number: true,
         status: true,
         sales_order_id: true,
+        order_id: true,
         grand_total: true,
         needs_collection: true,
         invoice: { select: { id: true, status: true, payment_date: true } },
@@ -374,6 +407,10 @@ export class DispatchRoutesService {
         'Una o más remisiones no existen o no pertenecen a la tienda',
       );
     }
+
+    // Eligibility gate: only draft/confirmed notes can be planned. A
+    // delivered/received/invoiced/voided note is terminal for the route flow.
+    this.assertNotesEligible(existing_notes);
 
     // Check whether the dispatch_notes are already in an active (non-released) stop.
     // A stop blocks reuse iff it is not yet 'released'. The previous carve-out
@@ -402,6 +439,48 @@ export class DispatchRoutesService {
       }
     }
 
+    // Plan Despacho Economía — FASE 3 paso 11.
+    // Auto-configuración desde la política del método cuando el usuario no
+    // pasa el ejecutor explícitamente. Mantiene UX cero-fricción: el operador
+    // elige el método y el resto se rellena solo.
+    let resolvedVehicle = dto.vehicle_id ?? null;
+    let resolvedDriver = dto.driver_user_id ?? null;
+    let resolvedCarrier = dto.external_carrier_supplier_id ?? null;
+
+    if (dto.shipping_method_id) {
+      const method = await this.prisma.shipping_methods.findFirst({
+        where: { id: dto.shipping_method_id, is_system: false },
+      });
+      if (!method) {
+        throw new BadRequestException(
+          `Método de envío #${dto.shipping_method_id} no habilitado en la tienda`,
+        );
+      }
+      // Mismo método ⇒ autocompletar desde la política.
+      if (method.collects_payment && !dto.external_carrier_supplier_id) {
+        // noop marker — el carrier es opcional; se setea abajo.
+      }
+      if (!resolvedVehicle && method.default_vehicle_id) {
+        const v = await this.prisma.vehicles.findFirst({
+          where: { id: method.default_vehicle_id, store_id },
+        });
+        if (v) resolvedVehicle = method.default_vehicle_id;
+      }
+      if (!resolvedDriver && method.default_driver_user_id) {
+        resolvedDriver = method.default_driver_user_id;
+      }
+      if (!resolvedCarrier && method.default_carrier_supplier_id) {
+        const s = await this.prisma.suppliers.findFirst({
+          where: {
+            id: method.default_carrier_supplier_id,
+            store_id,
+            supplier_category: 'carrier',
+          },
+        });
+        if (s) resolvedCarrier = method.default_carrier_supplier_id;
+      }
+    }
+
     // Generate route_number
     let route_number: string;
     let attempts = 0;
@@ -419,32 +498,53 @@ export class DispatchRoutesService {
           notes_by_id,
         );
 
-        const created = await this.prisma.dispatch_routes.create({
-          data: {
-            store_id,
-            route_number,
-            route_code: dto.route_code,
-            status: 'draft',
-            vehicle_id: dto.vehicle_id,
-            driver_user_id: dto.driver_user_id,
-            external_driver_name: dto.external_driver_name,
-            external_driver_id_number: dto.external_driver_id_number,
-            is_primary_driver_external: dto.is_primary_driver_external ?? false,
-            assistants: dto.assistants as any,
-            origin_location_id: dto.origin_location_id,
-            planned_date: new Date(dto.planned_date),
-            currency: dto.currency || 'COP',
-            notes: dto.notes,
-            total_to_collect,
-            total_prepaid,
-            created_by_user_id: user_id,
-            updated_at: new Date(),
-            stops: {
-              create: stops_data,
-            },
+        // Create the route + stops and auto-confirm any draft note in the SAME
+        // transaction, then emit `dispatch_note.confirmed` post-commit (the
+        // reservation listener re-reads the note and must see 'confirmed'
+        // persisted). Reuses the shared RouteFlowService mechanism.
+        const { created, confirmedPayloads } = await this.prisma.$transaction(
+          async (tx: any) => {
+            const created = await tx.dispatch_routes.create({
+              data: {
+                store_id,
+                route_number,
+                route_code: dto.route_code,
+                status: 'draft',
+                vehicle_id: resolvedVehicle,
+                driver_user_id: resolvedDriver,
+                external_driver_name: dto.external_driver_name,
+                external_driver_id_number: dto.external_driver_id_number,
+                is_primary_driver_external:
+                  dto.is_primary_driver_external ?? false,
+                assistants: dto.assistants as any,
+                origin_location_id: dto.origin_location_id,
+                // Plan Despacho Economía — FASE 3 paso 11.
+                shipping_method_id: dto.shipping_method_id ?? null,
+                external_carrier_supplier_id: resolvedCarrier,
+                planned_date: new Date(dto.planned_date),
+                currency: dto.currency || 'COP',
+                notes: dto.notes,
+                total_to_collect,
+                total_prepaid,
+                created_by_user_id: user_id,
+                updated_at: new Date(),
+                stops: {
+                  create: stops_data,
+                },
+              },
+              include: DISPATCH_ROUTE_INCLUDE,
+            });
+            const confirmedPayloads =
+              await this.routeFlow.confirmDraftNotesInTx(
+                tx,
+                existing_notes,
+                user_id,
+                store_id,
+              );
+            return { created, confirmedPayloads };
           },
-          include: DISPATCH_ROUTE_INCLUDE,
-        });
+        );
+        this.routeFlow.emitConfirmedNotes(confirmedPayloads);
         return created;
       } catch (error) {
         if (
@@ -537,6 +637,63 @@ export class DispatchRoutesService {
     };
   }
 
+  /**
+   * Plan Despacho Economía — FASE 3 paso 11.
+   * Helper de derivación: si la ruta no tiene `shipping_method_id` (caso
+   * legacy o ruta creada sin método explícito), lo deriva del set mayoritario
+   * de órdenes asociadas. Devuelve `null` si la ruta no tiene paradas o las
+   * órdenes tienen métodos mixtos sin mayoría clara.
+   *
+   * NO modifica el registro — es solo lectura. Usado por el monitor y por
+   * el listener de settlement (FASE 5) cuando necesita resolver la política.
+   */
+  async resolveRouteShippingMethod(id: number): Promise<number | null> {
+    const store_id = this.getStoreId();
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      select: { shipping_method_id: true },
+    });
+    if (!route) return null;
+    if (route.shipping_method_id) return route.shipping_method_id;
+
+    const method_counts = await this.prisma.dispatch_route_stops.groupBy({
+      by: ['dispatch_note_id'],
+      where: { route_id: id },
+    });
+    const note_ids = method_counts.map((s) => s.dispatch_note_id);
+    if (note_ids.length === 0) return null;
+
+    const notes = await this.prisma.dispatch_notes.findMany({
+      where: { id: { in: note_ids } },
+      select: { sales_order_id: true },
+    });
+    const order_ids = notes
+      .map((n) => n.sales_order_id)
+      .filter((x): x is number => !!x);
+    if (order_ids.length === 0) return null;
+
+    const orders = await this.prisma.orders.findMany({
+      where: { id: { in: order_ids } },
+      select: { shipping_method_id: true },
+    });
+    const counts = new Map<number, number>();
+    for (const o of orders) {
+      if (!o.shipping_method_id) continue;
+      counts.set(o.shipping_method_id, (counts.get(o.shipping_method_id) ?? 0) + 1);
+    }
+    if (counts.size === 0) return null;
+    // Devuelve el método con mayor recurrencia.
+    let best: number | null = null;
+    let best_count = 0;
+    for (const [mid, c] of counts) {
+      if (c > best_count) {
+        best = mid;
+        best_count = c;
+      }
+    }
+    return best;
+  }
+
   async findOne(id: number) {
     const store_id = this.getStoreId();
     const route = await this.prisma.dispatch_routes.findFirst({
@@ -619,6 +776,7 @@ export class DispatchRoutesService {
    */
   async addStops(id: number, dto: AddStopsDto) {
     const store_id = this.getStoreId();
+    const user_id = RequestContextService.getContext()?.user_id;
 
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
@@ -634,8 +792,14 @@ export class DispatchRoutesService {
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    // State gate: only "hot" routes (draft / dispatched) accept new stops.
-    const EDITABLE_STATES: dispatch_route_status_enum[] = ['draft', 'dispatched'];
+    // State gate: only "hot" routes accept new stops. Las rutas CARRIER admiten
+    // además `in_transit` (tomar-en-recorrido: el repartidor reclama otra orden
+    // pooleada mientras ya está en ruta) — espejo del gate de
+    // DispatchNotesService.attachToExistingRoute. Las rutas admin conservan el
+    // gate original (draft/dispatched), sin efectos colaterales.
+    const EDITABLE_STATES: dispatch_route_status_enum[] = route.is_carrier_route
+      ? ['draft', 'dispatched', 'in_transit']
+      : ['draft', 'dispatched'];
     if (!EDITABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001);
     }
@@ -666,8 +830,12 @@ export class DispatchRoutesService {
       select: {
         id: true,
         store_id: true,
+        // dispatch_number + order_id feed the eligibility error detail and the
+        // `dispatch_note.confirmed` auto-confirm payload (no extra query).
+        dispatch_number: true,
         status: true,
         sales_order_id: true,
+        order_id: true,
         grand_total: true,
         needs_collection: true,
         invoice: { select: { id: true, status: true, payment_date: true } },
@@ -678,6 +846,10 @@ export class DispatchRoutesService {
         'Una o más remisiones no existen o no pertenecen a la tienda',
       );
     }
+
+    // Eligibility gate: only draft/confirmed notes can be planned. A
+    // delivered/received/invoiced/voided note is terminal for the route flow.
+    this.assertNotesEligible(new_notes);
 
     // Assignability: a note already sitting on an active (non-released) stop
     // of any other route cannot be assigned. Mirrors create()'s rule and the
@@ -762,20 +934,48 @@ export class DispatchRoutesService {
       all_notes_by_id,
     );
 
-    return this.prisma.$transaction(async (tx) => {
-      await tx.dispatch_route_stops.createMany({
-        data: new_stops_data.map((s) => ({ ...s, route_id: id })),
-      });
-      return tx.dispatch_routes.update({
-        where: { id },
-        data: {
-          total_to_collect,
-          total_prepaid,
-          updated_at: new Date(),
-        },
-        include: DISPATCH_ROUTE_INCLUDE,
-      });
-    });
+    // Insert the new stops, refresh route totals, and auto-confirm any draft
+    // note among the newly added ones — all in the SAME transaction. The
+    // `dispatch_note.confirmed` events are emitted post-commit so the
+    // reservation listener sees the persisted 'confirmed' status. Applies to a
+    // destination route in both `draft` and `dispatched` states.
+    const { updated, confirmedPayloads } = await this.prisma.$transaction(
+      async (tx: any) => {
+        await tx.dispatch_route_stops.createMany({
+          data: new_stops_data.map((s) => ({ ...s, route_id: id })),
+        });
+        const updated = await tx.dispatch_routes.update({
+          where: { id },
+          data: {
+            total_to_collect,
+            total_prepaid,
+            updated_at: new Date(),
+          },
+          include: DISPATCH_ROUTE_INCLUDE,
+        });
+        // Al asignar remisiones a esta ruta, sus órdenes salen del pool de
+        // carriers (misma tx): limpiamos `dispatch_pool_at` y el claim para que
+        // dejen de aparecer como disponibles en los streams SSE de repartidores.
+        const pooled_order_ids = new_notes
+          .map((n) => n.order_id)
+          .filter((oid): oid is number => oid != null);
+        if (pooled_order_ids.length > 0) {
+          await tx.orders.updateMany({
+            where: { id: { in: pooled_order_ids }, store_id },
+            data: { dispatch_pool_at: null, claimed_by_carrier_user_id: null },
+          });
+        }
+        const confirmedPayloads = await this.routeFlow.confirmDraftNotesInTx(
+          tx,
+          new_notes,
+          user_id,
+          store_id,
+        );
+        return { updated, confirmedPayloads };
+      },
+    );
+    this.routeFlow.emitConfirmedNotes(confirmedPayloads);
+    return updated;
   }
 
   async update(id: number, dto: UpdateDispatchRouteDto) {
@@ -857,7 +1057,7 @@ export class DispatchRoutesService {
       this.prisma.dispatch_routes.count({ where: { store_id, status: 'closed' } }),
       this.prisma.dispatch_routes.count({ where: { store_id, status: 'voided' } }),
       this.prisma.dispatch_routes.aggregate({
-        where: { store_id, status: { in: ['closed', 'in_transit', 'settling'] } },
+        where: { store_id, status: { in: ['closed', 'in_transit'] } },
         _sum: { total_to_collect: true, total_collected: true, cash_variance: true },
       }),
     ]);
@@ -888,23 +1088,199 @@ export class DispatchRoutesService {
    * legacy `dispatch-notes?status=confirmed` endpoint returns notes that the
    * backend then rejects with 500 on `create()`.
    */
+  /**
+   * Plan Despacho Economía — FASE 8 paso 24.
+   * Monitor económico por ruta:
+   *   recaudo              = total_collected + total_prepaid
+   *   ingreso_flete        = SUM(shipping_amount) sobre dispatch_notes de la ruta
+   *   costo_transporte     = SUM(accounts_payable.original_amount donde source_type='dispatch_route' Y source_id=route.id)
+   *   margen_flete         = ingreso_flete − costo_transporte
+   *   estado_liquidacion   = 'pending' | 'paid' (derivado de ap.balance)
+   *
+   * Paginado (ResponseService.paginated no aplica aquí; usamos el envoltorio
+   * del controller vía `@Query`).
+   */
+  async getMonitor(query: {
+    page?: number;
+    limit?: number;
+    store_id?: number;
+  }) {
+    const store_id = query.store_id ?? this.getStoreId();
+    const page = Math.max(1, query.page ?? 1);
+    const limit = Math.max(1, Math.min(100, query.limit ?? 20));
+    const skip = (page - 1) * limit;
+
+    // Traemos las rutas cerradas como foco del monitor.
+    const where: any = { store_id };
+    const [routes, total] = await Promise.all([
+      this.prisma.dispatch_routes.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ closed_at: 'desc' }, { id: 'desc' }],
+        include: {
+          shipping_method: {
+            select: { id: true, name: true, type: true },
+          },
+        },
+      }),
+      this.prisma.dispatch_routes.count({ where }),
+    ]);
+
+    // Para cada ruta, agregar ingreso de flete (suma de shipping_amount de
+    // sus dispatch_notes) y costo (AP source_type='dispatch_route').
+    const route_ids = routes.map((r) => r.id);
+    const [shipping_sums, ap_sums, executor_sums] = await Promise.all([
+      route_ids.length === 0
+        ? []
+        : this.prisma.dispatch_notes.groupBy({
+            by: ['route_id_fk' as any], // placeholder — Prisma no permite route_id directo en notes
+          }).catch(() => []),
+      route_ids.length === 0
+        ? []
+        : this.prisma.accounts_payable.groupBy({
+            by: ['source_id'],
+            where: {
+              organization_id: undefined as any,
+              source_type: 'dispatch_route',
+              source_id: { in: route_ids },
+            },
+            _sum: { original_amount: true, paid_amount: true },
+          }).catch(() => []),
+      route_ids.length === 0
+        ? []
+        : this.prisma.dispatch_routes.findMany({
+            where: { id: { in: route_ids } },
+            select: {
+              id: true,
+              shipping_method_id: true,
+              external_carrier_supplier_id: true,
+              vehicle_id: true,
+            },
+          }),
+    ]);
+
+    // Ingreso de flete: dispatch_notes no tienen route_id directo; lo derivamos
+    // vía dispatch_route_stops.sum(route_id) = route.id.
+    const stop_groups =
+      route_ids.length === 0
+        ? []
+        : await this.prisma.dispatch_route_stops.groupBy({
+            by: ['route_id'],
+            where: { route_id: { in: route_ids } },
+            _count: { dispatch_note_id: true },
+          });
+    const stops_by_route = new Map<number, number>();
+    stop_groups.forEach((g) =>
+      stops_by_route.set(Number(g.route_id), g._count.dispatch_note_id),
+    );
+
+    // Para el flete: sumamos shipping_amount de las notes asociadas por ruta.
+    const note_ids_by_route = new Map<number, number[]>();
+    for (const r of route_ids) {
+      const stops = await this.prisma.dispatch_route_stops.findMany({
+        where: { route_id: r },
+        select: { dispatch_note_id: true },
+      });
+      note_ids_by_route.set(
+        r,
+        stops.map((s) => s.dispatch_note_id),
+      );
+    }
+    const all_note_ids = Array.from(
+      new Set(
+        Array.from(note_ids_by_route.values()).flat(),
+      ),
+    );
+    // El ingreso de flete vive en `invoices.shipping_amount` (FASE 4 paso 13),
+    // no en dispatch_notes. Lo leemos vía la relación dispatch_note.invoice.
+    const notes =
+      all_note_ids.length === 0
+        ? []
+        : await this.prisma.dispatch_notes.findMany({
+            where: { id: { in: all_note_ids } },
+            select: { id: true, invoice: { select: { shipping_amount: true } } },
+          });
+    const shipping_by_note = new Map<number, number>();
+    notes.forEach((n) =>
+      shipping_by_note.set(n.id, Number(n.invoice?.shipping_amount || 0)),
+    );
+    const shipping_by_route = new Map<number, number>();
+    for (const [route_id, ids] of note_ids_by_route) {
+      const total_shipping = ids.reduce(
+        (acc, id) => acc + (shipping_by_note.get(id) ?? 0),
+        0,
+      );
+      shipping_by_route.set(route_id, total_shipping);
+    }
+
+    const ap_by_route = new Map<number, number>();
+    ap_sums.forEach((g: any) => {
+      ap_by_route.set(Number(g.source_id), Number(g._sum.original_amount || 0));
+    });
+
+    const data = routes.map((r) => {
+      const recaudo = Number(r.total_collected || 0) + Number(r.total_prepaid || 0);
+      const ingreso_flete = shipping_by_route.get(r.id) ?? 0;
+      const costo_transporte = ap_by_route.get(r.id) ?? 0;
+      const margen_flete = ingreso_flete - costo_transporte;
+      const ejecutor = r.shipping_method?.name ?? null;
+      const estado_liquidacion = costo_transporte > 0 ? 'paid' : 'pending';
+      return {
+        id: r.id,
+        route_number: r.route_number,
+        store_id: r.store_id,
+        status: r.status,
+        planned_date: r.planned_date,
+        closed_at: r.closed_at,
+        shipping_method: r.shipping_method,
+        external_carrier_supplier_id: r.external_carrier_supplier_id,
+        vehicle_id: r.vehicle_id,
+        recaudo,
+        ingreso_flete,
+        costo_transporte,
+        margen_flete,
+        ejecutor,
+        estado_liquidacion,
+      };
+    });
+
+    return {
+      data,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
   async listAvailableNotes(search?: string) {
     const store_id = this.getStoreId();
 
+    // Plan Despacho Economía — FASE 6 paso 18. Sólo remisiones planillables:
+    // `outbound`/`customer_delivery` en `draft|confirmed`. Las `delivered`,
+    // `invoiced` y `voided` NO aparecen. El filtro de status es el source of
+    // truth del endpoint; antes dependía de la limpieza del cliente.
+    //
     // Find notes that are locked by an active (non-released) stop on ANY
     // route. Matches the partial unique index
     // `dispatch_route_stops_dispatch_note_id_active_idx` and the create()
     // /addStops() blockers. We don't carve out parent=draft here because a
     // draft route still holds its stops locked at the DB layer.
+    // QUI-484 — scope the lock lookup by store. `dispatch_route_stops` is NOT
+    // auto-scoped by the Prisma extension (this domain scopes manually), so a
+    // bare `status != released` filter would over-read active stops from EVERY
+    // tenant and could hide another store's notes from this store's picker.
+    // Constrain via the parent remisión's `store_id` (relation `dispatch_note`,
+    // schema.prisma dispatch_route_stops → dispatch_notes).
     const lockedNoteIds = await this.prisma.dispatch_route_stops.findMany({
-      where: { status: { not: 'released' } },
+      where: { status: { not: 'released' }, dispatch_note: { store_id } },
       select: { dispatch_note_id: true },
     });
     const lockedSet = new Set(lockedNoteIds.map((s) => s.dispatch_note_id));
 
     const where: any = {
       store_id,
-      status: { not: 'voided' },
+      direction: 'outbound',
+      subtype: 'customer_delivery',
+      status: { in: ['draft', 'confirmed'] },
     };
     if (search) {
       where.OR = [
@@ -924,7 +1300,9 @@ export class DispatchRoutesService {
         status: true,
         needs_collection: true,
         customer_address: true,
-        order: { select: { shipping_address_snapshot: true } },
+        order: {
+          select: { shipping_address_snapshot: true, shipping_method_id: true },
+        },
       },
     });
     return notes
@@ -938,6 +1316,7 @@ export class DispatchRoutesService {
         needs_collection: n.needs_collection,
         customer_address: n.customer_address,
         shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
+        shipping_method_id: n.order?.shipping_method_id ?? null,
       }));
   }
 
@@ -1018,6 +1397,8 @@ export class DispatchRoutesService {
           sequence: stop.stop_sequence,
           customerName,
           addressText: resolved.addressText,
+          dispatchNoteId: stop.dispatch_note?.id ?? null,
+          customerAddress: stop.dispatch_note?.customer_address ?? null,
         });
       }
     }

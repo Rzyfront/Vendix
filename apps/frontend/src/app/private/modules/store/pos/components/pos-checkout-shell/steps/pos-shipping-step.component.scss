@@ -1,0 +1,415 @@
+@use '../../../../../../../shared/components/payment-collector/subwizard' as subwizard;
+
+/* Fase 5·B2b — POS Shipping Step. Recolección de envío aplanada (sin modal).
+   Rediseño Pencil (frames Envío·Método / Envío·Costo): grid 2×2 de MethodCards,
+   card de costo automático con toggle manual, notas y card de totales.
+   Tokens del proyecto (var(--color-*)); nunca Tailwind /opacity. */
+
+.shipping-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ── Sub-wizard grid (opciones | stepper) ─────────────────
+   Móvil: una columna, steps-col ABAJO (DOM-last) pero oculta.
+   Desktop (≥768px): ship-main | steps-col. */
+.ship-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.ship-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Fila-resumen colapsada (clickable, vuelve a ese sub-paso). Verde "completado".
+   Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
+.ship-collapsed {
+  @include subwizard.subwizard-collapsed-row;
+}
+
+/* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
+.steps-col {
+  @include subwizard.subwizard-steps-col;
+}
+
+@media (min-width: 768px) {
+  .ship-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* Simetría vertical con los demás pasos del checkout (min-height común del
+     stepper). Solo desktop; en móvil el stepper se oculta (ver abajo). */
+  .steps-col {
+    min-height: 305px;
+  }
+}
+
+/* Móvil: el stepper vertical se oculta para dar el ancho completo a las
+   opciones; el header horizontal del shell orienta al usuario. */
+@media (max-width: 767px) {
+  .steps-col {
+    display: none;
+  }
+}
+
+/* ── Flash banner ─────────────────────────────────────── */
+.flash-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #92400e;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ── Método · section header ──────────────────────────── */
+.method-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-icon {
+  color: var(--color-primary);
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* ── Método · grid 2×2 de cards ───────────────────────── */
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.method-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+  padding: 20px 12px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+  color: var(--color-text-primary);
+}
+
+.method-card-icon {
+  color: var(--color-text-primary);
+  transition: color 0.18s ease;
+}
+
+.method-card-label {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--color-text-primary);
+  transition: color 0.18s ease;
+}
+
+.method-card:hover {
+  border-color: var(--color-primary);
+}
+
+.method-card.selected {
+  border-color: var(--color-primary);
+  background: rgba(var(--color-success-rgb), 0.14);
+}
+
+.method-card.selected .method-card-icon,
+.method-card.selected .method-card-label {
+  color: var(--color-primary);
+}
+
+/* ── No methods alert ─────────────────────────────────── */
+.no-methods-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(var(--color-error-rgb, 220, 38, 38), 0.08);
+  border: 1px solid rgba(var(--color-error-rgb, 220, 38, 38), 0.25);
+  border-radius: 12px;
+}
+
+.no-methods-icon {
+  color: var(--color-error);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.no-methods-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.no-methods-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-error);
+}
+
+.no-methods-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.no-methods-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+}
+
+/* ── Costo · card ─────────────────────────────────────── */
+.cost-card {
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface);
+  padding: 18px;
+}
+
+.cost-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cost-row-label {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+}
+
+.cost-row-amount {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.cost-toggle-label {
+  font-size: 16px;
+  color: var(--color-text-primary);
+}
+
+.cost-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 14px 0;
+}
+
+.cost-calculating {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* Input de costo manual (aparece con el toggle activo o sin cálculo automático) */
+.manual-cost-input {
+  margin-top: 12px;
+}
+
+.cash-input {
+  display: flex;
+  align-items: center;
+  background: var(--color-surface-secondary);
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  transition: border-color 0.2s;
+}
+
+.cash-input:focus-within {
+  border-color: var(--color-primary);
+}
+
+.cash-input .currency {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-right: 4px;
+}
+
+.cash-input input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  outline: none;
+  width: 100%;
+  min-width: 0;
+}
+
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* ── Notas de envío ───────────────────────────────────── */
+.notes-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.notes-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--color-surface-secondary);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.notes-textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.notes-textarea:focus {
+  border-color: var(--color-primary);
+}
+
+/* ── Totales · card ───────────────────────────────────── */
+.totals-card {
+  border-radius: 16px;
+  background: var(--color-surface-secondary);
+  padding: 18px;
+}
+
+.totals-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.totals-row + .totals-row {
+  margin-top: 10px;
+}
+
+.totals-label {
+  font-size: 16px;
+  color: var(--color-text-secondary);
+}
+
+.totals-amount {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.totals-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 14px 0;
+}
+
+.totals-grand-label {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.totals-grand-amount {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Validation flash animation ───────────────────────── */
+@keyframes configFlashWarning {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+  15% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4);
+    border-color: #f59e0b;
+  }
+  30% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+  55% {
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4);
+    border-color: #f59e0b;
+  }
+  70% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+    border-color: transparent;
+  }
+}
+
+.config-flash-warning {
+  animation: configFlashWarning 1.2s ease-out;
+}

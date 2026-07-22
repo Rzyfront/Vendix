@@ -616,6 +616,18 @@ export interface MembershipSettings {
    */
   ambient_access_enabled: boolean;
   /**
+   * Kiosk mode: keeps the QR scanner always-on (continuous loop) on the Aforo
+   * tab for an unattended reception tablet. When false (default), the scanner
+   * opens on demand and closes after a single decode.
+   */
+  qr_kiosk_mode?: boolean;
+  /**
+   * Default display mode for the Aforo QR scanner on open. `fullscreen`
+   * (default) shows the full overlay; `floating` opens a movable window/bubble.
+   * Per-device overrides are remembered client-side in localStorage.
+   */
+  qr_scanner_default_mode?: 'fullscreen' | 'floating';
+  /**
    * Enables capacity (aforo) control for the membership area.
    * When false (default), capacity control is disabled.
    */
@@ -646,6 +658,21 @@ export interface MembershipSettings {
    * where the reader emits an opaque ID and Vendix never sees the template.
    */
   fingerprint_device?: FingerprintDeviceConfig;
+  /**
+   * Re-entry detection policy. When a member is granted access again within
+   * `re_entry_window_hours` of their last `granted` access:
+   *   - `off`   → no detection (current behavior).
+   *   - `warn`  → still grant, but flag it (`warning: true` + `re_entry_minutes`)
+   *               without re-counting aforo or re-consuming quota. Default.
+   *   - `block` → deny with `denied_re_entry` (anti pass-back).
+   * Default `'warn'`.
+   */
+  re_entry_mode?: 'off' | 'warn' | 'block';
+  /**
+   * Window in hours used by `re_entry_mode` to consider an access a re-entry.
+   * Default `2`.
+   */
+  re_entry_window_hours?: number;
 }
 
 // ============================================================================
@@ -661,4 +688,12 @@ export interface DispatchSettings {
    * Default: `on_close`.
    */
   order_state_update_mode?: 'live' | 'on_close';
+
+  // Plan Despacho Economía — FASE 2 paso 9. Defaults globales de la tienda
+  // usados como fallback cuando un método de envío no define política.
+  default_payment_timing?: 'prepaid' | 'on_delivery';
+  default_settlement_type?: 'none' | 'per_delivery' | 'per_route';
+  default_cost_settlement_timing?: 'immediate_on_close';
+  default_origin_location_id?: number;
+  requires_dispatch_address?: boolean;
 }

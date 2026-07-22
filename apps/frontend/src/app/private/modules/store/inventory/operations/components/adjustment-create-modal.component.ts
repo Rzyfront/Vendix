@@ -15,6 +15,7 @@ import {
 } from '../../../../../../shared/components/index';
 
 import { InventoryService } from '../../services';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   AdjustmentType,
   AdjustableProduct,
@@ -506,6 +507,7 @@ import {
 export class AdjustmentCreateModalComponent {
   private destroyRef = inject(DestroyRef);
   private inventoryService = inject(InventoryService);
+  private toastService = inject(ToastService);
 
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
@@ -640,9 +642,17 @@ export class AdjustmentCreateModalComponent {
   }
 
   updateItemQuantity(index: number, event: Event): void {
-    const value = +(event.target as HTMLInputElement).value;
+    const raw = (event.target as HTMLInputElement).value;
+    const value = +raw;
+    const min = 0;
+    const clamped = Math.max(min, value);
+    // Feedback visible cuando el usuario teclea un valor por debajo del mínimo
+    // (ignoramos el campo vacío mientras edita para no spamear toasts).
+    if (raw !== '' && Number.isFinite(value) && value < min) {
+      this.toastService.info('La cantidad no puede ser negativa.', 'Cantidad ajustada');
+    }
     this.adjustmentItems = this.adjustmentItems.map((item, i) =>
-      i === index ? { ...item, quantity_after: Math.max(0, value) } : item,
+      i === index ? { ...item, quantity_after: clamped } : item,
     );
   }
 

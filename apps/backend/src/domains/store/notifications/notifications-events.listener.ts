@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationsService } from './notifications.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { EmailService } from '../../../email/email.service';
@@ -28,6 +28,7 @@ export class NotificationsEventsListener {
     private readonly global_prisma: GlobalPrismaService,
     private readonly email_service: EmailService,
     private readonly s3_service: S3Service,
+    private readonly event_emitter: EventEmitter2,
   ) {}
 
   @OnEvent('order.created')
@@ -54,6 +55,117 @@ export class NotificationsEventsListener {
       `Orden #${event.order_number}: ${event.old_state} → ${event.new_state}`,
       { order_id: event.order_id, order_number: event.order_number },
     );
+  }
+
+  /**
+   * Vendix Repartos — Fase B5. Un admin publicó una orden al pool de
+   * repartidores (evento emitido por `DispatchNotesService.sendToDispatchPool`).
+   * Resolvemos los carriers de la tienda (usuarios de `store_users` con rol
+   * `carrier`) y les entregamos una notificación DIRIGIDA (patrón
+   * `handleBookingStarted`, multi-destinatario). Si no hay carriers resueltos,
+   * caemos a un broadcast de tienda para no perder la señal.
+   */
+  @OnEvent('order.awaiting_carrier')
+  async handleOrderAwaitingCarrier(event: {
+    order_id: number;
+    store_id: number;
+  }) {
+    let carrierUserIds: number[] = [];
+    try {
+      const rows = await this.global_prisma.store_users.findMany({
+        where: {
+          store_id: event.store_id,
+          user: { user_roles: { some: { roles: { name: 'carrier' } } } },
+        },
+        select: { user_id: true },
+      });
+      carrierUserIds = rows.map((r) => r.user_id);
+    } catch (err: any) {
+      this.logger.error(
+        `[handleOrderAwaitingCarrier] Failed to resolve carriers: ${err.message}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+
+    // order_number para un mensaje más amigable (best-effort).
+    let order_number: string | null = null;
+    try {
+      const order = await this.global_prisma.orders.findUnique({
+        where: { id: event.order_id },
+        select: { order_number: true },
+      });
+      order_number = order?.order_number ?? null;
+    } catch {
+      // best-effort; el número no es crítico para la notificación.
+    }
+
+    const title = 'Pedido disponible para reparto';
+    const body = order_number
+      ? `El pedido #${order_number} está disponible para tomar`
+      : 'Hay un pedido disponible para tomar';
+    const data = {
+      order_id: event.order_id,
+      kind: 'awaiting_carrier',
+      route: '/repartos/pool',
+    };
+
+    if (carrierUserIds.length > 0) {
+      for (const user_id of carrierUserIds) {
+        await this.notifications_service.sendToUser(
+          event.store_id,
+          user_id,
+          'order_awaiting_carrier',
+          title,
+          body,
+          data,
+        );
+      }
+    } else {
+      // Sin carriers → broadcast de tienda (mejor sobre-notificar la campana).
+      await this.notifications_service.createAndBroadcast(
+        event.store_id,
+        'order_awaiting_carrier',
+        title,
+        body,
+        data,
+      );
+    }
+  }
+
+  /**
+   * Vendix Repartos — Fase B5. Limpieza del pool de repartos.
+   *
+   * El plan pedía @OnEvent('order.cancelled') / @OnEvent('order.refunded'),
+   * pero el repo NO emite esos nombres de evento. El evento de ciclo de vida
+   * real y cableado es `order.status_changed`, que se dispara con
+   * new_state='cancelled' (ruta de cancelación en order-flow) o 'refunded'
+   * (refund total, refund-flow.service.ts). Enganchamos ese emisor existente
+   * (no inventamos emisor) y, al llegar a un estado terminal cancelled/refunded,
+   * sacamos la orden del pool y soltamos cualquier claim huérfano. Idempotente
+   * (poner null sobre null no falla). Es un segundo @OnEvent para el mismo
+   * evento, junto al handler de notificación de arriba (EventEmitter2 lo
+   * permite).
+   */
+  @OnEvent('order.status_changed')
+  async handleOrderStateForPoolCleanup(event: OrderStatusChangedEvent) {
+    if (event.new_state !== 'cancelled' && event.new_state !== 'refunded') {
+      return;
+    }
+    try {
+      await this.global_prisma.orders.updateMany({
+        where: { id: event.order_id, store_id: event.store_id },
+        data: { dispatch_pool_at: null, claimed_by_carrier_user_id: null },
+      });
+      // La orden salió del pool (cancelada/reembolsada) → notificar al stream
+      // SSE de repartidores para que la retiren de su lista en vivo.
+      this.event_emitter.emit('carrier.pool.changed', {
+        store_id: event.store_id,
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `[handleOrderStateForPoolCleanup] Failed for order ${event.order_id}: ${err.message}`,
+      );
+    }
   }
 
   @OnEvent('payment.received')

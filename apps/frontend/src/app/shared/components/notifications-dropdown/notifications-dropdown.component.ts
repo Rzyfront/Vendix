@@ -194,6 +194,17 @@ export class NotificationsDropdownComponent {
         return d?.booking_id
           ? `/admin/reservations?booking_id=${d.booking_id}`
           : '/admin/reservations';
+      // Dine-in QR-por-mesa — staff flow (E2 deep-links).
+      // `table_session_id` is the route param (under `tables/session/:id`)
+      // so clicking a notification opens the mesero session page, where
+      // the pending-payments section lives and where the mesero can
+      // reconcile / fire / mark delivered.
+      case 'table_payment_pending':
+      case 'table_payment_confirmed':
+      case 'table_request_bill':
+        return d?.table_session_id
+          ? `/admin/restaurant-ops/tables/session/${d.table_session_id}`
+          : '/admin/restaurant-ops/tables';
       default:
         return null;
     }
@@ -240,6 +251,11 @@ export class NotificationsDropdownComponent {
       table_call_waiter: 'concierge-bell',
       table_request_bill: 'receipt',
       table_request_split: 'split',
+      // Staff-side payment reconciliation (E2). `pending` is the loud
+      // one (cash in hand, needs reconciliation); `confirmed` is the
+      // success acknowledgement — info-tier to avoid burying pending.
+      table_payment_pending: 'bell-ring',
+      table_payment_confirmed: 'circle-check',
     };
     return map[type] ?? 'bell';
   }

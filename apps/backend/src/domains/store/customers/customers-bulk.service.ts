@@ -13,7 +13,8 @@ import {
   BulkCustomerUploadResultDto,
   BulkCustomerUploadItemResultDto,
 } from './dto/bulk-customer.dto';
-import * as XLSX from 'xlsx';
+import { buildReportBuffer } from '@common/reports/report-builder';
+import type { ReportColumn } from '@common/reports/report-column.types';
 
 @Injectable()
 export class CustomersBulkService {
@@ -41,6 +42,13 @@ export class CustomersBulkService {
       'Tipo Documento',
       'Teléfono',
     ];
+
+    // Cada columna es texto (ejemplos). `key === header` para que las filas de
+    // ejemplo (ya indexadas por el texto del encabezado) se reutilicen sin
+    // reindexar y el contrato round-trip (parseFile mapea POR HEADER) quede intacto.
+    const columns: ReportColumn[] = headers.map(
+      (header): ReportColumn => ({ key: header, header, type: 'text' }),
+    );
 
     const exampleData = [
       {
@@ -125,15 +133,6 @@ export class CustomersBulkService {
       },
     ];
 
-    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
-
-    // Ajustar ancho de columnas
-    const colWidths = headers.map((h) => ({ wch: Math.max(h.length + 5, 20) }));
-    ws['!cols'] = colWidths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Clientes');
-
     // Hoja de instrucciones con códigos válidos del catálogo DIAN.
     const instructions: Array<Record<string, string>> = [
       {
@@ -179,13 +178,22 @@ export class CustomersBulkService {
       })),
     ];
 
-    const wsInstructions = XLSX.utils.json_to_sheet(instructions, {
-      header: ['Campo', 'Descripción', 'Obligatorio'],
-    });
-    wsInstructions['!cols'] = [{ wch: 30 }, { wch: 55 }, { wch: 20 }];
-    XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instrucciones');
+    const instructionColumns: ReportColumn[] = [
+      { key: 'Campo', header: 'Campo', type: 'text', width: 30 },
+      { key: 'Descripción', header: 'Descripción', type: 'text', width: 55 },
+      { key: 'Obligatorio', header: 'Obligatorio', type: 'text', width: 20 },
+    ];
 
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    return buildReportBuffer({
+      sheets: [
+        { name: 'Plantilla Clientes', columns, rows: exampleData },
+        {
+          name: 'Instrucciones',
+          columns: instructionColumns,
+          rows: instructions,
+        },
+      ],
+    });
   }
 
   /**

@@ -1,0 +1,79 @@
+:host {
+  display: block;
+}
+
+.address-form-fields {
+  width: 100%;
+}
+
+.map-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-surface, #fff);
+  color: var(--color-text-primary, #111827);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.map-toggle:hover {
+  border-color: var(--color-primary, #16a34a);
+  color: var(--color-primary, #16a34a);
+}
+
+.map-wrapper {
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.address-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.625rem;
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  color: #92400e;
+  font-size: 0.85rem;
+  line-height: 1.25rem;
+}
+
+.reverse-loading {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: var(--color-surface, #f9fafb);
+  color: var(--color-text-muted, #6b7280);
+  font-size: 0.85rem;
+}
+
+/* Wraps a single field + its inline error so the message stays attached to the
+   control. Only renders when the parent opts into `showErrors`. */
+.field-block {
+  display: block;
+}
+
+.field-error {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0.375rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--color-error, #dc2626);
+}
+
+.field-error app-icon {
+  flex-shrink: 0;
+  color: var(--color-error, #dc2626);
+}

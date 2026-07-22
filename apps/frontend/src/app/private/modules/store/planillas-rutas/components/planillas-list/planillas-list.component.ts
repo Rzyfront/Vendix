@@ -38,7 +38,6 @@ const STATUS_LABELS: Record<DispatchRouteStatus, string> = {
   draft: 'Borrador',
   dispatched: 'Despachada',
   in_transit: 'En ruta',
-  settling: 'Cuadrando',
   closed: 'Cerrada',
   voided: 'Anulada',
 };
@@ -51,7 +50,6 @@ const STATUS_COLORS: Record<string, string> = {
   draft: '#6b7280', // gray-500 — sin despachar
   dispatched: '#2563eb', // blue-600 — despachada
   in_transit: '#4f46e5', // indigo-600 — en ruta
-  settling: '#d97706', // amber-600 — cuadrando
   closed: '#059669', // emerald-600 — cerrada
   voided: '#dc2626', // red-600 — anulada
 };
@@ -211,7 +209,6 @@ export class PlanillasListComponent implements OnInit {
         { value: 'draft', label: 'Borrador' },
         { value: 'dispatched', label: 'Despachada' },
         { value: 'in_transit', label: 'En ruta' },
-        { value: 'settling', label: 'Cuadrando' },
         { value: 'closed', label: 'Cerrada' },
         { value: 'voided', label: 'Anulada' },
       ],

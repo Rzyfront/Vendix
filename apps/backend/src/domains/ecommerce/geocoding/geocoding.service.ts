@@ -98,8 +98,15 @@ export class GeocodingService {
   private static readonly CACHE_TTL_SECONDS = 2592000;
   /** Best-effort single-flight lock TTL (ms). */
   private static readonly LOCK_TTL_MS = 1500;
-  /** Nominatim request timeout (ms). */
-  private static readonly FETCH_TIMEOUT_MS = 8000;
+  /**
+   * Nominatim request timeout (ms). Deliberately short because this sits on the
+   * checkout address critical path: a free public provider with no SLA must
+   * never hold the customer for ~8s. On timeout the reverse geocode degrades to
+   * a minimal address (see {@link fetchFromNominatim}) rather than hanging or
+   * 503-ing. Shared by the forward search, which likewise benefits from failing
+   * fast (a slow forward only delays a non-blocking map centering).
+   */
+  private static readonly FETCH_TIMEOUT_MS = 3500;
   private static readonly NOMINATIM_BASE =
     'https://nominatim.openstreetmap.org/reverse';
   /** Nominatim forward-geocoding (free-text address → coordinate). */
@@ -140,8 +147,13 @@ export class GeocodingService {
   /**
    * Reverse-geocode a coordinate to a normalized address.
    *
-   * @throws ServiceUnavailableException when Nominatim is unreachable,
-   *         returns a non-2xx, sends invalid JSON, or reports an error.
+   * Never throws on a provider problem: if Nominatim is unreachable, times out,
+   * returns a non-2xx / invalid JSON, or cannot resolve the point, this degrades
+   * to a minimal empty {@link NormalizedAddress} (see {@link buildDegradedAddress})
+   * so the checkout address step keeps working instead of hitting a hard 503.
+   * Degraded results are intentionally NOT written to the 30-day `geocode:rev`
+   * cache, so the next lookup re-tries the provider and self-heals the moment it
+   * recovers.
    */
   async reverse(lat: number, lng: number): Promise<NormalizedAddress> {
     const cell = `${lat.toFixed(5)}:${lng.toFixed(5)}`;
@@ -167,9 +179,20 @@ export class GeocodingService {
       }
     }
 
-    const normalized = await this.fetchFromNominatim(lat, lng);
-    await this.writeCache(cacheKey, normalized);
-    return normalized;
+    const { address, degraded } = await this.fetchFromNominatim(lat, lng);
+    // Cache ONLY genuinely-resolved addresses for 30 days. A degraded result
+    // (provider down / timeout / non-2xx / unresolved coordinate) is never
+    // cached: persisting an empty address here would blank this ~1m cell for up
+    // to 30 days even after Nominatim recovers. Skipping the write lets the next
+    // request retry the provider (fast-fail bounded by FETCH_TIMEOUT_MS + the
+    // per-cell single-flight lock keeps that from stampeding). A short-TTL cache
+    // of the degraded result was considered and rejected: map-drag traffic hits
+    // mostly distinct cells, so it would rarely help and would only risk masking
+    // a real address that briefly failed.
+    if (!degraded) {
+      await this.writeCache(cacheKey, address);
+    }
+    return address;
   }
 
   /**
@@ -251,10 +274,17 @@ export class GeocodingService {
   }
 
   // ----------------------------------------------------------- Nominatim
+  /**
+   * Calls Nominatim reverse and maps it to our contract. On ANY provider
+   * problem (network error / timeout / non-2xx / invalid JSON / unresolved
+   * coordinate) it degrades to a minimal address instead of throwing, returning
+   * `{ address, degraded: true }` so {@link reverse} can skip the 30-day cache.
+   * A genuinely-resolved point returns `{ address, degraded: false }`.
+   */
   private async fetchFromNominatim(
     lat: number,
     lng: number,
-  ): Promise<NormalizedAddress> {
+  ): Promise<{ address: NormalizedAddress; degraded: boolean }> {
     // Fire the spatial cross-axis lookup (Overpass) IN PARALLEL with the
     // Nominatim reverse call. A manually-dragged point is almost never an
     // addressed house, so the cross axis nearly always needs this lookup;
@@ -284,40 +314,36 @@ export class GeocodingService {
         headers: { 'User-Agent': 'Vendix/1.0 (soporte@vendix.online)' },
       });
     } catch (err) {
-      this.logger.error(`Nominatim request failed for ${lat},${lng}: ${err}`);
-      throw new ServiceUnavailableException(
-        'Reverse geocoding provider unavailable',
+      // Network error or FETCH_TIMEOUT_MS abort. Degrade instead of 503 so the
+      // checkout address step is not blocked by a free provider with no SLA.
+      this.logger.warn(
+        `Nominatim request failed for ${lat},${lng}, degrading: ${err}`,
       );
+      return { address: this.buildDegradedAddress(), degraded: true };
     } finally {
       clearTimeout(timeout);
     }
 
     if (!response.ok) {
-      this.logger.error(
-        `Nominatim returned HTTP ${response.status} for ${lat},${lng}`,
+      this.logger.warn(
+        `Nominatim returned HTTP ${response.status} for ${lat},${lng}, degrading`,
       );
-      throw new ServiceUnavailableException(
-        'Reverse geocoding provider error',
-      );
+      return { address: this.buildDegradedAddress(), degraded: true };
     }
 
     let json: NominatimReverseResponse;
     try {
       json = (await response.json()) as NominatimReverseResponse;
     } catch (err) {
-      this.logger.error(`Nominatim returned invalid JSON: ${err}`);
-      throw new ServiceUnavailableException(
-        'Reverse geocoding provider returned invalid data',
-      );
+      this.logger.warn(`Nominatim returned invalid JSON, degrading: ${err}`);
+      return { address: this.buildDegradedAddress(), degraded: true };
     }
 
     if (json.error) {
       this.logger.warn(
-        `Nominatim error for ${lat},${lng}: ${json.error}`,
+        `Nominatim could not resolve ${lat},${lng}, degrading: ${json.error}`,
       );
-      throw new ServiceUnavailableException(
-        'Reverse geocoding provider could not resolve the coordinates',
-      );
+      return { address: this.buildDegradedAddress(), degraded: true };
     }
 
     const normalized = this.normalize(json);
@@ -339,7 +365,29 @@ export class GeocodingService {
     );
     if (composed) normalized.address_line1 = composed;
 
-    return normalized;
+    return { address: normalized, degraded: false };
+  }
+
+  /**
+   * Type-complete {@link NormalizedAddress} used when Nominatim is unreachable,
+   * times out, or cannot resolve the point. Every textual field is empty so the
+   * frontend's guarded prefill (`if (address.city) …`) simply skips it and the
+   * customer types the address manually. The exact coordinate is NOT carried
+   * here — the contract has no lat/lng field — but it is never lost: the map
+   * callers set `latitude`/`longitude` on their form BEFORE `reverse()` resolves
+   * (address-form-fields + checkout), independent of this payload. Returning
+   * this instead of a 503 keeps the checkout address step alive.
+   */
+  private buildDegradedAddress(): NormalizedAddress {
+    return {
+      address_line1: '',
+      address_line2: null,
+      city: '',
+      state_province: null,
+      country_code: '',
+      postal_code: null,
+      municipality_code: null,
+    };
   }
 
   /** Selects the primary road name from a Nominatim address object. */

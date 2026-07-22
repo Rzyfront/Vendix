@@ -1,0 +1,156 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onModalCancel()"
+  title="Asignar a ruta"
+  subtitle="Agrega esta remisión a una planilla de ruta"
+  size="md"
+>
+  <!-- Header icon -->
+  <div slot="header" class="flex items-center justify-center w-10 h-10 rounded-full bg-[var(--color-primary-light)]">
+    <app-icon name="map-pin" [size]="20" class="text-[var(--color-primary)]"></app-icon>
+  </div>
+
+  <!-- Body -->
+  <div class="space-y-4">
+    <!-- Summary -->
+    <div class="rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] p-3 space-y-1.5">
+      <div class="flex items-center justify-between">
+        <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">Remisión</span>
+        <span class="text-[var(--fs-base)] font-[var(--fw-semibold)] text-[var(--color-text-primary)]">
+          {{ dispatchNote().dispatch_number }}
+        </span>
+      </div>
+      @if (dispatchNote().customer_name) {
+        <div class="flex items-center justify-between">
+          <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">Cliente</span>
+          <span class="text-[var(--fs-sm)] text-[var(--color-text-primary)] text-right">
+            {{ dispatchNote().customer_name }}
+          </span>
+        </div>
+      }
+
+      <!-- Delivery address -->
+      <div class="pt-1.5 border-t border-[var(--color-border)]">
+        <div class="flex items-center gap-1.5 mb-1">
+          <app-icon name="map-pin" [size]="13" class="text-[var(--color-text-muted)]"></app-icon>
+          <span class="text-[11px] font-bold uppercase tracking-wide text-[var(--color-text-secondary)]">
+            Dirección de entrega
+          </span>
+        </div>
+        @if (hasAddress()) {
+          <div class="space-y-0.5">
+            @for (line of addressLines(); track line) {
+              <p class="text-[var(--fs-sm)] text-[var(--color-text-primary)] leading-snug">{{ line }}</p>
+            }
+          </div>
+        } @else {
+          <p class="text-[var(--fs-xs)] text-[var(--color-text-secondary)] italic">
+            Sin dirección registrada en la remisión.
+          </p>
+        }
+      </div>
+    </div>
+
+    <!-- Mode toggle -->
+    <div class="grid grid-cols-2 gap-2">
+      @for (opt of modeOptions; track opt.value) {
+        <button
+          type="button"
+          class="p-2.5 border-2 rounded-lg text-left transition-colors"
+          [class]="
+            mode() === opt.value
+              ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
+              : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40'
+          "
+          (click)="setMode(opt.value)"
+        >
+          <div class="flex items-center gap-1.5">
+            <app-icon [name]="opt.icon" [size]="16"></app-icon>
+            <span class="text-sm font-medium">{{ opt.label }}</span>
+          </div>
+          <p class="text-[11px] text-[var(--color-text-muted)] mt-0.5">{{ opt.description }}</p>
+        </button>
+      }
+    </div>
+
+    <!-- Existing mode -->
+    @if (mode() === 'existing') {
+      <div class="space-y-1.5">
+        @if (loadingRoutes()) {
+          <p class="text-xs text-[var(--color-text-secondary)] py-2 px-1">Cargando planillas...</p>
+        }
+
+        @if (!loadingRoutes() && routes().length === 0) {
+          <div class="rounded-lg border border-dashed border-[var(--color-border)] p-4 text-center">
+            <p class="text-xs text-[var(--color-text-muted)]">
+              No hay planillas en borrador o despachadas disponibles.
+            </p>
+            <p class="text-[11px] text-[var(--color-text-muted)] mt-1">
+              Usa "Nueva planilla" para crear una.
+            </p>
+          </div>
+        }
+
+        @if (!loadingRoutes() && routes().length > 0) {
+          <div class="max-h-64 overflow-y-auto space-y-1.5 pr-0.5">
+            @for (r of routes(); track r.id) {
+              <button
+                type="button"
+                class="w-full text-left p-2.5 border rounded-lg transition-colors"
+                [class]="
+                  selectedRouteId() === r.id
+                    ? 'border-[var(--color-primary)] bg-[var(--color-primary-light)]'
+                    : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40'
+                "
+                (click)="pickRoute(r.id)"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium text-[var(--color-text-primary)]">{{ r.route_number }}</span>
+                  <span class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)]">
+                    {{ r.status }}
+                  </span>
+                </div>
+                <p class="text-[11px] text-[var(--color-text-muted)] mt-0.5">
+                  {{ r.planned_date }}
+                  @if (r.driver_user) {
+                    · {{ r.driver_user.first_name }} {{ r.driver_user.last_name }}
+                  }
+                  @if (r.vehicle) {
+                    · {{ r.vehicle.plate }}
+                  }
+                </p>
+              </button>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    <!-- New mode -->
+    @if (mode() === 'new') {
+      <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 flex gap-2.5">
+        <app-icon name="plus-circle" [size]="18" class="text-[var(--color-primary)] flex-shrink-0 mt-0.5"></app-icon>
+        <p class="text-xs text-[var(--color-text-secondary)] leading-snug">
+          Se abrirá el asistente de planillas con esta remisión pre-seleccionada
+          para que definas conductor, vehículo y fecha de la nueva ruta.
+        </p>
+      </div>
+    }
+  </div>
+
+  <!-- Footer -->
+  <div slot="footer">
+    <div class="flex items-center justify-end gap-3">
+      <app-button variant="outline" (clicked)="onModalCancel()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        [disabled]="confirmDisabled()"
+        [loading]="submitting()"
+        (clicked)="onConfirm()"
+      >
+        {{ confirmLabel() }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>

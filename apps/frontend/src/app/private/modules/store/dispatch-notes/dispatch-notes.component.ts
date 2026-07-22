@@ -58,7 +58,7 @@ export class DispatchNotesComponent {
   @ViewChild(DispatchNoteListComponent) dispatch_note_list!: DispatchNoteListComponent;
 
   stats = signal<DispatchNoteStats>({
-    total: 0, draft: 0, confirmed: 0, delivered: 0, invoiced: 0, voided: 0,
+    total: 0, draft: 0, confirmed: 0, delivered: 0, received: 0, invoiced: 0, voided: 0,
   });
   stats_loading = signal(false);
   is_modal_open = signal(false);

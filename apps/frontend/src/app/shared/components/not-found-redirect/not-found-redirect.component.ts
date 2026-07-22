@@ -20,6 +20,7 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
  * - STORE_ADMIN → /admin/dashboard
  * - STORE_ECOMMERCE → /
  * - STORE_LANDING → /
+ * - STORE_DELIVERY → /repartos
  */
 @Component({
   selector: 'app-not-found-redirect',
@@ -40,6 +41,7 @@ export class NotFoundRedirectComponent {
     [AppEnvironment.STORE_ADMIN]: '/admin/dashboard',
     [AppEnvironment.STORE_ECOMMERCE]: '/',
     [AppEnvironment.STORE_LANDING]: '/',
+    [AppEnvironment.STORE_DELIVERY]: '/repartos',
   };
 
   constructor() {

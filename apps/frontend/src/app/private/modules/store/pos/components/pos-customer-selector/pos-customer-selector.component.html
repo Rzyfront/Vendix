@@ -56,6 +56,10 @@
         Volver
       </button>
       <span>Buscar cliente</span>
+      <app-button variant="primary" size="sm" (clicked)="goToCreate(lastQuery())">
+        <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
+        Crear cliente
+      </app-button>
     </div>
 
     <app-inputsearch
@@ -65,6 +69,40 @@
       (enter)="onSearchEnter()"
       (clear)="onClear()"
     ></app-inputsearch>
+
+    <!-- Sugerencias: top-5 clientes por volumen de órdenes cuando el buscador
+         está vacío. Al escribir (≥2 chars) los resultados los reemplazan. -->
+    @if (showingSuggestions()) {
+      @if (loadingTop()) {
+        <div class="search-loading">
+          <div class="spinner"></div>
+          <span>Cargando clientes frecuentes…</span>
+        </div>
+      } @else if (topCustomers().length > 0) {
+        <div class="suggestions-block">
+          <span class="suggestions-label">Clientes frecuentes</span>
+          <div class="search-results">
+            @for (customer of topCustomers(); track customer.id) {
+              <button
+                type="button"
+                class="customer-result"
+                (click)="selectCustomer(customer)"
+              >
+                <span class="result-name">
+                  {{ customer.first_name }} {{ customer.last_name }}
+                </span>
+                <span class="result-email">
+                  {{ customer.email || customer.phone || '—' }}
+                  @if (customer.document_number) {
+                    · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
+                  }
+                </span>
+              </button>
+            }
+          </div>
+        </div>
+      }
+    }
 
     @if (isSearching()) {
       <div class="search-loading">
@@ -101,13 +139,6 @@
         <p>No se encontraron clientes con esos criterios</p>
       </div>
     }
-
-    <div class="create-customer-action">
-      <app-button variant="outline" size="sm" (clicked)="goToCreate(lastQuery())">
-        <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
-        Crear nuevo cliente
-      </app-button>
-    </div>
   }
 
   <!-- ══════════════════ CREATE ══════════════════ -->

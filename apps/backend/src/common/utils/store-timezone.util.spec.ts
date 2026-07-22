@@ -2,6 +2,7 @@ import {
   DEFAULT_STORE_TIMEZONE,
   assertSafeTimezone,
   resolveStoreTimezone,
+  resolveOrganizationTimezone,
   resolveLocalDateRange,
   localPeriodKey,
   enumerateLocalPeriodKeys,
@@ -38,39 +39,158 @@ describe('store-timezone.util', () => {
   });
 
   describe('resolveStoreTimezone', () => {
-    it('reads store_settings.settings.general.timezone', async () => {
+    it('reads the store_settings JSON mirror when the column is absent', async () => {
       const prisma = {
         store_settings: {
           findFirst: jest.fn().mockResolvedValue({
             settings: { general: { timezone: 'America/New_York' } },
+            stores: { timezone: null },
           }),
         },
       } as any;
       await expect(resolveStoreTimezone(prisma, 10)).resolves.toBe(
         'America/New_York',
       );
+      // Fetches column + JSON in a single query via the store_settings->stores relation.
       expect(prisma.store_settings.findFirst).toHaveBeenCalledWith({
         where: { store_id: 10 },
-        select: { settings: true },
+        select: { settings: true, stores: { select: { timezone: true } } },
       });
     });
 
-    it('falls back to DEFAULT when settings are missing or invalid', async () => {
+    // (a) COLUMN-FIRST: stores.timezone wins even when the JSON still holds the
+    // seeded default — closes the silent bug.
+    it('prefers stores.timezone over a JSON left on the default', async () => {
+      const prisma = {
+        store_settings: {
+          findFirst: jest.fn().mockResolvedValue({
+            settings: { general: { timezone: 'America/Bogota' } }, // seeded default
+            stores: { timezone: 'America/Mexico_City' },
+          }),
+        },
+      } as any;
+      await expect(resolveStoreTimezone(prisma, 10)).resolves.toBe(
+        'America/Mexico_City',
+      );
+    });
+
+    it('prefers stores.timezone when the JSON timezone is absent entirely', async () => {
+      const prisma = {
+        store_settings: {
+          findFirst: jest.fn().mockResolvedValue({
+            settings: null,
+            stores: { timezone: 'America/Mexico_City' },
+          }),
+        },
+      } as any;
+      await expect(resolveStoreTimezone(prisma, 10)).resolves.toBe(
+        'America/Mexico_City',
+      );
+    });
+
+    // (b) No column, JSON present → JSON.
+    it('falls through to the JSON when stores.timezone is null/empty', async () => {
+      const nullColumn = {
+        store_settings: {
+          findFirst: jest.fn().mockResolvedValue({
+            settings: { general: { timezone: 'America/Lima' } },
+            stores: { timezone: null },
+          }),
+        },
+      } as any;
+      await expect(resolveStoreTimezone(nullColumn, 1)).resolves.toBe(
+        'America/Lima',
+      );
+
+      const emptyColumn = {
+        store_settings: {
+          findFirst: jest.fn().mockResolvedValue({
+            settings: { general: { timezone: 'America/Lima' } },
+            stores: { timezone: '   ' }, // whitespace-only is not a valid IANA id
+          }),
+        },
+      } as any;
+      await expect(resolveStoreTimezone(emptyColumn, 1)).resolves.toBe(
+        'America/Lima',
+      );
+    });
+
+    // (c) Nothing configured → DEFAULT (America/Bogota).
+    it('falls back to DEFAULT when neither column nor JSON is set', async () => {
+      const nothing = {
+        store_settings: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ settings: null, stores: { timezone: null } }),
+        },
+      } as any;
+      await expect(resolveStoreTimezone(nothing, 1)).resolves.toBe(
+        DEFAULT_STORE_TIMEZONE,
+      );
+    });
+
+    it('falls back to DEFAULT when the row is missing entirely', async () => {
       const missing = {
         store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       } as any;
       await expect(resolveStoreTimezone(missing, 1)).resolves.toBe(
         DEFAULT_STORE_TIMEZONE,
       );
+    });
 
+    it('falls through past an injection-unsafe column to the JSON, then DEFAULT', async () => {
+      // Unsafe column value is skipped; unsafe JSON too → DEFAULT.
       const invalid = {
         store_settings: {
-          findFirst: jest
-            .fn()
-            .mockResolvedValue({ settings: { general: { timezone: "'; DROP" } } }),
+          findFirst: jest.fn().mockResolvedValue({
+            settings: { general: { timezone: "'; DROP" } },
+            stores: { timezone: "'; DROP TABLE stores; --" },
+          }),
         },
       } as any;
       await expect(resolveStoreTimezone(invalid, 1)).resolves.toBe(
+        DEFAULT_STORE_TIMEZONE,
+      );
+    });
+  });
+
+  describe('resolveOrganizationTimezone (sister — column-first)', () => {
+    it('prefers the first active store column over its JSON default', async () => {
+      const prisma = {
+        store_settings: {
+          findFirst: jest.fn().mockResolvedValue({
+            settings: { general: { timezone: 'America/Bogota' } },
+            stores: { timezone: 'America/Mexico_City' },
+          }),
+        },
+      } as any;
+      await expect(resolveOrganizationTimezone(prisma, 7)).resolves.toBe(
+        'America/Mexico_City',
+      );
+      expect(prisma.store_settings.findFirst).toHaveBeenCalledWith({
+        where: { stores: { organization_id: 7, is_active: true } },
+        select: { settings: true, stores: { select: { timezone: true } } },
+        orderBy: { store_id: 'asc' },
+      });
+    });
+
+    it('falls through to JSON, then DEFAULT', async () => {
+      const jsonOnly = {
+        store_settings: {
+          findFirst: jest.fn().mockResolvedValue({
+            settings: { general: { timezone: 'America/Lima' } },
+            stores: { timezone: null },
+          }),
+        },
+      } as any;
+      await expect(resolveOrganizationTimezone(jsonOnly, 7)).resolves.toBe(
+        'America/Lima',
+      );
+
+      const none = {
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+      } as any;
+      await expect(resolveOrganizationTimezone(none, 7)).resolves.toBe(
         DEFAULT_STORE_TIMEZONE,
       );
     });

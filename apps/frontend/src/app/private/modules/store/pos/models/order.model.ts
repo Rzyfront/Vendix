@@ -1,6 +1,7 @@
 import { CartItem, CartSummary, CartDiscount } from './cart.model';
 import { PosCustomer } from './customer.model';
 import { PaymentMethod, Transaction } from './payment.model';
+import type { FulfillmentType } from '../components/pos-fulfillment-selector.component';
 
 export interface PosOrder {
   id: string;
@@ -172,4 +173,19 @@ export interface OrderStats {
 export interface OrderValidationError {
   field: string;
   message: string;
+}
+
+/**
+ * Resultado de crear/guardar una orden (borrador o mesa) desde el POS.
+ *
+ * Reubicado desde el retirado `pos-order-create-modal.component.ts`
+ * (limpieza Fase 5·B3) para que el contrato del borrador sobreviva al
+ * borrado del modal. Lo emiten `PosCheckoutShellComponent.draftSaved` y,
+ * históricamente, `PosOrderCreateModalComponent.created`.
+ */
+export interface PosOrderCreateResult {
+  order: any;
+  fulfillment: FulfillmentType | null;
+  tableId: number | null;
+  firedToKitchen: boolean;
 }

@@ -9,6 +9,7 @@ import { PublicSeoService } from './domains/public/seo/public-seo.service';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import { json, urlencoded } from 'express';
 import * as v8 from 'v8';
+import { Server } from 'http';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -250,6 +251,15 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
+
+  // TCP keep-alive reaper: detect and clean up dead sockets (e.g. abandoned SSE
+  // connections) without cutting long-lived streams. We only tune keep-alive /
+  // header timeouts here — we intentionally DO NOT set requestTimeout, which
+  // would kill legitimate long-running SSE requests by design.
+  const httpServer: Server = app.getHttpServer();
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000;
+  httpServer.on('connection', (socket) => socket.setKeepAlive(true, 60_000));
 
   const logger = new Logger('Bootstrap');
   logger.log(`🚀 Vendix Backend is running on: http://localhost:${port}/api`);

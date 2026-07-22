@@ -671,6 +671,11 @@ export class AutoEntryService {
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
+      // Anticipo a proveedores (pago de OC sin recepciones) y su reclasificación
+      // al recibir. El pago es una compra (activo por anticipo); la
+      // reclasificación es un ajuste entre CxP y el anticipo.
+      'purchase_order.advance_payment': 'auto_purchase',
+      'purchase_order.advance_reclass': 'adjustment',
       purchase_vat: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
@@ -692,6 +697,10 @@ export class AutoEntryService {
       stock_transfer: 'auto_inventory',
       'intercompany_transfer.shipped': 'auto_inventory',
       'intercompany_transfer.received': 'auto_inventory',
+      // Remisiones bidireccionales (Fase 4)
+      'dispatch_note.delivered': 'auto_inventory',
+      'dispatch_note.received': 'auto_inventory',
+      'dispatch_note.void': 'adjustment',
       cash_register_opened: 'adjustment',
       cash_register_closed: 'adjustment',
       cash_register_movement: 'adjustment',
@@ -852,6 +861,12 @@ export class AutoEntryService {
   /**
    * Fiscal invoice acceptance: Debit Accounts Receivable, Credit Revenue + VAT Payable.
    * Mapping/source keys keep the legacy invoice.validated name for compatibility.
+   *
+   * TODO[FASE-4 plan despacho-economia]: split `subtotal` between product income
+   * (`4135`) and shipping income (`414505` — Transporte Terrestre) when
+   * `shipping_amount > 0`. Flete excluido de IVA por defecto (tax_amount=0).
+   * Ver plan paso 14 — el fix cablea `shipping_amount` desde
+   * `invoicing.service.ts:590` y emite dos líneas en este método.
    */
   async onInvoiceValidated(data: {
     invoice_id: number;
@@ -859,6 +874,13 @@ export class AutoEntryService {
     store_id?: number;
     subtotal: number;
     tax_amount: number;
+    /**
+     * Plan Despacho Economía — FASE 4 paso 14. Monto del flete facturado (excluido
+     * de IVA, separado en cuenta 414505). Cuando > 0 se desdobla la línea de
+     * ingresos: subtotal_producto = subtotal - shipping_amount → 4135,
+     * shipping_amount → 414505. shipping_amount = 0 ⇒ comportamiento legacy.
+     */
+    shipping_amount?: number;
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     total: number;
@@ -888,6 +910,13 @@ export class AutoEntryService {
       0,
     );
     const accounts_receivable = Math.max(0, Number(data.total || 0) - wh_total);
+
+    // Plan Despacho Economía — FASE 4 paso 14. Split del ingreso:
+    //   subtotal_producto = subtotal − shipping_amount → 4135 (revenue)
+    //   shipping_amount                  → 414505 (shipping_income)
+    const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
+    const product_revenue = Math.max(0, Number(data.subtotal || 0) - shipping_amount);
+
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -903,9 +932,23 @@ export class AutoEntryService {
         'invoice.validated.revenue',
         'Revenue',
         0,
-        data.subtotal,
+        product_revenue,
         data.store_id,
       ),
+      // Plan Despacho Economía — FASE 4 paso 14. Línea de flete separada.
+      // Solo se materializa si shipping_amount > 0 (idempotente con el legacy).
+      ...(shipping_amount > 0
+        ? [
+            this.resolveAccountLine(
+              data.organization_id,
+              'invoice.validated.shipping_income',
+              'Shipping Income (Transporte Terrestre)',
+              0,
+              shipping_amount,
+              data.store_id,
+            ),
+          ]
+        : []),
     ]);
 
     lines.push(
@@ -1130,7 +1173,12 @@ export class AutoEntryService {
   /**
    * payment.received:
    * - WITH invoice: Debit Cash/Bank, Credit Accounts Receivable (invoice already recognized revenue)
-   * - WITHOUT invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT if applicable
+   * - WITHOUT invoice (POS direct sale): Debit Cash/Bank, Credit Revenue + VAT + Shipping Income if applicable
+   *
+   * Plan Despacho Economía — FASE 4 paso 15. Cierra el gap diagnosticado en el
+   * comentario previo: cuando el pago POS directo tiene `shipping_cost > 0` y
+   * SIN factura, se acredita también el ingreso de flete en cuenta 414505
+   * para que el guard de balance cuadre.
    */
   async onPaymentReceived(data: {
     payment_id: number;
@@ -1142,6 +1190,12 @@ export class AutoEntryService {
     amount: number;
     subtotal_amount?: number;
     tax_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4 paso 15. Monto del flete. Se acredita
+     * como CR separado en 414505 cuando NO hay factura asociada (POS directo
+     * con `order.shipping_cost > 0`).
+     */
+    shipping_amount?: number;
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
@@ -1210,13 +1264,16 @@ export class AutoEntryService {
         ),
       ]);
     } else {
-      // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT
+      // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT + Shipping Income.
       const tax = Number(data.tax_amount || 0);
       const discount = Number(data.discount_amount || 0);
+      // Plan Despacho Economía — FASE 4 paso 15. El subtotal ya viene sin flete;
+      // el flete se acredita como línea separada en 414505.
+      const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
       const subtotal =
         data.subtotal_amount != null
           ? Number(data.subtotal_amount)
-          : data.amount + discount - tax; // fallback: derive subtotal from amount + discount - tax
+          : data.amount + discount - tax - shipping_amount; // fallback
 
       lines = [
         await this.resolveAccountLine(
@@ -1253,6 +1310,22 @@ export class AutoEntryService {
           data.store_id,
         ),
       );
+
+      // Plan Despacho Economía — FASE 4 paso 15. Línea separada de flete
+      // (414505). Sin esta línea el asiento NO cuadraría cuando
+      // `order.shipping_cost > 0` (POS directo sin factura).
+      if (shipping_amount > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            'payment.received.shipping_income',
+            `Ingreso por flete${order_ref}`,
+            0,
+            shipping_amount,
+            data.store_id,
+          ),
+        );
+      }
 
       // Separate tax lines per fiscal type (IVA→2408, INC→2436, ICA→241205)
       lines.push(
@@ -1331,6 +1404,13 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Plan Despacho Economía — FASE 4. Flete de la venta a crédito. En crédito
+     * `subtotal_amount` YA excluye el flete y `total_amount` lo incluye, por lo
+     * que el flete se acredita como línea separada (414505) SIN restarlo del
+     * revenue; así CR (subtotal + IVA + flete) = DR CxC (grand_total).
+     */
+    shipping_amount?: number;
     total_amount: number;
     user_id?: number;
     /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
@@ -1394,6 +1474,24 @@ export class AutoEntryService {
         data.store_id,
       ),
     );
+
+    // Plan Despacho Economía — FASE 4. Línea separada de flete (414505). En
+    // crédito, `subtotal_amount` YA excluye el flete y `total_amount` (=DR CxC)
+    // lo incluye; SOLO se añade la línea CR de flete (no se resta del revenue),
+    // de lo contrario el asiento no cuadra cuando `shipping_amount > 0`.
+    const shipping_amount = Math.max(0, Number(data.shipping_amount || 0));
+    if (shipping_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'credit_sale.created.shipping_income',
+          `Ingreso por flete${order_ref}`,
+          0,
+          shipping_amount,
+          data.store_id,
+        ),
+      );
+    }
 
     lines.push(
       ...(await this.resolveTaxLines({
@@ -2214,6 +2312,241 @@ export class AutoEntryService {
     });
   }
 
+  // ===== DISPATCH NOTES (remisiones bidireccionales — Fase 4) =====
+
+  /**
+   * dispatch_note.delivered — COGS de una remisión de salida STANDALONE
+   * (customer_delivery sin orden/SO). DR 6135 Costo de Ventas / CR 1435
+   * Inventario. El anti-doble-COGS ya lo aplica el emisor (sólo emite para
+   * standalone). Idempotente por (org, 'dispatch_note.delivered', note_id).
+   */
+  async onDispatchNoteDelivered(data: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const total = Number(data.total_cost || 0);
+    if (total <= 0) return null;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_note.delivered.cogs',
+        `Costo de ventas — remisión ${data.dispatch_number}`,
+        total,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_note.delivered.inventory',
+        `Inventario — remisión ${data.dispatch_number}`,
+        0,
+        total,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_note.delivered',
+      source_id: data.dispatch_note_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Remisión entregada ${data.dispatch_number} — COGS`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * dispatch_note.received — entrada de inventario de una remisión de entrada:
+   *  - purchase_receipt: DR 1435 Inventario / CR 2205 Proveedores (con tercero)
+   *  - customer_return : DR 1435 Inventario / CR 6135 Reversa COGS
+   * Idempotente por (org, 'dispatch_note.received', note_id).
+   */
+  async onDispatchNoteReceived(data: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    subtype: string;
+    total_cost: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const total = Number(data.total_cost || 0);
+    if (total <= 0) return null;
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    let lines: (AutoEntryLine | null)[];
+    if (data.subtype === 'purchase_receipt') {
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.inventory',
+          `Inventario — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.accounts_payable',
+          `Proveedores — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+          supplier_third_party,
+        ),
+      ]);
+    } else {
+      // customer_return
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.inventory',
+          `Inventario (devolución) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.cogs',
+          `Reversa costo de ventas — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    }
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_note.received',
+      source_id: data.dispatch_note_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Remisión recibida ${data.dispatch_number} — ${data.subtype}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * dispatch_note.void — reversa contable (asiento espejo) al anular una
+   * remisión ya materializada. Invierte débito↔crédito del asiento original.
+   * Sólo llega para casos cuyo asiento posteó este módulo. Idempotente por
+   * (org, 'dispatch_note.void', note_id).
+   */
+  async onDispatchNoteVoided(data: {
+    dispatch_note_id: number;
+    dispatch_number: string;
+    organization_id: number;
+    store_id?: number;
+    direction: string;
+    subtype: string;
+    total_cost: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const total = Number(data.total_cost || 0);
+    if (total <= 0) return null;
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    let lines: (AutoEntryLine | null)[];
+    if (data.direction === 'outbound') {
+      // Reversa de customer_delivery standalone: DR inventario / CR COGS.
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.delivered.inventory',
+          `Inventario (reversa anulación) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.delivered.cogs',
+          `Reversa costo de ventas (anulación) — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    } else if (data.subtype === 'purchase_receipt') {
+      // Reversa recepción de compra: DR proveedores / CR inventario.
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.accounts_payable',
+          `Proveedores (reversa anulación) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+          supplier_third_party,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.received.inventory',
+          `Inventario (reversa anulación) — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    } else {
+      // Reversa customer_return: DR COGS / CR inventario.
+      lines = await Promise.all([
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.cogs',
+          `Costo de ventas (reversa devolución) — remisión ${data.dispatch_number}`,
+          total,
+          0,
+          data.store_id,
+        ),
+        this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_note.return.inventory',
+          `Inventario (reversa devolución) — remisión ${data.dispatch_number}`,
+          0,
+          total,
+          data.store_id,
+        ),
+      ]);
+    }
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_note.void',
+      source_id: data.dispatch_note_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Remisión anulada ${data.dispatch_number} — reversa (${data.direction}/${data.subtype})`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
   /**
    * production.completed (Restaurant Suite Fase C)
    *
@@ -2575,13 +2908,44 @@ export class AutoEntryService {
   }
 
   /**
-   * purchase_order.payment: Debit Accounts Payable, Credit Cash/Bank
+   * purchase_order.payment: contabiliza el pago de una orden de compra.
+   *
+   * DOS comportamientos según `is_advance` (bandera resuelta por el EMISOR en
+   * purchase-orders.service.ts — PROHIBIDO detectarlo aquí):
+   *
+   *  - Pago NORMAL (la OC ya tenía recepciones): extingue la CxP creada al
+   *    recibir → DR 2205 Proveedores / CR 1110 Banco.
+   *    Comportamiento actual INTACTO: `source_type='purchase_order.payment'`,
+   *    `source_id=purchase_order_id`.
+   *
+   *  - Pago ANTICIPADO (la OC NO tenía recepciones al pagar): NO hay pasivo que
+   *    extinguir todavía, así que registra un ACTIVO → DR 133005 Anticipos a
+   *    proveedores / CR 1110 Banco. Usa un `source_type` propio
+   *    ('purchase_order.advance_payment') y `source_id=payment_id` para que:
+   *      (a) cada pago anticipado postee su PROPIO asiento (no colisiona con el
+   *          guard de idempotencia por-OC del pago normal), y
+   *      (b) el emisor pueda sumar los débitos REALMENTE posteados a 133005
+   *          (Σ total_debit de estos asientos) como "saldo de anticipo" al
+   *          reclasificar en la recepción — sin acoplarse a códigos de cuenta.
+   *
+   * Al recibir después, `onPurchaseOrderAdvanceReclass` emite DR 2205 / CR 133005
+   * por min(monto_recibido, saldo_anticipo) para netear ambas cuentas.
    */
   async onPurchaseOrderPayment(data: {
     purchase_order_id: number;
+    /**
+     * `purchase_order_payments.id`. Usado como `source_id` SOLO en el camino de
+     * anticipo (para granularidad por-pago). El pago normal conserva
+     * `source_id=purchase_order_id` (comportamiento actual intacto).
+     */
+    payment_id?: number;
     organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
     amount: number;
     payment_method: string;
+    /** Resuelto por el emisor: la OC no tenía recepciones al momento del pago. */
+    is_advance?: boolean;
     user_id?: number;
     /** Snapshot del proveedor. Ver onPurchaseOrderReceived. */
     supplier?: { id: number; name?: string; tax_id?: string };
@@ -2595,21 +2959,27 @@ export class AutoEntryService {
         }
       : undefined;
 
-    // Resolve cash/bank key based on payment method
-    const method = (data.payment_method || '').toLowerCase();
-    const is_cash = method.includes('cash') || method.includes('efectivo');
-    const cash_bank_key = is_cash
-      ? 'purchase_order.payment.cash_bank'
-      : 'purchase_order.payment.cash_bank';
+    // Débito según naturaleza del pago: anticipo (activo 133005) vs pago normal
+    // (extinción de CxP 2205).
+    const debit_key = data.is_advance
+      ? 'purchase_order.payment.supplier_advance'
+      : 'purchase_order.payment.accounts_payable';
+    const debit_label = data.is_advance
+      ? 'Anticipo a proveedor - Pago OC'
+      : 'Proveedores - Pago OC';
+
+    // Cash/bank key (mismo default para efectivo o banco; el override de la
+    // cuenta de contrapartida se maneja vía mapping store/org).
+    const cash_bank_key = 'purchase_order.payment.cash_bank';
 
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
-        'purchase_order.payment.accounts_payable',
-        'Proveedores - Pago OC',
+        debit_key,
+        debit_label,
         data.amount,
         0,
-        undefined,
+        data.store_id,
         supplier_third_party,
       ),
       this.resolveAccountLine(
@@ -2618,13 +2988,110 @@ export class AutoEntryService {
         `Pago OC #${data.purchase_order_id}`,
         0,
         data.amount,
+        data.store_id,
       ),
     ]);
 
     return this.createAutoEntry({
-      source_type: 'purchase_order.payment',
-      source_id: data.purchase_order_id,
-      organization_id: data.organization_id,      description: `Pago orden de compra #${data.purchase_order_id}`,
+      source_type: data.is_advance
+        ? 'purchase_order.advance_payment'
+        : 'purchase_order.payment',
+      source_id: data.payment_id ?? data.purchase_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: data.is_advance
+        ? `Anticipo a proveedor — orden de compra #${data.purchase_order_id}`
+        : `Pago orden de compra #${data.purchase_order_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * purchase_order.advance_reclass: reclasifica un anticipo a proveedor contra
+   * la CxP creada al recibir → DR 2205 Proveedores / CR 133005 Anticipos.
+   *
+   * Se dispara al RECIBIR una OC que tiene anticipos pendientes. El EMISOR
+   * (purchase-orders.service.ts::receive) calcula el `amount` como
+   * min(monto_recibido_de_esta_recepción, saldo_anticipo_disponible) —
+   * PROHIBIDO recalcularlo aquí.
+   *
+   * Neto económico final de una OC pagada por anticipado y luego recibida:
+   *   Pago anticipo:   DR 133005 / CR 1110
+   *   Recepción:       DR 1435   / CR 2205
+   *   Reclasificación: DR 2205   / CR 133005
+   *   → 2205 y 133005 quedan en cero; neto = DR 1435 / CR 1110.
+   *
+   * IDEMPOTENCIA: `source_type='purchase_order.advance_reclass'` con
+   * `source_id=reception_id` → cada recepción reclasifica UNA sola vez (el guard
+   * de createAutoEntry por (org, source_type, source_id, entity) lo garantiza).
+   *
+   * LIMITACIÓN documentada (recepciones/pagos parciales): el saldo de anticipo
+   * lo calcula el emisor sumando los débitos REALMENTE posteados a 133005 menos
+   * lo ya reclasificado; con múltiples recepciones cada una consume una porción
+   * del saldo hasta agotarlo (FIFO por recepción). Si un pago anticipado falló
+   * al postear su asiento (error contable en cola de reintento), su débito NO
+   * cuenta como saldo hasta que el reintento lo postee — la reclasificación
+   * nunca deja 133005 en negativo.
+   */
+  async onPurchaseOrderAdvanceReclass(data: {
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    amount: number;
+    user_id?: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const amount = Number(data.amount || 0);
+    if (!(amount > 0)) {
+      this.logger.warn(
+        `Skipping advance reclass for PO #${data.purchase_order_id} ` +
+          `(reception #${data.reception_id}): non-positive amount (${amount})`,
+      );
+      return null;
+    }
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    const lines = await Promise.all([
+      // DR 2205 Proveedores (extingue la CxP creada por la recepción)
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase_order.received.accounts_payable',
+        'Proveedores (reclasificación de anticipo)',
+        amount,
+        0,
+        data.store_id,
+        supplier_third_party,
+      ),
+      // CR 133005 Anticipos a proveedores (consume el anticipo)
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase_order.payment.supplier_advance',
+        'Anticipos a proveedores (reclasificación)',
+        0,
+        amount,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_order.advance_reclass',
+      source_id: data.reception_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Reclasificación anticipo → CxP OC #${data.purchase_order_id} (recepción #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });
@@ -3859,6 +4326,7 @@ export class AutoEntryService {
    */
   async onApPaymentRegistered(data: {
     ap_id: number;
+    ap_payment_id: number;
     organization_id: number;
     store_id: number;
     amount: number;
@@ -3899,7 +4367,7 @@ export class AutoEntryService {
 
     return this.createAutoEntry({
       source_type: 'ap_payment',
-      source_id: data.ap_id,
+      source_id: data.ap_payment_id ?? data.ap_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
       lines,
@@ -4887,5 +5355,80 @@ export class AutoEntryService {
     }
 
     return lines;
+  }
+
+  // ===================================================================
+  // Plan Despacho Economía — FASE 5 paso 17.
+  // dispatch_route.settlement: reconocimiento del costo del transportador.
+  // Se ejecuta DESPUÉS de que el listener externo (settle-listener.ts) haya
+  // creado la CxP y la CxP haya disparado `ap.payment_registered` para
+  // contabilizar el pago. Aquí sólo se reconoce el devengo del costo
+  // (DR 523550 / CR 2205 — neto de retención).
+  // ===================================================================
+  async onDispatchRouteSettlement(data: {
+    route_id: number;
+    route_number?: string;
+    organization_id: number;
+    store_id: number;
+    transporter_supplier_id: number | null;
+    gross_cost: number;
+    /** Importe ya pagado (neto) — persistido por el listener externo. */
+    net_amount?: number;
+    settlement_type: 'per_delivery' | 'per_route';
+    user_id?: number;
+    /** Snapshot del proveedor para el asiento. */
+    supplier?: { id: number; name?: string; tax_id?: string };
+  }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : data.transporter_supplier_id
+        ? {
+            id: data.transporter_supplier_id,
+            type: 'supplier',
+          }
+        : undefined;
+
+    const gross = Math.max(0, Number(data.gross_cost || 0));
+    const net = Math.max(0, Number(data.net_amount ?? gross));
+
+    const lines: (AutoEntryLine | null)[] = await Promise.all([
+      // DR: costo del transporte (523550) por el gross.
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_route.settlement.transport_cost',
+        `Costo transporte${data.route_number ? ` - Ruta ${data.route_number}` : ''}`,
+        gross,
+        0,
+        data.store_id,
+      ),
+      // CR: CxP al transportador por el neto (gross - retención, ya gestionada
+      // por el listener externo que ejecuta la CxP completa). En el FASE 5 v1
+      // emitimos el evento y la CxP se paga de inmediato vía
+      // ap.payment.registered (CR 2205). Aquí sólo dejamos el devengo.
+      this.resolveAccountLine(
+        data.organization_id,
+        'dispatch_route.settlement.accounts_payable',
+        `CXP transportador${data.route_number ? ` - Ruta ${data.route_number}` : ''}`,
+        0,
+        net,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_route.settlement',
+      source_id: data.route_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Liquidación transporte - Ruta ${data.route_number ?? data.route_id}`,
+      lines,
+      user_id: data.user_id,
+    });
   }
 }

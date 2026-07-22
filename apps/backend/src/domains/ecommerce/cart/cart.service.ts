@@ -113,6 +113,9 @@ export class CartService {
         id: dto.product_id,
         state: 'active',
         available_for_ecommerce: true,
+        // is_sellable: true bloquea agregar al carrito un plato "agotado"
+        // (is_sellable=false se sigue mostrando en la carta como is_sold_out=true).
+        is_sellable: true,
       },
     });
 

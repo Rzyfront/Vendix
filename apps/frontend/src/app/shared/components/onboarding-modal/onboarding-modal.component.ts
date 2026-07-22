@@ -10,6 +10,9 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Actions, ofType } from '@ngrx/effects';
+import { firstValueFrom, race, timer, take } from 'rxjs';
+import * as AuthActions from '../../../core/store/auth/auth.actions';
 
 import {
   FormsModule,
@@ -344,6 +347,7 @@ export class OnboardingModalComponent {
   private readonly fb = inject(FormBuilder);
   private readonly wizardService = inject(OnboardingWizardService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly actions$ = inject(Actions);
   private readonly toastService = inject(ToastService);
   private readonly envSwitchService = inject(EnvironmentSwitchService);
 
@@ -1283,7 +1287,9 @@ export class OnboardingModalComponent {
             } catch (switchError) {
               console.error('Error switching environment:', switchError);
               this.toastService.error('Error al cambiar al entorno de comercio');
-              // Fallback reload to ensure clean state
+              // Refrescar el user (persiste onboarding=true en localStorage)
+              // ANTES del reload para evitar rehidratar estado stale y el loop.
+              await this.refreshUserBeforeReload();
               window.location.reload();
             }
           } else {
@@ -1291,7 +1297,9 @@ export class OnboardingModalComponent {
             this.toastService.warning(
               'No se pudo identificar el comercio específico, redirigiendo al panel general',
             );
-            // Fallback reload to ensure clean state
+            // Refrescar el user (persiste onboarding=true en localStorage)
+            // ANTES del reload para evitar rehidratar estado stale y el loop.
+            await this.refreshUserBeforeReload();
             window.location.reload();
           }
         } else if (app_type === 'ORG_ADMIN') {
@@ -1303,13 +1311,18 @@ export class OnboardingModalComponent {
               'Error switching to organization environment:',
               switchError,
             );
-            // Fallback reload to ensure clean state
+            // Refrescar el user (persiste onboarding=true en localStorage)
+            // ANTES del reload para evitar rehidratar estado stale y el loop.
+            await this.refreshUserBeforeReload();
             window.location.reload();
           }
         } else {
           this.toastService.warning(
             'Tipo de aplicación no reconocido, redirigiendo al panel general',
           );
+          // Refrescar el user (persiste onboarding=true en localStorage)
+          // ANTES del reload para evitar rehidratar estado stale y el loop.
+          await this.refreshUserBeforeReload();
           window.location.reload();
         }
 
@@ -1331,6 +1344,37 @@ export class OnboardingModalComponent {
       this.isSubmitting.set(false);
       this.isProcessing.set(false);
     }
+  }
+
+  /**
+   * Refresca el usuario desde `/auth/me` y ESPERA a que el efecto se resuelva
+   * antes de devolver el control. `refreshUserSuccess` reemplaza el user en el
+   * store y lo persiste en `localStorage` (`saveAuthState`), por lo que llamar
+   * a esto ANTES de un `window.location.reload()` de fallback garantiza que la
+   * rehidratación post-reload lea `organizations.onboarding=true` y no vuelva a
+   * rebotar al wizard (loop de onboarding).
+   *
+   * `refreshUser()` es fire-and-forget (solo despacha la acción), así que
+   * esperamos la acción de resolución (`refreshUserSuccess`/`refreshUserFailure`)
+   * vía el stream de `Actions`. Incluye un timeout defensivo para no colgar el
+   * reload si `/auth/me` no responde.
+   */
+  private async refreshUserBeforeReload(timeoutMs = 4000): Promise<void> {
+    const settled = firstValueFrom(
+      race(
+        this.actions$.pipe(
+          ofType(
+            AuthActions.refreshUserSuccess,
+            AuthActions.refreshUserFailure,
+          ),
+          take(1),
+        ),
+        timer(timeoutMs),
+      ),
+    ).catch(() => undefined);
+
+    this.authFacade.refreshUser();
+    await settled;
   }
 
   /**

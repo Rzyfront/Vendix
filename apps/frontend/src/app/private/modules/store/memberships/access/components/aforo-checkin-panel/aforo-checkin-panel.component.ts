@@ -28,15 +28,23 @@ import {
   GymAccessResult,
   GymCredentialType,
 } from '../../interfaces';
-import { AforoQrScannerComponent } from '../aforo-qr-scanner/aforo-qr-scanner.component';
+import { AforoQrScannerComponent, ScannerViewMode } from '../aforo-qr-scanner/aforo-qr-scanner.component';
 
 /** Normalized shape rendered by the result pill (QR/PIN or fingerprint). */
 interface CheckinResultView {
   granted: boolean;
+  /**
+   * Third visual state: `true` for a RE-ENTRY (warn-grant OR `denied_re_entry`).
+   * Renders amber with an `alert-triangle` icon regardless of `granted`.
+   */
+  warning: boolean;
   label: string;
   color: string;
   name: string | null;
 }
+
+/** Amber shown for the re-entry (warning) state in the result pill. */
+const CHECKIN_WARNING_COLOR = '#d97706';
 
 /**
  * "Ingreso" panel for the gym/aforo view. Lets an operator validate a member's
@@ -68,7 +76,12 @@ interface CheckinResultView {
   ],
   styleUrl: './aforo-checkin-panel.component.css',
   template: `
-    <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+    <app-card
+      [shadow]="'sm'"
+      [responsivePadding]="true"
+      [showHeader]="true"
+      [fullHeight]="true"
+    >
       <div slot="header" class="ci-header">
         <span class="ci-header-icon">
           <app-icon name="log-in" [size]="18" />
@@ -203,7 +216,13 @@ interface CheckinResultView {
             [style.border-color]="rv.color + '33'"
           >
             <app-icon
-              [name]="rv.granted ? 'check-circle' : 'x-circle'"
+              [name]="
+                rv.warning
+                  ? 'alert-triangle'
+                  : rv.granted
+                    ? 'check-circle'
+                    : 'x-circle'
+              "
               [size]="16"
             />
             <span class="result-label">{{ rv.label }}</span>
@@ -217,6 +236,8 @@ interface CheckinResultView {
 
     <app-aforo-qr-scanner
       [isOpen]="scannerOpen()"
+      [continuous]="kiosk()"
+      [defaultMode]="scannerDefaultMode()"
       (scanned)="onQrScanned($event)"
       (closed)="scannerOpen.set(false)"
     />
@@ -229,6 +250,14 @@ export class AforoCheckinPanelComponent {
   readonly actionInFlight = input<boolean>(false);
   /** QR/PIN validation result computed by the host page. */
   readonly lastResult = input<AccessValidationResult | null>(null);
+  /**
+   * Kiosk mode (store setting `qr_kiosk_mode`). When true, the QR scanner is
+   * auto-opened and kept scanning continuously (member after member) so an
+   * unattended reception tablet grants access on each read.
+   */
+  readonly kiosk = input<boolean>(false);
+  /** Store default display mode for the QR scanner (fullscreen | floating). */
+  readonly scannerDefaultMode = input<ScannerViewMode>('fullscreen');
 
   /** Emitted when the operator submits a credential to validate. */
   readonly validate = output<{
@@ -256,22 +285,54 @@ export class AforoCheckinPanelComponent {
     if (this.method() === 'external_ref') {
       const ev = this.fingerResult();
       if (!ev) return null;
-      return {
-        granted: ev.granted,
-        label: this.resultLabel(ev.result),
-        color: this.resultColor(ev.result),
-        name: ev.customer_name,
-      };
+      return this.buildResultView(
+        ev.granted,
+        ev.result,
+        ev.warning,
+        ev.re_entry_minutes,
+        ev.customer_name,
+      );
     }
     const r = this.lastResult();
     if (!r) return null;
-    return {
-      granted: r.granted,
-      label: this.resultLabel(r.result),
-      color: this.resultColor(r.result),
-      name: null,
-    };
+    return this.buildResultView(
+      r.granted,
+      r.result,
+      r.warning,
+      r.re_entry_minutes,
+      null,
+    );
   });
+
+  /**
+   * Build the normalized pill view. A re-entry (warn-grant `warning: true` OR
+   * `denied_re_entry`) becomes the amber third state with an `alert-triangle`
+   * icon and a "hace N min" suffix; every other result keeps its granted/denied
+   * color + label.
+   */
+  private buildResultView(
+    granted: boolean,
+    result: string,
+    warning: boolean | undefined,
+    minutes: number | undefined,
+    name: string | null,
+  ): CheckinResultView {
+    const isReEntry = warning === true || result === 'denied_re_entry';
+    return {
+      granted,
+      warning: isReEntry,
+      label: isReEntry
+        ? this.reEntryLabel(result, minutes)
+        : this.resultLabel(result),
+      color: isReEntry ? CHECKIN_WARNING_COLOR : this.resultColor(result),
+      name,
+    };
+  }
+
+  private reEntryLabel(result: string, minutes: number | undefined): string {
+    const base = result === 'denied_re_entry' ? 'Reingreso bloqueado' : 'Reingreso';
+    return minutes == null ? base : `${base} · hace ${minutes} min`;
+  }
 
   constructor() {
     // Surface the NEXT ambient decision while a fingerprint read is armed.
@@ -283,6 +344,15 @@ export class AforoCheckinPanelComponent {
       if (ev.at === this.fingerArmedAt()) return;
       this.fingerResult.set(ev);
       this.fingerScanning.set(false);
+    });
+
+    // Kiosk mode: keep the QR scanner open whenever the active method is QR so a
+    // reception tablet scans member after member unattended. Reads kiosk()+
+    // method() and writes scannerOpen — no cycle (it never reads scannerOpen).
+    effect(() => {
+      if (this.kiosk() && this.method() === 'qr') {
+        this.scannerOpen.set(true);
+      }
     });
   }
 
@@ -301,7 +371,8 @@ export class AforoCheckinPanelComponent {
   }
 
   onQrScanned(code: string): void {
-    this.scannerOpen.set(false);
+    // Kiosk mode keeps the overlay open (continuous loop); single-shot closes.
+    if (!this.kiosk()) this.scannerOpen.set(false);
     const value = code.trim();
     if (!value) return;
     this.validate.emit({ credential_type: 'qr', credential_value: value });

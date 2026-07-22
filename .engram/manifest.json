@@ -528,6 +528,198 @@
       "sessions": 0,
       "memories": 6,
       "prompts": 0
+    },
+    {
+      "id": "f97903cb",
+      "created_by": "yoner",
+      "created_at": "2026-07-09T03:06:05Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "c1bd0e89",
+      "created_by": "yoner",
+      "created_at": "2026-07-09T15:24:47Z",
+      "sessions": 1,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "3b481051",
+      "created_by": "yoner",
+      "created_at": "2026-07-09T21:33:41Z",
+      "sessions": 2,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "f7985ca0",
+      "created_by": "rzy",
+      "created_at": "2026-07-12T00:25:44Z",
+      "sessions": 21,
+      "memories": 27,
+      "prompts": 0
+    },
+    {
+      "id": "e0cf80c0",
+      "created_by": "rzy",
+      "created_at": "2026-07-12T04:13:04Z",
+      "sessions": 2,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "a368012a",
+      "created_by": "yoner",
+      "created_at": "2026-07-11T17:37:29Z",
+      "sessions": 2,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "6a7ff136",
+      "created_by": "yoner",
+      "created_at": "2026-07-10T16:43:24Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "d961bc16",
+      "created_by": "rzy",
+      "created_at": "2026-07-12T19:30:41Z",
+      "sessions": 6,
+      "memories": 7,
+      "prompts": 0
+    },
+    {
+      "id": "4a020bb6",
+      "created_by": "rzy",
+      "created_at": "2026-07-13T03:48:06Z",
+      "sessions": 7,
+      "memories": 2,
+      "prompts": 0
+    },
+    {
+      "id": "951586c3",
+      "created_by": "rzy",
+      "created_at": "2026-07-13T06:56:35Z",
+      "sessions": 1,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "528d65c5",
+      "created_by": "rzy",
+      "created_at": "2026-07-14T02:40:31Z",
+      "sessions": 14,
+      "memories": 8,
+      "prompts": 0
+    },
+    {
+      "id": "54bc9aea",
+      "created_by": "rzy",
+      "created_at": "2026-07-14T13:32:50Z",
+      "sessions": 3,
+      "memories": 7,
+      "prompts": 0
+    },
+    {
+      "id": "f9ab0264",
+      "created_by": "rzy",
+      "created_at": "2026-07-15T00:00:16Z",
+      "sessions": 14,
+      "memories": 8,
+      "prompts": 0
+    },
+    {
+      "id": "8f7376a6",
+      "created_by": "rzy",
+      "created_at": "2026-07-15T21:30:17Z",
+      "sessions": 15,
+      "memories": 15,
+      "prompts": 0
+    },
+    {
+      "id": "c100100d",
+      "created_by": "rzy",
+      "created_at": "2026-07-16T00:43:20Z",
+      "sessions": 2,
+      "memories": 3,
+      "prompts": 0
+    },
+    {
+      "id": "1ed47104",
+      "created_by": "rzy",
+      "created_at": "2026-07-16T01:03:44Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
+    },
+    {
+      "id": "02f74c0e",
+      "created_by": "yoner",
+      "created_at": "2026-07-16T03:30:26Z",
+      "sessions": 2,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "8369e850",
+      "created_by": "yoner",
+      "created_at": "2026-07-14T18:57:52Z",
+      "sessions": 0,
+      "memories": 5,
+      "prompts": 0
+    },
+    {
+      "id": "8680adb6",
+      "created_by": "rzy",
+      "created_at": "2026-07-17T14:21:33Z",
+      "sessions": 28,
+      "memories": 52,
+      "prompts": 1
+    },
+    {
+      "id": "f7fb1b8b",
+      "created_by": "rzy",
+      "created_at": "2026-07-18T20:25:42Z",
+      "sessions": 21,
+      "memories": 25,
+      "prompts": 0
+    },
+    {
+      "id": "2cf46bc4",
+      "created_by": "rzy",
+      "created_at": "2026-07-20T22:16:20Z",
+      "sessions": 37,
+      "memories": 47,
+      "prompts": 0
+    },
+    {
+      "id": "46755dde",
+      "created_by": "rzy",
+      "created_at": "2026-07-21T04:14:18Z",
+      "sessions": 6,
+      "memories": 4,
+      "prompts": 0
+    },
+    {
+      "id": "c9ef28fb",
+      "created_by": "rzy",
+      "created_at": "2026-07-21T22:46:51Z",
+      "sessions": 6,
+      "memories": 11,
+      "prompts": 0
+    },
+    {
+      "id": "bf502160",
+      "created_by": "rzy",
+      "created_at": "2026-07-22T04:31:55Z",
+      "sessions": 3,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }

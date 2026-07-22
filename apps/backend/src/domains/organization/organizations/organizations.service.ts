@@ -1,9 +1,12 @@
 import {
+  Inject,
   Injectable,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -27,6 +30,9 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 
+// Aggregated org dashboard tolerates 1-2 min of staleness → short TTL (ms).
+const ORGANIZATION_STATS_CACHE_TTL_MS = 120_000;
+
 @Injectable()
 export class OrganizationsService {
   constructor(
@@ -35,6 +41,7 @@ export class OrganizationsService {
     private s3Service: S3Service,
     private defaultPanelUIService: DefaultPanelUIService,
     private orgLocationsService: OrgLocationsService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   async getProfile() {
@@ -356,7 +363,6 @@ export class OrganizationsService {
     organizationId: number,
     query: OrganizationDashboardDto,
   ) {
-    const { period } = query;
     const context = RequestContextService.getContext();
 
     if (!context?.organization_id) {
@@ -378,6 +384,27 @@ export class OrganizationsService {
       throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
 
+    // Tenant (organization_id) + period key. `period` is the only input that
+    // changes the aggregation window; everything else is anchored to "now", so
+    // the short TTL bounds staleness. Ownership is validated above, so the key
+    // only ever holds the caller's own organization.
+    const cacheKey = `organization:stats:${organizationId}:${query.period ?? '_'}`;
+    const cached =
+      await this.cache.get<
+        Awaited<ReturnType<OrganizationsService['computeOrganizationStats']>>
+      >(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.computeOrganizationStats(organizationId, query);
+    await this.cache.set(cacheKey, result, ORGANIZATION_STATS_CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeOrganizationStats(
+    organizationId: number,
+    query: OrganizationDashboardDto,
+  ) {
+    const { period } = query;
     const org_id = organizationId;
 
     // Dates setup
@@ -713,7 +740,31 @@ export class OrganizationsService {
     const shippingCost = Number(row?.shipping_cost ?? 0);
     const cogs = Number(row?.cogs ?? 0);
 
-    return { _sum: { profit: revenue - shippingCost - cogs } };
+    // Plan Despacho Economía — FASE 8 paso 24. Resta el flete cobrado porque
+    // ya se contabiliza como ingreso separado (cuenta 414505). Lo recuperamos
+    // desde accounts_payable source_type='dispatch_route' como proxy del costo
+    // del transportador (suma de original_amount) — fuente operativa robusta
+    // a orgs sin fiscal flow activo.
+    const transportCostRows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ transport_cost: unknown }>
+    >`
+      SELECT COALESCE(SUM(ap.original_amount), 0) AS transport_cost
+      FROM accounts_payable ap
+      WHERE ap.organization_id = ${organizationId}
+        AND ap.source_type = 'dispatch_route'
+        ${storeFilter}
+    `;
+    const transportCost = Number(transportCostRows[0]?.transport_cost ?? 0);
+
+    // Fórmula corregida:
+    //   profit = (producto − COGS) + (ingreso flete − costo flete)
+    // donde:
+    //   producto   = revenue − shippingCost (lo ya cobrado)
+    //   ingreso flete = shippingCost (lo que ya estaba restando arriba)
+    // ⇒ producto − COGS + shippingCost − transportCost
+    //    = revenue − shippingCost − cogs + shippingCost − transportCost
+    //    = revenue − cogs − transportCost
+    return { _sum: { profit: revenue - cogs - transportCost } };
   }
 
   /**

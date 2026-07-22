@@ -379,15 +379,21 @@ export class OrdersService {
       }),
       // "Despachable" — ref 2026-06-25, plan wizard remisión order-first.
       // Single source of truth compartido con stores.service.ts dispatchWhere:
-      // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery
-      // (incluye home_delivery, pickup y other). pending_payment cubre el
+      // state ∈ {processing, pending_payment} + delivery_type ∉ {direct_delivery,
+      // dine_in} (incluye home_delivery, pickup y other). direct_delivery
+      // (entrega en mostrador) y dine_in (comer en mesa) se consumen/entregan en
+      // sitio → nunca generan remisión de despacho. pending_payment cubre el
       // contraentrega (COD): se despacha antes de cobrar. Coincide con el
       // dashboard de tienda y el filtro "Por enviar" del frontend.
-      // NOTA: NO excluye órdenes parcialmente remisionadas; el frontend
-      // descuenta cantidades ya despachadas vía getByOrder(orderId).
+      //
+      // Plan Despacho Economía — FASE 6 paso 19: ahora se excluyen también
+      // las órdenes totalmente remitidas (`dispatch_fulfillment != 'full'`).
+      // Las parciales siguen apareciendo con `remaining_units` calculado
+      // por el cliente o por el listener.
       ...(query.dispatchable && {
         state: { in: ['processing', 'pending_payment'] as order_state_enum[] },
-        delivery_type: { not: 'direct_delivery' },
+        delivery_type: { notIn: ['direct_delivery', 'dine_in'] as order_delivery_type_enum[] },
+        dispatch_fulfillment: { not: 'full' } as any,
       }),
       ...(date_from &&
         date_to && {

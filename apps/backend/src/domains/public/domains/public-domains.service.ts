@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { app_type_enum, domain_type_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '@common/services/s3.service';
 import { computeNextOpenMessage } from '../../store/settings/utils/next-open-time.util';
@@ -65,6 +66,19 @@ export class PublicDomainsService {
       throw new NotFoundException(`Domain ${hostname} not found`);
     }
 
+    // DERIVE-IN-READ: el tipo de app se deriva de `domain_type` (la fuente de
+    // verdad sin sesión), NO se lee crudo de `app_type`. El `app_type`
+    // almacenado puede haber quedado en el default VENDIX_LANDING del schema
+    // para filas históricas; VENDIX_LANDING solo es válido para dominios core
+    // de Vendix (domain_type === 'vendix_core'). Cualquier subdominio de
+    // tienda/organización DEBE resolver a su app concreta.
+    const appType = this.deriveAppType(
+      domain.domain_type,
+      domain.app_type,
+      domain.store_id,
+      domain.organization_id,
+    );
+
     // Fetch settings based on domain type
     let branding: any = null;
     let ecommerceSettings: any = null;
@@ -87,10 +101,9 @@ export class PublicDomainsService {
         generalSettings = settingsData?.general;
 
         // CLAVE: Para dominios STORE_ECOMMERCE, usar ecommerce.inicio como fuente de verdad
-        if (
-          domain.app_type === 'STORE_ECOMMERCE' &&
-          ecommerceSettings?.inicio
-        ) {
+        // Se usa el app_type DERIVADO para ser robusto ante filas con app_type
+        // almacenado obsoleto (VENDIX_LANDING) en dominios ecommerce.
+        if (appType === 'STORE_ECOMMERCE' && ecommerceSettings?.inicio) {
           // Construir branding desde inicio (única fuente de verdad para ecommerce)
           const inicioColores = ecommerceSettings.inicio.colores || {};
           branding = {
@@ -227,8 +240,9 @@ export class PublicDomainsService {
       organization_id: domain.organization_id!,
       store_id: domain.store_id ?? undefined,
 
-      // NUEVO: app_type directo del domain (única fuente de verdad)
-      app: domain.app_type,
+      // DERIVADO de domain_type (ver deriveAppType). VENDIX_LANDING solo se
+      // emite para dominios core; tiendas/organizaciones resuelven su app real.
+      app: appType,
 
       // NUEVO: Branding desde store_settings
       branding,
@@ -259,6 +273,75 @@ export class PublicDomainsService {
       is_primary: domain.is_primary,
       ownership: domain.ownership,
     };
+  }
+
+  /**
+   * Deriva el app_type a devolver en la resolución de dominio a partir de
+   * `domain_type` (fuente de verdad sin sesión).
+   *
+   * Regla dura: `VENDIX_LANDING` SOLO se emite para dominios core de Vendix
+   * (`domain_type === 'vendix_core'`). Cualquier subdominio de tienda u
+   * organización resuelve a su app concreta:
+   *   - store        → STORE_LANDING
+   *   - organization → ORG_LANDING
+   *   - ecommerce    → STORE_ECOMMERCE
+   *
+   * Defensivo: si `domain_type` es null/desconocido, cae al `app_type`
+   * almacenado, pero NUNCA emite VENDIX_LANDING para un dominio que tiene
+   * store_id (→ STORE_LANDING) u organization_id (→ ORG_LANDING).
+   */
+  private deriveAppType(
+    domainType: domain_type_enum | null | undefined,
+    storedAppType: app_type_enum | null | undefined,
+    storeId: number | null | undefined,
+    organizationId: number | null | undefined,
+  ): app_type_enum {
+    // Regla dura: VENDIX_LANDING SOLO es válido para dominios core de Vendix.
+    // Corrección QUIRÚRGICA: únicamente reparamos el caso defectuoso — una fila
+    // NO-core cuyo app_type quedó en el default VENDIX_LANDING — derivando el app
+    // concreto desde domain_type. Cualquier otro app_type almacenado es INTENCIONAL
+    // y se PRESERVA: los dominios de admin dedicados (admin-*.vendix.com) tienen
+    // domain_type='store'/'organization' pero app_type=STORE_ADMIN/ORG_ADMIN, y NO
+    // deben degradarse a landing. También se preservan STORE_LANDING/ORG_LANDING/
+    // STORE_ECOMMERCE ya correctos y VENDIX_ADMIN en dominios core.
+    const isLeakedLanding =
+      storedAppType === 'VENDIX_LANDING' && domainType !== 'vendix_core';
+
+    if (!isLeakedLanding) {
+      return (
+        storedAppType ??
+        this.fallbackAppType(domainType, storeId, organizationId)
+      );
+    }
+
+    // Fila NO-core con VENDIX_LANDING obsoleto → derivar el app correcto.
+    return this.fallbackAppType(domainType, storeId, organizationId);
+  }
+
+  /**
+   * Deriva el app_type "landing/ecommerce" correcto para un dominio no-core a
+   * partir de su `domain_type` (o de la presencia de store_id/organization_id
+   * como red de seguridad). NUNCA emite VENDIX_LANDING para un dominio con dueño.
+   */
+  private fallbackAppType(
+    domainType: domain_type_enum | null | undefined,
+    storeId: number | null | undefined,
+    organizationId: number | null | undefined,
+  ): app_type_enum {
+    switch (domainType) {
+      case 'store':
+        return 'STORE_LANDING';
+      case 'organization':
+        return 'ORG_LANDING';
+      case 'ecommerce':
+        return 'STORE_ECOMMERCE';
+      case 'vendix_core':
+        return 'VENDIX_LANDING';
+      default:
+        if (storeId) return 'STORE_LANDING';
+        if (organizationId) return 'ORG_LANDING';
+        return 'VENDIX_LANDING';
+    }
   }
 
   /**

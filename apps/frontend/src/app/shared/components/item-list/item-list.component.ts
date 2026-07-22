@@ -1,4 +1,11 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  input,
+  output,
+  signal,
+  computed,
+} from '@angular/core';
 import { NgClass, NgStyle } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -12,6 +19,7 @@ export type ItemListActionsDisplay = 'buttons' | 'dropdown';
 @Component({
   selector: 'app-item-list',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NgClass, NgStyle, IconComponent],
   templateUrl: './item-list.component.html',
   styleUrl: './item-list.component.scss',
@@ -38,6 +46,14 @@ export class ItemListComponent {
   }>();
 
   activeMenuIndex: number | null = null;
+
+  // Progress ring (donut) geometry. Circle radius is 52 in a 120x120 viewBox.
+  readonly donutRadius = 52;
+  readonly donutCircumference = 2 * Math.PI * this.donutRadius;
+
+  getDashOffset(percent: number): number {
+    return this.donutCircumference * (1 - (percent || 0) / 100);
+  }
 
   getNestedValue(obj: any, path: string): any {
     if (!path || !obj) return obj;

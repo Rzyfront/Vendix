@@ -20,12 +20,14 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
 import {
   ButtonComponent,
+  IconComponent,
   InputComponent,
   ModalComponent,
   SelectorComponent,
   SelectorOption,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
 
 import { CustomersService } from '../../../../customers/services/customers.service';
 import { Customer } from '../../../../customers/models/customer.model';
@@ -68,6 +70,7 @@ interface CredentialFormShape {
     SelectorComponent,
     InputComponent,
     ButtonComponent,
+    IconComponent,
   ],
   template: `
     <app-modal
@@ -93,11 +96,59 @@ interface CredentialFormShape {
             label="Tipo de credencial"
             placeholder="Selecciona un tipo"
             [options]="typeOptions"
+            [searchable]="true"
             [required]="true"
           />
         }
 
-        @if (valueFieldVisible()) {
+        @if (isFingerprint()) {
+          <!--
+            Fingerprint (external_ref): the value is captured LIVE from the
+            biometric reader over SSE and written to the HIDDEN credential_value
+            control — it is never typed nor rendered.
+          -->
+          <div class="space-y-2">
+            <span class="block text-sm font-medium text-text-primary"
+              >Huella (lector biométrico)</span
+            >
+            @if (!fingerScanning() && !fingerCaptured()) {
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="startFingerScan()"
+              >
+                <app-icon slot="icon" name="fingerprint" [size]="16" />
+                Escanear huella
+              </app-button>
+            } @else if (fingerScanning()) {
+              <div class="flex items-center gap-3 text-sm text-text-muted">
+                <span>Esperando lectura…</span>
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  (clicked)="cancelFingerScan()"
+                  >Cancelar</app-button
+                >
+              </div>
+            } @else {
+              <div class="flex items-center gap-3 text-sm text-success">
+                <app-icon name="fingerprint" [size]="16" />
+                <span>Huella capturada &#10003;</span>
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  (clicked)="startFingerScan()"
+                  >Volver a escanear</app-button
+                >
+              </div>
+            }
+            <p class="text-xs text-text-muted">
+              Coloca el dedo en el lector biométrico. Solo se guarda una
+              referencia del dispositivo: la huella nunca se muestra ni se
+              almacena.
+            </p>
+          </div>
+        } @else if (showManualValue()) {
           <app-input
             formControlName="credential_value"
             label="Valor de la credencial"
@@ -141,6 +192,7 @@ export class MembershipCredentialFormModalComponent {
   private readonly accessService = inject(MembershipAccessService);
   private readonly customersService = inject(CustomersService);
   private readonly toastService = inject(ToastService);
+  private readonly ambient = inject(MembershipAmbientAccessService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly open = model<boolean>(false);
@@ -189,9 +241,10 @@ export class MembershipCredentialFormModalComponent {
 
   /**
    * Signal mirror of `form.controls.credential_type.value` so that the
-   * `valueFieldVisible` computed and the validator-side-effect below can
-   * react to type changes (Zoneless: plain `form.controls.X.value` reads are
-   * NOT reactive inside `computed` / `effect`).
+   * `isFingerprint` / `showManualValue` computeds and the validator
+   * side-effect below can react to type changes (Zoneless: plain
+   * `form.controls.X.value` reads are NOT reactive inside `computed` /
+   * `effect`).
    */
   private readonly credentialTypeSignal = toSignal(
     this.form.controls.credential_type.valueChanges,
@@ -200,16 +253,30 @@ export class MembershipCredentialFormModalComponent {
     },
   );
 
+  /** `external_ref` uses the live biometric-scan flow, not a manual input. */
+  readonly isFingerprint = computed(
+    () => this.credentialTypeSignal() === 'external_ref',
+  );
+
   /**
-   * The raw `credential_value` input is only meaningful for `external_ref`
-   * (operator-supplied device id) and for EDIT (sensitive value can be
-   * re-supplied). For `qr` / `pin` in CREATE the backend auto-generates the
-   * value one-shot, so the input is replaced by a hint.
+   * The raw `credential_value` text input is shown ONLY for EDIT of a non-
+   * fingerprint credential (the operator can re-supply the sensitive value).
+   * For `qr` / `pin` in CREATE the backend auto-generates the value one-shot
+   * (a hint is shown instead); for `external_ref` (create or edit) the value
+   * is captured live from the reader (scan UI), never typed.
    */
-  readonly valueFieldVisible = computed(() => {
-    const t = this.credentialTypeSignal();
-    return t === 'external_ref' || !!this.credential();
-  });
+  readonly showManualValue = computed(
+    () => !this.isFingerprint() && !!this.credential(),
+  );
+
+  // ── Fingerprint live-capture state (external_ref only) ──────────────────
+  /** True while armed and waiting for the next `enrollment` SSE event. */
+  readonly fingerScanning = signal(false);
+  /** True once a reference has been captured into the hidden value control. */
+  readonly fingerCaptured = signal(false);
+  /** `.at` of the last enrollment event present when the scan was armed, so a
+   * pre-existing (stale) event is not mistaken for a fresh read. */
+  private readonly fingerArmedAt = signal<string | null>(null);
 
   constructor() {
     // Sync validators + prefill each time the modal opens.
@@ -218,6 +285,10 @@ export class MembershipCredentialFormModalComponent {
       const existing = this.credential();
 
       if (!isOpen) return;
+
+      // Every open starts with a clean fingerprint-capture state so a prior
+      // session's scan never leaks into a new credential.
+      this.resetFingerState();
 
       if (existing) {
         // Edit: customer + type immutable; value is a sensitive field. The API
@@ -275,7 +346,26 @@ export class MembershipCredentialFormModalComponent {
       // Skip during edit — the open/credential effect above already handled
       // that branch with the existing (non-required) validator set.
       if (this.credential()) return;
-      this.applyCredentialValueValidators(this.credentialTypeSignal());
+      const type = this.credentialTypeSignal();
+      // Switching type in CREATE must never carry a stale scan across types.
+      this.resetFingerState();
+      this.applyCredentialValueValidators(type);
+    });
+
+    // Capture the NEXT biometric `enrollment` event while a scan is armed.
+    // Stale events are discriminated by `.at` (mirrors aforo-checkin-panel).
+    // The reference is written to the HIDDEN `credential_value` control and is
+    // NEVER rendered, toasted, or logged.
+    effect(() => {
+      const ev = this.ambient.lastEnrollment();
+      if (!this.fingerScanning()) return;
+      if (!ev || !ev.at) return;
+      if (ev.at === this.fingerArmedAt()) return;
+      const control = this.form.controls.credential_value;
+      control.setValue(ev.external_ref, { emitEvent: false });
+      control.updateValueAndValidity({ emitEvent: false });
+      this.fingerCaptured.set(true);
+      this.fingerScanning.set(false);
     });
   }
 
@@ -298,6 +388,34 @@ export class MembershipCredentialFormModalComponent {
       control.setValue('', { emitEvent: false });
     }
     control.updateValueAndValidity({ emitEvent: false });
+  }
+
+  /**
+   * Arm the biometric reader: ensure the SSE stream is live, wipe any prior
+   * capture (re-blocking the form via the `required` validator), snapshot the
+   * current enrollment `.at` so only a FRESH read counts, and flip to the
+   * "waiting" state. The captured value is picked up by the constructor effect.
+   */
+  startFingerScan(): void {
+    this.ambient.connect();
+    this.fingerCaptured.set(false);
+    const control = this.form.controls.credential_value;
+    control.setValue('', { emitEvent: false });
+    control.updateValueAndValidity({ emitEvent: false });
+    this.fingerArmedAt.set(this.ambient.lastEnrollment()?.at ?? '');
+    this.fingerScanning.set(true);
+  }
+
+  /** Abort an armed scan without capturing anything. */
+  cancelFingerScan(): void {
+    this.fingerScanning.set(false);
+  }
+
+  /** Clear all transient fingerprint-capture state. */
+  private resetFingerState(): void {
+    this.fingerScanning.set(false);
+    this.fingerCaptured.set(false);
+    this.fingerArmedAt.set(null);
   }
 
   private loadCustomers(): void {
@@ -393,30 +511,34 @@ export class MembershipCredentialFormModalComponent {
 
     // Surface the one-shot value to the operator. The backend never returns
     // it again, so this toast is the only chance to read it back after submit.
+    // The success message reflects whether the email was actually delivered;
+    // a separate warning (below) carries the backend reason on failure.
+    const emailSuffix = emailSent ? 'enviado por email' : 'no se pudo enviar el email';
     if (type === 'qr') {
       this.toastService.success(
-        `QR creado: ${value} — enviado por email`,
+        `QR creado: ${value} — ${emailSuffix}`,
         'Credencial creada',
       );
     } else if (type === 'pin') {
       this.toastService.success(
-        `PIN creado: ${value} — enviado por email`,
+        `PIN creado: ${value} — ${emailSuffix}`,
         'Credencial creada',
       );
     } else {
-      // external_ref (fingerprint reference) — the value is just an opaque
-      // device id, not a secret; we still confirm + show email status.
+      // external_ref (fingerprint reference) — the value is a device reference
+      // that must NEVER be surfaced (Ley 1581). Confirm generically; the raw
+      // value is never read, rendered, or logged here.
       this.toastService.success(
-        `Huella registrada: ${value} — aviso enviado`,
+        emailSent
+          ? 'Huella registrada correctamente — aviso enviado al socio'
+          : 'Huella registrada correctamente — no se pudo enviar el aviso',
         'Credencial creada',
       );
     }
 
     if (!emailSent) {
-      this.toastService.warning(
-        'No se pudo enviar el email (el socio no tiene email configurado o falló el envío).',
-        'Aviso',
-      );
+      const reason = created.email_error ? `: ${created.email_error}` : '';
+      this.toastService.warning(`No se pudo enviar el email${reason}.`, 'Aviso');
     }
 
     this.form.reset({ credential_type: 'qr', is_active: true });

@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   inject,
   input,
   output,
@@ -71,6 +72,22 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
           </div>
         </div>
 
+        <!-- Irreversible warning (delivering directly, without a route) -->
+        @if (!hasActiveRoute()) {
+          <div class="rounded-xl border border-amber-300 bg-amber-50 p-3 flex gap-2.5">
+            <app-icon name="alert-triangle" [size]="18" class="text-amber-600 flex-shrink-0 mt-0.5"></app-icon>
+            <div class="space-y-1">
+              <p class="text-[var(--fs-sm)] font-[var(--fw-semibold)] text-amber-800">
+                Esta acción no se puede deshacer
+              </p>
+              <p class="text-[var(--fs-xs)] text-amber-700 leading-snug">
+                Vas a entregar esta remisión directamente, sin ruta. La mercancía sale de
+                bodega: se descuenta el stock y se registra el costo de venta (COGS).
+              </p>
+            </div>
+          </div>
+        }
+
         <!-- Form -->
         <form [formGroup]="form" class="space-y-4">
           <app-input
@@ -121,6 +138,18 @@ export class DeliverModalComponent {
   readonly isOpenChange = output<boolean>();
   readonly dispatchNote = input.required<DispatchNote>();
   readonly delivered = output<{ actual_delivery_date: string; notes?: string }>();
+
+  /**
+   * True when the remisión is currently assigned to a dispatch route (a stop
+   * whose status is not `released` and that carries a route). When false, the
+   * delivery happens directly from the remisión and is irreversible, so the
+   * modal surfaces an amber warning.
+   */
+  readonly hasActiveRoute = computed<boolean>(() =>
+    (this.dispatchNote().dispatch_route_stops ?? []).some(
+      (s) => s.status !== 'released' && !!s.route,
+    ),
+  );
 
   form: FormGroup = this.fb.group({
     actual_delivery_date: [this.getTodayDate()],

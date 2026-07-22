@@ -1,7 +1,9 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import {
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Controller,
   Get,
   Post,
@@ -10,8 +12,14 @@ import {
   Param,
   Delete,
   Query,
+  HttpCode,
+  HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { PurchaseOrdersService } from './purchase-orders.service';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -24,6 +32,23 @@ import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
+import {
+  PaymentReceiptScanJob,
+  PaymentReceiptScanJobStatusResult,
+} from './payment-receipt-scan-job.interface';
+
+/** Mimites permitidos para el scan de comprobante (calque del patrón
+ *  dispatch-notes: sharp solo procesa imagen; PDF → ver skill `vendix-ai-queue` v2.2). */
+const PAYMENT_RECEIPT_SCAN_ALLOWED_MIMETYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+const PAYMENT_RECEIPT_SCAN_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 @Controller('store/orders/purchase-orders')
 @UseGuards(PermissionsGuard)
@@ -32,6 +57,10 @@ export class PurchaseOrdersController {
     private readonly purchaseOrdersService: PurchaseOrdersService,
     private readonly invoiceScannerService: InvoiceScannerService,
     private readonly responseService: ResponseService,
+    // FASE TRACK B2 — cola dedicada `payment-receipt-scan` (registrada en
+    // purchase-orders.module.ts). Calque del patrón expenses.
+    @InjectQueue('payment-receipt-scan')
+    private readonly paymentReceiptScanQueue: Queue<PaymentReceiptScanJob>,
   ) {}
 
   @Post()
@@ -549,5 +578,113 @@ export class PurchaseOrdersController {
         error.status || 400,
       );
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // FASE TRACK B2 — AI scan ASYNC para comprobantes de pago (POP)
+  // ═══════════════════════════════════════════════════════════════
+  // Calque de dispatch-notes (`receipt-scan`) y expenses (`scan`).
+  //   POST /:id/payments/scan        → 202 {job_id}     (enqueue)
+  //   GET  /:id/payments/scan/:jobId → {status, result?} (poll con IDOR)
+  //
+  // El controller es dueño del preprocess (sharp resize → dataUri) y del
+  // enqueue; el processor (payment-receipt-scan.processor.ts) restaura
+  // RequestContextService.run y llama InvoiceScannerService.scanPaymentFromImage.
+
+  @Post(':id/payments/scan')
+  @Permissions('store:orders:purchase_orders:create')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: require('multer').memoryStorage(),
+      limits: { fileSize: PAYMENT_RECEIPT_SCAN_MAX_FILE_BYTES },
+      fileFilter: (_req, file, cb) => {
+        if (!PAYMENT_RECEIPT_SCAN_ALLOWED_MIMETYPES.has(file.mimetype)) {
+          return cb(
+            new BadRequestException(
+              `Tipo de archivo no soportado: ${file.mimetype}`,
+            ),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async enqueuePaymentReceiptScan(
+    @Param('id') purchaseOrderId: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        'Archivo requerido (campo "file", image/* hasta 10MB).',
+      );
+    }
+
+    // 1. Preprocess at ENQUEUE (multer buffer no cruza la frontera de la cola).
+    const { base64, mimeType } =
+      await this.invoiceScannerService.prepareImage(file);
+    const dataUri = `data:${mimeType};base64,${base64}`;
+
+    // 2. Capturar contexto tenant para que el processor restaure el scope.
+    const ctx = RequestContextService.getContext();
+    const store_id = (ctx as any)?.store_id ?? undefined;
+    const organization_id = (ctx as any)?.organization_id ?? undefined;
+    const user_id = (ctx as any)?.user_id ?? undefined;
+    const request_id =
+      (ctx as any)?.request_id ?? `payment-scan-${randomUUID()}`;
+
+    if (store_id == null) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // 3. Enqueue (calque exacto del patrón expenses/receipt-scan).
+    try {
+      const job = await this.paymentReceiptScanQueue.add(
+        'scan',
+        { dataUri, mimeType, context: { store_id, organization_id, user_id, request_id } },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+        },
+      );
+      return this.responseService.success(
+        { job_id: job.id, purchase_order_id: Number(purchaseOrderId) },
+        'Scan de comprobante encolado',
+      );
+    } catch (err: any) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
+    }
+  }
+
+  @Get(':id/payments/scan/:jobId')
+  @Permissions('store:orders:purchase_orders:read')
+  async getPaymentReceiptScanStatus(
+    @Param('id') purchaseOrderId: string,
+    @Param('jobId') jobId: string,
+  ): Promise<PaymentReceiptScanJobStatusResult> {
+    const job = await this.paymentReceiptScanQueue.getJob(jobId);
+
+    // 🔒 IDOR (MANDATORY per vendix-ai-queue v2.2). job.returnvalue NO está
+    // cubierto por scoped-prisma — viene de Redis. Devolver el mismo 404 que
+    // un job inexistente para no filtrar existencia cross-tenant.
+    const callerStoreId = RequestContextService.getContext()?.store_id as
+      | number
+      | undefined;
+    if (
+      !job ||
+      callerStoreId == null ||
+      job.data?.context?.store_id !== callerStoreId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+
+    return {
+      status: (await job.getState()) as any,
+      result: (job.returnvalue as any) ?? undefined,
+      error: job.failedReason ?? undefined,
+    };
   }
 }

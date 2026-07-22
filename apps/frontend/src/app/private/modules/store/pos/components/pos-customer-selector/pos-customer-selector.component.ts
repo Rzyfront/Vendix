@@ -2,10 +2,12 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
@@ -71,6 +73,13 @@ export class PosCustomerSelectorComponent {
   readonly searchLimit = input<number>(10);
   readonly compact = input<boolean>(true);
   readonly initialView = input<CustomerSelectorView>('overview');
+  /**
+   * When true, the 'search' view pre-shows the top customers (by order volume)
+   * while the query is empty, and — on first render with no customer already
+   * selected — the selector opens directly on the search view. Gated so other
+   * hosts (open-table / assign-customer modals) keep the default overview.
+   */
+  readonly showTopSuggestions = input<boolean>(false);
 
   // ── Outputs ─────────────────────────────────────────────────────────
   readonly customerSelected = output<PosCustomer>();
@@ -88,6 +97,25 @@ export class PosCustomerSelectorComponent {
   private readonly query = signal('');
   /** Última consulta efectiva, usada como prefill al crear desde búsqueda. */
   readonly lastQuery = signal('');
+
+  // ── Top-suggestions (clientes más frecuentes) ───────────────────────
+  /** Top-5 clientes por volumen de órdenes (carga on-init si showTopSuggestions). */
+  readonly topCustomers = signal<PosCustomer[]>([]);
+  readonly loadingTop = signal(false);
+  /** Guard one-shot para la inicialización de vista + carga de top-5. */
+  private topInitialized = false;
+
+  /**
+   * Muestra el bloque de sugeridos: pedido explícitamente, buscador vacío
+   * (query < 2 chars) y sin una búsqueda en curso. Cuando el operador escribe
+   * (≥2 chars) los resultados de búsqueda reemplazan a los sugeridos.
+   */
+  readonly showingSuggestions = computed(
+    () =>
+      this.showTopSuggestions() &&
+      this.query().trim().length < 2 &&
+      !this.isSearching(),
+  );
 
   /** Opciones del selector de tipo de documento (single source of truth). */
   readonly documentTypeOptions: SelectorOption[] = DOCUMENT_TYPES.map(
@@ -115,8 +143,45 @@ export class PosCustomerSelectorComponent {
   );
 
   constructor() {
-    // Aplicar la vista inicial solicitada por el anfitrión.
-    this.view.set(this.initialView());
+    // One-shot: aplica la vista inicial e (si corresponde) arranca directo en
+    // búsqueda con las sugerencias top-5. Un `effect` (no el constructor) porque
+    // los inputs de señal se enlazan DESPUÉS de construir: leerlos aquí sí ve el
+    // valor real que pasó el anfitrión. Escrituras dentro de `untracked`.
+    effect(() => {
+      const wantTop = this.showTopSuggestions();
+      const initial = this.initialView();
+      const hasCustomer = !!this.selectedCustomer();
+      untracked(() => {
+        if (this.topInitialized) return;
+        this.topInitialized = true;
+        if (initial !== 'overview') {
+          this.view.set(initial);
+        } else if (wantTop && !hasCustomer) {
+          // Sin cliente aún → mostramos el buscador (con top-5) directamente.
+          this.view.set('search');
+        }
+        if (wantTop) this.loadTopCustomers();
+      });
+    });
+  }
+
+  /** Carga perezosa e idempotente del top-5 (solo cuando showTopSuggestions). */
+  private loadTopCustomers(): void {
+    if (this.topCustomers().length > 0 || this.loadingTop()) return;
+    this.loadingTop.set(true);
+    this.customerService
+      .topCustomers(5)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          this.topCustomers.set(list ?? []);
+          this.loadingTop.set(false);
+        },
+        error: () => {
+          this.topCustomers.set([]);
+          this.loadingTop.set(false);
+        },
+      });
   }
 
   // ── Navegación drill-in ─────────────────────────────────────────────

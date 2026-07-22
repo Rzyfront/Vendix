@@ -15,6 +15,7 @@ import {
   CreateMembershipFromImportDto,
   UpdateMembershipDto,
   MembershipQueryDto,
+  ExpiringQueryDto,
   RenewMembershipDto,
 } from './dto';
 
@@ -192,14 +193,49 @@ export class MembershipsService {
 
   async findAll(query: MembershipQueryDto) {
     const storeId = this.requireStoreId();
-    const { page = 1, limit = 10, status, customer_id, plan_id } =
+    const { page = 1, limit = 10, status, customer_id, plan_id, search } =
       query ?? {};
     const skip = (page - 1) * limit;
+
+    // Server-side search: pre-fetch users matching the term in any of the
+    // canonical contact fields, then restrict memberships to that set.
+    const term = (search ?? '').trim();
+    let customerFilter: Prisma.membershipsWhereInput['customer_id'] | undefined;
+
+    if (term) {
+      const matched = await this.prisma.users.findMany({
+        where: {
+          OR: [
+            { first_name: { contains: term, mode: 'insensitive' } },
+            { last_name: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+            { phone: { contains: term, mode: 'insensitive' } },
+          ],
+        },
+        select: { id: true },
+        take: 5000,
+      });
+      const matchedIds = matched.map((u) => u.id);
+
+      // Intersect with an explicit customer_id if provided; otherwise use all
+      // matches. An empty set is forced to [-1] so the query returns 0 rows
+      // instead of the entire store membership list.
+      const customerIdsFilter =
+        customer_id !== undefined
+          ? matchedIds.filter((id) => id === customer_id)
+          : matchedIds;
+
+      customerFilter = {
+        in: customerIdsFilter.length ? customerIdsFilter : [-1],
+      };
+    } else if (customer_id !== undefined) {
+      customerFilter = customer_id;
+    }
 
     const where: Prisma.membershipsWhereInput = {
       store_id: storeId,
       ...(status !== undefined && { status }),
-      ...(customer_id !== undefined && { customer_id }),
+      ...(customerFilter !== undefined && { customer_id: customerFilter }),
       ...(plan_id !== undefined && { plan_id }),
     };
 
@@ -221,6 +257,38 @@ export class MembershipsService {
     };
   }
 
+  /**
+   * List memberships whose `period_end` is within the next `days` days OR
+   * already past, restricted to `active` + `expired`. The window combines
+   * "vencidas" (overdue) and "por vencer" (about to expire) so the dashboard
+   * widget can prompt renewals in a single read.
+   *
+   * Ordered by `period_end ASC` so the most urgent rows (already overdue or
+   * closest to expiring) surface first. Bounded list — no pagination: the
+   * caller is expected to render a focused widget, not a full report.
+   */
+  async findExpiring(query: ExpiringQueryDto) {
+    const storeId = this.requireStoreId();
+    const { days = 7, limit = 15 } = query ?? {};
+
+    const now = new Date();
+    const deadline = new Date(now.getTime() + days * DAY_MS);
+
+    const rows = await this.memberships.findMany({
+      where: {
+        store_id: storeId,
+        period_end: { not: null, lte: deadline },
+        status: {
+          in: [membership_status_enum.active, membership_status_enum.expired],
+        },
+      },
+      orderBy: { period_end: 'asc' },
+      take: limit,
+    });
+
+    return this.attachRelations(rows, storeId);
+  }
+
   async findOne(id: number) {
     const storeId = this.requireStoreId();
     const membership = await this.memberships.findFirst({
@@ -238,13 +306,50 @@ export class MembershipsService {
 
   async update(id: number, dto: UpdateMembershipDto) {
     const storeId = this.requireStoreId();
-    await this.findOne(id);
+    const current = await this.findOne(id);
+
+    // If `plan_id` is being swapped, validate it exists in this store. The
+    // plans service throws `SYS_NOT_FOUND_001` when the plan is outside the
+    // caller's store scope, which is exactly the cross-tenant guard we want.
+    if (dto.plan_id !== undefined) {
+      await this.membershipPlansService.findOne(dto.plan_id);
+    }
+
+    // Build the merged period range to enforce `period_start <= period_end`.
+    // Existing values may be null (memberships born `pending_payment` have no
+    // period yet — see fix H3), in which case we skip the cross-bound check
+    // because there is nothing on the other side to compare against.
+    const mergedStart: Date | null = dto.period_start
+      ? new Date(dto.period_start)
+      : (current.period_start ?? null);
+    const mergedEnd: Date | null = dto.period_end
+      ? new Date(dto.period_end)
+      : (current.period_end ?? null);
+
+    if (mergedStart && mergedEnd && mergedStart > mergedEnd) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'period_start debe ser anterior o igual a period_end',
+      );
+    }
 
     const data: Prisma.membershipsUpdateInput = {
+      ...(dto.plan_id !== undefined && { plan_id: dto.plan_id }),
+      ...(dto.period_start !== undefined && {
+        period_start: new Date(dto.period_start),
+      }),
+      ...(dto.period_end !== undefined && {
+        period_end: new Date(dto.period_end),
+      }),
+      ...(dto.status !== undefined && { status: dto.status }),
       ...(dto.auto_renew !== undefined && { auto_renew: dto.auto_renew }),
       ...(dto.notes !== undefined && { notes: dto.notes }),
     };
 
+    // Do NOT recalculate price, do NOT emit accounting entries. Admin edits to
+    // plan / period / status are pure metadata overrides; the financial truth
+    // lives in `renew` (which generates the order + journal entry on a real
+    // charge) and in the dedicated transition endpoints.
     await this.memberships.updateMany({
       where: { id, store_id: storeId },
       data,

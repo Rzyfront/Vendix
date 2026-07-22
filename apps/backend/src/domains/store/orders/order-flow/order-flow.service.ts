@@ -52,6 +52,28 @@ const CANCELABLE_STATES: OrderState[] = [
 ];
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
+/**
+ * Monotonic reconciliation ladder for `reconcileOrderFromDispatch`.
+ *
+ * The COD lifecycle advances a linked order only forward along this exact path:
+ *   pending_payment → processing → shipped → delivered → finished
+ *
+ * Every consecutive edge here is a real edge in {@link VALID_TRANSITIONS}
+ * (pending_payment→processing, processing→shipped, shipped→delivered,
+ * delivered→finished), so walking rung-by-rung never produces an invalid
+ * transition. States NOT on this ladder (draft/created/cancelled/refunded) are
+ * never advanced by the reconciler. `indexOf` gives each rung its rank; the
+ * reconciler computes `finalRank = max(currentRank, cappedTargetRank)` so it
+ * can only move up, never back.
+ */
+const RECONCILE_LADDER: OrderState[] = [
+  'pending_payment',
+  'processing',
+  'shipped',
+  'delivered',
+  'finished',
+];
+
 @Injectable()
 export class OrderFlowService {
   private readonly logger = new Logger(OrderFlowService.name);
@@ -1200,33 +1222,451 @@ export class OrderFlowService {
   }
 
   /**
-   * Cancel an order (from created, pending_payment, or processing)
+   * SINGLE SOURCE OF TRUTH: reconcile an order's `state` from the current
+   * state of its dispatch notes (order ↔ remisión unification).
+   *
+   * The COD / delivery lifecycle is driven by the remisiones linked to an
+   * order: as notes are confirmed and delivered (in a route or standalone),
+   * the order state must follow. This method DERIVES the target state from the
+   * notes + balance + open-route context and walks the monotonic ladder
+   * ({@link RECONCILE_LADDER}) up to it, calling {@link updateOrderState} for
+   * each valid edge. It NEVER moves the order backward
+   * (`finalRank = max(current, cappedTarget)`).
+   *
+   * MUST run POST-COMMIT: it does not receive a `tx` and must never be called
+   * inside another interactive `$transaction` — `updateOrderState` opens its
+   * own transaction for the `finished` stock commit and emits side-effect
+   * events only after that commit. The caller is expected to establish the
+   * store context (e.g. `StoreContextRunner.runInStoreContext`); every read
+   * and write here is additionally pinned with an explicit `store_id` for
+   * defense-in-depth tenant isolation.
+   *
+   * Derivation (all inputs scoped to `store_id`):
+   *   - `delivery_type ∈ {direct_delivery, dine_in}` → NO-OP (these never
+   *     reconcile from a remisión).
+   *   - Current state NOT on the ladder (draft/created/cancelled/refunded)
+   *     → NO-OP.
+   *   - `N` = non-voided dispatch notes of the order. `|N| == 0` → NO-OP.
+   *   - `fulfilled(n)` = status ∈ {delivered, invoiced}; `allFulfilled`,
+   *     `anyFulfilled`. `anyDispatched` = status ∈ {confirmed, delivered,
+   *     invoiced}. `balanceZero` = remaining_balance ≤ 0.01.
+   *       · allFulfilled && balanceZero          → finished
+   *       · allFulfilled && !balanceZero         → delivered
+   *       · anyFulfilled && !allFulfilled        → shipped
+   *       · !anyFulfilled && anyDispatched       → shipped
+   *       · only drafts (none dispatched)        → NO-OP
+   *   - Cap when an OPEN route (draft/dispatched/in_transit) still holds any of
+   *     the notes: `on_close` → cap at `shipped`; `live` → cap at `delivered`.
+   *     No open route → no cap.
+   *
+   * Best-effort: any failure is logged and swallowed (never rethrown), mirroring
+   * the dispatch-route COD listener — a reconciliation glitch must not break the
+   * upstream settlement flow.
+   */
+  async reconcileOrderFromDispatch(
+    order_id: number,
+    store_id: number,
+  ): Promise<void> {
+    try {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: order_id, store_id },
+        select: {
+          id: true,
+          state: true,
+          delivery_type: true,
+          remaining_balance: true,
+        },
+      });
+
+      if (!order) {
+        this.logger.debug(
+          `[reconcileOrderFromDispatch] order #${order_id} not found in store #${store_id} — NO-OP`,
+        );
+        return;
+      }
+
+      // Delivery types that never derive their state from a remisión.
+      if (
+        order.delivery_type === 'direct_delivery' ||
+        order.delivery_type === 'dine_in'
+      ) {
+        return;
+      }
+
+      const currentState = order.state as OrderState;
+      const currentRank = RECONCILE_LADDER.indexOf(currentState);
+      if (currentRank === -1) {
+        // draft / created / cancelled / refunded: not on the ladder.
+        this.logger.debug(
+          `[reconcileOrderFromDispatch] order #${order_id} in non-ladder state '${currentState}' — NO-OP`,
+        );
+        return;
+      }
+
+      // N = non-voided dispatch notes of this order (store-scoped).
+      const notes = await this.prisma.dispatch_notes.findMany({
+        where: { order_id, store_id, status: { not: 'voided' } },
+        select: { id: true, status: true },
+      });
+      if (notes.length === 0) {
+        // Cero remisiones activas que respalden la orden. Si está en un peldaño
+        // derivado-de-despacho (shipped/delivered/finished), la fuente-de-verdad
+        // de despacho dice "no hay despacho" → revertir al piso pre-despacho.
+        // Este es el ÚNICO caso donde el reconciliador retrocede, y sólo puede
+        // dispararse al anular la última remisión (las demás rutas siempre
+        // entran con notes>0), por lo que no introduce downgrades espurios. Va
+        // por updateOrderState directo (sin validateTransition) para no tener que
+        // abrir 'shipped'→'processing' en VALID_TRANSITIONS. Idempotente: una
+        // segunda corrida ve la orden ya en el piso (currentRank == floorRank) →
+        // NO-OP.
+        const balanceZero = Number(order.remaining_balance) <= 0.01;
+        const floorState: OrderState = balanceZero
+          ? 'processing'
+          : 'pending_payment';
+        const floorRank = RECONCILE_LADDER.indexOf(floorState);
+        const shippedRank = RECONCILE_LADDER.indexOf('shipped');
+        if (currentRank >= shippedRank && currentRank > floorRank) {
+          await this.updateOrderState(order_id, floorState, {
+            reverted_from_dispatch: true,
+            reverted_at: new Date().toISOString(),
+          });
+          this.logger.log(
+            `[reconcileOrderFromDispatch] order #${order_id} reverted '${currentState}' → '${floorState}' (no active remisión) (store #${store_id})`,
+          );
+        }
+        return;
+      }
+
+      const isFulfilled = (s: string) => s === 'delivered' || s === 'invoiced';
+      const isDispatched = (s: string) =>
+        s === 'confirmed' || s === 'delivered' || s === 'invoiced';
+
+      const allFulfilled = notes.every((n) => isFulfilled(n.status));
+      const anyFulfilled = notes.some((n) => isFulfilled(n.status));
+      const anyDispatched = notes.some((n) => isDispatched(n.status));
+      const balanceZero = Number(order.remaining_balance) <= 0.01;
+
+      let target: OrderState | null = null;
+      if (allFulfilled && balanceZero) {
+        target = 'finished';
+      } else if (allFulfilled && !balanceZero) {
+        target = 'delivered';
+      } else if (anyFulfilled && !allFulfilled) {
+        target = 'shipped';
+      } else if (!anyFulfilled && anyDispatched) {
+        target = 'shipped';
+      } else {
+        // Only drafts (nothing dispatched yet) → nothing to reconcile.
+        return;
+      }
+
+      let cappedRank = RECONCILE_LADDER.indexOf(target);
+
+      // Cap by mode only while an OPEN route still holds any of these notes.
+      const openRouteStop = await this.prisma.dispatch_route_stops.findFirst({
+        where: {
+          dispatch_note_id: { in: notes.map((n) => n.id) },
+          route: {
+            store_id,
+            status: { in: ['draft', 'dispatched', 'in_transit'] },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (openRouteStop) {
+        const mode = await this.readOrderStateUpdateMode(store_id);
+        const capRank =
+          mode === 'live'
+            ? RECONCILE_LADDER.indexOf('delivered')
+            : RECONCILE_LADDER.indexOf('shipped');
+        cappedRank = Math.min(cappedRank, capRank);
+      }
+
+      const finalRank = Math.max(currentRank, cappedRank);
+      if (finalRank <= currentRank) {
+        // Monotonic: never move backward and nothing new to advance.
+        return;
+      }
+
+      // Walk the ladder rung-by-rung; every consecutive edge is valid.
+      for (let rank = currentRank + 1; rank <= finalRank; rank++) {
+        const from = RECONCILE_LADDER[rank - 1];
+        const to = RECONCILE_LADDER[rank];
+        this.validateTransition(from, to);
+        await this.updateOrderState(order_id, to, {
+          reconciled_from_dispatch: true,
+          reconciled_at: new Date().toISOString(),
+          ...(to === 'finished' ? { finished_at: new Date() } : {}),
+        });
+      }
+
+      this.logger.log(
+        `[reconcileOrderFromDispatch] order #${order_id} reconciled '${currentState}' → '${RECONCILE_LADDER[finalRank]}' (store #${store_id})`,
+      );
+    } catch (error) {
+      // Best-effort mirror of the COD listener: never break the caller.
+      this.logger.error(
+        `[reconcileOrderFromDispatch] failed for order #${order_id} (store #${store_id}): ${
+          (error as Error).message
+        }`,
+        (error as Error).stack,
+      );
+    }
+  }
+
+  /**
+   * Read the store's `dispatch.order_state_update_mode` in a tenant-safe,
+   * decoupled way (accepts an explicit `store_id`, does NOT depend on the
+   * request context — the reconciler may run post-commit outside a request).
+   * Mirrors `RouteFlowService.getOrderStateUpdateMode`: `findFirst` (never
+   * `findUnique`, which breaks under the scope merge) and defaults to the
+   * legacy `'on_close'` when the key or the row is missing. A read failure must
+   * NEVER break reconciliation, so it also falls back to `'on_close'`.
+   */
+  private async readOrderStateUpdateMode(
+    store_id: number,
+  ): Promise<'live' | 'on_close'> {
+    try {
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+      const settings = (row?.settings ?? {}) as {
+        dispatch?: { order_state_update_mode?: 'live' | 'on_close' };
+      };
+      return settings.dispatch?.order_state_update_mode === 'live'
+        ? 'live'
+        : 'on_close';
+    } catch {
+      return 'on_close';
+    }
+  }
+
+  /**
+   * Shared COD payment helper (dispatch route AND standalone dispatch note).
+   *
+   * Extracted from `PaymentFromDispatchRouteListener.applyCodPayment` so both
+   * the route-settlement bridge and the standalone dispatch-note flow clear a
+   * COD balance the SAME way. It:
+   *   1. Resolves the REAL `orders.id` from `dispatch_notes.order_id`. If the
+   *      note has no linked order (legacy sales_order flow) it is a NO-OP.
+   *   2. Is IDEMPOTENT by the parameterized correlation key
+   *      (`gateway_reference`): the route uses `dispatch_route_stop:{stop_id}`,
+   *      the standalone flow uses `dispatch_note:{dispatch_note_id}`. If a
+   *      payment with that key already exists, it is a NO-OP.
+   *   3. Records a `payments` row and decrements `orders.remaining_balance`
+   *      (clamped at 0), mirroring `registerCreditPayment`.
+   *
+   * It DOES NOT transition `orders.state` (that is the reconciler's job) and
+   * does NOT emit an extra `payment.received` event (avoids double accounting).
+   * Every read/write is pinned with an explicit `store_id`.
+   */
+  async applyDispatchCodPayment(input: {
+    storeId: number;
+    dispatchNoteId: number;
+    amount: number;
+    correlationKey: string;
+    stopId?: number;
+    currency?: string;
+    paymentMethod?: string;
+  }): Promise<void> {
+    // 1. Resolve the REAL COD order id from the dispatch note (store-scoped).
+    const dispatchNote = await this.prisma.dispatch_notes.findFirst({
+      where: { id: input.dispatchNoteId, store_id: input.storeId },
+      select: { order_id: true },
+    });
+
+    const orderId = dispatchNote?.order_id ?? null;
+    if (!orderId) {
+      // Legacy sales_order flow (no COD order linked) — nothing to settle here.
+      this.logger.debug(
+        `[applyDispatchCodPayment] dispatch_note #${input.dispatchNoteId} has no order_id — NO-OP (${input.correlationKey})`,
+      );
+      return;
+    }
+
+    // 2. Idempotency guard: bail if a payment for this correlation key exists.
+    const existing = await this.prisma.payments.findFirst({
+      where: { gateway_reference: input.correlationKey },
+      select: { id: true },
+    });
+    if (existing) {
+      this.logger.debug(
+        `[applyDispatchCodPayment] Payment already registered for ${input.correlationKey} (payment #${existing.id}) — NO-OP`,
+      );
+      return;
+    }
+
+    // 3. Load the COD order (scope merges orders.store_id via direct field).
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: input.storeId },
+      select: {
+        id: true,
+        currency: true,
+        total_paid: true,
+        remaining_balance: true,
+        customer_id: true,
+      },
+    });
+    if (!order) {
+      this.logger.warn(
+        `[applyDispatchCodPayment] COD order #${orderId} not found in store #${input.storeId} — skipped (${input.correlationKey})`,
+      );
+      return;
+    }
+
+    const remaining = Number(order.remaining_balance);
+    const applied = Math.min(input.amount, Math.max(remaining, 0));
+    const newRemaining = Math.max(remaining - input.amount, 0);
+    const newTotalPaid = Number(order.total_paid) + applied;
+
+    // 4. Record the payment row + decrement the balance, mirroring
+    //    registerCreditPayment. payments has no store_id column (scoped via the
+    //    orders relation), so order_id is sufficient for tenant isolation.
+    await this.prisma.payments.create({
+      data: {
+        order_id: order.id,
+        customer_id: order.customer_id ?? undefined,
+        amount: applied,
+        currency: input.currency ?? order.currency ?? 'COP',
+        state: 'succeeded',
+        gateway_reference: input.correlationKey,
+        paid_at: new Date(),
+        gateway_response: {
+          payment_type:
+            input.stopId != null ? 'dispatch_route' : 'dispatch_note',
+          dispatch_note_id: input.dispatchNoteId,
+          stop_id: input.stopId ?? null,
+          payment_method: input.paymentMethod ?? 'cash',
+          collected_amount: input.amount,
+        },
+      },
+    });
+
+    await this.prisma.orders.updateMany({
+      where: { id: order.id, store_id: input.storeId },
+      data: {
+        total_paid: Math.round(newTotalPaid * 100) / 100,
+        remaining_balance: Math.round(newRemaining * 100) / 100,
+      },
+    });
+
+    this.logger.log(
+      `[applyDispatchCodPayment] COD order #${order.id} settled via ${input.correlationKey}: applied=${applied} remaining=${
+        Math.round(newRemaining * 100) / 100
+      }`,
+    );
+  }
+
+  /**
+   * Cancel an order (from created, pending_payment, or processing).
+   *
+   * Concurrency-safe (BUG-3): the state guard is enforced by an ATOMIC
+   * conditional UPDATE (claim-once pattern, mirrors
+   * OrderStockCommitService:361) instead of a check-then-act read. Two
+   * concurrent cancellations can both pass the cheap fast-path guard, but only
+   * ONE wins the conditional UPDATE (count=1) and runs the one-shot effects
+   * pipeline; the loser matches 0 rows and aborts with the SAME error, never
+   * double-running the pipeline (double payment-cancel / double release / double
+   * event). The claim + payment-cancel + metadata write share ONE
+   * $transaction (pattern of reactivateOrder) so they commit atomically; the
+   * order.status_changed event is emitted only AFTER commit with the REAL
+   * previous state.
    */
   async cancelOrder(orderId: number, dto: CancelOrderDto) {
     const order = await this.getOrder(orderId);
+    const previousState = order.state as OrderState;
 
-    if (!CANCELABLE_STATES.includes(order.state as OrderState)) {
-      throw new BadRequestException(
-        `Cannot cancel order in state '${order.state}'. ` +
+    const notCancelableError = () =>
+      new BadRequestException(
+        `Cannot cancel order in state '${previousState}'. ` +
           `Cancellation is only allowed from: [${CANCELABLE_STATES.join(', ')}]`,
       );
+
+    // Fast-path guard — clean error for the common (non-race) case without
+    // opening a transaction. The authoritative guard is the atomic claim below.
+    if (!CANCELABLE_STATES.includes(previousState)) {
+      throw notCancelableError();
     }
 
-    // Cancel any active payments when the order is cancelled
-    const activePayments = order.payments.filter(
-      (p) => p.state === 'pending' || p.state === 'succeeded',
-    );
-    for (const payment of activePayments) {
-      await this.prisma.payments.update({
-        where: { id: payment.id },
-        data: {
-          state: 'cancelled',
-          updated_at: new Date(),
+    // State-machine edge check (cancelled is a valid target from every
+    // CANCELABLE_STATE) — preserved from the original flow.
+    this.validateTransition(previousState, 'cancelled');
+
+    // Build cancel metadata exactly as updateOrderState would: `orders` has no
+    // cancelled_at/cancellation_reason columns, so these + previous_state live
+    // in internal_notes._flow_metadata (reactivateOrder reads previous_state
+    // back). Merge with any pre-existing _flow_metadata.
+    let existingMetadata: Record<string, any> = {};
+    if (order.internal_notes) {
+      try {
+        const parsed = JSON.parse(order.internal_notes);
+        if (parsed._flow_metadata) {
+          existingMetadata = parsed._flow_metadata;
+        }
+      } catch {
+        existingMetadata = { original_notes: order.internal_notes };
+      }
+    }
+    const internal_notes = JSON.stringify({
+      _flow_metadata: {
+        ...existingMetadata,
+        cancelled_at: new Date(),
+        cancellation_reason: dto.reason,
+        // Persist the previous state so reactivateOrder() can restore it.
+        previous_state: previousState,
+      },
+      notes: existingMetadata.original_notes || '',
+    });
+
+    // CLAIM + payment-cancel + metadata write share ONE transaction so they
+    // commit atomically (pattern of reactivateOrder).
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      // ATOMIC CLAIM — the conditional UPDATE is the source of truth that
+      // serializes concurrent cancellations (double-click / retry). Only ONE
+      // request flips the state out of CANCELABLE_STATES (count=1); a
+      // concurrent request blocks on the row lock, re-evaluates the WHERE
+      // (state is now 'cancelled' ∉ CANCELABLE_STATES) and matches 0 rows →
+      // aborts here WITHOUT running the effects below.
+      const claim = await tx.orders.updateMany({
+        where: { id: orderId, state: { in: CANCELABLE_STATES } },
+        data: { state: 'cancelled', updated_at: new Date() },
+      });
+      if (claim.count === 0) {
+        throw notCancelableError();
+      }
+
+      // Winner: cancel any active payments (one-shot).
+      const activePayments = order.payments.filter(
+        (p) => p.state === 'pending' || p.state === 'succeeded',
+      );
+      for (const payment of activePayments) {
+        await tx.payments.update({
+          where: { id: payment.id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+      }
+
+      // Persist cancel metadata (state/updated_at were already set by the
+      // claim) and return the fully-included order (same shape updateOrderState
+      // returned).
+      return tx.orders.update({
+        where: { id: orderId },
+        data: { internal_notes, updated_at: new Date() },
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          payments: true,
         },
       });
-    }
+    });
 
-    // Release reserved stock by reference (no location_id needed — fixes mismatched location bug)
+    // Release reserved stock by reference — kept OUTSIDE the transaction and
+    // best-effort (exactly as before): a release failure must never abort a
+    // cancellation, and swallowing a DB error INSIDE a Postgres tx would poison
+    // it (aborted-transaction). Runs exactly once because only the claim winner
+    // reaches this point.
     try {
       await this.stockLevelManager.releaseReservationsByReference(
         'order',
@@ -1239,13 +1679,14 @@ export class OrderFlowService {
       );
     }
 
-    this.validateTransition(order.state as OrderState, 'cancelled');
-    const updatedOrder = await this.updateOrderState(orderId, 'cancelled', {
-      cancelled_at: new Date(),
-      cancellation_reason: dto.reason,
-      // Persist the previous state so it can be restored by reactivateOrder().
-      // updateOrderState stores unknown keys into internal_notes._flow_metadata.
-      previous_state: order.state,
+    // Emitted AFTER commit (never on rollback) with the REAL previous state,
+    // mirroring updateOrderState's order.status_changed.
+    this.eventEmitter.emit('order.status_changed', {
+      store_id: updatedOrder.store_id,
+      order_id: orderId,
+      order_number: order.order_number,
+      old_state: previousState,
+      new_state: 'cancelled',
     });
 
     this.logger.log(`Order #${orderId} cancelled: ${dto.reason}`);

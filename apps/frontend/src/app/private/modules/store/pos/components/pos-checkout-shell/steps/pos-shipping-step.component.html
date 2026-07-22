@@ -1,0 +1,183 @@
+<div class="shipping-step">
+  <!-- Validation flash banner -->
+  @if (flashSection()) {
+    <div class="flash-banner">
+      <app-icon name="alert-triangle" [size]="16"></app-icon>
+      <span>{{ flashMessage() }}</span>
+    </div>
+  }
+
+  <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
+       Sub-pasos: 0=Método · 1=Costo (terminal). Espeja Cobro. El "cuándo paga"
+       ya no es un sub-paso: contra entrega es el método cash_on_delivery que el
+       paso Cobro ofrece solo en delivery. La fila-resumen del CLIENTE (frame
+       "Envío · Método") la provee el paso Cliente del shell — aquí NO se
+       duplica. -->
+  <div class="ship-grid">
+    <div class="ship-main">
+      <!-- SUB-STEP 0 · Método de envío -->
+      @if (shipSubStep() === 0) {
+        <section
+          class="method-section"
+          [class.config-flash-warning]="flashSection() === 'shipping-method'"
+        >
+          <div class="section-header">
+            <app-icon name="truck" [size]="20" class="section-icon"></app-icon>
+            <h2 class="section-title">Método de envío</h2>
+          </div>
+
+          @if (shippingMethods().length > 0) {
+            <div class="method-grid">
+              @for (method of shippingMethods(); track method.id) {
+                <button
+                  type="button"
+                  (click)="selectShippingMethod(method)"
+                  class="method-card"
+                  [class.selected]="selectedShippingMethod()?.id === method.id"
+                >
+                  <app-icon
+                    [name]="getShippingIcon(method.type)"
+                    [size]="30"
+                    class="method-card-icon"
+                  ></app-icon>
+                  <span class="method-card-label">{{ method.name }}</span>
+                </button>
+              }
+            </div>
+          } @else {
+            <div class="no-methods-alert">
+              <app-icon name="alert-triangle" [size]="18" class="no-methods-icon"></app-icon>
+              <div class="no-methods-body">
+                <span class="no-methods-title">No hay métodos de envío configurados</span>
+                <span class="no-methods-desc"
+                  >Debes configurar al menos un método de envío para crear órdenes con
+                  envío.</span
+                >
+                <button
+                  type="button"
+                  class="no-methods-link"
+                  (click)="navigateToShippingSettings()"
+                >
+                  Ir a configuración de envíos
+                </button>
+              </div>
+            </div>
+          }
+        </section>
+      } @else if (shipSubStep() > 0 && selectedShippingMethod()) {
+        <button type="button" class="ship-collapsed" (click)="goToShipSubStep(0)">
+          <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
+          <span class="sw-label">Método: {{ selectedShippingMethod()?.name }}</span>
+          <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
+        </button>
+      }
+
+      <!-- SUB-STEP 1 · Costo de envío + notas + totales (terminal) -->
+      @if (shipSubStep() === 1) {
+        @if (selectedShippingMethod()) {
+          <!-- Card · Costo de envío -->
+          <div class="cost-card">
+            <div class="cost-row">
+              <span class="cost-row-label"
+                >Costo de envío
+                {{ manualCostOverride() ? '(manual)' : '(automático)' }}</span
+              >
+              @if (isCalculatingShipping()) {
+                <span class="cost-calculating">
+                  <span class="spinner-sm"></span>
+                  <span>Calculando…</span>
+                </span>
+              } @else {
+                <span class="cost-row-amount">{{ shippingCost() | currency }}</span>
+              }
+            </div>
+
+            @if (calculatedShippingCost() !== null) {
+              <div class="cost-divider"></div>
+              <div class="cost-row cost-row--toggle">
+                <span class="cost-toggle-label">Editar costo manualmente</span>
+                <app-toggle
+                  [checked]="manualCostOverride()"
+                  [ariaLabel]="'Editar costo de envío manualmente'"
+                  (changed)="toggleManualCost()"
+                ></app-toggle>
+              </div>
+            }
+
+            @if (manualCostOverride() || calculatedShippingCost() === null) {
+              <div class="manual-cost-input">
+                <div class="cash-input">
+                  <span class="currency">{{ currencySymbol() }}</span>
+                  <input
+                    appCurrencyInput
+                    [ngModel]="shippingCost()"
+                    (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            }
+          </div>
+
+          <!-- Notas de envío (opcional) -->
+          <div class="notes-block">
+            <label class="notes-label" for="ship-notes">Notas de envío (opcional)</label>
+            <textarea
+              id="ship-notes"
+              class="notes-textarea"
+              [formControl]="deliveryNotesControl"
+              rows="2"
+              placeholder="Dejar en portería, timbre 2"
+            ></textarea>
+          </div>
+
+          <!-- Card · Totales -->
+          <div class="totals-card">
+            <div class="totals-row">
+              <span class="totals-label">Subtotal</span>
+              <span class="totals-amount">{{ subtotal() | currency }}</span>
+            </div>
+            <div class="totals-row">
+              <span class="totals-label">Envío</span>
+              <span class="totals-amount">{{ shippingCost() | currency }}</span>
+            </div>
+            <div class="totals-divider"></div>
+            <div class="totals-row totals-row--grand">
+              <span class="totals-grand-label">Total a pagar</span>
+              <span class="totals-grand-amount">{{ totalWithShipping() | currency }}</span>
+            </div>
+          </div>
+        } @else {
+          <!-- Terminal sin método: prompt para volver a elegir uno -->
+          <div class="no-methods-alert">
+            <app-icon name="alert-triangle" [size]="18" class="no-methods-icon"></app-icon>
+            <div class="no-methods-body">
+              <span class="no-methods-title">Selecciona un método de envío</span>
+              <span class="no-methods-desc"
+                >Elige primero un método para calcular el costo del envío.</span
+              >
+              <button type="button" class="no-methods-link" (click)="goToShipSubStep(0)">
+                Volver a Método
+              </button>
+            </div>
+          </div>
+        }
+      }
+    </div>
+
+    <!-- Columna del stepper: a la derecha en desktop; oculta en móvil (el header
+         horizontal del shell orienta al usuario). -->
+    <aside class="steps-col">
+      <app-steps-line
+        [orientation]="'vertical'"
+        [size]="'sm'"
+        [fillHeight]="true"
+        [minHeightPx]="305"
+        [steps]="shipSubSteps()"
+        [currentStep]="shipSubStep()"
+        [clickable]="true"
+        (stepClicked)="goToShipSubStep($event)"
+      ></app-steps-line>
+    </aside>
+  </div>
+</div>

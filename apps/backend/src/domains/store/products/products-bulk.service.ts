@@ -20,6 +20,8 @@ import {
 import { generateSlug } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { Prisma } from '@prisma/client';
+import { buildReportBuffer } from '@common/reports/report-builder';
+import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
 
 type BulkExcelTemplateRequest = 'products' | 'services';
@@ -1056,22 +1058,21 @@ export class ProductsBulkService {
             },
           ];
 
-    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
-
-    // Ajustar ancho de columnas
-    const colWidths = headers.map((h) => ({ wch: Math.max(h.length + 5, 20) }));
-    ws['!cols'] = colWidths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      wb,
-      ws,
-      templateType === 'services'
-        ? 'Plantilla Servicios'
-        : 'Plantilla Productos',
+    // Cada columna es texto. `key === header` preserva EXACTAMENTE los
+    // encabezados (contrato round-trip: parseFile mapea POR HEADER) y reutiliza
+    // las filas de ejemplo sin reindexar.
+    const columns: ReportColumn[] = headers.map(
+      (header): ReportColumn => ({ key: header, header, type: 'text' }),
     );
 
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const sheetName =
+      templateType === 'services'
+        ? 'Plantilla Servicios'
+        : 'Plantilla Productos';
+
+    return buildReportBuffer({
+      sheets: [{ name: sheetName, columns, rows: exampleData }],
+    });
   }
 
   /**

@@ -4,16 +4,14 @@ import {
   inject,
   input,
   output,
-  signal,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 
 import {
   IconComponent,
   ButtonComponent,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { WizardStepSectionComponent } from './wizard-step-section.component';
 import {
   DispatchNoteWizardService,
   WizardTerminalAction,
@@ -21,71 +19,110 @@ import {
 import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 
 /**
- * Review step (ref 2026-06-25, plan wizard remisión order-first).
+ * Review step (ref plan wizard remisión bidireccional — Ola 2, paso 4).
  *
- * Shows 4 read-only sections (Orden / Ítems / Detalles / Ruta) plus a
- * totals bar and a radio group for the terminal action
- * (draft / confirm_route / deliver). The wizard's "Siguiente" button is
- * hidden at step 4 — the footer "Crear" button mirrors the terminal
- * action label.
+ * Resumen READ-ONLY del wizard dentro del shell `app-wizard-step-section`:
+ * secciones Party / Ítems y bodega / Detalles / Ruta, más una barra de
+ * totales y enlaces "Editar" que saltan al paso correspondiente.
+ *
+ * Ya NO hay control de "Acción terminal": el estado destino de la remisión
+ * se DERIVA de si se asignó ruta (paso Ruta) — ver
+ * `DispatchNoteWizardService.deriveTargetStatus()`. El botón "Crear" vive en
+ * el footer del orquestador.
  */
 @Component({
   selector: 'app-dispatch-wizard-review-step',
   standalone: true,
-  imports: [IconComponent, ButtonComponent, CurrencyPipe, FormsModule],
+  imports: [
+    IconComponent,
+    ButtonComponent,
+    CurrencyPipe,
+    WizardStepSectionComponent,
+  ],
   template: `
-    <div class="space-y-2.5">
-      @if (!created()) {
-        <!-- Order Section -->
-        <section
-          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
-        >
-          <div class="flex items-center justify-between mb-1.5">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              Orden
+    @if (!created()) {
+      <app-wizard-step-section
+        icon="clipboard-check"
+        title="Revisión"
+        subtitle="Revisa el resumen antes de crear la remisión"
+        [dense]="true"
+      >
+        <!-- Party (Orden para customer_delivery; Origen/Destino/Proveedor/Cliente para el resto) -->
+        <div class="rounded-lg bg-[var(--color-surface-elevated)] p-3">
+          <div class="flex items-center justify-between mb-2">
+            <h4
+              class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+            >
+              {{ partyLabel() }}
             </h4>
             <button
               type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(0)"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded-md hover:bg-[var(--color-primary-light)] transition-colors"
+              (click)="goToStep.emit(partyStepIndex())"
             >
               Editar
             </button>
           </div>
-          @if (wizardService.selectedOrder(); as order) {
-            <p class="text-sm text-[var(--color-text-primary)] truncate">
-              <span class="font-medium">#{{ order.order_number }}</span>
-              @if (wizardService.customer(); as c) {
-                <span class="text-[var(--color-text-muted)]">
-                  · {{ c.first_name }} {{ c.last_name }}
-                </span>
+          <div class="text-sm text-[var(--color-text-primary)]">
+            @switch (wizardService.subtype()) {
+              @case ('customer_delivery') {
+                @if (wizardService.selectedOrder(); as order) {
+                  <p class="truncate">
+                    <span class="font-medium">#{{ order.order_number }}</span>
+                    @if (wizardService.customer(); as c) {
+                      <span class="text-[var(--color-text-muted)]">
+                        · {{ c.first_name }} {{ c.last_name }}
+                      </span>
+                    }
+                  </p>
+                  <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
+                    {{ order.grand_total | currency }} · {{ order.state }}
+                  </p>
+                }
               }
-            </p>
-            <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
-              {{ order.grand_total | currency }} · {{ order.state }}
-            </p>
-          }
-        </section>
+              @case ('transfer_out') {
+                <p>Origen: <span class="font-medium">{{ locationLabel(wizardService.fromLocationId()) }}</span></p>
+                <p>Destino: <span class="font-medium">{{ locationLabel(wizardService.toLocationId()) }}</span></p>
+              }
+              @case ('transfer_in') {
+                <p>Origen: <span class="font-medium">{{ locationLabel(wizardService.fromLocationId()) }}</span></p>
+                <p>Destino: <span class="font-medium">{{ locationLabel(wizardService.toLocationId()) }}</span></p>
+              }
+              @case ('purchase_receipt') {
+                <p>Proveedor: <span class="font-medium">{{ wizardService.supplierName() || '—' }}</span></p>
+                @if (wizardService.purchaseOrderId(); as poId) {
+                  <p class="text-xs text-[var(--color-text-muted)]">OC #{{ poId }}</p>
+                }
+              }
+              @case ('customer_return') {
+                <p>Cliente: <span class="font-medium">{{ wizardService.customerName() || '—' }}</span></p>
+                @if (wizardService.relatedDispatchId(); as rdId) {
+                  <p class="text-xs text-[var(--color-text-muted)]">Remisión original #{{ rdId }}</p>
+                }
+              }
+            }
+          </div>
+        </div>
 
-        <!-- Items Section -->
-        <section
-          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
-        >
-          <div class="flex items-center justify-between mb-1.5">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+        <!-- Ítems y bodega -->
+        <div class="rounded-lg bg-[var(--color-surface-elevated)] p-3">
+          <div class="flex items-center justify-between mb-2">
+            <h4
+              class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+            >
               Ítems ({{ wizardService.items().length }})
             </h4>
             <button
               type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(1)"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded-md hover:bg-[var(--color-primary-light)] transition-colors"
+              (click)="goToStep.emit(itemsStepIndex())"
             >
               Editar
             </button>
           </div>
 
           <div class="rounded-md overflow-hidden border border-[var(--color-border)]">
-            @for (item of wizardService.items(); track item.order_item_id; let idx = $index) {
+            @for (item of wizardService.items(); track $index; let idx = $index) {
               <div
                 class="flex items-center gap-2 px-2.5 py-1.5 text-sm"
                 [class]="idx % 2 === 0 ? 'bg-[var(--color-surface)]' : 'bg-[var(--color-surface-elevated)]'"
@@ -97,9 +134,9 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
                   @if (item.requires_serial_numbers) {
                     <span
                       class="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full
-                             bg-amber-100 text-amber-800 text-[10px] font-medium"
+                             bg-[var(--color-warning-light)] text-[var(--color-warning)] text-xs font-medium"
                     >
-                      <app-icon name="hash" [size]="9"></app-icon>
+                      <app-icon name="hash" [size]="12"></app-icon>
                       S/N
                     </span>
                   }
@@ -113,20 +150,20 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
               </div>
             }
           </div>
-        </section>
+        </div>
 
-        <!-- Details Section -->
-        <section
-          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
-        >
-          <div class="flex items-center justify-between mb-1.5">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+        <!-- Detalles (read-only; su "Editar" salta al paso Ítems y bodega tras la fusión) -->
+        <div class="rounded-lg bg-[var(--color-surface-elevated)] p-3">
+          <div class="flex items-center justify-between mb-2">
+            <h4
+              class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+            >
               Detalles
             </h4>
             <button
               type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(2)"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded-md hover:bg-[var(--color-primary-light)] transition-colors"
+              (click)="goToStep.emit(itemsStepIndex())"
             >
               Editar
             </button>
@@ -147,43 +184,45 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
               </p>
             }
           </div>
-        </section>
+        </div>
 
-        <!-- Route Section -->
-        <section
-          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
-        >
-          <div class="flex items-center justify-between mb-1.5">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              Ruta
-            </h4>
-            <button
-              type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
-              (click)="goToStep.emit(3)"
-            >
-              Editar
-            </button>
-          </div>
-          <p class="text-sm text-[var(--color-text-primary)]">
-            @switch (wizardService.routeMode()) {
-              @case ('none') { Sin ruta (entrega directa) }
-              @case ('existing') {
-                #{{ wizardService.selectedRouteId() }}
-              }
-              @case ('new') {
-                @if (wizardService.newRouteDraft(); as draft) {
-                  Nueva planilla · {{ draft.planned_date }} · #{{ draft.driver_user_id }}
-                } @else {
-                  Nueva planilla (borrador)
+        <!-- Ruta (solo customer_delivery — los demás subtipos no tienen ruta) -->
+        @if (wizardService.subtype() === 'customer_delivery') {
+          <div class="rounded-lg bg-[var(--color-surface-elevated)] p-3">
+            <div class="flex items-center justify-between mb-2">
+              <h4
+                class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+              >
+                Ruta
+              </h4>
+              <button
+                type="button"
+                class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded-md hover:bg-[var(--color-primary-light)] transition-colors"
+                (click)="goToStep.emit(routeStepIndex())"
+              >
+                Editar
+              </button>
+            </div>
+            <p class="text-sm text-[var(--color-text-primary)]">
+              @switch (wizardService.routeMode()) {
+                @case ('none') { Sin ruta (entrega directa) }
+                @case ('existing') {
+                  #{{ wizardService.selectedRouteId() }}
+                }
+                @case ('new') {
+                  @if (wizardService.newRouteDraft(); as draft) {
+                    Nueva planilla · {{ draft.planned_date }} · #{{ draft.driver_user_id }}
+                  } @else {
+                    Nueva planilla (borrador)
+                  }
                 }
               }
-            }
-          </p>
-        </section>
+            </p>
+          </div>
+        }
 
-        <!-- Totals Bar -->
-        <section
+        <!-- Barra de totales -->
+        <div
           class="rounded-lg overflow-hidden border border-[var(--color-primary)] bg-[var(--color-primary-light)]"
         >
           <div
@@ -218,86 +257,52 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
               {{ wizardService.totals().grandTotal | currency }}
             </span>
           </div>
-        </section>
-
-        <!-- Terminal action radio group -->
-        <section class="rounded-lg border border-[var(--color-border)] p-3 space-y-1.5">
-          <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-            Acción terminal
-          </p>
-          @for (opt of availableTerminalOptions(); track opt.value) {
-            <label
-              class="flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors"
-              [class]="
-                wizardService.terminalAction() === opt.value
-                  ? 'bg-[var(--color-primary-light)]'
-                  : 'hover:bg-[var(--color-surface-elevated)]'
-              "
-            >
-              <input
-                type="radio"
-                name="terminal-action"
-                [value]="opt.value"
-                [ngModel]="wizardService.terminalAction()"
-                (ngModelChange)="wizardService.setTerminalAction($event)"
-                class="mt-0.5"
-              />
-              <div>
-                <p class="text-sm font-medium text-[var(--color-text-primary)]">
-                  {{ opt.label }}
-                </p>
-                <p class="text-[11px] text-[var(--color-text-muted)]">
-                  {{ opt.description }}
-                </p>
-              </div>
-            </label>
-          }
-        </section>
-      } @else {
-        <!-- Success State -->
-        <div class="text-center py-6 space-y-3">
+        </div>
+      </app-wizard-step-section>
+    } @else {
+      <!-- Success State -->
+      <div class="text-center py-6 space-y-3">
+        <div
+          class="w-20 h-20 mx-auto rounded-full flex items-center justify-center"
+          style="background: radial-gradient(circle, var(--color-success-light) 0%, transparent 70%); animation: successPulse 1.5s ease-out"
+        >
           <div
-            class="w-20 h-20 mx-auto rounded-full flex items-center justify-center"
-            style="background: radial-gradient(circle, var(--color-success-light) 0%, transparent 70%); animation: successPulse 1.5s ease-out"
+            class="w-14 h-14 rounded-full bg-[var(--color-success)] flex items-center justify-center shadow-lg"
+            style="animation: successScale 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both"
           >
-            <div
-              class="w-14 h-14 rounded-full bg-[var(--color-success)] flex items-center justify-center shadow-lg"
-              style="animation: successScale 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both"
-            >
-              <app-icon name="check" [size]="28" color="#fff"></app-icon>
-            </div>
-          </div>
-
-          <div>
-            <h3 class="text-lg font-bold text-[var(--color-text-primary)]">
-              {{ successTitle }}
-            </h3>
-            @if (createdNote()) {
-              <p class="text-2xl font-bold text-[var(--color-primary)] mt-1">
-                #{{ createdNote()!.dispatch_number }}
-              </p>
-            }
-          </div>
-
-          <div class="flex flex-row gap-2 justify-center pt-2">
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="viewDetail.emit(createdNote()!.id)"
-            >
-              Ver detalle
-            </app-button>
-            <app-button variant="outline" size="sm" (clicked)="createAnother.emit()">
-              Crear otra
-            </app-button>
-            <app-button variant="primary" size="sm" (clicked)="printNote.emit(createdNote()!)">
-              <app-icon name="printer" [size]="14" slot="icon"></app-icon>
-              Imprimir
-            </app-button>
+            <app-icon name="check" [size]="28" color="#fff"></app-icon>
           </div>
         </div>
-      }
-    </div>
+
+        <div>
+          <h3 class="text-lg font-bold text-[var(--color-text-primary)]">
+            {{ successTitle }}
+          </h3>
+          @if (createdNote()) {
+            <p class="text-2xl font-bold text-[var(--color-primary)] mt-1">
+              #{{ createdNote()!.dispatch_number }}
+            </p>
+          }
+        </div>
+
+        <div class="flex flex-row gap-2 justify-center pt-2">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="viewDetail.emit(createdNote()!.id)"
+          >
+            Ver detalle
+          </app-button>
+          <app-button variant="outline" size="sm" (clicked)="createAnother.emit()">
+            Crear otra
+          </app-button>
+          <app-button variant="primary" size="sm" (clicked)="printNote.emit(createdNote()!)">
+            <app-icon name="printer" [size]="14" slot="icon"></app-icon>
+            Imprimir
+          </app-button>
+        </div>
+      </div>
+    }
 
     <style>
       @keyframes successScale {
@@ -317,12 +322,19 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 })
 export class ReviewStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
-  private readonly authFacade = inject(AuthFacade);
 
   // Inputs
   readonly created = input<boolean>(false);
   readonly createdNote = input<DispatchNote | null>(null);
   readonly completedAction = input<WizardTerminalAction>('draft');
+  /**
+   * @deprecated Retenido sólo por compatibilidad con el binding del orquestador
+   * (`[goToStepOffset]="1"`). Ya NO se usa para calcular los saltos "Editar":
+   * los índices se derivan de `stepLabels()` del servicio (ver
+   * `partyStepIndex` / `itemsStepIndex` / `routeStepIndex`). El orquestador
+   * retirará este binding en un paso posterior.
+   */
+  readonly goToStepOffset = input<number>(0);
 
   // Outputs
   readonly goToStep = output<number>();
@@ -330,43 +342,27 @@ export class ReviewStepComponent {
   readonly createAnother = output<void>();
   readonly printNote = output<DispatchNote>();
 
-  readonly terminalOptions: Array<{
-    value: WizardTerminalAction;
-    label: string;
-    description: string;
-  }> = [
-    {
-      value: 'draft',
-      label: 'Crear como borrador',
-      description: 'La remisión queda pendiente de confirmación.',
-    },
-    {
-      value: 'confirm_route',
-      label: 'Confirmar y asignar a ruta',
-      description: 'Si hay seriales, se solicitan antes de confirmar.',
-    },
-    {
-      value: 'deliver',
-      label: 'Confirmar y entregar',
-      description: 'Entrega inmediata tras verificar seriales.',
-    },
-  ];
+  // ── Saltos "Editar": índices ABSOLUTOS derivados de `stepLabels()` ──────────
+  // Se recalculan solos si el mapa de pasos cambia; evitan offsets frágiles.
+  //   customer_delivery (5): [Tipo=0, Orden=1, Ítems y bodega=2, Ruta=3, Revisión=4]
+  //   inbound/transfer  (4): [Tipo=0, Party=1, Ítems y bodega=2, Revisión=3]
 
-  /**
-   * Terminal options filtradas por permiso (ref 2026-06-25).
-   * 'draft' siempre disponible; 'confirm_route' requiere
-   * store:dispatch_notes:confirm; 'deliver' requiere
-   * store:dispatch_notes:deliver. Defensa-en-profundidad: el backend
-   * también valida estos permisos en confirm()/deliver().
-   */
-  readonly availableTerminalOptions = computed(() => {
-    const canConfirm = this.authFacade.hasPermission('store:dispatch_notes:confirm');
-    const canDeliver = this.authFacade.hasPermission('store:dispatch_notes:deliver');
-    return this.terminalOptions.filter((opt) => {
-      if (opt.value === 'confirm_route') return canConfirm;
-      if (opt.value === 'deliver') return canDeliver;
-      return true;
-    });
+  /** Paso Party (Orden / Origen-Destino / Proveedor / Cliente): el que sigue a "Tipo". */
+  readonly partyStepIndex = computed<number>(() => {
+    const idx = this.wizardService.stepLabels().indexOf('Tipo');
+    return idx >= 0 ? idx + 1 : 1;
+  });
+
+  /** Paso "Ítems y bodega" (fusión de ítems + detalles). */
+  readonly itemsStepIndex = computed<number>(() => {
+    const idx = this.wizardService.stepLabels().indexOf('Ítems y bodega');
+    return idx >= 0 ? idx : 2;
+  });
+
+  /** Paso "Ruta" (sólo customer_delivery). */
+  readonly routeStepIndex = computed<number>(() => {
+    const idx = this.wizardService.stepLabels().indexOf('Ruta');
+    return idx >= 0 ? idx : 3;
   });
 
   get successTitle(): string {
@@ -375,8 +371,38 @@ export class ReviewStepComponent {
         return 'Remisión confirmada y asignada';
       case 'deliver':
         return 'Remisión entregada';
+      case 'confirm':
+        return 'Remisión confirmada';
+      case 'receive':
+        return 'Remisión recibida';
       default:
         return 'Remisión creada';
     }
+  }
+
+  /** Label for the party section header, by subtype. */
+  partyLabel(): string {
+    switch (this.wizardService.subtype()) {
+      case 'customer_delivery':
+        return 'Orden';
+      case 'transfer_out':
+      case 'transfer_in':
+        return 'Origen / Destino';
+      case 'purchase_receipt':
+        return 'Proveedor';
+      case 'customer_return':
+        return 'Cliente y Remisión';
+      default:
+        return 'Orden';
+    }
+  }
+
+  /** Resolve a location id to its name from the wizard's loaded locations. */
+  locationLabel(id: number | null | undefined): string {
+    if (!id) return '—';
+    // The party step loads locations internally; the review step does not
+    // have direct access. We show the id as fallback. A future improvement
+    // would share the locations list via the wizard service.
+    return `Bodega #${id}`;
   }
 }

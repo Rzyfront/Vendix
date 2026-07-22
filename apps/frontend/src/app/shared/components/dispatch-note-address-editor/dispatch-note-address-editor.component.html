@@ -1,0 +1,69 @@
+<div class="dispatch-note-address-editor">
+  @if (!editing()) {
+    <!-- Display mode: read-only snapshot -->
+    <div class="display-mode">
+      <div class="address-display">
+        @if (address()?.address_line1) {
+          <p class="line">{{ address()?.address_line1 }}</p>
+        }
+        @if (address()?.address_line2) {
+          <p class="line line-secondary">{{ address()?.address_line2 }}</p>
+        }
+        @if (address()?.city || address()?.state_province) {
+          <p class="line line-secondary">
+            {{ address()?.city }}{{ address()?.city && address()?.state_province ? ', ' : '' }}{{ address()?.state_province }}
+          </p>
+        }
+        @if (address()?.postal_code) {
+          <p class="line line-secondary">{{ address()?.postal_code }}</p>
+        }
+        @if (address()?.phone_number) {
+          <p class="line line-secondary">Tel: {{ address()?.phone_number }}</p>
+        }
+        @if (
+          !address()?.address_line1 &&
+          !address()?.address_line2 &&
+          !address()?.city &&
+          !address()?.state_province
+        ) {
+          <p class="line line-empty">Sin dirección registrada</p>
+        }
+      </div>
+      <button type="button" class="edit-btn" (click)="startEdit()">
+        <app-icon name="edit-3" [size]="16"></app-icon>
+        <span>Editar</span>
+      </button>
+    </div>
+  } @else {
+    <!-- Edit mode: form + actions -->
+    <div class="edit-mode">
+      <app-address-form-fields
+        [initialAddress]="address()"
+        (addressChange)="onAddressChange($event)"
+      />
+
+      <div class="actions">
+        <button
+          type="button"
+          class="btn-secondary"
+          [disabled]="saving()"
+          (click)="cancelEdit()"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="btn-primary"
+          [disabled]="saving()"
+          (click)="save()"
+        >
+          @if (saving()) {
+            <span>Guardando…</span>
+          } @else {
+            <span>Guardar</span>
+          }
+        </button>
+      </div>
+    </div>
+  }
+</div>

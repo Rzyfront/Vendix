@@ -64,7 +64,7 @@ export class EmployeesBulkController {
   @Permissions('store:payroll:employees:bulk:template')
   async downloadTemplate(@Res() res: Response) {
     try {
-      const buffer = this.employeesBulkService.generateExcelTemplate();
+      const buffer = await this.employeesBulkService.generateExcelTemplate();
 
       const filename = `plantilla_empleados_${new Date().toISOString().split('T')[0]}.xlsx`;
 

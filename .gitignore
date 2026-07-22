@@ -7,6 +7,10 @@ core
 node_modules/
 dist/
 .env*
+# Los .env.example son plantillas SIN secretos reales (flags + placeholders):
+# se trackean para documentar variables requeridas (p.ej. REFRESH_TOKEN_HMAC_SECRET).
+!.env.example
+!**/.env.example
 .DS_Store
 npm-debug.log
 # Docker

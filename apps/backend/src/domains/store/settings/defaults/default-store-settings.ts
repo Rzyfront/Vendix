@@ -360,6 +360,12 @@ export function getDefaultStoreSettings(): StoreSettings {
     // is closed. Set to `live` to reflect delivery in real time on each settle.
     dispatch: {
       order_state_update_mode: 'on_close',
+      // Plan Despacho Economía — FASE 2 paso 9. Defaults globales; los métodos
+      // de envío pueden sobreescribir en su política tipada.
+      default_payment_timing: 'on_delivery',
+      default_settlement_type: 'none',
+      default_cost_settlement_timing: 'immediate_on_close',
+      requires_dispatch_address: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is
@@ -377,11 +383,17 @@ export function getDefaultStoreSettings(): StoreSettings {
     // Capacity (aforo) control and its auto-leveling are also opt-in.
     membership: {
       ambient_access_enabled: false,
+      qr_kiosk_mode: false,
+      qr_scanner_default_mode: 'fullscreen',
       capacity_control_enabled: false,
       max_capacity: 0,
       turnstile_mode: false,
       auto_leveling_enabled: false,
       auto_leveling_interval_hours: 2,
+      // Re-entry detection: warn by default (grant but flag repeated access
+      // within the window without re-counting aforo/quota). Window in hours.
+      re_entry_mode: 'warn',
+      re_entry_window_hours: 2,
       // Default reader mode = Tipo A (id_wrapper). Reader emits an opaque ID
       // directly; Vendix stores credentials as `external_ref` and never sees
       // the biometric template. The `template_sdk` (Tipo B) flow is planned

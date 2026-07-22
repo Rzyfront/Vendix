@@ -7,7 +7,6 @@ import {
 import {
   Prisma,
   dispatch_route_status_enum,
-  order_state_enum,
 } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -15,6 +14,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CashSettlementService } from './cash-settlement.service';
 import { PdfExportService } from './pdf-export.service';
+import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import {
   CloseDispatchRouteDto,
   ReleaseStopDto,
@@ -27,7 +27,6 @@ import {
   aggregateRouteTotals,
   deriveStopIsPrepaid,
 } from '../utils/route-stop-calc';
-import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -160,6 +159,35 @@ const ROUTE_PDF_INCLUDE = {
   },
 };
 
+/**
+ * Post-commit payload emitted as `dispatch_note.confirmed` for a dispatch_note
+ * that was auto-confirmed (draft → confirmed) while assembling/dispatching a
+ * route. The reservation listener (`handleConfirmed`) reserves stock on this
+ * event, so it MUST be emitted AFTER the transaction commits (once the note's
+ * 'confirmed' status is persisted). Shape mirrors what `dispatch()` emitted
+ * inline before the helper extraction.
+ */
+export interface ConfirmedNotePayload {
+  dispatch_note_id: number;
+  dispatch_number: string;
+  store_id: number;
+  sales_order_id: number | null;
+  order_id: number | null;
+}
+
+/**
+ * Minimal dispatch_note shape consumed by {@link RouteFlowService.confirmDraftNotesInTx}.
+ * Any richer note object (e.g. the `stop.dispatch_note` include) is structurally
+ * assignable — only these fields are read.
+ */
+export interface ConfirmableNote {
+  id: number;
+  dispatch_number: string;
+  status: string;
+  sales_order_id: number | null;
+  order_id: number | null;
+}
+
 @Injectable()
 export class RouteFlowService {
   private readonly logger = new Logger(RouteFlowService.name);
@@ -169,6 +197,7 @@ export class RouteFlowService {
     private readonly eventEmitter: EventEmitter2,
     private readonly cashSettlement: CashSettlementService,
     private readonly pdfExport: PdfExportService,
+    private readonly orderFlowService: OrderFlowService,
   ) {}
 
   private getStoreId(): number {
@@ -176,30 +205,6 @@ export class RouteFlowService {
     const store_id = context?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     return store_id;
-  }
-
-  /**
-   * Read the store's `dispatch.order_state_update_mode` setting in a
-   * tenant-safe way. Uses `findFirst({ where: { store_id } })` (never
-   * `findUnique`, whose WhereUniqueInput breaks under the scope merge) and
-   * merges with defaults so a missing JSON key falls back to `'on_close'`
-   * (the legacy behavior). Read once per settle, not per stop.
-   */
-  private async getOrderStateUpdateMode(
-    store_id: number,
-  ): Promise<'live' | 'on_close'> {
-    try {
-      const row = await this.prisma.store_settings.findFirst({
-        where: { store_id },
-        select: { settings: true },
-      });
-      const settings = mergeStoreSettingsWithDefaults(row?.settings);
-      return settings.dispatch?.order_state_update_mode ?? 'on_close';
-    } catch {
-      // A settings read failure must NEVER break route settlement. Fall back to
-      // the legacy behavior (advance the order state only at route close).
-      return 'on_close';
-    }
   }
 
   private async getRoute(id: number, store_id: number) {
@@ -288,104 +293,6 @@ export class RouteFlowService {
   }
 
   /**
-   * COD order-state machine helpers.
-   *
-   * The route drives the non-linear COD lifecycle of the linked `orders` row:
-   *   processing → shipped   (on route dispatch)
-   *   shipped → delivered → finished  (on route close, once delivered+collected)
-   *
-   * These mirror the source-of-truth `VALID_TRANSITIONS` in
-   * `OrderFlowService` (shipped:['delivered'], delivered:['finished',...]).
-   * We write the state directly inside the route transaction instead of
-   * re-dispatching order-flow events, to avoid side effects (stock, cash,
-   * notifications) that the route already orchestrates. All writes are
-   * store-scoped via `updateMany` and are idempotent (no-op when the order is
-   * already at/past the target state).
-   */
-  private async advanceOrderToShipped(
-    tx: Prisma.TransactionClient,
-    store_id: number,
-    order_id: number,
-  ): Promise<void> {
-    const order = await tx.orders.findFirst({
-      where: { id: order_id, store_id },
-      select: { id: true, state: true },
-    });
-    if (!order) return;
-    // Only `processing → shipped` is a valid transition. If the order is in any
-    // other state (already shipped/delivered/finished, or not yet processing),
-    // this is a no-op so re-dispatch never throws.
-    if (order.state !== 'processing') return;
-    await tx.orders.updateMany({
-      where: { id: order_id, store_id, state: 'processing' },
-      data: { state: 'shipped', updated_at: new Date() },
-    });
-  }
-
-  /**
-   * Advance a linked COD order `shipped → delivered` ONLY. Used for the
-   * `dispatch.order_state_update_mode = 'live'` setting so the order reflects
-   * "entregada" the moment a stop is settled, instead of waiting for the route
-   * close. Idempotent and store-scoped: if the order is not in `shipped`
-   * (not yet shipped, already delivered/finished, cancelled, etc.) this is a
-   * no-op. The route close (`advanceOrderToFinished`) still walks
-   * delivered → finished afterwards, so it composes with the live update.
-   */
-  private async advanceOrderToDelivered(
-    tx: Prisma.TransactionClient,
-    store_id: number,
-    order_id: number,
-  ): Promise<void> {
-    const order = await tx.orders.findFirst({
-      where: { id: order_id, store_id },
-      select: { id: true, state: true },
-    });
-    if (!order) return;
-    // Only `shipped → delivered` is valid here. Any other state is a no-op so
-    // re-settling never throws and never skips ahead to finished.
-    if (order.state !== 'shipped') return;
-    await tx.orders.updateMany({
-      where: { id: order_id, store_id, state: 'shipped' },
-      data: { state: 'delivered', updated_at: new Date() },
-    });
-  }
-
-  private async advanceOrderToFinished(
-    tx: Prisma.TransactionClient,
-    store_id: number,
-    order_id: number,
-  ): Promise<void> {
-    const order = await tx.orders.findFirst({
-      where: { id: order_id, store_id },
-      select: { id: true, state: true },
-    });
-    if (!order) return;
-    let state = order.state as order_state_enum;
-    if (state === 'finished') return;
-    // Walk the valid path shipped → delivered → finished. Each step is a no-op
-    // if the order is already past it, keeping the close idempotent.
-    if (state === 'shipped') {
-      await tx.orders.updateMany({
-        where: { id: order_id, store_id, state: 'shipped' },
-        data: { state: 'delivered', updated_at: new Date() },
-      });
-      state = 'delivered';
-    }
-    if (state === 'delivered') {
-      await tx.orders.updateMany({
-        where: { id: order_id, store_id, state: 'delivered' },
-        data: {
-          state: 'finished',
-          completed_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
-    }
-    // Any other state (processing/created/cancelled/refunded) is left untouched:
-    // there is no valid direct path to finished from there in this flow.
-  }
-
-  /**
    * Transition the linked dispatch_note → 'delivered' inside the settle
    * transaction, mirroring the canonical `DispatchNoteFlowService.deliver`
    * field writes (delivered_by_user_id, delivered_at, actual_delivery_date).
@@ -454,6 +361,59 @@ export class RouteFlowService {
   }
 
   /**
+   * Confirm-on-the-fly every dispatch_note still in 'draft' among `notes`,
+   * INSIDE the given transaction, mirroring the exact field writes `dispatch()`
+   * performed inline (status → 'confirmed', confirmed_by_user_id, confirmed_at,
+   * updated_at). Notes already past 'draft' are skipped (idempotent).
+   *
+   * Returns the list of `dispatch_note.confirmed` payloads that MUST be emitted
+   * AFTER the transaction commits via {@link emitConfirmedNotes} — the
+   * reservation listener (`handleConfirmed`) re-reads the note and must see the
+   * persisted 'confirmed' status before it fires the stock-reservation
+   * primitive. This method deliberately does NOT reserve stock itself: the
+   * `dispatch_note.confirmed` event is the single source of that side effect.
+   */
+  async confirmDraftNotesInTx(
+    tx: Prisma.TransactionClient,
+    notes: ReadonlyArray<ConfirmableNote>,
+    user_id: number | undefined,
+    store_id: number,
+  ): Promise<ConfirmedNotePayload[]> {
+    const payloads: ConfirmedNotePayload[] = [];
+    for (const note of notes) {
+      if (note.status !== 'draft') continue;
+      await tx.dispatch_notes.update({
+        where: { id: note.id },
+        data: {
+          status: 'confirmed',
+          confirmed_by_user_id: user_id,
+          confirmed_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+      payloads.push({
+        dispatch_note_id: note.id,
+        dispatch_number: note.dispatch_number,
+        store_id,
+        sales_order_id: note.sales_order_id,
+        order_id: note.order_id,
+      });
+    }
+    return payloads;
+  }
+
+  /**
+   * Emit one `dispatch_note.confirmed` per payload. MUST be called AFTER the
+   * transaction that produced them commits, so the reservation listener sees the
+   * note's 'confirmed' status already persisted. No-op for an empty list.
+   */
+  emitConfirmedNotes(payloads: ReadonlyArray<ConfirmedNotePayload>): void {
+    for (const payload of payloads) {
+      this.eventEmitter.emit('dispatch_note.confirmed', payload);
+    }
+  }
+
+  /**
    * Transition a route: draft → dispatched.
    * Locks the stops (no more add/remove) and sets dispatch_started_at.
    */
@@ -513,13 +473,7 @@ export class RouteFlowService {
     // Accumulate confirm-on-dispatch payloads so we can emit
     // `dispatch_note.confirmed` AFTER the transaction commits (the reservation
     // listener re-reads the note and must see status:'confirmed' persisted).
-    const confirmedEventPayloads: Array<{
-      dispatch_note_id: number;
-      dispatch_number: string;
-      store_id: number;
-      sales_order_id: number | null;
-      order_id: number | null;
-    }> = [];
+    let confirmedEventPayloads: ConfirmedNotePayload[] = [];
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const updated_route = await tx.dispatch_routes.update({
@@ -533,47 +487,28 @@ export class RouteFlowService {
         include: ROUTE_INCLUDE,
       });
 
-      // COD: advance each linked order processing → shipped (idempotent).
-      for (const stop of updated_route.stops) {
-        const order_id = stop.dispatch_note?.order_id;
-        if (order_id) {
-          await this.advanceOrderToShipped(tx, store_id, order_id);
-        }
-
-        // Reserve-invariant: every DISPATCHED remisión must be at least
-        // 'confirmed' so its stock reservation exists (handleConfirmed reserves
-        // only standalone notes). This makes the anti double-deduction gate
-        // consistent: by the time a stop settles to 'delivered', the note has a
-        // reservation to consume. If all notes already arrive confirmed, no-op.
-        const note = stop.dispatch_note;
-        if (note?.status === 'draft') {
-          await tx.dispatch_notes.update({
-            where: { id: note.id },
-            data: {
-              status: 'confirmed',
-              confirmed_by_user_id: user_id,
-              confirmed_at: new Date(),
-              updated_at: new Date(),
-            },
-          });
-          confirmedEventPayloads.push({
-            dispatch_note_id: note.id,
-            dispatch_number: note.dispatch_number,
-            store_id,
-            sales_order_id: note.sales_order_id,
-            order_id: note.order_id,
-          });
-        }
-      }
+      // Reserve-invariant: every DISPATCHED remisión must be at least
+      // 'confirmed' so its stock reservation exists (handleConfirmed reserves
+      // only standalone notes). This makes the anti double-deduction gate
+      // consistent: by the time a stop settles to 'delivered', the note has a
+      // reservation to consume. If all notes already arrive confirmed, no-op.
+      // Reuses the SAME mechanism as route create/addStops.
+      const notes: ConfirmableNote[] = updated_route.stops
+        .map((stop) => stop.dispatch_note)
+        .filter((note): note is NonNullable<typeof note> => !!note);
+      confirmedEventPayloads = await this.confirmDraftNotesInTx(
+        tx,
+        notes,
+        user_id,
+        store_id,
+      );
 
       return updated_route;
     });
 
     // Post-commit: emit one `dispatch_note.confirmed` per note confirmed above
     // so the reservation listener sees the persisted 'confirmed' status.
-    for (const payload of confirmedEventPayloads) {
-      this.eventEmitter.emit('dispatch_note.confirmed', payload);
-    }
+    this.emitConfirmedNotes(confirmedEventPayloads);
 
     this.eventEmitter.emit('dispatch_route.dispatched', {
       route_id: id,
@@ -582,6 +517,22 @@ export class RouteFlowService {
       user_id,
       stops_count: updated.stops.length,
     });
+
+    // COD: reconcile each linked order's state from the dispatch AFTER the
+    // transaction commits (the reconciler re-reads the persisted route/note
+    // state). The route is now `dispatched` (OPEN) holding confirmed notes, so
+    // the reconciler derives `processing → shipped` and caps there. Single
+    // source of truth: no direct `orders.state` write from the route.
+    const dispatchedOrderIds: number[] = [];
+    for (const stop of updated.stops) {
+      const oid = stop.dispatch_note?.order_id;
+      if (typeof oid === 'number' && !dispatchedOrderIds.includes(oid)) {
+        dispatchedOrderIds.push(oid);
+      }
+    }
+    for (const order_id of dispatchedOrderIds) {
+      await this.orderFlowService.reconcileOrderFromDispatch(order_id, store_id);
+    }
 
     this.logger.log(`Planilla #${id} despachada con ${updated.stops.length} paradas`);
     return this.withDerivedStopPrepaid(updated);
@@ -593,7 +544,7 @@ export class RouteFlowService {
   async startStop(id: number, stopId: number) {
     const store_id = this.getStoreId();
     const route = await this.getRoute(id, store_id);
-    if (!['dispatched', 'in_transit', 'settling'].includes(route.status)) {
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede iniciar liquidación en planilla en estado '${route.status}'`,
       );
@@ -644,14 +595,11 @@ export class RouteFlowService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
-    if (!['dispatched', 'in_transit', 'settling'].includes(route.status)) {
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede liquidar una parada en planilla en estado '${route.status}'`,
       );
     }
-
-    // Read the COD order-state update mode once per settle (not per stop).
-    const orderStateUpdateMode = await this.getOrderStateUpdateMode(store_id);
 
     const stop = await this.prisma.dispatch_route_stops.findFirst({
       where: { id: stopId, route_id: id },
@@ -811,16 +759,12 @@ export class RouteFlowService {
       // Keep parent totals in sync so the detail page reflects live "Recaudado".
       await this.refreshRouteTotals(tx, id);
 
-      // Live order-state mode: reflect the COD order as "delivered" the moment
-      // the stop is settled as delivered (pago total). `rejected` is excluded
-      // (a refused delivery does not deliver the order). The walk to `finished`
-      // still happens at route close. No-op for `on_close` mode.
-      if (orderStateUpdateMode === 'live') {
-        const order_id = stop.dispatch_note?.order_id;
-        if (order_id && dto.result === 'delivered') {
-          await this.advanceOrderToDelivered(tx, store_id, order_id);
-        }
-      }
+      // NOTE: the linked COD order state is NOT written here. `settleStop`
+      // emits `dispatch_note.delivered` post-commit (see below); its listener
+      // (`handleDelivered`) drives the single reconciler
+      // (`OrderFlowService.reconcileOrderFromDispatch`). This keeps the order
+      // state a derived read of the persisted route/note state — no parallel
+      // `orders.state` writer lives in the route.
 
       // Sync the remisión with the route close-out: a stop settled as delivered
       // (pago total) drives its dispatch_note → 'delivered' (idempotent).
@@ -997,15 +941,18 @@ export class RouteFlowService {
 
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, is_carrier_route: true },
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    // State guard: only "hot" routes (draft / dispatched) accept a reorder.
-    const REORDERABLE_STATES: dispatch_route_status_enum[] = [
-      'draft',
-      'dispatched',
-    ];
+    // State guard: draft / dispatched siempre. Vendix Repartos (B7): las rutas
+    // CARRIER admiten además `in_transit` (el repartidor reordena sus paradas
+    // en recorrido, "Aplicar orden óptimo" del mapa). Las rutas admin conservan
+    // el gate original (draft/dispatched).
+    const REORDERABLE_STATES: dispatch_route_status_enum[] =
+      route.is_carrier_route
+        ? ['draft', 'dispatched', 'in_transit']
+        : ['draft', 'dispatched'];
     if (!REORDERABLE_STATES.includes(route.status)) {
       throw new VendixHttpException(
         ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001,
@@ -1153,7 +1100,7 @@ export class RouteFlowService {
     const user_id = RequestContextService.getContext()?.user_id;
     const route = await this.getRoute(id, store_id);
 
-    if (!['dispatched', 'in_transit', 'settling'].includes(route.status)) {
+    if (!['dispatched', 'in_transit'].includes(route.status)) {
       throw new BadRequestException(
         `No se puede cerrar una planilla en estado '${route.status}'`,
       );
@@ -1209,20 +1156,6 @@ export class RouteFlowService {
         include: ROUTE_INCLUDE,
       });
 
-      // COD: finish each linked order whose stop was ENTREGADA. Con la regla
-      // "entregada = pagada al 100% (o prepaga)" ya no hay gate de recaudo: toda
-      // parada con result='delivered' sincroniza su orden shipped → delivered →
-      // finished. Esto cierra el gap donde las órdenes se quedaban en 'shipped'.
-      // rejected/released NO avanzan. `advanceOrderToFinished` es idempotente
-      // (no-op si la orden ya está en/past target) y store-scoped.
-      for (const stop of updated_route.stops) {
-        const order_id = stop.dispatch_note?.order_id;
-        if (!order_id) continue;
-        if (stop.result !== 'delivered') continue;
-
-        await this.advanceOrderToFinished(tx, store_id, order_id);
-      }
-
       return updated_route;
     });
 
@@ -1247,10 +1180,141 @@ export class RouteFlowService {
       cash_variance,
     });
 
+    // Plan Despacho Economía — FASE 5 paso 16. Cálculo del costo del ejecutor.
+    // Se emite en post-commit (fuera de la tx) para no romper el cuadre de caja
+    // si algo del cálculo falla — `dispatch_route.closed` ya se emitió arriba.
+    await this.maybeEmitRouteSettlement(updated, store_id, user_id);
+
+    // COD: reconcile each linked order whose stop was ENTREGADA, AFTER the
+    // transaction commits. The route is now `closed` (NOT open), so the
+    // reconciler is no longer capped and derives `delivered → finished` (the
+    // remaining balance is already 0 from the per-stop recaudo at settle).
+    // rejected/released stops do NOT reconcile. Single source of truth: no
+    // direct `orders.state` write from the route.
+    const finishedOrderIds: number[] = [];
+    for (const stop of updated.stops) {
+      if (stop.result !== 'delivered') continue;
+      const oid = stop.dispatch_note?.order_id;
+      if (typeof oid === 'number' && !finishedOrderIds.includes(oid)) {
+        finishedOrderIds.push(oid);
+      }
+    }
+    for (const order_id of finishedOrderIds) {
+      await this.orderFlowService.reconcileOrderFromDispatch(order_id, store_id);
+    }
+
     this.logger.log(
       `Planilla #${id} cerrada. Recaudado=${total_collected} Variance=${cash_variance}`,
     );
     return this.withDerivedStopPrepaid(updated);
+  }
+
+  /**
+   * Plan Despacho Economía — FASE 5 paso 16.
+   * Calcula el costo del ejecutor y emite `dispatch_route.settlement` cuando
+   * el costo es > 0. Reglas:
+   *   - Interno con sueldo (driver_user_id sin `is_primary_driver_external`):
+   *     costo 0 — la nómina no es parte del modelo.
+   *   - Externo (carrier | third_party_provider | vehículo externo): el método
+   *     define `generates_transport_cost`. Si es `none`, costo 0.
+   *     Si es `per_route`, `gross_cost = settlement_rate` (vehicle) o el monto
+   *     convenido (carrier — se negocia, default `0` si no hay nada).
+   *     Si es `per_delivery`, `gross_cost = settlement_rate × entregas_que_cuentan`.
+   *
+   * El cálculo se hace best-effort: si algo falla, la ruta sigue cerrada y el
+   * evento simplemente no se emite (con log warn).
+   */
+  private async maybeEmitRouteSettlement(
+    route: any,
+    store_id: number,
+    user_id?: number,
+  ): Promise<void> {
+    try {
+      const carrier_id = route.external_carrier_supplier_id ?? null;
+      const vehicle_id = route.vehicle_id ?? null;
+      let gross_cost = 0;
+      let settlement_type: 'none' | 'per_delivery' | 'per_route' = 'none';
+      let deliveries_count = 0;
+
+      if (vehicle_id) {
+        const vehicle = await this.prisma.vehicles.findFirst({
+          where: { id: vehicle_id, store_id },
+        });
+        if (vehicle && vehicle.settlement_type && vehicle.settlement_type !== 'none') {
+          settlement_type = vehicle.settlement_type;
+          const rate = Number(vehicle.settlement_rate || 0);
+          if (vehicle.settlement_type === 'per_route') {
+            gross_cost = rate;
+          } else if (vehicle.settlement_type === 'per_delivery') {
+            // Cuentan: delivered + partial. rejected/released no cuentan.
+            deliveries_count = (route.stops ?? []).filter(
+              (s: any) =>
+                s.result === 'delivered' || s.result === 'partial',
+            ).length;
+            gross_cost = rate * deliveries_count;
+          }
+        }
+      } else if (carrier_id) {
+        // Carrier externo. La tarifa en v1 se negocia fuera del sistema: si el
+        // método define `generates_transport_cost=per_route`, usamos el
+        // settlement_rate del VEHÍCULO REFERENCIADO POR EL MÉTODO si existe;
+        // si no, 0 (operación manual posterior). Por ahora, sólo emitimos si
+        // el método marca costo.
+        const method_id = route.shipping_method_id ?? null;
+        if (method_id) {
+          const method = await this.prisma.shipping_methods.findFirst({
+            where: { id: method_id, is_system: false },
+          });
+          if (
+            method &&
+            method.generates_transport_cost &&
+            method.generates_transport_cost !== 'none'
+          ) {
+            settlement_type = method.generates_transport_cost;
+            if (settlement_type === 'per_route') {
+              const def_vehicle = method.default_vehicle_id
+                ? await this.prisma.vehicles.findFirst({
+                    where: { id: method.default_vehicle_id, store_id },
+                  })
+                : null;
+              gross_cost = Number(def_vehicle?.settlement_rate || 0);
+            } else {
+              deliveries_count = (route.stops ?? []).filter(
+                (s: any) =>
+                  s.result === 'delivered' || s.result === 'partial',
+              ).length;
+              const def_vehicle = method.default_vehicle_id
+                ? await this.prisma.vehicles.findFirst({
+                    where: { id: method.default_vehicle_id, store_id },
+                  })
+                : null;
+              const rate = Number(def_vehicle?.settlement_rate || 0);
+              gross_cost = rate * deliveries_count;
+            }
+          }
+        }
+      }
+
+      // No emitir cuando el costo es 0 — la ruta cerrada sin costo no genera
+      // CxP ni retención.
+      if (gross_cost <= 0) return;
+
+      this.eventEmitter.emit('dispatch_route.settlement', {
+        route_id: route.id,
+        route_number: route.route_number,
+        store_id,
+        organization_id: route.stores?.organization_id,
+        transporter_supplier_id: carrier_id,
+        gross_cost,
+        deliveries_count,
+        settlement_type,
+        user_id,
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `Planilla #${route.id} cerrada, pero el cálculo del costo falló: ${err?.message}. No se emite settlement.`,
+      );
+    }
   }
 
   /**

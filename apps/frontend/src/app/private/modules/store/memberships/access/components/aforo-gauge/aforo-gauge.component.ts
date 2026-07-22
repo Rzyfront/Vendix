@@ -32,7 +32,12 @@ interface GaugeTick {
   changeDetection: ChangeDetectionStrategy.OnPush,
   styleUrl: './aforo-gauge.component.css',
   template: `
-    <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+    <app-card
+      [shadow]="'sm'"
+      [responsivePadding]="true"
+      [showHeader]="true"
+      [fullHeight]="true"
+    >
       <div slot="header" class="ag-header">
         <span class="ag-header-icon">
           <app-icon name="gauge" [size]="18" />
@@ -169,7 +174,6 @@ interface GaugeTick {
             </div>
           } @else {
             <div class="ag-help">
-              <app-icon name="gauge" [size]="16" />
               <span>
                 Activa el control de aforo en la configuración para ver cupos
                 disponibles y bloquear ingresos cuando el local se llene.

@@ -27,7 +27,11 @@ import { OnboardingService } from '../organization/onboarding/onboarding.service
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
-import { TOKEN_DEFAULTS } from './constants/token.constants';
+import {
+  TOKEN_DEFAULTS,
+  getRefreshTokenHmacSecret,
+  hmacSha256,
+} from './constants/token.constants';
 import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -217,9 +221,19 @@ export class AuthService {
         state: { notIn: ['suspended', 'archived'] },
       },
       include: {
+        // Se trae roles.role_permissions.permissions en la MISMA consulta para
+        // que login() derive los permisos planos desde memoria (sin un segundo
+        // fetch). No cambia la semántica: es exactamente la forma que consumía
+        // el fetch eliminado (getPermissionsFromRoles).
         user_roles: {
           include: {
-            roles: true,
+            roles: {
+              include: {
+                role_permissions: {
+                  include: { permissions: true },
+                },
+              },
+            },
           },
         },
         organizations: {
@@ -519,6 +533,7 @@ export class AuthService {
       'STORE_ADMIN',
       'ORG_ADMIN',
       'STORE_ECOMMERCE',
+      'STORE_DELIVERY',
       'VENDIX_LANDING',
       'VENDIX_ADMIN',
     ];
@@ -1369,8 +1384,10 @@ export class AuthService {
       );
     }
 
-    // Verificar rol válido (solo roles de staff que puede asignar un admin)
-    const validRoles = ['manager', 'supervisor', 'employee'];
+    // Verificar rol válido (solo roles de staff que puede asignar un admin).
+    // Fase B2: `carrier` (Vendix Repartos) es asignable y fuerza
+    // app_type=STORE_DELIVERY más abajo.
+    const validRoles = ['manager', 'supervisor', 'employee', 'carrier'];
     if (!validRoles.includes(role)) {
       throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
@@ -1419,13 +1436,17 @@ export class AuthService {
       },
     });
 
-    // Crear user_settings para el usuario staff usando el servicio centralizado (siempre STORE_ADMIN)
+    // Crear user_settings para el usuario staff usando el servicio centralizado.
+    // Fase B2: el app_type depende del rol — `carrier` (Vendix Repartos) ⇒
+    // STORE_DELIVERY; el resto de staff ⇒ STORE_ADMIN.
+    const staffAppType: 'STORE_ADMIN' | 'STORE_DELIVERY' =
+      role === 'carrier' ? 'STORE_DELIVERY' : 'STORE_ADMIN';
     const staffConfig =
-      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+      await this.defaultPanelUIService.generatePanelUI(staffAppType);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
-        app_type: 'STORE_ADMIN',
+        app_type: staffAppType,
         config: staffConfig,
       },
     });
@@ -2022,41 +2043,55 @@ export class AuthService {
       app_type: (userSettings?.app_type as any) || undefined,
     });
 
-    // Crear refresh token en la base de datos con información del dispositivo
-    await this.createUserSession(user.id, tokens.refresh_token, {
-      ip_address: client_info?.ip_address || '127.0.0.1',
-      user_agent: client_info?.user_agent || 'Login-Device',
-    });
+    // Validación temprana: user_settings es requerido para construir la respuesta.
+    if (!userSettings) {
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
+    }
 
-    // Registrar intento de login exitoso
-    await this.logLoginAttempt(user.id, true);
+    // Store de arranque para firmar el logo (S3) y limpiar el payload.
+    const storeToUse = active_store || user.main_store;
 
-    // Registrar auditoría de login
-    await this.auditService.logAuth(
-      user.id,
-      AuditAction.LOGIN,
-      {
-        login_method: 'password',
-        success: true,
-        login_context: login_context,
-        organization_id: target_organization_id ?? undefined,
-        store_id: target_store_id ?? undefined,
-      },
-      client_info?.ip_address || '127.0.0.1',
-      client_info?.user_agent || 'Login-Device',
-    );
-
-    // Actualizar último login
-    await this.prismaService.users.update({
-      where: { id: user.id },
-      data: { last_login: new Date() },
-    });
+    // Operaciones INDEPENDIENTES del login ejecutadas en paralelo para reducir
+    // la latencia total:
+    //  - persistencia de la sesión (refresh token),
+    //  - registro del intento de login exitoso,
+    //  - auditoría del evento LOGIN,
+    //  - actualización de last_login,
+    //  - firma del logo del store en S3,
+    //  - generación del panel_ui por defecto.
+    // Ninguna depende del resultado de otra ni escribe la misma fila
+    // (last_login es la única escritura sobre `users` en este tramo, tras los
+    // updates secuenciales previos), por lo que es seguro paralelizarlas.
+    const [, , , , signedLogoUrl, defaults] = await Promise.all([
+      this.createUserSession(user.id, tokens.refresh_token, {
+        ip_address: client_info?.ip_address || '127.0.0.1',
+        user_agent: client_info?.user_agent || 'Login-Device',
+      }),
+      this.logLoginAttempt(user.id, true),
+      this.auditService.logAuth(
+        user.id,
+        AuditAction.LOGIN,
+        {
+          login_method: 'password',
+          success: true,
+          login_context: login_context,
+          organization_id: target_organization_id ?? undefined,
+          store_id: target_store_id ?? undefined,
+        },
+        client_info?.ip_address || '127.0.0.1',
+        client_info?.user_agent || 'Login-Device',
+      ),
+      this.prismaService.users.update({
+        where: { id: user.id },
+        data: { last_login: new Date() },
+      }),
+      this.s3Service.signUrl(storeToUse?.logo_url),
+      this.defaultPanelUIService.generatePanelUI(''),
+    ]);
 
     // Remover password del response
     // Nota: domain_settings ya viene incluido en la relación de store.organizations
     // Limpiar store para evitar duplicación de store_settings (ya se envía a nivel raíz)
-    const storeToUse = active_store || user.main_store;
-    const signedLogoUrl = await this.s3Service.signUrl(storeToUse?.logo_url);
     const cleanStore = storeToUse
       ? {
           id: storeToUse.id,
@@ -2077,13 +2112,6 @@ export class AuthService {
       store: cleanStore,
     };
 
-    if (!userSettings) {
-      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
-    }
-
-    // Obtener defaults para detectar módulos nuevos en el frontend
-    const defaults = await this.defaultPanelUIService.generatePanelUI('');
-
     const userSettingsForResponse = {
       id: userSettings.id,
       user_id: userSettings.user_id,
@@ -2096,21 +2124,9 @@ export class AuthService {
     };
 
     // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
-    // findUserAccountsByEmail no incluye role_permissions.permissions, por eso refetcheamos.
-    const userRolesWithPermissions =
-      await this.prismaService.user_roles.findMany({
-        where: { user_id: user.id },
-        include: {
-          roles: {
-            include: {
-              role_permissions: {
-                include: { permissions: true },
-              },
-            },
-          },
-        },
-      });
-    const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
+    // findUserAccountsByEmail ya trae roles.role_permissions.permissions, así que
+    // derivamos los permisos del `user` cargado en memoria (sin segundo fetch).
+    const permissions = this.getPermissionsFromRoles(user_roles ?? []);
 
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
@@ -2156,10 +2172,15 @@ export class AuthService {
         secret: refreshSecret,
       });
 
-      // Buscar tokens activos del usuario (por user_id del payload JWT)
-      // No podemos buscar por hash directamente porque bcrypt genera hashes diferentes cada vez
-      const activeTokens = await this.prismaService.refresh_tokens.findMany({
+      // Lookup DIRECTO por hash HMAC-SHA256 (determinista) en lugar del loop
+      // O(n) de bcrypt.compare sobre todos los tokens activos del usuario.
+      const hashedIncomingToken = hmacSha256(
+        refresh_token,
+        getRefreshTokenHmacSecret(),
+      );
+      const tokenRecord = await this.prismaService.refresh_tokens.findFirst({
         where: {
+          token: hashedIncomingToken,
           user_id: payload.sub,
           revoked: false,
           expires_at: { gt: new Date() },
@@ -2184,16 +2205,6 @@ export class AuthService {
           },
         },
       });
-
-      // Comparar con bcrypt.compare() - forma correcta de validar hashes bcrypt
-      let tokenRecord: (typeof activeTokens)[number] | null = null;
-      for (const record of activeTokens) {
-        const isValid = await bcrypt.compare(refresh_token, record.token);
-        if (isValid) {
-          tokenRecord = record;
-          break;
-        }
-      }
 
       if (!tokenRecord) {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
@@ -2230,10 +2241,10 @@ export class AuthService {
         TOKEN_DEFAULTS.REFRESH_TOKEN_EXPIRY;
       const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
 
-      // Hashear el nuevo refresh token antes de guardarlo
-      const hashedNewToken = await bcrypt.hash(
+      // Hashear el nuevo refresh token antes de guardarlo (HMAC-SHA256).
+      const hashedNewToken = hmacSha256(
         tokens.refresh_token,
-        TOKEN_DEFAULTS.BCRYPT_ROUNDS,
+        getRefreshTokenHmacSecret(),
       );
 
       await this.prismaService.refresh_tokens.update({
@@ -2344,8 +2355,12 @@ export class AuthService {
     }
 
     if (refresh_token) {
-      // Hashear el refresh token para comparación
-      const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
+      // Hashear el refresh token para comparación (HMAC-SHA256, determinista:
+      // ahora el match por token específico sí acierta, a diferencia de bcrypt).
+      const hashedRefreshToken = hmacSha256(
+        refresh_token,
+        getRefreshTokenHmacSecret(),
+      );
 
       // Revocar el token específico Y todos los demás del usuario (seguridad mejorada)
       try {
@@ -3199,7 +3214,8 @@ export class AuthService {
         | 'ORG_ADMIN'
         | 'STORE_LANDING'
         | 'STORE_ADMIN'
-        | 'STORE_ECOMMERCE';
+        | 'STORE_ECOMMERCE'
+        | 'STORE_DELIVERY';
     },
   ): Promise<{
     access_token: string;
@@ -3268,10 +3284,10 @@ export class AuthService {
     // Generar fingerprint del dispositivo
     const device_fingerprint = this.generateDeviceFingerprint(client_info);
 
-    // Hashear el refresh token para almacenamiento seguro
-    const hashedRefreshToken = await bcrypt.hash(
+    // Hashear el refresh token para almacenamiento seguro (HMAC-SHA256).
+    const hashedRefreshToken = hmacSha256(
       refresh_token,
-      TOKEN_DEFAULTS.BCRYPT_ROUNDS,
+      getRefreshTokenHmacSecret(),
     );
 
     await this.prismaService.refresh_tokens.create({

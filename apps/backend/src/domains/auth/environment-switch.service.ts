@@ -17,7 +17,10 @@ import {
   AuditResource,
 } from '../../common/audit/audit.service';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
-import * as bcrypt from 'bcrypt';
+import {
+  getRefreshTokenHmacSecret,
+  hmacSha256,
+} from './constants/token.constants';
 
 @Injectable()
 export class EnvironmentSwitchService {
@@ -469,7 +472,10 @@ export class EnvironmentSwitchService {
       this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
     const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
     const device_fingerprint = this.generateDeviceFingerprint(client_info);
-    const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
+    const hashedRefreshToken = hmacSha256(
+      refresh_token,
+      getRefreshTokenHmacSecret(),
+    );
 
     await this.prismaService.refresh_tokens.create({
       data: {

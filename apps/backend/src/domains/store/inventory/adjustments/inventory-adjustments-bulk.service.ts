@@ -8,6 +8,8 @@ import {
   BulkAdjustmentItemResultDto,
 } from './dto/bulk-adjustment-upload.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { buildReportBuffer } from '@common/reports/report-builder';
+import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
 
 @Injectable()
@@ -120,18 +122,18 @@ export class InventoryAdjustmentsBulkService {
       ];
     }
 
-    const ws = XLSX.utils.json_to_sheet(data, { header: headers });
+    // Cada columna es texto. `key === header` para preservar EXACTAMENTE los
+    // encabezados (contrato round-trip: parseFile mapea POR HEADER) y reutilizar
+    // las filas `data` sin reindexar.
+    const columns: ReportColumn[] = headers.map(
+      (header): ReportColumn => ({ key: header, header, type: 'text' }),
+    );
 
-    // Ajustar ancho de columnas
-    const col_widths = headers.map((h) => ({
-      wch: Math.max(h.length + 5, 20),
-    }));
-    ws['!cols'] = col_widths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Ajuste Masivo Inventario');
-
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    return buildReportBuffer({
+      sheets: [
+        { name: 'Ajuste Masivo Inventario', columns, rows: data },
+      ],
+    });
   }
 
   /**

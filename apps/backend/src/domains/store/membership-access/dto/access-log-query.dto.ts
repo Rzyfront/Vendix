@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsISO8601, IsOptional, Min } from 'class-validator';
+import { IsEnum, IsInt, IsISO8601, IsOptional, IsString, Length, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { membership_access_result_enum } from '@prisma/client';
 
@@ -34,4 +34,9 @@ export class AccessLogQueryDto {
   @IsOptional()
   @IsISO8601()
   date_to?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 100)
+  search?: string;
 }

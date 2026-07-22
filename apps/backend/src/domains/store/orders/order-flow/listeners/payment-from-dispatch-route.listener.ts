@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
-import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { OrderFlowService } from '../order-flow.service';
 
 /**
  * Subset of the `payment.received` event payload that the COD bridge depends on.
@@ -57,7 +57,7 @@ export class PaymentFromDispatchRouteListener {
   private readonly logger = new Logger(PaymentFromDispatchRouteListener.name);
 
   constructor(
-    private readonly prisma: StorePrismaService,
+    private readonly orderFlow: OrderFlowService,
     private readonly storeContextRunner: StoreContextRunner,
   ) {}
 
@@ -101,6 +101,13 @@ export class PaymentFromDispatchRouteListener {
     }
   }
 
+  /**
+   * Route-settlement COD bridge — delegates to the shared
+   * {@link OrderFlowService.applyDispatchCodPayment} helper with the route
+   * correlation key (`dispatch_route_stop:{stop_id}`). Behavior is unchanged:
+   * same order resolution from the dispatch note, same idempotency guard, same
+   * balance decrement, and NO state transition (that is the reconciler's job).
+   */
   private async applyCodPayment(input: {
     storeId: number;
     dispatchNoteId: number;
@@ -109,92 +116,14 @@ export class PaymentFromDispatchRouteListener {
     currency?: string;
     paymentMethod?: string;
   }): Promise<void> {
-    // 1. Resolve the REAL COD order id from the dispatch note. `dispatch_notes`
-    //    is store-scoped, so this read is tenant-isolated.
-    const dispatchNote = await this.prisma.dispatch_notes.findFirst({
-      where: { id: input.dispatchNoteId, store_id: input.storeId },
-      select: { order_id: true },
+    await this.orderFlow.applyDispatchCodPayment({
+      storeId: input.storeId,
+      dispatchNoteId: input.dispatchNoteId,
+      stopId: input.stopId,
+      amount: input.amount,
+      correlationKey: `dispatch_route_stop:${input.stopId}`,
+      currency: input.currency,
+      paymentMethod: input.paymentMethod,
     });
-
-    const orderId = dispatchNote?.order_id ?? null;
-    if (!orderId) {
-      // Legacy sales_order flow (no COD order linked) — nothing to settle here.
-      this.logger.debug(
-        `[payment.received/dispatch_route] dispatch_note #${input.dispatchNoteId} has no order_id — NO-OP (stop #${input.stopId})`,
-      );
-      return;
-    }
-
-    // 2. Idempotency guard: bail if a payment for this stop already exists.
-    const correlation = `dispatch_route_stop:${input.stopId}`;
-    const existing = await this.prisma.payments.findFirst({
-      where: { gateway_reference: correlation },
-      select: { id: true },
-    });
-    if (existing) {
-      this.logger.debug(
-        `[payment.received/dispatch_route] Payment already registered for stop #${input.stopId} (payment #${existing.id}) — NO-OP`,
-      );
-      return;
-    }
-
-    // 3. Load the COD order (scope merges orders.store_id via direct field).
-    const order = await this.prisma.orders.findFirst({
-      where: { id: orderId, store_id: input.storeId },
-      select: {
-        id: true,
-        currency: true,
-        total_paid: true,
-        remaining_balance: true,
-        customer_id: true,
-      },
-    });
-    if (!order) {
-      this.logger.warn(
-        `[payment.received/dispatch_route] COD order #${orderId} not found in store #${input.storeId} — skipped`,
-      );
-      return;
-    }
-
-    const remaining = Number(order.remaining_balance);
-    const applied = Math.min(input.amount, Math.max(remaining, 0));
-    const newRemaining = Math.max(remaining - input.amount, 0);
-    const newTotalPaid = Number(order.total_paid) + applied;
-
-    // 4. Record the payment row + decrement the balance, mirroring
-    //    registerCreditPayment. payments has no store_id column (scoped via the
-    //    orders relation), so order_id is sufficient for tenant isolation.
-    await this.prisma.payments.create({
-      data: {
-        order_id: order.id,
-        customer_id: order.customer_id ?? undefined,
-        amount: applied,
-        currency: input.currency ?? order.currency ?? 'COP',
-        state: 'succeeded',
-        gateway_reference: correlation,
-        paid_at: new Date(),
-        gateway_response: {
-          payment_type: 'dispatch_route',
-          dispatch_note_id: input.dispatchNoteId,
-          stop_id: input.stopId,
-          payment_method: input.paymentMethod ?? 'cash',
-          collected_amount: input.amount,
-        },
-      },
-    });
-
-    await this.prisma.orders.updateMany({
-      where: { id: order.id, store_id: input.storeId },
-      data: {
-        total_paid: Math.round(newTotalPaid * 100) / 100,
-        remaining_balance: Math.round(newRemaining * 100) / 100,
-      },
-    });
-
-    this.logger.log(
-      `[payment.received/dispatch_route] COD order #${order.id} settled from stop #${input.stopId}: applied=${applied} remaining=${
-        Math.round(newRemaining * 100) / 100
-      }`,
-    );
   }
 }
