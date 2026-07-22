@@ -22,6 +22,12 @@ export interface StoreSettings {
   carrier?: CarrierSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
+  /**
+   * Services sub-section (offer_home_service + local_address). Lives
+   * outside the top-level sections in the backend JSON. Mirrors
+   * `store_settings.settings.services.*` on the backend.
+   */
+  services?: any;
 }
 
 /**

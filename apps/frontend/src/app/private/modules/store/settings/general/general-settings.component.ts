@@ -252,7 +252,10 @@ export class GeneralSettingsComponent implements OnInit {
   });
 
   ngOnInit() {
-    this.loadSettings();
+    // forceRefresh: true on mount too — the 60s cache would otherwise
+    // return the stale pre-save response after navigation, and the form
+    // would re-mount without the persisted `services` sub-section.
+    this.loadSettings({ forceRefresh: true });
     this.resolveStoreAppUrl();
     this.loadEmissionStatus();
   }
