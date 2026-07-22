@@ -67,7 +67,10 @@ export const RateLimitMiddleware = createRateLimitMiddleware({
 export const LoginRateLimitMiddleware = createRateLimitMiddleware({
   prefix: 'rl:login',
   windowSeconds: 15 * 60, // 15 minutes
-  maxAttempts: 30, // FIX QUI-489: 10→30 to accommodate demo retry patterns and frontend re-requests
+  // QUI-489 refactor: lee del env. Default 10 (production-safe). En dev se
+  // puede subir via docker-compose.override.yml con
+  // LOGIN_RATE_LIMIT_MAX_ATTEMPTS=30 sin tocar producción.
+  maxAttempts: Number(process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS) || 10,
   message: 'Too many login attempts from this IP, please try again later.',
   errorLabel: 'Too Many Login Attempts',
 });

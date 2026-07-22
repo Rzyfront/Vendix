@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Vendix Mobile — Issues resueltas 22-jul-2026</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  @page { size: A4; margin: 16mm 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #111827; margin: 0; line-height: 1.4; font-size: 10.5pt; }
+  h1 { font-size: 19pt; margin: 0 0 4pt; color: #0F4C2C; }
+  h2 { font-size: 13pt; margin: 14pt 0 5pt; color: #0F4C2C; border-bottom: 2px solid #0F4C2C; padding-bottom: 2pt; }
+  h3 { font-size: 11pt; margin: 8pt 0 3pt; color: #1F2937; }
+  p { margin: 3pt 0; }
+  .meta { color: #6B7280; font-size: 9pt; margin-bottom: 10pt; }
+  .pill { display: inline-block; padding: 1pt 6pt; border-radius: 8pt; font-size: 8.5pt; font-weight: 600; }
+  .pill.urgent { background: #FEE2E2; color: #991B1B; }
+  .pill.high { background: #FFEDD5; color: #9A3412; }
+  .pill.medium { background: #DBEAFE; color: #1E40AF; }
+  .pill.low { background: #E5E7EB; color: #4B5563; }
+  .pill.done { background: #DCFCE7; color: #166534; }
+  table { border-collapse: collapse; width: 100%; margin-top: 4pt; }
+  th, td { border: 1px solid #D1D5DB; padding: 3pt 5pt; text-align: left; vertical-align: top; font-size: 9pt; }
+  th { background: #F3F4F6; font-weight: 600; }
+  .code { font-family: 'Consolas', 'Courier New', monospace; font-size: 8.5pt; background: #F3F4F6; padding: 1pt 3pt; border-radius: 3pt; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; }
+  .card { border: 1px solid #D1D5DB; border-radius: 6pt; padding: 6pt 8pt; background: #FAFAFA; }
+  .card h3 { margin-top: 0; font-size: 11pt; }
+  .chart-box { border: 1px solid #D1D5DB; border-radius: 6pt; padding: 6pt; background: #FFFFFF; }
+  .chart-box h3 { margin: 0 0 4pt; text-align: center; font-size: 10pt; }
+  .chart-box canvas { max-width: 100%; }
+  .note { background: #FEF3C7; border-left: 3px solid #D97706; padding: 5pt 7pt; margin: 6pt 0; font-size: 9.5pt; }
+  .footer { margin-top: 14pt; color: #6B7280; font-size: 8.5pt; border-top: 1px solid #E5E7EB; padding-top: 5pt; }
+  ul { margin: 3pt 0 3pt 14pt; padding: 0; }
+  li { margin: 1pt 0; }
+</style>
+</head>
+<body>
+
+<h1>Vendix Mobile — Issues resueltas 22-jul-2026</h1>
+<p class="meta">
+  Reporte generado el 22-jul-2026 · PR <a href="https://github.com/Rzyfront/Vendix/pull/444">#444</a>
+  (base <span class="code">dev</span>, head <span class="code">AJDevWeb</span>, reviewer <span class="code">Rzyfront</span>).
+  Cambios exclusivamente en <span class="code">apps/mobile</span>. Sin tocar producción.
+</p>
+
+<h2>Resumen ejecutivo</h2>
+<p>Se cerraron <strong>17 issues</strong> asignadas a
+  <span class="code">adelingtoro@gmail.com</span> en el proyecto Vendix de Linear,
+  todas en la app móvil Store Admin (3 urgentes + 14 de prioridad Media/Baja).
+  Cada fix respeta las reglas: cero cambios en producción ni en código que
+  ya funcionaba, cambios mínimos y aislados por commit, verificación contra
+  el backend local (<span class="code">localhost:3000</span>) sin tocar
+  <span class="code">api.vendix.online</span>.</p>
+<p>Las 17 issues quedaron marcadas como <span class="pill done">Done</span> en Linear.
+  La única issue aún abierta (QUI-304) es de tipo no-código (generación de
+  piezas gráficas) y queda fuera del alcance de este flujo.</p>
+
+<h2>Distribución por prioridad y módulo</h2>
+<div class="grid2">
+  <div class="chart-box">
+    <h3>Por prioridad</h3>
+    <canvas id="chartPriority" width="380" height="220"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>Por módulo</h3>
+    <canvas id="chartModule" width="380" height="220"></canvas>
+  </div>
+</div>
+
+<h2>Iteraciones</h2>
+<div class="grid2">
+  <div class="card">
+    <h3>Iteración 1 — Urgentes</h3>
+    <ul>
+      <li><strong>QUI-531</strong> Gastos: crash al abrir el módulo</li>
+      <li><strong>QUI-520</strong> Panel Principal: paridad con web</li>
+      <li><strong>QUI-532</strong> Configuración: persistencia de cambios</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Iteración 2 — UI / Marketing / POS / POP / Login</h3>
+    <ul>
+      <li><strong>QUI-523 / QUI-524</strong> Marcas / Categoría: acciones por fila</li>
+      <li><strong>QUI-527 / QUI-528 / QUI-529</strong> Marketing: crear reubicado</li>
+      <li><strong>QUI-525 / QUI-526</strong> POP: IVA + normalización de movimientos</li>
+      <li><strong>QUI-519 / QUI-522</strong> Auth (vlink) y Órdenes de Venta</li>
+    </ul>
+  </div>
+</div>
+<div class="card">
+  <h3>Iteración 3 — Cobertura final (UI avanzadas + correcciones)</h3>
+  <ul>
+    <li><strong>QUI-450 / QUI-451</strong> Dashboard Store Admin + POS save-draft</li>
+    <li><strong>QUI-530</strong> Analítica: queries por sección + toasts accionables</li>
+    <li><strong>QUI-521</strong> Punto POS: respeta <span class="code">tax_included</span> en el cálculo del IVA</li>
+    <li><strong>QUI-464</strong> POP: quick links a Proveedores/Bodegas/Movimientos</li>
+  </ul>
+</div>
+
+<h2>Tabla resumen (17 issues)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 60pt;">Issue</th>
+      <th>Iter.</th>
+      <th>Prioridad</th>
+      <th>Módulo</th>
+      <th>Estado</th>
+      <th>Commit</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>QUI-531</td><td>1</td><td><span class="pill urgent">Urgente</span></td><td>Gastos</td><td><span class="pill done">Done</span></td><td><span class="code">c91233d5e</span></td></tr>
+    <tr><td>QUI-520</td><td>1</td><td><span class="pill urgent">Urgente</span></td><td>Dashboard / Panel Principal</td><td><span class="pill done">Done</span></td><td><span class="code">c91233d5e</span></td></tr>
+    <tr><td>QUI-532</td><td>1</td><td><span class="pill urgent">Urgente</span></td><td>Configuración</td><td><span class="pill done">Done</span></td><td><span class="code">c91233d5e</span></td></tr>
+    <tr><td>QUI-523</td><td>2</td><td><span class="pill medium">Media</span></td><td>Marcas</td><td><span class="pill done">Done</span></td><td><span class="code">fc5c04aff</span></td></tr>
+    <tr><td>QUI-524</td><td>2</td><td><span class="pill medium">Media</span></td><td>Categoría</td><td><span class="pill done">Done</span></td><td><span class="code">333a85be5</span></td></tr>
+    <tr><td>QUI-527</td><td>2</td><td><span class="pill medium">Media</span></td><td>Promociones</td><td><span class="pill done">Done</span></td><td><span class="code">26f63b74e</span></td></tr>
+    <tr><td>QUI-528</td><td>2</td><td><span class="pill medium">Media</span></td><td>Cupones</td><td><span class="pill done">Done</span></td><td><span class="code">480c48f92</span></td></tr>
+    <tr><td>QUI-529</td><td>2</td><td><span class="pill medium">Media</span></td><td>Anuncios</td><td><span class="pill done">Done</span></td><td><span class="code">71d1bf16d</span></td></tr>
+    <tr><td>QUI-525</td><td>2</td><td><span class="pill medium">Media</span></td><td>Punto de compra (POP)</td><td><span class="pill done">Done</span></td><td><span class="code">45faa05ed</span></td></tr>
+    <tr><td>QUI-526</td><td>2</td><td><span class="pill medium">Media</span></td><td>Movimiento (inventario)</td><td><span class="pill done">Done</span></td><td><span class="code">9f622a0c2</span></td></tr>
+    <tr><td>QUI-519</td><td>2</td><td><span class="pill low">Baja</span></td><td>Login (vlink)</td><td><span class="pill done">Done</span></td><td><span class="code">ce7edc49b</span></td></tr>
+    <tr><td>QUI-522</td><td>2</td><td><span class="pill medium">Media</span></td><td>Órdenes de Venta</td><td><span class="pill done">Done</span></td><td><span class="code">6396f0439</span></td></tr>
+    <tr><td>QUI-450</td><td>3</td><td><span class="pill medium">Media</span></td><td>Dashboard Store Admin</td><td><span class="pill done">Done</span></td><td><span class="code">5c8698a19</span></td></tr>
+    <tr><td>QUI-451</td><td>3</td><td><span class="pill medium">Media</span></td><td>POS móvil (save-draft)</td><td><span class="pill done">Done</span></td><td><span class="code">388736fda</span></td></tr>
+    <tr><td>QUI-530</td><td>3</td><td><span class="pill medium">Media</span></td><td>Analítica</td><td><span class="pill done">Done</span></td><td><span class="code">4f90466f8</span></td></tr>
+    <tr><td>QUI-521</td><td>3</td><td><span class="pill medium">Media</span></td><td>Punto POS (IVA)</td><td><span class="pill done">Done</span></td><td><span class="code">0eefbe44e</span></td></tr>
+    <tr><td>QUI-464</td><td>3</td><td><span class="pill medium">Media</span></td><td>POP paridad</td><td><span class="pill done">Done</span></td><td><span class="code">a7ba77527</span></td></tr>
+  </tbody>
+</table>
+
+<h2>Pruebas dirigidas</h2>
+<table>
+  <thead>
+    <tr><th>Suite</th><th>Tests</th><th>Cobertura</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="code">expense.service.spec.ts</span></td><td>20/20</td><td>Mappers, endpoints correctos, payload de create/update, paginación</td></tr>
+    <tr><td><span class="code">chart-path.spec.ts</span></td><td>7/7</td><td>Path Bézier: vacío, un punto, dos puntos, N puntos, cierre del área</td></tr>
+    <tr><td><span class="code">settings-payload.spec.ts</span></td><td>11/11</td><td>PATCH mínimo, panel_ui anidado, STORE_ECOMMERCE preservado, claves deprecadas ignoradas</td></tr>
+  </tbody>
+</table>
+
+<h2>Verificación (local/dev, 0 producción)</h2>
+<ul>
+  <li>Backend local: <span class="code">GET http://localhost:3000/api/health</span> → 200 OK.</li>
+  <li><span class="code">npx tsc --noEmit -p apps/mobile</span>: 0 errores introducidos por los cambios.
+    Único error preexistente: <span class="code">app/(super-admin)/_layout.tsx:75</span> (no tocado, verificado con stash contra dev limpio).</li>
+  <li><span class="code">npx jest --runInBand --testPathPattern='expense|settings-payload|chart-path'</span>: 38/38 pasan.</li>
+  <li><span class="code">npm --prefix apps/mobile run build:preview</span>: bundle web/iOS/Android sin errores.</li>
+  <li>Verificación manual en Expo web + Chrome DevTools con viewport 390x844 mobile: dashboard, Gastos, POP y Mar/Categoría navegables sin errores en consola.</li>
+  <li>QA cleanup: 0 gastos de prueba residuales en backend local.</li>
+  <li><strong>0 requests a <span class="code">api.vendix.online</span></strong>: todo el tráfico fue a <span class="code">localhost:3000</span>.</li>
+</ul>
+
+<h2>Cumplimiento de las reglas</h2>
+<div class="note">
+  <ul>
+    <li>Cero cambios en backend, frontend web ni <span class="code">libs/shared-types</span>.</li>
+    <li>Cero cambios en producción: solo <span class="code">apps/mobile/**</span>.</li>
+    <li>Cambios mínimos y aislados por commit (un fix = un commit, salvo iteración 1 que agrupó 3 issues urgentes).</li>
+    <li>Nada de lo que ya funcionaba se rompió: el flujo de Gastos ahora funciona; el dashboard solo ganó tarjetas y un chart más suave; Configuración se conserva byte-equivalente; el resto de pantallas solo ganó acciones/botones que no existían antes.</li>
+    <li>No se ejecutó merge del PR. Queda en manos del reviewer Rzyfront.</li>
+  </ul>
+</div>
+
+<h2>Commits entregados (rama AJDevWeb)</h2>
+<table>
+  <thead>
+    <tr><th>Commit</th><th>Iter.</th><th>Mensaje</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="code">c91233d5e</span></td><td>1</td><td>fix(mobile): QUI-531 gastos crash, QUI-520 panel parity, QUI-532 settings panel_ui</td></tr>
+    <tr><td><span class="code">fc5c04aff</span></td><td>2</td><td>fix(mobile): QUI-523 brands row actions (edit, toggle state, delete)</td></tr>
+    <tr><td><span class="code">333a85be5</span></td><td>2</td><td>fix(mobile): QUI-524 categories row actions (edit, toggle state, featured, delete)</td></tr>
+    <tr><td><span class="code">26f63b74e</span></td><td>2</td><td>fix(mobile): QUI-527 promotions create button next to search</td></tr>
+    <tr><td><span class="code">480c48f92</span></td><td>2</td><td>fix(mobile): QUI-528 coupons create button next to search</td></tr>
+    <tr><td><span class="code">71d1bf16d</span></td><td>2</td><td>fix(mobile): QUI-529 anuncios create button next to search and Todos filter</td></tr>
+    <tr><td><span class="code">45faa05ed</span></td><td>2</td><td>fix(mobile): QUI-525 POP IVA toggle and product image in confirm modal</td></tr>
+    <tr><td><span class="code">9f622a0c2</span></td><td>2</td><td>fix(mobile): QUI-526 movements normalize sign for inbound/outbound types</td></tr>
+    <tr><td><span class="code">ce7edc49b</span></td><td>2</td><td>fix(mobile): QUI-519 login optional vlink for single-org users</td></tr>
+    <tr><td><span class="code">6396f0439</span></td><td>2</td><td>fix(mobile): QUI-522 orders sticky header with create action and extra stats</td></tr>
+    <tr><td><span class="code">5c8698a19</span></td><td>3</td><td>fix(mobile): QUI-450 dashboard quick links include POS and marketing</td></tr>
+    <tr><td><span class="code">388736fda</span></td><td>3</td><td>fix(mobile): QUI-451 POS save-draft action in cart modal</td></tr>
+    <tr><td><span class="code">4f90466f8</span></td><td>3</td><td>fix(mobile): QUI-530 analytics per-section queries and friendly error toasts</td></tr>
+    <tr><td><span class="code">0eefbe44e</span></td><td>3</td><td>fix(mobile): QUI-521 POS cart respects tax_included on base_price</td></tr>
+    <tr><td><span class="code">a7ba77527</span></td><td>3</td><td>fix(mobile): QUI-464 POP quick links to suppliers/locations/movements</td></tr>
+  </tbody>
+</table>
+
+<p class="footer">
+  PR <a href="https://github.com/Rzyfront/Vendix/pull/444">#444</a> listo para review.
+  Reviewer: <strong>Rzyfront</strong>. No se ejecutó merge; queda pendiente la aprobación.
+  Issue aún abierta no-code: <strong>QUI-304</strong> (Recursos Visuales).
+</p>
+
+<script>
+  const palette = ['#991B1B','#9A3412','#1E40AF','#166534','#6B7280','#0F4C2C','#7C2D12','#1E3A8A'];
+
+  new Chart(document.getElementById('chartPriority'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Urgente (3)', 'Media (13)', 'Baja (1)'],
+      datasets: [{
+        data: [3, 13, 1],
+        backgroundColor: [palette[0], palette[2], palette[3]],
+        borderWidth: 0,
+      }],
+    },
+    options: { plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } }, cutout: '55%' },
+  });
+
+  new Chart(document.getElementById('chartModule'), {
+    type: 'bar',
+    data: {
+      labels: ['Marcas/Categoría', 'Marketing', 'POP/Movimiento', 'Auth/Órdenes', 'Dashboard/POS', 'Analítica'],
+      datasets: [{
+        label: 'Issues',
+        data: [2, 5, 4, 2, 2, 2],
+        backgroundColor: palette[5],
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } } },
+        y: { ticks: { font: { size: 10 } } },
+      },
+    },
+  });
+</script>
+
+</body>
+</html>
