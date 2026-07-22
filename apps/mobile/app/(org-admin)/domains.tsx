@@ -28,7 +28,7 @@ import { Icon } from '@/shared/components/icon/icon';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
-import { RowActionsMenu, type RowAction } from '@/shared/components/row-actions-menu/row-actions-menu';
+import { type RowAction } from '@/shared/components/row-actions-menu/row-actions-menu';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import {
   OptionsDropdown,

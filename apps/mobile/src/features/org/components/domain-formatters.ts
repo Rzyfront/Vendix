@@ -154,16 +154,16 @@ export function getSslStatusColor(status: SslStatus | string | null | undefined)
 }
 
 /** Opciones para el dropdown de status en filtros y en el modal crear. */
-export const DOMAIN_STATUS_OPTIONS: Array<{ value: DomainStatus; label: string }> = (
+export const DOMAIN_STATUS_OPTIONS: { value: DomainStatus; label: string }[] = (
   Object.keys(STATUS_LABELS) as DomainStatus[]
 ).map((value) => ({ value, label: STATUS_LABELS[value] }));
 
 /** Opciones para el dropdown de ownership. */
-export const DOMAIN_OWNERSHIP_OPTIONS: Array<{ value: DomainOwnership; label: string }> = (
+export const DOMAIN_OWNERSHIP_OPTIONS: { value: DomainOwnership; label: string }[] = (
   Object.keys(OWNERSHIP_LABELS) as DomainOwnership[]
 ).map((value) => ({ value, label: OWNERSHIP_LABELS[value] }));
 
 /** Opciones para el dropdown de app_type. */
-export const APP_TYPE_OPTIONS: Array<{ value: AppType; label: string }> = (
+export const APP_TYPE_OPTIONS: { value: AppType; label: string }[] = (
   Object.keys(APP_TYPE_LABELS) as AppType[]
 ).map((value) => ({ value, label: APP_TYPE_LABELS[value] }));

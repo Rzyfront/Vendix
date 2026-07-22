@@ -46,6 +46,7 @@ export function DomainVerifyModal({ visible, domain, onClose, onVerified }: Doma
       .then((d) => setInstructions(d))
       .catch(() => setInstructions(null))
       .finally(() => setLoadingInstructions(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- early-return ya maneja el caso `domain` null; queremos sólo re-cargar cuando cambia el hostname visible.
   }, [visible, domain?.hostname]);
 
   if (!domain) return null;
@@ -70,7 +71,7 @@ export function DomainVerifyModal({ visible, domain, onClose, onVerified }: Doma
     if (!instructions?.target) return;
     // Clipboard.setString (sin dep extra: ya viene con Expo)
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const Clipboard = require('expo-clipboard').default ?? require('expo-clipboard');
       Clipboard.setStringAsync(instructions.target).catch(() => undefined);
     } catch {
