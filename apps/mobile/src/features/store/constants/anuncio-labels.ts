@@ -27,6 +27,7 @@ export const ANUNCIO_LABELS = {
 
   // CTAs / botones
   ctaNew: 'Nuevo anuncio',
+  ctaAll: 'Todos',
   ctaCreate: 'Crear anuncio',
   ctaGenerate: 'Generar anuncio',
   ctaRegenerate: 'Regenerar',
