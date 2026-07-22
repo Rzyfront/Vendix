@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   effect,
   inject,
@@ -40,6 +41,7 @@ import { PosCustomer } from '../../models/customer.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
 import { PosOrderCreateResult } from '../../models/order.model';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
@@ -104,6 +106,7 @@ export class PosCheckoutShellComponent {
   private readonly integration = inject(PosRestaurantIntegrationService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   // ── Child references ────────────────────────────────────────────────────
   protected readonly consumoStep = viewChild(PosConsumoStepComponent);
@@ -579,6 +582,10 @@ export class PosCheckoutShellComponent {
       // Dirección → exige dirección válida (con teléfono) antes de avanzar.
       if (sub === 2 && this.requiresAddress() && !this.addressValid()) {
         this.showAddressErrors.set(true);
+        // Lleva el foco/viewport al primer campo inválido (ej. teléfono, que
+        // en pantallas chicas queda fuera de vista). Reusa el utilitario del
+        // fiscal-wizard; el navegador hace scroll nativo al enfocar.
+        focusFirstInvalid(this.host);
         return;
       }
       this.nextStep();
