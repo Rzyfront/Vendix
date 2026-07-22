@@ -3,6 +3,18 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
 
+/**
+ * A free slot = a time range where the provider has capacity and no booking.
+ * Same shape as the week-view's overlay so the two components stay
+ * interchangeable in the wizard (reservation-form-modal uses both).
+ */
+export interface FreeSlot {
+  /** "HH:mm" */
+  start: string;
+  /** "HH:mm" */
+  end: string;
+}
+
 @Component({
   selector: 'app-calendar-day-view',
   standalone: true,
@@ -14,7 +26,31 @@ export class CalendarDayViewComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly bookings = input.required<Booking[]>();
+  /**
+   * Optional free-slot overlay (green blocks). When provided, the user can
+   * click a free slot to pick that time. Empty array (or omitted) means the
+   * wizard is driving availability outside this view.
+   */
+  readonly freeSlots = input<FreeSlot[]>([]);
+  /**
+   * Optional unavailable-slot overlay (red blocks). Rendered BELOW bookings
+   * and free slots — represents times the provider does NOT work this day
+   * (outside their schedule blocks, including lunch breaks). The blocks are
+   * NOT clickable themselves; clicks bubble to the day-column which computes
+   * the snap, then the wizard's validation fires the "fuera de horario" toast.
+   */
+  readonly unavailableSlots = input<FreeSlot[]>([]);
   readonly currentDate = input.required<Date>();
+
+  /**
+   * Duration of one slot in minutes. Drives the grid's time-divider lines
+   * and the click-to-pick snap. Defaults to 30 so any caller that doesn't
+   * pass it keeps the legacy hardcoded behavior. Callers should pass the
+   * active product's `service_duration_minutes` so a 45-min service snaps
+   * to :00/:15/:30/:45 and a 20-min service snaps to :00/:20/:40 instead
+   * of forcing :00/:30.
+   */
+  readonly slotMinutes = input<number>(30);
 
   readonly slotClicked = output<{ time: string }>();
   readonly bookingClicked = output<Booking>();
@@ -26,7 +62,7 @@ export class CalendarDayViewComponent {
 
   private currentTimeSignal = signal(new Date());
 
-  readonly timeSlots: string[] = this.generateTimeSlots();
+  readonly timeSlots = computed<string[]>(() => this.generateTimeSlots(this.slotMinutes()));
 
   constructor() {
     const interval = setInterval(() => {
@@ -82,9 +118,30 @@ export class CalendarDayViewComponent {
     return ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100;
   }
 
+  getFreeSlotTop(slot: FreeSlot): number {
+    const startMinutes = this.parseTimeToMinutes(slot.start);
+    return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+  }
+
+  getFreeSlotHeight(slot: FreeSlot): number {
+    const startMinutes = this.parseTimeToMinutes(slot.start);
+    const endMinutes = this.parseTimeToMinutes(slot.end);
+    return Math.max(
+      ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100,
+      1.2, // ensure even 15-min slots remain clickable
+    );
+  }
+
   onBookingClick(event: MouseEvent, booking: Booking): void {
     event.stopPropagation();
     this.bookingClicked.emit(booking);
+  }
+
+  onFreeSlotClick(event: MouseEvent, slot: FreeSlot): void {
+    event.stopPropagation();
+    // Emit the slot's start time as the picked time. The parent decides
+    // whether to advance the wizard, open a confirmation, etc.
+    this.slotClicked.emit({ time: slot.start });
   }
 
   onColumnClick(event: MouseEvent): void {
@@ -92,7 +149,8 @@ export class CalendarDayViewComponent {
     const rect = target.getBoundingClientRect();
     const y = event.clientY - rect.top;
     const percent = y / rect.height;
-    const minutes = Math.round((percent * this.TOTAL_MINUTES + this.DAY_START) / 30) * 30;
+    const step = this.slotMinutes();
+    const minutes = Math.round((percent * this.TOTAL_MINUTES + this.DAY_START) / step) * step;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     const time = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
@@ -127,10 +185,10 @@ export class CalendarDayViewComponent {
     return h * 60 + m;
   }
 
-  private generateTimeSlots(): string[] {
+  private generateTimeSlots(stepMinutes: number): string[] {
     const slots: string[] = [];
     for (let h = 7; h <= 22; h++) {
-      for (let m = 0; m < 60; m += 30) {
+      for (let m = 0; m < 60; m += stepMinutes) {
         if (h === 22 && m > 0) break;
         slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
       }

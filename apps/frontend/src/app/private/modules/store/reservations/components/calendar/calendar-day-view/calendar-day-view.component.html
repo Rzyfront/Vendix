@@ -11,7 +11,7 @@
   <div class="day-view-body">
     <!-- Time labels column -->
     <div class="time-gutter">
-      @for (slot of timeSlots; track slot) {
+      @for (slot of timeSlots(); track slot) {
         <div class="time-label">{{ formatTime(slot) }}</div>
       }
     </div>
@@ -19,9 +19,36 @@
     <!-- Single day column -->
     <div class="day-column" (click)="onColumnClick($event)">
       <!-- Grid lines -->
-      @for (slot of timeSlots; track slot) {
+      @for (slot of timeSlots(); track slot) {
         <div class="time-row">
           <span class="slot-hint">{{ formatTime(slot) }}</span>
+        </div>
+      }
+
+      <!-- Unavailable-slot overlay (red). NOT clickable: clicks bubble to
+           the day-column's onColumnClick, which computes the snap and the
+           wizard validation fires the lunch-break / out-of-hours toast. -->
+      @for (slot of unavailableSlots(); track slot.start + slot.end) {
+        <div
+          class="unavailable-slot-block"
+          [style.top.%]="getFreeSlotTop(slot)"
+          [style.height.%]="getFreeSlotHeight(slot)"
+          [attr.aria-label]="'Horario no disponible: ' + slot.start + ' a ' + slot.end"
+          [title]="'No disponible ' + slot.start + ' – ' + slot.end">
+        </div>
+      }
+
+      <!-- Free-slot overlay (green). Clickable: emits slotClicked with the
+           slot's start time so the wizard can pick it. -->
+      @for (slot of freeSlots(); track slot.start + slot.end) {
+        <div
+          class="free-slot-block"
+          [style.top.%]="getFreeSlotTop(slot)"
+          [style.height.%]="getFreeSlotHeight(slot)"
+          (click)="onFreeSlotClick($event, slot)"
+          [attr.aria-label]="'Slot libre desde ' + slot.start + ' hasta ' + slot.end"
+          [title]="'Libre ' + slot.start + ' – ' + slot.end">
+          <span class="free-slot-time">{{ slot.start }}</span>
         </div>
       }
 
