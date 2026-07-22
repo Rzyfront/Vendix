@@ -11,6 +11,7 @@ import type {
   SalesByPaymentMethod,
   InventorySummary,
   DateRange,
+  ProfitLossSummary,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -32,6 +33,19 @@ export const DashboardService = {
   async getStats(): Promise<StoreDashboardStats> {
     const res = await apiClient.get(Endpoints.STORE.DASHBOARD_STATS);
     return unwrap<StoreDashboardStats>(res);
+  },
+  async getProfitLossSummary(range?: DateRange): Promise<ProfitLossSummary | null> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(
+      `${Endpoints.STORE.ANALYTICS.PROFIT_LOSS}${qs ? `?${qs}` : ''}`,
+    );
+    const body = res.data as ApiResponse<ProfitLossSummary> | ProfitLossSummary | null;
+    if (!body) return null;
+    if (typeof body === 'object' && 'success' in body) {
+      return (body as ApiResponse<ProfitLossSummary>).data ?? null;
+    }
+    return body as ProfitLossSummary;
   },
 };
 
