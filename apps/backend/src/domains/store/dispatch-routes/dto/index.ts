@@ -6,5 +6,6 @@ export { ReleaseStopDto } from './release-stop.dto';
 export { CloseDispatchRouteDto } from './close-dispatch-route.dto';
 export { VoidDispatchRouteDto } from './void-dispatch-route.dto';
 export { CreateVehicleDto } from './create-vehicle.dto';
+export { UpdateVehicleDto } from './update-vehicle.dto';
 export { AddStopsDto, AddStopItemDto } from './add-stops.dto';
 export { ReorderStopsDto, ReorderStopItemDto } from './reorder-stops.dto';

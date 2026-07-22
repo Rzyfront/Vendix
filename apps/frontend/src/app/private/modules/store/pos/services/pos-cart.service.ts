@@ -476,8 +476,31 @@ export class PosCartService {
         // Calculate cart total for order-level eligibility
         const subtotal = this.calculateSubtotal(currentState.items);
 
-        // Apply eligible auto-apply promotions
+        // Discounts evaluated this pass — only the single winner (highest
+        // priority, lowest id on ties) ends up in `promoDiscounts`. All
+        // other candidates are discarded. See the comment block below.
         const promoDiscounts: CartDiscount[] = [];
+
+        // ---------------------------------------------------------------
+        // WINNER-TAKES-ALL: an order has at most ONE active promotion.
+        // Mirrors the backend engine rule (PromotionEngineService.
+        // quoteDiscounts): the highest-priority candidate wins, ties broken
+        // by lowest promotion_id. All other candidates are discarded even
+        // if they apply to non-overlapping products. See skills/vendix-
+        // date-timezone and the engine fix in commit ac12eda13 for the
+        // canonical algorithm.
+        //
+        // The preview math (per-line shares, tier resolution, cap, etc.) is
+        // unchanged — only the selection step changes. The "winner" is
+        // recomputed in the backend at charge time; this just makes the
+        // cashier preview match the authoritative backend value.
+        // ---------------------------------------------------------------
+        let winner: {
+          discount: CartDiscount;
+          priority: number;
+          id: number;
+        } | null = null;
+
         for (const promo of promotions) {
           if (!promo.is_auto_apply) continue;
 
@@ -591,7 +614,7 @@ export class PosCartService {
               // so it cannot exceed a single line total here. No mutation.
             });
 
-            promoDiscounts.push({
+            const candidateDiscount: CartDiscount = {
               id: 'PROMO_' + promo.id,
               type: promo.type === 'percentage' ? 'percentage' : 'fixed',
               value: Number(promo.value),
@@ -601,7 +624,19 @@ export class PosCartService {
               is_auto_applied: true,
               // Presentation-only tier label (mirrors backend "Desde N und: -X%").
               badge_label: this.buildTierBadgeLabel(matchedTier),
-            });
+            };
+            if (
+              winner === null ||
+              Number(promo.priority ?? 0) < winner.priority ||
+              (Number(promo.priority ?? 0) === winner.priority &&
+                Number(promo.id) < winner.id)
+            ) {
+              winner = {
+                discount: candidateDiscount,
+                priority: Number(promo.priority ?? 0),
+                id: Number(promo.id),
+              };
+            }
             continue;
           }
 
@@ -619,7 +654,7 @@ export class PosCartService {
             discountAmount = Math.min(discountAmount, maxDiscountAmount);
           }
 
-          promoDiscounts.push({
+          const candidateDiscount: CartDiscount = {
             id: 'PROMO_' + promo.id,
             type: promo.type === 'percentage' ? 'percentage' : 'fixed',
             value: Number(promo.value),
@@ -627,7 +662,27 @@ export class PosCartService {
             amount: Math.round(discountAmount * 100) / 100,
             promotion_id: promo.id,
             is_auto_applied: true,
-          });
+          };
+          if (
+            winner === null ||
+            Number(promo.priority ?? 0) < winner.priority ||
+            (Number(promo.priority ?? 0) === winner.priority &&
+              Number(promo.id) < winner.id)
+          ) {
+            winner = {
+              discount: candidateDiscount,
+              priority: Number(promo.priority ?? 0),
+              id: Number(promo.id),
+            };
+          }
+        }
+
+        // Push ONLY the winner to the final discounts list. All other
+        // evaluated candidates are discarded by the "highest priority wins"
+        // rule. If no candidate passed the guards, `winner` is null and
+        // `promoDiscounts` remains empty.
+        if (winner) {
+          promoDiscounts.push(winner.discount);
         }
 
         const updatedDiscounts = [...manualDiscounts, ...promoDiscounts];

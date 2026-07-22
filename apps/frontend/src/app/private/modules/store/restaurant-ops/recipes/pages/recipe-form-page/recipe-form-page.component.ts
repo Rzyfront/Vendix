@@ -11,11 +11,13 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs/operators';
 import {
+  AbstractControl,
   FormArray,
   FormBuilder,
   FormControl,
   FormGroup,
   ReactiveFormsModule,
+  ValidationErrors,
   Validators,
 } from '@angular/forms';
 
@@ -53,6 +55,19 @@ interface RecipeFormShape {
   is_active: FormControl<boolean>;
 }
 
+/**
+ * Custom FormArray validator. Validators.minLength(1) does NOT work on
+ * FormArrays in Angular (limitation: it only checks string length on
+ * FormControl<string>). Use this to require at least one element in a
+ * FormArray — e.g. a recipe's BOM must have ≥1 component.
+ */
+function atLeastOneItemValidator(control: AbstractControl): ValidationErrors | null {
+  if (control instanceof FormArray) {
+    return control.length > 0 ? null : { minItems: true };
+  }
+  return null;
+}
+
 @Component({
   selector: 'app-recipe-form-page',
   standalone: true,
@@ -82,6 +97,10 @@ export class RecipeFormPageComponent implements OnInit {
 
   readonly isEditMode = signal(false);
   readonly recipeId = signal<number | null>(null);
+  // Inline error message displayed at the top of the form. Acts as a
+  // fallback to the toast (which the user reported was not always visible).
+  // Persists until the next submit attempt.
+  readonly submitError = signal<string | null>(null);
   readonly isLoadingRecipe = signal(false);
   readonly isSubmitting = signal(false);
   readonly isLoadingProducts = signal(false);
@@ -112,7 +131,7 @@ export class RecipeFormPageComponent implements OnInit {
 
   readonly itemsArray = this.fb.nonNullable.array<
     FormGroup<RecipeItemFormControls>
-  >([]);
+  >([], { validators: [atLeastOneItemValidator] });
 
   readonly form: FormGroup<RecipeFormShape> = this.fb.nonNullable.group<
     RecipeFormShape
@@ -148,7 +167,10 @@ export class RecipeFormPageComponent implements OnInit {
         id: 'cancel',
         label: 'Cancelar',
         variant: 'outline',
-        disabled: this.isSubmitting(),
+        // No longer tied to isSubmitting: if the user is stuck waiting for
+        // a 4xx/5xx response, they MUST be able to leave the form.
+        // takeUntilDestroyed will cancel the in-flight request on unmount.
+        disabled: false,
       },
       {
         id: 'save',
@@ -311,12 +333,41 @@ export class RecipeFormPageComponent implements OnInit {
   }
 
   submit(): void {
+    this.submitError.set(null); // clear any previous inline error
     this.form.markAllAsTouched();
     this.itemsArray.markAllAsTouched();
-    if (this.form.invalid || this.itemsArray.invalid) {
+    const formInvalid = this.form.invalid;
+    const itemsInvalid = this.itemsArray.invalid;
+    const itemsCount = this.itemsArray.length;
+    if (formInvalid || itemsInvalid) {
+      // Compose a specific inline message that names the actual problem
+      // rather than a generic "review the fields" hint.
+      const errors: string[] = [];
+      if (itemsCount === 0) {
+        errors.push('Agregá al menos un componente a la receta.');
+      } else if (itemsInvalid) {
+        errors.push('Revisá los componentes: cada uno necesita un insumo y cantidad mayor a 0.');
+      }
+      if (formInvalid) {
+        errors.push('Completá los campos obligatorios del encabezado.');
+      }
+      const composedMessage = errors.join(' ');
+      this.submitError.set(composedMessage);
       this.toastService.warning('Revisa los campos marcados antes de guardar');
       return;
     }
+
+    // Safety net: if the request hangs forever (network stalled, server
+    // crashed mid-response) the user is stuck looking at a spinner. After
+    // 30s we force-reset isSubmitting so the form becomes usable again.
+    const safetyTimer = setTimeout(() => {
+      if (this.isSubmitting()) {
+        this.isSubmitting.set(false);
+        this.toastService.warning(
+          'La solicitud tardó demasiado. Verificá tu conexión e intentá de nuevo.',
+        );
+      }
+    }, 30000);
 
     const raw = this.form.getRawValue();
     // Campos mutables compartidos. product_id NO va aquí: es inmutable tras crear
@@ -342,11 +393,18 @@ export class RecipeFormPageComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (recipe) => {
-          const recipeId = recipe.id ?? this.recipeId();
-          if (recipeId == null) {
+          clearTimeout(safetyTimer);
+          // Defensive: a malformed response (e.g. HTTP 200 with {success:false}
+          // instead of 409) bypasses catchError and reaches `next` with
+          // `recipe` undefined. Treat it as an error.
+          if (!recipe || recipe.id == null) {
+            const msg = 'Respuesta inválida del servidor. Intentá de nuevo.';
+            this.submitError.set(msg);
+            this.toastService.error(msg, 'No se pudo guardar la receta', 6000);
             this.isSubmitting.set(false);
             return;
           }
+          const recipeId = recipe.id;
           this.syncItems(recipeId).then(() => {
             this.isSubmitting.set(false);
             this.toastService.success(
@@ -358,13 +416,28 @@ export class RecipeFormPageComponent implements OnInit {
           });
         },
         error: (err: unknown) => {
+          clearTimeout(safetyTimer);
           this.isSubmitting.set(false);
-          this.toastService.error(
+          // The recipes service transforms HttpErrorResponse into a plain
+          // string message; for 409 it includes the backend's exact text
+          // (e.g. "Ya existe una receta para este producto en la tienda").
+          // Fall back to a clear generic only if no message arrived.
+          const apiMessage =
             typeof err === 'string'
               ? err
-              : this.isEditMode()
-                ? 'Error al actualizar la receta'
-                : 'Error al crear la receta',
+              : (err as { error?: { message?: string } })?.error?.message;
+          const finalMessage =
+            apiMessage ??
+            (this.isEditMode()
+              ? 'Error al actualizar la receta'
+              : 'Error al crear la receta');
+          // Inline error banner — always visible regardless of toast
+          // rendering, stacking, or auto-dismiss timing.
+          this.submitError.set(finalMessage);
+          this.toastService.error(
+            finalMessage,
+            'No se pudo guardar la receta',
+            6000, // 6s so the user has time to read the API message
           );
         },
       });

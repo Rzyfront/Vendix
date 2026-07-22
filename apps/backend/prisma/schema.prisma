@@ -2683,11 +2683,17 @@ model promotions {
   description         String?
   code                String?                  @db.VarChar(50)
   type                promotion_type_enum
-  value               Decimal                  @db.Decimal(12, 2)
-  rule_type           promotion_rule_type_enum @default(flat)
-  scope               promotion_scope_enum     @default(order)
-  min_purchase_amount Decimal?                 @db.Decimal(12, 2)
-  max_discount_amount Decimal?                 @db.Decimal(12, 2)
+  value               Decimal                   @db.Decimal(12, 2)
+  rule_type           promotion_rule_type_enum  @default(flat)
+  scope               promotion_scope_enum      @default(order)
+  // For quantity_tiered rules, how quantities are counted toward tiers.
+  //   cart_total: sums units across every line in scope (legacy behavior).
+  //   per_product: each SKU is evaluated independently; tier fires only when
+  //                a single product reaches min_quantity on its own.
+  // Default 'cart_total' preserves existing promotion semantics.
+  quantity_grouping   promotion_quantity_grouping_enum @default(cart_total)
+  min_purchase_amount Decimal?                  @db.Decimal(12, 2)
+  max_discount_amount Decimal?                  @db.Decimal(12, 2)
   usage_limit         Int?
   usage_count         Int                      @default(0)
   per_customer_limit  Int?
@@ -2784,6 +2790,11 @@ enum promotion_scope_enum {
   order
   product
   category
+}
+
+enum promotion_quantity_grouping_enum {
+  cart_total
+  per_product
 }
 
 // ===== MARKETING AD CREATIVES =====

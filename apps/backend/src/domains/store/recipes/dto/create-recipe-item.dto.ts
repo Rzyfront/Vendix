@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsDefined,
   IsIn,
   IsInt,
   IsNumber,
@@ -22,9 +23,10 @@ export class CreateRecipeItemDto {
   @Type(() => Number)
   component_product_id!: number;
 
+  @IsDefined({ message: 'La cantidad del sub-componente es obligatoria' })
   @IsNumber({ maxDecimalPlaces: 4 })
   @Type(() => Number)
-  @Min(0)
+  @Min(0.0001, { message: 'La cantidad del sub-componente debe ser mayor a 0' })
   quantity!: number;
 
   @IsOptional()

@@ -1,4 +1,51 @@
 <div class="home-page">
+  <!-- Fallback: when no modules are enabled, render a products grid so
+       the storefront doesn't show a blank page. Loads via the same
+       featured_products() signal that the @case('featured_products')
+       below uses — they never coexist (this only renders when
+       ordered_home_sections() is empty). -->
+  @if (ordered_home_sections().length === 0) {
+    <section class="home-fallback">
+      @if (is_loading_featured()) {
+        <div class="loading-grid">
+          @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+            <div class="skeleton-card">
+              <div class="skeleton-image"></div>
+              <div class="skeleton-text"></div>
+              <div class="skeleton-text short"></div>
+            </div>
+          }
+        </div>
+      } @else if (featured_products().length > 0) {
+        <h2 class="home-fallback__title">Nuestros productos</h2>
+        <p class="home-fallback__subtitle">Activá las secciones de inicio desde el panel admin para personalizar la portada.</p>
+        <div class="products-grid">
+          @for (product of featured_products(); track product.id) {
+            <app-product-card
+              [product]="product"
+              [show_shipping_badge]="shipping_badge_enabled()"
+              [in_wishlist]="isInWishlist(product.id)"
+              (add_to_cart)="onAddToCart($event)"
+              (toggle_wishlist)="onToggleWishlist($event)"
+              (quick_view)="onQuickView($event)"
+              (share)="onShare($event)"
+            />
+          }
+        </div>
+        <div class="view-more-container">
+          <app-button variant="outline" (clicked)="onViewMore()">
+            Descubre más productos
+          </app-button>
+        </div>
+      } @else {
+        <div class="empty-state">
+          <div class="empty-icon"><i class="pi pi-box"></i></div>
+          <h3>Aún no hay productos disponibles</h3>
+          <p>Activá el flag de publicado en tus productos para que aparezcan aquí.</p>
+        </div>
+      }
+    </section>
+  }
   @for (section of ordered_home_sections(); track section.key) {
     @switch (section.key) {
       @case ("slider") {

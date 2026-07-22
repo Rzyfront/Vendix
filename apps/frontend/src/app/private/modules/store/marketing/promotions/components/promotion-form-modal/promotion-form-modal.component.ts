@@ -407,6 +407,7 @@ interface NormalizedTier {
             formControlName="priority"
             placeholder="0"
             [min]="0"
+            tooltipText="Menor número = mayor prioridad. 0 es la más alta, 1 la siguiente, etc. Si dos promos tienen la misma prioridad, gana la más reciente."
           ></app-input>
         </div>
 
@@ -523,7 +524,7 @@ export class PromotionFormModalComponent {
       code: [''],
       rule_type: ['flat' as PromotionRuleType, Validators.required],
       type: ['percentage', Validators.required],
-      value: [null, [Validators.required, Validators.min(0.01), Validators.max(100)]],
+      value: [null, [Validators.required, Validators.min(0), Validators.max(100)]],
       scope: ['order'],
       start_date: ['', Validators.required],
       end_date: [''],
@@ -661,7 +662,7 @@ export class PromotionFormModalComponent {
       min_quantity: [null, [Validators.required, Validators.min(1)]],
       max_quantity: [null, [Validators.min(1)]],
       type: ['percentage', Validators.required],
-      value: [null, [Validators.required, Validators.min(0.01), Validators.max(100)]],
+      value: [null, [Validators.required, Validators.min(0), Validators.max(100)]],
     });
 
     // Per-row type toggles its own `value` max(100) constraint, mirroring

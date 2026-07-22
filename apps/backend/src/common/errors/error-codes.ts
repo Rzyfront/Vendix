@@ -2880,6 +2880,18 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Componente de receta no encontrado',
   },
+  RECIPE_ITEM_INVALID_QUANTITY: {
+    code: 'RECIPE_ITEM_INVALID_QUANTITY',
+    httpStatus: 422,
+    devMessage:
+      'La cantidad del sub-componente debe ser mayor a 0 (no se permite 0 ni nula)',
+  },
+  RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS: {
+    code: 'RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS',
+    httpStatus: 409,
+    devMessage:
+      'La receta no puede activarse porque tiene sub-componentes con cantidad invalida (0 o nula). Corregir antes de activar.',
+  },
 
   // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C
   PRODUCTION_ORDER_NOT_FOUND: {

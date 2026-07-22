@@ -18,6 +18,10 @@ function buildPromotion(overrides: Partial<Record<string, unknown>> = {}) {
     type: 'percentage',
     value: 10,
     scope: 'order',
+    // Default to legacy cart_total so existing test cases that aggregate
+    // quantity across lines keep working. Tests that want per-product
+    // grouping pass `quantity_grouping: 'per_product'` via overrides.
+    quantity_grouping: 'cart_total',
     min_purchase_amount: null,
     max_discount_amount: null,
     usage_limit: null,
@@ -573,6 +577,90 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(a.promotion_discount).toBe(10); // 100 * 10%
       expect(b.promotion_discount).toBe(20); // 200 * 10%
       expect(result.applied_promotions[0].promotion_id).toBe(102);
+    });
+
+    // Case 2b — per_product grouping with order scope. With 2 distinct single-unit
+    // lines, each product has qty=1, below min_quantity=2. NO discount must apply.
+    // This is the EXACT scenario from the issue (3 different SKUs, 1 unit each).
+    it('per_product: 2 distinct SKUs qty1 each do NOT trigger the tier (issue repro)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 201,
+          name: 'Super promo per_product 5% desde 2 und',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [
+            { product_id: 1 },
+            { product_id: 2 },
+            { product_id: 3 },
+          ],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 201, min_quantity: 2, max_quantity: null, value: 5, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 49499, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 43500, quantity: 1 },
+          { line_id: 'l3', product_id: 3, unit_price: 69000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Each product has qty=1 < min_quantity=2 → no tier matches any product
+      // → no discount applied to any line.
+      expect(result.total_discount).toBe(0);
+      for (const line of result.items) {
+        expect(line.promotion_discount).toBe(0);
+        expect(line.promotion_ids).toEqual([]);
+      }
+      expect(result.applied_promotions).toEqual([]);
+    });
+
+    // Case 2c — per_product grouping: 1 product reaches min_quantity on its own.
+    // Product A has qty=2 (qualifies); products B and C have qty=1 each (don't).
+    // The discount applies to product A only.
+    it('per_product: 1 product with qty=2 triggers the tier, others do not', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 202,
+          name: 'Per-product 10% desde 2 und',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 1 }, { product_id: 2 }, { product_id: 3 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 202, min_quantity: 2, max_quantity: null, value: 10, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 100, quantity: 2 },  // qualifies
+          { line_id: 'l2', product_id: 2, unit_price: 100, quantity: 1 },  // no
+          { line_id: 'l3', product_id: 3, unit_price: 100, quantity: 1 },  // no
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Product 1 (qty=2) qualifies → 10% of 200 = 20. Others 0.
+      expect(result.total_discount).toBe(20);
+      const l1 = result.items.find((i) => i.line_id === 'l1')!;
+      const l2 = result.items.find((i) => i.line_id === 'l2')!;
+      const l3 = result.items.find((i) => i.line_id === 'l3')!;
+      expect(l1.promotion_discount).toBe(20);
+      expect(l1.promotion_ids).toEqual([202]);
+      expect(l2.promotion_discount).toBe(0);
+      expect(l2.promotion_ids).toEqual([]);
+      expect(l3.promotion_discount).toBe(0);
+      expect(l3.promotion_ids).toEqual([]);
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(202);
+      expect(result.applied_promotions[0].applicable_item_ids).toEqual(['l1']);
     });
 
     // Case 3 — product scope with base + variant sharing the same product_id.

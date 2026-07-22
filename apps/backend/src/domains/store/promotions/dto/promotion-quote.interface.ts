@@ -62,6 +62,13 @@ export interface PromotionQuoteApplied {
   discount_amount: number;
   /** Items the discount was prorated against (sorted by line index). */
   applicable_item_ids: Array<string | number | undefined>;
+  /**
+   * Promotion priority that determined this promo as the winner. Surfaced to
+   * the frontend for the cart audit trail — an order has at most ONE active
+   * promotion (the highest priority wins, ties broken by lowest promotion_id).
+   * Optional for back-compat with older backend versions.
+   */
+  priority?: number;
 }
 
 export interface PromotionQuoteItemBreakdown {

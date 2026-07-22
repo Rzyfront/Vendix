@@ -10,8 +10,10 @@ import {
   signal,
 } from '@angular/core';
 import {
+  AbstractControl,
   FormArray,
   FormBuilder,
+  FormControl,
   FormGroup,
   ReactiveFormsModule,
   Validators,
@@ -153,8 +155,8 @@ export class RecipeItemsEditorComponent implements OnInit {
       component_product_id: this.fb.nonNullable.control<number | null>(null, {
         validators: [Validators.required],
       }),
-      quantity: this.fb.nonNullable.control<number | null>(0, {
-        validators: [Validators.required, Validators.min(0)],
+      quantity: this.fb.nonNullable.control<number | null>(1, {
+        validators: [Validators.required, Validators.min(0.0001)],
       }),
       waste_percent: this.fb.nonNullable.control<number | null>(0, {
         validators: [Validators.min(0), Validators.max(100)],
@@ -263,13 +265,24 @@ export class RecipeItemsEditorComponent implements OnInit {
           this.unitCache.set(id, label);
           this.unitCacheTick.update((v) => v + 1);
         },
-        error: () => {
-          // Swallow: missing unit must not block the form; the input simply
-          // shows no suffix.
-          this.unitCache.set(id, '');
-          this.unitCacheTick.update((v) => v + 1);
-        },
       });
+  }
+
+  /**
+   * Toast feedback when the user leaves the quantity field with an invalid
+   * value (zero or null). Per UX request: error is shown as a top-right
+   * toast, not as inline text below the field.
+   */
+  onQuantityBlur(control: FormControl<number | null> | AbstractControl | null): void {
+    if (!control) return;
+    const v = control.value;
+    if (v == null || Number(v) <= 0) {
+      this.toastService.error(
+        'La cantidad del componente debe ser mayor a 0.',
+        'Cantidad inválida',
+        5000,
+      );
+    }
   }
 
   private resolveProductUnitLabel(product: any): string {
@@ -288,7 +301,7 @@ export class RecipeItemsEditorComponent implements OnInit {
    * create/update/delete reconciliation relies on the same `id` field, so this
    * is an authoritative state (not a fragile heuristic).
    */
-  isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
+  private isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
     return row.get('id')?.value == null;
   }
 }

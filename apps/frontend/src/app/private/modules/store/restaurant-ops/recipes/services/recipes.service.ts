@@ -94,7 +94,17 @@ export class RecipesService {
     return this.http
       .post<ApiResponse<Recipe>>(`${this.apiUrl}${this.basePath}`, dto)
       .pipe(
-        map((res) => res.data),
+        // Some backend endpoints return HTTP 200 with {success: false, message}
+        // instead of a proper 4xx. Map that case to an error so callers see
+        // the same shape regardless of how the backend reports failure.
+        map((res) => {
+          if (res?.success === false) {
+            const message =
+              (res as { message?: string }).message ?? 'Error desconocido';
+            throw new Error(message);
+          }
+          return res.data;
+        }),
         catchError(this.handleError),
       );
   }
@@ -176,7 +186,14 @@ export class RecipesService {
     // eslint-disable-next-line no-console
     console.error('RecipesService Error:', error);
     let message = 'Error al procesar la solicitud';
-    const apiMessage = error?.error?.message;
+    // Defensive: extract the API message from multiple possible paths.
+    // 1) HttpErrorResponse body (HTTP 4xx/5xx): error.error.message
+    // 2) Regular Error thrown by our own map() when HTTP 200 + success:false
+    // 3) Top-level error.message (some libs)
+    const apiMessage =
+      error?.error?.message ??
+      (error instanceof Error ? error.message : undefined) ??
+      error?.message;
     if (apiMessage) {
       message =
         typeof apiMessage === 'string'
