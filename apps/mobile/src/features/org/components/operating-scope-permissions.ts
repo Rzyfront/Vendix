@@ -16,18 +16,11 @@ export const OPERATING_SCOPE_WRITE_PERMISSION =
  *   - Sin permisos cargados (`permissions` undefined o `[]`) → false.
  *   - Permisos cargados → true sólo si la permission explícita está presente.
  *
- * ⚠️ Estado actual del auth store mobile:
- * El campo `permissions: string[]` en `useAuthStore` está declarado pero no
- * se popula del login (el response de `/auth/login` no incluye `permissions`).
- * Esto significa que hasta que el backend exponga `permissions` en el
- * AuthResponse, `hasOperatingScopeWritePermission()` devolverá `false` y la
- * UI ocultará la acción de cambio. El backend sigue siendo la fuente de
- * verdad (controllers decorados con @Permissions() rechazan con 403), así
- * que no hay agujero de seguridad: el deny-by-default sólo bloquea UI
- * hasta que la fuente canónica esté disponible.
- *
- * Cuando el backend exponga `permissions` en el AuthResponse, este helper
- * empezará a devolver `true` para usuarios con el permiso sin cambios.
+ * Los `permissions` llegan del backend (`auth.service.ts:1005` retorna
+ * `getPermissionsFromRoles`) vía `AuthResponse.permissions`, son persistidos
+ * por `useAuthStore.setAuthData` y consumidos acá. El backend sigue siendo
+ * la fuente de verdad (controllers decorados con `@Permissions()` rechazan
+ * con 403), así que este helper sólo gobierna la UI.
  */
 export function hasOperatingScopeWritePermission(): boolean {
   const state = useAuthStore.getState();

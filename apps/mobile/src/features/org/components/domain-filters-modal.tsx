@@ -29,7 +29,7 @@ interface DomainFiltersModalProps {
  * popover flotante, no como sheet full-screen.
  *
  * Combina en un solo modal los 3 selects:
- *   - Estado: 16 statuses (PENDING, ACTIVE, FAILED, …)
+ *   - Estado: 17 statuses (PENDING, ACTIVE, FAILED, …)
  *   - Tipo (Ownership): VENDIX_SUBDOMAIN / CUSTOM_DOMAIN / CUSTOM_SUBDOMAIN / THIRD_PARTY_SUBDOMAIN
  *   - Tienda: Todas / Organización (sentinel) / tiendas reales del OrgStoreService
  *
