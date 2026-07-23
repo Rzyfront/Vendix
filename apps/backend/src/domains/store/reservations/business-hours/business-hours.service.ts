@@ -122,6 +122,9 @@ export class BusinessHoursService {
   ): Promise<Map<number, { start_time: string; end_time: string }>> {
     // Try the POS settings JSON first (single source of truth).
     const fromPos = await this.loadStoreHoursFromPosSettings(storeId);
+    this.logger.log(
+      `[BusinessHours] loadStoreHours storeId=${storeId} fromPos.size=${fromPos.size} fromPos=${JSON.stringify(Array.from(fromPos.entries()))}`,
+    );
     if (fromPos.size > 0) return fromPos;
 
     // Fallback: legacy store_business_hours table for stores that
@@ -156,7 +159,11 @@ export class BusinessHoursService {
       where: { store_id: storeId },
       select: { settings: true },
     });
-    const businessHours = (row?.settings as any)?.business_hours as
+    // POS business_hours live at settings.pos.business_hours (the POS
+    // settings card is rendered as a sub-section whose [settings]
+    // binding is `settings().pos`, and the save merges it back into
+    // settings.pos on the backend).
+    const businessHours = (row?.settings as any)?.pos?.business_hours as
       | Record<
           string,
           | string
@@ -189,6 +196,29 @@ export class BusinessHoursService {
       // Legacy/short form: just the open string ("09:00") — treat as closed.
       if (typeof value === 'string') continue;
       if (value?.is_active === false) continue;
+
+      // Customized (TIPO DE HORARIO = "Personalizado"): an array of
+      // {open, close} blocks per day. The reservations system today only
+      // honors a single window per day, so we collapse to the OUTER
+      // envelope [earliest open, latest close]. This intentionally drops
+      // any lunch-break gap inside the day, but it matches the previous
+      // behavior of the legacy store_business_hours table.
+      const blocks = (value as any).blocks as
+        | Array<{ open: string; close: string }>
+        | undefined;
+      if (Array.isArray(blocks) && blocks.length > 0) {
+        const opens = blocks.map((b) => b.open).filter(Boolean);
+        const closes = blocks.map((b) => b.close).filter(Boolean);
+        if (opens.length > 0 && closes.length > 0) {
+          const start = opens.reduce((a, b) => (a < b ? a : b));
+          const end = closes.reduce((a, b) => (a > b ? a : b));
+          out.set(dow, { start_time: start, end_time: end });
+          continue;
+        }
+      }
+
+      // Continuous (TIPO DE HORARIO = "Continuo"): a single
+      // {open, close} envelope per day.
       const open = (value as any).open as string | undefined;
       const close = (value as any).close as string | undefined;
       if (!open || !close) continue;
