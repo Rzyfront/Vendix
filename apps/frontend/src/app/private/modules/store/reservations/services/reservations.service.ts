@@ -58,12 +58,14 @@ export class ReservationsService {
 
   /**
    * Schedule a booking to be auto-archived from the today panel after
-   * `delayMs` ms. Replaces any existing timer for the same id (safe to
-   * call from a re-rendering effect).
+   * `delayMs` ms. **Idempotent:** if a timer is already running for
+   * this id, do nothing. The parent's periodic re-fetch re-emits the
+   * same booking through the effect on every poll, and we MUST NOT
+   * reset the timer each time — otherwise the 2 minutes never elapse
+   * and the booking stays visible forever.
    */
   scheduleTodayArchive(bookingId: number, delayMs: number): void {
-    const existing = this.todayArchiveTimers.get(bookingId);
-    if (existing) clearTimeout(existing);
+    if (this.todayArchiveTimers.has(bookingId)) return;
     const handle = setTimeout(() => {
       this.archivedTodayBookingIds.update((set) => {
         const next = new Set(set);
