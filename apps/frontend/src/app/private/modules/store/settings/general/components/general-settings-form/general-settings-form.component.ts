@@ -118,30 +118,48 @@ export class GeneralSettingsForm implements OnInit {
       this.editorValue.set({ ...(incoming?.STORE_ADMIN ?? {}) });
     });
 
+    // Patch the form once when the loaded settings become available.
+    // Timing: the form mounts BEFORE the parent's `loadSettings` async
+    // HTTP call resolves, so the first effect tick has `settings()`
+    // empty. We track a flag and keep retrying until the data lands,
+    // then lock the patch in. After that, subsequent settings changes
+    // (from the user's own debounced settingsChange emits) are NOT
+    // re-applied, which breaks the form-reset feedback cycle.
+    this.hasInitiallyPatchedForm = false;
     effect(() => {
+      if (this.hasInitiallyPatchedForm) return;
       const current = this.settings();
-      if (current) {
-        const sanitized = { ...current };
-        if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
-          sanitized.industries = ['retail'];
-        }
-        this.form.patchValue(sanitized, { emitEvent: false });
+      const servicesValue = this.services();
+      if (!current) return;
 
-        // Explicitly set the 'services' sub-form (the patchValue
-        // recursive path can leave the toggle control stale when the
-        // parent re-mounts after navigation; setValue on the nested
-        // FormGroup guarantees the offer_home_service control is
-        // updated to the persisted value).
-        const servicesGroup = this.form.get('services') as FormGroup | null;
-        const servicesValue = this.services();
-        if (servicesGroup && servicesValue) {
-          servicesGroup.patchValue(servicesValue, { emitEvent: false });
-        }
+      this.hasInitiallyPatchedForm = true;
 
-        this.modulesHiddenByIndustries.set(
-          getModulesHiddenByIndustries(sanitized.industries),
-        );
+      const sanitized = { ...current };
+      if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
+        sanitized.industries = ['retail'];
       }
+      this.form.patchValue(sanitized, { emitEvent: false });
+
+      const servicesGroup = this.form.get('services') as FormGroup | null;
+      if (servicesGroup && servicesValue) {
+        servicesGroup.patchValue(servicesValue, { emitEvent: false });
+
+        // The patchValue above uses emitEvent: false to avoid triggering
+        // a validation cascade, but the <app-services-settings-form>
+        // child subscribes to state_province.valueChanges to load the
+        // matching cities. Without an explicit emit, the city dropdown
+        // stays empty for the pre-populated department. Re-set the value
+        // here with emitEvent: true so the child's effect fires and
+        // loads cities for the persisted department.
+        const stateProv = servicesGroup.get('local_address.state_province') as FormControl | null;
+        if (stateProv && servicesValue?.local_address?.state_province) {
+          stateProv.setValue(servicesValue.local_address.state_province, { emitEvent: true });
+        }
+      }
+
+      this.modulesHiddenByIndustries.set(
+        getModulesHiddenByIndustries(sanitized.industries),
+      );
     });
 
     // Propagate changes from the services sub-form up to the parent's
@@ -164,6 +182,12 @@ export class GeneralSettingsForm implements OnInit {
         }
       });
   }
+
+  /** Guard so the settings effect patches the form exactly once on the
+   * first non-empty settings payload. After the lock, the form is the
+   * source of truth and the effect short-circuits, breaking the
+   * feedback cycle that was resetting user input on every keystroke. */
+  private hasInitiallyPatchedForm = false;
 
   form: FormGroup = new FormGroup({
     // Campos de stores

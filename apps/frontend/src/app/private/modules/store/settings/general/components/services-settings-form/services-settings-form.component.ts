@@ -82,6 +82,10 @@ export class ServicesSettingsForm {
   readonly departments = signal<Department[]>([]);
   readonly cities = signal<City[]>([]);
 
+  /** Guard so the city-loading effect re-fetches only when state_province
+   * actually changes, not on every unrelated effect tick. */
+  private lastLoadedState: string | null = null;
+
   /**
    * SelectorOption[] derivations for the <app-selector> bindings.
    * The form's country_code / state_province / city controls store
@@ -141,29 +145,70 @@ export class ServicesSettingsForm {
     // to CO; if the user changes country later we re-load.
     this.countryService.getDepartments().then((d) => this.departments.set(d));
 
-    // Reload cities whenever the user picks a department.
-    // NOTE: state_province lives at root.local_address.state_province,
-    // not at root.state_province. Looking it up on `root` directly
-    // returns null and the subscription is never created.
-    effect((onCleanup) => {
+    // Reload cities whenever state_province changes. Reading the
+    // value via the control (not valueChanges.subscribe) is critical:
+    // the form is patched with `emitEvent: false` on initial mount
+    // (so valueChanges doesn't fire for the pre-populated value),
+    // and a valueChanges subscription would miss that case entirely,
+    // leaving the city dropdown empty until the user manually
+    // re-selects the same department. The `lastLoadedState` flag
+    // ensures we only hit the API once per actual value change.
+    this.lastLoadedState = null;
+    effect(() => {
       const root = this.form();
       if (!root) return;
       const localAddress = root.get('local_address') as FormGroup | null;
       if (!localAddress) return;
-      const sub = localAddress
-        .get('state_province')
-        ?.valueChanges.subscribe((depName: string) => {
-          const dep = this.departments().find((d) => d.name === depName);
-          if (dep) {
-            this.countryService
-              .getCitiesByDepartment(dep.id)
-              .then((c: City[]) => this.cities.set(c));
-          } else {
-            this.cities.set([]);
-          }
-        });
-      onCleanup(() => sub?.unsubscribe());
+      const state = localAddress.get('state_province');
+      if (!state) return;
+
+      const currentValue = (state.value as string) ?? '';
+      if (currentValue === this.lastLoadedState) return;
+      this.lastLoadedState = currentValue;
+      this.loadCitiesForState(currentValue);
     });
+
+    // The effect above runs once on mount with state_value='' (the form
+    // is mounted before the parent patches it with `emitEvent: false`).
+    // The HTTP response that triggers the patch typically lands within
+    // ~200-500ms in dev, so we poll at 1500ms to give it headroom.
+    setTimeout(() => {
+      const state = this.form()?.get('local_address')?.get('state_province') as FormControl | null;
+      if (!state) return;
+      const currentValue = (state.value as string) ?? '';
+      if (currentValue && currentValue !== this.lastLoadedState) {
+        this.lastLoadedState = currentValue;
+        this.loadCitiesForState(currentValue);
+      }
+    }, 1500);
+  }
+
+  /**
+   * Look up the department by name in the currently-loaded list, then
+   * fetch its cities from the API. Centralized so the country effect
+   * (post-hydration) and the state effect (subsequent selections)
+   * share the same loading logic.
+   */
+  private loadCitiesForState(depName: string): void {
+    if (!depName) {
+      this.cities.set([]);
+      return;
+    }
+    const dep = this.departments().find((d) => d.name === depName);
+    if (!dep) {
+      this.cities.set([]);
+      return;
+    }
+    this.countryService
+      .getCitiesByDepartment(dep.id)
+      .then((c: City[]) => this.cities.set(c))
+      .catch((err) => {
+        console.error(
+          `[services-settings] Failed to load cities for "${depName}" (id=${dep.id})`,
+          err,
+        );
+        this.cities.set([]);
+      });
   }
 
   /**
