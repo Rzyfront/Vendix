@@ -108,10 +108,24 @@ export class BusinessHoursService {
    * Hot-path helper consumed by AvailabilityService. Loads all 7 day
    * windows in a single query and returns them as a Map for O(1) lookup.
    * Returns an empty Map if the store has never configured their hours.
+   *
+   * SOURCE OF TRUTH FIX: now reads from `store_settings.settings.business_hours`
+   * (the same JSON the POS settings form edits) instead of the legacy
+   * `store_business_hours` table. The store was forcing operators to keep
+   * two separate configs in sync — the POS one and the reservations one
+   * — and any drift between them produced truncated booking slots. The
+   * legacy table is still readable as a fallback (for stores that
+   * haven't migrated yet) but is no longer the primary source.
    */
   async loadStoreHours(
     storeId: number,
   ): Promise<Map<number, { start_time: string; end_time: string }>> {
+    // Try the POS settings JSON first (single source of truth).
+    const fromPos = await this.loadStoreHoursFromPosSettings(storeId);
+    if (fromPos.size > 0) return fromPos;
+
+    // Fallback: legacy store_business_hours table for stores that
+    // haven't been migrated to the unified POS settings yet.
     const rows = await this.prisma.store_business_hours.findMany({
       where: { store_id: storeId, is_active: true },
       select: { day_of_week: true, start_time: true, end_time: true },
@@ -122,5 +136,64 @@ export class BusinessHoursService {
         { start_time: r.start_time, end_time: r.end_time },
       ]),
     );
+  }
+
+  /**
+   * Reads the same `business_hours` JSON the POS settings form edits
+   * (continuous + split blocks per day) and projects it to the simple
+   * `{ day_of_week -> { start_time, end_time } }` shape that the slot
+   * generator expects.
+   *
+   * For TIPO DE HORARIO = "continuo" we collapse to a single window.
+   * For "split" we currently emit the outer envelope (open/close), which
+   * the slot generator can later refine to honor lunch breaks once we
+   * teach `clampToStoreHours` to accept an array of windows.
+   */
+  private async loadStoreHoursFromPosSettings(
+    storeId: number,
+  ): Promise<Map<number, { start_time: string; end_time: string }>> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const businessHours = (row?.settings as any)?.business_hours as
+      | Record<
+          string,
+          | string
+          | {
+              open?: string;
+              close?: string;
+              is_active?: boolean;
+              blocks?: Array<{ open: string; close: string }>;
+            }
+        >
+      | undefined;
+    if (!businessHours) return new Map();
+
+    const out = new Map<number, { start_time: string; end_time: string }>();
+    // Day-of-week keys in store_settings use monday=1..sunday=7; the
+    // reservations schema uses sunday=0..saturday=6. Map via Date so the
+    // conversion stays correct regardless of locale / week start.
+    const dowMap: Record<string, number> = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6,
+    };
+    for (const [dayKey, value] of Object.entries(businessHours)) {
+      const dow = dowMap[dayKey.toLowerCase()];
+      if (dow === undefined) continue;
+      // Legacy/short form: just the open string ("09:00") — treat as closed.
+      if (typeof value === 'string') continue;
+      if (value?.is_active === false) continue;
+      const open = (value as any).open as string | undefined;
+      const close = (value as any).close as string | undefined;
+      if (!open || !close) continue;
+      out.set(dow, { start_time: open, end_time: close });
+    }
+    return out;
   }
 }
