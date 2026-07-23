@@ -78,6 +78,7 @@ export interface AvailabilitySlot {
   end_time: string;
   available_providers: AvailableProvider[];
   total_available: number;
+  is_booked?: boolean;
 }
 
 export interface ProviderDateInfo {

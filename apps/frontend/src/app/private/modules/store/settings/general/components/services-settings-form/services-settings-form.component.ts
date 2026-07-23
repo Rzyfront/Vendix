@@ -8,7 +8,6 @@ import {
   DestroyRef,
   inject,
 } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   ReactiveFormsModule,
@@ -82,10 +81,11 @@ export class ServicesSettingsForm {
   readonly departments = signal<Department[]>([]);
   readonly cities = signal<City[]>([]);
 
+  /** DELETED: lastLoadedState guard — caused re-entry bug, removed. */
+
   /** Guard so the city-loading effect re-fetches only when state_province
    * actually changes, not on every unrelated effect tick. */
-  private lastLoadedState: string | null = null;
-
+  
   /**
    * SelectorOption[] derivations for the <app-selector> bindings.
    * The form's country_code / state_province / city controls store
@@ -111,6 +111,21 @@ export class ServicesSettingsForm {
   }
 
   /**
+   * Signal that mirrors the state_province control's value.
+   *
+   * NOTE: a previous version used `toSignal(valueChanges, { initialValue })`
+   * as a CLASS FIELD. That was broken because class fields run BEFORE the
+   * constructor — at that point `this.form()` is null, so the
+   * `valueChanges` was undefined and we fell back to `of(null)`. The
+   * observable was bound to that empty `of(null)` forever; even after
+   * the constructor's effect populated `this.form`, stateValue stayed
+   * null. The current implementation initializes the signal lazily
+   * inside the constructor (where `this.form()` is available) and
+   * syncs both the initial value and live changes from the control.
+   */
+  private readonly stateValue = signal<string | null>(null);
+
+  /**
    * Typed accessor for the local_address sub-FormGroup.
    */
   get localAddressGroup(): FormGroup {
@@ -124,6 +139,34 @@ export class ServicesSettingsForm {
     effect(() => {
       this.form.set(this.servicesForm());
     });
+
+    // Sync stateValue from the form control. Runs whenever the form
+    // becomes available (signal change) or whenever state_province's
+    // valueChanges fires. Replaces the broken `toSignal` class-field
+    // pattern that was bound to an empty `of(null)` because class
+    // fields evaluate before the constructor.
+    effect((onCleanup) => {
+      const root = this.form();
+      if (!root) return;
+      const stateControl = root
+        .get('local_address')
+        ?.get('state_province');
+      if (!stateControl) return;
+
+      // Sync current value once (covers initial mount AND the case
+      // where the parent patched the control with emitEvent: false —
+      // valueChanges doesn't fire for those, but `.value` does have
+      // the latest data).
+      const current = stateControl.value as string | null;
+      if (this.stateValue() !== current) {
+        this.stateValue.set(current);
+      }
+
+      const sub = stateControl.valueChanges.subscribe(
+        (v: string | null) => this.stateValue.set(v),
+      );
+      onCleanup(() => sub?.unsubscribe());
+    }, { allowSignalWrites: true });
 
     // Project offer_home_service's valueChanges into a local signal so
     // the parent (BookingComponent) can react to the toggle in real
@@ -153,34 +196,38 @@ export class ServicesSettingsForm {
     // leaving the city dropdown empty until the user manually
     // re-selects the same department. The `lastLoadedState` flag
     // ensures we only hit the API once per actual value change.
-    this.lastLoadedState = null;
+    // Read state_province via stateValue (the manual signal updated
+    // in the constructor's sync effect). This effect re-runs whenever
+    // the signal updates: initial value at mount + every valueChanges
+    // emit, including the parent's `setValue` with emitEvent: true
+    // that fires after a silent patchValue.
     effect(() => {
-      const root = this.form();
-      if (!root) return;
-      const localAddress = root.get('local_address') as FormGroup | null;
-      if (!localAddress) return;
-      const state = localAddress.get('state_province');
-      if (!state) return;
-
-      const currentValue = (state.value as string) ?? '';
-      if (currentValue === this.lastLoadedState) return;
-      this.lastLoadedState = currentValue;
-      this.loadCitiesForState(currentValue);
+      const value = (this.stateValue() as string) ?? '';
+      this.loadCitiesForState(value);
     });
 
-    // The effect above runs once on mount with state_value='' (the form
-    // is mounted before the parent patches it with `emitEvent: false`).
-    // The HTTP response that triggers the patch typically lands within
-    // ~200-500ms in dev, so we poll at 1500ms to give it headroom.
-    setTimeout(() => {
-      const state = this.form()?.get('local_address')?.get('state_province') as FormControl | null;
-      if (!state) return;
-      const currentValue = (state.value as string) ?? '';
-      if (currentValue && currentValue !== this.lastLoadedState) {
-        this.lastLoadedState = currentValue;
-        this.loadCitiesForState(currentValue);
-      }
-    }, 1500);
+    // Race-condition fix: the effect above fires when state_province
+    // changes, but it can fire BEFORE `getDepartments()` resolves
+    // (~500ms latency from api-colombia.com). In that case
+    // `this.departments()` is still empty → the lookup misses →
+    // `cities.set([])` runs and never recovers, because the valueChanges
+    // signal won't fire again once departments arrive.
+    //
+    // This second effect reacts to `this.departments()` directly: when
+    // departments finally populate AND there's a current state_province
+    // value, re-run the city load. `loadCitiesForState` is idempotent.
+    //
+    // No `lastLoadedState` guard — see comment in Effect 1 for why.
+    effect(() => {
+      const deps = this.departments();
+      if (!deps.length) return;
+      const root = this.form();
+      if (!root) return;
+      const localAddress = root.get('local_address');
+      if (!localAddress) return;
+      const depName = localAddress.get('state_province')?.value as string | null;
+      this.loadCitiesForState(depName ?? '');
+    });
   }
 
   /**

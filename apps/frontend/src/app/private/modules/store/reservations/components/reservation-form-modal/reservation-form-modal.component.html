@@ -173,6 +173,7 @@
               type="date"
               [ngModel]="selectedDate()"
               (ngModelChange)="selectedDate.set($event)"
+              [min]="todayString"
               placeholder="Selecciona fecha"
               [required]="true"
             ></app-input>

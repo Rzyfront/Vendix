@@ -35,6 +35,7 @@
           [style.height.%]="getFreeSlotHeight(slot)"
           [attr.aria-label]="'Horario no disponible: ' + slot.start + ' a ' + slot.end"
           [title]="'No disponible ' + slot.start + ' – ' + slot.end">
+          <span class="unavailable-slot-label">No disponible</span>
         </div>
       }
 
@@ -48,6 +49,7 @@
           (click)="onFreeSlotClick($event, slot)"
           [attr.aria-label]="'Slot libre desde ' + slot.start + ' hasta ' + slot.end"
           [title]="'Libre ' + slot.start + ' – ' + slot.end">
+          <span class="free-slot-status">Disponible</span>
           <span class="free-slot-time">{{ slot.start }}</span>
         </div>
       }
@@ -57,15 +59,22 @@
         <div
           class="booking-block"
           [class]="'status-' + booking.status"
+          [class.expired-pending]="isBookingExpired(booking)"
           [style.top.%]="getBlockTop(booking)"
           [style.height.%]="getBlockHeight(booking)"
           (click)="onBookingClick($event, booking)">
-          <div class="booking-block-header">
-            <span class="booking-time">{{ formatTimeRange(booking.start_time, booking.end_time) }}</span>
-            <span class="booking-status-badge" [style.background]="getStatusColor(booking.status)">
-              {{ statusLabels[booking.status] || booking.status }}
-            </span>
-          </div>
+          <!-- Status label centered at the top, mirroring the DISPONIBLE /
+               NO DISPONIBLE labels in the other overlay blocks so the
+               wizard's three block types all carry the same visual
+               hierarchy: status first, time/details below.
+               When the booking is past its end_time without being confirmed
+               (still pending), show "VENCIDA" instead of "PENDIENTE". -->
+          <span
+            class="booking-status-label"
+            [style.color]="isBookingExpired(booking) ? '#991b1b' : getStatusTextColor(booking.status)">
+            {{ isBookingExpired(booking) ? 'VENCIDA' : (statusLabels[booking.status] || booking.status) }}
+          </span>
+          <span class="booking-time">{{ formatTimeRange(booking.start_time, booking.end_time) }}</span>
           <span class="booking-title">{{ booking.product?.name }}</span>
           <span class="booking-customer">
             {{ booking.customer?.first_name }} {{ booking.customer?.last_name }}

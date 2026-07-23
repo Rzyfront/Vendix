@@ -89,8 +89,14 @@
           <button
             class="slot-chip"
             [class.selected]="selectedSlot() === slot"
-            (click)="selectSlot(slot)">
+            [class.slot-booked]="slot.is_booked"
+            [class.slot-available]="!slot.is_booked"
+            [disabled]="slot.is_booked"
+            (click)="!slot.is_booked && selectSlot(slot)">
             {{ formatTime(slot.start_time) }}
+            @if (slot.is_booked) {
+              <span class="slot-badge">Ocupado</span>
+            }
           </button>
         }
       </div>

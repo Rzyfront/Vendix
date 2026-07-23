@@ -94,11 +94,24 @@ export class EcommerceBookingService {
   /**
    * Returns the store's primary address (the technician's local) for
    * the "En el local" option in the booking flow.
+   *
+   * Returns `null` when the store has no address. The previous
+   * implementation used `r?.data ?? r ?? null`, which returned the
+   * wrapper object `{ success: true, data: null }` whenever `data`
+   * was null — that truthy object bypassed the template's
+   * `@if (storeAddress(); as addr)` guard and rendered the row
+   * with empty fields.
+   *
+   * The endpoint is mounted at `/ecommerce/reservations/store/address`
+   * (see `@Controller('ecommerce/reservations')` in the backend), NOT
+   * at `/store/address`. Calling the latter returned 404 silently in
+   * the browser console, which made the address appear "missing" even
+   * though the backend endpoint was working fine.
    */
   getStoreAddress(): Observable<any | null> {
     return this.http
       .get<any>(`${this.api_url}/store/address`, { headers: this.getHeaders() })
-      .pipe(map((r) => r?.data ?? r ?? null));
+      .pipe(map((r) => r?.data ?? null));
   }
 
   /**

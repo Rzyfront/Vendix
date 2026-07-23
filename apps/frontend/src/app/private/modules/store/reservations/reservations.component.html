@@ -186,7 +186,7 @@
 
       @if (activeView() === "list") {
         <app-reservation-list
-          [bookings]="bookings()"
+          [bookings]="listBookings()"
           [loading]="loading()"
           [totalItems]="totalItems()"
           [page]="page()"
@@ -209,7 +209,7 @@
     @if (activeView() === "calendar") {
       <div class="lg:col-span-4 flex flex-col gap-4">
         <app-today-reservations-panel
-          [bookings]="todayBookings()"
+          [bookings]="sortedTodayBookings()"
           [loading]="todayLoading()"
           (bookingClicked)="onBookingClicked($event)"
           (viewAllClicked)="onViewAllToday()"

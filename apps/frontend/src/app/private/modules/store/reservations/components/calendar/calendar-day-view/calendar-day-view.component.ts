@@ -2,6 +2,7 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
+import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
 
 /**
  * A free slot = a time range where the provider has capacity and no booking.
@@ -118,6 +119,20 @@ export class CalendarDayViewComponent {
     return ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100;
   }
 
+  /**
+   * A booking is "expired" when it's in a pre-service state AND its
+   * `end_time` is already in the past. Painted red to flag the no-show
+   * visually. The DB status stays as-is so the operator can still
+   * confirm, no-show or cancel. Driven by `currentTimeSignal` (refreshes
+   * every 60s) so the visual transitions without a page reload.
+   *
+   * Delegates to the shared `isBookingExpired()` util which handles the
+   * multiple date/time shapes the backend can serialize.
+   */
+  isBookingExpired(booking: Booking): boolean {
+    return checkBookingExpired(booking, this.currentTimeSignal());
+  }
+
   getFreeSlotTop(slot: FreeSlot): number {
     const startMinutes = this.parseTimeToMinutes(slot.start);
     return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
@@ -178,6 +193,24 @@ export class CalendarDayViewComponent {
       no_show: '#9ca3af',
     };
     return colors[status] || '#9ca3af';
+  }
+
+  /**
+   * Dark-tone status colors designed to read well on the unified yellow
+   * `.booking-block` background (`#fef3c7`). Used by the centered status
+   * label so each reservation's state is unmistakable at a glance, instead
+   * of relying only on the small corner badge.
+   */
+  getStatusTextColor(status: string): string {
+    const colors: Record<string, string> = {
+      pending: '#92400e',     // dark amber
+      confirmed: '#166534',   // dark green
+      in_progress: '#1e40af', // dark blue
+      completed: '#065f46',   // darker green
+      cancelled: '#991b1b',   // dark red
+      no_show: '#4b5563',     // dark gray
+    };
+    return colors[status] || '#4b5563';
   }
 
   private parseTimeToMinutes(time: string): number {

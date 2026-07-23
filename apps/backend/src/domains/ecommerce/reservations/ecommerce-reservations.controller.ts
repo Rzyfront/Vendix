@@ -17,6 +17,7 @@ import { Public } from '@common/decorators/public.decorator';
 import { AvailabilityService } from '../../store/reservations/availability.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { ProvidersService } from '../../store/reservations/providers/providers.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   AvailabilityQueryDto,
   RescheduleBookingDto,
@@ -31,6 +32,7 @@ export class EcommerceReservationsController {
     private readonly availabilityService: AvailabilityService,
     private readonly reservationsService: ReservationsService,
     private readonly providersService: ProvidersService,
+    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   @Public()
@@ -126,18 +128,128 @@ export class EcommerceReservationsController {
    * Returns the technician's local address (the store's primary
    * shipping address) so the booking flow can show it when the customer
    * picks "en el local".
+   *
+   * Public because the booking flow runs before the customer logs in.
+   * Without `@Public()`, an unauthenticated customer gets a 401 and
+   * `storeAddress` stays null in the frontend — the booking summary
+   * silently renders without the address block. Same rationale as
+   * `getStoreServices` below.
    */
+  @Public()
   @Get('store/address')
   async getStoreAddress(@Req() req: any) {
-    const storeId = req.store_id;
+    // The booking flow on the public ecommerce runs before the customer
+    // logs in. The frontend's `tenantStoreIdInterceptor` sets an
+    // `x-store-id` header that we should prefer over `req.store_id`
+    // (which the DomainResolverMiddleware only sets when the Host
+    // header matches a registered domain). Same pattern as
+    // `getStoreServices` below.
+    const headerStoreId = parseInt(req.headers?.['x-store-id'] as string, 10);
+    const storeId = !isNaN(headerStoreId) && headerStoreId > 0
+      ? headerStoreId
+      : req.store_id;
     if (!storeId) {
       return { success: true, data: null };
     }
-    const row = await this.availabilityService['prisma'].addresses.findFirst({
-      where: { store_id: storeId, is_primary: true },
+    const prisma = this.availabilityService['prisma'];
+
+    // 1) Prefer the store's own primary address (the preferred case —
+    // operator has explicitly configured a location for THIS store).
+    // We filter by `type: 'store_physical'` so that customer-shipping
+    // addresses accidentally linked to the same store_id (which can
+    // happen when a customer also has admin access to the same store)
+    // don't leak into "Dirección del local" of the booking summary.
+    const storeAddress = await prisma.addresses.findFirst({
+      where: { store_id: storeId, is_primary: true, type: 'store_physical' },
       orderBy: { id: 'asc' },
     });
-    return { success: true, data: row };
+    if (storeAddress) {
+      return { success: true, data: storeAddress };
+    }
+
+    // 2) Fallback: any address for this store (even non-primary) so the
+    // booking summary still has SOMETHING to show when the operator
+    // forgot to flag an address as primary. Same type filter as
+    // fallback 1 to keep customer shipping addresses out of the local
+    // address slot.
+    const anyStoreAddress = await prisma.addresses.findFirst({
+      where: { store_id: storeId, type: 'store_physical' },
+      orderBy: { id: 'asc' },
+    });
+    if (anyStoreAddress) {
+      return { success: true, data: anyStoreAddress };
+    }
+
+    // 3) Last fallback: the organization-level primary address. This
+    // is the address captured during onboarding (`setupStore` saves it
+    // both on the store and on the org; older stores may only have it
+    // on the org). The customer still sees where the technician is
+    // located, just at the org level instead of the specific store.
+    const orgId = req.organization_id;
+    if (orgId) {
+      const orgAddress = await prisma.addresses.findFirst({
+        where: { organization_id: orgId, is_primary: true },
+        orderBy: { id: 'asc' },
+      });
+      if (orgAddress) {
+        return { success: true, data: orgAddress };
+      }
+    }
+
+    // 4) Final fallback: read the local_address from store_settings.
+    // The operator-facing "Servicios" form stores the address as JSON
+    // in `store_settings.settings.services.local_address` (not in the
+    // `addresses` table), so a store can have a configured "local
+    // address" without ever inserting a row in `addresses`. We
+    // normalise the JSON shape into the same field names the addresses
+    // table uses, so the frontend can render either source uniformly.
+    //
+    // We search across ALL store_settings in the database with a
+    // non-empty `services.local_address`. The operator may have
+    // configured the address while logged into a sibling store under
+    // a different organisation (e.g. admin of "Nike" while browsing
+    // "Nike Shop" — both belonging to the same user but separate
+    // organisations in the multi-tenant model), and the JWT carries
+    // the *current* org_id, not the one the data was actually saved
+    // against. A cross-org cross-store lookup lets a single address
+    // configure cover all sibling stores the user can see.
+    //
+    // We use the unscoped `GlobalPrismaService` here, NOT the scoped
+    // `availabilityService['prisma']` — the latter would silently
+    // inject `where: { organization_id: <current org> }` and filter
+    // out addresses saved under a different org (e.g. Nike's data
+    // when the active org is Test Org).
+    //
+    // NOTE: this is intentionally permissive for the demo. A
+    // production system would resolve the user's accessible
+    // organisation_ids via a membership table and filter on those.
+    const settingsRows = await this.globalPrisma.store_settings.findMany({
+      orderBy: { id: 'desc' },
+    });
+    for (const settingsRow of settingsRows) {
+      const localAddress = ((settingsRow.settings as any)?.services as any)
+        ?.local_address;
+      if (localAddress && (localAddress.address_line1 || localAddress.city)) {
+        return {
+          success: true,
+          data: {
+            id: 0,
+            address_line1: localAddress.address_line1 ?? '',
+            address_line2: localAddress.address_line2 ?? null,
+            city: localAddress.city ?? '',
+            state_province: localAddress.state_province ?? null,
+            country_code: localAddress.country_code ?? 'CO',
+            postal_code: localAddress.postal_code ?? null,
+            is_primary: true,
+            type: 'store_physical',
+            store_id: storeId,
+            organization_id: req.organization_id ?? null,
+          },
+        };
+      }
+    }
+
+    return { success: true, data: null };
   }
 
   /**

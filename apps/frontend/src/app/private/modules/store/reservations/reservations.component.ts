@@ -1,4 +1,6 @@
-import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { Component, computed, inject, signal, DestroyRef } from '@angular/core';
+
+import { isBookingExpired } from './components/calendar/booking-expired.util';
 import { FormsModule } from '@angular/forms';
 
 import { Router, RouterLink } from '@angular/router';
@@ -107,10 +109,85 @@ export class ReservationsComponent {
   todayBookings = signal<Booking[]>([]);
   todayLoading = signal(false);
 
+  /**
+   * Status priority for the today panel sort. Lower number = appears
+   * higher in the list. Pending bookings bubble to the top so the
+   * operator sees what still needs confirmation/cancellation at a
+   * glance; everything else sorts below by start_time.
+   */
+  private static readonly TODAY_PANEL_STATUS_PRIORITY: Record<BookingStatus, number> = {
+    pending: 0,
+    confirmed: 1,
+    arriving: 2,
+    attending: 3,
+    in_progress: 4,
+    completed: 5,
+    cancelled: 6,
+    no_show: 7,
+  };
+
+  /**
+   * Today bookings sorted with pending first, then by start_time
+   * ascending. The panel feeds off this signal so the rendering is
+   * driven by signals (no extra change-detection work in the parent).
+   * Confirmed bookings are NOT filtered out — they just sort lower
+   * so the operator's eye lands on the pending ones first.
+   */
+  readonly sortedTodayBookings = computed<Booking[]>(() => {
+    const list = this.todayBookings();
+    return [...list].sort((a, b) => {
+      const pa = ReservationsComponent.TODAY_PANEL_STATUS_PRIORITY[a.status] ?? 99;
+      const pb = ReservationsComponent.TODAY_PANEL_STATUS_PRIORITY[b.status] ?? 99;
+      if (pa !== pb) return pa - pb;
+      // Same status → earlier start_time first.
+      return a.start_time.localeCompare(b.start_time);
+    });
+  });
+
+  /**
+   * Bookings passed to the list view with expired pre-service bookings
+   * re-stamped as `cancelled`. The DB still says `pending` / `confirmed`
+   * (so the operator can still confirm/cancel manually), but for the
+   * list UI the booking renders as if cancelled — same red badge,
+   * same action-button hide, same "Cancelada" label. The original
+   * `bookings()` signal is left untouched so other consumers (e.g.
+   * stats) keep the real status counts.
+   *
+   * The `now` snapshot is recomputed on every dependency change, which
+   * is good enough — list re-renders happen on data refreshes, not on
+   * minute-by-minute ticks (the calendar uses the live signal).
+   */
+  readonly listBookings = computed<Booking[]>(() => {
+    const now = new Date();
+    return this.bookings().map((b) => {
+      if (!isBookingExpired(b, now)) return b;
+      // Stamp a copy with `status: 'cancelled'` so the list's status
+      // badge + action buttons treat it like a real cancellation.
+      // We don't mutate the original — the badge logic in
+      // reservation-list reads `b.status` and would still see the
+      // real value without this copy.
+      return { ...b, status: 'cancelled' as BookingStatus };
+    });
+  });
+
+  /** Auto-refresh interval for the today panel (ms). */
+  private static readonly TODAY_PANEL_REFRESH_MS = 2 * 60 * 1000;
+
   constructor() {
     this.loadStats();
     this.loadBookings();
     this.loadTodayBookings();
+
+    // Auto-refresh the today panel every 2 minutes so the operator
+    // sees fresh state without manual reload (newly confirmed bookings,
+    // recently-arrived clients, status changes from the booking-detail
+    // modal, etc.). The interval is cleared on DestroyRef so we don't
+    // leak a timer when the component is torn down (route change, etc.).
+    const refreshTimer = setInterval(
+      () => this.loadTodayBookings(),
+      ReservationsComponent.TODAY_PANEL_REFRESH_MS,
+    );
+    this.destroyRef.onDestroy(() => clearInterval(refreshTimer));
   }
 
   setActiveView(view: string): void {
@@ -326,6 +403,18 @@ export class ReservationsComponent {
   }
 
   onSlotClicked(event: { date: string; time: string }): void {
+    // Block clicks on past slots — the tap-to-book modal would let the
+    // user fill out a reservation for a time that already happened, which
+    // the backend would reject anyway but with a less helpful error.
+    // String comparison works for "YYYY-MM-DD" lexicographic ordering.
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (event.date < today) {
+      this.toastService.warning(
+        'No podés agendar en un horario que ya pasó. Hacé click en un slot de hoy o del futuro.',
+      );
+      return;
+    }
     this.tapToBookDate.set(event.date);
     this.tapToBookTime.set(event.time);
     this.isTapToBookModalOpen.set(true);

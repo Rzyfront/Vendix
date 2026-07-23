@@ -202,12 +202,18 @@ export class ReservationFormModalComponent {
 
     // Convert schedule blocks for this day-of-week into minute ranges,
     // sort by start time, drop degenerate (end <= start) entries.
+    //
+    // Midnight edge case: HTML5 `<input type="time">` returns "00:00" for
+    // midnight — but that's ambiguous (start-of-day vs end-of-day). For an
+    // end_time that would otherwise be ≤ its start_time, the user almost
+    // certainly meant "closes at midnight" → treat as 24:00 (1440 min).
+    // Without this, a block like "2PM - 12AM" gets parsed as
+    // {start: 840, end: 0} → fails the `end > start` filter → block
+    // disappears from the schedule → the whole afternoon gets marked
+    // as unavailable.
     const sortedBlocks = blocks
       .filter(b => b.day_of_week === dayOfWeek)
-      .map(b => ({
-        start: this.timeToMinutes(b.start_time),
-        end: this.timeToMinutes(b.end_time),
-      }))
+      .map(b => this.parseScheduleBlock(b))
       .filter(b => b.end > b.start)
       .sort((a, b) => a.start - b.start);
 
@@ -267,8 +273,13 @@ export class ReservationFormModalComponent {
 
   readonly canGoNext = computed(() => {
     const step = this.currentStep();
-    // Step 0: Service + Date required
-    if (step === 0) return !!this.selectedService() && !!this.selectedDate();
+    // Step 0: Service + Date required AND date must not be in the past.
+    // String comparison works for "YYYY-MM-DD" (lexicographic == chronological)
+    // and avoids Date-parsing timezone surprises.
+    if (step === 0) {
+      if (!this.selectedService() || !this.selectedDate()) return false;
+      return this.selectedDate() >= this.todayString;
+    }
     // Provider step (only in provider mode)
     if (step === this.providerStep()) return true; // "any" is valid
     // Slot step
@@ -376,6 +387,15 @@ export class ReservationFormModalComponent {
     const step = this.currentStep();
 
     if (step === 0) {
+      // Defense in depth: even if `canGoNext` somehow let a past date
+      // through (e.g. user typed it after a date-picker paste), surface a
+      // toast and refuse to advance.
+      if (this.selectedDate() < this.todayString) {
+        this.toastService.warning(
+          'No podés agendar en una fecha que ya pasó. Elegí hoy o una fecha futura.',
+        );
+        return;
+      }
       if (!this.isFreeBooking()) {
         this.loadingProviders.set(true);
         this.loadProvidersAndAdvance(step);
@@ -696,24 +716,45 @@ export class ReservationFormModalComponent {
 
     // Check if the slot falls within ANY block
     for (const block of dayBlocks) {
-      const blockStart = this.timeToMinutes(block.start_time);
-      const blockEnd = this.timeToMinutes(block.end_time);
+      const { start: blockStart, end: blockEnd } = this.parseScheduleBlock(block);
       if (startMin >= blockStart && endMin <= blockEnd) {
         return null; // Valid - slot is within a block
       }
     }
 
     // Slot is not within any block - check if it's in a gap (lunch break)
-    const sortedBlocks = [...dayBlocks].sort((a, b) => this.timeToMinutes(a.start_time) - this.timeToMinutes(b.start_time));
+    const sortedBlocks = [...dayBlocks].sort((a, b) => {
+      const aStart = this.parseScheduleBlock(a).start;
+      const bStart = this.parseScheduleBlock(b).start;
+      return aStart - bStart;
+    });
     for (let i = 0; i < sortedBlocks.length - 1; i++) {
-      const gapEnd = this.timeToMinutes(sortedBlocks[i].end_time);
-      const gapStart = this.timeToMinutes(sortedBlocks[i + 1].start_time);
+      const { end: gapEnd } = this.parseScheduleBlock(sortedBlocks[i]);
+      const { start: gapStart } = this.parseScheduleBlock(sortedBlocks[i + 1]);
       if (startMin >= gapEnd && endMin <= gapStart) {
         return 'El proveedor está en hora de almuerzo/descanso en ese horario';
       }
     }
 
     return 'El horario seleccionado está fuera del horario del proveedor';
+  }
+
+  /**
+   * Parses a schedule block's HH:mm start/end into minute-of-day values,
+   * handling the HTML5-time-picker midnight ambiguity: an end_time of
+   * "00:00" combined with a non-zero start_time almost always means
+   * "closes at midnight" (24:00), so we coerce it to 1440 minutes.
+   *
+   * Without this, a block like `2PM - 12AM` would parse as
+   * `{ start: 840, end: 0 }` → validation rejects any time after 14:00,
+   * and the unavailable-slots computation marks the entire afternoon
+   * as "fuera de horario" even though the provider actually works.
+   */
+  private parseScheduleBlock(block: { start_time: string; end_time: string }): { start: number; end: number } {
+    const start = this.timeToMinutes(block.start_time);
+    const endRaw = this.timeToMinutes(block.end_time);
+    const end = endRaw === 0 && start > 0 ? 24 * 60 : endRaw;
+    return { start, end };
   }
 
   private timeToMinutes(time: string): number {
@@ -849,6 +890,23 @@ export class ReservationFormModalComponent {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
+  })();
+
+  /**
+   * Today's date as a "YYYY-MM-DD" string in the user's local timezone.
+   * Used as the `min` attribute on the date input and to validate that
+   * `selectedDate()` is not in the past. String comparison (>=) works
+   * lexicographically because YYYY-MM-DD sorts the same as dates.
+   *
+   * Computed lazily once per component lifetime. If the modal stays open
+   * across midnight, this becomes stale — `nextStep` would still toast
+   * for any date older than this snapshot, but a date between the
+   * snapshot and "real today" wouldn't be flagged. Acceptable trade-off
+   * because the modal is short-lived.
+   */
+  readonly todayString = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   })();
 
   /**

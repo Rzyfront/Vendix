@@ -124,17 +124,21 @@
   .booking-time {
     font-weight: 600;
     font-size: 11px;
+    text-align: center;
   }
 
-  .booking-status-badge {
-    font-size: 9px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 10px;
-    color: #fff;
+  // Status label centered at the top of the block, mirroring the
+  // DISPONIBLE / NO DISPONIBLE labels in the overlay blocks so all three
+  // block types share the same visual hierarchy: status first, time + details
+  // below. Color comes from the per-status palette in `getStatusTextColor`.
+  .booking-status-label {
+    display: block;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
+    letter-spacing: 0.4px;
+    line-height: 1.1;
   }
 
   .booking-title {
@@ -184,13 +188,31 @@
     color: #92400e;
   }
 
-  // Terminal-negative states: same yellow family but faded so the eye
-  // immediately reads "this slot might be reusable".
+  // Expired-pending override: a `pending` OR `confirmed` booking that passed
+  // its `end_time` without being attended (no customer arrival recorded).
+  // Painted red to flag the no-show visually. The DB status stays as-is so
+  // the operator can still confirm / cancel / no-show as they see fit — this
+  // is a visual cue, not a status change. See `isBookingExpired()` in the .ts
+  // for the logic.
+  &.status-pending.expired-pending,
+  &.status-confirmed.expired-pending {
+    background: #fee2e2;
+    border-left-color: #ef4444;
+    color: #991b1b;
+    // No opacity — we want this to feel urgent, not faded.
+  }
+
+  // Terminal-negative states: cancelled / no-show. The slot is no longer
+  // occupied — the booking ended without the customer arriving. Red tells
+  // the operator "this slot is free again" without having to open the
+  // detail modal. The faded opacity (0.55) ranks it below `expired-pending`
+  // (full opacity red) so the eye still distinguishes "needs your attention
+  // now" vs "this already resolved itself".
   &.status-cancelled,
   &.status-no_show {
-    background: #fef3c7;
-    border-left: 4px solid #fbbf24;
-    color: #92400e;
+    background: #fee2e2;
+    border-left: 4px solid #ef4444;
+    color: #991b1b;
     opacity: 0.55;
   }
 }
@@ -254,31 +276,56 @@
  */
 .free-slot-block {
   position: absolute;
-  left: 2px;
-  right: 2px;
+  // left/right must match `.booking-block` (4px) — otherwise the green
+  // border-left of a free-slot would peek out 2px to the left of a
+  // booking-block that overlaps it, creating a visible green stripe on
+  // the left edge of the yellow booking block.
+  left: 4px;
+  right: 4px;
   background: rgba(34, 197, 94, 0.16);
   border-left: 3px solid #22c55e;
   border-radius: 6px;
   cursor: pointer;
   z-index: 1;
   transition: background-color 0.15s ease, border-color 0.15s ease;
-  padding: 2px 6px;
+  padding: 3px 6px;
   overflow: hidden;
   display: flex;
+  flex-direction: column;
+  justify-content: center;
   align-items: center;
+  gap: 1px;
 
   &:hover {
     background: rgba(34, 197, 94, 0.32);
     border-left-color: #16a34a;
   }
 
-  .free-slot-time {
+  .free-slot-status {
     font-size: 10px;
-    font-weight: 600;
+    font-weight: 700;
     color: #166534;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    line-height: 1;
+    text-align: center;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    width: 100%;
+  }
+
+  .free-slot-time {
+    font-size: 9px;
+    font-weight: 600;
+    color: #166534;
+    opacity: 0.75;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
   }
 }
 
@@ -288,11 +335,14 @@
  * Rendered BELOW free-slot-block and booking-block (default z-index, no
  * pointer-events override) so clicks bubble up to the day-column and the
  * wizard's validation fires the appropriate toast.
+ *
+ * left/right match `.booking-block` (4px) — see note on `.free-slot-block`
+ * about the overlap-peeking border issue.
  */
 .unavailable-slot-block {
   position: absolute;
-  left: 2px;
-  right: 2px;
+  left: 4px;
+  right: 4px;
   background: rgba(239, 68, 68, 0.18);
   border-left: 3px solid #ef4444;
   border-radius: 6px;
@@ -306,4 +356,25 @@
     rgba(239, 68, 68, 0.08) 6px,
     rgba(239, 68, 68, 0.08) 12px
   );
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .unavailable-slot-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #991b1b;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    // Slightly translucent so the stripes still read through
+    background: rgba(254, 226, 226, 0.85);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
 }

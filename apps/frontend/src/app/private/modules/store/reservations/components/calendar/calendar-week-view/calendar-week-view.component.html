@@ -45,6 +45,7 @@
           <div
             class="booking-block"
             [class]="'status-' + booking.status"
+            [class.expired-pending]="isBookingExpired(booking)"
             [style.top.%]="getBlockTop(booking)"
             [style.height.%]="getBlockHeight(booking)"
             (click)="onBookingClick($event, booking)">
@@ -53,6 +54,13 @@
             <span class="booking-customer">{{ booking.customer?.first_name }}</span>
             @if (booking.provider) {
               <span class="booking-provider">{{ booking.provider.display_name || booking.provider.employee?.first_name }}</span>
+            }
+            @if (isBookingExpired(booking)) {
+              <!-- Compact "VENCIDA" badge for the week-view (which has less
+                   vertical space than the day-view). Mirrors the day-view's
+                   centered status label but fits in ~12px so it doesn't
+                   push other content out of the block. -->
+              <span class="booking-expired-badge">VENCIDA</span>
             }
           </div>
         }

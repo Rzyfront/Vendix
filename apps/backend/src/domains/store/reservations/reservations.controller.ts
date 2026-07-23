@@ -93,6 +93,7 @@ export class ReservationsController {
       {
         provider_id: query.provider_id,
         product_variant_id: query.product_variant_id,
+        include_booked: query.include_booked,
       },
     );
     return this.responseService.success(
