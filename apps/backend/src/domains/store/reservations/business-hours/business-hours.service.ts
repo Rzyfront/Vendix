@@ -122,9 +122,6 @@ export class BusinessHoursService {
   ): Promise<Map<number, { start_time: string; end_time: string }>> {
     // Try the POS settings JSON first (single source of truth).
     const fromPos = await this.loadStoreHoursFromPosSettings(storeId);
-    this.logger.log(
-      `[BusinessHours] loadStoreHours storeId=${storeId} fromPos.size=${fromPos.size} fromPos=${JSON.stringify(Array.from(fromPos.entries()))}`,
-    );
     if (fromPos.size > 0) return fromPos;
 
     // Fallback: legacy store_business_hours table for stores that
