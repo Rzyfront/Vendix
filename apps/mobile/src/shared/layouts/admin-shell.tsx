@@ -19,6 +19,19 @@ interface AdminShellProps {
   title?: string;
   breadcrumb?: string;
   variant?: 'store' | 'org' | 'super';
+  /**
+   * Optional parent label for the breadcrumb hierarchy. Accepted for
+   * API compatibility with mobile layout callers (parity with web
+   * app-shell). The native header renders its own breadcrumb, so
+   * this is currently unused at runtime.
+   */
+  parentLabel?: string;
+  /**
+   * Optional parent icon for the breadcrumb hierarchy. Accepted for
+   * API compatibility with mobile layout callers. The native header
+   * renders its own breadcrumb, so this is currently unused at runtime.
+   */
+  parentIcon?: string;
 }
 
 export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = 'store' }: AdminShellProps) {
