@@ -32,6 +32,18 @@ interface AdminShellProps {
    * renders its own breadcrumb, so this is currently unused at runtime.
    */
   parentIcon?: string;
+  /**
+   * Optional current-route label for the breadcrumb hierarchy. Accepted
+   * for API compatibility with mobile layout callers. Currently unused
+   * at runtime because the native header renders its own breadcrumb.
+   */
+  currentLabel?: string;
+  /**
+   * Optional current-route icon for the breadcrumb hierarchy. Accepted
+   * for API compatibility with mobile layout callers. Currently unused
+   * at runtime because the native header renders its own breadcrumb.
+   */
+  currentIcon?: string;
 }
 
 export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = 'store' }: AdminShellProps) {
