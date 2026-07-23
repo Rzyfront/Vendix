@@ -15,7 +15,7 @@
     <div class="p-8 flex justify-center">
       <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-primary)]"></div>
     </div>
-  } @else if (bookings().length === 0) {
+  } @else if (displayedBookings().length === 0) {
     <!-- Empty -->
     <app-empty-state
       size="sm"
@@ -27,7 +27,7 @@
   } @else {
     <!-- Reservations list -->
     <div class="divide-y divide-[var(--color-border)]">
-      @for (booking of bookings(); track booking.id) {
+      @for (booking of displayedBookings(); track booking.id) {
         <button
           type="button"
           (click)="bookingClicked.emit(booking)"
