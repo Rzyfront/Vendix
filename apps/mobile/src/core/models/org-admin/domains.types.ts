@@ -140,12 +140,12 @@ export interface DomainStats {
 
 export interface VerifyDomainResult {
   verified: boolean;
-  checks: {
+  checks: Array<{
     type: 'cname' | 'a' | 'txt';
     expected?: string;
     actual?: string;
     pass: boolean;
-  }[];
+  }>;
   message?: string;
 }
 

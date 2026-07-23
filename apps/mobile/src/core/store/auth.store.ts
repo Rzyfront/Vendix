@@ -22,6 +22,7 @@ interface AuthState {
     user_settings: UserSettings;
     store_settings?: any;
     default_panel_ui?: Record<string, Record<string, boolean>> | null;
+    permissions?: string[];
     access_token: string;
     refresh_token: string;
   }) => void;
@@ -50,6 +51,7 @@ export const useAuthStore = create<AuthState>()(
         user_settings,
         store_settings,
         default_panel_ui,
+        permissions,
         access_token,
         refresh_token,
       }) => {
@@ -69,7 +71,11 @@ export const useAuthStore = create<AuthState>()(
           token: access_token,
           refreshToken: refresh_token,
           roles: user?.roles || [],
-          permissions: [],
+          // Backend `auth.service.ts` retorna `permissions` por login/register/
+          // switchEnvironment. Si por alguna razón viene vacío, mantenemos []
+          // y dejamos que los helpers que lo consumen (ej.
+          // hasOperatingScopeWritePermission) decidan deny-by-default.
+          permissions: permissions || [],
           isAuthenticated: true,
           isLoading: false,
         });

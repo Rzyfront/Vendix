@@ -2,6 +2,7 @@ import { Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
 import { colorScales, borderRadius } from '@/shared/theme';
+import type { OperatingScopeValue } from '@/core/models/org-admin/config.types';
 
 /**
  * Scope chip del header global — paridad 1:1 con el web `HeaderComponent`
@@ -12,13 +13,11 @@ import { colorScales, borderRadius } from '@/shared/theme';
  *   - `store`     gris (slate-600) cuando scope = STORE
  *
  * NO incluye el chip fiscal — el usuario decidió no mostrar el modo fiscal
- * en el header mobile (sólo el modo operativo).
+ * en el header mobile (sólo el operativo).
  *
  * Tap → navega a `/(org-admin)/settings/operating-scope` para que el usuario
  * pueda cambiar el modo si lo necesita.
  */
-
-export type OperatingScopeValue = 'STORE' | 'ORGANIZATION';
 
 interface ScopeChipProps {
   scope: OperatingScopeValue | null | undefined;

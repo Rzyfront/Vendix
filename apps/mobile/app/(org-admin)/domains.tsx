@@ -269,7 +269,7 @@ export default function DomainsScreen() {
       actions.push({
         key: 'provision',
         label: 'Provisionar',
-        icon: 'refresh',
+        icon: 'refresh-cw',
         variant: 'warning',
         onPress: () => provisionMutation.mutate(String(domain.id)),
       });
@@ -437,7 +437,7 @@ export default function DomainsScreen() {
             }}
           >
             <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
-              <Icon name="refresh" size={16} color={colorScales.gray[700]} />
+              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
             </View>
             <View style={styles.actionsModalTextWrap}>
               <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
