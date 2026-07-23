@@ -35,7 +35,37 @@ export interface PaginatedResponse<T> {
 export class ReservationsService {
   private apiUrl = `${environment.apiUrl}/store/reservations`;
 
+  /**
+   * Booking IDs that have been auto-archived by the today panel
+   * (completed N minutes ago, so the operator can briefly see the
+   * "Completada" badge before it slides off). Lives in the singleton
+   * service so it survives the panel being destroyed/recreated by
+   * the parent's periodic re-fetch (otherwise setTimeout would be
+   * cleared in onDestroy and the timer would never fire).
+   */
+  private readonly archivedTodayBookingIds = new Set<number>();
+  private readonly todayArchiveTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
   constructor(private http: HttpClient) {}
+
+  /**
+   * Schedule a booking to be auto-archived from the today panel after
+   * `delayMs` ms. Replaces any existing timer for the same id (safe to
+   * call from a re-rendering effect).
+   */
+  scheduleTodayArchive(bookingId: number, delayMs: number): void {
+    const existing = this.todayArchiveTimers.get(bookingId);
+    if (existing) clearTimeout(existing);
+    const handle = setTimeout(() => {
+      this.archivedTodayBookingIds.add(bookingId);
+      this.todayArchiveTimers.delete(bookingId);
+    }, delayMs);
+    this.todayArchiveTimers.set(bookingId, handle);
+  }
+
+  isTodayBookingArchived(bookingId: number): boolean {
+    return this.archivedTodayBookingIds.has(bookingId);
+  }
 
   getReservations(query: BookingQuery = {}): Observable<PaginatedResponse<Booking>> {
     let params = new HttpParams();
@@ -149,6 +179,7 @@ export class ReservationsService {
     dateTo: string,
     providerId?: number,
     productVariantId?: number,
+    includeBooked?: boolean,
   ): Observable<AvailabilitySlot[]> {
     let params = new HttpParams()
       .set('date_from', dateFrom)
@@ -159,6 +190,9 @@ export class ReservationsService {
     }
     if (productVariantId) {
       params = params.set('product_variant_id', productVariantId.toString());
+    }
+    if (includeBooked) {
+      params = params.set('include_booked', 'true');
     }
 
     return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(

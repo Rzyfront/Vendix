@@ -1,7 +1,6 @@
 import {
   Component,
   computed,
-  DestroyRef,
   effect,
   inject,
   input,
@@ -31,7 +30,6 @@ const SPANISH_MONTHS = [
 export class TodayReservationsPanelComponent {
   private readonly reservations = inject(ReservationsService);
   private readonly toastService = inject(ToastService);
-  private readonly destroyRef = inject(DestroyRef);
 
   /**
    * Time (ms) a `completed` booking stays visible in the panel before
@@ -40,12 +38,6 @@ export class TodayReservationsPanelComponent {
    * and the next pending booking takes its place.
    */
   private static readonly COMPLETED_VISIBLE_MS = 2 * 60 * 1000;
-
-  /** Set of booking IDs that have been auto-archived after completing. */
-  private readonly archived = signal<Set<number>>(new Set());
-
-  /** Active `setTimeout` handles, keyed by booking ID, for cleanup. */
-  private readonly archiveTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
   bookings = input<Booking[]>([]);
   readonly loadingInput = input(false, { alias: 'loading' });
@@ -60,50 +52,31 @@ export class TodayReservationsPanelComponent {
 
   constructor() {
     // Watch the bookings list for `completed` transitions and schedule
-    // an auto-archive 2 minutes later. The effect only depends on
-    // `bookings()` (the input signal) — not on `archived()` — so the
-    // timer callback mutating the signal doesn't re-trigger us.
+    // an auto-archive 2 minutes later via the ReservationsService
+    // singleton (so the timer survives the panel being recreated by the
+    // parent's periodic re-fetch).
     effect(() => {
       const bookings = this.bookings();
       for (const booking of bookings) {
-        if (
-          booking.status === 'completed' &&
-          !this.archiveTimers.has(booking.id)
-        ) {
-          const id = booking.id;
-          const handle = setTimeout(() => {
-            this.archived.update((set) => {
-              const next = new Set(set);
-              next.add(id);
-              return next;
-            });
-            this.archiveTimers.delete(id);
-          }, TodayReservationsPanelComponent.COMPLETED_VISIBLE_MS);
-          this.archiveTimers.set(id, handle);
+        if (booking.status === 'completed') {
+          this.reservations.scheduleTodayArchive(
+            booking.id,
+            TodayReservationsPanelComponent.COMPLETED_VISIBLE_MS,
+          );
         }
       }
-    });
-
-    // Clean up pending timers when the panel is destroyed so we don't
-    // leak handles or try to mutate a dead signal.
-    this.destroyRef.onDestroy(() => {
-      for (const handle of this.archiveTimers.values()) {
-        clearTimeout(handle);
-      }
-      this.archiveTimers.clear();
     });
   }
 
   /**
    * Bookings the template should render: identical to the `bookings`
-   * input, minus the IDs we've auto-archived. Computed (not effect) so
-   * the template re-renders the moment a new ID is added to the
-   * archived set.
+   * input, minus the IDs the service has auto-archived.
    */
-  displayedBookings = computed(() => {
-    const archived = this.archived();
-    return this.bookings().filter((b) => !archived.has(b.id));
-  });
+  displayedBookings = computed(() =>
+    this.bookings().filter(
+      (b) => !this.reservations.isTodayBookingArchived(b.id),
+    ),
+  );
 
   todayLabel = computed(() => {
     const now = new Date();
