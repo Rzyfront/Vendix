@@ -35,6 +35,10 @@ interface PosCartModalProps {
   onCreate: () => void;
   /** Handler de "Envío" — abre shipping modal. */
   onShipping: () => void;
+  /** Handler de "Guardar borrador" — paridad con web `pos-cart-modal.component.ts:738`. */
+  onSaveDraft?: () => void;
+  /** Estado del draft: `true` cuando ya hay un draft persistido. */
+  hasDraft?: boolean;
   /** Handler de "Finalizar Venta" — abre `pos-payment-modal`. */
   onCheckout: () => void;
   /** Habilita el botón de ítem personalizado (paridad web `canCreateCustomItems`). */
@@ -92,6 +96,8 @@ export function PosCartModal({
   onCustomItem,
   onCreate,
   onShipping,
+  onSaveDraft,
+  hasDraft,
   onCheckout,
   canCreateCustomItems = false,
 }: PosCartModalProps) {
@@ -337,6 +343,22 @@ export function PosCartModal({
                       <Icon name="truck" size={18} color={colors.primary} />
                       <Text style={styles.actionShippingText}>Envío</Text>
                     </Pressable>
+                    {onSaveDraft ? (
+                      <Pressable
+                        onPress={onSaveDraft}
+                        style={({ pressed }) => [styles.actionBtn, styles.createBtn, pressed && { opacity: 0.85 }]}
+                        accessibilityLabel={hasDraft ? 'Actualizar borrador' : 'Guardar borrador'}
+                      >
+                        <Icon
+                          name={hasDraft ? 'save' : 'bookmark'}
+                          size={18}
+                          color={hasDraft ? colors.primary : colorScales.gray[700]}
+                        />
+                        <Text style={styles.actionSecondaryText}>
+                          {hasDraft ? 'Borrador' : 'Guardar'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
                   <Pressable
                     onPress={onCheckout}

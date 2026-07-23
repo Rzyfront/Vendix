@@ -28,6 +28,12 @@ interface CartActions {
   setMode: (mode: PosMode) => void;
   applyDiscount: (type: 'percentage' | 'fixed', value: number, description: string) => void;
   removeDiscount: (discountId: string) => void;
+  /**
+   * Marca el carrito como borrador persistido localmente. La conversión a
+   * `order_draft` real se hace vía el servicio POS al confirmar.
+   */
+  markAsDraft: (draftId: string) => void;
+  clearDraft: () => void;
   clearCart: () => void;
   getSummary: () => CartSummary;
 }
@@ -39,6 +45,7 @@ const initialState: CartState = {
   discounts: [],
   summary: { subtotal: 0, taxAmount: 0, discountAmount: 0, total: 0, itemCount: 0, totalItems: 0 },
   mode: 'sale',
+  draftId: null,
 };
 
 function generateItemId(): string {
@@ -59,6 +66,20 @@ function getTaxRateSum(product: Product): number {
   return total;
 }
 
+/**
+ * Cuando el `base_price` del producto ya incluye IVA, el `tax_rate` debe
+ * extraerse del precio (es decir, el impuesto no debe duplicarse al
+ * multiplicar `unitPrice * (1 + rate)`). En ese caso devolvemos 0
+ * porque el producto ya viene con todo el impuesto adentro (paridad con
+ * el backend `price_includes_tax`).
+ */
+function isPriceTaxInclusive(product: Product): boolean {
+  return Boolean(
+    (product as Product & { tax_included?: boolean }).tax_included ||
+      (product as Product & { price_includes_tax?: boolean }).price_includes_tax,
+  );
+}
+
 function getSellableUnitPrice(product: Product, variant?: ProductVariant | null): number {
   if (variant?.is_on_sale && variant.sale_price != null) return Number(variant.sale_price) || 0;
   if (variant?.price_override != null) return Number(variant.price_override) || 0;
@@ -69,8 +90,11 @@ function getSellableUnitPrice(product: Product, variant?: ProductVariant | null)
 function buildCartItem(product: Product, variant?: ProductVariant | null, quantity: number = 1): CartItem {
   const unitPrice = getSellableUnitPrice(product, variant);
   const rateSum = getTaxRateSum(product);
-  const taxAmount = unitPrice * quantity * rateSum;
-  const finalPrice = unitPrice * (1 + rateSum);
+  // Si el `base_price` ya incluye IVA, no duplicar el impuesto al
+  // multiplicar — `tax_included` se respeta solo cuando el backend lo
+  // expone; si no, comportamiento legacy (rateSum) para no romper.
+  const taxAmount = isPriceTaxInclusive(product) ? 0 : unitPrice * quantity * rateSum;
+  const finalPrice = isPriceTaxInclusive(product) ? unitPrice : unitPrice * (1 + rateSum);
   const totalPrice = quantity * finalPrice;
   const variant_display_name = variant?.name || variant?.attributes || undefined;
 
@@ -90,8 +114,9 @@ function buildCartItem(product: Product, variant?: ProductVariant | null, quanti
 function recalcItem(item: CartItem): CartItem {
   const rateSum = getTaxRateSum(item.product);
   const unitPrice = getSellableUnitPrice(item.product, item.variant);
-  const taxAmount = unitPrice * item.quantity * rateSum;
-  const finalPrice = unitPrice * (1 + rateSum);
+  const inclusive = isPriceTaxInclusive(item.product);
+  const taxAmount = inclusive ? 0 : unitPrice * item.quantity * rateSum;
+  const finalPrice = inclusive ? unitPrice : unitPrice * (1 + rateSum);
   const totalPrice = item.quantity * finalPrice;
   return { ...item, unitPrice, taxAmount, finalPrice, totalPrice };
 }
@@ -231,6 +256,10 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   },
 
   clearCart: () => set({ ...initialState, summary: { ...initialState.summary } }),
+
+  markAsDraft: (draftId) => set({ draftId }),
+
+  clearDraft: () => set({ draftId: null }),
 
   getSummary: () => get().summary,
 }));

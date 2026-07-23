@@ -158,6 +158,12 @@ export interface PopProductConfigResult {
   quantity: number;
   unit_cost: number;
   pricing_type?: PricingType;
+  /**
+   * `true` si la factura del proveedor grava IVA — paridad con web
+   * `includes_vat` (QUI-525). El backend puede omitirlo y el cart lo
+   * propaga al payload final.
+   */
+  includes_vat?: boolean;
 }
 
 /**

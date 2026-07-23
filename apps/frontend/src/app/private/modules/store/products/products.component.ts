@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef, signal } from '@angular/core';
+import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 import { Router, ActivatedRoute } from '@angular/router';
@@ -99,6 +99,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [categories]="categories()"
         [brands]="brands()"
         [paginationData]="pagination()"
+        [canCreate]="canCreateProduct()"
         (refresh)="loadProducts()"
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
@@ -153,6 +154,11 @@ export class ProductsComponent {
 
   // Pagination
   readonly pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
+
+  // FIX QUI-503: granular permissions derived from AuthFacade
+  readonly canCreateProduct = computed(() =>
+    this.authFacade.hasPermission('store:products:create'),
+  );
 
   // Stats
   readonly stats = signal<ProductStats>({

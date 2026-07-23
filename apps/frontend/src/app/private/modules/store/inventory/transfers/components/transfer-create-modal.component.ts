@@ -1,4 +1,4 @@
-import {Component, inject, input, output, effect, viewChild, DestroyRef} from '@angular/core';
+import {Component, inject, input, output, effect, signal, viewChild, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -48,6 +48,7 @@ interface TransferItem {
       [isOpen]="isOpen()"
       [title]="modalTitle"
       size="md"
+      [canClose]="canCloseTransfer"
       (closed)="onCancel()"
       (isOpenChange)="isOpenChange.emit($event)"
       subtitle="Mover productos entre ubicaciones"
@@ -89,6 +90,14 @@ interface TransferItem {
             <div class="p-3 bg-error/10 rounded-xl border border-error/30 text-sm text-error flex items-center gap-2">
               <app-icon name="alert-circle" [size]="16"></app-icon>
               Las ubicaciones de origen y destino deben ser diferentes
+            </div>
+          }
+
+          <!-- QUI-440: mensaje explicito cuando no hay ubicaciones destino -->
+          @if (noToLocationsAvailable()) {
+            <div class="p-3 bg-amber-50 border border-amber-200 rounded text-amber-800 text-sm flex items-center gap-2">
+              <app-icon name="alert-triangle" [size]="16"></app-icon>
+              No hay otras ubicaciones disponibles para transferir. Crea otra ubicación primero.
             </div>
           }
 
@@ -138,6 +147,11 @@ interface TransferItem {
           </div>
 
           <!-- Search Results -->
+          @if (searchTerm().length >= 2 && productSearchResults.length === 0 && !searching()) {
+            <p class="text-sm text-text-secondary text-center py-4">
+              No hay productos con stock disponible para transferir entre estas ubicaciones.
+            </p>
+          }
           @if (productSearchResults.length > 0) {
             <div class="max-h-48 overflow-y-auto border border-border rounded-xl divide-y divide-border">
               @for (product of productSearchResults; track product.id) {
@@ -328,7 +342,8 @@ interface TransferItem {
           <label class="flex items-start gap-3 p-3 bg-warning/5 rounded-xl border border-warning/20 cursor-pointer select-none">
             <input
               type="checkbox"
-              [(ngModel)]="confirmCreate"
+              [checked]="confirmCreate()"
+              (change)="confirmCreate.set($any($event.target).checked)"
               class="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary"
             />
             <div>
@@ -365,6 +380,7 @@ interface TransferItem {
               type="button"
               (clicked)="goToStep(currentStep + 1)"
               [disabled]="!canAdvance()"
+              [title]="getNextButtonTooltip()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
               Continuar
@@ -387,7 +403,7 @@ interface TransferItem {
               type="button"
               (clicked)="onSubmitAndComplete()"
               [loading]="isSubmitting()"
-              [disabled]="isSubmitting() || hasNegativeProjection() || !confirmCreate"
+              [disabled]="isSubmitting() || hasNegativeProjection() || !confirmCreate()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
               <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
@@ -429,7 +445,13 @@ export class TransferCreateModalComponent {
   // Step 2
   readonly productSearchRef = viewChild<InputsearchComponent>('productSearch');
   productSearchResults: TransferableProduct[] = [];
-  confirmCreate = false;
+  // QUI-440: signals para controlar el mensaje de busqueda vacia del
+  // paso 2 con reactividad zoneless.
+  searchTerm = signal('');
+  searching = signal(false);
+  // QUI-440: signal en vez de boolean plano para reactividad zoneless del
+  // [disabled] del botón "Crear y Aplicar" del paso 3.
+  confirmCreate = signal(false);
   transferItems: TransferItem[] = [];
 
   get locationOptions(): SelectorOption[] {
@@ -440,6 +462,42 @@ export class TransferCreateModalComponent {
     if (!this.selectedFromLocation) return this.locations();
     return this.locations().filter(l => l.value !== this.selectedFromLocation);
   }
+
+  // QUI-440: getter que indica cuando el paso 1 esta bloqueado por falta
+  // de ubicaciones destino (ej. tienda con una sola ubicacion).
+  noToLocationsAvailable(): boolean {
+    return (
+      this.selectedFromLocation !== null &&
+      this.selectedFromLocation !== undefined &&
+      this.filteredToLocations.length === 0
+    );
+  }
+
+  // QUI-440: tooltip del boton "Continuar" que explica que falta cuando
+  // el paso 1 no esta completo.
+  getNextButtonTooltip(): string {
+    if (this.currentStep !== 1) return 'Avanzar al siguiente paso';
+    if (!this.selectedFromLocation) return 'Selecciona la ubicacion de origen';
+    if (!this.selectedToLocation) return 'Selecciona la ubicacion de destino';
+    if (this.selectedFromLocation === this.selectedToLocation)
+      return 'El origen y destino deben ser diferentes';
+    return 'Avanzar al siguiente paso';
+  }
+
+  // QUI-438: confirma antes de descartar cambios en el wizard de
+  // transferencia si el usuario ya ingreso ubicaciones o productos.
+  canCloseTransfer = (): boolean => {
+    const hasChanges =
+      this.selectedFromLocation !== null ||
+      this.selectedToLocation !== null ||
+      this.expectedDate !== '' ||
+      this.notes !== '' ||
+      this.transferItems.length > 0;
+    if (!hasChanges) return true;
+    return window.confirm(
+      'Tienes datos sin guardar. ¿Cerrar y descartarlos?',
+    );
+  };
 
   get modalTitle(): string {
     if (this.currentStep === 1) return 'Ubicaciones';
@@ -468,22 +526,29 @@ export class TransferCreateModalComponent {
   }
 
   searchProducts(term: string): void {
+    this.searchTerm.set(term);
     if (!term || term.length < 2 || !this.selectedFromLocation || !this.selectedToLocation) {
       this.productSearchResults = [];
+      this.searching.set(false);
       return;
     }
 
+    this.searching.set(true);
     this.transfersService.searchTransferableProducts(
       term,
       this.selectedFromLocation,
       this.selectedToLocation,
     ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (products) => {
+        this.searching.set(false);
         this.productSearchResults = products.filter(
           (p) => !this.transferItems.some(ti => ti.product_id === p.id),
         );
       },
-      error: () => { this.productSearchResults = []; },
+      error: () => {
+        this.searching.set(false);
+        this.productSearchResults = [];
+      },
     });
   }
 
@@ -612,7 +677,7 @@ export class TransferCreateModalComponent {
     this.notes = '';
     this.productSearchResults = [];
     this.transferItems = [];
-    this.confirmCreate = false;
+    this.confirmCreate.set(false);
     this.productSearchRef()?.clearInput();
   }
 }

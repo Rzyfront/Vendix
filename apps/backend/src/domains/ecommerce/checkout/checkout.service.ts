@@ -167,12 +167,21 @@ export class CheckoutService {
       ];
     }
 
+    // FIX QUI-467: wallet requires an authenticated customer. Hide it from
+    // anonymous visitors (defense-in-depth — POST /checkout also rejects it).
+    const isAuthenticated = !!RequestContextService.getUserId();
+
     // store_id se aplica automáticamente por EcommercePrismaService
     const methods = await this.prisma.store_payment_methods.findMany({
       where: {
         state: 'enabled',
         system_payment_method: {
           processing_mode: { in: allowedModes },
+          // Hide wallet from anonymous users — it requires a logged-in
+          // customer with a wallet_id.
+          ...(isAuthenticated
+            ? {}
+            : { NOT: { type: 'wallet' } }),
         },
       },
       include: {
@@ -718,6 +727,18 @@ export class CheckoutService {
 
     if (!payment_method) {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
+    }
+
+    // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
+    // crafts a request manually, the server must refuse wallet — the wallet
+    // is per-customer (prepaid balance) and needs an authenticated identity.
+    if (
+      payment_method.system_payment_method.type === 'wallet' &&
+      !RequestContextService.getUserId()
+    ) {
+      throw new BadRequestException(
+        'Wallet payment is only available to authenticated customers.',
+      );
     }
 
     // Strict carta schedule gate (same OR window semantics as the public menu).

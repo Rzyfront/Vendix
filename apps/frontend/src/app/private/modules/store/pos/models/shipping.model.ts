@@ -35,3 +35,15 @@ export interface PosShippingOption {
   currency: string;
   estimated_days?: { min: number; max: number };
 }
+
+/**
+ * Modo de pago asociado a un envío. Usado por el wizard de envío del POS
+ * para decidir si el cobro se hace en línea, contra entrega, o se
+ * transfiere al checkout del e-commerce.
+ */
+export type PosShippingPaymentMode =
+  | 'on_delivery'
+  | 'online'
+  | 'pay_now'
+  | 'ecommerce';
+

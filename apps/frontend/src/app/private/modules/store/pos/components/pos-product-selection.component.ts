@@ -254,7 +254,7 @@ interface ActiveOrderPromotion {
                     <img
                       [src]="product.image_url || product.image"
                       [alt]="product.name"
-                      class="w-full h-full object-cover"
+                      class="w-full h-full object-contain p-2"
                       (error)="onImageError($event)"
                     />
                   }

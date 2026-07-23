@@ -43,6 +43,18 @@ export const SettingsService = {
     return unwrap<StoreSettings>(res);
   },
 
+  /**
+   * Helper para extraer un mensaje accionable del backend. Tolerante a
+   * respuestas envueltas (`ApiResponse`) o a strings en `message`.
+   */
+  extractErrorMessage(error: unknown, fallback: string): string {
+    const candidate = (error as { response?: { data?: { message?: unknown } } })?.response?.data?.message;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+    if (Array.isArray(candidate) && candidate.length > 0) return String(candidate[0]);
+    if (error instanceof Error && error.message) return error.message;
+    return fallback;
+  },
+
   async getUsers(query?: ListQuery): Promise<PaginatedResponse<StoreUser>> {
     const params: Record<string, unknown> = {
       page: query?.page ?? 1,

@@ -16,6 +16,9 @@ import { RecordCard } from '@/shared/components/record-card/record-card';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
+import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
+import { Icon } from '@/shared/components/icon/icon';
+import { useCan } from '@/core/auth/use-permissions';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatRelative } from '@/shared/utils/date';
 import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
@@ -113,6 +116,7 @@ const OrderCard = ({ order, onPress }: { order: Order; onPress: () => void }) =>
 
 export default function Orders() {
   const router = useRouter();
+  const canCreate = useCan('store:orders:create');
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<OrderState | 'all'>('all');
 
@@ -174,10 +178,22 @@ export default function Orders() {
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
           <View>
+            <StickyHeader
+              title="Ordenes de Venta"
+              actions={canCreate ? [
+                {
+                  label: 'Nueva orden',
+                  icon: 'plus',
+                  onPress: () => router.push('/(store-admin)/orders/new' as never),
+                },
+              ] : []}
+            />
             <StatsGrid
               items={[
                 { label: 'Total Órdenes', value: stats?.total_orders ?? 0, icon: 'clipboard-list' },
                 { label: 'Ingresos', value: formatCurrency(stats?.total_revenue ?? 0), icon: 'dollar-sign' },
+                { label: 'Pendientes', value: stats?.pending_orders ?? 0, icon: 'clock' },
+                { label: 'Entregadas', value: stats?.completed_orders ?? 0, icon: 'check-circle' },
               ]}
             />
 

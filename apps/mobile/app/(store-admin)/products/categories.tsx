@@ -37,6 +37,7 @@ export default function CategoriesListScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const canCreate = useCan('store:categories:create');
+  const canUpdate = useCan('store:categories:update');
   const canDelete = useCan('store:categories:delete');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -79,6 +80,27 @@ export default function CategoriesListScreen() {
     onError: () => {
       toastError('No se pudo eliminar la categoría');
     },
+  });
+
+  const stateMutation = useMutation({
+    mutationFn: ({ id, nextState }: { id: number; nextState: CategoryState }) =>
+      CategoryService.update(id, { state: nextState }),
+    onSuccess: () => {
+      toastSuccess('Estado actualizado');
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
+    },
+    onError: () => toastError('No se pudo cambiar el estado'),
+  });
+
+  const featuredMutation = useMutation({
+    mutationFn: ({ id, is_featured }: { id: number; is_featured: boolean }) =>
+      CategoryService.update(id, { is_featured }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
+    },
+    onError: () => toastError('No se pudo cambiar el destaque'),
   });
 
   function handleSearch(value: string) {
@@ -244,6 +266,15 @@ export default function CategoriesListScreen() {
               category={item}
               onPress={() => router.push(`/(store-admin)/products/categories/${item.id}`)}
               onLongPress={canDelete ? () => setDeleteTarget(item) : undefined}
+              onEdit={canUpdate ? () => router.push(`/(store-admin)/products/categories/${item.id}`) : undefined}
+              onToggleState={canUpdate ? () => {
+                const nextState: CategoryState = item.state === 'active' ? 'inactive' : 'active';
+                stateMutation.mutate({ id: item.id, nextState });
+              } : undefined}
+              onToggleFeatured={canUpdate ? () =>
+                featuredMutation.mutate({ id: item.id, is_featured: !item.is_featured }) : undefined}
+              isTogglingFeatured={featuredMutation.isPending}
+              onDelete={canDelete ? () => setDeleteTarget(item) : undefined}
             />
           )}
           ListFooterComponent={
@@ -281,13 +312,24 @@ function CategoryCard({
   category,
   onPress,
   onLongPress,
+  onEdit,
+  onToggleState,
+  onToggleFeatured,
+  isTogglingFeatured,
+  onDelete,
 }: {
   category: ProductCategory;
   onPress: () => void;
   onLongPress?: () => void;
+  onEdit?: () => void;
+  onToggleState?: () => void;
+  onToggleFeatured?: () => void;
+  isTogglingFeatured?: boolean;
+  onDelete?: () => void;
 }) {
   const stateVariant = category.state === 'active' ? 'success' : 'default';
   const stateLabel = category.state === 'active' ? 'Activa' : 'Inactiva';
+  const showActions = Boolean(onEdit || onToggleState || onToggleFeatured || onDelete);
 
   return (
     <Pressable
@@ -357,6 +399,78 @@ function CategoryCard({
           </Text>
         )}
       </View>
+      {showActions ? (
+        <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+          {onEdit ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onEdit(); }}
+              hitSlop={8}
+              accessibilityLabel="Editar categoría"
+              style={({ pressed }) => [
+                { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon name="edit-2" size={16} color={colors.primary} />
+            </Pressable>
+          ) : null}
+          {onToggleState ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onToggleState(); }}
+              hitSlop={8}
+              accessibilityLabel={category.state === 'active' ? 'Desactivar categoría' : 'Activar categoría'}
+              style={({ pressed }) => [
+                { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon
+                name={category.state === 'active' ? 'toggle-right' : 'toggle-left'}
+                size={16}
+                color={category.state === 'active' ? colors.success : colors.text.muted}
+              />
+            </Pressable>
+          ) : null}
+          {onToggleFeatured ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onToggleFeatured(); }}
+              hitSlop={8}
+              disabled={isTogglingFeatured}
+              accessibilityLabel={category.is_featured ? 'Quitar destaque' : 'Destacar'}
+              style={({ pressed }) => [
+                {
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: category.is_featured ? '#FEF3C7' : 'transparent',
+                },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon
+                name="star"
+                size={16}
+                color={category.is_featured ? colors.warning : colors.text.muted}
+              />
+            </Pressable>
+          ) : null}
+          {onDelete ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onDelete(); }}
+              hitSlop={8}
+              accessibilityLabel="Eliminar categoría"
+              style={({ pressed }) => [
+                { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon name="trash-2" size={16} color={colors.error} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <Icon name="chevron-right" size={18} color={colors.text.muted} />
     </Pressable>
   );

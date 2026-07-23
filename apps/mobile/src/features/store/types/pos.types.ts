@@ -48,6 +48,11 @@ export interface CartState {
   summary: CartSummary;
   /** Modo de operación del POS (paridad web `isQuotationMode / isLayawayMode`). */
   mode?: PosMode;
+  /**
+   * `draftId` cuando el carrito ya fue persistido como orden en draft
+   * (paridad con web `pos-cart-modal.component.ts:737`).
+   */
+  draftId?: string | null;
 }
 
 export interface PaymentMethod {

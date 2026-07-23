@@ -234,7 +234,12 @@ model store_users {
 
 model roles {
   id               Int                @id @default(autoincrement())
-  name             String             @unique @db.VarChar(50)
+  // QUI-473: `name` is no longer globally unique. Per-org uniqueness is
+  // enforced by the composite index `roles_organization_id_name_key`
+  // (created in the matching migration). Global system roles keep their
+  // global-uniqueness via `roles_name_global_system_key`, so `super_admin`,
+  // `owner`, etc. cannot be duplicated.
+  name             String             @db.VarChar(50)
   description      String?
   is_system_role   Boolean            @default(false)
   organization_id  Int?
@@ -244,6 +249,7 @@ model roles {
   user_roles       user_roles[]
   organizations    organizations?     @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
+  @@unique([organization_id, name])
   @@index([organization_id])
 }
 

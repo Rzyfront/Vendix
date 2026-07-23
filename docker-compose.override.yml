@@ -1,0 +1,8 @@
+services:
+  backend:
+    command: sh -c "npx prisma generate && node dist/src/main.js"
+    environment:
+      # QUI-489: override rate limit del login para dev. Prod (sin override)
+      # mantiene el default de 10 (production-safe). Para subir el límite
+      # en otro environment, exportar LOGIN_RATE_LIMIT_MAX_ATTEMPTS=30.
+      LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-30}
