@@ -33,7 +33,7 @@
             <h2 class="section-title">Identidad y General</h2>
           </div>
           <div class="section-body">
-            <app-general-settings-form #generalForm [settings]="settings().general" [services]="settings().services"
+            <app-general-settings-form #generalForm [settings]="settings().general" [services]="$any(settings()).services"
               [panelUi]="settings().panel_ui"
               (settingsChange)="onSectionChange('general', $event)"
               (panelUiChange)="onSectionChange('panel_ui', $event)" />
@@ -41,13 +41,17 @@
         </section>
 
         <!-- Servicios (own card, only when 'service' industry is selected) -->
-        @if (showServicesSection()) {
-          <section class="settings-card mt-6">
-            <app-services-settings-form
-              [servicesForm]="generalForm.servicesForm"
-            />
-          </section>
-        }
+        <!-- Use [style.display] instead of @if so the form is NEVER
+             unmounted. The industries signal transitions multiple times
+             during the parent's effect cascade (load → patch → re-emit
+             → re-patch), and @if would mount/unmount the form on each
+             transition, resetting its `lastLoadedState` flag and the
+             setTimeout poll before the post-patch value can be read. -->
+        <section class="settings-card mt-6" [style.display]="showServicesSection() ? 'block' : 'none'">
+          <app-services-settings-form
+            [servicesForm]="generalForm.servicesForm"
+          />
+        </section>
 
         <!-- Branding & Customization -->
         <section id="section-branding" class="settings-section">
