@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map, catchError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
@@ -42,8 +42,16 @@ export class ReservationsService {
    * service so it survives the panel being destroyed/recreated by
    * the parent's periodic re-fetch (otherwise setTimeout would be
    * cleared in onDestroy and the timer would never fire).
+   *
+   * Wrapped in a signal so updates trigger the panel's
+   * `displayedBookings` computed to re-evaluate. A bare Set would NOT
+   * notify Angular on .add() — the booking would be archived in the
+   * data but the template would keep showing it because no signal
+   * dependency fired.
    */
-  private readonly archivedTodayBookingIds = new Set<number>();
+  private readonly archivedTodayBookingIds = signal<Set<number>>(
+    new Set<number>(),
+  );
   private readonly todayArchiveTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
   constructor(private http: HttpClient) {}
@@ -57,14 +65,18 @@ export class ReservationsService {
     const existing = this.todayArchiveTimers.get(bookingId);
     if (existing) clearTimeout(existing);
     const handle = setTimeout(() => {
-      this.archivedTodayBookingIds.add(bookingId);
+      this.archivedTodayBookingIds.update((set) => {
+        const next = new Set(set);
+        next.add(bookingId);
+        return next;
+      });
       this.todayArchiveTimers.delete(bookingId);
     }, delayMs);
     this.todayArchiveTimers.set(bookingId, handle);
   }
 
   isTodayBookingArchived(bookingId: number): boolean {
-    return this.archivedTodayBookingIds.has(bookingId);
+    return this.archivedTodayBookingIds().has(bookingId);
   }
 
   getReservations(query: BookingQuery = {}): Observable<PaginatedResponse<Booking>> {
