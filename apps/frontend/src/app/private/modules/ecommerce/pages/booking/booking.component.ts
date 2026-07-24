@@ -197,7 +197,22 @@ export class BookingComponent implements OnInit {
    */
   private loadServiceLocation(): void {
     this.bookingService.getCustomerAddresses().subscribe({
-      next: (list) => this.customerAddresses.set(list ?? []),
+      next: (list) => {
+        const safeList = list ?? [];
+        this.customerAddresses.set(safeList);
+        // Auto-pick the primary address when the user hasn't yet chosen
+        // one. The user might have just set a new address as Principal
+        // in Mi Cuenta → Mis Direcciones before opening this flow, and
+        // we want that selection to flow through without forcing them
+        // to click a radio button. Only acts when nothing is selected
+        // yet, so an in-progress booking isn't disturbed.
+        if (this.selectedAddressId() == null) {
+          const primary = safeList.find((a) => a?.is_primary);
+          if (primary?.id != null) {
+            this.selectedAddressId.set(primary.id);
+          }
+        }
+      },
     });
     this.bookingService.getStoreAddress().subscribe({
       next: (addr) => this.storeAddress.set(addr ?? null),
@@ -225,14 +240,6 @@ export class BookingComponent implements OnInit {
 
   onServiceAddressChange(id: number | null): void {
     this.selectedAddressId.set(id);
-  }
-
-  /**
-   * Called when the child selector creates a new address inline
-   * and wants the parent to refresh its local copy of the list.
-   */
-  onServiceAddressesChanged(list: any[]): void {
-    this.customerAddresses.set(list);
   }
 
   // --- Data loading ---

@@ -151,6 +151,14 @@ export class AccountService {
           created_at: true,
           placed_at: true,
           completed_at: true,
+          // Pull the first order item's product name so the list view
+          // can show "1 producto(s): <name>" instead of just the count.
+          // We take 1 ordered by id asc to get a stable "first" item.
+          order_items: {
+            select: { product_name: true },
+            take: 1,
+            orderBy: { id: 'asc' },
+          },
           _count: {
             select: { order_items: true },
           },
@@ -162,10 +170,14 @@ export class AccountService {
     ]);
 
     return {
-      data: data.map((order) => ({
-        ...order,
-        item_count: order._count.order_items,
-      })),
+      data: data.map((order) => {
+        const { order_items, _count, ...rest } = order;
+        return {
+          ...rest,
+          item_count: _count.order_items,
+          first_item_name: order_items?.[0]?.product_name ?? null,
+        };
+      }),
       meta: {
         total,
         page: Number(page),

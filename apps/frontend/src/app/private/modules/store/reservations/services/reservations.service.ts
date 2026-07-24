@@ -54,6 +54,7 @@ export class ReservationsService {
    * row back, even ones the operator had already seen auto-archive.
    */
   private static readonly ARCHIVE_STORAGE_KEY = 'vendix.today-archived-bookings';
+  private static readonly ARCHIVE_CHECK_INTERVAL_MS = 15_000;
   private readonly archivedTodayBookingIds = signal<Set<number>>(
     ReservationsService.loadArchivedFromStorage(),
   );
@@ -66,6 +67,7 @@ export class ReservationsService {
    * to fire under the parent's re-fetch pattern in this codebase.
    */
   private readonly completedAtByBookingId = new Map<number, number>();
+  private archiveIntervalHandle: ReturnType<typeof setInterval> | null = null;
 
   constructor(private http: HttpClient) {
     // Persist the archived set to localStorage on every change so a

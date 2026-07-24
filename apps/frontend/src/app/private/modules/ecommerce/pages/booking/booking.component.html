@@ -201,16 +201,16 @@
         <div class="step-content">
           <h2 class="step-title">Confirmar reserva</h2>
 
-          <!-- Service location selector (a domicilio vs en el local) -->
+          <!-- Service location selector: emits (valueChange) and
+               (addressChange) to the parent. Now driven by config
+               (offerHomeService), not by user click on a toggle. -->
           <app-service-location-selector
-            [value]="serviceLocation()"
             [storeAddress]="storeAddress()"
             [customerAddresses]="customerAddresses()"
             [selectedAddressId]="selectedAddressId()"
             [offerHomeService]="offerHomeService()"
             (valueChange)="onServiceLocationChange($event)"
             (addressChange)="onServiceAddressChange($event)"
-            (addressesChanged)="onServiceAddressesChanged($event)"
           />
 
           <!-- Summary card -->

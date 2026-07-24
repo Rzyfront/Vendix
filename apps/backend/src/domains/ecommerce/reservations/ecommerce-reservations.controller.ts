@@ -321,19 +321,34 @@ export class EcommerceReservationsController {
         'address_line1, city y country_code son obligatorios',
       );
     }
-    const created = await this.availabilityService['prisma'].addresses.create({
-      data: {
-        address_line1: dto.address_line1,
-        address_line2: dto.address_line2 ?? null,
-        city: dto.city,
-        state_province: dto.state_province ?? null,
-        country_code: dto.country_code,
-        postal_code: dto.postal_code ?? null,
-        phone_number: dto.phone_number ?? null,
-        user_id: customerId,
-        is_primary: !!dto.is_primary,
-        type: 'shipping',
-      },
+    const prisma = this.availabilityService['prisma'];
+    // Maintain the "single primary per customer" invariant. When the new
+    // address is flagged as primary, unset is_primary on every other
+    // address of this customer first — otherwise we end up with multiple
+    // primaries in the DB and the UI sort can't tell which is "the" one.
+    // The unset + create run in a transaction so a failure doesn't leave
+    // a partial state (e.g. all old ones demoted but new one never saved).
+    const created = await prisma.$transaction(async (tx) => {
+      if (dto.is_primary) {
+        await tx.addresses.updateMany({
+          where: { user_id: customerId, is_primary: true },
+          data: { is_primary: false },
+        });
+      }
+      return tx.addresses.create({
+        data: {
+          address_line1: dto.address_line1,
+          address_line2: dto.address_line2 ?? null,
+          city: dto.city,
+          state_province: dto.state_province ?? null,
+          country_code: dto.country_code,
+          postal_code: dto.postal_code ?? null,
+          phone_number: dto.phone_number ?? null,
+          user_id: customerId,
+          is_primary: !!dto.is_primary,
+          type: 'shipping',
+        },
+      });
     });
     return { success: true, data: created };
   }

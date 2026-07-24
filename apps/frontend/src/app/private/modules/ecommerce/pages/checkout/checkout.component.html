@@ -99,56 +99,16 @@
           <div class="checkout-section">
             <h2>Direccion de Envio</h2>
 
-            @if (addresses().length > 0) {
-              <div class="address-list">
-                @for (addr of addresses(); track addr.id) {
-                  <div
-                    class="address-card"
-                    [class.selected]="
-                      selected_address_id() === addr.id && !use_new_address()
-                    "
-                    (click)="selectAddress(addr.id)"
-                  >
-                    <div class="address-radio">
-                      <span
-                        class="radio"
-                        [class.checked]="
-                          selected_address_id() === addr.id &&
-                          !use_new_address()
-                        "
-                      ></span>
-                    </div>
-                    <div class="address-info">
-                      <p class="address-line">{{ addr.address_line1 }}</p>
-                      @if (addr.address_line2) {
-                        <p class="address-line">{{ addr.address_line2 }}</p>
-                      }
-                      <p class="address-city">
-                        {{ addr.city }}, {{ addr.state_province }}
-                      </p>
-                      <p class="address-phone">Tel: {{ addr.phone_number }}</p>
-                    </div>
-                  </div>
-                }
-
-                <div
-                  class="address-card new"
-                  [class.selected]="use_new_address()"
-                  (click)="selectNewAddress()"
-                >
-                  <div class="address-radio">
-                    <span
-                      class="radio"
-                      [class.checked]="use_new_address()"
-                    ></span>
-                  </div>
-                  <div class="address-info">
-                    <i class="pi pi-plus"></i>
-                    <span>Agregar nueva direccion</span>
-                  </div>
-                </div>
-              </div>
-            }
+            <app-customer-address-picker
+              [addresses]="addresses()"
+              [selectedAddressId]="
+                use_new_address() ? null : selected_address_id()
+              "
+              [showAddNew]="addresses().length > 0"
+              [showEditLink]="false"
+              (addressSelected)="onServiceAddressPicked($event)"
+              (addNewClicked)="onServiceNewAddressClicked()"
+            />
 
             @if (use_new_address()) {
               <app-address-map-picker

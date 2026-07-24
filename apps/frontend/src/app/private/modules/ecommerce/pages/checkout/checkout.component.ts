@@ -34,6 +34,7 @@ import {
 } from '../../services/checkout.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
+import { CustomerAddressPickerComponent } from '../../../../../shared/components/customer-address-picker/customer-address-picker.component';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
 import { phoneDigitsValidator } from '../../utils/address-validators';
@@ -97,6 +98,7 @@ import {
     BookingSlotPickerComponent,
     GuestCheckoutDataModalComponent,
     PaymentInstructionsModalComponent,
+    CustomerAddressPickerComponent,
     CartPromotionsComponent,
     LocationPermissionModalComponent,
     AddressMapPickerComponent,
@@ -669,9 +671,31 @@ export class CheckoutComponent implements OnInit {
     this.use_new_address.set(false);
   }
 
+  /**
+   * Wired to the shared <app-customer-address-picker>'s
+   * (addressSelected) event. Same effect as the legacy selectAddress
+   * — kept as a separate method so the template reads as a thin
+   * pass-through and the parent keeps the option to do per-consumer
+   * extra work in the future.
+   */
+  onServiceAddressPicked(id: number): void {
+    this.selectAddress(id);
+  }
+
   selectNewAddress(): void {
     this.selected_address_id.set(null);
     this.use_new_address.set(true);
+  }
+
+  /**
+   * Wired to the shared <app-customer-address-picker>'s
+   * (addNewClicked) event. The picker emits a generic event; this
+   * parent decides what "add new" means in the checkout context.
+   * Here we flip the inline-form flag to show the map picker and
+   * the full address form below.
+   */
+  onServiceNewAddressClicked(): void {
+    this.selectNewAddress();
   }
 
   // ========== GEO-LOCATION HANDLERS ==========

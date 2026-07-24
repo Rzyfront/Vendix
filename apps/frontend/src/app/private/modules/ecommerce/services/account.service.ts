@@ -45,6 +45,12 @@ export interface Order {
   placed_at: string | null;
   completed_at: string | null;
   item_count: number;
+  /**
+   * Product / service name of the first item in the order, surfaced
+   * by the backend's `getOrders` so the "Mis Pedidos" list can show
+   * a useful label ("1 producto(s): Zapatillas") instead of just a count.
+   */
+  first_item_name: string | null;
 }
 
 export interface OrderAppliedPromotion {
