@@ -207,12 +207,15 @@
     </div>
 
     <!-- Right: Sidebar (4 cols) — only in calendar mode.
-         On mobile the sidebar jumps ABOVE the calendar so the
-         "today reservations" empty state and quick actions are
-         visible without scrolling. Desktop layout is unchanged
-         (sidebar stays in its right column). -->
+         On mobile the today-reservations panel jumps ABOVE the
+         calendar so the empty-state copy is visible without scrolling.
+         Desktop layout is unchanged (sidebar stays in its right
+         column). Quick actions live in a separate row below the grid
+         so they end up at the BOTTOM of the page on mobile (operator
+         scrolled past the calendar first) instead of stacking right
+         under the today panel. -->
     @if (activeView() === "calendar") {
-      <div class="order-1 lg:order-2 lg:col-span-4 flex flex-col gap-4">
+      <div class="order-1 lg:order-2 lg:col-span-4">
         <app-today-reservations-panel
           [bookings]="sortedTodayBookings()"
           [loading]="todayLoading()"
@@ -222,15 +225,17 @@
           (started)="onStartBooking($event)"
           (completed)="onComplete($event)"
         />
-
-        <app-quick-actions-panel
-          (walkIn)="onWalkIn()"
-          (blockSchedule)="onBlockSchedule()"
-          (exportReport)="onExportReport()"
-        />
       </div>
     }
   </div>
+
+  @if (activeView() === "calendar") {
+    <app-quick-actions-panel
+      (walkIn)="onWalkIn()"
+      (blockSchedule)="onBlockSchedule()"
+      (exportReport)="onExportReport()"
+    />
+  }
 
   @defer (when isFormModalOpen()) {
     <app-reservation-form-modal
