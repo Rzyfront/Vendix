@@ -129,6 +129,7 @@
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
     <!-- Left: Calendar or List -->
     <div
+      class="order-2 lg:order-1"
       [class]="activeView() === 'calendar' ? 'lg:col-span-8' : 'lg:col-span-12'"
     >
       @if (activeView() === "calendar") {
@@ -206,12 +207,12 @@
     </div>
 
     <!-- Right: Sidebar (4 cols) — only in calendar mode.
-         On mobile the sidebar jumps BELOW the calendar so the
-         calendar grid is the first thing the operator sees.
-         Desktop layout is unchanged (sidebar stays in its right
-         column, calendar in the left column). -->
+         On mobile the sidebar jumps ABOVE the calendar so the
+         "today reservations" empty state and quick actions are
+         visible without scrolling. Desktop layout is unchanged
+         (sidebar stays in its right column). -->
     @if (activeView() === "calendar") {
-      <div class="lg:col-span-4 flex flex-col gap-4">
+      <div class="order-1 lg:order-2 lg:col-span-4 flex flex-col gap-4">
         <app-today-reservations-panel
           [bookings]="sortedTodayBookings()"
           [loading]="todayLoading()"
