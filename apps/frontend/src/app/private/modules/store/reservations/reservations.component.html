@@ -129,8 +129,8 @@
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
     <!-- Left: Calendar or List -->
     <div
-      class="order-2 xl:order-1"
-      [class]="activeView() === 'calendar' ? 'xl:col-span-8' : 'xl:col-span-12'"
+      class="order-2 md:order-1"
+      [class]="activeView() === 'calendar' ? 'md:col-span-8 xl:col-span-8' : 'md:col-span-12 xl:col-span-12'"
     >
       @if (activeView() === "calendar") {
         <app-card shadow="sm" customClasses="overflow-hidden">
@@ -207,12 +207,13 @@
     </div>
 
     <!-- Right: Sidebar (4 cols) — only in calendar mode.
-         On mobile AND tablet the sidebar jumps ABOVE the calendar
-         so the "today reservations" empty state and quick actions
-         are visible without scrolling. Desktop layout (≥ 1280px)
-         keeps the sidebar in its right column. -->
+         On mobile (single column) the sidebar jumps ABOVE the
+         calendar so the "today reservations" empty state and quick
+         actions are visible without scrolling. From md (≥ 768px,
+         tablets and up) the sidebar moves to its right column and
+         the calendar takes the left col-span-8. -->
     @if (activeView() === "calendar") {
-      <div class="order-1 xl:order-2 xl:col-span-4 flex flex-col gap-4">
+      <div class="order-1 md:order-2 md:col-span-4 xl:col-span-4 flex flex-col gap-4">
         <app-today-reservations-panel
           [bookings]="sortedTodayBookings()"
           [loading]="todayLoading()"
