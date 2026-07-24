@@ -65,8 +65,25 @@ export class ReservationsService {
    * and the booking stays visible forever.
    */
   scheduleTodayArchive(bookingId: number, delayMs: number): void {
-    if (this.todayArchiveTimers.has(bookingId)) return;
+    if (this.todayArchiveTimers.has(bookingId)) {
+      // eslint-disable-next-line no-console
+      console.log(
+        '[ReservationsService] already has timer for',
+        bookingId,
+        '— skipping',
+      );
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.log(
+      '[ReservationsService] setting timer for',
+      bookingId,
+      'delayMs=',
+      delayMs,
+    );
     const handle = setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.log('[ReservationsService] timer FIRED for', bookingId);
       this.archivedTodayBookingIds.update((set) => {
         const next = new Set(set);
         next.add(bookingId);
@@ -75,10 +92,23 @@ export class ReservationsService {
       this.todayArchiveTimers.delete(bookingId);
     }, delayMs);
     this.todayArchiveTimers.set(bookingId, handle);
+    // eslint-disable-next-line no-console
+    console.log(
+      '[ReservationsService] timer set, Map size now =',
+      this.todayArchiveTimers.size,
+    );
   }
 
   isTodayBookingArchived(bookingId: number): boolean {
     return this.archivedTodayBookingIds().has(bookingId);
+  }
+
+  getTodayArchivedCount(): number {
+    return this.archivedTodayBookingIds().size;
+  }
+
+  getTodayArchiveTimerCount(): number {
+    return this.todayArchiveTimers.size;
   }
 
   getReservations(query: BookingQuery = {}): Observable<PaginatedResponse<Booking>> {
