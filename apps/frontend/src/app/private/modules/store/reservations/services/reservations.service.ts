@@ -57,7 +57,15 @@ export class ReservationsService {
   private readonly archivedTodayBookingIds = signal<Set<number>>(
     ReservationsService.loadArchivedFromStorage(),
   );
-  private readonly todayArchiveTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  /**
+   * Timestamp (epoch ms) of when each completed booking was first
+   * seen by the today panel. A single global setInterval in the
+   * service polls this map every 15s and archives any booking whose
+   * age exceeds `COMPLETED_VISIBLE_MS` (2 min by default). This is
+   * more reliable than per-booking setTimeout, which kept failing
+   * to fire under the parent's re-fetch pattern in this codebase.
+   */
+  private readonly completedAtByBookingId = new Map<number, number>();
 
   constructor(private http: HttpClient) {
     // Persist the archived set to localStorage on every change so a
@@ -65,6 +73,31 @@ export class ReservationsService {
     effect(() => {
       this.saveArchivedToStorage(this.archivedTodayBookingIds());
     });
+
+    // Global interval that polls the completedAt map and archives any
+    // booking that's been "completed" for > 2 minutes. Started here
+    // (in the service constructor) so it lives for the lifetime of
+    // the app, not tied to any component lifecycle. Per-booking
+    // setTimeout was unreliable in this codebase.
+    this.archiveIntervalHandle = setInterval(
+      () => this.archiveExpiredBookings(),
+      ReservationsService.ARCHIVE_CHECK_INTERVAL_MS,
+    );
+  }
+
+  private archiveExpiredBookings(): void {
+    const now = Date.now();
+    const visibleMs = 2 * 60 * 1000;
+    for (const [bookingId, completedAt] of this.completedAtByBookingId.entries()) {
+      if (now - completedAt >= visibleMs) {
+        this.archivedTodayBookingIds.update((set) => {
+          const next = new Set(set);
+          next.add(bookingId);
+          return next;
+        });
+        this.completedAtByBookingId.delete(bookingId);
+      }
+    }
   }
 
   private static loadArchivedFromStorage(): Set<number> {
@@ -95,24 +128,16 @@ export class ReservationsService {
   }
 
   /**
-   * Schedule a booking to be auto-archived from the today panel after
-   * `delayMs` ms. **Idempotent:** if a timer is already running for
-   * this id, do nothing. The parent's periodic re-fetch re-emits the
-   * same booking through the effect on every poll, and we MUST NOT
-   * reset the timer each time — otherwise the 2 minutes never elapse
-   * and the booking stays visible forever.
+   * Record that a booking is now "completed" so the auto-archive
+   * interval can pick it up after the visibility window elapses.
+   * The actual archive happens inside `archiveExpiredBookings()`,
+   * driven by the service-level setInterval — NOT by a per-booking
+   * setTimeout, which kept failing to fire in this environment.
    */
-  scheduleTodayArchive(bookingId: number, delayMs: number): void {
-    if (this.todayArchiveTimers.has(bookingId)) return;
-    const handle = setTimeout(() => {
-      this.archivedTodayBookingIds.update((set) => {
-        const next = new Set(set);
-        next.add(bookingId);
-        return next;
-      });
-      this.todayArchiveTimers.delete(bookingId);
-    }, delayMs);
-    this.todayArchiveTimers.set(bookingId, handle);
+  scheduleTodayArchive(bookingId: number, _delayMs: number): void {
+    if (!this.completedAtByBookingId.has(bookingId)) {
+      this.completedAtByBookingId.set(bookingId, Date.now());
+    }
   }
 
   isTodayBookingArchived(bookingId: number): boolean {
@@ -124,7 +149,7 @@ export class ReservationsService {
   }
 
   getTodayArchiveTimerCount(): number {
-    return this.todayArchiveTimers.size;
+    return this.completedAtByBookingId.size;
   }
 
   getReservations(query: BookingQuery = {}): Observable<PaginatedResponse<Booking>> {
