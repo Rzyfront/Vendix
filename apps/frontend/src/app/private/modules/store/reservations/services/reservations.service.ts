@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, effect, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map, catchError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
@@ -48,13 +48,51 @@ export class ReservationsService {
    * notify Angular on .add() — the booking would be archived in the
    * data but the template would keep showing it because no signal
    * dependency fired.
+   *
+   * Persisted to localStorage so the archive state survives a page
+   * reload — otherwise a hard refresh would bring every "Completada"
+   * row back, even ones the operator had already seen auto-archive.
    */
+  private static readonly ARCHIVE_STORAGE_KEY = 'vendix.today-archived-bookings';
   private readonly archivedTodayBookingIds = signal<Set<number>>(
-    new Set<number>(),
+    ReservationsService.loadArchivedFromStorage(),
   );
   private readonly todayArchiveTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // Persist the archived set to localStorage on every change so a
+    // page reload doesn't lose the auto-archived state.
+    effect(() => {
+      this.saveArchivedToStorage(this.archivedTodayBookingIds());
+    });
+  }
+
+  private static loadArchivedFromStorage(): Set<number> {
+    if (typeof localStorage === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem(ReservationsService.ARCHIVE_STORAGE_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(
+        parsed.filter((x): x is number => typeof x === 'number'),
+      );
+    } catch {
+      return new Set();
+    }
+  }
+
+  private saveArchivedToStorage(ids: Set<number>): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(
+        ReservationsService.ARCHIVE_STORAGE_KEY,
+        JSON.stringify(Array.from(ids)),
+      );
+    } catch {
+      // localStorage might be full or disabled (e.g., private mode)
+    }
+  }
 
   /**
    * Schedule a booking to be auto-archived from the today panel after
@@ -65,25 +103,8 @@ export class ReservationsService {
    * and the booking stays visible forever.
    */
   scheduleTodayArchive(bookingId: number, delayMs: number): void {
-    if (this.todayArchiveTimers.has(bookingId)) {
-      // eslint-disable-next-line no-console
-      console.log(
-        '[ReservationsService] already has timer for',
-        bookingId,
-        '— skipping',
-      );
-      return;
-    }
-    // eslint-disable-next-line no-console
-    console.log(
-      '[ReservationsService] setting timer for',
-      bookingId,
-      'delayMs=',
-      delayMs,
-    );
+    if (this.todayArchiveTimers.has(bookingId)) return;
     const handle = setTimeout(() => {
-      // eslint-disable-next-line no-console
-      console.log('[ReservationsService] timer FIRED for', bookingId);
       this.archivedTodayBookingIds.update((set) => {
         const next = new Set(set);
         next.add(bookingId);
@@ -92,11 +113,6 @@ export class ReservationsService {
       this.todayArchiveTimers.delete(bookingId);
     }, delayMs);
     this.todayArchiveTimers.set(bookingId, handle);
-    // eslint-disable-next-line no-console
-    console.log(
-      '[ReservationsService] timer set, Map size now =',
-      this.todayArchiveTimers.size,
-    );
   }
 
   isTodayBookingArchived(bookingId: number): boolean {

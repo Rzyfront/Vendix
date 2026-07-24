@@ -57,17 +57,8 @@ export class TodayReservationsPanelComponent {
     // parent's periodic re-fetch).
     effect(() => {
       const bookings = this.bookings();
-      // eslint-disable-next-line no-console
-      console.log('[today-panel] effect tick', {
-        total: bookings.length,
-        completed: bookings.filter((b) => b.status === 'completed').map((b) => b.id),
-        activeTimers: this.reservations.getTodayArchiveTimerCount(),
-        archived: this.reservations.getTodayArchivedCount(),
-      });
       for (const booking of bookings) {
         if (booking.status === 'completed') {
-          // eslint-disable-next-line no-console
-          console.log('[today-panel] scheduling', booking.id);
           this.reservations.scheduleTodayArchive(
             booking.id,
             TodayReservationsPanelComponent.COMPLETED_VISIBLE_MS,
