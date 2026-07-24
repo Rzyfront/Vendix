@@ -18,48 +18,70 @@ export class RolesService {
   constructor(private prisma: GlobalPrismaService) {}
 
   async create(createRoleDto: CreateRoleDto) {
-    const existingRole = await (this.prisma as any).roles.findUnique({
-      where: { name: createRoleDto.name },
+    // QUI-473: roles are no longer unique by name alone. The composite unique
+    // is (organization_id, name). Superadmin creates roles with organization_id
+    // NULL (system or orphan), so the pre-check must match the same predicate:
+    // any existing role with (organization_id = NULL, name).
+    const existingRole = await (this.prisma as any).roles.findFirst({
+      where: {
+        name: createRoleDto.name,
+        organization_id: null,
+      },
     });
 
     if (existingRole) {
       throw new ConflictException('Role with this name already exists');
     }
 
-    const role = await this.prisma.roles.create({
-      data: {
-        name: createRoleDto.name,
-        description: createRoleDto.description,
-        is_system_role: createRoleDto.system_role || false,
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: {
-              select: { id: true, name: true, description: true },
-            },
-          },
+    // QUI-473: catch P2002 (race condition between the pre-check above and the
+    // INSERT below). With the composite unique on (organization_id, name)
+    // (system roles keep organization_id NULL and are unique among themselves),
+    // translate the raw Prisma error into a clean 409 ConflictException.
+    let role;
+    try {
+      role = await this.prisma.roles.create({
+        data: {
+          name: createRoleDto.name,
+          description: createRoleDto.description,
+          is_system_role: createRoleDto.system_role || false,
         },
-        user_roles: {
-          include: {
-            users: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
+        include: {
+          role_permissions: {
+            include: {
+              permissions: {
+                select: { id: true, name: true, description: true },
               },
             },
           },
-        },
-        _count: {
-          select: {
-            role_permissions: true,
-            user_roles: true,
+          user_roles: {
+            include: {
+              users: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              role_permissions: true,
+              user_roles: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Role with this name already exists');
+      }
+      throw err;
+    }
 
     return this.mapToResponse(role);
   }

@@ -234,7 +234,7 @@ model store_users {
 
 model roles {
   id               Int                @id @default(autoincrement())
-  name             String             @unique @db.VarChar(50)
+  name             String             @db.VarChar(50)
   description      String?
   is_system_role   Boolean            @default(false)
   organization_id  Int?
@@ -244,6 +244,10 @@ model roles {
   user_roles       user_roles[]
   organizations    organizations?     @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
+  // QUI-473: composite unique — non-system roles are unique per organization_id.
+  // System roles (is_system_role=true) keep organization_id NULL and remain unique
+  // among themselves thanks to Postgres NULLS DISTINCT semantics on the unique index.
+  @@unique([organization_id, name])
   @@index([organization_id])
 }
 
