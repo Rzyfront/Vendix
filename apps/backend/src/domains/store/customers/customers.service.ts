@@ -232,7 +232,7 @@ export class CustomersService {
       if (!normalizedEmail) return null;
 
       const customerRole = await this.prisma.roles.findFirst({
-        where: { name: 'customer' },
+        where: { name: 'customer', organization_id: null, is_system_role: true },
       });
 
       if (!customerRole) {
@@ -436,7 +436,7 @@ export class CustomersService {
     }
 
     const customerRole = await this.prisma.roles.findFirst({
-      where: { name: 'customer' },
+      where: { name: 'customer', organization_id: null, is_system_role: true },
     });
 
     if (!customerRole) {
@@ -560,7 +560,7 @@ export class CustomersService {
 
     // Find customer role
     const customerRole = await this.prisma.roles.findFirst({
-      where: { name: 'customer' },
+      where: { name: 'customer', organization_id: null, is_system_role: true },
     });
 
     if (!customerRole) {
