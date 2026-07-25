@@ -35,5 +35,3 @@ export const LayawayService = {
     return unwrap<LayawayPlan>(res);
   },
 };
-
-export type LayawayServiceType = typeof LayawayService;

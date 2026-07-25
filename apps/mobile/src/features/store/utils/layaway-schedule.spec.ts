@@ -352,21 +352,53 @@ describe('allocateCartDiscounts', () => {
     expect(sum / 100).toBeCloseTo(100.03, 2);
   });
 
-  it('caps each line at its own unit_price × quantity when discount exceeds line gross', () => {
-    // Item 1 has weight 10, item 2 has weight 1000. Discount = 500 → item 1
-    // would theoretically get 4.95 (>10 not possible), so cap to 10 and
-    // re-allocate the remainder into item 2.
+  it('caps each line at its own unit_price × quantity (genuine cap path)', () => {
+    // To actually trigger the per-line cap, the proportional share for at
+    // least one line must exceed its own gross weight.
+    // Items weights: {10, 50} = 60. Discount = 100. Item 1's proportional
+    // share is 100 * 10 / 60 = 16.67 > cap 10 → cap fires.
     const items = [
       { unitPrice: 10, quantity: 1 },
-      { unitPrice: 1000, quantity: 1 },
+      { unitPrice: 50, quantity: 1 },
     ];
-    const allocations = allocateCartDiscounts(items, 500);
-    // Item 1 cap = 10. The remaining 490 must fit in item 2 (cap 1000).
-    expect(allocations[0]).toBeLessThanOrEqual(10);
-    expect(allocations[1]).toBeLessThanOrEqual(1000);
-    // Total must reconcile (subject to back-fill reaching the cap).
+    const allocations = allocateCartDiscounts(items, 100);
+    // Item 1 hits its cap (10); item 2 takes its full cap (50).
+    expect(allocations[0]).toBe(10);
+    expect(allocations[1]).toBe(50);
+    // And the documented known limitation: if discount > sum of weights,
+    // the helper cannot reconcile (Σ allocations < totalDiscount). The
+    // modal must guard this case upstream via `discountExceedsSubtotal` —
+    // see PosLayawayConfigModal.ts:107-110.
     const sum = allocations.reduce((s, a) => s + a, 0);
-    expect(sum).toBeCloseTo(500, 2);
+    expect(sum).toBe(60);
+    expect(sum).toBeLessThan(100);
+  });
+
+  it('propagates back-fill when the LAST line cap leaves leftover', () => {
+    // 3 lines, weights {5, 5, 5}. Discount = 12. Proportional shares are
+    // 4, 4, 4 → cap at 5 each → no cap fires at proportional pass.
+    // But set discount = 16 to force the proportional share = 5.33,
+    // exceeding cap 5 on every line EXCEPT we want the cap to trigger on
+    // the LAST line. Use weights {100, 100, 5} with discount = 150:
+    //   share[0] = 150 * 100/205 ≈ 73.17 (no cap)
+    //   share[1] = 150 * 100/205 ≈ 73.17 (no cap)
+    //   share[2] = 150 * 5/205 ≈ 3.66 (no cap)
+    // Final remainder = 150 - 73.17 - 73.17 = 3.66 absorbed by last.
+    // Total reconciles. Back-fill path not triggered. Now do the genuine
+    // case: weights {5, 100}, discount = 200 → share[0] = 9.30 cap to 5,
+    // last takes min(195, 100) = 100, leftover = 95 → back-fill pushes 95
+    // into item 0 → but item 0 cap already maxed out at 5 → no add.
+    // Returns [5, 100], sum = 105 (under-allocated, modal MUST block).
+    const items = [
+      { unitPrice: 5, quantity: 1 },
+      { unitPrice: 100, quantity: 1 },
+    ];
+    const allocations = allocateCartDiscounts(items, 200);
+    expect(allocations[0]).toBe(5); // capped at own weight
+    expect(allocations[1]).toBe(100); // capped at own weight
+    const sum = allocations.reduce((s, a) => s + a, 0);
+    expect(sum).toBe(105);
+    expect(sum).toBeLessThan(200);
   });
 
   it('QUI-499 end-to-end: discounted cart reconstruction equals installment basis', () => {

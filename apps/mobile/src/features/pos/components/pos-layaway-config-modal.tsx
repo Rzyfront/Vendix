@@ -104,6 +104,17 @@ export function PosLayawayConfigModal({
     [items],
   );
 
+  // Discount sanity guard: layaway rejects when a cart-level discount exceeds
+  // the items' gross subtotal. The discount allocator (`allocateCartDiscounts`)
+  // would otherwise cap allocations per line and leave `Σ allocations <
+  // totalDiscount`, causing the backend's per-line reconstruction to under-fire
+  // and POST /store/layaway to fail with LAY_INSTALLMENT_001.
+  const discountExceedsSubtotal = useMemo(
+    () =>
+      (summary.discountAmount ?? 0) > (summary.subtotal ?? 0) + 0.005,
+    [summary.discountAmount, summary.subtotal],
+  );
+
   const cartTotal = summary.total;
 
   const remainingBalance = Math.max(0, cartTotal - downPayment);
@@ -130,6 +141,7 @@ export function PosLayawayConfigModal({
     configValid &&
     installmentsWithinCap &&
     !hasCustomItems &&
+    !discountExceedsSubtotal &&
     !!customer &&
     items.length > 0 &&
     !isSubmitting;
@@ -163,6 +175,12 @@ export function PosLayawayConfigModal({
     if (hasCustomItems) {
       toastWarning(
         'Los ítems personalizados no se pueden incluir en un plan separé. Elimínalos del carrito.',
+      );
+      return;
+    }
+    if (discountExceedsSubtotal) {
+      toastWarning(
+        'El descuento del carrito es mayor al subtotal. Redúcelo antes de crear el plan.',
       );
       return;
     }
@@ -353,6 +371,27 @@ export function PosLayawayConfigModal({
                   <Text style={styles.warningText}>
                     Los ítems personalizados no se pueden incluir en un plan
                     separé. Elimínalos del carrito antes de continuar.
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* === Discount exceeds subtotal warning ===
+                  When the cart-level discount is larger than the items' gross
+                  subtotal, `allocateCartDiscounts` cannot reconcile per-item
+                  allocations to the cart total and the backend would reject
+                  with LAY_INSTALLMENT_001. Block submit and instruct the
+                  operator to reduce the discount. */}
+              {discountExceedsSubtotal ? (
+                <View style={styles.warningCard}>
+                  <Icon
+                    name="alert-triangle"
+                    size={18}
+                    color={colors.error}
+                  />
+                  <Text style={styles.warningText}>
+                    El descuento del carrito ({formatCurrency(summary.discountAmount ?? 0)})
+                    supera el subtotal de los productos ({formatCurrency(summary.subtotal ?? 0)}).
+                    Redúcelo antes de crear el plan separé.
                   </Text>
                 </View>
               ) : null}
