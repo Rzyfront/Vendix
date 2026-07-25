@@ -1,4 +1,4 @@
-import {Component, ChangeDetectionStrategy, inject, input, output, signal, DestroyRef} from '@angular/core';
+import {Component, ChangeDetectionStrategy, computed, inject, input, output, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -52,6 +52,58 @@ export class BookingSlotPickerComponent {
   readonly selectedFreeSlot = signal<{ time: string; endTime: string } | null>(
     null,
   );
+
+  /**
+   * Slots the user can actually pick on the SELECTED day, with past
+   * start times hidden when the day is today. The backend returns the
+   * full day's availability regardless of the clock (it doesn't know
+   * that "now" is 15:24 and 10:00 is long gone) — without this filter
+   * the customer could try to book a 10:00 AM slot that's already in
+   * the past. For future days we keep every slot because a "10:00 AM"
+   * tomorrow is still bookable.
+   *
+   * We normalize `selectedDate` to YYYY-MM-DD because the backend can
+   * hand us either `"2026-07-25"` (date-only) or
+   * `"2026-07-25T00:00:00.000Z"` (Prisma Date serialized to ISO). A
+   * raw string compare would miss the second shape and skip the
+   * past-time filter, leaving stale slots visible.
+   */
+  readonly visibleSlots = computed<AvailabilitySlot[]>(() => {
+    const slots = this.slotsForSelectedDate();
+    const rawDate = this.selectedDate();
+    if (!rawDate) return [];
+    const date = rawDate.split('T')[0];
+    const today = toLocalDateString(new Date());
+    if (date !== today) return slots;
+    const nowMinutes =
+      new Date().getHours() * 60 + new Date().getMinutes();
+    return slots.filter((s) => {
+      const [h, m] = s.start_time.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
+  });
+
+  /**
+   * Same treatment for `free_booking` mode: the synthetic slot list
+   * starts at 08:00 and walks forward, so today's early slots would
+   * otherwise stay clickable after their start time has passed.
+   */
+  readonly visibleFreeSlots = computed<
+    { time: string; endTime: string }[]
+  >(() => {
+    const slots = this.freeBookingSlots();
+    const rawDate = this.selectedDate();
+    if (!rawDate) return [];
+    const date = rawDate.split('T')[0];
+    const today = toLocalDateString(new Date());
+    if (date !== today) return slots;
+    const nowMinutes =
+      new Date().getHours() * 60 + new Date().getMinutes();
+    return slots.filter((s) => {
+      const [h, m] = s.time.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
+  });
 
   constructor() {
     this.generateDates();

@@ -25,6 +25,7 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
 
 import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
 import {
@@ -116,6 +117,27 @@ export class BookingComponent implements OnInit {
       });
     }
     return slots;
+  });
+
+  /**
+   * `freeBookingSlots` filtered to hide past start times when the
+   * selected day is today. Without this, the synthetic slot list
+   * (which starts at 08:00 and walks forward) would still let the
+   * customer pick 10:00 AM at 4 PM. We normalize `selectedDate` to
+   * YYYY-MM-DD because some call sites forward Prisma's ISO-timestamp
+   * shape, others a date-only string.
+   */
+  readonly visibleFreeBookingSlots = computed(() => {
+    const rawDate = this.selectedDate();
+    const date = rawDate ? rawDate.split('T')[0] : '';
+    const today = toLocalDateString(new Date());
+    if (date !== today) return this.freeBookingSlots();
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return this.freeBookingSlots().filter((s) => {
+      const [h, m] = s.time.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
   });
 
   // Steps config — 4 steps when the service has providers, 3 when free_booking

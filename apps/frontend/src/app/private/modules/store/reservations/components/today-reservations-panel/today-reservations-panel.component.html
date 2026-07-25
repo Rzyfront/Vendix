@@ -32,7 +32,7 @@
           type="button"
           (click)="bookingClicked.emit(booking)"
           class="w-full text-left px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3 min-h-[52px]"
-          [style.border-left]="'3px solid ' + getStatusBorderColor(booking.status)">
+          [style.border-left]="'3px solid ' + getStatusBorderColor(booking)">
           <!-- Time -->
           <div class="shrink-0 w-[52px] text-center">
             <div class="text-sm font-bold text-[var(--color-text-primary)]">{{ formatTime(booking.start_time) }}</div>
@@ -50,8 +50,8 @@
             </p>
           </div>
           <!-- Badge -->
-          <app-badge [variant]="getStatusBadgeVariant(booking.status)" size="sm">
-            {{ getStatusLabel(booking.status) }}
+          <app-badge [variant]="getStatusBadgeVariant(booking)" size="sm">
+            {{ getStatusLabel(booking) }}
           </app-badge>
           <!-- Quick actions -->
           @if (canCheckIn(booking)) {

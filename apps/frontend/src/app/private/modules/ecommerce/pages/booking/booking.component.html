@@ -161,7 +161,7 @@
                 Horarios disponibles
               </h3>
               <div class="slot-list">
-                @for (slot of freeBookingSlots(); track slot.time) {
+                @for (slot of visibleFreeBookingSlots(); track slot.time) {
                   <button
                     class="slot-btn"
                     [class.selected]="freeBookingTime() === slot.time"

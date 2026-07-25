@@ -155,11 +155,33 @@ export class ReservationFormModalComponent {
    * Free slots for the SELECTED day only. The wizard's step 3 (Horario)
    * now renders a single-day view, so we filter at the component level
    * instead of asking the user to pick from a 7-day grid.
+   *
+   * Past-time filter: when the selected day is TODAY, drop any slot
+   * whose start time is already in the past. The backend hands us the
+   * full day-availability (it doesn't know that "now" is 15:24 and
+   * 10:00 is long gone) and the user must not be allowed to book into
+   * the past. For future days we keep every slot — a "10:00 AM"
+   * tomorrow is still bookable. We do NOT filter `dayBookings` because
+   * those carry their own expired → "VENCIDA" treatment via
+   * `isBookingExpired()` in the day-view.
+   *
+   * We re-read `new Date()` on every evaluation instead of caching
+   * `todayString` once: the modal can sit open across the midnight
+   * boundary or stay open while the user picks a new date. Caching
+   * "today" at init would let stale slots slip through the filter.
    */
   readonly dayFreeSlots = computed<FreeSlot[]>(() => {
-    const date = this.selectedDate();
-    if (!date) return [];
-    return this.freeSlotsByDate()[date] || [];
+    const rawDate = this.selectedDate();
+    if (!rawDate) return [];
+    const date = rawDate.split('T')[0];
+    const slots = this.freeSlotsByDate()[date] || [];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (date !== today) return slots;
+    return slots.filter((s) => {
+      const [h, m] = s.start.split(':').map(Number);
+      return h * 60 + m > now.getHours() * 60 + now.getMinutes();
+    });
   });
 
   /**
@@ -243,7 +265,28 @@ export class ReservationFormModalComponent {
       gaps.push({ start: lastBlock.end, end: DAY_END });
     }
 
-    return gaps.flatMap(g => this.splitRangeIntoSlots(g.start, g.end, slotMinutes));
+    const allSlots = gaps.flatMap(g => this.splitRangeIntoSlots(g.start, g.end, slotMinutes));
+
+    // Past-time filter: when the selected day is today, drop unavailable
+    // gaps whose start has already passed. A lunch break at 10:20 is
+    // noise once 10:20 has gone by — the staff knows it happened, the
+    // customer can never book a past lunch break, and the red stripes
+    // crowd the "what's still bookable" view of the day. Future days
+    // keep all gaps so the user sees the full schedule context.
+    //
+    // Normalize `date` to YYYY-MM-DD: `selectedDate()` is set from a
+    // string built locally, but `date` here can come from a different
+    // code path; we strip any trailing "T00:00:00.000Z" so the compare
+    // against `today` (which is also YYYY-MM-DD) is reliable.
+    const todayDate = date.split('T')[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (todayDate !== today) return allSlots;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return allSlots.filter((s) => {
+      const [h, m] = s.start.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
   });
 
   /**

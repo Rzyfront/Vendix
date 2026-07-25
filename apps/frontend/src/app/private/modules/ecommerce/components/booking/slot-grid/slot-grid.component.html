@@ -11,14 +11,14 @@
     </div>
   } @else {
     @for (group of groupOrder; track group.key) {
-      @if (groupedSlots()[group.key].length > 0) {
+      @if (visibleGroupedSlots()[group.key].length > 0) {
         <div class="slot-grid-section__group">
           <h4 class="slot-grid-section__group-title">
             <span class="slot-grid-section__group-icon">{{ group.icon }}</span>
             {{ group.label }}
           </h4>
           <div class="slot-grid">
-            @for (slot of groupedSlots()[group.key]; track trackByStartTime($index, slot)) {
+            @for (slot of visibleGroupedSlots()[group.key]; track trackByStartTime($index, slot)) {
               <button
                 type="button"
                 class="slot"

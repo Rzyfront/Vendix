@@ -11,6 +11,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { map } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { IconComponent, SpinnerComponent } from '../../../../../../shared/components';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 export interface BookingSlot {
   date: string;
@@ -55,6 +56,36 @@ export class SlotGridComponent {
   readonly groupedSlots = computed(() => {
     const buckets = { MANANA: [] as BookingSlot[], TARDE: [] as BookingSlot[], NOCHE: [] as BookingSlot[] };
     for (const s of this.slots()) {
+      const hour = parseInt(s.start_time.split(':')[0], 10);
+      if (hour < 12) buckets.MANANA.push(s);
+      else if (hour < 19) buckets.TARDE.push(s);
+      else buckets.NOCHE.push(s);
+    }
+    return buckets;
+  });
+
+  /**
+   * Same grouping as `groupedSlots`, but with past start times hidden
+   * when the date is today. The backend hands us the full day's
+   * availability regardless of the clock — without this filter the
+   * customer could try to book a 10:00 AM slot that's already in the
+   * past. We normalize `date()` because the parent may forward the
+   * value as either `"2026-07-25"` (date-only) or
+   * `"2026-07-25T00:00:00.000Z"` (Prisma Date serialized to ISO).
+   */
+  readonly visibleGroupedSlots = computed(() => {
+    const buckets = { MANANA: [] as BookingSlot[], TARDE: [] as BookingSlot[], NOCHE: [] as BookingSlot[] };
+    const rawDate = this.date();
+    const date = rawDate ? rawDate.split('T')[0] : '';
+    const today = toLocalDateString(new Date());
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const isToday = date === today;
+    for (const s of this.slots()) {
+      if (isToday) {
+        const [h, m] = s.start_time.split(':').map(Number);
+        if (h * 60 + m <= nowMinutes) continue;
+      }
       const hour = parseInt(s.start_time.split(':')[0], 10);
       if (hour < 12) buckets.MANANA.push(s);
       else if (hour < 19) buckets.TARDE.push(s);

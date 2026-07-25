@@ -13,6 +13,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent, ToastService } from '../../../../../../shared/components';
 import { BadgeVariant } from '../../../../../../shared/components/badge/badge.component';
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
+import { isBookingExpired } from '../calendar/booking-expired.util';
 import { ReservationsService } from '../../services/reservations.service';
 
 const SPANISH_MONTHS = [
@@ -51,14 +52,20 @@ export class TodayReservationsPanelComponent {
   completed = output<Booking>();
 
   constructor() {
-    // Watch the bookings list for `completed` transitions and schedule
-    // an auto-archive 2 minutes later via the ReservationsService
-    // singleton (so the timer survives the panel being recreated by the
-    // parent's periodic re-fetch).
+    // Watch the bookings list for terminal-ish transitions and
+    // schedule an auto-archive 2 minutes later via the
+    // ReservationsService singleton (so the timer survives the panel
+    // being recreated by the parent's periodic re-fetch).
+    //
+    // - `completed` bookings: confirmed by the staff, hide them after
+    //   a brief confirmation window.
+    // - expired pending bookings: the staff didn't act on them, the
+    //   slot is gone. Hide them the same way to keep the panel
+    //   focused on what's still actionable today.
     effect(() => {
       const bookings = this.bookings();
       for (const booking of bookings) {
-        if (booking.status === 'completed') {
+        if (booking.status === 'completed' || this.isExpired(booking)) {
           this.reservations.scheduleTodayArchive(
             booking.id,
             TodayReservationsPanelComponent.COMPLETED_VISIBLE_MS,
@@ -87,7 +94,9 @@ export class TodayReservationsPanelComponent {
 
   bookingsCount = computed(() => this.displayedBookings().length);
 
-  getStatusBorderColor(status: BookingStatus): string {
+  getStatusBorderColor(booking: Booking): string {
+    if (this.isExpired(booking)) return 'var(--color-error)';
+    const status = booking.status;
     const map: Record<BookingStatus, string> = {
       pending: 'var(--color-warning)',
       confirmed: 'var(--color-info)',
@@ -101,7 +110,9 @@ export class TodayReservationsPanelComponent {
     return map[status] ?? 'var(--color-border)';
   }
 
-  getStatusBadgeVariant(status: BookingStatus): BadgeVariant {
+  getStatusBadgeVariant(booking: Booking): BadgeVariant {
+    if (this.isExpired(booking)) return 'error';
+    const status = booking.status;
     const map: Record<BookingStatus, BadgeVariant> = {
       pending: 'warning',
       confirmed: 'primary',
@@ -115,7 +126,9 @@ export class TodayReservationsPanelComponent {
     return map[status] ?? 'neutral';
   }
 
-  getStatusLabel(status: BookingStatus): string {
+  getStatusLabel(booking: Booking): string {
+    if (this.isExpired(booking)) return 'Vencida';
+    const status = booking.status;
     const map: Record<BookingStatus, string> = {
       pending: 'Pendiente',
       confirmed: 'Confirmada',
@@ -127,6 +140,27 @@ export class TodayReservationsPanelComponent {
       no_show: 'No show',
     };
     return map[status] ?? status;
+  }
+
+  /**
+   * Decide whether the today-panel should render this booking as
+   * "Vencida" (overdue) instead of its raw backend status. The widget
+   * only shows TODAY's bookings, so we don't need the calendar's
+   * "future-day with stale data" guard — but we DO want to skip
+   * bookings that are already in a terminal state (cancelled/no_show)
+   * or actively being serviced (arriving/attending/in_progress/
+   * completed) so we don't relabel a real-time event.
+   *
+   * Delegates the time-vs-grace math to the shared
+   * `isBookingExpired()` util which already filters non-expirable
+   * statuses. We add a tighter grace window (30 min vs the calendar's
+   * 2h) so the panel flags overdue bookings faster — the calendar can
+   * afford to wait because the staff is actively looking at it, but
+   * the today-panel needs to surface the problem now.
+   */
+  isExpired(booking: Booking): boolean {
+    if (booking.status === 'confirmed') return false;
+    return isBookingExpired(booking, new Date(), 30);
   }
 
   /**
