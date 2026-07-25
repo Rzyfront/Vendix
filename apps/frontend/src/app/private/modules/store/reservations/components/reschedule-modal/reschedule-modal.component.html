@@ -2,27 +2,44 @@
   (opened)="onOpen()" title="Reprogramar Reserva" size="md">
 
   @if (booking()) {
-    <!-- Current booking info -->
-    <div class="current-info">
-      <div class="info-row">
-        <app-icon name="briefcase" [size]="16"></app-icon>
-        <span>{{ booking()!.product?.name }}</span>
-      </div>
-      <div class="info-row">
-        <app-icon name="user" [size]="16"></app-icon>
-        <span>{{ booking()!.customer?.first_name }} {{ booking()!.customer?.last_name }}</span>
-      </div>
-      @if (booking()!.provider) {
-        <div class="info-row">
-          <app-icon name="user-circle" [size]="16"></app-icon>
-          <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+    <!-- Synthetic booking: id=0 means the backend never persisted a real
+         reservation row for this order (orphan from the checkout silent-
+         failure bug or pre-fix orders). The customer needs to create the
+         booking before they can reschedule it. -->
+    @if (booking()!.id === 0) {
+      <div class="synthetic-warning">
+        <app-icon name="alert-triangle" [size]="20"></app-icon>
+        <div>
+          <h4>Aún no tienes una reserva creada para este servicio</h4>
+          <p>
+            Tu pedido incluye <strong>{{ $any(booking()!).product_name }}</strong>, pero
+            no se generó una reserva. Para reagendar, primero crea una reserva
+            nueva desde la página del producto o contacta a soporte.
+          </p>
         </div>
-      }
-      <div class="info-row muted">
-        <app-icon name="calendar" [size]="14"></app-icon>
-        <span>Actual: {{ booking()!.date }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
       </div>
-    </div>
+    } @else {
+      <!-- Current booking info -->
+      <div class="current-info">
+        <div class="info-row">
+          <app-icon name="briefcase" [size]="16"></app-icon>
+          <span>{{ booking()!.product?.name }}</span>
+        </div>
+        <div class="info-row">
+          <app-icon name="user" [size]="16"></app-icon>
+          <span>{{ booking()!.customer?.first_name }} {{ booking()!.customer?.last_name }}</span>
+        </div>
+        @if (booking()!.provider) {
+          <div class="info-row">
+            <app-icon name="user-circle" [size]="16"></app-icon>
+            <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+          </div>
+        }
+        <div class="info-row muted">
+          <app-icon name="calendar" [size]="14"></app-icon>
+          <span>Actual: {{ booking()!.date }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
+        </div>
+      </div>
 
     <!-- Date selector -->
     <label class="section-label">Seleccionar nueva fecha</label>
@@ -81,11 +98,11 @@
       <div class="loading-center">
         <app-spinner size="sm" color="primary"></app-spinner>
       </div>
-    } @else if (slots().length === 0) {
+    } @else if (visibleSlots().length === 0) {
       <p class="empty-slots">No hay horarios disponibles para esta fecha</p>
     } @else {
       <div class="slots-grid">
-        @for (slot of slots(); track slot.start_time) {
+        @for (slot of visibleSlots(); track slot.start_time) {
           <button
             class="slot-chip"
             [class.selected]="selectedSlot() === slot"
@@ -101,20 +118,26 @@
         }
       </div>
     }
-  }
+    }  <!-- cierra el @else que abrió el bloque normal -->
+  }  <!-- cierra el @if (booking()) -->
 
   <div slot="footer" class="modal-footer">
-    <app-button variant="ghost" size="sm" (click)="closed.emit()">Cancelar</app-button>
-    <app-button
-      variant="primary"
-      size="sm"
-      [disabled]="!selectedSlot() || submitting()"
-      (click)="submit()">
-      @if (submitting()) {
-        <app-spinner size="sm" color="white"></app-spinner>
-      } @else {
-        Confirmar Reprogramación
-      }
-    </app-button>
+    @if (booking()?.id === 0) {
+      <!-- Synthetic booking: no reschedule possible, only close. -->
+      <app-button variant="primary" size="sm" (click)="closed.emit()">Cerrar</app-button>
+    } @else {
+      <app-button variant="ghost" size="sm" (click)="closed.emit()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        size="sm"
+        [disabled]="!selectedSlot() || submitting()"
+        (click)="submit()">
+        @if (submitting()) {
+          <app-spinner size="sm" color="white"></app-spinner>
+        } @else {
+          Confirmar Reprogramación
+        }
+      </app-button>
+    }
   </div>
 </app-modal>

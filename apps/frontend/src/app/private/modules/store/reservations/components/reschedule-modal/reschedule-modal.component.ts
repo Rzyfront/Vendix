@@ -1,4 +1,4 @@
-import {Component, input, output, signal, inject, DestroyRef} from '@angular/core';
+import {Component, computed, input, output, signal, inject, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -8,9 +8,12 @@ import {
   SpinnerComponent,
 } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
+import { EcommerceBookingService } from '../../../../ecommerce/services/ecommerce-booking.service';
 import { ToastService } from '../../../../../../shared/components';
 import { Booking, AvailabilitySlot, ProviderDateInfo } from '../../interfaces/reservation.interface';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { finalize } from 'rxjs';
+import { Observable } from 'rxjs';
 
 @Component({
   selector: 'app-reschedule-modal',
@@ -22,13 +25,32 @@ import { finalize } from 'rxjs';
 export class RescheduleModalComponent {
   private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
+  // The ecommerce context has no access to /api/store/reservations/* (those
+  // endpoints require a STORE_ADMIN token, not the customer's STORE_ECOMMERCE
+  // token). When `mode === 'ecommerce'`, we route through EcommerceBookingService
+  // which hits the public /api/ecommerce/reservations/* endpoints instead.
+  private ecommerceBookingService = inject(EcommerceBookingService);
   private toastService = inject(ToastService);
 
   readonly isOpen = input<boolean>(false);
   readonly booking = input<Booking | null>(null);
+  /**
+   * 'admin' (default) uses the store ReservationsService with provider-aware
+   * endpoints. 'ecommerce' uses the customer-facing EcommerceBookingService
+   * with product-scoped endpoints (no provider lookup needed).
+   */
+  readonly mode = input<'admin' | 'ecommerce'>('admin');
 
   readonly closed = output<void>();
   readonly rescheduled = output<void>();
+
+  // Cache of all availability slots fetched in one shot for the next 30
+  // days in ecommerce mode — used to filter per-date in memory without
+  // hitting the backend on every chip click. Typed as `any[]` because the
+  // ecommerce AvailabilitySlot shape (`{ date, start_time, end_time, available }`)
+  // doesn't match the admin AvailabilitySlot (`is_booked`, `available_providers`,
+  // etc.) — we map it on consumption in loadSlots().
+  private allSlots = signal<any[]>([]);
 
   dates = signal<ProviderDateInfo[]>([]);
   selectedDate = signal('');
@@ -39,6 +61,21 @@ export class RescheduleModalComponent {
   submitting = signal(false);
 
   onOpen(): void {
+    // Synthetic booking (id=0) means the backend never persisted a real
+    // reservation. Skip every backend call — there's no provider to query
+    // availability for, and the user already sees the recovery warning.
+    // Without this guard the modal fires /api/store/reservations/availability/*
+    // and /api/store/settings with an ecommerce token, both of which 403
+    // on the domain-scope guard.
+    const b = this.booking();
+    if (b?.id === 0) {
+      this.dates.set([]);
+      this.slots.set([]);
+      this.selectedDate.set('');
+      this.selectedSlot.set(null);
+      return;
+    }
+
     this.selectedDate.set('');
     this.selectedSlot.set(null);
     this.slots.set([]);
@@ -48,7 +85,14 @@ export class RescheduleModalComponent {
 
   loadProviderDates(): void {
     const b = this.booking();
-    if (!b?.provider_id) {
+    if (!b) return;
+
+    if (this.mode() === 'ecommerce') {
+      this.loadAvailabilityEcommerce(b.product_id);
+      return;
+    }
+
+    if (!b.provider_id) {
       this.generateFallbackDates();
       return;
     }
@@ -70,6 +114,60 @@ export class RescheduleModalComponent {
           this.dates.set(availableDates);
           if (availableDates.length > 0) {
             this.selectDate(availableDates[0].date);
+          }
+        },
+        error: () => this.generateFallbackDates(),
+      });
+  }
+
+  /**
+   * Ecommerce-mode date loader. The public /api/ecommerce/reservations/availability
+   * endpoint returns a flat list of `{ date, start_time, end_time, available }`
+   * slots for the next N days. We:
+   *  1) cache the entire batch in `allSlots`
+   *  2) derive the unique-date list for the date chips
+   *  3) on each chip click, filter `allSlots` in memory (no extra HTTP call)
+   */
+  private loadAvailabilityEcommerce(productId: number): void {
+    this.loadingDates.set(true);
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 30);
+    const dateFrom = this.formatDateISO(today);
+    const dateTo = this.formatDateISO(endDate);
+
+    this.ecommerceBookingService
+      .getAvailability(productId, dateFrom, dateTo)
+      .pipe(finalize(() => this.loadingDates.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const slots = res?.data ?? [];
+          this.allSlots.set(slots);
+          // Build a unique-date list, only days that have at least one slot
+          // with `available > 0`.
+          const dateMap = new Map<string, ProviderDateInfo>();
+          for (const slot of slots) {
+            if ((slot as any).available <= 0) continue;
+            const existing = dateMap.get(slot.date);
+            if (existing) {
+              existing.booking_count += 1;
+            } else {
+              dateMap.set(slot.date, {
+                date: slot.date,
+                day_of_week: new Date(slot.date + 'T12:00:00').getDay(),
+                has_schedule: true,
+                booking_count: 1,
+                bookings: [],
+              });
+            }
+          }
+          const dateList = Array.from(dateMap.values()).sort((a, b) =>
+            a.date.localeCompare(b.date),
+          );
+          this.dates.set(dateList);
+          if (dateList.length > 0) {
+            this.selectDate(dateList[0].date);
           }
         },
         error: () => this.generateFallbackDates(),
@@ -106,6 +204,22 @@ export class RescheduleModalComponent {
     const b = this.booking();
     if (!b) return;
 
+    if (this.mode() === 'ecommerce') {
+      // Already fetched in loadAvailabilityEcommerce — just filter in memory.
+      const daySlots: AvailabilitySlot[] = this.allSlots()
+        .filter((s: any) => s.date === date)
+        .map((s: any) => ({
+          date: s.date,
+          start_time: s.start_time,
+          end_time: s.end_time,
+          // The ecommerce endpoint doesn't return is_booked; mark every
+          // slot with available > 0 as available.
+          is_booked: (s.available ?? 0) <= 0,
+        } as AvailabilitySlot));
+      this.slots.set(daySlots);
+      return;
+    }
+
     this.loadingSlots.set(true);
     this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id, undefined, true)
       .pipe(finalize(() => this.loadingSlots.set(false)))
@@ -118,6 +232,29 @@ export class RescheduleModalComponent {
   selectSlot(slot: AvailabilitySlot): void {
     this.selectedSlot.set(slot);
   }
+
+  /**
+   * Slots the user can actually pick on the SELECTED day, with past
+   * start times hidden when the day is today. The backend hands us
+   * the full day's availability regardless of the clock — without
+   * this filter the customer could try to reschedule into 10:00 AM
+   * at 4 PM. We normalize `selectedDate()` because the backend may
+   * return either `"2026-07-25"` (date-only) or
+   * `"2026-07-25T00:00:00.000Z"` (Prisma Date serialized to ISO).
+   */
+  readonly visibleSlots = computed<AvailabilitySlot[]>(() => {
+    const rawDate = this.selectedDate();
+    const date = rawDate ? rawDate.split('T')[0] : '';
+    const today = toLocalDateString(new Date());
+    const slots = this.slots();
+    if (date !== today) return slots;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return slots.filter((s) => {
+      const [h, m] = s.start_time.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
+  });
 
   getSelectedDateBookings(): Array<{
     id: number;
@@ -138,12 +275,22 @@ export class RescheduleModalComponent {
     if (!slot || !b) return;
 
     this.submitting.set(true);
-    this.reservationsService.rescheduleReservation(b.id, {
+
+    const dto = {
       date: slot.date,
       start_time: slot.start_time,
       end_time: slot.end_time,
-    }).pipe(finalize(() => this.submitting.set(false)))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    };
+
+    const request$: Observable<any> =
+      this.mode() === 'ecommerce'
+        ? (this.ecommerceBookingService.rescheduleBooking(b.id, dto) as Observable<any>)
+        : (this.reservationsService.rescheduleReservation(b.id, dto) as Observable<any>);
+
+    request$
+      .pipe(finalize(() => this.submitting.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
         next: () => {
           this.toastService.success('Reserva reprogramada exitosamente');
           this.rescheduled.emit();
