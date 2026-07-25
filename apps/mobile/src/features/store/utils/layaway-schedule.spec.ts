@@ -2,6 +2,8 @@ import {
   buildLayawaySchedule,
   isLayawayConfigValid,
   allocateCartDiscounts,
+  rebuildLayawayItemCents,
+  rebuildLayawayTotalFromLines,
   round2,
   LayawayFrequency,
 } from './layaway-schedule';
@@ -427,5 +429,69 @@ describe('allocateCartDiscounts', () => {
     });
     const scheduleSum = rows.reduce((s, r) => s + r.amount, 0);
     expect(scheduleSum).toBeCloseTo(reconstructed, 2);
+  });
+});
+
+describe('rebuildLayawayItemCents — backend-faithful line total', () => {
+  it('matches backend Decimal arithmetic for single line with discount and tax', () => {
+    // Backend: Decimal(unit_price).times(qty).minus(discount).plus(tax)
+    // We send unit_price=100, qty=2, discount=20, tax=15 (all cents-exact).
+    // Cents: 10000*2 - 2000 + 1500 = 19500 → 195.00.
+    expect(
+      rebuildLayawayItemCents(100, 2, 20, 15),
+    ).toBe(19500);
+  });
+
+  it('returns 0 when line is fully discounted', () => {
+    expect(rebuildLayawayItemCents(100, 1, 100, 0)).toBe(0);
+  });
+
+  it('handles fractional unit_price rounded to cents (per-line tax scenario)', () => {
+    // Two lines at $1.00 each, raw 6.5% tax each = 0.065 → mobile rounds
+    // each per-line to 0.07 BEFORE sending. Backend uses the rounded value.
+    // Per-line cents: 100*1 + 7 = 107 → 1.07 each, total 214 cents.
+    const perLineCents = rebuildLayawayItemCents(1.0, 1, 0, 0.07);
+    expect(perLineCents).toBe(107);
+    expect(perLineCents * 2).toBe(214);
+  });
+});
+
+describe('rebuildLayawayTotalFromLines — cart basis matches backend', () => {
+  it('rebuilds a cart with discount using rounded per-line values', () => {
+    // The pr-review-3 scenario from QUI-499:
+    // 2 items × $500.00, raw tax 6.5% each = 0.065 → mobile rounds to 0.07,
+    // discount = $100.00 cart-level (allocated to items proportionally).
+    //
+    // After allocation (cap-free): [50, 50]. Per-line:
+    //   line 0: 50000*1 - 5000 + 7 = 45007
+    //   line 1: 50000*1 - 5000 + 7 = 45007
+    // Total = 90014 cents = 900.14.
+    const lines = [
+      {
+        unit_price: Number((50000 / 100).toFixed(2)),
+        quantity: 1,
+        discount_amount: Number((50 / 100).toFixed(2)),
+        tax_amount: Number((7 / 100).toFixed(2)),
+      },
+      {
+        unit_price: Number((50000 / 100).toFixed(2)),
+        quantity: 1,
+        discount_amount: Number((50 / 100).toFixed(2)),
+        tax_amount: Number((7 / 100).toFixed(2)),
+      },
+    ];
+    const total = rebuildLayawayTotalFromLines(lines);
+    expect(total).toBeCloseTo(900.14, 2);
+  });
+
+  it('sentinel: backend-faithful total under three equal-tax lines', () => {
+    // 3 × $10.00 lines, tax 6.5% each rounded to $0.07, no discount.
+    // Per-line cents: 1000 + 7 = 1007; total = 3021 cents = $30.21.
+    const lines = [
+      { unit_price: 10, quantity: 1, discount_amount: 0, tax_amount: 0.07 },
+      { unit_price: 10, quantity: 1, discount_amount: 0, tax_amount: 0.07 },
+      { unit_price: 10, quantity: 1, discount_amount: 0, tax_amount: 0.07 },
+    ];
+    expect(rebuildLayawayTotalFromLines(lines)).toBeCloseTo(30.21, 2);
   });
 });

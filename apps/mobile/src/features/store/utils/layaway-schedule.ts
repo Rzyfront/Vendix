@@ -120,6 +120,71 @@ export function buildLayawaySchedule(
 }
 
 /**
+ * Sum a numeric value into an integer-cents accumulator without accumulating
+ * float drift. Used to build backend-faithful totals from per-line rounded
+ * `unit_price`, `discount_amount`, and `tax_amount` values that the backend
+ * will use in its `Decimal` reconstruction.
+ *
+ * Example: `2 * 1.00 + 0.07 + 0.07` (two $1 lines taxed at 6.5% rounded per
+ * line) → 214 cents → $2.14, matching the backend.
+ */
+function addCents(acc: number, value: number): number {
+  return Math.round(acc + value * 100);
+}
+
+/**
+ * Rebuild the per-item contribution to `layaway.total_amount` exactly as the
+ * backend does in `apps/backend/src/domains/store/layaway/layaway.service.ts:47-63`,
+ * using the SAME cent-rounded values that the mobile modal serializes in the
+ * POST body (`unit_price.toFixed(2)`, `discount_amount.toFixed(2)`,
+ * `tax_amount.toFixed(2)`).
+ *
+ * Returns the integer-cent subtotal for this line so callers can sum without
+ * float-drift artefacts. With integer-cent inputs and an integer quantity this
+ * is exact.
+ *
+ * This is the ONLY way the installment `sum` can match the backend's
+ * `total_amount` once `tax_amount` per line is rounded (e.g. raw 0.065 → 0.07),
+ * since rounding shifts each line's contribution by sub-cent amounts.
+ */
+export function rebuildLayawayItemCents(
+  unit_price: number,
+  quantity: number,
+  discount_amount: number,
+  tax_amount: number,
+): number {
+  // quantity is an int (DTO @IsInt @Min(1)) so cents × qty is exact.
+  const grossCents = Math.round(unit_price * 100) * quantity;
+  return grossCents + addCents(0, tax_amount) - addCents(0, discount_amount);
+}
+
+/**
+ * Sum a list of line-items (as the modal will POST them) into an exact
+ * backend-faithful total in dollars. Use this to build the installment
+ * schedule basis so `sum(installments)` matches the backend's reconstructed
+ * `total_amount` to the cent, even when per-line taxes round sub-cent.
+ */
+export function rebuildLayawayTotalFromLines(
+  lines: ReadonlyArray<{
+    unit_price: number;
+    quantity: number;
+    discount_amount: number;
+    tax_amount: number;
+  }>,
+): number {
+  let cents = 0;
+  for (const line of lines) {
+    cents += rebuildLayawayItemCents(
+      line.unit_price,
+      line.quantity,
+      line.discount_amount,
+      line.tax_amount,
+    );
+  }
+  return cents / 100;
+}
+
+/**
  * Mirrors desktop `LayawayConfigModalComponent.isValid`
  * (`layaway-config-modal.component.ts:221-226`).
  *

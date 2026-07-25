@@ -27,6 +27,7 @@ import {
   buildLayawaySchedule,
   isLayawayConfigValid,
   allocateCartDiscounts,
+  rebuildLayawayItemCents,
   FREQ_LABELS,
   MAX_INSTALLMENTS,
   type LayawayFrequency,
@@ -115,7 +116,32 @@ export function PosLayawayConfigModal({
     [summary.discountAmount, summary.subtotal],
   );
 
-  const cartTotal = summary.total;
+  // Compute the exact backend-faithful cart total AND per-line discount
+  // allocations in cents using the SAME `toFixed(2)` rounding the modal will
+  // POST. This avoids a tax-rounding mismatch where `summary.total` carries
+  // raw fractional per-line taxes while the request body rounds each line's
+  // `tax_amount` independently — the backend's Decimal reconstruction would
+  // then drift from the installment sum and the request fails with
+  // LAY_INSTALLMENT_001.
+  const { cartTotalExact, itemDiscountsMemo } = useMemo(() => {
+    const allocated = allocateCartDiscounts(
+      items,
+      Math.max(0, summary.discountAmount ?? 0),
+    );
+    let cents = 0;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      cents += rebuildLayawayItemCents(
+        Number(it.unitPrice.toFixed(2)),
+        it.quantity,
+        Number((allocated[i] ?? 0).toFixed(2)),
+        Number(it.taxAmount.toFixed(2)),
+      );
+    }
+    return { cartTotalExact: cents / 100, itemDiscountsMemo: allocated };
+  }, [items, summary.discountAmount]);
+
+  const cartTotal = cartTotalExact;
 
   const remainingBalance = Math.max(0, cartTotal - downPayment);
 
@@ -195,15 +221,12 @@ export function PosLayawayConfigModal({
 
     setIsSubmitting(true);
     try {
-      // Distribute any cart-level discount onto per-item discount_amount so the
-      // backend can reconstruct `total_amount = Σ (unit_price*qty - discount +
-      // tax)` exactly. Without this, LAY_INSTALLMENT_001 fires whenever the
-      // cart has any cart-level discount (coupons, manual promo, etc.).
-      // See `allocateCartDiscounts` for the cent-exact algorithm.
-      const itemDiscounts = allocateCartDiscounts(
-        items,
-        Math.max(0, summary.discountAmount ?? 0),
-      );
+      // Reuse the per-line discount allocations already memoized above so the
+      // submission serializes the EXACT values the schedule was built from.
+      // cartTotalExact / itemDiscountsMemo were computed with the same
+      // `toFixed(2)` rounding the request body uses → backend Decimal
+      // reconstruction matches the installment sum exactly.
+      const itemDiscounts = itemDiscountsMemo;
 
       const layawayItems: LayawayItemInput[] = items.map((i: CartItem, idx: number) => {
         const variantName =
