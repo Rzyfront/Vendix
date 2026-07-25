@@ -480,12 +480,28 @@ export const stage01Foundation: Stage = {
     log('  · Creating users (admin, employees, cashier, bookkeeping, customers)');
     const hashedPassword = await bcrypt.hash(DEFAULT_PASSWORD, 10);
     const [ownerRole, adminRole, managerRole, employeeRole, cashierRole, customerRole] = await Promise.all([
-      prisma.roles.findUnique({ where: { name: 'owner' } }),
-      prisma.roles.findUnique({ where: { name: 'admin' } }),
-      prisma.roles.findUnique({ where: { name: 'manager' } }),
-      prisma.roles.findUnique({ where: { name: 'employee' } }),
-      prisma.roles.findUnique({ where: { name: 'cashier' } }),
-      prisma.roles.findUnique({ where: { name: 'customer' } }),
+      // QUI-473: system roles are scoped by (organization_id = null, name).
+      // `name` alone is no longer a unique selector and Prisma's compound
+      // selector types organization_id as `number` (not nullable), so we
+      // use findFirst with the explicit (name, organization_id) filter.
+      prisma.roles.findFirst({
+        where: { name: 'owner', organization_id: null },
+      }),
+      prisma.roles.findFirst({
+        where: { name: 'admin', organization_id: null },
+      }),
+      prisma.roles.findFirst({
+        where: { name: 'manager', organization_id: null },
+      }),
+      prisma.roles.findFirst({
+        where: { name: 'employee', organization_id: null },
+      }),
+      prisma.roles.findFirst({
+        where: { name: 'cashier', organization_id: null },
+      }),
+      prisma.roles.findFirst({
+        where: { name: 'customer', organization_id: null },
+      }),
     ]);
 
     const usersToCreate = [

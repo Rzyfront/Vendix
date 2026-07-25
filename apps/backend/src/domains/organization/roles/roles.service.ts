@@ -21,6 +21,7 @@ import {
   RemoveRoleFromUserDto,
 } from './dto/role.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { Prisma } from '@prisma/client';
 import {
   RoleDashboardStatsDto,
   RoleWithPermissionDescriptionsDto,
@@ -44,6 +45,9 @@ export class RolesService {
     return {
       id: role.id,
       name: role.name,
+      // QUI-473: expose organization_id so callers (e.g. the update()
+      // pre-check) know which org owns the role. NULL for system roles.
+      organization_id: role.organization_id,
       description: role.description,
       system_role: role.is_system_role,
       created_at: role.created_at,
@@ -68,43 +72,63 @@ export class RolesService {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
-    // Verificar que el nombre no exista
-    const existingRole = await this.prismaService.roles.findUnique({
-      where: { name },
+    // QUI-473: roles are unique per (organization_id, name), not by name alone.
+    // The pre-check must match the scope of the row we are about to insert:
+    // - system_role=true  → look for (organization_id = NULL, name)
+    // - system_role=false → look for (organization_id = <ctx.org>, name)
+    const target_organization_id = system_role ? null : organization_id;
+    const existingRole = await this.prismaService.roles.findFirst({
+      where: {
+        name,
+        organization_id: target_organization_id,
+      },
     });
 
     if (existingRole) {
       throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
-    // Crear el rol
-    const role = await this.prismaService.roles.create({
-      data: {
-        name,
-        description,
-        is_system_role: system_role || false,
-        organization_id: system_role ? null : organization_id,
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
-          },
+    // Create the role. QUI-473: catch P2002 (race between this pre-check and
+    // the INSERT below) and translate the raw Prisma error into the same
+    // domain error the pre-check raises, so the UI gets a clean 409.
+    let role;
+    try {
+      role = await this.prismaService.roles.create({
+        data: {
+          name,
+          description,
+          is_system_role: system_role || false,
+          organization_id: target_organization_id,
         },
-        user_roles: {
-          include: {
-            users: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
+        include: {
+          role_permissions: {
+            include: {
+              permissions: true,
+            },
+          },
+          user_roles: {
+            include: {
+              users: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
+      }
+      throw err;
+    }
 
     // Registrar auditoría
     await this.auditService.log({
@@ -235,9 +259,16 @@ export class RolesService {
     const { name, description } = updateRoleDto;
 
     // Verificar que el nombre no exista (si se está cambiando)
+    // QUI-473: scope the pre-check to the role's own organization_id (NULL
+    // for system roles). After the composite unique, the same name can
+    // legitimately exist in another organization, so a name-only lookup
+    // would falsely reject the rename.
     if (name && name !== role.name) {
-      const existingRole = await this.prismaService.roles.findUnique({
-        where: { name },
+      const existingRole = await this.prismaService.roles.findFirst({
+        where: {
+          name,
+          organization_id: role.organization_id,
+        },
       });
 
       if (existingRole) {
@@ -250,21 +281,33 @@ export class RolesService {
       throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
-    // Actualizar el rol
-    const updatedRole = await this.prismaService.roles.update({
-      where: { id },
-      data: {
-        ...(name && { name }),
-        ...(description !== undefined && { description }),
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
+    // Actualizar el rol. QUI-473: catch P2002 from the new composite unique
+    // so a concurrent rename cannot leak the raw Prisma error.
+    let updatedRole;
+    try {
+      updatedRole = await this.prismaService.roles.update({
+        where: { id },
+        data: {
+          ...(name && { name }),
+          ...(description !== undefined && { description }),
+        },
+        include: {
+          role_permissions: {
+            include: {
+              permissions: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Ya existe un rol con este nombre');
+      }
+      throw err;
+    }
 
     return this.transformRoleWithPermissionDescriptions(updatedRole);
 
