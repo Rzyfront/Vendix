@@ -744,6 +744,14 @@
       "sessions": 1,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "4d22ce13",
+      "created_by": "yoner",
+      "created_at": "2026-07-25T20:44:51Z",
+      "sessions": 0,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }
