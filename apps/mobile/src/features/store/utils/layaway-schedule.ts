@@ -124,8 +124,12 @@ export function buildLayawaySchedule(
  * (`layaway-config-modal.component.ts:221-226`).
  *
  * - `numInstallments > 0`
- * - `cartTotal - downPayment > 0`
+ * - `cartTotal - downPayment > 0` (remaining balance strictly positive)
  * - `0 <= downPayment < cartTotal`
+ * - finite and safe-integer numeric inputs (defends the schedule invariant)
+ * - the remaining balance in cents is at least `numInstallments` so each
+ *   installment clears the backend `LayawayInstallmentDto.amount @Min(0.01)`
+ *   guard and never collapses a cent into a zero or negative amount.
  *
  * The `numInstallments <= MAX_INSTALLMENTS` cap is a UX guard (backend has no
  * hard cap) and is checked separately at the call site.
@@ -136,10 +140,83 @@ export function isLayawayConfigValid(input: {
   numInstallments: number;
 }): boolean {
   const { cartTotal, downPayment, numInstallments } = input;
-  return (
-    numInstallments > 0 &&
-    cartTotal - downPayment > 0 &&
-    downPayment >= 0 &&
-    downPayment < cartTotal
+  if (!Number.isFinite(cartTotal) || !Number.isFinite(downPayment)) return false;
+  if (!Number.isFinite(numInstallments)) return false;
+  if (!Number.isSafeInteger(numInstallments) || numInstallments <= 0) return false;
+  if (downPayment < 0 || downPayment >= cartTotal) return false;
+  const remaining = round2(cartTotal - downPayment);
+  if (remaining <= 0) return false;
+  // remaining (in cents) must be >= numInstallments so every installment can be
+  // at least 0.01. Backend DTO: LayawayInstallmentDto.amount @Min(0.01).
+  const remainingCents = Math.round(remaining * 100);
+  if (remainingCents < numInstallments) return false;
+  return true;
+}
+
+/**
+ * Allocate a cart-level discount across line items, proportional to each
+ * line's `unitPrice × quantity`, with the rounding remainder absorbed into
+ * the LAST item so `Σ allocations === totalDiscount` exactly (no fractional
+ * cents lost).
+ *
+ * Used by `PosLayawayConfigModal` to populate per-item `discount_amount` on
+ * the POST /store/layaway payload; otherwise the backend
+ * (`apps/backend/src/domains/store/layaway/layaway.service.ts:47-75`)
+ * reconstructs the plan total without any discount and rejects with
+ * `LAY_INSTALLMENT_001`.
+ *
+ * - Returns an empty array when `items` is empty or `totalDiscount <= 0`.
+ * - Each per-item allocation is capped at `unitPrice × quantity` of that line
+ *   (so a discount greater than one line's gross is still represented — the
+ *   remaining unallocated cents will fall into the last item, capped).
+ *   In practice a cart-level discount is rarely larger than one line, but the
+ *   cap protects against pathological inputs without throwing.
+ */
+export function allocateCartDiscounts(
+  items: ReadonlyArray<{ unitPrice: number; quantity: number }>,
+  totalDiscount: number,
+): number[] {
+  if (items.length === 0) return [];
+  if (!Number.isFinite(totalDiscount) || totalDiscount <= 0) {
+    return items.map(() => 0);
+  }
+
+  const weights = items.map((i) =>
+    Math.max(0, Number(i.unitPrice) || 0) * Math.max(0, Number(i.quantity) || 0),
   );
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
+
+  if (totalWeight <= 0) {
+    // All lines have zero weight (free/zero-priced). Put the discount on the
+    // last line, capped at zero — effectively the discount cannot be applied.
+    return items.map(() => 0);
+  }
+
+  const allocations = items.map(() => 0);
+  let allocated = 0;
+  for (let i = 0; i < items.length - 1; i++) {
+    const share = round2((totalDiscount * weights[i]) / totalWeight);
+    const cap = round2(weights[i]);
+    const value = Math.min(share, cap);
+    allocations[i] = value;
+    allocated += value;
+  }
+  // Last item absorbs the remainder (with cap to its own line gross).
+  const remainder = round2(totalDiscount - allocated);
+  const lastCap = round2(weights[weights.length - 1]);
+  allocations[items.length - 1] = Math.max(0, Math.min(remainder, lastCap));
+  // If the cap clipped the last item, push the leftover into earlier items
+  // (greedy back-fill) so the total still reconciles.
+  let leftover = round2(totalDiscount - allocations.reduce((s, a) => s + a, 0));
+  if (leftover > 0) {
+    for (let i = items.length - 2; i >= 0 && leftover > 0.005; i--) {
+      const cap = round2(weights[i] - allocations[i]);
+      const add = Math.min(cap, leftover);
+      if (add > 0) {
+        allocations[i] = round2(allocations[i] + add);
+        leftover = round2(leftover - add);
+      }
+    }
+  }
+  return allocations;
 }

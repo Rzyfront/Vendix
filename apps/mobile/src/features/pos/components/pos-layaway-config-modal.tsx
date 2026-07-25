@@ -26,6 +26,7 @@ import {
 import {
   buildLayawaySchedule,
   isLayawayConfigValid,
+  allocateCartDiscounts,
   FREQ_LABELS,
   MAX_INSTALLMENTS,
   type LayawayFrequency,
@@ -176,9 +177,21 @@ export function PosLayawayConfigModal({
 
     setIsSubmitting(true);
     try {
-      const layawayItems: LayawayItemInput[] = items.map((i: CartItem) => {
-        const variantName = i.variant?.name || i.variant?.attributes;
+      // Distribute any cart-level discount onto per-item discount_amount so the
+      // backend can reconstruct `total_amount = Σ (unit_price*qty - discount +
+      // tax)` exactly. Without this, LAY_INSTALLMENT_001 fires whenever the
+      // cart has any cart-level discount (coupons, manual promo, etc.).
+      // See `allocateCartDiscounts` for the cent-exact algorithm.
+      const itemDiscounts = allocateCartDiscounts(
+        items,
+        Math.max(0, summary.discountAmount ?? 0),
+      );
+
+      const layawayItems: LayawayItemInput[] = items.map((i: CartItem, idx: number) => {
+        const variantName =
+          typeof i.variant?.name === 'string' ? i.variant.name : undefined;
         const sku = i.variant?.sku || i.product.sku;
+        const perItemDiscount = itemDiscounts[idx] ?? 0;
         return {
           product_id: Number(i.product.id),
           ...(i.variant?.id ? { product_variant_id: Number(i.variant.id) } : {}),
@@ -187,6 +200,9 @@ export function PosLayawayConfigModal({
           ...(sku ? { sku } : {}),
           quantity: i.quantity,
           unit_price: Number(i.unitPrice.toFixed(2)),
+          ...(perItemDiscount > 0
+            ? { discount_amount: Number(perItemDiscount.toFixed(2)) }
+            : {}),
           tax_amount: Number(i.taxAmount.toFixed(2)),
         };
       });
