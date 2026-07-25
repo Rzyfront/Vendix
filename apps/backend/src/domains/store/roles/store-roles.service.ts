@@ -266,25 +266,38 @@ export class StoreRolesService {
       organization_id,
     );
 
-    const updated = await this.prisma.roles.update({
-      where: { id },
-      data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.description !== undefined && { description: dto.description }),
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
+    let updated;
+    try {
+      updated = await this.prisma.roles.update({
+        where: { id },
+        data: {
+          ...(dto.name && { name: dto.name }),
+          ...(dto.description !== undefined && { description: dto.description }),
+        },
+        include: {
+          role_permissions: {
+            include: {
+              permissions: true,
+            },
+          },
+          _count: {
+            select: {
+              user_roles: { where: userRolesCountWhere },
+            },
           },
         },
-        _count: {
-          select: {
-            user_roles: { where: userRolesCountWhere },
-          },
-        },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'A role with this name already exists in this organization',
+        );
+      }
+      throw err;
+    }
 
     return this.transformRole(updated);
   }
