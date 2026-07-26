@@ -44,6 +44,10 @@ interface PromotionRecord {
   per_customer_limit: number | null;
   is_auto_apply: boolean;
   priority: number;
+  // quantity_grouping: how quantity_tiered promos aggregate cart quantities
+  // when checking tier thresholds. Added in migration 20260715... — the
+  // Prisma client may not know about it yet (it returns unknown).
+  quantity_grouping?: 'cart_total' | 'per_product';
   start_date: Date;
   end_date: Date | null;
   state: string;
@@ -475,9 +479,7 @@ export class PromotionEngineService {
         //     fires only when a single product reaches min_quantity on its
         //     own. Different SKUs are NOT aggregated.
         const grouping = promo.quantity_grouping ?? 'cart_total';
-        let matchedTier:
-          | (typeof tiers)[number]
-          | null = null;
+        let matchedTier: (typeof tiers)[number] | undefined;
         let scopedQty = 0;
 
         if (grouping === 'per_product') {
@@ -727,7 +729,7 @@ export class PromotionEngineService {
       if (applicableIndexes.length === 0) continue;
 
       const grouping = promo.quantity_grouping ?? 'cart_total';
-      let nextTier: (typeof tiers)[number] | null = null;
+      let nextTier: (typeof tiers)[number] | undefined;
       let remaining = 0;
 
       if (grouping === 'per_product') {
