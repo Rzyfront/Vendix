@@ -109,6 +109,8 @@ export default function DomainsScreen() {
     queryFn: () => OrgStoreService.list({ pageSize: 200 }).then((r) => r.data ?? []),
     staleTime: 5 * 60 * 1000, // 5 min — la lista de tiendas no cambia en cada interacción.
   });
+  // useMemo evita recrear la referencia en cada render para que
+  // `filterConfigs` (más abajo) no se invalide por un cambio de identidad.
   const stores = useMemo<StoreListItem[]>(() => storesQuery.data ?? [], [storesQuery.data]);
 
   // ───── Filtros del header (popover tipo web, NO modal) ───────────────────
@@ -197,10 +199,10 @@ export default function DomainsScreen() {
   }, [domains, sort]);
 
   // ───── Mutations ───────────────────────────────────────────────────────────
-  // NOTA: la verificación de DNS se ejecuta dentro del DomainVerifyModal
-  // (muestra resultado inline + tabla de records DNS). El parent solo
-  // invalida queries cuando `onVerified` se dispara — ver M3 fix en
-  // <DomainVerifyModal onVerified={...}> más abajo.
+  // NOTA: la verificación del dominio se hace DENTRO de `DomainVerifyModal`
+  // (que muestra el resultado inline). Aquí sólo refrescamos queries desde
+  // `onVerified` del modal. No exponemos `verifyMutation` para evitar una
+  // segunda llamada accidental a POST /verify.
 
   const provisionMutation = useMutation({
     mutationFn: (id: string) => OrgDomainsService.provisionNextById(id),
@@ -381,12 +383,13 @@ export default function DomainsScreen() {
         domain={verifying}
         onClose={() => setVerifying(null)}
         onVerified={() => {
-          // M3 fix: la verificación ya se ejecutó dentro del modal y mostró
-          // el resultado inline. NO re-llamar al endpoint acá para evitar
-          // doble toast + doble invalidación. Solo refrescar la lista.
-          setVerifying(null);
-          queryClient.invalidateQueries({ queryKey: ['org-domains-list'] });
+          // El modal ya llamó OrgDomainsService.verify() inline y mostró el
+          // resultado en su propio `resultBlock`. Aquí sólo sincronizamos
+          // la query y mostramos el toast de éxito en pantalla (sin re-mutar).
+          refetch();
           queryClient.invalidateQueries({ queryKey: ['org-domains-stats'] });
+          toastSuccess('Propiedad verificada. Certificado pendiente de emisión.');
+          setVerifying(null);
         }}
       />
       <DomainDeleteModal
