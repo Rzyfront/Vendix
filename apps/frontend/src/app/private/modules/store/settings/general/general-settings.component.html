@@ -46,12 +46,11 @@
              during the parent's effect cascade (load → patch → re-emit
              → re-patch), and @if would mount/unmount the form on each
              transition, resetting its `lastLoadedState` flag and the
-             setTimeout poll before the post-patch value can be read. -->
-        <section class="settings-card mt-6" [style.display]="showServicesSection() ? 'block' : 'none'">
-          <app-services-settings-form
-            [servicesForm]="generalForm.servicesForm"
-          />
-        </section>
+             setTimeout poll before the post-patch value can be read.
+             (Section removed 2026-07-26: 'Servicios / Ofrece servicio a
+             domicilio' toggle is no longer shown. The ServicesSettingsForm
+             child component and its `showServicesSection` computed are
+             still wired up so we can re-enable it without code surgery.) -->
 
         <!-- Branding & Customization -->
         <section id="section-branding" class="settings-section">
