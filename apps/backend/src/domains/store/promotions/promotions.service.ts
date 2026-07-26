@@ -454,6 +454,23 @@ export class PromotionsService {
       );
     }
 
+    // Block deletion when the promotion has historical order_promotions
+    // rows. order_promotions.promotions is onDelete: Cascade (schema.prisma),
+    // so a hard delete would silently destroy accounting/audit history.
+    // Before this guard only draft (no orders) promotions were deletable;
+    // cancelled promotions with usage now require soft-delete (already the
+    // case via the state check above) and removal via a separate
+    // data-retention flow.
+    const historicalUsage = await this.prisma.order_promotions.count({
+      where: { promotion_id: id },
+    });
+    if (historicalUsage > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        `No se puede eliminar la promoción porque tiene ${historicalUsage} aplicación(es) histórica(s) en órdenes. Márcala como cancelada para conservar el historial de auditoría.`,
+      );
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await tx.promotion_products.deleteMany({
         where: { promotion_id: id },

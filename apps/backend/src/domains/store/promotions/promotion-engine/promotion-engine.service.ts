@@ -376,7 +376,7 @@ export class PromotionEngineService {
         promotion_categories: true,
         promotion_quantity_tiers: true,
       },
-      orderBy: { priority: 'desc' },
+      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
     })) as unknown as PromotionRecord[];
 
     /**
@@ -818,7 +818,7 @@ export class PromotionEngineService {
         promotion_categories: { select: { category_id: true } },
         promotion_quantity_tiers: true,
       },
-      orderBy: { priority: 'desc' },
+      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
     })) as unknown as PromotionRecord[];
 
     if (promotions.length === 0) return result;
@@ -853,9 +853,14 @@ export class PromotionEngineService {
 
         if (!matchesProduct && !matchesCategory) continue;
 
-        // Higher rank wins: product scope beats category scope at same priority.
+        // LOWER priority number wins (consistent with quoteDiscounts — priority
+        // 1 is the "first" promo to apply, like a priority queue). Inverted
+        // into a "rank" so the existing `rank > chosen.rank` comparison still
+        // picks the higher-priority promo. Among equal priorities, product
+        // scope beats category scope for clearer UX.
         const rank =
-          (promo.priority ?? 0) * 10 + (promo.scope === 'product' ? 1 : 0);
+          (1000 - (promo.priority ?? 0)) * 10 +
+          (promo.scope === 'product' ? 1 : 0);
         if (chosen === null || rank > chosen.rank) {
           chosen = { promo, rank };
         }
