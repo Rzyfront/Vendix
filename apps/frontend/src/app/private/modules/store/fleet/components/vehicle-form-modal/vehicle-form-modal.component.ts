@@ -146,7 +146,9 @@ export class VehicleFormModalComponent {
       model_name: ['', [Validators.required, Validators.maxLength(80)]],
       capacity_kg: [
         null as number | null,
-        [Validators.required, Validators.min(0)],
+        // Backend DTO uses @Min(0.01) — match it here so the user doesn't
+        // pass frontend validation with 0 and then get a 400 on submit.
+        [Validators.required, Validators.min(0.01)],
       ],
       capacity_units: [null as number | null],
       primary_driver_id: [
@@ -199,7 +201,10 @@ export class VehicleFormModalComponent {
       rateControl.clearValidators();
       rateControl.setValue(null);
     } else {
-      rateControl.setValidators([Validators.required, Validators.min(0)]);
+      // Backend DTO requires settlement_rate >= 0.01 when settlement_type is
+      // not 'none'. Keep parity so the form doesn't let through values the
+      // API would 400 on.
+      rateControl.setValidators([Validators.required, Validators.min(0.01)]);
     }
     rateControl.updateValueAndValidity({ emitEvent: false });
   }

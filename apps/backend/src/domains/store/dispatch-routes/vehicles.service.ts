@@ -32,8 +32,10 @@ export class VehiclesService {
     // El DTO exige el campo, pero no garantiza que el user exista. Sin este
     // check, Prisma fallaría con P2003 → 500 genérico. Acá retornamos 404
     // con un mensaje claro y evitamos el query fallido.
+    // Note: StorePrismaService auto-scopes by store_id, so the extra
+    // `store_id` filter is redundant — we just check the user id.
     const driver = await this.prisma.users.findFirst({
-      where: { id: dto.primary_driver_id, store_id },
+      where: { id: dto.primary_driver_id },
       select: { id: true },
     });
     if (!driver) {

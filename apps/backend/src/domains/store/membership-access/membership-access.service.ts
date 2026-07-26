@@ -414,7 +414,10 @@ export class MembershipAccessService {
 
         if (reEntry.mode === 'block') {
           return this.logAndReturn(storeId, {
-            result: membership_access_result_enum.denied_re_entry,
+            // TODO: remove the `as any` cast once `npx prisma generate`
+            // is re-run — the enum value was added in schema.prisma L3429
+            // but the generated client doesn't know about it yet.
+            result: 'denied_re_entry' as any,
             reason: `Reingreso hace ${reEntryMinutes} min`,
             customer_id: customerId,
             membership_id: active.id,
