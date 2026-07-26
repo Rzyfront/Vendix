@@ -1,12 +1,14 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   computed,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
 import { formatNextAvailableDetailed } from '../../services/next-available.util';
@@ -599,6 +601,7 @@ export class ProductCardComponent {
   readonly quick_view = output<EcommerceProduct>();
   readonly share = output<EcommerceProduct>();
 
+  private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
   public readonly tableContext = inject(TableContextService);
@@ -800,14 +803,14 @@ export class ProductCardComponent {
       // `add_to_cart` upstream — the parent container would otherwise call
       // `cartService.addProduct` again, dispatching a SECOND POST and adding
       // the dish twice to the bill (BUG A — Step 8 single-dispatch cure).
-      result.subscribe(() => this.qtyToAdd.set(1));
+      result.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.qtyToAdd.set(1));
       return;
     }
     // Non-mesa path: emit `add_to_cart` for any parent listeners (e.g. cart
     // animation trigger). The chokepoint already added the item, so the
     // container's handler is a no-op via the mesa-guard below.
     if (result) {
-      result.subscribe();
+      result.pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     this.add_to_cart.emit(this.product());
   }
