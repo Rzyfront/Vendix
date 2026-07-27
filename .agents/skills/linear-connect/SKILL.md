@@ -160,6 +160,7 @@ not ask the user to choose — there is no choice to make.
          "Backlog": "4b74cd22-2daa-4220-bccc-002a6b4121de",
          "Todo": "1c3e8e81-3fa4-46fa-9674-0d46e6bb003f",
          "In Progress": "e24cd9a7-66db-4e49-93cb-d3f1c99df2f7",
+         "Code Review": "17d15a4c-92b4-4d6e-92d7-bc7c201fb465",
          "In Review": "d123e233-1f17-422e-b7c0-06f463e798df",
          "Done": "30f4c5c5-e1de-43a7-b00e-b737fc6e73a4",
          "Canceled": "6081e147-8c02-4531-9437-e9d6115559fd",
@@ -193,7 +194,7 @@ A short summary printed to the user, in this order:
 2. Their Linear identity (name + email)
 3. Team: Quickss (QUI)
 4. Project: Vendix
-5. Counts: 6 labels cached, 7 states cached, user_id resolved
+5. Counts: 6 labels cached, 8 states cached, user_id resolved
 6. Full path to `.linear/config.json` and a reminder that the cache
    contains no secrets
 7. Confirmation that the API key was added to `~/.zshrc` (or whatever rc

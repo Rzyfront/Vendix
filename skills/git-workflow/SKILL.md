@@ -240,6 +240,7 @@ gh pr merge <N>   # without a prior pr-code-review pass and APPROVE
    - Invoke the **`linear-issues`** skill (`search` action) to find it — build the term from the PR title / branch name / key changes. If the user already gives a `QUI-XXX`, resolve that directly.
    - Show the candidate(s) and confirm the right one with the user. Never guess silently.
    - **Document it in the PR body** — add a `## Linear` section with `QUI-XXX — title — url` using `gh pr edit <N> --body` (or include it when running `gh pr create`).
+   - **Suggest moving the issue to `Code Review`** — see the state transition below.
 3. **If the user says no** (or there is no issue): continue without linking — do not invent an issue.
 
 ```markdown
@@ -248,7 +249,28 @@ gh pr merge <N>   # without a prior pr-code-review pass and APPROVE
   https://linear.app/quickss/issue/QUI-418
 ```
 
-**Why:** Linking the PR to its issue closes the loop — reviewers see the context, and the merge step (`pr-code-review`) can move that issue to **In Review** automatically. Do NOT call the Linear API from here directly; delegate every Linear call to the `linear-issues` skill.
+**State transition on PR open (SUGGESTED — ask, don't block):**
+
+Once the issue is confirmed, suggest moving it to **`Code Review`** — the state that means "the code is written, the PR is open, it is waiting on a human reviewer". Never apply it silently.
+
+- **Target state:** `Code Review` (`17d15a4c-92b4-4d6e-92d7-bc7c201fb465`), and no other. Opening a PR never moves an issue to `In Review`, `Done`, or backwards.
+- **Allowed source states:** `Backlog`, `Todo`, `In Progress`. These are the states an issue can legitimately be in when its PR is opened.
+- **Terminal-state guard:** if the issue is in `Done` / `Canceled` / `Duplicate`, **ask for extra confirmation** before reopening it into `Code Review` — a PR against a closed issue usually means the reference is wrong.
+- **Already past this stage:** if the issue is already in `In Review`, do NOT pull it backwards. Report it and leave it alone — it is likely a follow-up PR on a change that already reached QA.
+- Delegate the write to the **`linear-issues`** skill. Do NOT call the Linear API from here directly.
+
+**Where this sits in the pipeline:**
+
+```
+Backlog → Todo → In Progress → Code Review → In Review → Done
+                                    ↑             ↑         ↑
+                              git-workflow   pr-code-review  QA
+                              (abrir PR)     (merge a dev)  (manual)
+```
+
+`Code Review` and `In Review` are different gates and must not be conflated: `Code Review` is **pre-merge** (technical review of the diff), `In Review` is **post-merge** (QA validating the change on the dev environment).
+
+**Why:** Linking the PR to its issue closes the loop — reviewers see the context, and each stage of the pipeline updates Linear on its own trigger: opening the PR marks the issue as blocked on review, and the merge step (`pr-code-review`) hands it off to QA in **In Review**. Without the `Code Review` stage, an issue waiting days on a reviewer is indistinguishable from one still being coded.
 
 ---
 
