@@ -14,7 +14,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Creating a QA sprint report as a web presentation"
@@ -51,8 +51,21 @@ Does NOT own:
    question at a time (see Workflow step 1): (a) **which data path** — paste-text vs autonomous
    Linear search; (b) the **sprint window** as explicit start/end dates (convert any relative phrase
    like "este sprint" to absolute dates and confirm — see `vendix-date-timezone`); (c) the **sprint
-   name/label** and audience; (d) what counts as a **"validated" ticket** (a Linear state, a label,
-   or the paste-text list). Restate the collected scope in one line before proceeding.
+   name/label** and audience; (d) what counts as a **"validated" ticket** — offer the pipeline
+   default and let the user override it. Restate the collected scope in one line before proceeding.
+
+   **Pipeline default (see `linear-issues/references/states.md`):**
+
+   | Bucket del reporte | Señal en Linear |
+   | --- | --- |
+   | Ticket validado | estado `Done` — QA lo verificó en prod con `verify-ticket-prod` |
+   | Ticket rebotado por QA | label `Devuelto` (vuelve a `Todo`, prioridad Alta) |
+   | Esperando verificación de QA | estado `In Review` — ya está en prod |
+   | En revisión de código | estado `Code Review`, con label `Aprobado` o `Requiere cambios` |
+
+   `Devuelto` is the most report-worthy signal in the set: it counts a ticket that consumed a full
+   dev + review + release cycle and still failed. Surface those separately from bugs found fresh in
+   the sprint — they are a different kind of finding.
 2. **Two data paths, never invent data.**
    - **Path A — user pastes the info:** parse the text into the report model (bugs, severities,
      validated tickets, verdicts, dates). Do not add issues the user did not mention. Mark unknowns
@@ -130,7 +143,7 @@ Critical/Urgent — state it as empty).
    - "¿Me pasás la info del sprint en texto, o busco todo en Linear por ventana de fechas?"
    - "¿Cuál es la ventana del sprint? (fechas de inicio y fin)" → convert relative → absolute, confirm.
    - "¿Nombre del sprint y para quién es el reporte?"
-   - "¿Qué cuenta como ticket *validado* — un estado de Linear, una etiqueta, o la lista que me pases?"
+   - "¿Qué cuenta como ticket *validado* — el default del pipeline (`Done`), otra cosa, o la lista que me pases?"
    - Restate the scope in one line and wait for "ok".
 2. **Gather data.**
    - Path A: parse the pasted text into the model; confirm the parsed counts back to the user.

@@ -57,7 +57,7 @@ Variables:
     "title": "Bug en checkout mobile",
     "description": "## Pasos para reproducir\n1. ...",
     "priority": 2,
-    "labelIds": ["d6a4fc5c-7350-4cbf-b820-2fed8e6f131b"],
+    "labelIds": ["cc489b0b-2b1e-4d58-92de-8c261f74b67e"],
     "assigneeId": "<uuid>",
     "stateId": "<uuid>"
   }
@@ -100,7 +100,7 @@ Variables (only include the fields the user actually wants to change):
     "title": "FIX/ Error al aprobar reseña [ecommerce]",
     "description": "...merged markdown body...",
     "priority": 2,
-    "labelIds": ["d6a4fc5c-7350-4cbf-b820-2fed8e6f131b"]
+    "labelIds": ["cc489b0b-2b1e-4d58-92de-8c261f74b67e"]
   }
 }
 ```
@@ -128,7 +128,7 @@ body comes verbatim from `references/issue-template-bug.md`.
     "title": "FIX/ Error al aprobar reseña desde ecommerce [ecommerce]",
     "description": "## Entorno\n- **App:** ecommerce\n- **Store:** Vendix Demo Store (NIT 900123456)\n- **Fecha:** 2026-06-08\n\n## Pasos para reproducir\n1. Ingresar al panel admin como moderador\n2. Ir a la sección Reseñas pendientes\n3. Hacer clic en \"Aprobar\" sobre una reseña\n4. Observar la respuesta del servidor\n\n## Comportamiento actual\nEl endpoint devuelve 500 Internal Server Error. En consola del navegador:\n```\nTypeError: Cannot read properties of undefined (reading 'id')\n    at ReviewController.approve (review.controller.ts:127)\n```\n\n## Comportamiento esperado\nLa reseña se marca como aprobada, desaparece de pendientes y aparece en la lista de aprobadas con un toast de confirmación.\n\n## Capturas / logs\nhttps://drive.example.com/screenshots/2026-06-08-review-500.png\nSentry: VENDIX-REVIEW-7421\n\n## Severidad\n- [x] Alta (workaround incómodo)\n- [ ] Bloqueante (no se puede operar)\n- [ ] Media (workaround existe)\n- [ ] Baja (cosmético)\n",
     "priority": 2,
-    "labelIds": ["d6a4fc5c-7350-4cbf-b820-2fed8e6f131b"],
+    "labelIds": ["cc489b0b-2b1e-4d58-92de-8c261f74b67e"],
     "assigneeId": "<uuid-from-viewer-query>",
     "stateId": "<uuid-of-Todo-state>"
   }
@@ -235,6 +235,24 @@ Variables:
 - `teamId` is the Quickss team — it **boosts** that team's results but does not
   restrict to it. Since Vendix is the only project on this team, results are
   effectively Vendix already.
+- **There is no state filter argument.** `searchIssues` is relevance-ranked,
+  not a filtered list. To prioritize by state (e.g. `pr-code-review` matching a
+  PR to its ticket), make **one** call and re-rank the returned `nodes`
+  client-side on `state.name` — do not issue one query per state. The endpoint
+  is rate-limited to 30 req/min and a second call would return the same corpus.
+
+  ```js
+  // Tiered match for a PR → ticket, from a single searchIssues call
+  const TIER = { 'Code Review': 0, 'In Progress': 1, 'Todo': 2, 'Backlog': 3 }
+  const CLOSED = new Set(['Done', 'Canceled', 'Duplicate', 'In Review'])
+  const ranked = nodes
+    .filter(n => !CLOSED.has(n.state.name))       // closed/QA tickets are not PR candidates
+    .sort((a, b) => (TIER[a.state.name] ?? 9) - (TIER[b.state.name] ?? 9))
+  ```
+
+  If a genuinely filtered list is needed instead of a relevance search, use
+  `issues(filter: { state: { name: { eq: "Code Review" } } })` — that one does
+  support filtering, but it does not rank by meaning.
 - Still **filter the returned `nodes` client-side** to `project.id ==
   PROJECT_ID` (`0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59`) before showing matches —
   belt and suspenders.

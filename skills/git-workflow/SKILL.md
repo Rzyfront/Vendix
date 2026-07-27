@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "git commit, git push, create PR, create branch"
@@ -17,6 +17,8 @@ metadata:
     - "Saving an Engram memory before pushing non-trivial changes"
     - "Running an automated code review (pr-code-review) on a PR before merging"
     - "Linking a PR to its Linear issue when opening a PR to dev"
+    - "Moving a Linear issue to Code Review when opening a PR to dev"
+    - "Releasing to prod by merging dev into main and moving tickets to In Review"
 ---
 
 ## When to Use
@@ -262,15 +264,49 @@ Once the issue is confirmed, suggest moving it to **`Code Review`** — the stat
 **Where this sits in the pipeline:**
 
 ```
-Backlog → Todo → In Progress → Code Review → In Review → Done
-                                    ↑             ↑         ↑
-                              git-workflow   pr-code-review  QA
-                              (abrir PR)     (merge a dev)  (manual)
+Backlog → Todo → In Progress → Code Review ───────→ In Review → Done
+                     ↑              │  ↑                 │        ↑
+                     │              │  └─ +Aprobado      │        │ QA OK
+                     │              │     +Requiere      │        │
+                     │              │      cambios       │        │
+                     │              │     (bucle PR)     │        │
+                     │         git-workflow         git-workflow  QA
+                     │         RULE 9               RULE 10   verify-ticket-prod
+                     │         (abrir PR)           (release   
+                     │                               dev→main)
+                     └──── +Devuelto, prioridad Alta ─────┘  (QA falla)
 ```
 
-`Code Review` and `In Review` are different gates and must not be conflated: `Code Review` is **pre-merge** (technical review of the diff), `In Review` is **post-merge** (QA validating the change on the dev environment).
+`Code Review` and `In Review` are different gates and must not be conflated: `Code Review` is **pre-merge** (revisión técnica del diff), `In Review` is **post-release** (el cambio ya está en **producción** y QA lo verifica contra el requerimiento).
 
-**Why:** Linking the PR to its issue closes the loop — reviewers see the context, and each stage of the pipeline updates Linear on its own trigger: opening the PR marks the issue as blocked on review, and the merge step (`pr-code-review`) hands it off to QA in **In Review**. Without the `Code Review` stage, an issue waiting days on a reviewer is indistinguishable from one still being coded.
+Merging the PR to `dev` does **not** move the issue — it only adds the `Aprobado` label (`pr-code-review`). The issue stays in `Code Review` through every review round trip.
+
+**Why:** Linking the PR to its issue closes the loop — reviewers see the context, and each stage updates Linear on its own trigger. Separating state (where the ticket is) from label (what the last reviewer decided) is what lets `Code Review` absorb N review iterations without the ticket bouncing between states on every push. Without the `Code Review` stage, an issue waiting days on a reviewer is indistinguishable from one still being coded.
+
+### RULE 10: Release to Prod Moves Tickets to In Review (SUGGESTED — ask, don't block)
+
+**A release is the merge of a PR from `dev` into `main`.** That is the only trigger — there is no release tag or separate release branch in this repo.
+
+When the reviewer merges `dev` → `main`, every ticket shipped in that release moves to **`In Review`** and gets its workflow labels **cleared**. Suggest it, confirm the list with the user, never apply it silently.
+
+**Flow (after `gh pr merge <N>` where base is `main`):**
+
+1. **Build the ticket list.** Collect the `QUI-XXX` references from the commits in the release:
+   ```bash
+   gh pr view <N> --json commits --jq '.commits[].messageHeadline' | grep -oE 'QUI-[0-9]+' | sort -u
+   # or, if the release PR body lists them:
+   gh pr view <N> --json body --jq .body | grep -oE 'QUI-[0-9]+' | sort -u
+   ```
+   Cross-check against Linear: every issue currently in `Code Review` **with the `Aprobado` label** is a release candidate. Show the user the union and let them confirm or trim it — a release PR can carry tickets whose commit messages never named them.
+2. **For each confirmed ticket, via the `linear-issues` skill:**
+   - `stateId` → **In Review** (`d123e233-1f17-422e-b7c0-06f463e798df`).
+   - `labelIds` → current labels **minus all three workflow labels** (`Aprobado`, `Requiere cambios`, `Devuelto`). A ticket in `In Review` carries **no workflow label** — the code-review verdict already did its job and dragging it into the QA phase is misleading.
+3. **Guards:**
+   - A ticket still tagged **`Requiere cambios`** should not be in a release. Flag it and ask before moving it — it usually means an unmerged PR got swept into the list.
+   - A ticket already in `In Review`, `Done`, `Canceled` or `Duplicate` → skip it, report it, do not move it backwards.
+4. **Report what moved and what was skipped.** A release touching 20 tickets where 3 were skipped must say which 3 and why. Silent partial application is how tickets get lost.
+
+**Why:** `In Review` is the QA queue. Filling it at release time — not at merge-to-dev time — is what makes the state mean "this is live in production, go verify it". QA picks the queue up from there with `verify-ticket-prod`.
 
 ---
 
@@ -312,7 +348,17 @@ Did I just open a PR to dev?  (RULE 9 — suggested)
   → Ask: "¿Este cambio corresponde a un issue/ticket de Linear?"
       → Yes → linear-issues (search) → confirm match → document it in the
               PR body (## Linear: QUI-XXX — title — url) via gh pr edit.
+              Then suggest moving the issue to Code Review.
       → No  → Continue without linking.
+
+Did I just merge a PR whose base is main?  (RULE 10 — that IS the release)
+  → Collect QUI-XXX from the release commits + every issue in Code Review
+    tagged Aprobado. Confirm the list with the user.
+  → For each: state → In Review, and CLEAR all three workflow labels
+    (Aprobado / Requiere cambios / Devuelto).
+  → Ticket tagged 'Requiere cambios' in the list → flag and ask, do not move.
+  → Already In Review/Done/Canceled/Duplicate → skip and report.
+  → Report what moved AND what was skipped. Never apply partially in silence.
 
 Does any output have an AI signature/footer?
   → ALWAYS remove. No exceptions. Applies to commits, PRs, reviews, comments — everything.

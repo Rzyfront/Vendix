@@ -117,6 +117,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Choosing Playwright MCP for frontend E2E verification in a plan step | `how-to-plan` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Choosing test credentials from seeds or asking the user | `how-to-test` |
+| Closing a Linear ticket to Done after QA verifies it in production | `verify-ticket-prod` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
@@ -256,6 +257,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the POS open-table flow that propagates an optional customer to the session and draft order | `vendix-restaurant-ops` |
 | Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning) | `vendix-restaurant-ops` |
 | Modifying the storefront's `?mesa=` deep-link, mesa token hydration, or localStorage mesaToken guard | `vendix-restaurant-table-qr` |
+| Moving a Linear issue to Code Review when opening a PR to dev | `git-workflow` |
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
@@ -274,10 +276,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
+| Releasing to prod by merging dev into main and moving tickets to In Review | `git-workflow` |
 | Reporting QA results with charts and a critical/urgent section | `qa-report` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
+| Returning a failed ticket to Todo with the Devuelto label and raised priority | `verify-ticket-prod` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reusing app-address-form-fields shared component | `vendix-address-geocoding` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
@@ -298,6 +302,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |
+| Tagging a Linear issue Aprobado after merging a PR to dev | `pr-code-review` |
+| Tagging a Linear issue Requiere cambios after requesting changes on a PR | `pr-code-review` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding AI cost tracking | `vendix-ai-platform-core` |
@@ -306,7 +312,6 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Understanding Vendix architecture | `vendix-core` |
 | Understanding frontend web architecture | `vendix-frontend` |
 | Understanding settings inheritance and defaults | `vendix-settings-system` |
-| Updating a Linear issue to In Review after merging a PR to dev | `pr-code-review` |
 | Updating notification subscriptions or notification preferences | `vendix-notifications-system` |
 | Updating skill guidance or documenting repeatable AI patterns | `skill-creator` |
 | Updating the status of a Vendix Linear issue | `linear-issues` |
@@ -397,6 +402,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
+| Writing the Aprobado / Requiere cambios / Devuelto workflow labels on an issue | `linear-issues` |
 | analizar PR | `pr-code-review` |
 | changes with database migrations | `git-workflow` |
 | code review | `pr-code-review` |

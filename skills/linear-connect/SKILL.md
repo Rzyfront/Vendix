@@ -11,7 +11,7 @@ description: |
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Bootstrapping local Linear credentials for Vendix"
@@ -134,6 +134,21 @@ not ask the user to choose — there is no choice to make.
      and verify the cache matches reality. If the user has created new
      labels in Linear since the skill was last updated, surface them and ask
      the user whether to overwrite the cache.
+   - **Verify every baked-in UUID actually resolves — do not trust the
+     constants.** Labels and states get renamed, archived, or deleted in the
+     Linear UI without anyone touching this repo, and a dead UUID fails
+     silently at write time (`Entity not found: IssueLabel`) while the rest
+     of the mutation succeeds. In July 2026 four cached labels (`prod`,
+     `dev`, `Focus`, `Revisado`) had been dead for an unknown period and
+     `pr-code-review` was writing against one of them on every merge.
+     ```graphql
+     query { issueLabels(first: 100, includeArchived: true) {
+       nodes { id name archivedAt } } }
+     ```
+     Use `includeArchived: true` — an archived label still occupies its name
+     (creating a duplicate fails) but does not appear in the default listing.
+     Report any cached UUID that does not resolve instead of silently
+     dropping it.
    - Cache the user's own `viewer.id` as `user_id` so `linear-issues` can
      resolve "asignármelo a mí" without an extra query.
 
@@ -149,12 +164,14 @@ not ask the user to choose — there is no choice to make.
        "project_id": "0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59",
        "user_id": "<uuid from viewer>",
        "labels": {
-         "prod": "d6a4fc5c-7350-4cbf-b820-2fed8e6f131b",
-         "dev": "a9523fa5-931b-40ce-99b1-320831d46e58",
+         "Aprobado": "c41a06ad-bc03-4baf-a36a-93df6230054b",
+         "Requiere cambios": "1b0a8cac-be15-4aaf-9e68-ba9f86f57574",
+         "Devuelto": "dbdfcb7c-af6f-49bb-825f-3f38f9df218e",
          "IA": "b8d3e68a-9409-4b8e-b609-2eb4372f35bf",
          "Invesigacion": "c10a0a2e-f720-46ee-a743-1607c9c3a8ca",
-         "Focus": "c3173485-3aca-418d-9ccc-4bb86a34f3d1",
-         "Revisado": "de51cc7a-710d-461d-a38f-ccb98751e5d2"
+         "Bug": "cc489b0b-2b1e-4d58-92de-8c261f74b67e",
+         "Feature": "bb28dc3f-2774-44c5-ad88-5092a744c4d8",
+         "Improvement": "94555d1b-7006-4e51-a71e-6e7dfb98b420"
        },
        "states": {
          "Backlog": "4b74cd22-2daa-4220-bccc-002a6b4121de",
@@ -194,7 +211,7 @@ A short summary printed to the user, in this order:
 2. Their Linear identity (name + email)
 3. Team: Quickss (QUI)
 4. Project: Vendix
-5. Counts: 6 labels cached, 8 states cached, user_id resolved
+5. Counts: 8 labels cached, 8 states cached, user_id resolved
 6. Full path to `.linear/config.json` and a reminder that the cache
    contains no secrets
 7. Confirmation that the API key was added to `~/.zshrc` (or whatever rc

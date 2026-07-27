@@ -12,7 +12,7 @@ description: |
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.2"
+  version: "1.3"
   scope: [root]
   auto_invoke:
     - "Creating an issue in Linear"
@@ -22,6 +22,7 @@ metadata:
     - "Checking if a Vendix Linear issue already exists"
     - "Listing Vendix issues in Linear"
     - "Updating the status of a Vendix Linear issue"
+    - "Writing the Aprobado / Requiere cambios / Devuelto workflow labels on an issue"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
@@ -67,9 +68,11 @@ description body; do not deviate from the section order.
     agent MUST infer it from Severidad (see table in
     `references/issue-template-bug.md`) and confirm with the user.
 11. **Assignee** — "me", an email, or "unassigned" (default = unassigned).
-12. **Labels** — must be one of the six existing labels (see
+12. **Labels** — must be one of the eight existing labels (see
     `references/labels.md`); if the user wants a new one, tell them to
-    create it in Linear first.
+    create it in Linear first. Note that `Aprobado`, `Requiere cambios` and
+    `Devuelto` are **workflow labels** written by the pipeline skills, not
+    something a human picks at creation time — see **Workflow labels** below.
 
 **Questioning protocol — the agent MUST follow this loop:**
 
@@ -122,9 +125,18 @@ sobre Y?", "¿existe un bug de Z?".
   `project.id`).
 - **State filter** (optional) — if the user says "abiertos" / "cerrados",
   apply the same `state.type` filter as `list` after searching.
+- **State tiering** (optional, used by `pr-code-review`) — when the caller
+  needs candidates ranked by pipeline state rather than pure relevance, make
+  **one** `searchIssues` call and re-rank the returned nodes client-side.
+  `searchIssues` has **no state filter argument**; it returns
+  `state { name type }` on every node, and it is rate-limited to 30 req/min,
+  so never fan out one query per state. Recipe:
+  `references/graphql-mutations.md` → "Tiered match".
 
 `search` differs from `list`: `list` is a structured filter (by state),
-`search` is a relevance match by text/meaning via `searchIssues`.
+`search` is a relevance match by text/meaning via `searchIssues`. If you need
+a hard state filter *and* no relevance ranking, that is `list`
+(`issues(filter: { state: { name: { eq: "Code Review" } } })`), not `search`.
 
 ### General inputs (all actions)
 
@@ -157,6 +169,69 @@ Rules:
 - No trailing period
 - Optional `[<module>]` tag at the end (no space inside brackets)
 - Maximum ~60 characters total
+
+## Workflow labels and the Vendix pipeline
+
+This skill owns **every** Linear write in the Vendix pipeline — `git-workflow`,
+`pr-code-review` and `verify-ticket-prod` all delegate here instead of calling
+the API themselves. Those three skills decide *what* to write; this one is
+responsible for writing it *correctly*.
+
+### The pipeline
+
+```
+Backlog → Todo → In Progress → Code Review → In Review → Done
+                                    │  ▲          │         ▲
+                        +Aprobado / │  │          │         │ QA OK
+                 +Requiere cambios ─┘  │          │         │
+                                       │          │
+   git-workflow R9 ────────────────────┘          │
+   (abrir PR)                                     │
+   pr-code-review ── labels only, NEVER estado    │
+   git-workflow R10 (release dev→main) ───────────┘  limpia las 3 labels
+   verify-ticket-prod ── Done, o Todo +Devuelto +prioridad Alta
+```
+
+Full trigger table in `references/states.md`.
+
+### The three workflow labels are mutually exclusive
+
+`Aprobado` · `Requiere cambios` · `Devuelto` are three answers to one question:
+*what did the last reviewer decide?* An issue must never carry two at once — a
+leftover one contradicts the current truth.
+
+**Linear's `issueUpdate.labelIds` REPLACES the entire label set.** It does not
+append. Two failure modes follow, and both are silent:
+
+1. Sending a bare `[verdict]` array **wipes** the ticket's topic labels
+   (`Bug`, `Feature`, `IA`, `Invesigacion`, `Improvement`).
+2. Sending `[...current, verdict]` **stacks** contradictory verdicts.
+
+The correct write reads first, then strips, then adds:
+
+```js
+const WORKFLOW_LABELS = [
+  'c41a06ad-bc03-4baf-a36a-93df6230054b', // Aprobado
+  '1b0a8cac-be15-4aaf-9e68-ba9f86f57574', // Requiere cambios
+  'dbdfcb7c-af6f-49bb-825f-3f38f9df218e', // Devuelto
+]
+// read current, drop every workflow label, add exactly one (or none on release)
+const labelIds = [...current.filter(id => !WORKFLOW_LABELS.includes(id)), verdict]
+```
+
+```graphql
+query { issue(id: "QUI-XXX") { labels { nodes { id name } } } }
+```
+
+**Release clears all three and adds none** — a ticket in `In Review` carries no
+workflow label.
+
+### Always read back after a workflow write
+
+A dead label UUID fails with `Entity not found: IssueLabel` **without aborting
+the rest of the mutation**: the state moves, the label never lands, and the
+agent reports success. Read the issue back and confirm both the state and the
+label before telling the user it worked.
 
 ## Procedure
 
@@ -226,7 +301,8 @@ Rules:
    - For `update` (user chose to update a duplicate): use the `issueUpdate`
      mutation with the existing issue's UUID and only the fields that
      change. Merge — do not blindly overwrite the description; pass the
-     union of labels.
+     union of labels. If the write touches a **workflow label**, apply the
+     mutual-exclusivity rule in **Workflow labels** below.
    - For `comment` (user chose to append to a duplicate): use the
      `commentCreate` mutation with the existing issue's UUID and the new
      info as the comment body.
@@ -354,11 +430,17 @@ Do NOT dump raw GraphQL responses. The user wants a confirmation, not JSON.
 
 - **`LINEAR_API_KEY` missing or invalid** → tell the user the symptom,
   then trigger `linear-connect`. Do not attempt to fix credentials here.
-- **Label name not in cache** → tell the user the six valid labels (see
+- **Label name not in cache** → tell the user the eight valid labels (see
   `references/labels.md`) and ask which to use, or to create a new one
   in Linear first. Do not auto-create labels.
-- **State name not in cache** → same pattern; show the seven valid states
+- **State name not in cache** → same pattern; show the eight valid states
   from `references/states.md`.
+- **`Entity not found: IssueLabel` / `Entity not found: WorkflowState`** →
+  the cached UUID is dead: the label or state was renamed away, archived, or
+  deleted in the Linear UI. **This error does not abort the rest of the
+  mutation** — the state change can succeed while the label silently never
+  lands. Never report success without reading the issue back. Re-resolve the
+  cache with `linear-connect` and tell the user which entry was stale.
 - **GraphQL validation error** → show the message; the user needs to fix
   the input.
 - **Rate limit** (HTTP 429 or `extensions.code: RATE_LIMITED`) → wait 30s
@@ -394,7 +476,7 @@ Agent behavior:
 9. Asks: "¿Capturas o logs?" → user pastes Sentry URL.
 10. Priority: user said "alta" → 2. Confirmed with user.
 11. Assignee: "asignármelo" → resolves to `viewer.id`.
-12. Labels: "prod" → resolves to `d6a4fc5c-7350-4cbf-b820-2fed8e6f131b`.
+12. Labels: "Bug" → resolves to `cc489b0b-2b1e-4d58-92de-8c261f74b67e`.
 13. Builds title: `FIX/ Error al aprobar reseña [ecommerce]`. Confirms.
 14. **Deduplication check**: runs `searchIssues`, finds no Vendix match,
     shows the assembled issue, and asks for confirmation.
