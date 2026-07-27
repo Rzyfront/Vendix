@@ -50,22 +50,24 @@ export class TodayReservationsPanelComponent {
   checkedIn = output<Booking>();
   started = output<Booking>();
   completed = output<Booking>();
+  dismissed = output<Booking>();
 
   constructor() {
-    // Watch the bookings list for terminal-ish transitions and
-    // schedule an auto-archive 2 minutes later via the
-    // ReservationsService singleton (so the timer survives the panel
-    // being recreated by the parent's periodic re-fetch).
+    // Watch the bookings list for `completed` transitions and schedule
+    // an auto-archive 2 minutes later via the ReservationsService
+    // singleton (so the timer survives the panel being recreated by
+    // the parent's periodic re-fetch).
     //
-    // - `completed` bookings: confirmed by the staff, hide them after
-    //   a brief confirmation window.
-    // - expired pending bookings: the staff didn't act on them, the
-    //   slot is gone. Hide them the same way to keep the panel
-    //   focused on what's still actionable today.
+    // Only `completed` bookings auto-archive: they're confirmed done,
+    // so we hide them after a brief confirmation window. Expired
+    // bookings do NOT auto-archive anymore — they stay visible with a
+    // "Descartar" action so the operator can consciously dismiss them
+    // (e.g. the client called to reschedule) instead of the row
+    // silently sliding off on its own.
     effect(() => {
       const bookings = this.bookings();
       for (const booking of bookings) {
-        if (booking.status === 'completed' || this.isExpired(booking)) {
+        if (booking.status === 'completed') {
           this.reservations.scheduleTodayArchive(
             booking.id,
             TodayReservationsPanelComponent.COMPLETED_VISIBLE_MS,
@@ -153,14 +155,16 @@ export class TodayReservationsPanelComponent {
    *
    * Delegates the time-vs-grace math to the shared
    * `isBookingExpired()` util which already filters non-expirable
-   * statuses. We add a tighter grace window (30 min vs the calendar's
-   * 2h) so the panel flags overdue bookings faster — the calendar can
-   * afford to wait because the staff is actively looking at it, but
-   * the today-panel needs to surface the problem now.
+   * statuses (only pending/confirmed can expire). We pass a grace of
+   * `0`, so a booking is flagged as soon as its `end_time` passes —
+   * and since `end_time = start_time + service_duration_minutes`, the
+   * expiry threshold naturally scales with the length of the service:
+   * a 3-min service expires at the 3-min mark, a 2-hour service only
+   * after 2 hours. If the client hasn't arrived/confirmed by then, the
+   * slot is considered missed.
    */
   isExpired(booking: Booking): boolean {
-    if (booking.status === 'confirmed') return false;
-    return isBookingExpired(booking, new Date(), 30);
+    return isBookingExpired(booking, new Date(), 0);
   }
 
   /**
@@ -191,6 +195,30 @@ export class TodayReservationsPanelComponent {
 
   canComplete(booking: Booking): boolean {
     return booking.status === 'in_progress';
+  }
+
+  /**
+   * A booking can be dismissed from the panel only once it's overdue
+   * ("Vencida"). Dismissing is a UI-only action — it hides the row so
+   * the operator can clear the notification when the client says they
+   * will reschedule; the booking itself is left untouched in the
+   * backend so it stays available to reschedule from the calendar.
+   */
+  canDismiss(booking: Booking): boolean {
+    return this.isExpired(booking);
+  }
+
+  /**
+   * Remove an overdue booking from the today panel. Delegates to the
+   * singleton service so the archived state persists (localStorage)
+   * and survives the parent's periodic re-fetch — otherwise the next
+   * 2-min re-fetch would bring the row right back.
+   */
+  dismissExpired(booking: Booking, event: Event): void {
+    event.stopPropagation();
+    if (!this.canDismiss(booking)) return;
+    this.reservations.archiveTodayBookingNow(booking.id);
+    this.dismissed.emit(booking);
   }
 
   quickStart(booking: Booking, event: Event): void {

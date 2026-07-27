@@ -25,6 +25,23 @@
         </div>
       }
 
+      <!-- Past-time overlay (muted striped). Solo para HOY: marca los
+           chunks ya transcurridos que NO caen sobre un free-slot,
+           unavailable-slot o booking — para que el operador vea de un
+           vistazo qué franjas del día ya pasaron y no son seleccionables.
+           Capa por DEBAJO de unavailable/free/booking para que esos
+           overlays tengan prioridad visual cuando se solapan. -->
+      @for (slot of pastSlots(); track slot.start + slot.end) {
+        <div
+          class="past-slot-block"
+          [style.top.%]="getFreeSlotTop(slot)"
+          [style.height.%]="getFreeSlotHeight(slot)"
+          [attr.aria-label]="'Horario ya transcurrido: ' + slot.start + ' a ' + slot.end"
+          [title]="'Ya pasó ' + slot.start + ' – ' + slot.end">
+          <span class="past-slot-label">Ya pasó</span>
+        </div>
+      }
+
       <!-- Unavailable-slot overlay (red). NOT clickable: clicks bubble to
            the day-column's onColumnClick, which computes the snap and the
            wizard validation fires the lunch-break / out-of-hours toast. -->

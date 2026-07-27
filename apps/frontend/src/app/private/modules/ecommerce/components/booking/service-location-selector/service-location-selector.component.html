@@ -1,6 +1,43 @@
 <section class="service-location">
+  <!-- El cliente elige DÓNDE se realiza el servicio. Esta elección
+       activa/desactiva la captura de dirección abajo. Sin este toggle,
+       la UX anterior tomaba la decisión por el cliente en función de
+       `offerHomeService`, lo que generaba confusión ("no elegí A
+       domicilio pero aparece A domicilio"). -->
+  <h3 class="service-location__title">¿Dónde se realiza el servicio?</h3>
+  <div class="service-location__toggle" role="tablist">
+    <button
+      type="button"
+      role="tab"
+      class="service-location__toggle-btn"
+      [class.active]="effectiveServiceLocation() === 'shop'"
+      [disabled]="!offerHomeService()"
+      (click)="pickShop()"
+    >
+      <app-icon name="store" [size]="16"></app-icon>
+      En el local del técnico
+      @if (effectiveServiceLocation() === 'shop' && storeAddress(); as addr) {
+        <span class="service-location__toggle-hint">
+          {{ formatAddressLine(addr) }}
+        </span>
+      }
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="service-location__toggle-btn"
+      [class.active]="effectiveServiceLocation() === 'home'"
+      (click)="pickHome()"
+    >
+      <app-icon name="home" [size]="16"></app-icon>
+      En mi domicilio
+    </button>
+  </div>
+
+  <!-- Cuando la tienda NO ofrece servicio a domicilio, el botón de
+       "En mi domicilio" se deshabilita para reflejar la config real,
+       y abajo mostramos solo la dirección del local. -->
   @if (!offerHomeService() && storeAddress()) {
-    <h3 class="service-location__title">En el local del técnico</h3>
     <div class="store-address">
       <app-icon name="map-pin" [size]="20"></app-icon>
       <div>

@@ -146,6 +146,30 @@ export class ReservationsService {
     return this.archivedTodayBookingIds().has(bookingId);
   }
 
+  /**
+   * Immediately archive a booking from the today panel (no visibility
+   * window, no polling). Used by the manual "Descartar" action on an
+   * overdue booking: the operator has decided to clear it right now.
+   *
+   * Must add `bookingId` to `archivedTodayBookingIds` in a way that
+   * NOTIFIES the signal, so the panel's `displayedBookings` computed
+   * re-evaluates and the row disappears. The persistence to
+   * localStorage is handled automatically by the constructor effect
+   * that watches this signal.
+   */
+  archiveTodayBookingNow(bookingId: number): void {
+    if (this.archivedTodayBookingIds().has(bookingId)) return;
+    this.archivedTodayBookingIds.update((set) => {
+      const next = new Set(set);
+      next.add(bookingId);
+      return next;
+    });
+    // Drop any pending auto-archive timer for this booking: the
+    // operator already dismissed it manually, so the interval has
+    // nothing left to do.
+    this.completedAtByBookingId.delete(bookingId);
+  }
+
   getTodayArchivedCount(): number {
     return this.archivedTodayBookingIds().size;
   }

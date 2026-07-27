@@ -54,7 +54,17 @@
             {{ getStatusLabel(booking) }}
           </app-badge>
           <!-- Quick actions -->
-          @if (canCheckIn(booking)) {
+          @if (canDismiss(booking)) {
+            <button
+              type="button"
+              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md bg-[var(--color-error)] text-white hover:opacity-90 transition-opacity"
+              (click)="dismissExpired(booking, $event)"
+              title="Descartar de la lista (el cliente puede reagendar)"
+            >
+              <app-icon name="x" [size]="12"></app-icon>
+              Descartar
+            </button>
+          } @else if (canCheckIn(booking)) {
             <button
               type="button"
               class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-md bg-[var(--color-success)] text-white hover:opacity-90 transition-opacity"

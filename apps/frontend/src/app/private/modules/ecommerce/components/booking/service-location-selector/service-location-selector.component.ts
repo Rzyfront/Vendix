@@ -5,6 +5,7 @@ import {
   output,
   effect,
   inject,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
@@ -64,19 +65,48 @@ export class ServiceLocationSelectorComponent {
    */
   readonly offerHomeService = input<boolean>(true);
 
-  /** Resolved service location — derived from `offerHomeService`.
-   *  Emitted to the parent on input change so the parent can react
-   *  without polling the component. */
+  /** Resolved service location — driven by la elección explícita del
+   *  cliente o, si no eligió todavía, por la config `offerHomeService`.
+   *  Emitted to the parent on cada cambio para que BookingComponent
+   *  pueda sincronizar `serviceLocation` con el selector. */
   readonly valueChange = output<ServiceLocation>();
   readonly addressChange = output<number | null>();
 
+  /** Elección explícita del usuario. null = aún no eligió, en ese
+   *  caso el default es `offerHomeService() ? 'home' : 'shop'`. */
+  private readonly userChoice = signal<'shop' | 'home' | null>(null);
+
   constructor() {
-    // Emit the resolved value whenever the input changes. Replaces the
-    // old `pickHome()` / `pickShop()` user-click handlers — the
-    // decision is now driven by config, not user input.
+    // Re-emite cuando cambia la elección del usuario o el flag de
+    // config. La decisión efectiva es siempre: elección explícita si
+    // existe, sino el fallback de `offerHomeService`.
     effect(() => {
-      this.valueChange.emit(this.offerHomeService() ? 'home' : 'shop');
+      const choice = this.userChoice();
+      const fallback = this.offerHomeService() ? 'home' : 'shop';
+      this.valueChange.emit(choice ?? fallback);
     });
+  }
+
+  pickHome(): void {
+    if (!this.offerHomeService()) return; // la tienda no ofrece a domicilio
+    this.userChoice.set('home');
+  }
+
+  pickShop(): void {
+    this.userChoice.set('shop');
+  }
+
+  /**
+   * Modalidad efectiva: la elección EXPLÍCITA del usuario si hizo click,
+   * si no, el fallback de `offerHomeService` (que el backend marca si la
+   * tienda ofrece o no el servicio a domicilio). Lo usamos en el template
+   * para marcar `[class.active]` en el botón correspondiente, así el
+   * visual refleja la decisión actual — no la config del backend.
+   */
+  effectiveServiceLocation(): ServiceLocation {
+    const choice = this.userChoice();
+    if (choice) return choice;
+    return this.offerHomeService() ? 'home' : 'shop';
   }
 
   /**

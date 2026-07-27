@@ -1,4 +1,14 @@
-import {Component, ChangeDetectionStrategy, computed, inject, input, output, signal, DestroyRef} from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  DestroyRef,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -30,6 +40,22 @@ export class BookingSlotPickerComponent {
   readonly bookingMode = input<'provider_required' | 'free_booking'>(
     'provider_required',
   );
+
+  /**
+   * Initial values pre-filled by the parent (typically the checkout when
+   * the user came in through the dedicated booking flow and `pending_booking`
+   * was already restored from sessionStorage). Without these inputs the
+   * picker starts empty and forces the customer to re-pick a date / slot
+   * they JUST chose — confusing and a known orphan-order source.
+   *
+   * For `provider_required`: date is matched against the day in
+   * `availableSlots`, and the slot with matching `start_time`/`end_time`
+   * is preselected.
+   * For `free_booking`: a synthetic slot is created from the initial times.
+   */
+  readonly initialDate = input<string | null>(null);
+  readonly initialStartTime = input<string | null>(null);
+  readonly initialEndTime = input<string | null>(null);
 
   slotSelected = output<{
     date: string;
@@ -108,6 +134,84 @@ export class BookingSlotPickerComponent {
   constructor() {
     this.generateDates();
     this.loadAvailability();
+
+    // Re-aplicar la selección inicial cada vez que los inputs cambian
+    // DESPUÉS de cargar availability. Cubre el caso real:
+    //   - el padre pinta el picker con `bookingSelections` aún vacío
+    //     (cart todavía hidrata del backend),
+    //   - 100 ms después `bookingSelections` se rellena desde
+    //     sessionStorage → el template re-renderiza pasando los nuevos
+    //     `initialDate/initialStartTime/initialEndTime`,
+    //   - este effect dispara `applyInitialSelection` con los slots
+    //     ya en memoria y pre-marca fecha + slot sin re-fetch.
+    effect(() => {
+      const _date = this.initialDate();
+      const _start = this.initialStartTime();
+      // Disparamos cuando los inputs cambian; usamos los slots ya
+      // cargados (no re-fetch).
+      if (_date && _start && this.availableSlots().length > 0) {
+        this.applyInitialSelection(this.availableSlots());
+      }
+    });
+  }
+
+  /**
+   * Si el padre pasó `initialDate/initialStartTime/initialEndTime`,
+   * pre-seleccionamos la fecha y el slot apenas cargan los slots. Llamamos
+   * a esto tanto en el path sin `availableSlots` (free_booking → slots
+   * sintéticos) como en el path con backend — fuera de `loadAvailability`
+   * para que el caller pueda invocarlo manualmente si lo necesita.
+   *
+   * Devuelve `true` cuando se aplicó un valor inicial (para que el caller
+   * pueda saltarse el comportamiento por defecto de "primera fecha con
+   * slots").
+   */
+  private applyInitialSelection(availableSlots: AvailabilitySlot[] = []): boolean {
+    const initDate = this.initialDate();
+    const initStart = this.initialStartTime();
+    const initEnd = this.initialEndTime();
+    if (!initDate) return false;
+    // Normalizamos: el backend puede devolver `"16:00:00"` y el padre
+    // puede haber guardado `"16:00"` (o al revés). Comparamos por HH:mm.
+    const normStart = (initStart ?? '').slice(0, 5);
+    const normEnd = (initEnd ?? '').slice(0, 5);
+    const normDate = initDate.slice(0, 10);
+
+    if (this.bookingMode() === 'free_booking' && normStart) {
+      const freeSlot = this.freeBookingSlots().find((s) => s.time === normStart);
+      if (!freeSlot) return false;
+      this.selectedDate.set(normDate);
+      this.selectedFreeSlot.set(freeSlot);
+      this.slotSelected.emit({
+        date: normDate,
+        start_time: normStart,
+        end_time: normEnd,
+      });
+      return true;
+    }
+
+    if (normStart) {
+      const match = availableSlots.find(
+        (s) =>
+          (s.date ?? '').slice(0, 10) === normDate &&
+          (s.start_time ?? '').slice(0, 5) === normStart,
+      );
+      if (!match) return false;
+      this.selectedDate.set(normDate);
+      this.slotsForSelectedDate.set(
+        this.availableSlots().filter(
+          (s) => (s.date ?? '').slice(0, 10) === normDate && s.available > 0,
+        ),
+      );
+      this.selectedSlot.set(match);
+      this.slotSelected.emit({
+        date: normDate,
+        start_time: normStart,
+        end_time: normEnd || (match.end_time ?? '').slice(0, 5),
+      });
+      return true;
+    }
+    return false;
   }
 
   private getHeaders(): HttpHeaders {
@@ -152,6 +256,10 @@ export class BookingSlotPickerComponent {
       if (dates.length > 0) {
         this.selectDate(dates[0]);
       }
+      // Si el padre ya tiene fecha + horario pre-cargados (caso típico:
+      // veníamos del BookingComponent), los dejamos pre-seleccionados
+      // en lugar de forzar al cliente a re-elegir todo.
+      this.applyInitialSelection();
       return;
     }
 
@@ -178,6 +286,11 @@ export class BookingSlotPickerComponent {
           const slots = response.data || response || [];
           this.availableSlots.set(slots);
           this.loading.set(false);
+          // Si el padre pasó initialDate/initialStartTime intentamos
+          // pre-marcar ese slot específicamente; si no hay match caemos
+          // al comportamiento por defecto (primera fecha con slots).
+          const init = this.applyInitialSelection(slots);
+          if (init) return;
           if (slots.length > 0) {
             const firstAvailableDate = slots.find(
               (s: AvailabilitySlot) => s.available > 0,

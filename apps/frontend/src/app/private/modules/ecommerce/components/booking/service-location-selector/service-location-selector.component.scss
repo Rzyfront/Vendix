@@ -11,6 +11,65 @@
   color: var(--color-text-primary);
 }
 
+// Toggle horizontal: dos botones grandes tipo "segmented control".
+// El cliente VE explícitamente las dos opciones y elige — sin esto
+// el componente decidía solo por la config y mostraba "A domicilio"
+// sin que el usuario tocara nada.
+.service-location__toggle {
+    display: flex;
+    gap: 8px;
+    padding: 4px;
+    background: var(--color-background, #f5f6f8);
+    border-radius: var(--radius-md, 8px);
+}
+
+.service-location__toggle-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+
+    &:hover:not(:disabled) {
+        color: var(--color-text-primary);
+    }
+
+    &.active {
+        background: var(--color-surface, #fff);
+        color: var(--color-primary);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        font-weight: 600;
+    }
+
+    &:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+}
+
+.service-location__toggle-hint {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--color-text-secondary);
+    margin-top: 2px;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .service-location__subtitle {
   margin: 0;
   font-size: 13px;

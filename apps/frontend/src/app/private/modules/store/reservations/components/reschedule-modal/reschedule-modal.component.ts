@@ -212,8 +212,8 @@ export class RescheduleModalComponent {
           date: s.date,
           start_time: s.start_time,
           end_time: s.end_time,
-          // The ecommerce endpoint doesn't return is_booked; mark every
-          // slot with available > 0 as available.
+          // El endpoint ecommerce no devuelve is_booked. Lo inferimos
+          // desde `available` (>0 = libre).
           is_booked: (s.available ?? 0) <= 0,
         } as AvailabilitySlot));
       this.slots.set(daySlots);
@@ -221,10 +221,21 @@ export class RescheduleModalComponent {
     }
 
     this.loadingSlots.set(true);
-    this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id, undefined, true)
+    // `include_booked=false` le pide al backend que DEVUELVA SOLO los
+    // slots libres (omite los `is_booked: true`). Esto evita depender
+    // de la lógica de overlap del backend — que en datos con bookings
+    // legacy / huérfanos puede marcar como ocupados slots que en
+    // realidad están libres. Como el modal de reagendar solo ofrece
+    // huecos, no necesitamos la franja ocupada.
+    this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id, undefined, false)
       .pipe(finalize(() => this.loadingSlots.set(false)))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: (slots) => this.slots.set(slots),
+        next: (slots) => {
+          // Forzamos `is_booked: false` en cada slot (ya viene así
+          // del backend con `include_booked=false`, pero defendemos
+          // en profundidad por si la API cambia la semántica).
+          this.slots.set(slots.map((s) => ({ ...s, is_booked: false })));
+        },
         error: () => this.slots.set([]),
       });
   }

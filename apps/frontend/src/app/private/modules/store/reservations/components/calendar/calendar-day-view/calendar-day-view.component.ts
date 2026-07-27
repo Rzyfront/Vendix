@@ -98,6 +98,61 @@ export class CalendarDayViewComponent {
     return ((minutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
   });
 
+  /**
+   * Past-time slots for the SELECTED day. Only populated when the day IS
+   * today (otherwise the wizard always shows the full future schedule).
+   *
+   * We chunk the elapsed range into `slotMinutes`-sized blocks that match
+   * the day-grid granularity, then filter out any chunk that overlaps with
+   * an existing `freeSlots`, `unavailableSlots` or `bookings` row so the
+   * past overlay never double-paints on top of those (the booking block or
+   * pending-stripe already paints the truth for that span).
+   *
+   * Why we add this on top of `unavailableSlots`: a time that *was* open
+   * but already passed is conceptually different from "the store never
+   * opens at this hour". Painting both with the same red loses that
+   * distinction. The past overlay uses a muted, semi-transparent striped
+   * fill so it reads as "history you can't book" rather than "store closed".
+   */
+  readonly pastSlots = computed<FreeSlot[]>(() => {
+    if (!this.isToday()) return [];
+    const now = this.currentTimeSignal();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    if (nowMin <= this.DAY_START) return [];
+    const step = this.slotMinutes();
+    const cap = Math.min(nowMin, this.DAY_END);
+    const out: FreeSlot[] = [];
+    for (let t = this.DAY_START; t + step <= cap; t += step) {
+      const start = this.minutesToTimeLocal(t);
+      const end = this.minutesToTimeLocal(t + step);
+      if (this.overlapsAny(start, end)) continue;
+      out.push({ start, end });
+    }
+    return out;
+  });
+
+  private overlapsAny(start: string, end: string): boolean {
+    const s = this.parseTimeToMinutes(start);
+    const e = this.parseTimeToMinutes(end);
+    const inAny = (a: string, b: string) => {
+      const am = this.parseTimeToMinutes(a);
+      const bm = this.parseTimeToMinutes(b);
+      return Math.max(s, am) < Math.min(e, bm);
+    };
+    for (const f of this.freeSlots()) if (inAny(f.start, f.end)) return true;
+    for (const u of this.unavailableSlots()) if (inAny(u.start, u.end)) return true;
+    for (const b of this.bookings()) {
+      if (inAny(b.start_time, b.end_time)) return true;
+    }
+    return false;
+  }
+
+  private minutesToTimeLocal(minutes: number): string {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
   readonly dateLabel = computed(() => {
     const d = this.currentDate();
     const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];

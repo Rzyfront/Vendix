@@ -264,6 +264,35 @@ export class BookingComponent implements OnInit {
     this.selectedAddressId.set(id);
   }
 
+  /**
+   * Comprime una dirección del cliente a una etiqueta corta legible
+   * para mostrar en el resumen del checkout. El modelo real del
+   * ecommerce varía entre despliegues (street_line, address_line_1,
+   * complement, city, neighborhood), así que armamos el texto con los
+   * campos que estén poblados y caemos con gracia al `id` si no
+   * encontramos nada.
+   */
+  private formatAddressLabel(addr: any): string {
+    if (!addr || typeof addr !== 'object') return 'Dirección guardada';
+    const parts: string[] = [];
+    const tryKeys = [
+      ['street_line_1', 'street_line_2'],
+      ['address_line_1', 'address_line_2'],
+      ['street', 'complement'],
+    ];
+    for (const [a, b] of tryKeys) {
+      if (addr[a]) parts.push(String(addr[a]));
+      if (addr[b]) parts.push(String(addr[b]));
+      if (parts.length) break;
+    }
+    if (addr.city) parts.push(String(addr.city));
+    else if (addr.neighborhood) parts.push(String(addr.neighborhood));
+    if (parts.length) return parts.filter(Boolean).join(', ');
+    return addr.label
+      ? String(addr.label)
+      : `Dirección #${addr.id ?? ''}`.trim();
+  }
+
   // --- Data loading ---
 
   private loadProduct(): void {
@@ -398,6 +427,17 @@ export class BookingComponent implements OnInit {
     if (variantId) {
       bookingSelection['product_variant_id'] = variantId;
     }
+    // Persistimos también el proveedor seleccionado (cuando aplica) para
+    // que el resumen del checkout pueda mostrarlo al lado de la fecha
+    // y el horario, sin obligar al cliente a re-picar.
+    const providerId = this.providerId();
+    if (providerId) {
+      bookingSelection['provider_id'] = providerId;
+    }
+    const provider = this.selectedProvider();
+    if (provider?.display_name) {
+      bookingSelection['provider_name'] = provider.display_name;
+    }
     // Persist the service-location choice so the checkout (which calls
     // /ecommerce/reservations/ POST) can forward it.
     const svcLocation = this.serviceLocation();
@@ -406,6 +446,17 @@ export class BookingComponent implements OnInit {
     }
     if (svcLocation === 'home' && this.selectedAddressId() != null) {
       bookingSelection['service_address_id'] = this.selectedAddressId();
+      // Componemos una etiqueta legible para mostrar en el resumen del
+      // checkout (sin obligar al cliente a recordar qué dirección tenía
+      // guardada). Probamos varios campos porque el modelo del
+      // ecommerce no es uniforme en todos los despliegues.
+      const address = this.customerAddresses().find(
+        (a: any) => a?.id === this.selectedAddressId(),
+      );
+      if (address) {
+        bookingSelection['service_address_label'] =
+          this.formatAddressLabel(address);
+      }
     }
     sessionStorage.setItem('pending_booking', JSON.stringify(bookingSelection));
 

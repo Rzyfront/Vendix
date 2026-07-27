@@ -209,16 +209,20 @@ export class ProviderAvailabilityService {
 
         let totalSlots = 0;
         if (!exception?.is_unavailable) {
-          // Find the active schedule for this day-of-week
-          const schedule = provSchedules.find(
+          // Sum ALL blocks for this day-of-week. `provider_schedules`
+          // supports split shifts via `block_order` (morning + afternoon,
+          // etc.) — `find()` solo contaba el primer bloque y descartaba
+          // los restantes, lo que dejaba al proveedor con stats
+          // incompletos en la Disponibilidad.
+          const daySchedules = provSchedules.filter(
             (s) => s.day_of_week === dayOfWeek,
           );
-          if (schedule) {
+          for (const schedule of daySchedules) {
             const effectiveStart =
               exception?.custom_start_time ?? schedule.start_time;
             const effectiveEnd =
               exception?.custom_end_time ?? schedule.end_time;
-            totalSlots = this.countSlots(
+            totalSlots += this.countSlots(
               effectiveStart,
               effectiveEnd,
               productDuration,

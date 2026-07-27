@@ -378,3 +378,50 @@
     border-radius: 4px;
   }
 }
+
+/**
+ * Past-time overlay — para HOY, marca las franjas que YA pasaron y no
+ * caen sobre un free-slot / unavailable-slot / booking. Diferencia
+ * visual entre "el local estuvo cerrado" (rojo unavailable) y "esto ya
+ * ocurrió en el día" (gris-pizarra con rayas más sutiles).
+ *
+ * Estética apagada a propósito: el cerebro debe distinguirlo de un
+ * pending booking (amarillo) y de un NO DISPONIBLE pre-apertura (rojo
+ * puro). Gris/blue-grisáceo lee como "histórico, no accionable".
+ */
+.past-slot-block {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  background: rgba(148, 163, 184, 0.18);
+  border-left: 3px solid rgba(100, 116, 139, 0.55);
+  border-radius: 6px;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(148, 163, 184, 0.18),
+    rgba(148, 163, 184, 0.18) 6px,
+    rgba(148, 163, 184, 0.08) 6px,
+    rgba(148, 163, 184, 0.08) 12px
+  );
+  padding: 3px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+
+  .past-slot-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+    background: rgba(241, 245, 249, 0.85);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+}
