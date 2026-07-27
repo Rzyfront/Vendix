@@ -80,7 +80,7 @@ interface DomainNextStep {
       >
         @if (isLoading()) {
           <div
-            class="flex min-h-[320px] items-center justify-center rounded-lg border border-slate-200 bg-white"
+            class="flex min-h-[320px] items-center justify-center rounded-lg border border-slate-200 bg-surface"
           >
             <app-spinner
               text="Cargando dominio"
@@ -89,7 +89,7 @@ interface DomainNextStep {
           </div>
         } @else if (domain(); as item) {
           <section
-            class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+            class="rounded-lg border border-slate-200 bg-surface p-4 md:p-6"
           >
             <div
               class="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
@@ -194,7 +194,7 @@ interface DomainNextStep {
 
           @if (dnsInstructions()?.root_hostname) {
             <section
-              class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+              class="rounded-lg border border-slate-200 bg-surface p-4 md:p-6"
             >
               <div
                 class="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between"
@@ -247,7 +247,7 @@ interface DomainNextStep {
                         track assignment.id
                       ) {
                         <div
-                          class="flex items-center justify-between gap-3 rounded-md bg-white px-2 py-2"
+                          class="flex items-center justify-between gap-3 rounded-md bg-surface px-2 py-2"
                         >
                           <div class="min-w-0">
                             <span
@@ -282,7 +282,7 @@ interface DomainNextStep {
             class="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"
           >
             <section
-              class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+              class="rounded-lg border border-slate-200 bg-surface p-4 md:p-6"
             >
               <h2 class="mb-1 text-base font-semibold text-slate-950">
                 Ajustes
@@ -298,7 +298,7 @@ interface DomainNextStep {
                   >
                   <select
                     formControlName="app_type"
-                    class="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950"
+                    class="h-11 w-full rounded-lg border border-slate-200 bg-surface px-3 text-sm text-slate-950"
                   >
                     <option value="STORE_ECOMMERCE">E-commerce</option>
                     <option value="STORE_LANDING">Landing tienda</option>
@@ -312,7 +312,7 @@ interface DomainNextStep {
                   >
                   <select
                     formControlName="domain_type"
-                    class="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950"
+                    class="h-11 w-full rounded-lg border border-slate-200 bg-surface px-3 text-sm text-slate-950"
                   >
                     <option value="ecommerce">E-commerce</option>
                     <option value="store">Tienda</option>
@@ -363,7 +363,7 @@ interface DomainNextStep {
             </section>
 
             <section
-              class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+              class="rounded-lg border border-slate-200 bg-surface p-4 md:p-6"
             >
               <h2 class="mb-1 text-base font-semibold text-slate-950">
                 Diagnóstico
@@ -422,7 +422,7 @@ interface DomainNextStep {
           </div>
 
           <section
-            class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+            class="rounded-lg border border-slate-200 bg-surface p-4 md:p-6"
           >
             <div class="mb-4">
               <h2 class="text-base font-semibold text-slate-950">
@@ -561,7 +561,7 @@ interface DomainNextStep {
             >
             <button
               type="button"
-              class="flex w-full items-start gap-2 rounded-md bg-white px-2 py-2 text-left font-mono text-xs text-slate-950"
+              class="flex w-full items-start gap-2 rounded-md bg-surface px-2 py-2 text-left font-mono text-xs text-slate-950"
               (click)="copyToClipboard(providerHost(record))"
             >
               <span class="min-w-0 flex-1 break-all">{{
@@ -582,7 +582,7 @@ interface DomainNextStep {
             >
             <button
               type="button"
-              class="flex w-full items-start gap-2 rounded-md bg-white px-2 py-2 text-left font-mono text-xs text-slate-950"
+              class="flex w-full items-start gap-2 rounded-md bg-surface px-2 py-2 text-left font-mono text-xs text-slate-950"
               (click)="copyToClipboard(record.value)"
             >
               <span class="min-w-0 flex-1 break-all">{{ record.value }}</span>
@@ -1213,9 +1213,9 @@ export class DomainSetupPageComponent implements OnInit {
     if (stage.status === 'failed')
       return 'border-red-500 bg-red-500 text-white';
     if (stage.waiting || stage.status === 'waiting') {
-      return 'border-sky-500 bg-white text-sky-600';
+      return 'border-sky-500 bg-surface text-sky-600';
     }
-    return 'border-slate-300 bg-white text-slate-400';
+    return 'border-slate-300 bg-surface text-slate-400';
   }
 
   stageTextClass(stage: DomainProvisioningStage): string {

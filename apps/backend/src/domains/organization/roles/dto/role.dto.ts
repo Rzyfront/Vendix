@@ -153,6 +153,14 @@ export class RoleWithPermissionDescriptionsDto {
   name: string;
 
   @ApiProperty({
+    description:
+      'ID de la organización dueña del rol. NULL para roles del sistema (compartidos entre todas las orgs).',
+    example: 1,
+    nullable: true,
+  })
+  organization_id?: number | null;
+
+  @ApiProperty({
     description: 'Descripción del rol',
     example: 'Gestor de tienda con permisos administrativos',
   })

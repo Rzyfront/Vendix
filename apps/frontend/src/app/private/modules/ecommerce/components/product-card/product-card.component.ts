@@ -1,12 +1,14 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   computed,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct, formatMenuNextAvailable } from '../../services/catalog.service';
 import { formatNextAvailableDetailed } from '../../services/next-available.util';
@@ -276,7 +278,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       align-items: center;
       justify-content: center;
       color: var(--color-text-primary);
-      background: rgba(255, 255, 255, 0.9);
+      background: rgba(var(--color-surface-rgb), 0.9);
       border: 1px solid rgba(148, 163, 184, 0.24);
       border-radius: 999px;
       backdrop-filter: blur(10px);
@@ -294,7 +296,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 
       &:hover {
         color: var(--color-primary);
-        background: #ffffff;
+        background: var(--color-surface);
         border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
         transform: translateY(-1px) scale(1.02);
       }
@@ -310,7 +312,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       left: 0.6rem;
       bottom: 0.6rem;
       z-index: 2;
-      background: rgba(255, 255, 255, 0.9);
+      background: rgba(var(--color-surface-rgb), 0.9);
       border-radius: 999px;
       padding: 2px;
       backdrop-filter: blur(10px);
@@ -345,7 +347,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       font-weight: var(--fw-semibold);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      background: rgba(255, 255, 255, 0.88);
+      background: rgba(var(--color-surface-rgb), 0.88);
       color: var(--color-text-primary);
       border: 1px solid rgba(148, 163, 184, 0.24);
       z-index: 1;
@@ -377,14 +379,14 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       padding: 0 !important;
       border-radius: 50% !important;
       color: var(--color-text-secondary) !important;
-      background: rgba(255, 255, 255, 0.88) !important;
+      background: rgba(var(--color-surface-rgb), 0.88) !important;
       border: 1px solid rgba(148, 163, 184, 0.22) !important;
       box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.45);
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
 
       &:hover {
-        background: #ffffff !important;
+        background: var(--color-surface) !important;
         color: var(--color-primary) !important;
       }
 
@@ -601,6 +603,7 @@ export class ProductCardComponent {
   readonly quick_view = output<EcommerceProduct>();
   readonly share = output<EcommerceProduct>();
 
+  private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
   public readonly tableContext = inject(TableContextService);
@@ -802,14 +805,14 @@ export class ProductCardComponent {
       // `add_to_cart` upstream — the parent container would otherwise call
       // `cartService.addProduct` again, dispatching a SECOND POST and adding
       // the dish twice to the bill (BUG A — Step 8 single-dispatch cure).
-      result.subscribe(() => this.qtyToAdd.set(1));
+      result.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.qtyToAdd.set(1));
       return;
     }
     // Non-mesa path: emit `add_to_cart` for any parent listeners (e.g. cart
     // animation trigger). The chokepoint already added the item, so the
     // container's handler is a no-op via the mesa-guard below.
     if (result) {
-      result.subscribe();
+      result.pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     this.add_to_cart.emit(this.product());
   }

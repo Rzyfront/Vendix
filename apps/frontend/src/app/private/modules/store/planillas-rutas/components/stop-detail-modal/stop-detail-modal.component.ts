@@ -374,10 +374,10 @@ export class StopDetailModalComponent {
     const s = this.note()?.status || this.stop().dispatch_note?.status || '';
     const map: Record<string, { fg: string; bg: string }> = {
       draft: { fg: '#475569', bg: '#f1f5f9' },
-      confirmed: { fg: '#1d4ed8', bg: '#dbeafe' },
+      confirmed: { fg: '#1d4ed8', bg: 'var(--color-info-100, #dbeafe)' },
       delivered: { fg: '#047857', bg: '#d1fae5' },
-      invoiced: { fg: '#7e22ce', bg: '#f3e8ff' },
-      voided: { fg: '#b91c1c', bg: '#fee2e2' },
+      invoiced: { fg: '#7e22ce', bg: 'var(--color-purple-100, #f3e8ff)' },
+      voided: { fg: '#b91c1c', bg: 'var(--color-error-100, #fee2e2)' },
     };
     return map[s] || { fg: '#475569', bg: '#f1f5f9' };
   });

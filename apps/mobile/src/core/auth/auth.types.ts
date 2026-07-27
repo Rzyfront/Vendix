@@ -115,6 +115,15 @@ export interface AuthResponse {
   user_settings: UserSettings;
   store_settings?: any;
   default_panel_ui?: Record<string, Record<string, boolean>> | null;
+  /**
+   * Permisos efectivos del usuario (paridad con web `auth.effects`).
+   * El backend `auth.service.ts` retorna este array desde
+   * `getPermissionsFromRoles(user.user_roles)` y se persiste en
+   * `useAuthStore.permissions` para que helpers como
+   * `hasOperatingScopeWritePermission()` puedan denegar por defecto
+   * cuando el rol no tiene el permiso (gating real, no confianza ciega).
+   */
+  permissions?: string[];
   access_token: string;
   refresh_token: string;
   token_type?: string;

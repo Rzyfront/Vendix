@@ -127,7 +127,7 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
                   <div class="p-3 sm:p-4 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors">
                     <div class="flex items-center gap-3 sm:gap-4">
                       <!-- Product Image -->
-                      <div class="w-11 h-11 sm:w-14 sm:h-14 bg-white rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
+                      <div class="w-11 h-11 sm:w-14 sm:h-14 bg-surface rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
                         @if (item.product?.image_url) {
                           <img [src]="item.product.image_url" class="w-full h-full object-cover" />
                         } @else {
@@ -350,7 +350,7 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
               </div>
               <!-- Print button -->
               <div class="pt-4 space-y-2">
-                <app-button variant="secondary" [fullWidth]="true" (clicked)="printQuotation()" customClasses="!bg-gray-900 hover:!bg-black !shadow-md">
+                <app-button variant="secondary" [fullWidth]="true" (clicked)="printQuotation()" customClasses="!bg-gray-900 hover:!bg-[var(--color-neutral-800)] !text-[var(--color-neutral-50)] !shadow-md">
                   <app-icon slot="icon" name="printer" size="16"></app-icon>
                   Imprimir Cotización
                 </app-button>

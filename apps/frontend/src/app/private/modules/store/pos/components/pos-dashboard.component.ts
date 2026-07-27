@@ -226,7 +226,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
     `
       .pos-dashboard-container {
         padding: 24px;
-        background: #f8fafc;
+        background: var(--color-neutral-50);
         min-height: 100vh;
       }
 
@@ -255,7 +255,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
         border: 1px solid #d1d5db;
         border-radius: 8px;
         font-size: 14px;
-        background: white;
+        background: var(--color-surface);
         cursor: pointer;
       }
 
@@ -322,7 +322,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
       .top-products-container,
       .payment-methods-container,
       .categories-container {
-        background: white;
+        background: var(--color-surface);
         border-radius: 12px;
         padding: 24px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -354,7 +354,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
         align-items: center;
         gap: 6px;
         padding: 6px 12px;
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         border: 1px solid #e2e8f0;
         border-radius: 6px;
         font-size: 12px;
@@ -364,12 +364,12 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
       }
 
       .export-btn:hover {
-        background: #e2e8f0;
+        background: var(--color-neutral-200);
       }
 
       .chart-placeholder {
         height: 300px;
-        background: #f8fafc;
+        background: var(--color-neutral-50);
         border: 2px dashed #d1d5db;
         border-radius: 8px;
         display: flex;
@@ -440,7 +440,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
       .product-bar {
         width: 100%;
         height: 4px;
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         border-radius: 2px;
         overflow: hidden;
       }
@@ -506,7 +506,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
       }
 
       .loading-spinner {
-        background: white;
+        background: var(--color-surface);
         border-radius: 12px;
         padding: 32px;
         text-align: center;

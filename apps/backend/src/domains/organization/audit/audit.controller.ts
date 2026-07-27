@@ -77,11 +77,16 @@ export class AuditController {
     const offsetNum = offset ? parseInt(offset) : 0;
     const page = offsetNum ? offsetNum / limitNum + 1 : 1;
 
+    // Orden de argumentos: paginated(data, total, page, limit). Estaba pasando
+    // (data, page, limit, total), así que meta.total salía 1 y meta.limit traía
+    // el total real: cualquier consumidor veía "Página 1 de 1" y nunca podía
+    // avanzar. Lo destapó la pantalla de auditoría de mobile al montar su
+    // PaginationBar sobre este meta.
     return this.responseService.paginated(
       result.data,
+      result.total,
       page,
       limitNum,
-      result.total,
     );
   }
 

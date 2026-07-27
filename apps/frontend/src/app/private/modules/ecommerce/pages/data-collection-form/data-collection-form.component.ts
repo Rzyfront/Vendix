@@ -40,7 +40,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
         >
           <div
             class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center"
-            style="background: #dcfce7"
+            style="background: var(--color-success-100, #dcfce7)"
           >
             <svg
               class="w-8 h-8"
@@ -83,7 +83,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
         >
           <div
             class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center"
-            style="background: #fee2e2"
+            style="background: var(--color-error-100, #fee2e2)"
           >
             <svg
               class="w-8 h-8"

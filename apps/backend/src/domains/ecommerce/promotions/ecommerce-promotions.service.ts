@@ -57,7 +57,8 @@ export class EcommercePromotionsService {
       include: {
         promotion_quantity_tiers: { orderBy: { sort_order: 'asc' } },
       },
-      orderBy: { priority: 'desc' },
+      // Priority follows the "1 = highest" convention (lower number wins).
+      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
     });
 
     return promotions.map((promo) => ({

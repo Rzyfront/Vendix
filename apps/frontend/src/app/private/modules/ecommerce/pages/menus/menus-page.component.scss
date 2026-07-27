@@ -132,7 +132,7 @@
   }
 
   &--off {
-    background: #fef3c7;
+    background: var(--color-warning-100, #fef3c7);
     color: #b45309;
   }
 }
@@ -257,7 +257,7 @@
   font-weight: var(--fw-semibold, 600);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(var(--color-surface-rgb), 0.88);
   color: var(--color-text-primary, #111827);
   border: 1px solid rgba(148, 163, 184, 0.24);
 }
@@ -289,7 +289,7 @@
   padding: 0 !important;
   border-radius: 50% !important;
   color: var(--color-text-secondary, #6b7280) !important;
-  background: rgba(255, 255, 255, 0.88) !important;
+  background: rgba(var(--color-surface-rgb), 0.88) !important;
   border: 1px solid rgba(148, 163, 184, 0.22) !important;
   box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.45);
   backdrop-filter: blur(10px);
@@ -297,7 +297,7 @@
 }
 
 ::ng-deep .action-btn:hover {
-  background: #ffffff !important;
+  background: var(--color-surface) !important;
   color: var(--color-primary, #2f6f4e) !important;
 }
 
@@ -317,7 +317,7 @@
   align-items: center;
   justify-content: center;
   color: var(--color-text-primary, #111827);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(var(--color-surface-rgb), 0.9);
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 999px;
   backdrop-filter: blur(10px);
@@ -335,7 +335,7 @@
 
   &:hover {
     color: var(--color-primary, #2f6f4e);
-    background: #ffffff;
+    background: var(--color-surface);
     border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
     transform: translateY(-1px) scale(1.02);
   }

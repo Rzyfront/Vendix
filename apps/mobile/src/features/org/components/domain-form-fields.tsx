@@ -60,6 +60,9 @@ export function DomainFormFields({
   const [hostnameError, setHostnameError] = useState<string | null>(null);
   const [hostnameValidating, setHostnameValidating] = useState(false);
   const lastValidatedHostname = useRef<string | null>(initial?.hostname ?? null);
+  // Aborta la validación en vuelo si el usuario sigue tipeando — sin esto,
+  // una respuesta lenta de "abc" puede resolverse después de la de "abcdef"
+  // y setear hostnameError sobre un input cuyo valor ya no aplica.
   const hostnameAbortRef = useRef<AbortController | null>(null);
 
   const [roots, setRoots] = useState<DomainRoot[]>([]);
@@ -89,6 +92,7 @@ export function DomainFormFields({
 
   const validateAndCheckDuplicate = async (value: string) => {
     if (!value || value === lastValidatedHostname.current) return;
+    // Cancelar cualquier validación en vuelo antes de empezar la nueva.
     hostnameAbortRef.current?.abort();
     const ac = new AbortController();
     hostnameAbortRef.current = ac;
@@ -108,12 +112,11 @@ export function DomainFormFields({
         return;
       }
       lastValidatedHostname.current = value;
-    } catch (e) {
+    } catch (e: any) {
       if (ac.signal.aborted) return;
-      setHostnameError(e instanceof Error ? e.message : 'No se pudo validar el hostname');
+      setHostnameError(e?.message ?? 'No se pudo validar el hostname');
     } finally {
-      if (ac.signal.aborted) return;
-      setHostnameValidating(false);
+      if (!ac.signal.aborted) setHostnameValidating(false);
     }
   };
 

@@ -420,29 +420,12 @@
   }
 }
 
-// Clases para temas personalizados
+// Tema oscuro: solo ajustes componente-específicos no cubiertos por el bloque
+// global de styles.scss (que ya invierte las escalas neutral/info/success/warning/error).
+// Se eliminaron los re-sets redundantes de --color-surface, --color-border,
+// --color-text-primary/secondary/muted (ya invertidos globalmente).
 [data-theme="dark"] {
-  .selector-wrapper {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-
-    &:hover:not(.selector-disabled) {
-      border-color: var(--color-primary);
-    }
-  }
-
-  .selector-select {
-    color: var(--color-text-primary);
-
-    &::placeholder {
-      color: var(--color-text-secondary);
-    }
-  }
-
-  .selector-icon {
-    color: var(--color-text-muted);
-  }
-
+  // Ajuste componente-específico: tinte del filled en dark usa un gris más claro
   .selector-filled .selector-select {
     background-color: rgba(154, 166, 178, 0.2);
 

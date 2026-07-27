@@ -42,7 +42,7 @@ export interface PricingCardSelectEvent {
       class="relative flex flex-col h-full min-w-0 rounded-2xl overflow-hidden transition-all duration-300"
       [class.shadow-sm]="!isPopular()"
       [class.shadow-2xl]="isPopular()"
-      [class.bg-white]="!isPopular() && !loading()"
+      [class.bg-surface]="!isPopular() && !loading()"
       [class.text-text-primary]="!isPopular()"
       [class.text-white]="isPopular()"
       [class.border]="!isPopular()"

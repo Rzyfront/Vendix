@@ -212,7 +212,7 @@ interface ValidationRow {
         margin: 0;
         border: 1px solid #fcd34d;
         border-radius: 0.5rem;
-        background: #fffbeb;
+        background: var(--color-warning-50, #fffbeb);
         color: var(--color-warning);
       }
       .step-warning__body {

@@ -1,9 +1,11 @@
 import {
   Component,
+  DestroyRef,
   computed,
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { PublicHeaderComponent } from '../../../landing/components/public-header/public-header.component';
 import {
@@ -42,6 +44,7 @@ type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
   styleUrls: ['./pqr-submit.component.scss'],
 })
 export class PqrSubmitComponent {
+  private destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
   private readonly pqrService = inject(PqrService);
   private readonly router = inject(Router);
@@ -175,7 +178,7 @@ export class PqrSubmitComponent {
     this.state.set('submitting');
     this.serverError.set(null);
 
-    this.pqrService.createPublic(dto).subscribe({
+    this.pqrService.createPublic(dto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         if (res.success) {
           this.state.set('success');

@@ -6,12 +6,12 @@
   textarea {
     min-height: 44px;
     font-size: 16px; // Prevent iOS zoom
-    background-color: white;
+    background-color: var(--color-surface);
 
     &:focus {
       outline: none;
-      border-color: #3b82f6;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+      border-color: var(--color-info);
+      box-shadow: 0 0 0 3px rgba(var(--color-info-rgb), 0.12);
     }
   }
 }

@@ -447,7 +447,8 @@ export class AuthService {
               ...config,
               preferences: {
                 language: 'es',
-                theme: 'aura',
+                theme_mode: 'light',
+                theme: 'default',
               },
             },
           };

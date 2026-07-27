@@ -15,3 +15,4 @@ export * from './data-collection.types';
 export * from './promotions.types';
 export * from './coupon.types';
 export * from './social-sales.types';
+export * from './layaway.types';

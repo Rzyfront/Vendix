@@ -193,26 +193,44 @@ export class StoreRolesService {
     );
 
     // Store admins can NEVER create system roles
-    const role = await this.prisma.roles.create({
-      data: {
-        name: dto.name,
-        description: dto.description,
-        is_system_role: false,
-        organization_id,
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
+    // QUI-473: catch P2002 (race condition: two concurrent requests pass the
+    // pre-check above and both reach INSERT; with the composite unique on
+    // (organization_id, name) the second one will fail. Translate the raw
+    // Prisma error into a clean 409 ConflictException so the UI can show a
+    // useful message instead of leaking Prisma internals.
+    let role;
+    try {
+      role = await this.prisma.roles.create({
+        data: {
+          name: dto.name,
+          description: dto.description,
+          is_system_role: false,
+          organization_id,
+        },
+        include: {
+          role_permissions: {
+            include: {
+              permissions: true,
+            },
+          },
+          _count: {
+            select: {
+              user_roles: { where: userRolesCountWhere },
+            },
           },
         },
-        _count: {
-          select: {
-            user_roles: { where: userRolesCountWhere },
-          },
-        },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'A role with this name already exists in this organization',
+        );
+      }
+      throw err;
+    }
 
     return this.transformRole(role);
   }
@@ -256,25 +274,38 @@ export class StoreRolesService {
       organization_id,
     );
 
-    const updated = await this.prisma.roles.update({
-      where: { id },
-      data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.description !== undefined && { description: dto.description }),
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
+    let updated;
+    try {
+      updated = await this.prisma.roles.update({
+        where: { id },
+        data: {
+          ...(dto.name && { name: dto.name }),
+          ...(dto.description !== undefined && { description: dto.description }),
+        },
+        include: {
+          role_permissions: {
+            include: {
+              permissions: true,
+            },
+          },
+          _count: {
+            select: {
+              user_roles: { where: userRolesCountWhere },
+            },
           },
         },
-        _count: {
-          select: {
-            user_roles: { where: userRolesCountWhere },
-          },
-        },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          'A role with this name already exists in this organization',
+        );
+      }
+      throw err;
+    }
 
     return this.transformRole(updated);
   }

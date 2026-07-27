@@ -73,6 +73,13 @@ interface ActiveOrderPromotion {
   type: 'percentage' | 'fixed_amount';
   value: number;
   minPurchaseAmount: number | null;
+  /**
+   * Backend-defined priority that determines this promo as the winner. Per
+   * Edward's winner-takes-all design, the LOWEST priority number wins
+   * (priority 1 = highest importance). Tie-broken by lowest id. Optional
+   * for back-compat with older backend versions.
+   */
+  priority?: number;
 }
 
 @Component({
@@ -675,14 +682,27 @@ export class PosProductSelectionComponent {
   readonly orderScopePromotions = signal<ActiveOrderPromotion[]>([]);
 
   /**
-   * Human-readable chip label for the highest-priority active order-scope
-   * promotion (backend already returns them ordered by priority desc), with a
-   * "+N" suffix when more than one is active. Null when none is active.
+   * Human-readable chip label for the WINNER active order-scope promotion
+   * (backend returns them ordered by priority desc, but per the
+   * winner-takes-all convention from Edward's design, priority 1 = highest
+   * importance, so we pick the LOWEST priority number). Tie-broken by
+   * lowest id. With a "+N" suffix when more than one is active. Null
+   * when none is active.
    */
   readonly orderPromoNotice = computed<string | null>(() => {
     const promos = this.orderScopePromotions();
     if (promos.length === 0) return null;
-    const top = promos[0];
+    const top = promos.reduce((best, current) => {
+      const currentP = current.priority ?? 0;
+      const bestP = best.priority ?? 0;
+      if (
+        currentP < bestP ||
+        (currentP === bestP && current.id < best.id)
+      ) {
+        return current;
+      }
+      return best;
+    });
     const name = (top.name ?? '').trim();
     const head = name ? `Promoción de orden: ${name}` : 'Promoción de orden activa';
     const benefit = this.orderPromoBenefitLabel(top);
@@ -892,6 +912,11 @@ export class PosProductSelectionComponent {
                   p.min_purchase_amount != null
                     ? Number(p.min_purchase_amount)
                     : null,
+                // Mirror the backend's priority field so the frontend
+                // winner-takes-all reduce below picks the correct winner
+                // (lowest priority number = highest importance, per
+                // Edward's design convention).
+                priority: Number(p.priority ?? 0),
               }),
             );
           this.orderScopePromotions.set(orderPromos);

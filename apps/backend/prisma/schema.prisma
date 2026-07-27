@@ -234,11 +234,6 @@ model store_users {
 
 model roles {
   id               Int                @id @default(autoincrement())
-  // QUI-473: `name` is no longer globally unique. Per-org uniqueness is
-  // enforced by the composite index `roles_organization_id_name_key`
-  // (created in the matching migration). Global system roles keep their
-  // global-uniqueness via `roles_name_global_system_key`, so `super_admin`,
-  // `owner`, etc. cannot be duplicated.
   name             String             @db.VarChar(50)
   description      String?
   is_system_role   Boolean            @default(false)
@@ -249,6 +244,28 @@ model roles {
   user_roles       user_roles[]
   organizations    organizations?     @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
+  // QUI-473: composite unique on (organization_id, name) replaces the legacy
+  // global `@@unique([name])` so two organizations can each have their own
+  // 'Preventista' role. The matching SQL migration is
+  // `prisma/migrations/20260724233150_roles_composite_unique/migration.sql`
+  // (consolidated into `..._nulls_not_distinct/migration.sql`).
+  //
+  // System roles (is_system_role=true, organization_id=null) are enforced
+  // unique by Postgres `NULLS NOT DISTINCT` on that composite index — without
+  // that modifier PostgreSQL would treat `(NULL, name)` rows as distinct and
+  // let two system roles share a name.
+  //
+  // ⚠️ Prisma cannot express `NULLS NOT DISTINCT` in `@@unique(...)`, so any
+  // future `prisma migrate diff` / schema regeneration that drops the manual
+  // migration will silently re-create the index WITHOUT the modifier. Verify
+  // after any schema regeneration:
+  //
+  //   SELECT indnullsnotdistinct FROM pg_index
+  //   WHERE indexrelid = '"roles_organization_id_name_key"'::regclass;
+  //   -- must be `true`
+  //
+  // If you ever need to enforce a system-vs-org invariant at the SQL layer
+  // (e.g. a CHECK constraint), prefer a separate follow-up migration.
   @@unique([organization_id, name])
   @@index([organization_id])
 }
@@ -2689,11 +2706,17 @@ model promotions {
   description         String?
   code                String?                  @db.VarChar(50)
   type                promotion_type_enum
-  value               Decimal                  @db.Decimal(12, 2)
-  rule_type           promotion_rule_type_enum @default(flat)
-  scope               promotion_scope_enum     @default(order)
-  min_purchase_amount Decimal?                 @db.Decimal(12, 2)
-  max_discount_amount Decimal?                 @db.Decimal(12, 2)
+  value               Decimal                   @db.Decimal(12, 2)
+  rule_type           promotion_rule_type_enum  @default(flat)
+  scope               promotion_scope_enum      @default(order)
+  // For quantity_tiered rules, how quantities are counted toward tiers.
+  //   cart_total: sums units across every line in scope (legacy behavior).
+  //   per_product: each SKU is evaluated independently; tier fires only when
+  //                a single product reaches min_quantity on its own.
+  // Default 'cart_total' preserves existing promotion semantics.
+  quantity_grouping   promotion_quantity_grouping_enum @default(cart_total)
+  min_purchase_amount Decimal?                  @db.Decimal(12, 2)
+  max_discount_amount Decimal?                  @db.Decimal(12, 2)
   usage_limit         Int?
   usage_count         Int                      @default(0)
   per_customer_limit  Int?
@@ -2790,6 +2813,11 @@ enum promotion_scope_enum {
   order
   product
   category
+}
+
+enum promotion_quantity_grouping_enum {
+  cart_total
+  per_product
 }
 
 // ===== MARKETING AD CREATIVES =====

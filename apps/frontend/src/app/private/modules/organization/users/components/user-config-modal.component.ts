@@ -81,7 +81,7 @@ const CATALOG_APP_TYPES: PanelUiAppType[] = ['STORE_ADMIN', 'ORG_ADMIN'];
     >
       @if (user()) {
         <form [formGroup]="configForm" (ngSubmit)="onSubmit()">
-          <div class="flex border-b border-gray-200 dark:border-gray-700 mb-6">
+          <div class="flex border-b border-gray-200 mb-6">
             <button
               type="button"
               class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"

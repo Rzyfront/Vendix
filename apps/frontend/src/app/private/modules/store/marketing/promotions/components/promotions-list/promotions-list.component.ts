@@ -8,7 +8,7 @@ import { Promotion } from '../../interfaces/promotion.interface';
   standalone: true,
   imports: [DatePipe, FormsModule],
   template: `
-    <div class="bg-white rounded-lg border border-gray-200 shadow-sm">
+    <div class="bg-surface rounded-lg border border-gray-200 shadow-sm">
       <!-- Header -->
       <div class="p-4 border-b border-gray-200">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

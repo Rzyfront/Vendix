@@ -42,7 +42,10 @@
     .modal-footer {
       padding: 1.5rem;
       border-top: 1px solid var(--color-border);
-      background-color: var(--color-background-secondary);
+      // `--color-background-secondary` NO existe en el sistema de tokens: la
+      // declaración era inválida y el pie quedaba SIN fondo (transparente).
+      // Mismo tinte que el pie del modal base (modal.component.scss).
+      background-color: color-mix(in srgb, var(--color-background) 30%, var(--color-surface));
       border-radius: 0 0 12px 12px;
     }
   }
@@ -76,5 +79,8 @@
 .modal-footer {
   border-top: 1px solid var(--color-border);
   padding: 1rem 1.5rem;
-  background-color: var(--color-background-secondary);
+  // `--color-background-secondary` NO existe en el sistema de tokens: la
+  // declaración era inválida y el pie quedaba SIN fondo (transparente).
+  // Mismo tinte que el pie del modal base (modal.component.scss).
+  background-color: color-mix(in srgb, var(--color-background) 30%, var(--color-surface));
 }

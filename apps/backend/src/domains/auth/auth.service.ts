@@ -691,7 +691,7 @@ export class AuthService {
     const result = await this.prismaService.$transaction(async (tx) => {
       // Buscar rol owner dentro de la transacción
       const ownerRole = await tx.roles.findFirst({
-        where: { name: 'owner' },
+        where: { name: 'owner', organization_id: null, is_system_role: true },
       });
       if (!ownerRole) {
         throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
@@ -1079,7 +1079,7 @@ export class AuthService {
 
     // Buscar rol customer
     const customerRole = await this.prismaService.roles.findFirst({
-      where: { name: 'customer' },
+      where: { name: 'customer', organization_id: null, is_system_role: true },
     });
     if (!customerRole) {
       throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
@@ -1394,7 +1394,7 @@ export class AuthService {
 
     // Buscar rol en la base de datos
     const staffRole = await this.prismaService.roles.findFirst({
-      where: { name: role },
+      where: { name: role, organization_id: null, is_system_role: true },
     });
 
     if (!staffRole) {

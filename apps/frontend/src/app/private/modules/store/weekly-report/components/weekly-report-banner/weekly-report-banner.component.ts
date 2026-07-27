@@ -120,7 +120,7 @@ const DISMISS_KEY_PREFIX = 'vendix:weekly-report:dismissed';
         min-height: 3.25rem;
         background: linear-gradient(135deg, #fdf2f8 0%, #fce7f3 100%);
         color: #831843;
-        border-bottom: 1px solid #fbcfe8;
+        border-bottom: 1px solid var(--color-pink-200, #fbcfe8);
         position: relative;
       }
 
@@ -215,8 +215,8 @@ const DISMISS_KEY_PREFIX = 'vendix:weekly-report:dismissed';
         right: 0;
         z-index: 50;
         min-width: 14rem;
-        background: #ffffff;
-        border: 1px solid #f3e8ff;
+        background: var(--color-surface);
+        border: 1px solid var(--color-purple-100, #f3e8ff);
         border-radius: 0.6rem;
         box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15);
         padding: 0.25rem;
@@ -242,7 +242,7 @@ const DISMISS_KEY_PREFIX = 'vendix:weekly-report:dismissed';
         transition: background 0.12s ease;
       }
       .wr-banner__menu-item:hover {
-        background: #f3f4f6;
+        background: var(--color-neutral-100);
       }
       .wr-banner__menu-item:focus-visible {
         outline: 2px solid #ec4899;

@@ -22,14 +22,14 @@
   color: var(--color-primary);
 
   &--open-tab {
-    background: rgba(34, 197, 94, 0.08);
-    border-bottom-color: rgba(34, 197, 94, 0.18);
+    background: rgba(var(--color-success-500-rgb), 0.08);
+    border-bottom-color: rgba(var(--color-success-500-rgb), 0.18);
     color: var(--color-success);
   }
 
   &--require-staff {
-    background: rgba(245, 158, 11, 0.08);
-    border-bottom-color: rgba(245, 158, 11, 0.18);
+    background: rgba(var(--color-warning-500-rgb), 0.08);
+    border-bottom-color: rgba(var(--color-warning-500-rgb), 0.18);
     color: var(--color-warning, rgb(245, 158, 11));
   }
 
@@ -72,7 +72,7 @@
     border-radius: 999px;
     font-size: var(--fs-xs);
     font-weight: var(--fw-semibold);
-    background: rgba(59, 130, 246, 0.12);
+    background: rgba(var(--color-info-500-rgb), 0.12);
     color: var(--color-primary);
     flex-shrink: 0;
     overflow: hidden;
@@ -83,12 +83,12 @@
     }
 
     &[data-status='listo'] {
-      background: rgba(34, 197, 94, 0.16);
+      background: rgba(var(--color-success-500-rgb), 0.16);
       color: var(--color-success);
     }
 
     &[data-status='en-preparación'] {
-      background: rgba(245, 158, 11, 0.16);
+      background: rgba(var(--color-warning-500-rgb), 0.16);
       color: var(--color-warning, rgb(217, 119, 6));
     }
   }
@@ -785,14 +785,14 @@
   }
 
   &--ok {
-    background: rgba(34, 197, 94, 0.1);
-    border: 1px solid rgba(34, 197, 94, 0.32);
+    background: rgba(var(--color-success-500-rgb), 0.1);
+    border: 1px solid rgba(var(--color-success-500-rgb), 0.32);
     color: var(--color-success);
   }
 
   &--pending {
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.32);
+    background: rgba(var(--color-warning-500-rgb), 0.1);
+    border: 1px solid rgba(var(--color-warning-500-rgb), 0.32);
     color: var(--color-warning, rgb(217, 119, 6));
   }
 }
@@ -864,7 +864,7 @@
 
 .table-banner-leave {
   // Only show in desktop inline-actions; the sheet covers mobile.
-  border-color: rgba(239, 68, 68, 0.5) !important;
+  border-color: rgba(var(--color-error-500-rgb), 0.5) !important;
   color: var(--color-error, rgb(220, 38, 38)) !important;
 }
 
@@ -884,14 +884,14 @@
 
   &--leave {
     color: var(--color-error, rgb(220, 38, 38));
-    border-color: rgba(239, 68, 68, 0.32);
+    border-color: rgba(var(--color-error-500-rgb), 0.32);
 
     app-icon {
       color: var(--color-error, rgb(220, 38, 38));
     }
 
     &:active {
-      background: rgba(239, 68, 68, 0.08);
+      background: rgba(var(--color-error-500-rgb), 0.08);
     }
   }
 }
@@ -1117,7 +1117,7 @@
       position: absolute;
       top: -2px;
       right: -2px;
-      background: #ef4444; // High contrast red
+      background: var(--color-error); // High contrast red
       color: white;
       font-size: 0.6rem;
       font-weight: 800;
@@ -1175,7 +1175,7 @@
       }
 
       app-icon {
-        color: #10b981; // Success color
+        color: var(--color-success); // Success color
       }
     }
   }
@@ -1296,7 +1296,7 @@
         border-radius: 8px;
         overflow: hidden;
         border: 1px solid var(--color-border);
-        background: #f9fafb;
+        background: var(--color-neutral-50);
 
         img {
           width: 100%;
@@ -1381,8 +1381,8 @@
 
           .remove-btn {
             &:hover {
-              background: #fee2e2 !important;
-              color: #dc2626;
+              background: var(--color-error-100) !important;
+              color: var(--color-error-600);
             }
           }
         }
@@ -1518,7 +1518,7 @@
       }
 
       &:hover {
-        background-color: #f3f4f6; // Gris claro
+        background-color: var(--color-neutral-100); // Gris claro
         color: var(--color-primary);
         padding-left: 1.5rem;
 
@@ -1756,7 +1756,7 @@
       color: var(--color-error);
 
       &:hover {
-        background: #fee2e2;
+        background: var(--color-error-100);
       }
     }
 
@@ -1985,19 +1985,19 @@
     background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    box-shadow: 0 -8px 24px -12px rgba(15, 23, 42, 0.35);
+    box-shadow: 0 -8px 24px -12px rgba(var(--color-neutral-900-rgb), 0.35);
     color: var(--color-text-primary);
 
     // Los tintes de modo pasan a un acento en el borde superior; el fondo se
     // mantiene en surface+blur para legibilidad sobre el contenido.
     &--open-tab {
       background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
-      border-top-color: rgba(34, 197, 94, 0.5);
+      border-top-color: rgba(var(--color-success-500-rgb), 0.5);
     }
 
     &--require-staff {
       background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
-      border-top-color: rgba(245, 158, 11, 0.5);
+      border-top-color: rgba(var(--color-warning-500-rgb), 0.5);
     }
 
     .table-banner-content {
