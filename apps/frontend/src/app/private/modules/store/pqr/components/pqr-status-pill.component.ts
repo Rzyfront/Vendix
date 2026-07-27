@@ -30,16 +30,16 @@ import { PqrStatus } from '../../../../../shared/services/pqr.service';
         text-transform: uppercase;
       }
       .pqr-status-pill[data-status='NEW'] {
-        background: #fef3c7;
+        background: var(--color-warning-100, #fef3c7);
         color: #92400e;
       }
       .pqr-status-pill[data-status='OPEN'],
       .pqr-status-pill[data-status='IN_PROGRESS'] {
-        background: #dbeafe;
+        background: var(--color-info-100, #dbeafe);
         color: #1e40af;
       }
       .pqr-status-pill[data-status='WAITING_RESPONSE'] {
-        background: #ede9fe;
+        background: var(--color-violet-100, #ede9fe);
         color: #5b21b6;
       }
       .pqr-status-pill[data-status='RESOLVED'] {
@@ -47,11 +47,11 @@ import { PqrStatus } from '../../../../../shared/services/pqr.service';
         color: #065f46;
       }
       .pqr-status-pill[data-status='CLOSED'] {
-        background: #e5e7eb;
+        background: var(--color-neutral-200);
         color: #374151;
       }
       .pqr-status-pill[data-status='REOPENED'] {
-        background: #fee2e2;
+        background: var(--color-error-100, #fee2e2);
         color: #991b1b;
       }
     `,

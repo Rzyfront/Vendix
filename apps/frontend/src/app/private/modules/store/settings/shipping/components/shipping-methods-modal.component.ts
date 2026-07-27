@@ -151,9 +151,9 @@ export class ShippingMethodsModalComponent {
     const map: Record<string, string> = {
       custom: '#F1F5F9',
       pickup: '#ECFDF5',
-      own_fleet: '#DBEAFE',
-      carrier: '#FEF3C7',
-      third_party_provider: '#F5F3FF',
+      own_fleet: 'var(--color-info-100, #DBEAFE)',
+      carrier: 'var(--color-warning-100, #FEF3C7)',
+      third_party_provider: 'var(--color-violet-50, #F5F3FF)',
     };
     return map[type] || '#F1F5F9';
   }

@@ -442,12 +442,12 @@ class BrandingAssetUploadError {
 
       .section-icon--blue {
         color: #2563eb;
-        background: #eff6ff;
+        background: var(--color-info-50, #eff6ff);
       }
 
       .section-icon--pink {
         color: #db2777;
-        background: #fdf2f8;
+        background: var(--color-pink-50, #fdf2f8);
       }
 
       .section-title {

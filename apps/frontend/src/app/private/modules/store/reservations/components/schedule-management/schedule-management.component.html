@@ -144,7 +144,7 @@
                  changes are needed. -->
             <button
               type="button"
-              class="w-full flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:border-primary hover:text-primary transition-colors"
+              class="w-full flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-surface px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:border-primary hover:text-primary transition-colors"
               (click)="toggleEmployeeForm()"
               title="Crear un empleado nuevo desde este modal"
             >
@@ -202,7 +202,7 @@
                 <div class="space-y-1">
                   <label class="text-[11px] text-gray-500 font-medium">Tipo de documento *</label>
                   <select
-                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-surface"
                     [ngModel]="newEmployee().document_type"
                     (ngModelChange)="patchNewEmployee('document_type', $event)"
                   >

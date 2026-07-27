@@ -56,7 +56,7 @@ export type DomainResolutionErrorKind = 'not_found' | 'transient';
         class="relative flex min-h-full items-center justify-center p-4 sm:p-6"
       >
         <div
-          class="dre-card w-full max-w-md rounded-3xl bg-white px-6 py-10 text-center shadow-xl ring-1 ring-black/5 sm:px-9 sm:py-12"
+          class="dre-card w-full max-w-md rounded-3xl bg-surface px-6 py-10 text-center shadow-xl ring-1 ring-black/5 sm:px-9 sm:py-12"
         >
           <!-- Vendix logo -->
           <img
@@ -106,7 +106,7 @@ export type DomainResolutionErrorKind = 'not_found' | 'transient';
   `,
   styles: `
     .dre-overlay {
-      background: #ffffff;
+      background: var(--color-surface);
       animation: dre-fade 0.3s ease-out;
     }
 

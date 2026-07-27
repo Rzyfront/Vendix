@@ -283,6 +283,34 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
   `,
   styles: [
     `
+      /* Alto simétrico con la cabecera-logo del sidebar (--admin-header-h).
+         Antes medía 84px por DOS cinturones de padding apilados: el propio
+         (regla global \`header, nav { padding: .5rem .25rem }\` de styles.scss,
+         pensada para móvil pero sin media query) más el \`md:p-2\` del div
+         interno. Aquí se anula solo el vertical del global — el horizontal se
+         conserva — y el alto pasa a decidirlo el token, no la suma accidental.
+         La diferencia (12px) se devuelve como padding-top del outlet en cada
+         layout admin, no como margin-bottom aquí: así el hueco pertenece al
+         contenedor con scroll y se va con el contenido al desplazar, en vez de
+         quedar clavado bajo el header. Los banners intermedios (suscripción,
+         fiscal, arribo) tampoco quedan empujados por un margen que no es suyo.
+         Va en el componente y no en styles.scss porque app-header solo lo usan
+         los tres layouts admin: un dueño por elemento evita la carrera de
+         especificidad contra el preset glass, que también pinta este <header>. */
+      :host > header {
+        display: flex;
+        align-items: center;
+        min-height: var(--admin-header-h);
+        padding-block: 0;
+      }
+
+      /* El div interno era quien definía el ancho al ser el único hijo en flujo
+         normal; con el header en flex hay que devolvérselo explícitamente. */
+      :host > header > div {
+        flex: 1;
+        min-width: 0;
+      }
+
       .mobile-logo-container {
         width: 32px;
         height: 32px;

@@ -275,7 +275,7 @@ interface SelectedResourcePreview {
                           </div>
                         } @else {
                           <div
-                            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft,#dcfce7)] text-[var(--color-success,#16a34a)]"
+                            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft,var(--color-success-100, #dcfce7))] text-[var(--color-success,#16a34a)]"
                           >
                             <app-icon name="check" [size]="18"></app-icon>
                           </div>

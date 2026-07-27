@@ -268,7 +268,7 @@ import {
                       <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
                     </tr>
                   </thead>
-                  <tbody class="bg-white divide-y divide-gray-200">
+                  <tbody class="bg-surface divide-y divide-gray-200">
                     @for (sku of analysisResult()!.skus; track sku.sku) {
                       <tr>
                         <td class="px-4 py-2 text-sm font-mono font-medium text-gray-900">{{ sku.sku }}</td>
@@ -317,7 +317,7 @@ import {
             <!-- Mobile cards -->
             <div class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto">
               @for (sku of analysisResult()!.skus; track sku.sku) {
-                <div class="border rounded-lg p-3 bg-white">
+                <div class="border rounded-lg p-3 bg-surface">
                   <div class="flex items-center justify-between mb-2">
                     <span class="font-mono text-sm font-medium text-gray-900">{{ sku.sku }}</span>
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
@@ -380,7 +380,7 @@ import {
           @if (uploadResults(); as upload) {
             @if (!isUploading()) {
             <!-- Summary -->
-            <div class="bg-white border rounded-lg overflow-hidden">
+            <div class="bg-surface border rounded-lg overflow-hidden">
               <div class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
                 <h4 class="text-sm font-medium text-gray-900">Resumen de Carga</h4>
                 <span class="text-xs text-gray-500">{{ upload.total_skus_processed || 0 }} SKUs</span>
@@ -407,7 +407,7 @@ import {
                 <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
                 Detalle por SKU
               </div>
-              <div class="max-h-48 overflow-y-auto bg-white">
+              <div class="max-h-48 overflow-y-auto bg-surface">
                 <table class="min-w-full divide-y divide-gray-200">
                   <thead class="bg-gray-50">
                     <tr>
@@ -416,7 +416,7 @@ import {
                       <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Detalle</th>
                     </tr>
                   </thead>
-                  <tbody class="bg-white divide-y divide-gray-200">
+                  <tbody class="bg-surface divide-y divide-gray-200">
                     @for (result of upload.results; track result.sku) {
                       <tr>
                         <td class="px-4 py-2 whitespace-nowrap text-sm font-mono font-medium text-gray-900">

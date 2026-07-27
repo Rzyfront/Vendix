@@ -63,7 +63,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
       @if (!loadingArticle()) {
         <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4 md:gap-6 p-3 md:p-4 max-w-5xl mx-auto w-full">
           <!-- Section 1: Basic Info -->
-          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <section class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
             <div class="flex items-center gap-2 mb-4">
               <app-icon name="info" size="18" class="text-primary-600"></app-icon>
               <h2 class="text-base font-bold text-gray-900">Información básica</h2>
@@ -85,7 +85,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
             </div>
           </section>
           <!-- Section 2: Classification -->
-          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <section class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
             <div class="flex items-center gap-2 mb-4">
               <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
               <h2 class="text-base font-bold text-gray-900">Clasificación</h2>
@@ -124,7 +124,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
             </div>
           </section>
           <!-- Section 3: Cover Image -->
-          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <section class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
             <div class="flex items-center gap-2 mb-4">
               <app-icon name="image" size="18" class="text-primary-600"></app-icon>
               <h2 class="text-base font-bold text-gray-900">Imagen de portada</h2>
@@ -181,7 +181,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
             ></app-image-source-modal>
           </section>
           <!-- Section 4: Content -->
-          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <section class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
             <div class="flex items-center gap-2 mb-4">
               <app-icon name="file-text" size="18" class="text-primary-600"></app-icon>
               <h2 class="text-base font-bold text-gray-900">Contenido</h2>
@@ -199,7 +199,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
             }
           </section>
           <!-- Section 5: Extra -->
-          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+          <section class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
             <div class="flex items-center gap-2 mb-4">
               <app-icon name="settings" size="18" class="text-primary-600"></app-icon>
               <h2 class="text-base font-bold text-gray-900">Opciones adicionales</h2>

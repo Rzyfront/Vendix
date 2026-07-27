@@ -55,9 +55,9 @@ export interface StoreOption {
       }
 
       @if (!selectedStoreId() && showNoStoreHint()) {
-        <div class="flex items-center gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
-          <app-icon name="info" [size]="14" class="text-amber-600 dark:text-amber-400" />
-          <span class="text-xs text-amber-700 dark:text-amber-300">
+        <div class="flex items-center gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200">
+          <app-icon name="info" [size]="14" class="text-amber-600" />
+          <span class="text-xs text-amber-700">
             Sin tienda asociada, el dominio será de la organización
           </span>
         </div>

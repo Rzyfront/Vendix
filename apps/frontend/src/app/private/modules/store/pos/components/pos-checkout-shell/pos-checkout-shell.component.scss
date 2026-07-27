@@ -360,12 +360,12 @@
 }
 
 .tier-badge {
-  background: #fef3c7;
+  background: var(--color-warning-100, #fef3c7);
   color: #92400e;
 }
 
 .item-package-badge {
-  background: #dbeafe;
+  background: var(--color-info-100, #dbeafe);
   color: #1d4ed8;
 }
 

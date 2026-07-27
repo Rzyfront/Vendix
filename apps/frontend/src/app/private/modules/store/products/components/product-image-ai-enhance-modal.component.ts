@@ -47,7 +47,7 @@ import { ProductsService } from '../services/products.service';
                 <img
                   [src]="sourceUrl"
                   alt="Imagen actual"
-                  class="h-full w-full object-contain bg-white p-3"
+                  class="h-full w-full object-contain bg-surface p-3"
                 />
               } @else {
                 <div class="text-sm text-gray-400">Sin imagen</div>
@@ -71,7 +71,7 @@ import { ProductsService } from '../services/products.service';
                 <img
                   [src]="generatedUrl"
                   alt="Imagen generada con IA"
-                  class="relative z-[2] h-full w-full object-contain bg-white p-3"
+                  class="relative z-[2] h-full w-full object-contain bg-surface p-3"
                 />
               } @else if (isGenerating()) {
                 <div class="ai-result-stage__placeholder">
@@ -138,7 +138,7 @@ import { ProductsService } from '../services/products.service';
             ¿Qué quieres mejorar?
           </label>
           <textarea
-            class="block w-full min-h-[96px] rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 disabled:opacity-60"
+            class="block w-full min-h-[96px] rounded-xl border border-gray-200 bg-surface px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 disabled:opacity-60"
             placeholder="Ej. mejora la iluminación, deja el fondo blanco y haz que el producto se vea más nítido"
             [value]="prompt()"
             [disabled]="isGenerating()"

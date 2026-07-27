@@ -524,7 +524,7 @@ interface AnalysisResult {
                           </th>
                         </tr>
                       </thead>
-                      <tbody class="bg-white divide-y divide-gray-200">
+                      <tbody class="bg-surface divide-y divide-gray-200">
                         @for (item of result.items; track $index) {
                           <tr>
                             <td
@@ -623,7 +623,7 @@ interface AnalysisResult {
                   class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto"
                 >
                   @for (item of result.items; track $index) {
-                    <div class="border rounded-lg p-3 bg-white">
+                    <div class="border rounded-lg p-3 bg-surface">
                       <div class="flex items-center justify-between mb-2">
                         <span
                           class="text-sm font-medium text-gray-900 truncate mr-2"
@@ -697,7 +697,7 @@ interface AnalysisResult {
         <!-- STEP 2: Confirmar -->
         @if (currentStep() === 2) {
           <div class="space-y-3">
-            <div class="bg-white border rounded-lg overflow-hidden">
+            <div class="bg-surface border rounded-lg overflow-hidden">
               <div
                 class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center"
               >
@@ -748,7 +748,7 @@ interface AnalysisResult {
                 <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
                 Productos Importados
               </div>
-              <div class="max-h-48 overflow-y-auto bg-white">
+              <div class="max-h-48 overflow-y-auto bg-surface">
                 <table class="min-w-full divide-y divide-gray-200">
                   <thead class="bg-gray-50">
                     <tr>
@@ -774,7 +774,7 @@ interface AnalysisResult {
                       </th>
                     </tr>
                   </thead>
-                  <tbody class="bg-white divide-y divide-gray-200">
+                  <tbody class="bg-surface divide-y divide-gray-200">
                     @for (item of importedItems(); track $index) {
                       <tr>
                         <td

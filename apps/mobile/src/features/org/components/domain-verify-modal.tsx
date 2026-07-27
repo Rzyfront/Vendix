@@ -46,9 +46,7 @@ export function DomainVerifyModal({ visible, domain, onClose, onVerified }: Doma
       .then((d) => setInstructions(d))
       .catch(() => setInstructions(null))
       .finally(() => setLoadingInstructions(false));
-    // TODO(#11c): agregar AbortController (como en domain-form-fields.tsx)
-    // para cancelar el fetch cuando el modal se cierra antes de que termine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- early-return ya maneja el caso `domain` null; queremos sólo re-cargar cuando cambia el hostname visible.
   }, [visible, domain?.hostname]);
 
   if (!domain) return null;
@@ -71,9 +69,7 @@ export function DomainVerifyModal({ visible, domain, onClose, onVerified }: Doma
 
   const handleCopy = () => {
     if (!instructions?.target) return;
-    // Clipboard.setString (sin dep extra: ya viene con Expo).
-    // TODO(#11c): migrar a import estático (`import * as Clipboard from 'expo-clipboard'`)
-    // para evitar el require() dinámico y los eslint-disable warnings.
+    // Clipboard.setString (sin dep extra: ya viene con Expo)
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const Clipboard = require('expo-clipboard').default ?? require('expo-clipboard');

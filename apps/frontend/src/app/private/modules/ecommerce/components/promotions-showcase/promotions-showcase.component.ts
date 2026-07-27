@@ -105,7 +105,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         align-items: flex-start;
         gap: 0.75rem;
         border-radius: 0.75rem;
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid #f0f0f0;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
         padding: 1rem;
