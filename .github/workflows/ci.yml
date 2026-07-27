@@ -8,6 +8,15 @@ permissions:
   contents: read
   pull-requests: read
 
+# Los builds de AOT y de nest tardan minutos, así que un PR que recibe varios
+# pushes seguidos no necesita terminar los runs viejos.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
 jobs:
   changes:
     name: Detect Changes
@@ -20,12 +29,31 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # `shared` son entradas que alimentan el build de las TRES apps sin
+          # vivir en el directorio de ninguna. Van incluidas en los tres
+          # filtros a propósito: un `package-lock.json` regenerado en otro SO
+          # rompe los tres builds y no toca ni un archivo de `apps/**`, así que
+          # sin esto quedaría fuera de todo gate (pasó en el PR #444). El
+          # propio ci.yml está incluido para que cambiarlo se autoverifique.
+          #
+          # Cambiar sólo código de una app sigue corriendo únicamente el build
+          # de esa app.
           filters: |
+            shared: &shared
+              - 'package.json'
+              - 'package-lock.json'
+              - 'libs/**'
+              - 'tsconfig*.json'
+              - '.npmrc'
+              - '.github/workflows/ci.yml'
             frontend:
+              - *shared
               - 'apps/frontend/**'
             mobile:
+              - *shared
               - 'apps/mobile/**'
             backend:
+              - *shared
               - 'apps/backend/**'
               - 'scripts/tz-audit.sh'
 
@@ -48,7 +76,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
       # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
       # vacío rompe el action con 'Caching for false is not supported'.
       # Ver docs/setup-node@v4 — omitir el parámetro es la forma soportada
@@ -79,7 +107,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
       # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
       # vacío rompe el action con 'Caching for false is not supported'. Sin
       # este parámetro el action funciona correctamente y desactiva cache
@@ -87,3 +115,89 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
         working-directory: apps/mobile
+
+  # ---------------------------------------------------------------------------
+  # Builds de producción, uno por app y sólo si esa app cambió.
+  #
+  # Por qué existen: hasta ahora el CI eran dos greps y un `tsc` de mobile.
+  # Ninguno compilaba, así que toda una clase de errores llegaba a `dev` con
+  # los checks en verde:
+  #
+  #   - Angular sólo reporta en AOT (`ng build --configuration production`) el
+  #     acceso a miembros `private` desde plantilla (TS2341) y los
+  #     `templateUrl` que apuntan a archivos inexistentes. En modo dev (JIT)
+  #     ambos pasan. Los dos casos llegaron a ramas distintas.
+  #   - `nest build` sin un `prisma generate` previo typechequea contra el
+  #     cliente Prisma anterior. Un cambio de schema puede dar 0 errores en
+  #     local y 17 después de regenerar, que es exactamente lo que rompe la
+  #     imagen de producción.
+  # ---------------------------------------------------------------------------
+
+  frontend-build:
+    name: Frontend Build (prod)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # Mismo comando que `deploy-s3.yml` corre para publicar a producción: si
+      # esto pasa, el deploy compila.
+      - name: Build AOT de producción
+        working-directory: apps/frontend
+        run: npm run build:prod
+
+  backend-build:
+    name: Backend Build (prisma + nest)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # `prisma generate` ANTES de compilar, en ese orden y no al revés: es la
+      # secuencia de `apps/backend/Dockerfile` (líneas 9 y 11) y es lo que hace
+      # que el typecheck corra contra el cliente del schema de este PR y no
+      # contra el que quedó en node_modules. No necesita base de datos: el
+      # bloque `datasource` de schema.prisma no declara `url`.
+      - name: Generar Prisma Client
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: nest build
+        working-directory: apps/backend
+        run: npm run build
+
+  mobile-build:
+    name: Mobile Build (expo export)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # Complementa a `mobile-typecheck`: `tsc` resuelve por tipos, Metro
+      # resuelve por módulo real, así que esto atrapa el import que existe para
+      # TypeScript pero no se puede bundlear. No usa EAS ni credenciales.
+      #
+      # EXPO_NO_DOTENV=1 porque el runner no tiene los `.env*` locales
+      # (`.env.web` está gitignoreado) y sin el flag expo intenta cargarlos.
+      - name: expo export
+        working-directory: apps/mobile
+        env:
+          EXPO_NO_DOTENV: '1'
+        run: npm run build:preview

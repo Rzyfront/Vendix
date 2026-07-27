@@ -63,6 +63,9 @@ GITHUB_SECRET_INSTRUCTIONS.txt
 # Para compartir una variante usar `docker-compose.no-watch.yml` con -f.
 docker-compose.override.yml
 
-# Capturas de verificación local (QA, screenshots de referencia).
-/vendix-*.png
+# Capturas de verificación local (QA, screenshots de referencia). El patrón es
+# la raíz completa, no sólo `vendix-*`: no hay ningún PNG legítimo trackeado en
+# la raíz del repo, y las capturas suelo dejarlas ahí sueltas, donde un
+# `git add -A` las barre sin que nadie las note.
+/*.png
 apps/mobile/.captures/
