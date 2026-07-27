@@ -200,7 +200,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
   styles: [
     `
       .product-search-container {
-        background: white;
+        background: var(--color-surface);
         border-radius: 12px;
         padding: 20px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -213,7 +213,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         gap: 10px;
         padding: 12px 16px;
         margin-bottom: 12px;
-        background-color: #fef9c3;
+        background-color: var(--color-yellow-100, #fef9c3);
         border: 1px solid #facc15;
         border-radius: 10px;
         color: #854d0e;
@@ -281,7 +281,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       }
 
       .clear-search-btn:hover {
-        background-color: #f3f4f6;
+        background-color: var(--color-neutral-100);
       }
 
       .search-actions {
@@ -294,7 +294,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         align-items: center;
         gap: 8px;
         padding: 12px 16px;
-        background-color: #f3f4f6;
+        background-color: var(--color-neutral-100);
         border: 2px solid #e5e7eb;
         border-radius: 8px;
         color: #374151;
@@ -324,7 +324,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       }
 
       .search-filters {
-        background-color: #f9fafb;
+        background-color: var(--color-neutral-50);
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 16px;
@@ -412,7 +412,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
 
       .search-suggestions {
         position: relative;
-        background-color: white;
+        background-color: var(--color-surface);
         border: 1px solid #e5e7eb;
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -439,7 +439,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       }
 
       .suggestion-item:hover {
-        background-color: #f9fafb;
+        background-color: var(--color-neutral-50);
       }
 
       .suggestion-item i {

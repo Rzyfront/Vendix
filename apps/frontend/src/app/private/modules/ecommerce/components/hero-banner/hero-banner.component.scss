@@ -73,7 +73,7 @@
     gap: 0.45rem;
     padding: 0.65rem 0.95rem;
     color: var(--color-text-primary);
-    background: #ffffff;
+    background: var(--color-surface);
     border: 1px solid rgba(255, 255, 255, 0.74);
     border-radius: 999px;
     font-size: var(--fs-sm);
@@ -114,6 +114,10 @@
 
     &.active {
       width: 2.65rem;
+      // Blanco literal a propósito: el indicador vive SOBRE la imagen del hero,
+      // no sobre una superficie. Su hermano inactivo ya es un velo blanco al 42%,
+      // y tokenizarlo lo volvería verde en monocromo y casi negro en oscuro,
+      // justo encima de una foto.
       background: #ffffff;
     }
   }

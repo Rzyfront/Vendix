@@ -23,9 +23,9 @@
 // ─── Loading State ──────────────────────────────────────
 
 .loading-card {
-  background: #fff;
+  background: var(--color-surface);
   border-radius: 16px;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--color-neutral-200);
   padding: 48px 24px;
   text-align: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -35,15 +35,15 @@
   display: inline-block;
   width: 40px;
   height: 40px;
-  border: 4px solid #dbeafe;
-  border-top-color: #2563eb;
+  border: 4px solid var(--color-info-100);
+  border-top-color: var(--color-info-600);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-bottom: 16px;
 }
 
 .loading-text {
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-weight: 500;
   font-size: 14px;
 }
@@ -71,9 +71,9 @@
 // ─── Section Cards ──────────────────────────────────────
 
 .settings-section {
-  background: #fff;
+  background: var(--color-surface);
   border-radius: 16px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   scroll-margin-top: 80px;
 
@@ -89,7 +89,7 @@
   align-items: center;
   gap: 10px;
   padding: 16px;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--color-neutral-200);
 
   @media (min-width: 768px) {
     padding: 20px 24px;
@@ -106,37 +106,37 @@
   flex-shrink: 0;
 
   &--blue {
-    background: #eff6ff;
-    color: #2563eb;
+    background: var(--color-info-50);
+    color: var(--color-info-600);
   }
 
   &--green {
-    background: #f0fdf4;
-    color: #16a34a;
+    background: var(--color-success-50);
+    color: var(--color-success-600);
   }
 
   &--purple {
-    background: #faf5ff;
+    background: var(--color-purple-50, #faf5ff);
     color: #9333ea;
   }
 
   &--orange {
-    background: #fff7ed;
-    color: #ea580c;
+    background: var(--color-warning-50);
+    color: var(--color-warning-600);
   }
 
   &--indigo {
-    background: #eef2ff;
+    background: var(--color-indigo-50, #eef2ff);
     color: #4f46e5;
   }
 
   &--pink {
-    background: #fdf2f8;
+    background: var(--color-pink-50, #fdf2f8);
     color: #db2777;
   }
 
   &--teal {
-    background: #f0fdfa;
+    background: var(--color-teal-50, #f0fdfa);
     color: #0d9488;
   }
 }
@@ -144,7 +144,7 @@
 .section-title {
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
   margin: 0;
 }
 
@@ -158,7 +158,7 @@
 
 .section-divider {
   border: none;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--color-neutral-200);
   margin: 16px 0;
 
   @media (min-width: 768px) {
@@ -171,8 +171,8 @@
 .vendix-info-box {
   margin-top: 16px;
   border-radius: 12px;
-  border: 1px solid #bfdbfe;
-  background: linear-gradient(135deg, #eff6ff, #eef2ff);
+  border: 1px solid var(--color-info-200);
+  background: linear-gradient(135deg, var(--color-info-50), var(--color-info-100));
   padding: 16px;
 }
 
@@ -186,12 +186,12 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: #dbeafe;
+  background: var(--color-info-100);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: #2563eb;
+  color: var(--color-info-600);
 }
 
 .vendix-info-text {
@@ -202,13 +202,13 @@
 .vendix-info-title {
   font-size: 14px;
   font-weight: 600;
-  color: #1e3a5f;
+  color: var(--color-info-700);
   margin: 0 0 4px;
 }
 
 .vendix-info-description {
   font-size: 13px;
-  color: #1d4ed8;
+  color: var(--color-info-700);
   line-height: 1.5;
   margin: 0 0 12px;
 }
@@ -220,7 +220,7 @@
   font-size: 13px;
   font-weight: 600;
   color: #fff;
-  background: #2563eb;
+  background: var(--color-info-600);
   border-radius: 8px;
   padding: 8px 14px;
   min-height: 44px; // Touch target
@@ -228,7 +228,7 @@
   transition: background 200ms ease;
 
   &:hover {
-    background: #1d4ed8;
+    background: var(--color-info-700);
   }
 
   &:active {

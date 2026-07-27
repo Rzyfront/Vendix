@@ -82,7 +82,7 @@ import { extractApiErrorMessage } from '../../../../../../../core/utils';
           <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
             <div class="flex items-center gap-3">
               <div
-                class="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white"
+                class="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-surface"
               >
                 @if (imagePreviewUrl()) {
                   <img

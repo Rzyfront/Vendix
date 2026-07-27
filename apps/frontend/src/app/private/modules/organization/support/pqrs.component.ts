@@ -237,7 +237,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         display: flex;
         align-items: center;
         gap: 0.75rem;
-        background: #ffffff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         padding: 1rem 1.25rem;
@@ -246,7 +246,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         width: 44px;
         height: 44px;
         border-radius: 12px;
-        background: #dcfce7;
+        background: var(--color-success-100, #dcfce7);
         color: #15803d;
         display: flex;
         align-items: center;
@@ -294,7 +294,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       }
       .quick-filters__tab:hover {
         color: #15803d;
-        background: #f0fdf4;
+        background: var(--color-success-50, #f0fdf4);
       }
       .quick-filters__tab:focus-visible {
         outline: 2px solid #16a34a;
@@ -309,7 +309,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         background: transparent;
       }
       .quick-filters__tab--active:hover {
-        background: #f0fdf4;
+        background: var(--color-success-50, #f0fdf4);
       }
       .pqr-list-page {
         display: flex;
@@ -317,7 +317,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         gap: 1rem;
       }
       .cta-card {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         padding: 1.25rem 1.5rem;
@@ -331,7 +331,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         width: 48px;
         height: 48px;
         border-radius: 14px;
-        background: #dcfce7;
+        background: var(--color-success-100, #dcfce7);
         color: #15803d;
         display: flex;
         align-items: center;
@@ -339,7 +339,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         flex-shrink: 0;
       }
       .cta-card__icon--muted {
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         color: #94a3b8;
       }
       .cta-card__copy {
@@ -359,11 +359,13 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         font-size: 0.875rem;
       }
       .cta-card--urgent {
-        border-color: #fecaca;
-        background: linear-gradient(135deg, #fef2f2, #fff);
+        /* Tokens de la escala de error: el degradado terminaba en blanco literal y
+           dejaba la tarjeta urgente medio blanca sobre superficie teñida u oscura. */
+        border-color: var(--color-error-200);
+        background: linear-gradient(135deg, var(--color-error-50), var(--color-surface));
       }
       .cta-card--urgent .cta-card__icon {
-        background: #fee2e2;
+        background: var(--color-error-100);
         color: #b91c1c;
       }
       .cta-card--urgent h2 {
@@ -383,7 +385,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         display: inline-flex;
         align-items: center;
         gap: 0.375rem;
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         color: #475569;
         font-size: 0.8125rem;
@@ -402,7 +404,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         color: #fff;
       }
       .chip__count {
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         color: #64748b;
         padding: 0.0625rem 0.4375rem;
         border-radius: 9999px;
@@ -413,7 +415,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         gap: 0.75rem;
         align-items: flex-end;
         padding: 0.875rem 1rem;
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 10px;
       }
@@ -446,7 +448,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         padding: 0 0.75rem;
         border: 1px solid #cbd5e1;
         border-radius: 8px;
-        background: #fff;
+        background: var(--color-surface);
       }
       .search-input input {
         flex: 1;
@@ -455,7 +457,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         padding: 0.4375rem 0;
       }
       .table-wrapper {
-        background: #fff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 12px;
         overflow: hidden;
@@ -464,15 +466,15 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       .loading-overlay {
         position: absolute;
         inset: 0;
-        background: rgba(255, 255, 255, 0.85);
+        background: rgba(var(--color-surface-rgb), 0.85);
         display: flex;
         align-items: center;
         justify-content: center;
         color: #64748b;
       }
       .error-banner {
-        background: #fef2f2;
-        border-bottom: 1px solid #fecaca;
+        background: var(--color-error-50, #fef2f2);
+        border-bottom: 1px solid var(--color-error-200, #fecaca);
         color: #991b1b;
         padding: 0.75rem 1rem;
         font-size: 0.875rem;
@@ -484,7 +486,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       }
       .pqr-table th {
         padding: 0.625rem 1rem;
-        background: #f8fafc;
+        background: var(--color-neutral-50);
         font-size: 0.7rem;
         text-transform: uppercase;
         color: #64748b;
@@ -500,13 +502,13 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         cursor: pointer;
       }
       .pqr-table tbody tr:hover {
-        background: #f8fafc;
+        background: var(--color-neutral-50);
       }
       .pqr-table .row-link--warn {
-        background: #fffbeb;
+        background: var(--color-warning-50, #fffbeb);
       }
       .pqr-table .row-link--overdue {
-        background: #fef2f2;
+        background: var(--color-error-50, #fef2f2);
       }
       .mono {
         font-family: 'SF Mono', Menlo, Consolas, monospace;
@@ -534,15 +536,15 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         font-weight: 600;
       }
       .type-tag[data-type='PETITION'] {
-        background: #dcfce7;
+        background: var(--color-success-100, #dcfce7);
         color: #15803d;
       }
       .type-tag[data-type='COMPLAINT'] {
-        background: #fed7aa;
+        background: var(--color-orange-200, #fed7aa);
         color: #9a3412;
       }
       .type-tag[data-type='CLAIM'] {
-        background: #fecaca;
+        background: var(--color-error-200, #fecaca);
         color: #991b1b;
       }
       .sla-badge {
@@ -559,11 +561,11 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         color: #047857;
       }
       .sla-badge[data-status='warn'] {
-        background: #fef3c7;
+        background: var(--color-warning-100, #fef3c7);
         color: #92400e;
       }
       .sla-badge[data-status='overdue'] {
-        background: #fee2e2;
+        background: var(--color-error-100, #fee2e2);
         color: #b91c1c;
       }
       .status-pill {
@@ -572,11 +574,11 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         border-radius: 6px;
         font-size: 0.75rem;
         font-weight: 600;
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         color: #475569;
       }
       .status-pill[data-status='NEW'] {
-        background: #dbeafe;
+        background: var(--color-info-100, #dbeafe);
         color: #1e40af;
       }
       .status-pill[data-status='RESOLVED'],

@@ -67,7 +67,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
                 >
                 @for (feature of features; track feature) {
                   <div
-                    class="group bg-white p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
+                    class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
                     >
                     <div
                       class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300"

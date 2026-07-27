@@ -192,20 +192,20 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           </div>
 
           <!-- User Info -->
-          <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-700 mb-2">
               Información del Usuario
             </h4>
             <div class="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span class="text-gray-500 dark:text-gray-400">ID:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                <span class="ml-2 text-gray-900">{{
                   user()?.id
                 }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Creado:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                <span class="ml-2 text-gray-900">{{
                   formatDate(user()?.created_at ?? '')
                 }}</span>
               </div>
@@ -230,13 +230,13 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
               @if (user()?.phone) {
                 <div>
                   <span class="text-gray-500 dark:text-gray-400">Teléfono:</span>
-                  <span class="ml-2 text-gray-900 dark:text-gray-100">{{ user()?.phone }}</span>
+                  <span class="ml-2 text-gray-900">{{ user()?.phone }}</span>
                 </div>
               }
               @if (user()?.document_number) {
                 <div>
                   <span class="text-gray-500 dark:text-gray-400">Documento:</span>
-                  <span class="ml-2 text-gray-900 dark:text-gray-100">
+                  <span class="ml-2 text-gray-900">
                     {{ user()?.document_type }} {{ user()?.document_number }}
                   </span>
                 </div>

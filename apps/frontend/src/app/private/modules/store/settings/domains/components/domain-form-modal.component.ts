@@ -332,7 +332,7 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
     if (stage.waiting || stage.status === 'waiting') {
       return 'border-sky-500 bg-sky-50 text-sky-600';
     }
-    return 'border-slate-300 bg-white text-slate-400';
+    return 'border-slate-300 bg-surface text-slate-400';
   }
 
   stageTextClass(stage: DomainProvisioningStage): string {

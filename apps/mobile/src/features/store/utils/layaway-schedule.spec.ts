@@ -1,0 +1,497 @@
+import {
+  buildLayawaySchedule,
+  isLayawayConfigValid,
+  allocateCartDiscounts,
+  rebuildLayawayItemCents,
+  rebuildLayawayTotalFromLines,
+  round2,
+  LayawayFrequency,
+} from './layaway-schedule';
+
+/**
+ * Pure-helper tests for the layaway installment preview builder.
+ *
+ * These run under the Jest config in `apps/mobile/jest.config.js` once a runner
+ * is wired. They are deliberately framework-free (no React Native) so they
+ * execute under any Node test runner with `ts-jest`.
+ *
+ * See plan §10.1 for the 11 cases. We also assert the round2 helper directly
+ * to lock in the float-safety behaviour.
+ */
+
+function sumAmounts(
+  rows: ReturnType<typeof buildLayawaySchedule>,
+): number {
+  // Use integer-cents math to avoid the very artefacts we're guarding against.
+  return rows.reduce((acc, r) => acc + Math.round(r.amount * 100), 0) / 100;
+}
+
+describe('round2', () => {
+  it('rounds to 2 decimal places using integer cents', () => {
+    expect(round2(0.1 + 0.2)).toBe(0.3);
+    expect(round2(33.3333333)).toBe(33.33);
+    expect(round2(33.337)).toBe(33.34);
+    expect(round2(0)).toBe(0);
+  });
+});
+
+describe('buildLayawaySchedule', () => {
+  it('case 1 — 300000 split in 3 monthly equal installments', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 300000,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.amount)).toEqual([100000, 100000, 100000]);
+    expect(rows.map((r) => r.due_date)).toEqual([
+      '2026-08-24',
+      '2026-09-23',
+      '2026-10-23',
+    ]);
+    expect(sumAmounts(rows)).toBe(300000);
+  });
+
+  it('case 2 — 100 split in 3, remainder goes to last installment', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toHaveLength(3);
+    // 100 / 3 = 33.333… → first two are 33.33, last absorbs the remainder (33.34)
+    expect(rows.map((r) => r.amount)).toEqual([33.33, 33.33, 33.34]);
+    expect(sumAmounts(rows)).toBe(100);
+  });
+
+  it('case 3 — 100 with down payment 33, remaining 67 split in 3 sums exactly', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 33,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toHaveLength(3);
+    // 67 / 3 = 22.333… → 22.33, 22.33, 22.34
+    expect(rows.map((r) => r.amount)).toEqual([22.33, 22.33, 22.34]);
+    expect(sumAmounts(rows)).toBe(67);
+  });
+
+  it('case 4 — returns [] when numInstallments is 0', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 0,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it('case 5 — returns [] when downPayment >= cartTotal', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 100,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it('case 6 — weekly frequency adds 7 days per installment', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'weekly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows.map((r) => r.due_date)).toEqual([
+      '2026-08-01',
+      '2026-08-08',
+      '2026-08-15',
+    ]);
+  });
+
+  it('case 7 — biweekly frequency adds 14 days per installment', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'biweekly' as LayawayFrequency,
+      firstInstallmentDate: '2026-08-01',
+    });
+    expect(rows.map((r) => r.due_date)).toEqual([
+      '2026-08-15',
+      '2026-08-29',
+      '2026-09-12',
+    ]);
+  });
+
+  it('case 8 — handles max 60 installments with remainder in the last', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 60,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toHaveLength(60);
+    // 100/60 = 1.6666… → first 59 at 1.67, last at 1.67 with remainder applied.
+    // Use sumAmounts to assert exact invariant.
+    expect(sumAmounts(rows)).toBe(100);
+  });
+
+  it('assigns sequential installment_number starting at 1', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 300,
+      downPayment: 0,
+      numInstallments: 5,
+      frequency: 'weekly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows.map((r) => r.installment_number)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('defaults firstInstallmentDate to today when omitted', () => {
+    const before = new Date();
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 1,
+      frequency: 'monthly' as LayawayFrequency,
+    });
+    const after = new Date();
+    const expectedDue = new Date(before);
+    expectedDue.setDate(expectedDue.getDate() + 30);
+    // Allow ±1s skew from wall-clock drift between before/after captures.
+    expect(
+      Math.abs(new Date(rows[0].due_date).getTime() - expectedDue.getTime()),
+    ).toBeLessThanOrEqual(60_000);
+    // And after capture must be at or before the expected due date.
+    const expectedAfter = new Date(after);
+    expectedAfter.setDate(expectedAfter.getDate() + 30);
+    expect(
+      Math.abs(new Date(rows[0].due_date).getTime() - expectedAfter.getTime()),
+    ).toBeLessThanOrEqual(60_000);
+  });
+});
+
+describe('isLayawayConfigValid', () => {
+  it('case 9 — rejects when remaining balance is not positive', () => {
+    expect(
+      isLayawayConfigValid({ cartTotal: 0, downPayment: 0, numInstallments: 1 }),
+    ).toBe(false);
+  });
+
+  it('case 10 — rejects when downPayment equals cartTotal', () => {
+    expect(
+      isLayawayConfigValid({
+        cartTotal: 100,
+        downPayment: 100,
+        numInstallments: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it('case 11 — accepts valid 100/50/3', () => {
+    expect(
+      isLayawayConfigValid({
+        cartTotal: 100,
+        downPayment: 50,
+        numInstallments: 3,
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects when numInstallments is 0', () => {
+    expect(
+      isLayawayConfigValid({
+        cartTotal: 100,
+        downPayment: 0,
+        numInstallments: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects negative downPayment', () => {
+    expect(
+      isLayawayConfigValid({
+        cartTotal: 100,
+        downPayment: -1,
+        numInstallments: 3,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects when remaining balance in cents is below numInstallments (Min(0.01) per row)', () => {
+    // remaining = 0.02, n = 3 → backend Min(0.01) per installment would
+    // require 0.03 in cents for 3 installments, impossible.
+    expect(
+      isLayawayConfigValid({
+        cartTotal: 0.02,
+        downPayment: 0,
+        numInstallments: 3,
+      }),
+    ).toBe(false);
+  });
+
+  it('accepts remaining exactly equal to 1 cent per installment (boundary)', () => {
+    expect(
+      isLayawayConfigValid({
+        cartTotal: 0.03,
+        downPayment: 0,
+        numInstallments: 3,
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects non-finite numeric values', () => {
+    expect(
+      isLayawayConfigValid({ cartTotal: NaN, downPayment: 0, numInstallments: 1 }),
+    ).toBe(false);
+    expect(
+      isLayawayConfigValid({ cartTotal: 100, downPayment: Infinity, numInstallments: 1 }),
+    ).toBe(false);
+    expect(
+      isLayawayConfigValid({ cartTotal: 100, downPayment: 0, numInstallments: 2.5 }),
+    ).toBe(false);
+    expect(
+      isLayawayConfigValid({ cartTotal: 100, downPayment: 0, numInstallments: Number.MAX_SAFE_INTEGER + 2 }),
+    ).toBe(false);
+  });
+});
+
+describe('buildLayawaySchedule — calendar and discount-aware cases', () => {
+  it('case 12 — financing schedule with prior cart-level discount', () => {
+    // Mirrors QUI-499 pr-review HIGH bug scenario:
+    // cart subtotal = 100000, cart discount = 10000, summary.total = 90000.
+    // The schedule must reflect the discounted total exactly.
+    const rows = buildLayawaySchedule({
+      cartTotal: 90000,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    expect(rows).toHaveLength(3);
+    expect(sumAmounts(rows)).toBe(90000);
+    expect(rows.map((r) => r.amount)).toEqual([30000, 30000, 30000]);
+  });
+
+  it('case 13 — leap-day monthly rollover across Feb 29', () => {
+    // Starts in late January 2028. +30d crossing leap day.
+    const rows = buildLayawaySchedule({
+      cartTotal: 200,
+      downPayment: 0,
+      numInstallments: 4,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2028-01-31',
+    });
+    expect(rows.map((r) => r.due_date)).toEqual([
+      '2028-03-01', // Jan 31 + 30d → Mar 1 (no Feb 31)
+      '2028-03-31',
+      '2028-04-30',
+      '2028-05-30',
+    ]);
+  });
+
+  it('case 14 — leap year first installment starting on Feb 29', () => {
+    const rows = buildLayawaySchedule({
+      cartTotal: 100,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2028-02-29',
+    });
+    expect(rows.map((r) => r.due_date)).toEqual([
+      '2028-03-30',
+      '2028-04-29',
+      '2028-05-29',
+    ]);
+  });
+});
+
+describe('allocateCartDiscounts', () => {
+  it('returns zeros for empty items or zero discount', () => {
+    expect(allocateCartDiscounts([], 100)).toEqual([]);
+    expect(allocateCartDiscounts([{ unitPrice: 100, quantity: 1 }], 0)).toEqual([0]);
+    expect(allocateCartDiscounts([{ unitPrice: 100, quantity: 1 }], -5)).toEqual([0]);
+  });
+
+  it('proportionally allocates by unit_price × quantity and sums exactly', () => {
+    // Two items: 50000 × 2 = 100000 weighted vs 50000 × 1 = 50000 weighted.
+    // Total discount = 15000. Weights 2:1. Expected ≈ [10000, 5000].
+    const items = [
+      { unitPrice: 50000, quantity: 2 },
+      { unitPrice: 50000, quantity: 1 },
+    ];
+    const allocations = allocateCartDiscounts(items, 15000);
+    const sum = allocations.reduce((s, a) => s + a, 0);
+    expect(sum).toBeCloseTo(15000, 2);
+    // Proportional check (rounding remainder may shift cents).
+    expect(allocations[0]).toBeGreaterThan(allocations[1]);
+  });
+
+  it('absorbs cent-rounding remainder into the last item (exact reconciliation)', () => {
+    // 3 items of equal weight, discount = 100.03 → 33.34, 33.34, 33.35
+    const items = [
+      { unitPrice: 100, quantity: 1 },
+      { unitPrice: 100, quantity: 1 },
+      { unitPrice: 100, quantity: 1 },
+    ];
+    const allocations = allocateCartDiscounts(items, 100.03);
+    const sum =
+      Math.round(allocations[0] * 100) +
+      Math.round(allocations[1] * 100) +
+      Math.round(allocations[2] * 100);
+    expect(sum / 100).toBeCloseTo(100.03, 2);
+  });
+
+  it('caps each line at its own unit_price × quantity (genuine cap path)', () => {
+    // To actually trigger the per-line cap, the proportional share for at
+    // least one line must exceed its own gross weight.
+    // Items weights: {10, 50} = 60. Discount = 100. Item 1's proportional
+    // share is 100 * 10 / 60 = 16.67 > cap 10 → cap fires.
+    const items = [
+      { unitPrice: 10, quantity: 1 },
+      { unitPrice: 50, quantity: 1 },
+    ];
+    const allocations = allocateCartDiscounts(items, 100);
+    // Item 1 hits its cap (10); item 2 takes its full cap (50).
+    expect(allocations[0]).toBe(10);
+    expect(allocations[1]).toBe(50);
+    // And the documented known limitation: if discount > sum of weights,
+    // the helper cannot reconcile (Σ allocations < totalDiscount). The
+    // modal must guard this case upstream via `discountExceedsSubtotal` —
+    // see PosLayawayConfigModal.ts:107-110.
+    const sum = allocations.reduce((s, a) => s + a, 0);
+    expect(sum).toBe(60);
+    expect(sum).toBeLessThan(100);
+  });
+
+  it('propagates back-fill when the LAST line cap leaves leftover', () => {
+    // 3 lines, weights {5, 5, 5}. Discount = 12. Proportional shares are
+    // 4, 4, 4 → cap at 5 each → no cap fires at proportional pass.
+    // But set discount = 16 to force the proportional share = 5.33,
+    // exceeding cap 5 on every line EXCEPT we want the cap to trigger on
+    // the LAST line. Use weights {100, 100, 5} with discount = 150:
+    //   share[0] = 150 * 100/205 ≈ 73.17 (no cap)
+    //   share[1] = 150 * 100/205 ≈ 73.17 (no cap)
+    //   share[2] = 150 * 5/205 ≈ 3.66 (no cap)
+    // Final remainder = 150 - 73.17 - 73.17 = 3.66 absorbed by last.
+    // Total reconciles. Back-fill path not triggered. Now do the genuine
+    // case: weights {5, 100}, discount = 200 → share[0] = 9.30 cap to 5,
+    // last takes min(195, 100) = 100, leftover = 95 → back-fill pushes 95
+    // into item 0 → but item 0 cap already maxed out at 5 → no add.
+    // Returns [5, 100], sum = 105 (under-allocated, modal MUST block).
+    const items = [
+      { unitPrice: 5, quantity: 1 },
+      { unitPrice: 100, quantity: 1 },
+    ];
+    const allocations = allocateCartDiscounts(items, 200);
+    expect(allocations[0]).toBe(5); // capped at own weight
+    expect(allocations[1]).toBe(100); // capped at own weight
+    const sum = allocations.reduce((s, a) => s + a, 0);
+    expect(sum).toBe(105);
+    expect(sum).toBeLessThan(200);
+  });
+
+  it('QUI-499 end-to-end: discounted cart reconstruction equals installment basis', () => {
+    // The exact scenario from the pr-review HIGH bug:
+    // 2 items × 50000 + cart discount 10000 → summary.total = 90000.
+    // After dispatching the discount to items (proportional), the backend
+    // rebuilds Σ (unit*qty − discount + tax) = 90000 exactly, matching the
+    // installment preview built from summary.total.
+    const items = [
+      { unitPrice: 50000, quantity: 1 },
+      { unitPrice: 50000, quantity: 1 },
+    ];
+    const allocations = allocateCartDiscounts(items, 10000);
+    const reconstructed = items.reduce((sum, i, idx) => {
+      const gross = i.unitPrice * i.quantity;
+      return sum + (gross - allocations[idx]);
+    }, 0);
+    expect(reconstructed).toBeCloseTo(90000, 2);
+    // And the schedule built from the discounted cart total sums exactly.
+    const rows = buildLayawaySchedule({
+      cartTotal: 90000,
+      downPayment: 0,
+      numInstallments: 3,
+      frequency: 'monthly' as LayawayFrequency,
+      firstInstallmentDate: '2026-07-25',
+    });
+    const scheduleSum = rows.reduce((s, r) => s + r.amount, 0);
+    expect(scheduleSum).toBeCloseTo(reconstructed, 2);
+  });
+});
+
+describe('rebuildLayawayItemCents — backend-faithful line total', () => {
+  it('matches backend Decimal arithmetic for single line with discount and tax', () => {
+    // Backend: Decimal(unit_price).times(qty).minus(discount).plus(tax)
+    // We send unit_price=100, qty=2, discount=20, tax=15 (all cents-exact).
+    // Cents: 10000*2 - 2000 + 1500 = 19500 → 195.00.
+    expect(
+      rebuildLayawayItemCents(100, 2, 20, 15),
+    ).toBe(19500);
+  });
+
+  it('returns 0 when line is fully discounted', () => {
+    expect(rebuildLayawayItemCents(100, 1, 100, 0)).toBe(0);
+  });
+
+  it('handles fractional unit_price rounded to cents (per-line tax scenario)', () => {
+    // Two lines at $1.00 each, raw 6.5% tax each = 0.065 → mobile rounds
+    // each per-line to 0.07 BEFORE sending. Backend uses the rounded value.
+    // Per-line cents: 100*1 + 7 = 107 → 1.07 each, total 214 cents.
+    const perLineCents = rebuildLayawayItemCents(1.0, 1, 0, 0.07);
+    expect(perLineCents).toBe(107);
+    expect(perLineCents * 2).toBe(214);
+  });
+});
+
+describe('rebuildLayawayTotalFromLines — cart basis matches backend', () => {
+  it('rebuilds a cart with discount using rounded per-line values', () => {
+    // The pr-review-3 scenario from QUI-499:
+    // 2 items × $500.00, raw tax 6.5% each = 0.065 → mobile rounds to 0.07,
+    // discount = $100.00 cart-level (allocated to items proportionally).
+    //
+    // After allocation (cap-free): [50, 50]. Per-line:
+    //   line 0: 50000*1 - 5000 + 7 = 45007
+    //   line 1: 50000*1 - 5000 + 7 = 45007
+    // Total = 90014 cents = 900.14.
+    const lines = [
+      {
+        unit_price: Number((50000 / 100).toFixed(2)),
+        quantity: 1,
+        discount_amount: Number((50 / 100).toFixed(2)),
+        tax_amount: Number((7 / 100).toFixed(2)),
+      },
+      {
+        unit_price: Number((50000 / 100).toFixed(2)),
+        quantity: 1,
+        discount_amount: Number((50 / 100).toFixed(2)),
+        tax_amount: Number((7 / 100).toFixed(2)),
+      },
+    ];
+    const total = rebuildLayawayTotalFromLines(lines);
+    expect(total).toBeCloseTo(900.14, 2);
+  });
+
+  it('sentinel: backend-faithful total under three equal-tax lines', () => {
+    // 3 × $10.00 lines, tax 6.5% each rounded to $0.07, no discount.
+    // Per-line cents: 1000 + 7 = 1007; total = 3021 cents = $30.21.
+    const lines = [
+      { unit_price: 10, quantity: 1, discount_amount: 0, tax_amount: 0.07 },
+      { unit_price: 10, quantity: 1, discount_amount: 0, tax_amount: 0.07 },
+      { unit_price: 10, quantity: 1, discount_amount: 0, tax_amount: 0.07 },
+    ];
+    expect(rebuildLayawayTotalFromLines(lines)).toBeCloseTo(30.21, 2);
+  });
+});

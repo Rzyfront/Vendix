@@ -48,7 +48,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         <!-- Dropdown de resultados -->
         @if (showDropdown && searchResults.length > 0) {
           <div
-            class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            class="absolute z-50 w-full mt-1 bg-surface border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto"
             >
             @for (product of searchResults; track product) {
               <div

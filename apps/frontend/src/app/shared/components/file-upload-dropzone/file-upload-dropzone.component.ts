@@ -20,7 +20,7 @@ import { IconComponent } from '../icon/icon.component';
         <!-- Remove button -->
         <button
           type="button"
-          class="absolute top-2 right-2 p-1 rounded-full bg-white shadow-sm border border-gray-200 hover:bg-red-50 hover:border-red-300 transition-colors"
+          class="absolute top-2 right-2 p-1 rounded-full bg-surface shadow-sm border border-gray-200 hover:bg-red-50 hover:border-red-300 transition-colors"
           (click)="removeFile()"
           [disabled]="disabled()"
           >
@@ -47,7 +47,7 @@ import { IconComponent } from '../icon/icon.component';
         <!-- Non-image file display -->
         @if (!previewUrl()) {
           <div class="flex items-center gap-3">
-            <div class="p-2 bg-white rounded-lg shadow-sm border border-gray-100">
+            <div class="p-2 bg-surface rounded-lg shadow-sm border border-gray-100">
               <app-icon name="file-text" size="24" class="text-primary-500"></app-icon>
             </div>
             <div class="flex-1 min-w-0">
@@ -67,11 +67,11 @@ import { IconComponent } from '../icon/icon.component';
     } @else {
       <div
         (click)="triggerFileInput()"
-        class="group w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
+        class="group w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-surface hover:border-primary-300 hover:shadow-md"
         [class.opacity-50]="disabled()"
         [class.pointer-events-none]="disabled()"
         >
-        <div class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
+        <div class="p-2 bg-surface rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
           <app-icon [name]="icon()" size="24" class="text-primary-500"></app-icon>
         </div>
         <p class="text-[13px] font-semibold text-gray-700">{{ label() }}</p>
