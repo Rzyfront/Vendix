@@ -995,12 +995,17 @@ onSearchChange(term: string): void {
   }
 
   // QUI-438: confirma antes de descartar cambios sin guardar en el modal
-  // de configuración de métodos de pago.
-  canCloseConfigModal = (): boolean => {
-    if (this.config_form.pristine) return true;
-    return window.confirm(
-      'Tienes cambios sin guardar. ¿Cerrar y descartarlos?',
-    );
+  // de configuración de métodos de pago. Usa DialogService en vez de
+  // window.confirm — `canClose` acepta Promise<boolean>, así que el diálogo
+  // del design system encaja directo y respeta el tema y el foco.
+  canCloseConfigModal = (): Promise<boolean> => {
+    if (this.config_form.pristine) return Promise.resolve(true);
+    return this.dialog_service.confirm({
+      title: 'Descartar cambios',
+      message: 'Tienes cambios sin guardar. ¿Cerrar y descartarlos?',
+      confirmText: 'Descartar',
+      cancelText: 'Seguir editando',
+      confirmVariant: 'danger'});
   };
 
   closeConfigModal(): void {

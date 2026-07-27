@@ -27,6 +27,18 @@ describe('flattenPanelUi / nestPanelUi', () => {
       STORE_ADMIN: { dashboard: true },
     });
   });
+
+  it('nestPanelUi conserva las apps hermanas de la base', () => {
+    expect(
+      nestPanelUi({ dashboard: true }, 'STORE_ADMIN', {
+        STORE_ADMIN: { dashboard: false, pos: true },
+        STORE_ECOMMERCE: { profile: true },
+      }),
+    ).toEqual({
+      STORE_ECOMMERCE: { profile: true },
+      STORE_ADMIN: { dashboard: true },
+    });
+  });
 });
 
 describe('buildSettingsUpdatePayload', () => {
@@ -58,7 +70,10 @@ describe('buildSettingsUpdatePayload', () => {
     expect(result).toEqual({ panel_ui: { STORE_ADMIN: { dashboard: true, pos: false } } });
   });
 
-  it('preserva STORE_ECOMMERCE intacto si el form ya lo trae', () => {
+  // El backend reemplaza la sección completa en vez de hacer deep-merge
+  // (`settings.service.ts:371-376`), así que omitir STORE_ECOMMERCE del PATCH
+  // no lo preserva: lo borra. Tiene que viajar en el payload.
+  it('reenvía STORE_ECOMMERCE en el payload para no borrarlo', () => {
     const form: Partial<StoreSettings> = {
       ...original,
       panel_ui: {
@@ -69,10 +84,27 @@ describe('buildSettingsUpdatePayload', () => {
     const result = buildSettingsUpdatePayload(form, original);
     expect(result?.panel_ui).toEqual({
       STORE_ADMIN: { dashboard: false, pos: true },
+      STORE_ECOMMERCE: { profile: true },
     });
-    expect(
-      (result?.panel_ui as { STORE_ECOMMERCE?: unknown })?.STORE_ECOMMERCE,
-    ).toBeUndefined();
+  });
+
+  it('reenvía las apps hermanas del original aunque el form no las traiga', () => {
+    const withEcommerce: Partial<StoreSettings> = {
+      ...original,
+      panel_ui: {
+        STORE_ADMIN: { dashboard: true, pos: true },
+        STORE_ECOMMERCE: { profile: true },
+      },
+    };
+    const form: Partial<StoreSettings> = {
+      ...withEcommerce,
+      panel_ui: { STORE_ADMIN: { dashboard: false, pos: true } },
+    };
+    const result = buildSettingsUpdatePayload(form, withEcommerce);
+    expect(result?.panel_ui).toEqual({
+      STORE_ADMIN: { dashboard: false, pos: true },
+      STORE_ECOMMERCE: { profile: true },
+    });
   });
 
   it('omite secciones no presentes en el form', () => {

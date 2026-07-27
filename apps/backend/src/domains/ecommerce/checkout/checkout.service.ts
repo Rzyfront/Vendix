@@ -736,9 +736,7 @@ export class CheckoutService {
       payment_method.system_payment_method.type === 'wallet' &&
       !RequestContextService.getUserId()
     ) {
-      throw new BadRequestException(
-        'Wallet payment is only available to authenticated customers.',
-      );
+      throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
     }
 
     // Strict carta schedule gate (same OR window semantics as the public menu).

@@ -67,17 +67,52 @@ function getTaxRateSum(product: Product): number {
 }
 
 /**
- * Cuando el `base_price` del producto ya incluye IVA, el `tax_rate` debe
- * extraerse del precio (es decir, el impuesto no debe duplicarse al
- * multiplicar `unitPrice * (1 + rate)`). En ese caso devolvemos 0
- * porque el producto ya viene con todo el impuesto adentro (paridad con
- * el backend `price_includes_tax`).
+ * QUI-521 — ¿el precio del producto ya trae el IVA adentro?
+ *
+ * ⚠️ Hoy esto devuelve siempre `false`: ni `tax_included` ni
+ * `price_includes_tax` existen como campo de producto en ningún punto del
+ * stack (no están en `schema.prisma`, ni en el backend, ni en el tipo
+ * `Product` de mobile). El flag real vive en el setting de tienda
+ * `GeneralSettings.tax_included` (`types/settings.types.ts:15`), y mobile
+ * todavía no tiene un store de settings desde donde leerlo.
+ *
+ * O sea: QUI-521 sigue abierto. Para cerrarlo hay que exponer el setting al
+ * carrito, no leerlo del producto. Se deja la función porque el resto del
+ * cálculo ya quedó correcto para cuando el flag esté disponible.
  */
 function isPriceTaxInclusive(product: Product): boolean {
   return Boolean(
     (product as Product & { tax_included?: boolean }).tax_included ||
       (product as Product & { price_includes_tax?: boolean }).price_includes_tax,
   );
+}
+
+/**
+ * Impuesto y precio final de una línea.
+ *
+ * Con precio tax-exclusive el impuesto se suma encima. Con precio
+ * tax-inclusive el impuesto ya está adentro, así que hay que EXTRAERLO
+ * (`p * rate / (1 + rate)`), no ponerlo en 0: `summary.taxAmount` se manda al
+ * backend como `tax_amount` al crear la orden (`pos-payment-modal.tsx:225`,
+ * `shipping-modal.tsx:126`) y se imprime como "IVA" en el footer, así que un
+ * 0 acá declara una venta gravada con IVA cero.
+ */
+function computeLineTax(
+  unitPrice: number,
+  quantity: number,
+  rateSum: number,
+  inclusive: boolean,
+): { taxAmount: number; finalPrice: number } {
+  if (!inclusive) {
+    return {
+      taxAmount: unitPrice * quantity * rateSum,
+      finalPrice: unitPrice * (1 + rateSum),
+    };
+  }
+  return {
+    taxAmount: (unitPrice * quantity * rateSum) / (1 + rateSum),
+    finalPrice: unitPrice,
+  };
 }
 
 function getSellableUnitPrice(product: Product, variant?: ProductVariant | null): number {
@@ -90,11 +125,12 @@ function getSellableUnitPrice(product: Product, variant?: ProductVariant | null)
 function buildCartItem(product: Product, variant?: ProductVariant | null, quantity: number = 1): CartItem {
   const unitPrice = getSellableUnitPrice(product, variant);
   const rateSum = getTaxRateSum(product);
-  // Si el `base_price` ya incluye IVA, no duplicar el impuesto al
-  // multiplicar — `tax_included` se respeta solo cuando el backend lo
-  // expone; si no, comportamiento legacy (rateSum) para no romper.
-  const taxAmount = isPriceTaxInclusive(product) ? 0 : unitPrice * quantity * rateSum;
-  const finalPrice = isPriceTaxInclusive(product) ? unitPrice : unitPrice * (1 + rateSum);
+  const { taxAmount, finalPrice } = computeLineTax(
+    unitPrice,
+    quantity,
+    rateSum,
+    isPriceTaxInclusive(product),
+  );
   const totalPrice = quantity * finalPrice;
   const variant_display_name = variant?.name || variant?.attributes || undefined;
 
@@ -114,9 +150,12 @@ function buildCartItem(product: Product, variant?: ProductVariant | null, quanti
 function recalcItem(item: CartItem): CartItem {
   const rateSum = getTaxRateSum(item.product);
   const unitPrice = getSellableUnitPrice(item.product, item.variant);
-  const inclusive = isPriceTaxInclusive(item.product);
-  const taxAmount = inclusive ? 0 : unitPrice * item.quantity * rateSum;
-  const finalPrice = inclusive ? unitPrice : unitPrice * (1 + rateSum);
+  const { taxAmount, finalPrice } = computeLineTax(
+    unitPrice,
+    item.quantity,
+    rateSum,
+    isPriceTaxInclusive(item.product),
+  );
   const totalPrice = item.quantity * finalPrice;
   return { ...item, unitPrice, taxAmount, finalPrice, totalPrice };
 }

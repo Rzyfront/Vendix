@@ -57,3 +57,12 @@ GITHUB_SECRET_INSTRUCTIONS.txt
 
 # Playwright MCP session artifacts (snapshots, console, network logs)
 .playwright-mcp/
+
+# Compose override local. Es el nombre reservado que Compose fusiona solo, sin
+# flag ni opt-in, así que commitearlo cambia el arranque de todo el equipo.
+# Para compartir una variante usar `docker-compose.no-watch.yml` con -f.
+docker-compose.override.yml
+
+# Capturas de verificación local (QA, screenshots de referencia).
+/vendix-*.png
+apps/mobile/.captures/

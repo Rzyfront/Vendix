@@ -51,6 +51,10 @@ services:
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      # QUI-489: en dev el límite de 10 intentos de login estorba al probar
+      # flujos de auth. Este compose es sólo de desarrollo (NODE_ENV arriba lo
+      # fija), así que el 30 vive acá y prod queda con el default seguro de 10.
+      LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-30}
     depends_on:
       - db
       - redis

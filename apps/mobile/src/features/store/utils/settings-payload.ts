@@ -27,13 +27,31 @@ export function flattenPanelUi(
   return asRoot;
 }
 
-/** Anida un panel_ui plano dentro de la app objetivo. */
+/**
+ * Anida un panel_ui plano dentro de la app objetivo, conservando las demás
+ * apps de `base`.
+ *
+ * `base` NO es opcional por comodidad: el backend reemplaza la sección
+ * completa en vez de hacer deep-merge —`settings.service.ts:371-376` hace
+ * `updatedSettings[key] = dto[key]`—, así que un payload
+ * `{ panel_ui: { STORE_ADMIN: {...} } }` borra `STORE_ECOMMERCE` y cualquier
+ * otra app, y `mergeStoreSettingsWithDefaults` las repone con los defaults,
+ * no con lo que el usuario había configurado. Hay que reenviar las hermanas.
+ */
 export function nestPanelUi(
   panelUi: Record<string, boolean> | undefined,
   targetApp = 'STORE_ADMIN',
+  base?: PanelUiSettings | undefined,
 ): PanelUiSettings | undefined {
   if (!panelUi) return undefined;
-  return { [targetApp]: { ...panelUi } } as PanelUiSettings;
+  const siblings: PanelUiSettings = {};
+  for (const [appKey, modules] of Object.entries(base ?? {})) {
+    if (appKey === targetApp) continue;
+    if (modules && typeof modules === 'object') {
+      (siblings as Record<string, unknown>)[appKey] = { ...modules };
+    }
+  }
+  return { ...siblings, [targetApp]: { ...panelUi } } as PanelUiSettings;
 }
 
 /**
@@ -41,9 +59,13 @@ export function nestPanelUi(
  * secciones cuyo JSON cambia. Si no hay cambios, devuelve `null` para
  * que la UI no haga un PATCH vacío.
  *
- * El backend hace deep-merge por sección, así que un top-level solo
- * incluye claves realmente modificadas; las claves deprecadas/
- * desconocidas (e.g. `app`, `branding`, `fiscal_status`) no se envían.
+ * El PATCH solo incluye secciones realmente modificadas; las claves
+ * deprecadas/desconocidas (e.g. `app`, `branding`, `fiscal_status`) no se
+ * envían.
+ *
+ * ⚠️ El backend NO hace deep-merge dentro de la sección: reemplaza el objeto
+ * completo (`settings.service.ts:371-376`). Por eso cada sección incluida debe
+ * ir COMPLETA, y `panel_ui` reenvía las apps que no son la objetivo.
  */
 const PATCHABLE_SECTIONS: ReadonlyArray<keyof StoreSettings> = [
   'general',
@@ -99,7 +121,13 @@ export function buildSettingsUpdatePayload(
       const flat = flattenPanelUi(next as PanelUiSettings, targetApp);
       const flatPrev = flattenPanelUi(prev as PanelUiSettings | undefined, targetApp);
       if (deepEqual(flat, flatPrev)) continue;
-      const nested = nestPanelUi(flat, targetApp);
+      // Base para las apps hermanas: se prefiere lo que trae el form (lectura
+      // más fresca del backend) y se cae al original si el form no las trae.
+      const siblingBase = {
+        ...((prev as PanelUiSettings | undefined) ?? {}),
+        ...((next as PanelUiSettings | undefined) ?? {}),
+      } as PanelUiSettings;
+      const nested = nestPanelUi(flat, targetApp, siblingBase);
       if (nested) {
         (payload as Record<string, unknown>).panel_ui = nested;
         mutated = true;

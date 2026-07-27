@@ -56,6 +56,19 @@ export function createRateLimitMiddleware(
   return RedisRateLimitMiddleware;
 }
 
+/**
+ * Lee un límite de intentos del env aceptando 0 como valor válido (cerrar el
+ * endpoint) y cayendo al default sólo si falta, no es número o es negativo.
+ */
+function resolveMaxAttempts(
+  raw: string | undefined,
+  fallback: number,
+): number {
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 export const RateLimitMiddleware = createRateLimitMiddleware({
   prefix: 'rl:general',
   windowSeconds: 15 * 60, // 15 minutes
@@ -67,10 +80,13 @@ export const RateLimitMiddleware = createRateLimitMiddleware({
 export const LoginRateLimitMiddleware = createRateLimitMiddleware({
   prefix: 'rl:login',
   windowSeconds: 15 * 60, // 15 minutes
-  // QUI-489 refactor: lee del env. Default 10 (production-safe). En dev se
-  // puede subir via docker-compose.override.yml con
-  // LOGIN_RATE_LIMIT_MAX_ATTEMPTS=30 sin tocar producción.
-  maxAttempts: Number(process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS) || 10,
+  // QUI-489 refactor: lee del env. Default 10 (production-safe). En dev el
+  // docker-compose.yml lo sube a 30 sin tocar producción.
+  //
+  // `Number(x) || 10` no sirve acá: con LOGIN_RATE_LIMIT_MAX_ATTEMPTS=0 —la
+  // forma intuitiva de cerrar el login— Number da 0, que es falsy, y cae al
+  // default de 10, o sea justo lo contrario de lo pedido. Igual con NaN.
+  maxAttempts: resolveMaxAttempts(process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, 10),
   message: 'Too many login attempts from this IP, please try again later.',
   errorLabel: 'Too Many Login Attempts',
 });

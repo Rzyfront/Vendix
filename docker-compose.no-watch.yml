@@ -1,0 +1,21 @@
+# Variante SIN watch para el backend. Uso EXPLÍCITO:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.no-watch.yml up -d backend
+#
+# Workaround al bug de `swc --watch`, que sobre Docker Desktop/VirtioFS a veces
+# deja de recompilar (ver skill `buildcheck-dev`). A cambio hay que construir a
+# mano después de cada cambio:
+#
+#   docker compose exec backend npx nest build --builder swc && docker restart vendix_backend
+#
+# NO renombrar a `docker-compose.override.yml`: ese nombre lo fusiona Compose
+# automáticamente, sin flag ni opt-in. Como `dist/` está en .gitignore y el bind
+# mount `./apps/backend:/app` tapa el `dist` de la imagen, en un clon fresco el
+# contenedor muere con `Cannot find module '/app/dist/src/main.js'` y
+# `restart: unless-stopped` lo reintenta en bucle.
+#
+# El override de LOGIN_RATE_LIMIT_MAX_ATTEMPTS (QUI-489) NO vive acá: está en
+# el `docker-compose.yml` base, para que aplique con o sin watch.
+services:
+  backend:
+    command: sh -c "npx prisma generate && node dist/src/main.js"

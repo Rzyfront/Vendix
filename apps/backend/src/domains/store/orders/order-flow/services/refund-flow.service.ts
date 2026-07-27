@@ -345,8 +345,22 @@ export class RefundFlowService {
           }
         }
 
-        // Record cash register refund movement (non-blocking)
-        if (userId) {
+        // Record cash register refund movement (non-blocking).
+        //
+        // Sólo para métodos que realmente sacan efectivo del cajón:
+        // `recordRefundCashRegisterMovement` registra el movimiento con
+        // `payment_method: 'cash'` fijo. Con caja habilitada y sesión abierta
+        // —el flujo normal de un reembolso en tienda— un `store_credit`
+        // pagaría dos veces: crédito en la billetera del cliente (arriba) más
+        // salida de efectivo acá. `bank_transfer` tiene el mismo problema: sale
+        // por banco, no por caja.
+        //
+        // `original_payment` se sigue registrando como hoy: depende del método
+        // del pago original, que este servicio no resuelve todavía.
+        const movesCash =
+          dto.refund_method !== 'store_credit' &&
+          dto.refund_method !== 'bank_transfer';
+        if (userId && movesCash) {
           this.recordRefundCashRegisterMovement(
             order.store_id,
             userId,

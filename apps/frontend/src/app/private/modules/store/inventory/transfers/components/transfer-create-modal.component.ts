@@ -19,6 +19,7 @@ import {
 import { CreateTransferRequest, LocationStock, TransferableProduct } from '../interfaces';
 import { TransfersService } from '../services/transfers.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 
 interface TransferItem {
   product_id: number;
@@ -419,6 +420,7 @@ export class TransferCreateModalComponent {
   private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
   private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
 
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
@@ -486,17 +488,20 @@ export class TransferCreateModalComponent {
 
   // QUI-438: confirma antes de descartar cambios en el wizard de
   // transferencia si el usuario ya ingreso ubicaciones o productos.
-  canCloseTransfer = (): boolean => {
+  canCloseTransfer = (): Promise<boolean> => {
     const hasChanges =
       this.selectedFromLocation !== null ||
       this.selectedToLocation !== null ||
       this.expectedDate !== '' ||
       this.notes !== '' ||
       this.transferItems.length > 0;
-    if (!hasChanges) return true;
-    return window.confirm(
-      'Tienes datos sin guardar. ¿Cerrar y descartarlos?',
-    );
+    if (!hasChanges) return Promise.resolve(true);
+    return this.dialogService.confirm({
+      title: 'Descartar transferencia',
+      message: 'Tienes datos sin guardar. ¿Cerrar y descartarlos?',
+      confirmText: 'Descartar',
+      cancelText: 'Seguir editando',
+      confirmVariant: 'danger'});
   };
 
   get modalTitle(): string {
