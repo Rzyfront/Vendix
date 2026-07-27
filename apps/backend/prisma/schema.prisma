@@ -234,7 +234,7 @@ model store_users {
 
 model roles {
   id               Int                @id @default(autoincrement())
-  name             String             @unique @db.VarChar(50)
+  name             String             @db.VarChar(50)
   description      String?
   is_system_role   Boolean            @default(false)
   organization_id  Int?
@@ -244,6 +244,29 @@ model roles {
   user_roles       user_roles[]
   organizations    organizations?     @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
+  // QUI-473: composite unique on (organization_id, name) replaces the legacy
+  // global `@@unique([name])` so two organizations can each have their own
+  // 'Preventista' role. The matching SQL migration is
+  // `prisma/migrations/20260724233150_roles_composite_unique/migration.sql`
+  // (consolidated into `..._nulls_not_distinct/migration.sql`).
+  //
+  // System roles (is_system_role=true, organization_id=null) are enforced
+  // unique by Postgres `NULLS NOT DISTINCT` on that composite index — without
+  // that modifier PostgreSQL would treat `(NULL, name)` rows as distinct and
+  // let two system roles share a name.
+  //
+  // ⚠️ Prisma cannot express `NULLS NOT DISTINCT` in `@@unique(...)`, so any
+  // future `prisma migrate diff` / schema regeneration that drops the manual
+  // migration will silently re-create the index WITHOUT the modifier. Verify
+  // after any schema regeneration:
+  //
+  //   SELECT indnullsnotdistinct FROM pg_index
+  //   WHERE indexrelid = '"roles_organization_id_name_key"'::regclass;
+  //   -- must be `true`
+  //
+  // If you ever need to enforce a system-vs-org invariant at the SQL layer
+  // (e.g. a CHECK constraint), prefer a separate follow-up migration.
+  @@unique([organization_id, name])
   @@index([organization_id])
 }
 

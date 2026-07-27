@@ -226,7 +226,20 @@ export class StaffProvisioningService {
 
     // 2. Rol en user_roles (idempotente)
     if (roleName) {
-      const role = await db.roles.findUnique({ where: { name: roleName } });
+      // QUI-473: this helper only ever provisions staff/owner with a system
+      // role (e.g. owner / admin / super_admin). After the composite unique
+      // on (organization_id, name), name alone is no longer a unique
+      // selector — and a name-only lookup could now resolve to a same-named
+      // organization-custom role, which is the wrong scope. Scope explicitly
+      // to the system role by also filtering on `organization_id: null` and
+      // `is_system_role: true`.
+      const role = await db.roles.findFirst({
+        where: {
+          name: roleName,
+          organization_id: null,
+          is_system_role: true,
+        },
+      });
       if (!role) {
         throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
       }
