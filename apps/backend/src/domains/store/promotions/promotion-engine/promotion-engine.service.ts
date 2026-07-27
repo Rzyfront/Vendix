@@ -81,7 +81,7 @@ export class PromotionEngineService {
       // Priority follows the "1 = highest" convention (ranking-style, intuitive
       // for UI). Lower number wins. Promos with the same priority keep their
       // insertion order (id desc as tiebreaker).
-      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
+      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     });
 
     const eligible: any[] = [];
@@ -125,14 +125,16 @@ export class PromotionEngineService {
 
     // WINNER-TAKES-ALL: return only the single lowest-priority-number
     // eligible promotion (1 = highest, per the "1=highest" convention).
-    // Ties broken by highest id (newest promo wins). Mirrors the rule
-    // used in quoteDiscounts so /check-eligibility and the POS payments
-    // snapshot stay consistent.
+    // Ties broken by lowest promotion_id (the older promo wins). This MUST
+    // match quoteDiscounts exactly, otherwise /check-eligibility and the POS
+    // payments snapshot pick different winners whenever two promos share a
+    // priority — which is the common case, since promotions.priority defaults
+    // to 0.
     if (eligible.length === 0) return eligible;
     const winner = eligible.reduce((best, current) => {
       if (
         current.priority < best.priority ||
-        (current.priority === best.priority && current.id > best.id)
+        (current.priority === best.priority && current.id < best.id)
       ) {
         return current;
       }
@@ -380,7 +382,7 @@ export class PromotionEngineService {
         promotion_categories: true,
         promotion_quantity_tiers: true,
       },
-      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
+      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     })) as unknown as PromotionRecord[];
 
     /**
@@ -450,6 +452,9 @@ export class PromotionEngineService {
         | {
             discountAmount: number;
             perLineShares: Map<number, number>;
+            // Lines actually charged. Narrower than `applicableIndexes` for
+            // per_product tiered promos; omitted means "the whole scope".
+            chargedIndexes?: number[];
           }
         | null = null;
 
@@ -482,6 +487,12 @@ export class PromotionEngineService {
         let matchedTier: (typeof tiers)[number] | undefined;
         let scopedQty = 0;
 
+        // Lines the resolved tier is actually charged against. For cart_total
+        // that is the whole scope; for per_product it narrows below to the
+        // products that reached the tier on their own.
+        let tierIndexes = applicableIndexes;
+        let tierTotal = applicableTotal;
+
         if (grouping === 'per_product') {
           // Group by product_id, then pick the BEST tier across all groups
           // (largest discount value wins). This keeps the "best discount for
@@ -492,19 +503,44 @@ export class PromotionEngineService {
             const pid = Number(items[idx].product_id);
             byProduct.set(pid, (byProduct.get(pid) ?? 0) + Number(items[idx].quantity));
           }
-          for (const qty of byProduct.values()) {
+          const tierByProduct = new Map<number, (typeof tiers)[number]>();
+          for (const [pid, qty] of byProduct.entries()) {
             const candidate = tiers.find(
               (t) =>
                 t.min_quantity <= qty &&
                 (t.max_quantity === null || t.max_quantity >= qty),
             );
-            if (
-              candidate &&
-              (!matchedTier || Number(candidate.value) > Number(matchedTier.value))
-            ) {
+            if (!candidate) continue;
+            tierByProduct.set(pid, candidate);
+            if (!matchedTier || Number(candidate.value) > Number(matchedTier.value)) {
               matchedTier = candidate;
               scopedQty = qty;
             }
+          }
+
+          // Charge the winning tier ONLY to the products that reached it.
+          // Without this narrowing a single qualifying product would bleed its
+          // tier onto every other line in scope (e.g. one product with qty=2
+          // discounting a 3-line cart), which contradicts the per_product
+          // contract above and inflates the discount.
+          if (matchedTier) {
+            const winningTierId = matchedTier.id;
+            const qualifyingPids = new Set(
+              Array.from(tierByProduct.entries())
+                .filter(([, t]) => t.id === winningTierId)
+                .map(([pid]) => pid),
+            );
+            tierIndexes = applicableIndexes.filter((idx) =>
+              qualifyingPids.has(Number(items[idx].product_id)),
+            );
+            tierTotal = this.roundMoney(
+              tierIndexes.reduce(
+                (sum, idx) =>
+                  sum +
+                  Number(items[idx].unit_price) * Number(items[idx].quantity),
+                0,
+              ),
+            );
           }
         } else {
           // cart_total: legacy behavior — sum across every applicable line.
@@ -520,21 +556,22 @@ export class PromotionEngineService {
         }
 
         if (!matchedTier) continue;
+        if (tierIndexes.length === 0 || tierTotal <= 0) continue;
 
         // Per-line discount computed from the FIXED winning tier (resolved once
         // from scopedQty above), not from each line's individual quantity.
         // percentage tiers apply per line; fixed_amount tiers apply a single
-        // flat amount across the scope (capped at applicableTotal) split
-        // proportionally across lines — see computeTierDiscountForResolvedTier.
+        // flat amount across the charged lines (capped at tierTotal) split
+        // proportionally across them — see computeTierDiscountForResolvedTier.
         const perLineShares = new Map<number, number>();
         let rawTotal = 0;
-        for (const idx of applicableIndexes) {
+        for (const idx of tierIndexes) {
           const item = items[idx];
           const lineDiscount = this.computeTierDiscountForResolvedTier(
             Number(item.unit_price),
             Number(item.quantity),
             matchedTier,
-            applicableTotal,
+            tierTotal,
           );
           perLineShares.set(idx, lineDiscount);
           rawTotal = this.roundMoney(rawTotal + lineDiscount);
@@ -549,7 +586,7 @@ export class PromotionEngineService {
         if (Number.isFinite(maxDiscount) && maxDiscount > 0) {
           discountAmount = Math.min(discountAmount, maxDiscount);
         }
-        discountAmount = Math.min(discountAmount, applicableTotal);
+        discountAmount = Math.min(discountAmount, tierTotal);
         discountAmount = this.roundMoney(discountAmount);
         if (discountAmount <= 0) continue;
 
@@ -559,9 +596,9 @@ export class PromotionEngineService {
         // cap respects the global promotion limit.
         const scale = rawTotal > 0 ? discountAmount / rawTotal : 0;
         let assigned = 0;
-        for (let i = 0; i < applicableIndexes.length; i++) {
-          const idx = applicableIndexes[i];
-          const isLast = i === applicableIndexes.length - 1;
+        for (let i = 0; i < tierIndexes.length; i++) {
+          const idx = tierIndexes[i];
+          const isLast = i === tierIndexes.length - 1;
           const rawShare = perLineShares.get(idx) ?? 0;
           const proportionalShare = this.roundMoney(rawShare * scale);
           const share = isLast
@@ -571,7 +608,11 @@ export class PromotionEngineService {
           assigned = this.roundMoney(assigned + share);
         }
 
-        candidateResult = { discountAmount, perLineShares };
+        candidateResult = {
+          discountAmount,
+          perLineShares,
+          chargedIndexes: tierIndexes,
+        };
       } else {
         // flat (default) branch
         const discountAmount = this.computeDiscountAmount(
@@ -613,7 +654,7 @@ export class PromotionEngineService {
       ) {
         winner = {
           promo,
-          applicableIndexes,
+          applicableIndexes: candidateResult.chargedIndexes ?? applicableIndexes,
           discountAmount: candidateResult.discountAmount,
           perLineShares: candidateResult.perLineShares,
         };
@@ -820,7 +861,7 @@ export class PromotionEngineService {
         promotion_categories: { select: { category_id: true } },
         promotion_quantity_tiers: true,
       },
-      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
+      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     })) as unknown as PromotionRecord[];
 
     if (promotions.length === 0) return result;
@@ -836,8 +877,14 @@ export class PromotionEngineService {
         .filter((id) => Number.isFinite(id));
 
       // Find the highest priority eligible promotion for this product.
-      // Promotions are pre-ordered by priority desc; among equal priorities,
-      // prefer scope=product over scope=category for clearer UX.
+      // Promotions are pre-ordered by (priority asc, id asc) — lowest priority
+      // number first, oldest promo first. The `rank >` comparison below is
+      // strict, so on an exact rank tie the FIRST promo iterated wins, which
+      // makes the oldest promo win. That matches the explicit `id <` tie-break
+      // in quoteDiscounts and getEligiblePromotions, so the product-card badge
+      // and the cart/POS quote never disagree on which promo applies.
+      // Among equal priorities, prefer scope=product over scope=category for
+      // clearer UX.
       let chosen: { promo: PromotionRecord; rank: number } | null = null;
       for (const promo of promotions) {
         const productIds = (promo.promotion_products ?? []).map((pp) =>

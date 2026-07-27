@@ -371,8 +371,11 @@ describe('PromotionEngineService - quoteDiscounts', () => {
     });
   });
 
-  describe('stacking', () => {
-    it('combines multiple auto-apply promotions by priority desc', async () => {
+  describe('winner-takes-all', () => {
+    // Promotions do NOT stack. When several auto-apply promos are eligible,
+    // exactly ONE is applied: the lowest priority NUMBER wins (1 = highest
+    // importance, like a priority queue).
+    it('applies only the promotion with the lowest priority number', async () => {
       prisma.promotions.findMany.mockResolvedValue([
         buildPromotion({
           id: 71,
@@ -401,18 +404,57 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         now: REFERENCE_NOW,
       });
 
-      // subtotal = 200
-      // First (priority 10): order scope, 5% of 200 = 10
-      // Second (priority 5): product scope, fixed 20 on product 10
+      // subtotal = 200. Promo 72 (priority 5) beats promo 71 (priority 10),
+      // so ONLY the $20 fixed discount on product 10 applies — the order-wide
+      // 5% is evaluated and discarded, not added on top.
       expect(result.subtotal).toBe(200);
-      expect(result.total_discount).toBe(30);
-      expect(result.promotional_subtotal).toBe(170);
-      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([71, 72]);
+      expect(result.total_discount).toBe(20);
+      expect(result.promotional_subtotal).toBe(180);
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([72]);
 
       const item10 = result.items.find((i) => i.product_id === 10)!;
-      // Item 10 got order share (5% of 100 = 5) + product (20) = 25
-      expect(item10.promotion_discount).toBe(25);
-      expect(item10.promotion_ids).toEqual([71, 72]);
+      expect(item10.promotion_discount).toBe(20);
+      expect(item10.promotion_ids).toEqual([72]);
+
+      const item20 = result.items.find((i) => i.product_id === 20)!;
+      expect(item20.promotion_discount).toBe(0);
+      expect(item20.promotion_ids).toEqual([]);
+    });
+
+    // Tie-break contract. `promotions.priority` defaults to 0, so equal
+    // priorities are the COMMON case, not an edge case. On a tie the oldest
+    // promo (lowest id) wins, and every read path must agree on that —
+    // quoteDiscounts, getEligiblePromotions and the product-card badge.
+    it('breaks a priority tie by lowest promotion id (oldest wins)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 82,
+          name: 'Nueva 30% OFF',
+          type: 'percentage',
+          value: 30,
+          scope: 'order',
+          priority: 0,
+        }),
+        buildPromotion({
+          id: 81,
+          name: 'Vieja 10% OFF',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+          priority: 0,
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'l1', product_id: 1, unit_price: 100, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+
+      // Same priority → id 81 wins even though 82 offers a bigger discount
+      // and was listed first. The rule is deterministic, not "best for the
+      // customer", so the POS snapshot and /check-eligibility never diverge.
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([81]);
+      expect(result.total_discount).toBe(10);
     });
   });
 
