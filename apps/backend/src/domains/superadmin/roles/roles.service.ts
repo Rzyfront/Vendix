@@ -208,14 +208,17 @@ export class RolesService {
     }
 
     if (updateRoleDto.name && updateRoleDto.name !== existingRole.name) {
-      // QUI-473: align the pre-check with the create path (organization_id:
-      // null). The composite unique on (organization_id, name) means the
-      // same name can legitimately exist in another scope, so a global
-      // name-only lookup would falsely reject the rename.
+      // QUI-473: align the pre-check with the create path. The composite
+      // unique on (organization_id, name) means the same name can
+      // legitimately exist in another scope, so the pre-check must match the
+      // scope of the role being renamed — `existingRole.organization_id`
+      // (NULL for system roles, <orgId> for org-scoped ones). A global
+      // `organization_id: null` lookup would falsely reject a rename of an
+      // org-scoped role whose new name collides with another org-scoped role.
       const nameExists = await (this.prisma as any).roles.findFirst({
         where: {
           name: updateRoleDto.name,
-          organization_id: null,
+          organization_id: existingRole.organization_id,
           id: { not: id },
         },
       });

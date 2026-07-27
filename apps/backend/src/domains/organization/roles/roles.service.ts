@@ -76,11 +76,22 @@ export class RolesService {
     // The pre-check must match the scope of the row we are about to insert:
     // - system_role=true  → look for (organization_id = NULL, name)
     // - system_role=false → look for (organization_id = <ctx.org>, name)
+    //
+    // Critically, the pre-check must ALSO reject the case where an org tries
+    // to create a role whose name is already taken by a SYSTEM role. Before
+    // QUI-473 this was impossible because `name` had a global UNIQUE; with the
+    // composite unique on (organization_id, name) a row matching
+    // `(NULL, 'carrier')` does NOT collide with `(org_x, 'carrier')` at the
+    // database level, so the application has to enforce it. Mirrors the
+    // pre-check in `store-roles.service.ts:172-177`.
     const target_organization_id = system_role ? null : organization_id;
     const existingRole = await this.prismaService.roles.findFirst({
       where: {
         name,
-        organization_id: target_organization_id,
+        OR: [
+          { organization_id: target_organization_id },
+          { is_system_role: true },
+        ],
       },
     });
 
@@ -263,16 +274,23 @@ export class RolesService {
     // for system roles). After the composite unique, the same name can
     // legitimately exist in another organization, so a name-only lookup
     // would falsely reject the rename.
+    //
+    // We ALSO block a rename that would collide with any SYSTEM role name —
+    // same regression vector as `create()` above. Mirrors
+    // `store-roles.service.ts:248-260`.
     if (name && name !== role.name) {
       const existingRole = await this.prismaService.roles.findFirst({
         where: {
           name,
-          organization_id: role.organization_id,
+          OR: [
+            { organization_id: role.organization_id },
+            { is_system_role: true },
+          ],
         },
       });
 
       if (existingRole) {
-        throw new ConflictException('Ya existe un rol con este nombre');
+        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
       }
     }
 
@@ -304,7 +322,7 @@ export class RolesService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        throw new ConflictException('Ya existe un rol con este nombre');
+        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
       }
       throw err;
     }

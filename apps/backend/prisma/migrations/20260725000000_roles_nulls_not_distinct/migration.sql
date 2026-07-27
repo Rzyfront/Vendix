@@ -1,3 +1,10 @@
+-- DATA IMPACT:
+-- tabla: roles
+-- operacion: drop & recreate roles_organization_id_name_key con NULLS NOT DISTINCT
+-- filas afectadas: 0 (DDL puro)
+-- idempotente: SI (DROP ... IF EXISTS, CREATE INDEX no-op si ya existe con misma definición)
+-- precondición: PostgreSQL 15+ (NULLS NOT DISTINCT requiere 15+)
+
 -- QUI-473 follow-up: enforce system role uniqueness at the DB level.
 --
 -- The previous composite unique on (organization_id, name) used the Postgres
