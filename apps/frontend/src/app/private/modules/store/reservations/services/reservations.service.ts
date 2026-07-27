@@ -302,8 +302,13 @@ export class ReservationsService {
     if (productVariantId) {
       params = params.set('product_variant_id', productVariantId.toString());
     }
-    if (includeBooked) {
+    // Forward `include_booked` explícito: tanto `true` como `false`
+    // llegan al backend. Sin esto, pasar `false` se ignoraba y el
+    // backend seguía devolviendo la franja completa con `is_booked`.
+    if (includeBooked === true) {
       params = params.set('include_booked', 'true');
+    } else if (includeBooked === false) {
+      params = params.set('include_booked', 'false');
     }
 
     return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(
