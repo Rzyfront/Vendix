@@ -160,7 +160,6 @@ interface ListHeaderProps {
   filterValues: FilterValues;
   onFilterChange: (values: FilterValues) => void;
   onClearAllFilters: () => void;
-  activeFilterCount: boolean;
 }
 
 function ListHeader({
@@ -171,7 +170,6 @@ function ListHeader({
   filterValues,
   onFilterChange,
   onClearAllFilters,
-  activeFilterCount,
 }: ListHeaderProps) {
   return (
     <View>
@@ -262,7 +260,6 @@ export default function AuditLogsScreen() {
 
   const hasFilters =
     !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
-  const activeFilterCount = !!(filters.resource || filters.action || filters.from || filters.to);
 
   // ───── Filter configs (espejo del `filterConfigs` web) ─────────────────
   const filterConfigs = useMemo<FilterConfig[]>(
@@ -394,7 +391,6 @@ export default function AuditLogsScreen() {
             filterValues={filterValues}
             onFilterChange={handleFilterChange}
             onClearAllFilters={handleClearAllFilters}
-            activeFilterCount={activeFilterCount}
           />
         }
         ListEmptyComponent={

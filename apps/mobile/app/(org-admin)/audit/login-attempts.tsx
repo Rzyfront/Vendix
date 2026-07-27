@@ -77,7 +77,6 @@ interface ListHeaderProps {
   filterValues: FilterValues;
   onFilterChange: (values: FilterValues) => void;
   onClearAllFilters: () => void;
-  activeFilterCount: boolean;
 }
 
 function ListHeader({
@@ -90,7 +89,6 @@ function ListHeader({
   filterValues,
   onFilterChange,
   onClearAllFilters,
-  activeFilterCount,
 }: ListHeaderProps) {
   return (
     <View>
@@ -213,7 +211,6 @@ export default function LoginAttemptsScreen() {
   const total = data?.meta?.total ?? 0;
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasFilters = !!search || filter !== 'all';
-  const activeFilterCount = filter !== 'all';
 
   // ───── Filter configs (espejo del form web) ──────────────────────
   const filterConfigs = useMemo<FilterConfig[]>(
@@ -279,7 +276,6 @@ export default function LoginAttemptsScreen() {
             filterValues={filterValues}
             onFilterChange={handleFilterChange}
             onClearAllFilters={handleClearAllFilters}
-            activeFilterCount={activeFilterCount}
           />
         }
         ListEmptyComponent={

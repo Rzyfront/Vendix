@@ -73,7 +73,6 @@ interface ListHeaderProps {
   filterValues: FilterValues;
   onFilterChange: (values: FilterValues) => void;
   onClearAllFilters: () => void;
-  activeFilterCount: boolean;
 }
 
 function ListHeader({
@@ -85,7 +84,6 @@ function ListHeader({
   filterValues,
   onFilterChange,
   onClearAllFilters,
-  activeFilterCount,
 }: ListHeaderProps) {
   return (
     <View>
@@ -220,7 +218,6 @@ export default function SessionsScreen() {
     setPage(1);
   }, []);
 
-  const activeFilterCount = status !== 'all';
 
   // ───── Mutations ─────────────────────────────────────────────────
   const terminateMutation = useMutation({
@@ -255,7 +252,6 @@ export default function SessionsScreen() {
             filterValues={filterValues}
             onFilterChange={handleFilterChange}
             onClearAllFilters={handleClearAllFilters}
-            activeFilterCount={activeFilterCount}
           />
         }
         ListEmptyComponent={
