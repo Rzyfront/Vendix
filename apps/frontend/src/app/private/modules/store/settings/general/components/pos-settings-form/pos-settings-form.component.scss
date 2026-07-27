@@ -5,8 +5,8 @@
 // ─── Day Row (mobile-first) ────────────────────────────
 
 .day-row {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 10px 12px;
   display: flex;
@@ -41,7 +41,7 @@
 .day-label {
   font-size: 13px;
   font-weight: 600;
-  color: #374151;
+  color: var(--color-text-primary);
   text-transform: capitalize;
 }
 
@@ -72,15 +72,15 @@
   }
 
   &--close {
-    background: #fef2f2;
-    color: #dc2626;
-    border-color: #fecaca;
+    background: var(--color-error-50);
+    color: var(--color-error-600);
+    border-color: var(--color-error-200);
   }
 
   &--open {
-    background: #f0fdf4;
-    color: #16a34a;
-    border-color: #bbf7d0;
+    background: var(--color-success-50);
+    color: var(--color-success-600);
+    border-color: var(--color-success-200);
   }
 }
 
@@ -103,7 +103,7 @@
 .time-label {
   font-size: 11px;
   font-weight: 600;
-  color: #9ca3af;
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 
@@ -118,10 +118,10 @@
   padding: 8px 6px;
   min-height: 36px;
   font-size: 13px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f9fafb;
-  color: #111827;
+  background: var(--color-neutral-100);
+  color: var(--color-text-primary);
   cursor: pointer;
   transition: border-color 200ms ease, box-shadow 200ms ease;
 
@@ -134,9 +134,9 @@
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
-    background: #fff;
+    border-color: var(--color-info);
+    box-shadow: 0 0 0 3px rgba(var(--color-info-rgb), 0.12);
+    background: var(--color-surface);
   }
 
   &:disabled {
@@ -146,7 +146,7 @@
 }
 
 .time-separator {
-  color: #d1d5db;
+  color: var(--color-neutral-300);
   font-size: 14px;
   padding-bottom: 8px;
   flex-shrink: 0;
@@ -156,7 +156,7 @@
   font-size: 13px;
   font-weight: 500;
   font-style: italic;
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 // ─── Custom Mode Blocks ──────────────────────────────
@@ -177,7 +177,7 @@
 .block-label {
   font-size: 11px;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   min-width: 56px;
   flex-shrink: 0;
 }
@@ -189,9 +189,9 @@
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  border: 1px solid #fecaca;
-  background: #fef2f2;
-  color: #dc2626;
+  border: 1px solid var(--color-error-200);
+  background: var(--color-error-50);
+  color: var(--color-error-600);
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
@@ -208,7 +208,7 @@
   }
 
   &:hover {
-    background: #fee2e2;
+    background: var(--color-error-100);
   }
 }
 
@@ -219,9 +219,9 @@
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  border: 1px solid #bbf7d0;
-  background: #f0fdf4;
-  color: #16a34a;
+  border: 1px solid var(--color-success-200);
+  background: var(--color-success-50);
+  color: var(--color-success-600);
   font-size: 18px;
   font-weight: 700;
   cursor: pointer;
@@ -238,6 +238,6 @@
   }
 
   &:hover {
-    background: #dcfce7;
+    background: var(--color-success-100);
   }
 }

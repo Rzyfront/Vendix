@@ -606,7 +606,7 @@ import {
 
                     @if (feature.enabled && feature.limit !== null && feature.limit > 0) {
                       <div class="space-y-1">
-                        <div class="w-full bg-white rounded-full h-1.5 overflow-hidden border border-gray-200">
+                        <div class="w-full bg-surface rounded-full h-1.5 overflow-hidden border border-gray-200">
                           <div
                             class="h-1.5 rounded-full transition-all"
                             [class.bg-green-500]="usagePercent(feature) < 70"

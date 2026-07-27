@@ -58,7 +58,7 @@ import {
             </div>
           </div>
 
-          <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <div class="rounded-lg border border-slate-200 bg-surface p-4">
             <div class="mb-3 flex items-start justify-between gap-3">
               <div>
                 <h4 class="text-sm font-semibold text-slate-950">
@@ -273,7 +273,7 @@ import {
                     <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
                       Host en proveedor
                     </label>
-                    <button type="button" class="flex w-full items-center gap-2 rounded bg-white px-3 py-2 text-left" (click)="copyToClipboard(providerHost(record))">
+                    <button type="button" class="flex w-full items-center gap-2 rounded bg-surface px-3 py-2 text-left" (click)="copyToClipboard(providerHost(record))">
                       <code class="text-sm flex-1 truncate">{{ providerHost(record) }}</code>
                       <app-icon name="copy" [size]="14"></app-icon>
                     </button>
@@ -283,7 +283,7 @@ import {
                     <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
                       Valor/Destino
                     </label>
-                    <button type="button" class="flex w-full items-center gap-2 rounded bg-white px-3 py-2 text-left" (click)="copyToClipboard(record.value)">
+                    <button type="button" class="flex w-full items-center gap-2 rounded bg-surface px-3 py-2 text-left" (click)="copyToClipboard(record.value)">
                       <code class="text-sm flex-1 truncate">{{ record.value }}</code>
                       <app-icon name="copy" [size]="14"></app-icon>
                     </button>
@@ -644,7 +644,7 @@ export class DomainVerifyModalComponent implements OnChanges {
     if (stage.waiting || stage.status === 'waiting') {
       return 'border-sky-500 bg-sky-50 text-sky-600';
     }
-    return 'border-slate-300 bg-white text-slate-400';
+    return 'border-slate-300 bg-surface text-slate-400';
   }
 
   stageTextClass(stage: DomainProvisioningStage): string {

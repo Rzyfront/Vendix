@@ -703,7 +703,7 @@ export class AuthEffects {
     { dispatch: false },
   );
 
-  // 🔥 Apply Theme Preset
+  // 🔥 Apply Theme — dos ejes: modo (light/dark/system) + estilo (preset)
   applyThemeEffect$ = createEffect(
     () =>
       this.actions$.pipe(
@@ -714,20 +714,26 @@ export class AuthEffects {
           AuthActions.updateUserSettingsSuccess,
         ),
         tap((action: any) => {
-          let theme = 'default';
+          // Defaults: modo 'light' (no sorprender al usuario con dark tras migrar),
+          // estilo 'default' (sin tinte de superficies).
+          let mode: 'light' | 'dark' | 'system' = 'light';
+          let preset: 'default' | 'aura' | 'monocromo' | 'glass' = 'default';
 
           if (action.user_settings) {
-            // Check for config.preferences.theme (as per prompt/new structure)
-            if (action.user_settings.config?.preferences?.theme) {
-              theme = action.user_settings.config.preferences.theme;
+            const prefs =
+              action.user_settings.config?.preferences ||
+              action.user_settings.preferences;
+            // Eje modo (nuevo). Legacy sin theme_mode → 'light'.
+            if (prefs?.theme_mode === 'dark' || prefs?.theme_mode === 'system') {
+              mode = prefs.theme_mode;
             }
-            // Fallback/Legacy: preferences directly on user_settings?
-            else if (action.user_settings.preferences?.theme) {
-              theme = action.user_settings.preferences.theme;
+            // Eje estilo. Acepta strings legacy ('aura'|'monocromo'|'glass').
+            if (prefs?.theme) {
+              preset = prefs.theme as any;
             }
           }
 
-          this.themeService.applyUserTheme(theme);
+          this.themeService.applyThemePreferences(mode, preset);
         }),
       ),
     { dispatch: false },

@@ -144,39 +144,41 @@ export type TooltipColor =
 
       /* Colors */
       .tooltip-container[data-color='default'] {
-        --tooltip-bg: rgba(15, 23, 42, 0.95);
-        --tooltip-text: #f8fafc;
-        --tooltip-arrow-color: rgba(15, 23, 42, 0.95);
+        /* Tokenizado: rgba neutral-900 con alpha */
+        --tooltip-bg: rgba(var(--color-neutral-900-rgb), 0.95);
+        --tooltip-text: var(--color-neutral-50);
+        --tooltip-arrow-color: rgba(var(--color-neutral-900-rgb), 0.95);
       }
 
       .tooltip-container[data-color='primary'] {
-        --tooltip-bg: linear-gradient(135deg, #7ed7a5 0%, #6fc58a 100%);
-        --tooltip-text: #0f172a;
-        --tooltip-arrow-color: #7ed7a5;
+        /* Gradiente usa tokens primarios (sobrescrito por .tooltip-content) */
+        --tooltip-bg: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary) 100%);
+        --tooltip-text: var(--color-neutral-900);
+        --tooltip-arrow-color: var(--color-primary);
       }
 
       .tooltip-container[data-color='secondary'] {
-        --tooltip-bg: linear-gradient(135deg, #2f6f4e 0%, #245d3f 100%);
+        --tooltip-bg: linear-gradient(135deg, var(--color-secondary) 0%, var(--color-secondary) 100%);
         --tooltip-text: #ffffff;
-        --tooltip-arrow-color: #2f6f4e;
+        --tooltip-arrow-color: var(--color-secondary);
       }
 
       .tooltip-container[data-color='accent'] {
-        --tooltip-bg: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+        --tooltip-bg: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent) 100%);
         --tooltip-text: #ffffff;
-        --tooltip-arrow-color: #06b6d4;
+        --tooltip-arrow-color: var(--color-accent);
       }
 
       .tooltip-container[data-color='destructive'] {
-        --tooltip-bg: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        --tooltip-bg: linear-gradient(135deg, var(--color-error) 0%, var(--color-error) 100%);
         --tooltip-text: #ffffff;
-        --tooltip-arrow-color: #ef4444;
+        --tooltip-arrow-color: var(--color-error);
       }
 
       .tooltip-container[data-color='warning'] {
-        --tooltip-bg: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        --tooltip-bg: linear-gradient(135deg, var(--color-warning-500) 0%, var(--color-warning-600) 100%);
         --tooltip-text: #ffffff;
-        --tooltip-arrow-color: #f59e0b;
+        --tooltip-arrow-color: var(--color-warning-500);
       }
 
       .tooltip-container[data-color='ai'] {
@@ -208,9 +210,10 @@ export type TooltipColor =
       }
 
       .tooltip-container[data-color='warning'] .tooltip-content {
-        background: #f59e0b;
+        /* Tokenizado: warning-500 */
+        background: var(--color-warning-500);
         color: white;
-        border-color: #f59e0b;
+        border-color: var(--color-warning-500);
       }
 
       @keyframes ai-tooltip-shimmer {
@@ -341,14 +344,15 @@ export type TooltipColor =
       }
 
       .tooltip-container[data-color='warning'] {
-        --tooltip-arrow-color: #f59e0b;
+        --tooltip-arrow-color: var(--color-warning-500);
       }
 
-      /* Dark theme adjustments */
+      /* Dark theme: invierte tooltip default (fondo claro, texto oscuro) — específico del tooltip, no cubierto por global */
       [data-theme='dark'] .tooltip-container[data-color='default'] {
-        --tooltip-bg: rgba(248, 250, 252, 0.95);
-        --tooltip-text: #0f172a;
-        --tooltip-arrow-color: rgba(248, 250, 252, 0.95);
+        /* Tokenizado: rgba neutral-50 con alpha + neutral-900 para texto */
+        --tooltip-bg: rgba(var(--color-neutral-50-rgb), 0.95);
+        --tooltip-text: var(--color-neutral-900);
+        --tooltip-arrow-color: rgba(var(--color-neutral-50-rgb), 0.95);
       }
 
       [data-theme='dark'] .tooltip-container[data-color='default'] {

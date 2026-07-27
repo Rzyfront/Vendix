@@ -143,8 +143,8 @@ interface DnsInstructionsData {
       }
 
       @if (error()) {
-        <div class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
-          <p class="text-xs text-red-700 dark:text-red-300">
+        <div class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200">
+          <p class="text-xs text-red-700">
             {{ error() }}
           </p>
         </div>

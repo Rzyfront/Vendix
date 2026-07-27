@@ -34,7 +34,7 @@ import {
     <div class="space-y-6">
       <!-- Methods Table -->
       <div
-        class="bg-white rounded-2xl shadow-sm border border-[var(--color-border)] overflow-visible"
+        class="bg-surface rounded-2xl shadow-sm border border-[var(--color-border)] overflow-visible"
       >
         <div
           class="p-6 border-b border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50"

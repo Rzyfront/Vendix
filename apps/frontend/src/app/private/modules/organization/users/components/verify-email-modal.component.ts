@@ -30,14 +30,14 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </p>
 
         @if (user()?.email_verified) {
-          <div class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+          <div class="p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 rounded-md">
             <p class="text-sm text-green-700 dark:text-green-400">
               Este usuario ya tiene el email verificado.
             </p>
           </div>
         }
 
-        <div class="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+        <div class="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 rounded-md">
           <p class="text-sm text-blue-700 dark:text-blue-400">
             <strong>Email:</strong> {{ user()?.email }}
           </p>

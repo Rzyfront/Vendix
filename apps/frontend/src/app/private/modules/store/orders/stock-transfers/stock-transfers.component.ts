@@ -16,7 +16,7 @@ import { Component } from '@angular/core';
         </p>
       </div>
 
-      <div class="bg-white rounded-lg shadow-sm border p-8">
+      <div class="bg-surface rounded-lg shadow-sm border p-8">
         <div class="text-center">
           <div
             class="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4"

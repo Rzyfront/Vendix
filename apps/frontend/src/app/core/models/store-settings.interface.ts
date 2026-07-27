@@ -49,7 +49,10 @@ export interface AppSettings {
   primary_color: string;
   secondary_color: string;
   accent_color: string;
-  theme: 'default' | 'aura' | 'monocromo';
+  // Espejo del contrato de branding del backend (settings-schemas.dto.ts).
+  // Debe incluir los 4 presets del eje estilo; ver ThemePreset en
+  // tenant-config.interface.ts.
+  theme: 'default' | 'aura' | 'glass' | 'monocromo';
   logo_url: string | null;
   favicon_url: string | null;
 }

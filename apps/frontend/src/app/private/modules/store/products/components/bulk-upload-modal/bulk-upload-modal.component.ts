@@ -602,7 +602,7 @@ import {
                         </th>
                       </tr>
                     </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
+                    <tbody class="bg-surface divide-y divide-gray-200">
                       @for (
                         item of analysisResult()!.products;
                         track item.row_number
@@ -893,7 +893,7 @@ import {
                   item of analysisResult()!.products;
                   track item.row_number
                 ) {
-                  <div class="border rounded-lg p-3 bg-white">
+                  <div class="border rounded-lg p-3 bg-surface">
                     <div class="flex items-center justify-between mb-2">
                       <span
                         class="text-sm font-medium truncate mr-2"
@@ -1130,7 +1130,7 @@ import {
             <!-- Results -->
             @if (uploadResults() && !isUploading()) {
               <!-- Summary -->
-              <div class="bg-white border rounded-lg overflow-hidden">
+              <div class="bg-surface border rounded-lg overflow-hidden">
                 <div
                   class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center"
                 >
@@ -1183,7 +1183,7 @@ import {
                   <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
                   Detalle por Concepto
                 </div>
-                <div class="max-h-48 overflow-y-auto bg-white">
+                <div class="max-h-48 overflow-y-auto bg-surface">
                   <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
                       <tr>
@@ -1209,7 +1209,7 @@ import {
                         </th>
                       </tr>
                     </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
+                    <tbody class="bg-surface divide-y divide-gray-200">
                       @for (
                         result of uploadResults()!.results;
                         track result.sku

@@ -430,7 +430,7 @@ export interface RouteMapReorderEntry {
                     @if (u.dispatchNoteId != null) {
                       <button
                         type="button"
-                        class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-amber-500"
+                        class="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-surface px-2 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-amber-500"
                         (click)="onFijarEnMapaClick(u)"
                         [attr.aria-label]="'Fijar en mapa la parada ' + u.sequence"
                       >
@@ -444,7 +444,7 @@ export interface RouteMapReorderEntry {
                     }
                   </div>
                   @if (editingNoteId() === u.stopId && u.dispatchNoteId != null) {
-                    <div class="rounded-lg border border-amber-200 bg-white p-2">
+                    <div class="rounded-lg border border-amber-200 bg-surface p-2">
                       <app-dispatch-note-address-editor
                         [noteId]="u.dispatchNoteId"
                         [address]="u.customerAddress ?? null"
@@ -483,7 +483,7 @@ export interface RouteMapReorderEntry {
         gap: 4px;
         padding: 11px 14px;
         border-radius: 16px;
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(var(--color-surface-rgb), 0.9);
         border: 1px solid rgba(255, 255, 255, 0.6);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);

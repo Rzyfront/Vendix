@@ -101,7 +101,7 @@ import {
         align-items: center;
         gap: 8px;
         padding: 8px 16px;
-        background-color: #f3f4f6;
+        background-color: var(--color-neutral-100);
         border: 1px solid #d1d5db;
         border-radius: 6px;
         color: #374151;
@@ -132,7 +132,7 @@ import {
       }
 
       .shortcuts-help-content {
-        background: white;
+        background: var(--color-surface);
         border-radius: 12px;
         max-width: 600px;
         width: 100%;
@@ -169,7 +169,7 @@ import {
       }
 
       .close-btn:hover {
-        background-color: #f3f4f6;
+        background-color: var(--color-neutral-100);
       }
 
       .help-body {
@@ -220,7 +220,7 @@ import {
         align-items: center;
         justify-content: center;
         padding: 4px 8px;
-        background-color: #f3f4f6;
+        background-color: var(--color-neutral-100);
         border: 1px solid #d1d5db;
         border-radius: 4px;
         font-size: 11px;

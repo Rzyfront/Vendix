@@ -54,20 +54,25 @@
 
 /* Main content area styles */
 main {
+  /* Los 12px que se le quitaron de alto al header (84 → --admin-header-h)
+     reaparecen aquí para conservar la separación vertical original. Van en el
+     outlet y no como margen del header porque `main` es el contenedor con
+     scroll: el hueco se desplaza con el contenido en vez de quedar fijo. */
+  padding-top: var(--admin-header-gap);
   background-color: var(--color-background);
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
 }
 
-/* ===== Glass Theme Overrides ===== */
+/* ===== Glass Theme Overrides =====
+   `main` va TRANSPARENTE y SIN backdrop-filter, a propósito. Un backdrop-filter
+   aquí convierte a `main` en su propio backdrop root: las tarjetas de su interior
+   dejan de difuminar los blobs del canvas y pasan a difuminar el relleno lechoso
+   de `main`, con lo que todo el vidrio se ve plano y "tímido". Sin filtro, cada
+   panel refracta el canvas real. */
 :host-context([data-theme-preset="glass"]) {
-  main {
-    background: rgba(255, 255, 255, 0.25);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-  }
-
+  main,
   .main-content {
     background: transparent;
   }

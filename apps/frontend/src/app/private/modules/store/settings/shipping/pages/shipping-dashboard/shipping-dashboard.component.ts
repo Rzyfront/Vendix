@@ -726,9 +726,9 @@ export class ShippingDashboardComponent implements OnInit {
     const bg_map: Record<string, string> = {
       custom: '#F1F5F9',
       pickup: '#ECFDF5',
-      own_fleet: '#EFF6FF',
-      carrier: '#FFF7ED',
-      third_party_provider: '#F5F3FF'};
+      own_fleet: 'var(--color-info-50, #EFF6FF)',
+      carrier: 'var(--color-orange-50, #FFF7ED)',
+      third_party_provider: 'var(--color-violet-50, #F5F3FF)'};
     return bg_map[type] || '#F1F5F9';
   }
 

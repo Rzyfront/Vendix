@@ -771,11 +771,11 @@ export class SesionPageComponent {
   routeStatusColor(status?: string): { fg: string; bg: string } {
     const map: Record<string, { fg: string; bg: string }> = {
       draft: { fg: '#475569', bg: '#f1f5f9' },
-      dispatched: { fg: '#1d4ed8', bg: '#dbeafe' },
-      in_transit: { fg: '#b45309', bg: '#fef3c7' },
-      settling: { fg: '#7e22ce', bg: '#f3e8ff' },
+      dispatched: { fg: '#1d4ed8', bg: 'var(--color-info-100, #dbeafe)' },
+      in_transit: { fg: '#b45309', bg: 'var(--color-warning-100, #fef3c7)' },
+      settling: { fg: '#7e22ce', bg: 'var(--color-purple-100, #f3e8ff)' },
       closed: { fg: '#047857', bg: '#d1fae5' },
-      voided: { fg: '#b91c1c', bg: '#fee2e2' },
+      voided: { fg: '#b91c1c', bg: 'var(--color-error-100, #fee2e2)' },
     };
     return map[status ?? ''] || { fg: '#475569', bg: '#f1f5f9' };
   }

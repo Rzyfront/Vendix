@@ -236,7 +236,7 @@ export class OperatingScopeComponent {
       this.editable() ? 'hover:-translate-y-0.5' : 'cursor-not-allowed opacity-70',
       selected
         ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
-        : 'border-[var(--color-border)] bg-white hover:border-primary/50 hover:shadow-md',
+        : 'border-[var(--color-border)] bg-surface hover:border-primary/50 hover:shadow-md',
     ].join(' ');
   }
 }

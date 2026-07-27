@@ -435,7 +435,7 @@ interface Tab {
                       <img
                         [src]="storeForm.get('logo_url')?.value"
                         alt="Logo"
-                        class="w-10 h-10 rounded object-cover bg-white/20"
+                        class="w-10 h-10 rounded object-cover bg-surface/20"
                       />
                     } @else {
                       <div

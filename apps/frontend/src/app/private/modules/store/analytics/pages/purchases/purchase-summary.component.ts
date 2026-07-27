@@ -87,7 +87,7 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
 
       <!-- Filter Bar -->
       <div
-        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
+        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
       >
         <div class="flex items-center gap-2.5 min-w-0">
           <div

@@ -732,8 +732,8 @@ export const storeAdminRoutes: Routes = [
       },
       // Memberships (Membership Suite: Planes, Socios/Membresías, Accesos). The
       // whole group is hidden by INDUSTRY_HIDDEN_MODULES for every industry
-      // except `gym` and `service`; visible only when the store's industry
-      // includes `gym` or `service`. Panel_ui keys: memberships (parent) ·
+      // except `gym`; visible only when the store's industry includes `gym`.
+      // Panel_ui keys: memberships (parent) ·
       // memberships_plans · memberships_members · memberships_access. The root
       // /admin/memberships defaults to Planes.
       {
