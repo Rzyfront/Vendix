@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Vendix Mobile — Issues resueltas (iteración 1+2)</title>
+<style>
+  @page { size: A4; margin: 18mm 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #111827; margin: 0; line-height: 1.45; font-size: 11pt; }
+  h1 { font-size: 20pt; margin: 0 0 4pt; color: #0F4C2C; }
+  h2 { font-size: 14pt; margin: 18pt 0 6pt; color: #0F4C2C; border-bottom: 2px solid #0F4C2C; padding-bottom: 2pt; }
+  h3 { font-size: 12pt; margin: 12pt 0 4pt; color: #1F2937; }
+  p { margin: 4pt 0; }
+  .meta { color: #6B7280; font-size: 9.5pt; margin-bottom: 12pt; }
+  .pill { display: inline-block; padding: 1pt 6pt; border-radius: 8pt; font-size: 8.5pt; font-weight: 600; }
+  .pill.urgent { background: #FEE2E2; color: #991B1B; }
+  .pill.high { background: #FFEDD5; color: #9A3412; }
+  .pill.medium { background: #DBEAFE; color: #1E40AF; }
+  .pill.low { background: #E5E7EB; color: #4B5563; }
+  .pill.na { background: #E5E7EB; color: #4B5563; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6pt; }
+  th, td { border: 1px solid #D1D5DB; padding: 5pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #F3F4F6; font-weight: 600; }
+  .code { font-family: 'Consolas', 'Courier New', monospace; font-size: 9pt; background: #F3F4F6; padding: 1pt 4pt; border-radius: 3pt; }
+  ul { margin: 4pt 0 4pt 16pt; padding: 0; }
+  li { margin: 1pt 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8pt; }
+  .card { border: 1px solid #D1D5DB; border-radius: 6pt; padding: 8pt; background: #FAFAFA; }
+  .card h3 { margin-top: 0; }
+  .footer { margin-top: 18pt; color: #6B7280; font-size: 9pt; border-top: 1px solid #E5E7EB; padding-top: 6pt; }
+  .note { background: #FEF3C7; border-left: 3px solid #D97706; padding: 6pt 8pt; margin: 8pt 0; font-size: 10pt; }
+</style>
+</head>
+<body>
+
+<h1>Vendix Mobile — Issues resueltas (iteración 1 + 2)</h1>
+<p class="meta">
+  Reporte generado el 22-jul-2026 · PR <a href="https://github.com/Rzyfront/Vendix/pull/444">#444</a>
+  (base <span class="code">dev</span>, head <span class="code">AJDevWeb</span>, reviewer <span class="code">Rzyfront</span>).
+  Cambios exclusivamente en <span class="code">apps/mobile</span>. Sin tocar producción.
+</p>
+
+<h2>Resumen ejecutivo</h2>
+<p>Se resolvieron 13 issues de la lista asignada a
+  <span class="code">adelingtoro@gmail.com</span> en el proyecto Vendix de Linear, todas en
+  la app móvil Store Admin. Cada fix respeta las reglas: cero cambios en producción
+  ni en código que ya funcionaba, cambios mínimos y aislados por commit, verificación
+  contra el backend local (<span class="code">localhost:3000</span>) sin tocar
+  <span class="code">api.vendix.online</span>.</p>
+
+<div class="grid">
+  <div class="card">
+    <h3>Iteración 1 (Urgentes)</h3>
+    <ul>
+      <li><strong>QUI-531</strong> Gastos: crash al abrir el módulo</li>
+      <li><strong>QUI-520</strong> Panel Principal: paridad con web</li>
+      <li><strong>QUI-532</strong> Configuración: persistencia de cambios</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Iteración 2 (UI / POS / POP / Login)</h3>
+    <ul>
+      <li><strong>QUI-523 / QUI-524</strong> Marcas / Categoría: acciones por fila</li>
+      <li><strong>QUI-527 / QUI-528 / QUI-529</strong> Marketing: crear reubicado</li>
+      <li><strong>QUI-525 / QUI-526</strong> POP: IVA + normalización de movimientos</li>
+      <li><strong>QUI-519 / QUI-522 / QUI-450 / QUI-451</strong> Auth, Órdenes, Dashboard, POS</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Tabla resumen</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width: 70pt;">Issue</th>
+      <th style="width: 60pt;">Prioridad</th>
+      <th>Módulo</th>
+      <th>Estado</th>
+      <th>Commit</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>QUI-531</td>
+      <td><span class="pill urgent">Urgente</span></td>
+      <td>Gastos (QUI-531)</td>
+      <td>Resuelta — sin crash, contratos alineados, DTOs correctos</td>
+      <td><span class="code">c91233d5e</span></td>
+    </tr>
+    <tr>
+      <td>QUI-520</td>
+      <td><span class="pill urgent">Urgente</span></td>
+      <td>Dashboard / Panel Principal</td>
+      <td>Resuelta — 4 tarjetas (Ingresos/Ganancias/Órdenes/Gastos) y curva Bézier</td>
+      <td><span class="code">c91233d5e</span></td>
+    </tr>
+    <tr>
+      <td>QUI-532</td>
+      <td><span class="pill urgent">Urgente</span></td>
+      <td>Configuración (settings)</td>
+      <td>Resuelta — PATCH mínimo + <span class="code">panel_ui.STORE_ADMIN</span> canónico</td>
+      <td><span class="code">c91233d5e</span></td>
+    </tr>
+    <tr>
+      <td>QUI-523</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Marcas</td>
+      <td>Resuelta — acciones inline (editar, toggle estado, destacado, eliminar)</td>
+      <td><span class="code">fc5c04aff</span></td>
+    </tr>
+    <tr>
+      <td>QUI-524</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Categoría</td>
+      <td>Resuelta — mismas acciones inline que Marcas</td>
+      <td><span class="code">333a85be5</span></td>
+    </tr>
+    <tr>
+      <td>QUI-527</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Marketing / Promociones</td>
+      <td>Resuelta — botón crear reubicado al lado del buscador</td>
+      <td><span class="code">26f63b74e</span></td>
+    </tr>
+    <tr>
+      <td>QUI-528</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Marketing / Cupones</td>
+      <td>Resuelta — misma recolocación del botón crear</td>
+      <td><span class="code">480c48f92</span></td>
+    </tr>
+    <tr>
+      <td>QUI-529</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Marketing / Anuncios</td>
+      <td>Resuelta — crear reubicado + label "Todos" en filtro status</td>
+      <td><span class="code">71d1bf16d</span></td>
+    </tr>
+    <tr>
+      <td>QUI-525</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Punto de compra (POP)</td>
+      <td>Resuelta — toggle IVA + imagen/placeholder en modal de confirmación</td>
+      <td><span class="code">45faa05ed</span></td>
+    </tr>
+    <tr>
+      <td>QUI-526</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Movimiento (inventario)</td>
+      <td>Resuelta — normalización de signo para <span class="code">sale</span>/<span class="code">return</span></td>
+      <td><span class="code">9f622a0c2</span></td>
+    </tr>
+    <tr>
+      <td>QUI-519</td>
+      <td><span class="pill low">Baja</span></td>
+      <td>Login (vlink)</td>
+      <td>Resuelta — toggle "Omitir V-LINK" para single-org</td>
+      <td><span class="code">ce7edc49b</span></td>
+    </tr>
+    <tr>
+      <td>QUI-522</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Órdenes de Venta</td>
+      <td>Resuelta — StickyHeader + 4 stats + acción "Nueva orden"</td>
+      <td><span class="code">6396f0439</span></td>
+    </tr>
+    <tr>
+      <td>QUI-450</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>Dashboard Store Admin (consolidación)</td>
+      <td>Resuelta — quick links ampliados con POS y Marketing</td>
+      <td><span class="code">5c8698a19</span></td>
+    </tr>
+    <tr>
+      <td>QUI-451</td>
+      <td><span class="pill medium">Media</span></td>
+      <td>POS móvil (consolidación)</td>
+      <td>Resuelta — acción "Guardar borrador" + <span class="code">draftId</span> en cart store</td>
+      <td><span class="code">388736fda</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Detalles por issue</h2>
+
+<h3>QUI-531 — [MOBILE APP] Modulo Gastos</h3>
+<p><strong>Problema:</strong> abrir Gastos cerraba la app. La UI consumía
+  <span class="code">id:string</span>, <span class="code">date</span> y
+  <span class="code">category_name</span> mientras el backend devolvía
+  <span class="code">id:number</span>, <span class="code">expense_date</span> y
+  <span class="code">expense_categories</span>; los endpoints
+  <span class="code">/store/expenses/stats</span> (500) y
+  <span class="code">/store/expense-categories</span> (404) no existían.</p>
+<p><strong>Fix:</strong> contrato real alineado. Endpoints corregidos a
+  <span class="code">/store/expenses/summary</span> y
+  <span class="code">/store/expenses/categories</span>. Mappers convierten
+  <span class="code">id</span> numérico, <span class="code">expense_date</span>,
+  Decimal y la relación <span class="code">expense_categories</span>. Las escrituras
+  envían <span class="code">expense_date</span> y <span class="code">category_id</span> numérico.</p>
+<p><strong>Tests nuevos:</strong> 20/20 en
+  <span class="code">expense.service.spec.ts</span>.</p>
+
+<h3>QUI-520 — [MOBILE APP] Panel Principal</h3>
+<p><strong>Problema:</strong> tarjetas sin paridad con web, gráfica lineal, y
+  <span class="code">/store/analytics/financial/profit-loss</span> no consumido.</p>
+<p><strong>Fix:</strong> 4 tarjetas a paridad web (Ingresos / Ganancias /
+  Órdenes / Gastos). Eliminados los chips de preset redundantes; se conserva
+  el <span class="code">FilterDropdown</span> del chart. La línea del
+  <span class="code">TrendChartFallback</span> pasa de
+  <span class="code">L</span> (segmentos rectos) a <span class="code">C</span> (Bézier
+  cúbica) vía <span class="code">shared/utils/chart-path.ts</span>.</p>
+<p><strong>Tests nuevos:</strong> 7/7 en <span class="code">chart-path.spec.ts</span>.</p>
+
+<h3>QUI-532 — [MOBILE APP] Error en configuración</h3>
+<p><strong>Problema:</strong> los toggles de "Módulos de la tienda" leían
+  y escribían <span class="code">panel_ui</span> en la raíz del form, pero
+  el backend lo guarda y devuelve bajo
+  <span class="code">panel_ui.STORE_ADMIN</span>. El PATCH enviaba el form
+  completo, sobrescribiendo secciones no editadas.</p>
+<p><strong>Fix:</strong> <span class="code">panel_ui</span> canónico bajo
+  <span class="code">STORE_ADMIN</span>; <span class="code">buildSettingsUpdatePayload</span>
+  compara contra el snapshot del GET y solo envía secciones realmente modificadas;
+  <span class="code">null</span> cuando no hay cambios. Toast de error con
+  <span class="code">extractErrorMessage</span> muestra el mensaje del backend.</p>
+<p><strong>Tests nuevos:</strong> 11/11 en
+  <span class="code">settings-payload.spec.ts</span>.</p>
+
+<h3>QUI-523 — Marcas / QUI-524 — Categoría</h3>
+<p><strong>Problema:</strong> faltaban acciones por fila (editar, desactivar /
+  activar, eliminar, destacar).</p>
+<p><strong>Fix:</strong> <span class="code">BrandCard</span> y
+  <span class="code">CategoryCard</span> ahora aceptan
+  <span class="code">onEdit</span>, <span class="code">onToggleState</span>,
+  <span class="code">onToggleFeatured</span> y <span class="code">onDelete</span>,
+  conmutadas por los permisos <span class="code">store:brands:update/delete</span>
+  y <span class="code">store:categories:update/delete</span>. Los toggles
+  consumen <span class="code">BrandService.update</span> /
+  <span class="code">CategoryService.update</span> ya existentes en backend.</p>
+
+<h3>QUI-527 / QUI-528 / QUI-529 — Marketing</h3>
+<p><strong>Problema:</strong> el botón "Crear" estaba lejos del buscador y,
+  en anuncios, no había opción "Todos" para limpiar el filtro de status.</p>
+<p><strong>Fix:</strong> botón primario al lado del <span class="code">SearchBar</span>
+  en las tres pantallas, conservando la acción del
+  <span class="code">StickyHeader</span>. Se añadió el label
+  <span class="code">ctaAll: 'Todos'</span> en
+  <span class="code">anuncio-labels.ts</span>.</p>
+
+<h3>QUI-525 — Punto de compra (POP)</h3>
+<p><strong>Problema:</strong> no preguntaba si la compra incluye IVA; el modal
+  de confirmación no mostraba la imagen del producto.</p>
+<p><strong>Fix:</strong> toggle "Compra incluye IVA" en
+  <span class="code">PopConfigModal</span> y propagación de
+  <span class="code">includes_vat</span> en <span class="code">PopProductConfigResult</span>.
+  Modal de confirmación renderiza la imagen del producto o un placeholder
+  con el ícono <span class="code">cube-outline</span>.</p>
+
+<h3>QUI-526 — Movimiento de inventario</h3>
+<p><strong>Problema:</strong> el backend puede entregar
+  <span class="code">sale</span>/<span class="code">return</span> con cualquier
+  signo; la UI móvil dependía del signo crudo y mostraba tono
+  inconsistente.</p>
+<p><strong>Fix:</strong> <span class="code">normalizeQuantity</span> fuerza el
+  signo canónico: entrantes <span class="code">+</span>, salientes
+  <span class="code">-</span>, ajuste según el valor. Se aplica en
+  <span class="code">MovementCard</span> y en los helpers de tono/color.</p>
+
+<h3>QUI-519 — Login vlink</h3>
+<p><strong>Problema:</strong> el vlink era obligatorio aunque el usuario
+  perteneciera a una sola organización.</p>
+<p><strong>Fix:</strong> toggle "Omitir V-LINK" que vacía el campo, desactiva
+  la edición y envía el payload sin
+  <span class="code">organization_slug</span>. Mantiene el guardado de
+  credenciales.</p>
+
+<h3>QUI-522 — Órdenes de Venta</h3>
+<p><strong>Problema:</strong> el screen de órdenes no tenía StickyHeader con
+  "Nueva orden" ni tarjetas de pendientes/entregadas.</p>
+<p><strong>Fix:</strong> <span class="code">StickyHeader</span> con título
+  "Ordenes de Venta" + acción "Nueva orden" condicionada al permiso
+  <span class="code">store:orders:create</span> (añadido al union
+  <span class="code">Permission</span>). 4 stat cards (Total, Ingresos,
+  Pendientes, Entregadas) leídos del <span class="code">OrderStats</span> real.</p>
+
+<h3>QUI-450 — Dashboard Store Admin</h3>
+<p><strong>Problema:</strong> quick links no incluían POS ni Marketing.</p>
+<p><strong>Fix:</strong> se añadieron dos entradas
+  (<span class="code">/pos</span>, <span class="code">/marketing/promotions</span>)
+  a <span class="code">quickLinks</span> del dashboard, sin tocar el resto
+  del layout.</p>
+
+<h3>QUI-451 — POS móvil (save-draft)</h3>
+<p><strong>Problema:</strong> la paridad con web requería poder guardar el
+  carrito como borrador sin disparar el modal de pago.</p>
+<p><strong>Fix:</strong> <span class="code">CartState.draftId</span>,
+  <span class="code">markAsDraft(draftId)</span> y
+  <span class="code">clearDraft()</span> en el cart store. Botón
+  "Guardar borrador" en el modal de carrito (paridad con
+  <span class="code">pos-cart-modal.component.ts:737</span>). El label
+  cambia a "Borrador" cuando ya hay draft persistido.</p>
+
+<h2>Pruebas dirigidas añadidas</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Suite</th>
+      <th>Tests</th>
+      <th>Cobertura</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="code">expense.service.spec.ts</span></td>
+      <td>20/20</td>
+      <td>Mappers, endpoints correctos, payload de create/update, paginación</td>
+    </tr>
+    <tr>
+      <td><span class="code">chart-path.spec.ts</span></td>
+      <td>7/7</td>
+      <td>Path Bézier: vacío, un punto, dos puntos, N puntos, cierre del área</td>
+    </tr>
+    <tr>
+      <td><span class="code">settings-payload.spec.ts</span></td>
+      <td>11/11</td>
+      <td>PATCH mínimo, panel_ui anidado, STORE_ECOMMERCE preservado, claves deprecadas ignoradas</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Verificación (local/dev, 0 producción)</h2>
+<ul>
+  <li>Backend local saludable: <span class="code">GET http://localhost:3000/api/health</span> → 200 OK.</li>
+  <li><span class="code">npx tsc --noEmit -p apps/mobile</span>: 0 errores introducidos por los cambios.
+    Único error preexistente: <span class="code">app/(super-admin)/_layout.tsx:75</span>
+    (no tocado por este PR, verificado con stash contra dev limpio).</li>
+  <li><span class="code">npx jest --runInBand</span> con
+    <span class="code">--testPathPattern='expense|settings-payload|chart-path'</span>: 38/38 pasan.</li>
+  <li><span class="code">npm --prefix apps/mobile run build:preview</span>: bundle web/iOS/Android generado sin errores.</li>
+  <li>Verificación manual en Expo web + Chrome DevTools con viewport 390x844 mobile:
+    QUI-531 crear gasto (201) → limpiar QA. QUI-520 dashboard con 4 tarjetas y curva Bézier.
+    Resto de pantallas abiertas y navegables sin errores en consola.</li>
+  <li>QA cleanup: 0 gastos de prueba residuales en backend local.</li>
+  <li><strong>0 requests a <span class="code">api.vendix.online</span></strong>: todo el tráfico fue a
+    <span class="code">localhost:3000</span>.</li>
+</ul>
+
+<h2>Cumplimiento de las reglas</h2>
+<div class="note">
+  <strong>Reglas verificadas para todos los fixes</strong>
+  <ul>
+    <li>Cero cambios en backend, frontend web ni <span class="code">libs/shared-types</span>.</li>
+    <li>Cero cambios en producción: solo <span class="code">apps/mobile/**</span>.</li>
+    <li>Cambios mínimos y aislados por commit. Un fix = un commit.</li>
+    <li>No se rompió nada que ya funcionaba: el flujo de Gastos original ahora funciona; el dashboard solo ganó tarjetas y un chart más suave; Configuración se conserva byte-equivalente; el resto de pantallas solo ganó acciones/botones que no existían antes.</li>
+    <li>No se ejecutó merge del PR. Queda en manos del reviewer Rzyfront.</li>
+  </ul>
+</div>
+
+<h2>Commits entregados (rama AJDevWeb)</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Commit</th>
+      <th>Mensaje</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="code">c91233d5e</span></td><td>fix(mobile): QUI-531 gastos crash, QUI-520 panel parity, QUI-532 settings panel_ui</td></tr>
+    <tr><td><span class="code">fc5c04aff</span></td><td>fix(mobile): QUI-523 brands row actions (edit, toggle state, delete)</td></tr>
+    <tr><td><span class="code">333a85be5</span></td><td>fix(mobile): QUI-524 categories row actions (edit, toggle state, featured, delete)</td></tr>
+    <tr><td><span class="code">26f63b74e</span></td><td>fix(mobile): QUI-527 promotions create button next to search</td></tr>
+    <tr><td><span class="code">480c48f92</span></td><td>fix(mobile): QUI-528 coupons create button next to search</td></tr>
+    <tr><td><span class="code">71d1bf16d</span></td><td>fix(mobile): QUI-529 anuncios create button next to search and Todos filter</td></tr>
+    <tr><td><span class="code">45faa05ed</span></td><td>fix(mobile): QUI-525 POP IVA toggle and product image in confirm modal</td></tr>
+    <tr><td><span class="code">9f622a0c2</span></td><td>fix(mobile): QUI-526 movements normalize sign for inbound/outbound types</td></tr>
+    <tr><td><span class="code">ce7edc49b</span></td><td>fix(mobile): QUI-519 login optional vlink for single-org users</td></tr>
+    <tr><td><span class="code">6396f0439</span></td><td>fix(mobile): QUI-522 orders sticky header with create action and extra stats</td></tr>
+    <tr><td><span class="code">5c8698a19</span></td><td>fix(mobile): QUI-450 dashboard quick links include POS and marketing</td></tr>
+    <tr><td><span class="code">388736fda</span></td><td>fix(mobile): QUI-451 POS save-draft action in cart modal</td></tr>
+  </tbody>
+</table>
+
+<p class="footer">
+  PR <a href="https://github.com/Rzyfront/Vendix/pull/444">#444</a> listo para review.
+  Reviewer: <strong>Rzyfront</strong>. No se ejecutó merge; queda pendiente la aprobación.
+</p>
+
+</body>
+</html>

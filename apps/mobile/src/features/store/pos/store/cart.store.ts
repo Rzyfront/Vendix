@@ -28,6 +28,12 @@ interface CartActions {
   setMode: (mode: PosMode) => void;
   applyDiscount: (type: 'percentage' | 'fixed', value: number, description: string) => void;
   removeDiscount: (discountId: string) => void;
+  /**
+   * Marca el carrito como borrador persistido localmente. La conversión a
+   * `order_draft` real se hace vía el servicio POS al confirmar.
+   */
+  markAsDraft: (draftId: string) => void;
+  clearDraft: () => void;
   clearCart: () => void;
   getSummary: () => CartSummary;
 }
@@ -39,6 +45,7 @@ const initialState: CartState = {
   discounts: [],
   summary: { subtotal: 0, taxAmount: 0, discountAmount: 0, total: 0, itemCount: 0, totalItems: 0 },
   mode: 'sale',
+  draftId: null,
 };
 
 function generateItemId(): string {
@@ -59,6 +66,55 @@ function getTaxRateSum(product: Product): number {
   return total;
 }
 
+/**
+ * QUI-521 — ¿el precio del producto ya trae el IVA adentro?
+ *
+ * ⚠️ Hoy esto devuelve siempre `false`: ni `tax_included` ni
+ * `price_includes_tax` existen como campo de producto en ningún punto del
+ * stack (no están en `schema.prisma`, ni en el backend, ni en el tipo
+ * `Product` de mobile). El flag real vive en el setting de tienda
+ * `GeneralSettings.tax_included` (`types/settings.types.ts:15`), y mobile
+ * todavía no tiene un store de settings desde donde leerlo.
+ *
+ * O sea: QUI-521 sigue abierto. Para cerrarlo hay que exponer el setting al
+ * carrito, no leerlo del producto. Se deja la función porque el resto del
+ * cálculo ya quedó correcto para cuando el flag esté disponible.
+ */
+function isPriceTaxInclusive(product: Product): boolean {
+  return Boolean(
+    (product as Product & { tax_included?: boolean }).tax_included ||
+      (product as Product & { price_includes_tax?: boolean }).price_includes_tax,
+  );
+}
+
+/**
+ * Impuesto y precio final de una línea.
+ *
+ * Con precio tax-exclusive el impuesto se suma encima. Con precio
+ * tax-inclusive el impuesto ya está adentro, así que hay que EXTRAERLO
+ * (`p * rate / (1 + rate)`), no ponerlo en 0: `summary.taxAmount` se manda al
+ * backend como `tax_amount` al crear la orden (`pos-payment-modal.tsx:225`,
+ * `shipping-modal.tsx:126`) y se imprime como "IVA" en el footer, así que un
+ * 0 acá declara una venta gravada con IVA cero.
+ */
+function computeLineTax(
+  unitPrice: number,
+  quantity: number,
+  rateSum: number,
+  inclusive: boolean,
+): { taxAmount: number; finalPrice: number } {
+  if (!inclusive) {
+    return {
+      taxAmount: unitPrice * quantity * rateSum,
+      finalPrice: unitPrice * (1 + rateSum),
+    };
+  }
+  return {
+    taxAmount: (unitPrice * quantity * rateSum) / (1 + rateSum),
+    finalPrice: unitPrice,
+  };
+}
+
 function getSellableUnitPrice(product: Product, variant?: ProductVariant | null): number {
   if (variant?.is_on_sale && variant.sale_price != null) return Number(variant.sale_price) || 0;
   if (variant?.price_override != null) return Number(variant.price_override) || 0;
@@ -69,8 +125,12 @@ function getSellableUnitPrice(product: Product, variant?: ProductVariant | null)
 function buildCartItem(product: Product, variant?: ProductVariant | null, quantity: number = 1): CartItem {
   const unitPrice = getSellableUnitPrice(product, variant);
   const rateSum = getTaxRateSum(product);
-  const taxAmount = unitPrice * quantity * rateSum;
-  const finalPrice = unitPrice * (1 + rateSum);
+  const { taxAmount, finalPrice } = computeLineTax(
+    unitPrice,
+    quantity,
+    rateSum,
+    isPriceTaxInclusive(product),
+  );
   const totalPrice = quantity * finalPrice;
   const variant_display_name = variant?.name || variant?.attributes || undefined;
 
@@ -90,8 +150,12 @@ function buildCartItem(product: Product, variant?: ProductVariant | null, quanti
 function recalcItem(item: CartItem): CartItem {
   const rateSum = getTaxRateSum(item.product);
   const unitPrice = getSellableUnitPrice(item.product, item.variant);
-  const taxAmount = unitPrice * item.quantity * rateSum;
-  const finalPrice = unitPrice * (1 + rateSum);
+  const { taxAmount, finalPrice } = computeLineTax(
+    unitPrice,
+    item.quantity,
+    rateSum,
+    isPriceTaxInclusive(item.product),
+  );
   const totalPrice = item.quantity * finalPrice;
   return { ...item, unitPrice, taxAmount, finalPrice, totalPrice };
 }
@@ -231,6 +295,10 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   },
 
   clearCart: () => set({ ...initialState, summary: { ...initialState.summary } }),
+
+  markAsDraft: (draftId) => set({ draftId }),
+
+  clearDraft: () => set({ draftId: null }),
 
   getSummary: () => get().summary,
 }));

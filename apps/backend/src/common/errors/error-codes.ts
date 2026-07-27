@@ -309,6 +309,14 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Store is unavailable for checkout',
   },
+  // QUI-467: la billetera es saldo prepago por cliente, así que exige
+  // identidad autenticada. Se mantiene en 400 (era un BadRequestException) para
+  // no disparar el interceptor de refresh/logout que sí reacciona al 401.
+  ECOM_CHECKOUT_005: {
+    code: 'ECOM_CHECKOUT_005',
+    httpStatus: 400,
+    devMessage: 'Wallet payment requires an authenticated customer',
+  },
   ECOM_ACCOUNT_001: {
     code: 'ECOM_ACCOUNT_001',
     httpStatus: 404,

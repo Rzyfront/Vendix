@@ -2,6 +2,7 @@ import { Component, type ReactNode } from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import Svg, { Path, Circle, Line, Text as SvgText, G } from 'react-native-svg';
 import { colors, spacing, borderRadius, colorScales, typography } from '@/shared/theme';
+import { buildSmoothAreaPath, buildSmoothLinePath } from '@/shared/utils/chart-path';
 
 interface ChartFallbackProps {
   data: Array<{ x: string; revenue: number; orders?: number }>;
@@ -51,16 +52,17 @@ export function TrendChartFallback({ data, title, granularity }: ChartFallbackPr
     label: formatChartPeriod(d.x, granularity),
   }));
 
-  // Construir el path del line chart
-  const linePath = points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
-    .join(' ');
+  // Construir el path del line chart con curvas Bézier (paridad visual
+  // con la web — la issue QUI-520 pide gráficas "más curvas"). El algoritmo
+  // vive en `shared/utils/chart-path.ts` para mantenerlo puro y testeable.
+  const chartPoints = points.map((p) => ({ x: p.x, y: p.y }));
+  const linePath = buildSmoothLinePath(chartPoints);
 
-  // Construir el path del área rellenada
-  const areaPath =
-    `M ${points[0].x} ${CHART_PADDING_TOP + chartHeight} ` +
-    points.map((p) => `L ${p.x} ${p.y}`).join(' ') +
-    ` L ${points[points.length - 1].x} ${CHART_PADDING_TOP + chartHeight} Z`;
+  // Construir el path del área rellenada bajo la curva.
+  const areaPath = buildSmoothAreaPath(
+    chartPoints,
+    CHART_PADDING_TOP + chartHeight,
+  );
 
   // Encontrar el punto más alto
   const highestIndex = data.findIndex((d) => d.revenue === maxRevenue);

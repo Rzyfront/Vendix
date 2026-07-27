@@ -444,7 +444,7 @@ export class OrderRefundModalComponent {
     { value: 'original_payment' as RefundMethod, label: 'Pago original', icon: 'rotate-ccw' },
     { value: 'cash' as RefundMethod, label: 'Efectivo', icon: 'banknote' },
     { value: 'bank_transfer' as RefundMethod, label: 'Transferencia', icon: 'landmark' },
-    { value: 'store_credit' as RefundMethod, label: 'Credito tienda', icon: 'wallet' },
+    { value: 'store_credit' as RefundMethod, label: 'Billetera', icon: 'wallet' },
   ];
 
   constructor() {

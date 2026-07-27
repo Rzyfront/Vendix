@@ -51,6 +51,10 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberCredentials, setRememberCredentials] = useState(false);
+  // El vlink es opcional: si el usuario pertenece a una sola organización
+  // (caso común en cuentas de tienda), puede omitirlo y autenticarse solo
+  // con email + contraseña (paridad con web `?optionalVlink=true`).
+  const [skipVlink, setSkipVlink] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,8 +86,8 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     setError(null);
-    if (!vlink.trim()) {
-      setError('Por favor ingresa tu V-LINK (organización)');
+    if (!skipVlink && !vlink.trim()) {
+      setError('Por favor ingresa tu V-LINK (organización) o marca "Omitir V-LINK"');
       return;
     }
     if (!isValidEmail(email)) {
@@ -100,7 +104,7 @@ export default function LoginScreen() {
       const response = await AuthService.login({
         email,
         password,
-        ...(vlink ? { organization_slug: vlink } : {}),
+        ...(skipVlink || !vlink ? {} : { organization_slug: vlink }),
       });
       const firstName = response.user?.first_name?.trim();
       toastSuccess(firstName ? `Bienvenido, ${firstName}` : 'Bienvenido');
@@ -156,8 +160,25 @@ export default function LoginScreen() {
             placeholder="Nombre o ID de tu organización"
             value={vlink}
             onChangeText={setVlink}
-            editable={!isLoading}
+            editable={!isLoading && !skipVlink}
+            helperText={skipVlink ? 'Omitido' : undefined}
           />
+
+          <TouchableOpacity
+            style={styles.checkboxRow}
+            onPress={() => {
+              setSkipVlink(!skipVlink);
+              if (!skipVlink) setVlink('');
+            }}
+            activeOpacity={0.7}
+          >
+            <Icon
+              name={skipVlink ? 'check-square' : 'square'}
+              size={18}
+              color={skipVlink ? colors.primary : colorScales.gray[400]}
+            />
+            <Text style={styles.checkboxLabel}>Omitir V-LINK (una sola organización)</Text>
+          </TouchableOpacity>
 
           <Input
             label="EMAIL"

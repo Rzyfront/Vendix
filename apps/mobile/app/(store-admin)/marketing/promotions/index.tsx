@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { View, FlatList, RefreshControl, Pressable, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   useQuery,
@@ -34,7 +34,8 @@ import {
 } from '@/features/store/components/promotion-filters';
 import { PromotionUpsertModal } from '@/features/store/components/promotion-upsert-modal';
 import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
-import { spacing } from '@/shared/theme';
+import { spacing, colors, borderRadius, typography } from '@/shared/theme';
+import { Icon } from '@/shared/components/icon/icon';
 
 export default function PromotionsListScreen() {
   const router = useRouter();
@@ -211,6 +212,17 @@ export default function PromotionsListScreen() {
                 placeholder={PROMOTION_LABELS.ctaSearch}
                 debounceMs={300}
               />
+              <Pressable
+                onPress={handleCreate}
+                accessibilityLabel={PROMOTION_LABELS.ctaNew}
+                style={({ pressed }) => [
+                  styles.createBtn,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Icon name="plus" size={18} color={colors.background} />
+                <Text style={styles.createBtnText}>{PROMOTION_LABELS.ctaNew}</Text>
+              </Pressable>
             </View>
             <View style={styles.filterRow}>
               <PromotionFilters value={filters} onChange={setFilters} />
@@ -315,6 +327,23 @@ const styles = StyleSheet.create({
   searchRow: {
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  createBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
+  },
+  createBtnText: {
+    color: colors.background,
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
   },
   filterRow: {
     paddingHorizontal: spacing[4],

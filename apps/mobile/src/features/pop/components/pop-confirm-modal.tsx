@@ -5,6 +5,7 @@ import {
   FlatList,
   TouchableOpacity,
   Modal,
+  Image,
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -81,6 +82,17 @@ export default function PopConfirmModal({
             style={styles.list}
             renderItem={({ item }) => (
               <View style={styles.itemRow}>
+                {item.product.image_url ? (
+                  <Image
+                    source={{ uri: item.product.image_url }}
+                    style={styles.itemImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.itemImagePlaceholder}>
+                    <Ionicons name="cube-outline" size={16} color="#9ca3af" />
+                  </View>
+                )}
                 <Text style={styles.itemName} numberOfLines={1}>{item.product.name}</Text>
                 <Text style={styles.itemQty}>x{item.quantity}</Text>
                 <Text style={styles.itemTotal}>{formatCurrency(item.total)}</Text>
@@ -130,7 +142,9 @@ const styles = StyleSheet.create({
   contextRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   contextText: { fontSize: 13, color: '#374151', fontWeight: '500' },
   list: { maxHeight: 200, paddingHorizontal: 20 },
-  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  itemRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', gap: 8 },
+  itemImage: { width: 32, height: 32, borderRadius: 6, backgroundColor: '#f3f4f6' },
+  itemImagePlaceholder: { width: 32, height: 32, borderRadius: 6, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
   itemName: { flex: 1, fontSize: 13, color: '#374151', fontWeight: '500' },
   itemQty: { fontSize: 13, color: '#6b7280', marginHorizontal: 12 },
   itemTotal: { fontSize: 13, fontWeight: '700', color: '#22C55E' },

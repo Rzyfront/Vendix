@@ -81,6 +81,7 @@ export const Endpoints = {
       SALES_BY_CUSTOMER: '/store/analytics/sales/by-customer',
       SALES_BY_PAYMENT_METHOD: '/store/analytics/sales/by-payment-method',
       INVENTORY_SUMMARY: '/store/analytics/inventory/summary',
+      PROFIT_LOSS: '/store/analytics/financial/profit-loss',
       OVERVIEW: '/store/analytics/overview',
       SALES: '/store/analytics/sales',
       INVENTORY: '/store/analytics/inventory',

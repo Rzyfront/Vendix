@@ -616,6 +616,10 @@ export class AdjustmentCreateModalComponent {
         product_id: product.id,
         product_name: product.name,
         sku: product.sku ?? undefined,
+        // QUI-517: propagar product_variant_id para que el backend pueda
+        // resolver la fila de stock_levels del insumo (los insumos usan
+        // variantes para trazabilidad de empaque).
+        product_variant_id: product.product_variant_id ?? null,
         stock_on_hand: product.stock_at_location.quantity_on_hand,
         type: 'count_variance' as AdjustmentType,
         quantity_after: product.stock_at_location.quantity_on_hand,
@@ -807,6 +811,10 @@ export class AdjustmentCreateModalComponent {
       location_id: locationId,
       items: this.adjustmentItems.map((item) => ({
         product_id: item.product_id,
+        // QUI-517: propagar product_variant_id para insumos. Es opcional
+        // para productos normales (null) y requerido para resolver la
+        // fila de stock del insumo en el backend.
+        ...(item.product_variant_id != null && { product_variant_id: item.product_variant_id }),
         type: item.type,
         quantity_after: item.quantity_after,
         ...(item.reason_code && { reason_code: item.reason_code }),

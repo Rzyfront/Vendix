@@ -5,6 +5,7 @@ import {
   inject,
   effect,
   signal,
+  computed,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -32,6 +33,8 @@ import {
   EmptyStateComponent,
   CardComponent,
   ImageLightboxComponent,
+  ButtonComponent, // FIX QUI-503
+  IconComponent,  // FIX QUI-503
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -51,6 +54,8 @@ import './product-list.component.css';
     PaginationComponent,
     CardComponent,
     ImageLightboxComponent,
+    ButtonComponent, // FIX QUI-503
+    IconComponent,   // FIX QUI-503
   ],
   templateUrl: './product-list.component.html',
 })
@@ -62,6 +67,9 @@ export class ProductListComponent {
   readonly categories = input<ProductCategory[]>([]);
   readonly brands = input<Brand[]>([]);
   readonly paginationData = input({ page: 1, limit: 10, total: 0, totalPages: 0 });
+
+  /** Granular permission flag driven by the parent page (FIX QUI-503). */
+  readonly canCreate = input(false);
 
   readonly refresh = output<void>();
   readonly search = output<string>();
@@ -129,22 +137,35 @@ export class ProductListComponent {
   // Current filter values
   filterValues: FilterValues = {};
 
-  // Dropdown actions for the filter/options dropdown
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Nuevo Producto',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-    { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
-    { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
-    {
-      label: 'Descargar Plantilla con Productos Actuales',
-      icon: 'file-spreadsheet',
-      action: 'download-current-products',
-    },
-  ];
+  // Dropdown actions for the filter/options dropdown.
+  //
+  // FIX QUI-503: se filtra POR ACCIÓN, no escondiendo el dropdown completo.
+  // Sólo 'create' y 'bulk-upload' crean productos; 'bulk-image-upload' es un
+  // update y 'download-current-products' es una exportación, así que un
+  // usuario con read+update y sin create seguía necesitando esas dos.
+  // `showActions` queda en su default (true) y `OptionsDropdownComponent`
+  // oculta la sección solo si la lista queda vacía.
+  readonly dropdownActions = computed<DropdownAction[]>(() => {
+    const creationActions = new Set(['create', 'bulk-upload']);
+    const all: DropdownAction[] = [
+      {
+        label: 'Nuevo Producto',
+        icon: 'plus',
+        action: 'create',
+        variant: 'primary',
+      },
+      { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
+      { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
+      {
+        label: 'Descargar Plantilla con Productos Actuales',
+        icon: 'file-spreadsheet',
+        action: 'download-current-products',
+      },
+    ];
+    return this.canCreate()
+      ? all
+      : all.filter((a) => !creationActions.has(a.action));
+  });
 
   // Table configuration
   tableColumns: TableColumn[] = [

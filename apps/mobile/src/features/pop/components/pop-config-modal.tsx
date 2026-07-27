@@ -67,6 +67,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
 
   const [manageVariants, setManageVariants] = useState(false);
   const [manageLot, setManageLot] = useState(false);
+  const [includesVat, setIncludesVat] = useState(false);
 
   // ----------------------------------------------------------------
   // Variant creation state (parity con web — Fase 5 unified modal).
@@ -110,6 +111,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
       setExpirationDate('');
       setManageVariants(false);
       setManageLot(false);
+      setIncludesVat(false);
       setPricingType(product?.pricing_type || 'unit');
       setVariantAttributes([]);
       setGeneratedVariants([]);
@@ -331,6 +333,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
         quantity: Math.max(1, Number(quantity) || 1),
         unit_cost: Number(unitCost) || 0,
         pricing_type: pricingType,
+        includes_vat: includesVat,
         lot_info: manageLot ? {
           batch_number: batchNumber.trim() || undefined,
           manufacturing_date: manufacturingDate.trim() || undefined,
@@ -347,6 +350,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
       quantity: Math.max(1, Number(quantity) || 1),
       unit_cost: Number(unitCost) || 0,
       pricing_type: pricingType,
+      includes_vat: includesVat,
       lot_info: manageLot ? {
         batch_number: batchNumber.trim() || undefined,
         manufacturing_date: manufacturingDate.trim() || undefined,
@@ -493,6 +497,24 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
                       onValueChange={setManageLot}
                       trackColor={{ false: '#d1d5db', true: '#86efac' }}
                       thumbColor={manageLot ? '#22C55E' : '#f4f3f4'}
+                      disabled={creatingVariants}
+                    />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.settingToggleRow} onPress={() => setIncludesVat(!includesVat)} activeOpacity={0.7} disabled={creatingVariants}>
+                    <View style={styles.settingToggleInfo}>
+                      <Text style={styles.settingToggleLabel}>Compra incluye IVA</Text>
+                      <Text style={styles.settingToggleDesc}>
+                        {includesVat
+                          ? 'El costo unitario ya grava IVA'
+                          : 'Marcar si la factura del proveedor incluye IVA'}
+                      </Text>
+                    </View>
+                    <Switch
+                      value={includesVat}
+                      onValueChange={setIncludesVat}
+                      trackColor={{ false: '#d1d5db', true: '#86efac' }}
+                      thumbColor={includesVat ? '#22C55E' : '#f4f3f4'}
                       disabled={creatingVariants}
                     />
                   </TouchableOpacity>

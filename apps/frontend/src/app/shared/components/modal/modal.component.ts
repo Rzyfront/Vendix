@@ -138,6 +138,9 @@ export class ModalComponent {
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);
   readonly customClasses = input<string>('');
+  // QUI-438: el consumidor puede bloquear el cierre (ej. cuando hay form
+  // dirty). Default: `() => true` (cierra normal — sin cambio de comportamiento).
+  readonly canClose = input<() => boolean | Promise<boolean>>(() => true);
   /**
    * Opt-in, backwards-compatible: when `true`, the modal renders as an
    * edge-to-edge full-screen sheet below the `md:` breakpoint and keeps the
@@ -283,8 +286,19 @@ export class ModalComponent {
 
   close(): void {
     if (!this.isOpen()) return;
-    this.isOpen.set(false);
-    this.cancel.emit();
+    // QUI-438: respeta canClose antes de cerrar. Soporta sync y async.
+    const result = this.canClose()();
+    if (result instanceof Promise) {
+      result.then((allowed) => {
+        if (allowed) {
+          this.isOpen.set(false);
+          this.cancel.emit();
+        }
+      });
+    } else if (result) {
+      this.isOpen.set(false);
+      this.cancel.emit();
+    }
   }
 
   onWrapperClick(event: MouseEvent): void {
