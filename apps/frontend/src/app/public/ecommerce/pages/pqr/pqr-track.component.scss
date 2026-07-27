@@ -21,13 +21,13 @@
   text-decoration: none;
   font-size: 0.875rem;
   font-weight: 600;
-  background: #f0fdf4;
+  background: var(--color-success-50, #f0fdf4);
   border: 1.5px solid #86efac;
   border-radius: 8px;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: #dcfce7;
+    background: var(--color-success-100, #dcfce7);
     border-color: #22c55e;
     color: #14532d;
   }
@@ -54,7 +54,7 @@
 .search-bar {
   display: flex;
   gap: 0.5rem;
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 0.5rem;
@@ -112,7 +112,7 @@
 }
 
 .state-card {
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 1rem;
@@ -120,8 +120,8 @@
   text-align: center;
 
   &--warn {
-    background: #fffbeb;
-    border-color: #fde68a;
+    background: var(--color-warning-50, #fffbeb);
+    border-color: var(--color-warning-200, #fde68a);
     color: #92400e;
     display: flex;
     gap: 0.75rem;
@@ -130,8 +130,8 @@
   }
 
   &--error {
-    background: #fef2f2;
-    border-color: #fecaca;
+    background: var(--color-error-50, #fef2f2);
+    border-color: var(--color-error-200, #fecaca);
     color: #991b1b;
     display: flex;
     gap: 0.75rem;
@@ -146,7 +146,7 @@
 }
 
 .ticket-card {
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   padding: 1.5rem;
@@ -208,15 +208,15 @@
   font-weight: 600;
 
   &[data-type='PETITION'] {
-    background: #eef2ff;
+    background: var(--color-indigo-50, #eef2ff);
     color: #4338ca;
   }
   &[data-type='COMPLAINT'] {
-    background: #fef3c7;
+    background: var(--color-warning-100, #fef3c7);
     color: #92400e;
   }
   &[data-type='CLAIM'] {
-    background: #fee2e2;
+    background: var(--color-error-100, #fee2e2);
     color: #991b1b;
   }
 }
@@ -253,7 +253,7 @@
   }
 
   .response {
-    background: #f0f9ff;
+    background: var(--color-sky-50, #f0f9ff);
     border-left: 3px solid #3b82f6;
     border-radius: 6px;
     padding: 0.875rem;

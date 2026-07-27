@@ -58,34 +58,34 @@ import {
             ></app-input>
           </div>
           <!-- Role Info -->
-          <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+          <div class="mt-6 p-4 bg-gray-50 rounded-lg">
             <h4
-              class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+              class="text-sm font-medium text-gray-700 mb-2"
             >
               Informacion del Rol
             </h4>
             <div class="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span class="text-gray-500 dark:text-gray-400">ID:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                <span class="ml-2 text-gray-900">{{
                   role()?.id
                 }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Tipo:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                <span class="ml-2 text-gray-900">{{
                   role()?.system_role ? 'Sistema' : 'Personalizado'
                 }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Usuarios:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                <span class="ml-2 text-gray-900">{{
                   role()?._count?.user_roles || 0
                 }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Permisos:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                <span class="ml-2 text-gray-900">{{
                   role()?.permissions?.length || 0
                 }}</span>
               </div>

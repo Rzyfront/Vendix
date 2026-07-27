@@ -160,7 +160,7 @@
   box-shadow: var(--shadow-md);
 
   &:hover {
-    background: white;
+    background: var(--color-surface);
     transform: translateY(-50%) scale(1.05);
     box-shadow: var(--shadow-lg);
   }

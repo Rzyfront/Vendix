@@ -55,7 +55,7 @@ export interface DashboardTab {
       color: var(--color-text-secondary);
     }
     .inactive-tab:hover {
-      background-color: #f9fafb;
+      background-color: var(--color-neutral-50);
       color: var(--color-text-primary);
     }
   `],

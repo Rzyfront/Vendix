@@ -54,20 +54,23 @@
 
 /* Main content area styles */
 main {
+  /* Compensa el alto recortado del header (ver --admin-header-gap). Mismo
+     tratamiento en los tres layouts admin para que la banda superior se lea
+     igual en tienda, organización y super admin. */
+  padding-top: var(--admin-header-gap);
   background-color: var(--color-background);
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
 }
 
-/* ===== Glass Theme Overrides ===== */
+/* ===== Glass Theme Overrides =====
+   Ver nota extensa en store-admin-layout: `main` NO lleva backdrop-filter porque
+   crea containing block para los `position: fixed` de dentro (los modales salían
+   encajonados en el outlet en vez de cubrir la app) y además rompe la refracción
+   del canvas para las tarjetas. */
 :host-context([data-theme-preset="glass"]) {
-  main {
-    background: rgba(255, 255, 255, 0.25);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-  }
-
+  main,
   .main-content {
     background: transparent;
   }

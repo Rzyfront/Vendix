@@ -522,17 +522,21 @@ export class AppSettingsDto {
   })
   accent_color?: string;
 
+  // Eje "estilo" del sistema de temas de dos ejes (modo × estilo). El modo
+  // (light/dark/system) NO vive aquí: es preferencia de usuario, no branding de
+  // tienda. 'glass' faltaba en el enum desde que se añadió el cuarto preset:
+  // un PATCH de branding con theme='glass' respondía 400.
   @ApiProperty({
-    enum: ['default', 'aura', 'monocromo'],
+    enum: ['default', 'aura', 'glass', 'monocromo'],
     example: 'default',
     required: false,
   })
   @IsOptional()
   @ValidateIf((o) => o.theme !== undefined && o.theme !== null)
-  @IsIn(['default', 'aura', 'monocromo'], {
-    message: 'theme must be either "default", "aura", or "monocromo"',
+  @IsIn(['default', 'aura', 'glass', 'monocromo'], {
+    message: 'theme must be one of "default", "aura", "glass", "monocromo"',
   })
-  theme?: 'default' | 'aura' | 'monocromo';
+  theme?: 'default' | 'aura' | 'glass' | 'monocromo';
 
   @ApiProperty({ example: 'https://example.com/logo.png', required: false })
   @IsOptional()

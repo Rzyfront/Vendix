@@ -147,9 +147,14 @@
 // Estilos para el footer del modal usando tokens con mejor diseño
 .modal-footer {
   border-top: 1px solid var(--color-border);
+  // `var(--color-background) / 30` era sintaxis inválida (el `/ alpha` solo
+  // existe dentro de rgb()/hsl(), no sobre un color suelto): el stop moría, el
+  // gradiente entero se descartaba y el pie quedaba TRANSPARENTE, dejando ver
+  // lo que hubiera detrás. color-mix expresa la intención original —pie
+  // levemente teñido del background— y es válido.
   background: linear-gradient(
     to top,
-    var(--color-background) / 30,
+    color-mix(in srgb, var(--color-background) 30%, var(--color-surface)),
     var(--color-surface)
   );
   display: flex;
@@ -195,11 +200,13 @@
       );
       color: var(--color-text-on-primary);
       border: 1px solid var(--color-primary);
-      box-shadow: 0 2px 8px rgba(126, 215, 165, 0.25);
+      // Sombra derivada del primario del comercio, no del verde Vendix fijo:
+      // en una tienda con marca azul o vino la sombra verde delataba el hardcode.
+      box-shadow: 0 2px 8px rgba(var(--color-primary-rgb, 126, 215, 165), 0.25);
 
       &:hover {
         transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(126, 215, 165, 0.35);
+        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb, 126, 215, 165), 0.35);
       }
     }
 
@@ -209,7 +216,10 @@
       border: 1px solid var(--color-border);
 
       &:hover {
-        background-color: var(--color-text-muted);
+        // Antes: fondo = --color-text-muted (gris fuerte) con el mismo
+        // --color-text-primary encima → contraste al borde de lo ilegible.
+        // Ahora un velo del muted sobre la propia superficie.
+        background-color: color-mix(in srgb, var(--color-text-muted) 12%, var(--color-surface));
         border-color: var(--color-text-secondary);
         transform: translateY(-1px);
       }
@@ -225,7 +235,9 @@
 
   &:hover {
     transform: scale(1.05);
-    background-color: var(--color-text-muted) / 20;
+    // Igual que en el pie: `/ 20` sobre un color suelto es inválido y la
+    // declaración se descartaba → el hover no pintaba nada.
+    background-color: color-mix(in srgb, var(--color-text-muted) 20%, transparent);
   }
 
   &:active {
@@ -241,7 +253,7 @@
     width: 0;
     height: 0;
     border-radius: 50%;
-    background: var(--color-text-muted) / 30;
+    background: color-mix(in srgb, var(--color-text-muted) 30%, transparent);
     transform: translate(-50%, -50%);
     transition:
       width 0.3s,
@@ -343,8 +355,8 @@
     inset: -1px;
     background: linear-gradient(
       135deg,
-      var(--color-primary) / 20,
-      var(--color-secondary) / 20
+      rgba(var(--color-primary-rgb, 126, 215, 165), 0.2),
+      rgba(var(--color-secondary-rgb, 47, 111, 78), 0.2)
     );
     border-radius: var(--radius-lg);
     z-index: calc(var(--z-base) - 1);

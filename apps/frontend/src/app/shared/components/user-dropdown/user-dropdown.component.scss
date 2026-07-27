@@ -2,6 +2,61 @@
   position: relative;
   display: inline-block;
 
+  // Glass: el "user badge" es una superficie propia (pill con borde). Se pinta
+  // aquí y no en el preset global porque `.user-dropdown-container
+  // .user-trigger-full` compila a (0,4,0) con la encapsulación (los atributos
+  // [_ngcontent] cuentan en la misma columna que las clases) y gana a cualquier
+  // selector razonable de styles.scss. Control pequeño ⇒ blur ligero y relleno
+  // denso (--glass-fill-chip): sobre el header ya translúcido, un pill igual de
+  // translúcido dejaría de leerse como control.
+  :host-context([data-theme-preset="glass"]) & .user-trigger-full {
+    background: rgba(
+      var(--color-surface-rgb, 255, 255, 255),
+      var(--glass-fill-chip)
+    );
+    border-color: transparent;
+    backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+    -webkit-backdrop-filter: blur(var(--glass-blur-chip))
+      saturate(var(--glass-sat));
+    box-shadow:
+      inset 0 0 0 1px var(--glass-edge),
+      inset 0 1px 0 var(--glass-sheen-soft),
+      0 2px 10px var(--glass-shade);
+
+    &:hover {
+      background: rgba(
+        var(--color-surface-rgb, 255, 255, 255),
+        calc(var(--glass-fill-chip) + 0.16)
+      );
+    }
+  }
+
+  // El panel del dropdown y su cabecera, por el mismo motivo de cascada. Usa el
+  // nivel `float` (~0.86), no el de tarjeta: flota sobre contenido arbitrario y
+  // con el relleno de panel se leía la tabla de debajo a través del menú.
+  :host-context([data-theme-preset="glass"]) & .dropdown-menu {
+    background: rgba(
+      var(--color-surface-rgb, 255, 255, 255),
+      var(--glass-fill-float)
+    );
+    backdrop-filter: blur(calc(var(--glass-blur) + 6px))
+      saturate(var(--glass-sat));
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px))
+      saturate(var(--glass-sat));
+    border-color: transparent;
+    box-shadow:
+      inset 0 0 0 1px var(--glass-edge),
+      inset 0 1px 0 var(--glass-sheen),
+      0 12px 36px var(--glass-shade);
+
+    // La cabecera no lleva filtro propio: ya está sobre el vidrio del panel, así
+    // que basta un velo para diferenciarla y se ahorra una capa de GPU.
+    .dropdown-header {
+      background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.28);
+      border-bottom: 1px solid var(--glass-edge-low);
+    }
+  }
+
   // Full trigger style (desktop)
   .user-trigger-full {
     align-items: center;
@@ -72,8 +127,8 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #f97316;
-    border: 2px solid var(--color-surface, #fff);
+    background: var(--color-warning);
+    border: 2px solid var(--color-surface);
     pointer-events: none;
   }
 
@@ -81,8 +136,8 @@
     min-width: 18px;
     height: 18px;
     border-radius: 9999px;
-    background: #f97316;
-    color: white;
+    background: var(--color-warning);
+    color: #1e293b; /* Dark text on warning (#fb923c) — warning no cambia entre light/dark, neutral-900 sí invierte */
     font-size: 10px;
     font-weight: 700;
     display: flex;
@@ -104,11 +159,12 @@
     transition: all 0.2s ease;
 
     &:hover {
-      background: rgba(0, 0, 0, 0.04);
+      /* hover overlay theme-aware: neutral-900 se invierte en dark */
+      background: rgba(var(--color-neutral-900-rgb), 0.04);
 
       .user-avatar-minimal {
         border-color: var(--color-primary);
-        box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 59, 130, 246), 0.15);
+        box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.15);
       }
     }
 
@@ -122,8 +178,8 @@
       font-weight: 600;
       font-size: var(--fs-xs);
       color: var(--color-primary);
-      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
-      border: 1.5px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.2);
+      background: rgba(var(--color-primary-rgb), 0.08);
+      border: 1.5px solid rgba(var(--color-primary-rgb), 0.2);
       flex-shrink: 0;
       transition: all 0.2s ease;
     }
@@ -209,13 +265,13 @@
       gap: 0.5rem;
       margin: 0.5rem 0.5rem 0;
       padding: 0.5rem 0.625rem;
-      background: rgba(249, 115, 22, 0.08);
-      border: 1px solid rgba(249, 115, 22, 0.25);
+      background: rgba(var(--color-warning-rgb), 0.08);
+      border: 1px solid rgba(var(--color-warning-rgb), 0.25);
       border-radius: 0.5rem;
       animation: fadeInBanner 0.3s ease;
 
       .banner-icon {
-        color: #f97316;
+        color: var(--color-warning);
         flex-shrink: 0;
         margin-top: 1px;
       }
@@ -266,7 +322,7 @@
           }
 
           &:hover {
-            background: rgba(239, 68, 68, 0.1);
+            background: rgba(var(--color-error-rgb), 0.1);
           }
         }
 

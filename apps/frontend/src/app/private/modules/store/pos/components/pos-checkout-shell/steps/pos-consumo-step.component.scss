@@ -66,7 +66,7 @@
 
 .option-row--selected {
   border-color: var(--color-primary);
-  background: #dcfce7;
+  background: var(--color-success-100, #dcfce7);
 }
 
 /* Icon box 48×48 */
@@ -88,7 +88,7 @@
 }
 
 .option-row--selected .option-row__icon {
-  background: #ffffff;
+  background: var(--color-surface);
   color: var(--color-primary);
   border-color: var(--color-primary);
 }
@@ -161,7 +161,7 @@
   padding: 14px 16px;
   border: 1.5px solid var(--color-primary);
   border-radius: 12px;
-  background: #f0fdf4;
+  background: var(--color-success-50, #f0fdf4);
   color: var(--color-primary);
   font-size: 16px;
   font-weight: 700;
@@ -172,7 +172,7 @@
 }
 
 .choose-table-btn:hover {
-  background: #dcfce7;
+  background: var(--color-success-100, #dcfce7);
 }
 
 .choose-table-btn:focus-visible {
@@ -188,7 +188,7 @@
   align-self: flex-start;
   padding: 6px 12px;
   border-radius: 999px;
-  background: #dcfce7;
+  background: var(--color-success-100, #dcfce7);
   border: 1px solid var(--color-primary);
   color: #15803d;
   font-size: 13px;

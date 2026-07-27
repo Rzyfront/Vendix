@@ -21,7 +21,7 @@ export interface FaqItem {
 
       <!-- Modal -->
       <div
-        class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        class="relative bg-surface rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <!-- Header -->
         <div class="flex items-center justify-between p-4 md:p-6 border-b border-gray-200">
           <div class="flex items-center gap-3">
@@ -82,7 +82,7 @@ export interface FaqItem {
           <button
             type="button"
             (click)="close()"
-            class="w-full py-2.5 px-4 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors">
+            class="w-full py-2.5 px-4 bg-gray-900 text-[var(--color-neutral-50)] rounded-lg font-medium hover:bg-gray-800 transition-colors">
             Cerrar
           </button>
         </div>
