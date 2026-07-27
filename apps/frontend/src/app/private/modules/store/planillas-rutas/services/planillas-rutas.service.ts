@@ -347,11 +347,9 @@ export class PlanillasRutasService {
       .pipe(map((r) => r.data));
   }
 
-  createVehicle(dto: any): Observable<any> {
-    return this.http
-      .post<any>(`${this.apiUrl}/store/vehicles`, dto)
-      .pipe(map((r) => r.data));
-  }
+  // Vehicle creation lives in FleetService (`createVehicle`), which sends a
+  // typed CreateVehicleDto. The duplicate `dto: any` version that used to sit
+  // here had no call sites and bypassed the DTO's required fields.
 
   // Dispatch notes (for wizard)
   /**

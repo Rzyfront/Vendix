@@ -368,6 +368,11 @@ export class RecipeFormPageComponent implements OnInit {
         );
       }
     }, 30000);
+    // takeUntilDestroyed below cancels the subscription on destroy, so neither
+    // `next` nor `error` runs and their clearTimeout never fires. Without this
+    // the timer survives the component and pops a warning toast 30s later on
+    // whatever page the user navigated to.
+    this.destroyRef.onDestroy(() => clearTimeout(safetyTimer));
 
     const raw = this.form.getRawValue();
     // Campos mutables compartidos. product_id NO va aquí: es inmutable tras crear

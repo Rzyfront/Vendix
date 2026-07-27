@@ -479,8 +479,16 @@ export class InputComponent implements ControlValueAccessor {
     }
     if (errors['min']) {
       const min = errors['min'].min;
-      // Friendly wording for the common "quantity must be > 0" case.
-      if (min === 0 || min === 0.0001) {
+      // Validators.min(0) only fails for NEGATIVE values — 0 itself is valid —
+      // so "debe ser mayor a 0" would tell the user to avoid a value the form
+      // actually accepts.
+      if (min === 0) {
+        return 'No puede ser negativo.';
+      }
+      // A small positive minimum is the repo's idiom for "must be greater than
+      // zero" (e.g. Validators.min(0.01) on money and quantity fields), where
+      // echoing the raw bound reads worse than the intent.
+      if (min > 0 && min < 1) {
         return 'Debe ser mayor a 0.';
       }
       return `El valor mínimo es ${min}.`;

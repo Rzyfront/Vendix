@@ -720,7 +720,11 @@ export class PromotionEngineService {
 
     // Pure, non-mutating read over the SAME candidate set resolved above. Never
     // touches the discount math; the return only GAINS this field.
-    const tierProgress = this.buildTierProgress(candidates, items);
+    const tierProgress = this.buildTierProgress(
+      candidates,
+      items,
+      winner?.promo ?? null,
+    );
 
     return {
       subtotal,
@@ -740,11 +744,16 @@ export class PromotionEngineService {
    * branch, and performs NO discount math. Structured mirror of the POS-only
    * frontend helper `getPromotionTierProgress` so POS and ecommerce nudge
    * identically. Returns one entry per promo that already has items in scope AND
-   * a next tier reachable above the current aggregated scope quantity.
+   * a next tier reachable above the current aggregated scope quantity AND that
+   * could actually win the winner-takes-all comparison (see `appliedPromo`).
+   *
+   * @param appliedPromo the promo currently winning (null if none applies).
+   *   Promos do NOT stack, so this is required to keep the nudge honest.
    */
   private buildTierProgress(
     candidatePromos: PromotionRecord[],
     items: PromotionQuoteItemInput[],
+    appliedPromo: PromotionRecord | null = null,
   ): PromotionTierProgress[] {
     const progress: PromotionTierProgress[] = [];
 
@@ -752,6 +761,25 @@ export class PromotionEngineService {
       // Only auto-apply quantity_tiered promos surface a nudge.
       if (!promo?.is_auto_apply) continue;
       if (promo.rule_type !== 'quantity_tiered') continue;
+
+      // Since only ONE promo can apply, a nudge is honest only if reaching the
+      // tier would actually change what the customer is charged. A promo that
+      // loses the priority comparison against the promo already applying can
+      // never take over by adding quantity, so advertising "add 2 more for
+      // -15%" would make the customer add product for nothing. Back when
+      // promos stacked every nudge was reachable; winner-takes-all broke that
+      // assumption. Same comparison as the winner loop above: lower priority
+      // number wins, ties go to the lower id.
+      if (
+        appliedPromo &&
+        promo.id !== appliedPromo.id &&
+        !(
+          promo.priority < appliedPromo.priority ||
+          (promo.priority === appliedPromo.priority &&
+            promo.id < appliedPromo.id)
+        )
+      )
+        continue;
 
       // Same tier ordering as the discount branch (min_quantity, sort_order, id).
       const tiers = (promo.promotion_quantity_tiers ?? [])

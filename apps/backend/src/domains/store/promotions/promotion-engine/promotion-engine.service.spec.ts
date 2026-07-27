@@ -983,6 +983,86 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.tier_progress[0].benefit_value).toBe(15);
     });
 
+    // Promos do NOT stack, so a nudge for a promo that would lose the
+    // winner-takes-all comparison is a lie: the customer adds product and the
+    // discount never changes. Only promos that could actually take over are
+    // advertised.
+    it('suppresses the nudge of a promo that would lose to the applied one', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 401,
+          name: 'Orden 10% (gana)',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+          priority: 1,
+        }),
+        buildPromotion({
+          id: 402,
+          name: 'Escala desde 3 und (pierde)',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          priority: 5,
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 402, min_quantity: 3, max_quantity: null, value: 25, type: 'percentage', sort_order: 0 }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 10000, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 20000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 401 (priority 1) applies. 402 (priority 5) has a tier one unit away,
+      // but even reaching it would not beat 401, so no nudge is emitted.
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([401]);
+      expect(result.total_discount).toBe(3000);
+      expect(result.tier_progress).toEqual([]);
+    });
+
+    it('keeps the nudge of a promo that would beat the applied one', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 403,
+          name: 'Escala desde 3 und (ganaria)',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          priority: 0,
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 403, min_quantity: 3, max_quantity: null, value: 25, type: 'percentage', sort_order: 0 }),
+          ],
+        }),
+        buildPromotion({
+          id: 404,
+          name: 'Orden 10% (aplica ahora)',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+          priority: 5,
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 10000, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 20000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 404 applies today (403's tier is not reached yet), but 403 has a lower
+      // priority number, so reaching its tier WOULD take over — the nudge is
+      // actionable and must survive.
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([404]);
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].promotion_id).toBe(403);
+      expect(result.tier_progress[0].remaining_quantity).toBe(1);
+    });
+
     it('emits no nudge when there are no in-scope items yet (scopedQty=0)', async () => {
       prisma.promotions.findMany.mockResolvedValue([
         buildPromotion({

@@ -47,7 +47,6 @@ export class VehicleFormModalComponent {
   readonly is_edit_mode = signal(false);
 
   /**
-  /**
    * `settlement_rate` solo aplica cuando el tipo ≠ 'none'. Helper para mostrar
    * el input en el template.
    */

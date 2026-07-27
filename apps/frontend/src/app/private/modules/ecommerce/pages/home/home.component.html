@@ -18,7 +18,9 @@
         </div>
       } @else if (featured_products().length > 0) {
         <h2 class="home-fallback__title">Nuestros productos</h2>
-        <p class="home-fallback__subtitle">Activá las secciones de inicio desde el panel admin para personalizar la portada.</p>
+        <!-- Este fallback lo ve el COMPRADOR, no el administrador: el copy no
+             puede pedirle configurar nada del panel admin. -->
+        <p class="home-fallback__subtitle">Explorá nuestra selección de productos.</p>
         <div class="products-grid">
           @for (product of featured_products(); track product.id) {
             <app-product-card
@@ -41,7 +43,7 @@
         <div class="empty-state">
           <div class="empty-icon"><i class="pi pi-box"></i></div>
           <h3>Aún no hay productos disponibles</h3>
-          <p>Activá el flag de publicado en tus productos para que aparezcan aquí.</p>
+          <p>Estamos preparando el catálogo. Volvé pronto.</p>
         </div>
       }
     </section>

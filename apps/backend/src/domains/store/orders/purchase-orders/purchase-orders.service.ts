@@ -2545,12 +2545,7 @@ export class PurchaseOrdersService {
         // FASE TRACK B2/B4 — liga el adjunto a un pago concreto cuando el modal
         // de pago sube el comprobante tras registrar el pago. Nullable: los
         // adjuntos de factura/OC normales siguen sin payment_id.
-        // TODO: remove the spread cast once `npx prisma generate` is re-run
-        // — the column was added in the B2/B4 migration but the generated
-        // client doesn't know about it yet.
-        ...(dto.payment_id !== undefined
-          ? { payment_id: dto.payment_id }
-          : {}),
+        payment_id: dto.payment_id ?? null,
         uploaded_by_user_id: userId,
       },
     });
