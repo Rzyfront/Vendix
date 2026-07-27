@@ -71,6 +71,9 @@ export default function SuperAdminLayout() {
   // Breadcrumb = "Padre / Actual". Si no hay padre configurado, sólo el actual.
   // AdminShell sólo acepta un string `breadcrumb` — la composición padre/hijo
   // se hace aquí (paridad con web `app-header.breadcrumb`).
+  // Los `icon` de routeBreadcrumbParent todavía no se renderizan: PosHeader no
+  // soporta iconos en el breadcrumb. Quedan declarados para cuando se
+  // implemente.
   const breadcrumb = parent ? `${parent.label} / ${currentLabel}` : currentLabel;
 
   return (
