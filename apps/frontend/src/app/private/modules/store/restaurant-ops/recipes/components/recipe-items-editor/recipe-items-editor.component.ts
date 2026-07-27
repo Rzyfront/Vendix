@@ -300,8 +300,12 @@ export class RecipeItemsEditorComponent implements OnInit {
    * A row is "unsaved" when it has no persisted `id` yet. The parent form's
    * create/update/delete reconciliation relies on the same `id` field, so this
    * is an authoritative state (not a fragile heuristic).
+   *
+   * `protected`, not `private`: the template calls it, and AOT rejects private
+   * members accessed from a template (TS2341) even though JIT dev mode lets it
+   * through.
    */
-  private isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
+  protected isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
     return row.get('id')?.value == null;
   }
 }
