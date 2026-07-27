@@ -481,7 +481,8 @@ export class PromotionListComponent {
       icon: 'play',
       variant: 'success',
       action: (row: any) => this.activate.emit(row.id),
-      show: (row: any) => ['draft', 'scheduled', 'paused'].includes(row.state),
+      show: (row: any) =>
+        ['draft', 'scheduled', 'paused', 'cancelled'].includes(row.state),
     },
     {
       label: 'Pausar',
@@ -502,7 +503,7 @@ export class PromotionListComponent {
       icon: 'trash-2',
       variant: 'danger',
       action: (row: any) => this.delete.emit(row.id),
-      show: (row: any) => row.state === 'draft',
+      show: (row: any) => ['draft', 'cancelled'].includes(row.state),
     },
   ];
 

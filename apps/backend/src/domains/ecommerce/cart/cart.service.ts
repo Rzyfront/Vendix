@@ -620,6 +620,9 @@ export class CartService {
         type: p.type,
         scope: p.scope,
         discount_amount: p.discount_amount,
+        // Surfaced for the cart UI audit trail. With the winner-takes-all
+        // engine, an order has at most one entry here.
+        priority: p.priority,
       })),
       tier_progress: quote.tier_progress,
     };

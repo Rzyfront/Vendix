@@ -1,10 +1,12 @@
 import {
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -34,6 +36,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
   styleUrls: ['./pqr-detail-page.component.scss'],
 })
 export class PqrDetailPageComponent {
+  private destroyRef = inject(DestroyRef);
   private readonly adminService = inject(PqrAdminService);
   private readonly authFacade = inject(AuthFacade);
   private readonly route = inject(ActivatedRoute);
@@ -195,7 +198,7 @@ export class PqrDetailPageComponent {
       notify_requester: this.isInternal() ? this.notifyRequester() : true,
     };
     this.submitting.set(true);
-    this.adminService.addComment(detail.id, dto).subscribe({
+    this.adminService.addComment(detail.id, dto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.newComment.set('');
         this.fetch(detail.id);
@@ -247,7 +250,7 @@ export class PqrDetailPageComponent {
     this.editCommentError.set(null);
     this.adminService.editComment(detailId, commentId, {
       content: newContent,
-    }).subscribe({
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         if (!res?.success) return;
         this.editCommentSaving.set(false);
@@ -333,6 +336,7 @@ export class PqrDetailPageComponent {
         requester_document_type: this.editRequesterDocType() || undefined,
         requester_document_num: this.editRequesterDocNum().trim() || undefined,
       })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           if (!res?.success) return;
@@ -371,7 +375,7 @@ export class PqrDetailPageComponent {
   private fetch(id: number) {
     this.loading.set(true);
     this.errorMsg.set(null);
-    this.adminService.getById(id).subscribe({
+    this.adminService.getById(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         if (res.success) this.detail.set(res.data);
         this.loading.set(false);
