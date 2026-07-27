@@ -11,7 +11,7 @@ import { IconComponent } from '../../../../../shared/components/index';
   imports: [DatePipe, RouterModule, IconComponent],
   template: `
     <div
-      class="bg-white border border-border rounded-lg p-6 hover:shadow-md transition-shadow duration-200 cursor-pointer"
+      class="bg-surface border border-border rounded-lg p-6 hover:shadow-md transition-shadow duration-200 cursor-pointer"
       (click)="onCardClick()"
       >
       <div class="flex items-center justify-between">
@@ -72,7 +72,7 @@ import { IconComponent } from '../../../../../shared/components/index';
             <!-- Dropdown Menu -->
             @if (showMenu) {
               <div
-                class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-border z-10"
+                class="absolute right-0 mt-2 w-48 bg-surface rounded-lg shadow-lg border border-border z-10"
                 >
                 <button
                   class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-t-lg flex items-center gap-2"

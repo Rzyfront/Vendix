@@ -145,11 +145,11 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
                         >
                         @for (dep of departments(); track dep.id) {
                           <div
-                            [class.bg-white]="isRegionSelected(dep.name)"
+                            [class.bg-surface]="isRegionSelected(dep.name)"
                 [class.border-[var(--color-primary)]]="
                   isRegionSelected(dep.name)
                 "
-                            class="flex items-center gap-3 p-3 rounded-xl border border-transparent hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer"
+                            class="flex items-center gap-3 p-3 rounded-xl border border-transparent hover:bg-surface hover:border-gray-200 hover:shadow-sm transition-all cursor-pointer"
                             (click)="toggleRegion(dep.name)"
                             >
                             <input

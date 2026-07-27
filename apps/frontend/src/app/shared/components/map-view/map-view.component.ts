@@ -251,8 +251,20 @@ export class MapViewComponent implements AfterViewInit, OnDestroy {
 
   async ngAfterViewInit(): Promise<void> {
     try {
+      // Dynamic import keeps maplibre-gl out of the main bundle. The
+      // import resolves to a default-export object on ESM builds and a
+      // namespace object on CJS — handle both.
       const maplibreModule = await import('maplibre-gl');
       this.maplibregl = (maplibreModule as any).default ?? maplibreModule;
+
+      // Guard against missing package (dev/CI without optional dep):
+      // surface the error placeholder instead of throwing inside the Map
+      // constructor.
+      if (!this.maplibregl) {
+        this.loading.set(false);
+        this.error.set(true);
+        return;
+      }
 
       this.map = new this.maplibregl.Map({
         container: this.mapContainer().nativeElement,

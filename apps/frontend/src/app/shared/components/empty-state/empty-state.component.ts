@@ -92,7 +92,16 @@ import { IconComponent } from '../icon/icon.component';
         width: 6rem;
         height: 6rem;
         border-radius: 50%;
-        background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+        /* Los grises de Tailwind estaban clavados y NADA los movía: el círculo
+           salía gris claro sobre superficie teñida (monocromo) y gris claro sobre
+           superficie oscura (dark). Los pasos 100/200 de la escala neutral son
+           exactamente estos dos valores en el tema base, así que en default no
+           cambia nada y en los demás modos/presets el círculo sigue a la familia. */
+        background: linear-gradient(
+          135deg,
+          var(--color-neutral-100) 0%,
+          var(--color-neutral-200) 100%
+        );
         display: flex;
         align-items: center;
         justify-content: center;
@@ -100,7 +109,7 @@ import { IconComponent } from '../icon/icon.component';
       }
 
       .empty-state-icon-svg {
-        color: #9ca3af;
+        color: var(--color-neutral-400);
       }
 
       .empty-state-title {
@@ -192,8 +201,10 @@ export class EmptyStateComponent {
 
   private colorMap: Record<string, { bg: string; fg: string }> = {
     default: {
-      bg: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
-      fg: '#9ca3af',
+      // Mismos tokens que la regla CSS: el ngStyle la pisa, así que si aquí
+      // quedan los hex el círculo vuelve a ser gris pase lo que pase en el SCSS.
+      bg: 'linear-gradient(135deg, var(--color-neutral-100) 0%, var(--color-neutral-200) 100%)',
+      fg: 'var(--color-neutral-400)',
     },
     success: {
       bg: 'var(--color-success-light, rgba(34, 197, 94, 0.1))',

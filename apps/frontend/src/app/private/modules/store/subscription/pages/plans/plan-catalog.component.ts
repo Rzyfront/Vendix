@@ -80,12 +80,12 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 [attr.aria-selected]="selectedCycle() === c"
                 (click)="selectCycle(c)"
                 class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
-                [class.bg-white]="selectedCycle() === c"
+                [class.bg-surface]="selectedCycle() === c"
                 [class.shadow-md]="selectedCycle() === c"
                 [class.text-primary-700]="selectedCycle() === c"
                 [class.text-text-secondary]="selectedCycle() !== c"
                 [class.hover:text-text-primary]="selectedCycle() !== c"
-                [class.hover:bg-white/50]="selectedCycle() !== c"
+                [class.hover:bg-surface/50]="selectedCycle() !== c"
               >
                 {{ cycleLabel(c) }}
               </button>
@@ -143,7 +143,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
             ¿Tienes un cupón?
           </button>
         } @else {
-          <div class="max-w-md mx-auto bg-white border border-border rounded-xl p-4 space-y-3">
+          <div class="max-w-md mx-auto bg-surface border border-border rounded-xl p-4 space-y-3">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-semibold text-text-primary">Aplicar cupón</h3>
               <button

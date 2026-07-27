@@ -44,7 +44,7 @@ interface ComparisonRow {
       </p>
 
       <div
-        class="relative w-full overflow-x-auto rounded-2xl border border-[var(--color-border)] bg-white shadow-sm"
+        class="relative w-full overflow-x-auto rounded-2xl border border-[var(--color-border)] bg-surface shadow-sm"
         role="region"
         aria-label="Comparación de planes"
         tabindex="0"
@@ -92,7 +92,7 @@ interface ComparisonRow {
             <tr class="border-b border-[var(--color-border)] hover:bg-gray-50">
               <th
                 scope="row"
-                class="sticky left-0 z-10 bg-white text-left p-4 font-medium text-[var(--color-text-primary)]"
+                class="sticky left-0 z-10 bg-surface text-left p-4 font-medium text-[var(--color-text-primary)]"
               >
                 Precio
               </th>
@@ -146,7 +146,7 @@ interface ComparisonRow {
 
             <!-- CTA row -->
             <tr>
-              <th scope="row" class="sticky left-0 z-10 bg-white p-4">
+              <th scope="row" class="sticky left-0 z-10 bg-surface p-4">
                 <span class="sr-only">Acción</span>
               </th>
               @for (plan of plans(); track plan.id) {
@@ -242,7 +242,7 @@ export class PlanComparisonTableComponent {
   rowLabelClass(row: ComparisonRow): Record<string, boolean> {
     return {
       'bg-gray-50': !!row.isGroupHeader,
-      'bg-white': !row.isGroupHeader,
+      'bg-surface': !row.isGroupHeader,
       'font-semibold': !!row.isGroupHeader,
       'text-[var(--color-text-primary)]': !!row.isGroupHeader,
       'font-medium': !row.isGroupHeader,

@@ -114,7 +114,7 @@ interface RefundItemState {
                   </div>
 
                   <!-- Product Image -->
-                  <div class="w-10 h-10 bg-white rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
+                  <div class="w-10 h-10 bg-surface rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
                     @if (item.orderItem.products?.image_url) {
                       <img [src]="item.orderItem.products!.image_url" class="w-full h-full object-cover" />
                     } @else {
@@ -188,7 +188,7 @@ interface RefundItemState {
             @for (item of selectedItems(); track item.orderItem.id) {
               <div class="p-3 rounded-xl border border-border bg-[var(--color-surface)]">
                 <div class="flex items-center gap-2 mb-3">
-                  <div class="w-8 h-8 bg-white rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
+                  <div class="w-8 h-8 bg-surface rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
                     @if (item.orderItem.products?.image_url) {
                       <img [src]="item.orderItem.products!.image_url" class="w-full h-full object-cover" />
                     } @else {

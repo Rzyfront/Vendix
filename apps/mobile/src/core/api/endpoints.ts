@@ -193,6 +193,16 @@ export const Endpoints = {
       CONVERT: '/store/quotations/:id/convert',
       DUPLICATE: '/store/quotations/:id/duplicate',
     },
+    LAYAWAY: {
+      CREATE: '/store/layaway',
+      LIST: '/store/layaway',
+      GET: '/store/layaway/:id',
+      STATS: '/store/layaway/stats',
+      PAYMENT: '/store/layaway/:id/payment',
+      MODIFY_INSTALLMENTS: '/store/layaway/:id/installments',
+      CANCEL: '/store/layaway/:id/cancel',
+      COMPLETE: '/store/layaway/:id/complete',
+    },
     SHIPPING_METHODS: {
       LIST: '/store/shipping-methods',
       ENABLE: '/store/shipping-methods/enable',
@@ -380,10 +390,13 @@ export const Endpoints = {
     },
     AUDIT: {
       LOGS: '/organization/audit/logs',
-      LOGIN_ATTEMPTS: '/organization/audit/login-attempts',
-      SESSIONS: '/organization/audit/sessions',
-      SESSIONS_USER: '/organization/audit/sessions/user/:userId',
-      STATS: '/organization/audit/stats',
+      LOGS_STATS: '/organization/audit/stats',
+      LOGS_EXPORT: '/organization/audit/export',
+      LOGIN_ATTEMPTS: '/organization/login-attempts',
+      LOGIN_ATTEMPTS_STATS: '/organization/login-attempts/stats',
+      SESSIONS: '/organization/sessions',
+      SESSIONS_TERMINATE: '/organization/sessions/:id',
+      SESSIONS_TERMINATE_USER: '/organization/sessions/user/:userId',
     },
     ACCOUNTING: {
       CHART_OF_ACCOUNTS: {

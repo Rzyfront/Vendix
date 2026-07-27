@@ -247,7 +247,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       // CTA card — same friendly copy as store-admin; tonal flip
       // (cta-card--urgent) when there are overdue PQRs in the queue.
       .cta-card {
-        background: #ffffff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         padding: 1.25rem 1.5rem;
@@ -268,7 +268,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         width: 48px;
         height: 48px;
         border-radius: 14px;
-        background: #dcfce7;
+        background: var(--color-success-100, #dcfce7);
         color: #15803d;
         display: flex;
         align-items: center;
@@ -276,7 +276,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         flex-shrink: 0;
       }
       .cta-card__icon--muted {
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         color: #94a3b8;
       }
       .cta-card__copy {
@@ -297,10 +297,12 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         }
       }
       .cta-card--urgent {
-        border-color: #fecaca;
-        background: linear-gradient(135deg, #fef2f2, #ffffff);
+        /* Tokens de la escala de error: el degradado terminaba en blanco literal y
+           dejaba la tarjeta urgente medio blanca sobre superficie teñida u oscura. */
+        border-color: var(--color-error-200);
+        background: linear-gradient(135deg, var(--color-error-50), var(--color-surface));
         .cta-card__icon {
-          background: #fee2e2;
+          background: var(--color-error-100);
           color: #b91c1c;
         }
         h2 {

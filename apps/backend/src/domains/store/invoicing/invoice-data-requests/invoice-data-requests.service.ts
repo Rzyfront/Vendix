@@ -488,7 +488,7 @@ export class InvoiceDataRequestsService {
       if (!customer) {
         // Find customer role
         const customerRole = await this.prisma.roles.findFirst({
-          where: { name: 'customer' },
+          where: { name: 'customer', organization_id: null, is_system_role: true },
         });
 
         if (!customerRole) {

@@ -83,15 +83,17 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  * the module is NOT hidden in the `restaurant` half of the intersection.
  *
  * Membership Suite: the generalized `memberships` module (plans, members,
- * access) is visible ⟺ the store's industry ∈ {gym, service}. It is hidden for
- * retail / restaurant / manufacturing. Both `gym` and `service` omit
- * `memberships` from their hidden lists so the OR-semantics intersection keeps
- * the suite visible for either industry (and for a store that has both). A gym
- * that also sells shakes adds `restaurant` to its industries to unlock the
- * restaurant suite too — the intersection empties for both `memberships` and
- * `restaurant_ops`, so a `['gym','restaurant']` store sees BOTH suites. Note
- * `gym` and `service` still hide `restaurant_ops` on their own, so a pure gym
- * or pure service store never sees the restaurant suite.
+ * access) is visible ⟺ the store's industry includes `gym`. It is hidden for
+ * retail / restaurant / manufacturing / service. `gym` omits `memberships`
+ * from its hidden list so the OR-semantics intersection keeps the suite
+ * visible whenever `gym` is one of the store's industries (a `['gym','retail']`
+ * store still sees it because the `gym` half of the intersection does not hide
+ * it). A gym that also sells shakes adds `restaurant` to its industries to
+ * unlock the restaurant suite too — the intersection empties for both
+ * `memberships` and `restaurant_ops`, so a `['gym','restaurant']` store sees
+ * BOTH suites. Note `gym` still hides `restaurant_ops` on its own, so a pure gym
+ * store never sees the restaurant suite. `service` (citas/reservas) is its own
+ * suite gated via `orders_reservations`; it does NOT unlock memberships.
  *
  * Service Suite: the `orders_reservations` module (booking calendar, providers,
  * schedules) is visible ⟺ the store's industry includes `service`. Every other
@@ -103,10 +105,43 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   retail: ['restaurant_ops', 'memberships', 'orders_reservations'],
-  restaurant: ['memberships', 'orders_reservations'],
-  manufacturing: ['restaurant_ops', 'memberships', 'orders_reservations'],
-  service: ['restaurant_ops'],
-  gym: ['restaurant_ops', 'orders_reservations'],
+  restaurant: [
+    'memberships',
+    'orders_reservations',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+  ],
+  manufacturing: [
+    'restaurant_ops',
+    'memberships',
+    'orders_reservations',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+  ],
+  service: [
+    'restaurant_ops',
+    'memberships',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+  ],
+  gym: [
+    'restaurant_ops',
+    'orders_reservations',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+  ],
 };
 
 /**

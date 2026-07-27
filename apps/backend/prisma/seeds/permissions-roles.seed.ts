@@ -3994,106 +3994,87 @@ export async function seedPermissionsAndRoles(
   // is_system_permission flag is set at create-time (additive-only seed).
 
   // Create roles
-  const superAdminRole = await client.roles.upsert({
-    where: { name: 'super_admin' },
-    update: {},
-    create: {
-      name: 'super_admin',
-      description: 'Super Administrador del sistema',
-      is_system_role: true,
-      organization_id: null as any,
-    },
-  });
+  // QUI-473: roles are unique per (organization_id, name) with NULLS NOT
+  // DISTINCT (PostgreSQL 15+). System roles live at organization_id = null.
+  // Prisma's generated `organization_id_name` compound selector types
+  // `organization_id` as `number` (not `number | null`), so the standard
+  // `upsert({ where: { organization_id_name: { organization_id: null, ... } } })`
+  // is a TypeScript error. We use an idempotent findFirst+create helper
+  // instead — safe because the DB-level NULLS NOT DISTINCT unique now
+  // prevents two `null + same name` rows from coexisting.
+  const findOrCreateSystemRole = async (
+    name: string,
+    description: string,
+  ): Promise<{ id: number; name: string; description: string | null }> => {
+    const existing = await client.roles.findFirst({
+      where: { name, organization_id: null },
+    });
+    if (existing) {
+      return existing as {
+        id: number;
+        name: string;
+        description: string | null;
+      };
+    }
+    return (await client.roles.create({
+      data: {
+        name,
+        description,
+        is_system_role: true,
+        organization_id: null as any,
+      },
+    })) as { id: number; name: string; description: string | null };
+  };
 
-  const ownerRole = await client.roles.upsert({
-    where: { name: 'owner' },
-    update: {},
-    create: {
-      name: 'owner',
-      description: 'Propietario de la organización',
-      is_system_role: true,
-    },
-  });
+  const superAdminRole = await findOrCreateSystemRole(
+    'super_admin',
+    'Super Administrador del sistema',
+  );
 
-  const adminRole = await client.roles.upsert({
-    where: { name: 'admin' },
-    update: {},
-    create: {
-      name: 'admin',
-      description: 'Administrador de la organización',
-      is_system_role: true,
-    },
-  });
+  const ownerRole = await findOrCreateSystemRole(
+    'owner',
+    'Propietario de la organización',
+  );
 
-  const fiscalSupervisorRole = await client.roles.upsert({
-    where: { name: 'fiscal_supervisor' },
-    update: {},
-    create: {
-      name: 'fiscal_supervisor',
-      description: 'Supervisor fiscal de la organización',
-      is_system_role: true,
-    },
-  });
+  const adminRole = await findOrCreateSystemRole(
+    'admin',
+    'Administrador de la organización',
+  );
 
-  const managerRole = await client.roles.upsert({
-    where: { name: 'manager' },
-    update: {},
-    create: {
-      name: 'manager',
-      description: 'Gerente de tienda',
-      is_system_role: true,
-    },
-  });
+  const fiscalSupervisorRole = await findOrCreateSystemRole(
+    'fiscal_supervisor',
+    'Supervisor fiscal de la organización',
+  );
 
-  const supervisorRole = await client.roles.upsert({
-    where: { name: 'supervisor' },
-    update: {},
-    create: {
-      name: 'supervisor',
-      description: 'Supervisor de tienda',
-      is_system_role: true,
-    },
-  });
+  const managerRole = await findOrCreateSystemRole(
+    'manager',
+    'Gerente de tienda',
+  );
 
-  const employeeRole = await client.roles.upsert({
-    where: { name: 'employee' },
-    update: {},
-    create: {
-      name: 'employee',
-      description: 'Empleado de tienda',
-      is_system_role: true,
-    },
-  });
+  const supervisorRole = await findOrCreateSystemRole(
+    'supervisor',
+    'Supervisor de tienda',
+  );
 
-  const customerRole = await client.roles.upsert({
-    where: { name: 'customer' },
-    update: {},
-    create: {
-      name: 'customer',
-      description: 'Cliente de la tienda',
-      is_system_role: true,
-    },
-  });
+  const employeeRole = await findOrCreateSystemRole(
+    'employee',
+    'Empleado de tienda',
+  );
 
-  const cashierRole = await client.roles.upsert({
-    where: { name: 'cashier' },
-    update: {},
-    create: {
-      name: 'cashier',
-      description: 'Cajero de tienda',
-      is_system_role: true,
-    },
-  });
+  const customerRole = await findOrCreateSystemRole(
+    'customer',
+    'Cliente de la tienda',
+  );
 
-  const carrierRole = await client.roles.upsert({
-    where: { name: 'carrier' },
-    update: {},
-    create: {
-      name: 'carrier',
-      description: 'Repartidor',
-      is_system_role: true,
-    },
-  });
+  const cashierRole = await findOrCreateSystemRole(
+    'cashier',
+    'Cajero de tienda',
+  );
+
+  const carrierRole = await findOrCreateSystemRole(
+    'carrier',
+    'Repartidor',
+  );
 
   // Create-only seed: system roles are inserted with organization_id=null on
   // their initial upsert; existing roles are never mutated by this seed.

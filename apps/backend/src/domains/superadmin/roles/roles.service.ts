@@ -18,48 +18,70 @@ export class RolesService {
   constructor(private prisma: GlobalPrismaService) {}
 
   async create(createRoleDto: CreateRoleDto) {
-    const existingRole = await (this.prisma as any).roles.findUnique({
-      where: { name: createRoleDto.name },
+    // QUI-473: roles are no longer unique by name alone. The composite unique
+    // is (organization_id, name). Superadmin creates roles with organization_id
+    // NULL (system or orphan), so the pre-check must match the same predicate:
+    // any existing role with (organization_id = NULL, name).
+    const existingRole = await (this.prisma as any).roles.findFirst({
+      where: {
+        name: createRoleDto.name,
+        organization_id: null,
+      },
     });
 
     if (existingRole) {
       throw new ConflictException('Role with this name already exists');
     }
 
-    const role = await this.prisma.roles.create({
-      data: {
-        name: createRoleDto.name,
-        description: createRoleDto.description,
-        is_system_role: createRoleDto.system_role || false,
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: {
-              select: { id: true, name: true, description: true },
-            },
-          },
+    // QUI-473: catch P2002 (race condition between the pre-check above and the
+    // INSERT below). With the composite unique on (organization_id, name)
+    // (system roles keep organization_id NULL and are unique among themselves),
+    // translate the raw Prisma error into a clean 409 ConflictException.
+    let role;
+    try {
+      role = await this.prisma.roles.create({
+        data: {
+          name: createRoleDto.name,
+          description: createRoleDto.description,
+          is_system_role: createRoleDto.system_role || false,
         },
-        user_roles: {
-          include: {
-            users: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
+        include: {
+          role_permissions: {
+            include: {
+              permissions: {
+                select: { id: true, name: true, description: true },
               },
             },
           },
-        },
-        _count: {
-          select: {
-            role_permissions: true,
-            user_roles: true,
+          user_roles: {
+            include: {
+              users: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              role_permissions: true,
+              user_roles: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Role with this name already exists');
+      }
+      throw err;
+    }
 
     return this.mapToResponse(role);
   }
@@ -186,9 +208,17 @@ export class RolesService {
     }
 
     if (updateRoleDto.name && updateRoleDto.name !== existingRole.name) {
+      // QUI-473: align the pre-check with the create path. The composite
+      // unique on (organization_id, name) means the same name can
+      // legitimately exist in another scope, so the pre-check must match the
+      // scope of the role being renamed — `existingRole.organization_id`
+      // (NULL for system roles, <orgId> for org-scoped ones). A global
+      // `organization_id: null` lookup would falsely reject a rename of an
+      // org-scoped role whose new name collides with another org-scoped role.
       const nameExists = await (this.prisma as any).roles.findFirst({
         where: {
           name: updateRoleDto.name,
+          organization_id: existingRole.organization_id,
           id: { not: id },
         },
       });
@@ -198,40 +228,55 @@ export class RolesService {
       }
     }
 
-    const role = await this.prisma.roles.update({
-      where: { id },
-      data: {
-        ...updateRoleDto,
-        updated_at: new Date(),
-      },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: {
-              select: { id: true, name: true, description: true },
-            },
-          },
+    // QUI-473: catch P2002 on the rename write (race between the pre-check
+    // above and this UPDATE). The composite unique on (organization_id,
+    // name) means a concurrent insert can win the slot between the
+    // pre-check and the write.
+    let role;
+    try {
+      role = await this.prisma.roles.update({
+        where: { id },
+        data: {
+          ...updateRoleDto,
+          updated_at: new Date(),
         },
-        user_roles: {
-          include: {
-            users: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
+        include: {
+          role_permissions: {
+            include: {
+              permissions: {
+                select: { id: true, name: true, description: true },
               },
             },
           },
-        },
-        _count: {
-          select: {
-            role_permissions: true,
-            user_roles: true,
+          user_roles: {
+            include: {
+              users: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              role_permissions: true,
+              user_roles: true,
+            },
           },
         },
-      },
-    });
+      });
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Role with this name already exists');
+      }
+      throw err;
+    }
 
     return this.mapToResponse(role);
   }

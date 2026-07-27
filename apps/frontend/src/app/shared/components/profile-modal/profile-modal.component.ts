@@ -263,7 +263,7 @@ import { dataUrlToFile } from '../../utils/data-url.util';
             </div>
             <!-- Password form (expandable) -->
             @if (showPasswordSection()) {
-              <div class="bg-white border border-gray-200 rounded-xl p-4">
+              <div class="bg-surface border border-gray-200 rounded-xl p-4">
                 <form
                   [formGroup]="passwordForm"
                   (ngSubmit)="onChangePassword()"
@@ -502,7 +502,7 @@ import { dataUrlToFile } from '../../utils/data-url.util';
             Editar Perfil
           </app-button>
           <app-button
-            class="order-2 sm:order-1 sm:!w-auto"
+            class="order-2 sm:order-1 sm:!w-auto sm:shrink-0"
             variant="secondary"
             [fullWidth]="true"
             (click)="onClose()"
@@ -522,7 +522,7 @@ import { dataUrlToFile } from '../../utils/data-url.util';
             Guardar Cambios
           </app-button>
           <app-button
-            class="order-2 sm:order-1 sm:!w-auto"
+            class="order-2 sm:order-1 sm:!w-auto sm:shrink-0"
             variant="secondary"
             [fullWidth]="true"
             (click)="cancelEditMode()"

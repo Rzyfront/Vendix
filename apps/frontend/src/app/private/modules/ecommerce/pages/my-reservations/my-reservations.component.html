@@ -75,13 +75,13 @@
                         <!-- Status badges & action buttons -->
                         <div class="card-extra-actions">
                             @if (booking.checked_in_at) {
-                                <span class="text-xs px-2 py-0.5 rounded-full" style="background: #dcfce7; color: #166534">
+                                <span class="text-xs px-2 py-0.5 rounded-full" style="background: var(--color-success-100, #dcfce7); color: #166534">
                                     Check-in registrado
                                 </span>
                             }
 
                             @if (booking.confirmation_requested_at && booking.status === 'pending') {
-                                <span class="text-xs px-2 py-0.5 rounded-full" style="background: #fef3c7; color: #92400e">
+                                <span class="text-xs px-2 py-0.5 rounded-full" style="background: var(--color-warning-100, #fef3c7); color: #92400e">
                                     Confirmación pendiente
                                 </span>
                             }

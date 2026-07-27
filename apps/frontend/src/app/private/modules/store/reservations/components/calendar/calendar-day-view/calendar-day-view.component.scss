@@ -166,7 +166,7 @@
   }
 
   &.status-pending {
-    background: #fef3c7;
+    background: var(--color-warning-100, #fef3c7);
     border-left: 4px solid #f59e0b;
     color: #92400e;
   }
@@ -178,7 +178,7 @@
   }
 
   &.status-in_progress {
-    background: #dbeafe;
+    background: var(--color-info-100, #dbeafe);
     border-left: 4px solid #3b82f6;
     color: #1e40af;
   }
@@ -190,14 +190,14 @@
   }
 
   &.status-cancelled {
-    background: #fee2e2;
+    background: var(--color-error-100, #fee2e2);
     border-left: 4px solid #ef4444;
     color: #991b1b;
     opacity: 0.6;
   }
 
   &.status-no_show {
-    background: #f3f4f6;
+    background: var(--color-neutral-100);
     border-left: 4px solid #9ca3af;
     color: #4b5563;
     opacity: 0.6;

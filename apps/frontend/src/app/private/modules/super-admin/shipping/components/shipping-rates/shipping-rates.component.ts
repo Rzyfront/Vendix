@@ -65,7 +65,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
         <div class="flex-1 overflow-hidden flex flex-col md:flex-row">
           <!-- Column 1: Rates List (40%) -->
           <div
-            class="w-full md:w-[35%] lg:w-[40%] border-r border-[var(--color-border)] flex flex-col bg-white"
+            class="w-full md:w-[35%] lg:w-[40%] border-r border-[var(--color-border)] flex flex-col bg-surface"
           >
             <div
               class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-gray-50/30"
@@ -304,13 +304,13 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
                         [class.ring-[var(--color-primary)]]="
                           form.get('type')?.value === strategy.type
                         "
-                        [class.bg-white]="
+                        [class.bg-surface]="
                           form.get('type')?.value === strategy.type
                         "
                         [class.shadow-sm]="
                           form.get('type')?.value === strategy.type
                         "
-                        class="border rounded-2xl p-3 flex flex-col items-center justify-center cursor-pointer hover:bg-white transition-all duration-300 gap-1 text-center group"
+                        class="border rounded-2xl p-3 flex flex-col items-center justify-center cursor-pointer hover:bg-surface transition-all duration-300 gap-1 text-center group"
                       >
                         <app-icon
                           [name]="strategy.icon"
@@ -335,7 +335,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
                 </div>
                 <!-- Costs and Conditions -->
                 <div
-                  class="bg-white p-6 rounded-2xl border border-[var(--color-border)] shadow-sm space-y-6"
+                  class="bg-surface p-6 rounded-2xl border border-[var(--color-border)] shadow-sm space-y-6"
                 >
                   <div class="grid grid-cols-2 gap-4">
                     <app-input
@@ -382,7 +382,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
               </form>
             </div>
             <div
-              class="p-4 bg-white border-t border-[var(--color-border)] mt-auto"
+              class="p-4 bg-surface border-t border-[var(--color-border)] mt-auto"
             >
               <app-button
                 variant="primary"
@@ -407,7 +407,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
           </div>
           <!-- Column 3: Help & Summary (20%) -->
           <div
-            class="hidden lg:flex lg:w-[20%] flex-col bg-white overflow-y-auto"
+            class="hidden lg:flex lg:w-[20%] flex-col bg-surface overflow-y-auto"
           >
             <div class="p-5 space-y-6">
               <div class="space-y-4">

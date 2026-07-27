@@ -314,7 +314,7 @@ import { ButtonComponent, IconComponent } from '../../index';
       .domain-icon {
         width: 36px;
         height: 36px;
-        background: white;
+        background: var(--color-surface);
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -398,7 +398,7 @@ import { ButtonComponent, IconComponent } from '../../index';
         position: absolute;
         width: 20px;
         height: 20px;
-        background: white;
+        background: var(--color-surface);
         border-radius: 50%;
         top: 2px;
         left: 2px;

@@ -34,7 +34,7 @@
           <span
             class="text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap inline-flex items-center gap-1"
             [style.color]="isLineComplete(state) ? '#16a34a' : '#b45309'"
-            [style.backgroundColor]="isLineComplete(state) ? '#dcfce7' : '#fef3c7'"
+            [style.backgroundColor]="isLineComplete(state) ? 'var(--color-success-100, #dcfce7)' : 'var(--color-warning-100, #fef3c7)'"
           >
             @if (isLineComplete(state)) {
               <app-icon name="check" [size]="12" />

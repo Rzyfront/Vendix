@@ -4,7 +4,7 @@
 
 .form-intro {
   margin: 0 0 20px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   font-size: 14px;
   line-height: 1.45;
 }
@@ -13,7 +13,7 @@
   margin: 0 0 16px;
   font-size: 12px;
   font-weight: 700;
-  color: #9ca3af;
+  color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -22,7 +22,7 @@
   margin: 24px 0 12px;
   font-size: 16px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 // ─── Color Grid ─────────────────────────────────────────
@@ -36,13 +36,13 @@
 
 .color-card {
   padding: 14px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--color-neutral-100);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   transition: background 200ms ease;
 
   &:hover {
-    background: #f3f4f6;
+    background: var(--color-neutral-200);
   }
 }
 
@@ -50,7 +50,7 @@
   display: block;
   font-size: 11px;
   font-weight: 700;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 10px;
@@ -67,7 +67,7 @@
   height: 44px; // WCAG touch target
   border-radius: 10px;
   cursor: pointer;
-  border: 2px solid #e5e7eb;
+  border: 2px solid var(--color-border);
   padding: 2px;
   background: transparent;
   flex-shrink: 0;
@@ -95,16 +95,16 @@
   font-size: 16px; // Prevent iOS zoom
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   text-transform: uppercase;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  color: #111827;
+  color: var(--color-text-primary);
   transition: border-color 200ms ease, box-shadow 200ms ease;
 
   &:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    border-color: var(--color-info);
+    box-shadow: 0 0 0 3px rgba(var(--color-info-rgb), 0.12);
   }
 }
 
@@ -123,14 +123,14 @@
   gap: 12px;
   min-height: 76px;
   padding: 12px;
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--color-neutral-100);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   transition: border-color 180ms ease, background 180ms ease;
 
   &:hover {
-    background: #fff;
-    border-color: #d1d5db;
+    background: var(--color-surface);
+    border-color: var(--color-neutral-300);
   }
 }
 
@@ -138,8 +138,8 @@
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -176,7 +176,7 @@
   display: block;
   font-size: 11px;
   font-weight: 700;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   line-height: 1.25;
@@ -197,7 +197,7 @@
   white-space: nowrap;
   font-size: 12px;
   line-height: 1.35;
-  color: #6b7280;
+  color: var(--color-text-secondary);
 }
 
 .brand-remove {
@@ -207,14 +207,14 @@
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  border: 1px solid #fee2e2;
-  color: #dc2626;
-  background: #fff;
+  border: 1px solid var(--color-error-100);
+  color: var(--color-error-600);
+  background: var(--color-surface);
   transition: background 180ms ease, border-color 180ms ease;
 
   &:hover {
-    background: #fef2f2;
-    border-color: #fecaca;
+    background: var(--color-error-50);
+    border-color: var(--color-error-200);
   }
 }
 

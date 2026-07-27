@@ -16,7 +16,7 @@ import { environment } from '../../../../../environments/environment';
 
         <!-- Loading State -->
         @if (loading()) {
-          <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div class="bg-surface rounded-2xl shadow-lg p-8 text-center">
             <div class="animate-spin w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
             <p class="text-gray-500 text-sm">Cargando información...</p>
           </div>
@@ -24,7 +24,7 @@ import { environment } from '../../../../../environments/environment';
 
         <!-- Error State -->
         @if (error() && !loading()) {
-          <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div class="bg-surface rounded-2xl shadow-lg p-8 text-center">
             <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -37,7 +37,7 @@ import { environment } from '../../../../../environments/environment';
 
         <!-- Success State -->
         @if (submitted() && !loading() && !error()) {
-          <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
+          <div class="bg-surface rounded-2xl shadow-lg p-8 text-center">
             <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -60,7 +60,7 @@ import { environment } from '../../../../../environments/environment';
 
         <!-- Form State -->
         @if (!submitted() && !loading() && !error()) {
-          <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
+          <div class="bg-surface rounded-2xl shadow-lg overflow-hidden">
             <!-- Header with store info -->
             <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5 text-white">
               @if (storeName()) {
@@ -114,7 +114,7 @@ import { environment } from '../../../../../environments/environment';
                     [(ngModel)]="form.document_type"
                     name="document_type"
                     required
-                    class="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-white"
+                    class="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all bg-surface"
                   >
                     <option value="CC">CC</option>
                     <option value="NIT">NIT</option>

@@ -171,7 +171,7 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(255, 255, 255, 0.8);
+        background: rgba(var(--color-surface-rgb), 0.8);
         border-radius: 0.75rem;
         z-index: 10;
       }
