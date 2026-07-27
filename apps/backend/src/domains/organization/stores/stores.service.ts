@@ -112,6 +112,7 @@ export class StoresService {
                 manager_user_id: storeData.manager_user_id ?? null,
                 store_code: storeData.store_code ?? null,
                 logo_url: storeData.logo_url ?? null,
+                industries: storeData.industries,
                 is_active: storeData.is_active ?? true,
               },
               address_data: address
@@ -186,11 +187,23 @@ export class StoresService {
         await this.createStoreDomain(store.id, store.slug, tx);
 
         // 3) optional store_settings from DTO
-        if (settings && Object.keys(settings).length > 0) {
+        //    Mirror `industries` into `settings.general.industries` so the
+        //    JSON mirror stays in sync with the `stores.industries` column
+        //    written by the helper (several frontend readers consult
+        //    store_settings.general.industries, not the column). Same
+        //    pattern as OnboardingWizardService.setupStore().
+        const mergedSettings = { ...(settings ?? {}) };
+        if (storeData.industries?.length) {
+          mergedSettings.general = {
+            ...(mergedSettings.general ?? {}),
+            industries: storeData.industries,
+          };
+        }
+        if (Object.keys(mergedSettings).length > 0) {
           await tx.store_settings.create({
             data: {
               store_id: store.id,
-              settings,
+              settings: mergedSettings,
             },
           });
         }
@@ -303,12 +316,21 @@ export class StoresService {
     const { settings, address, operating_hours, ...storeData } =
       updateStoreDto as any;
 
-    // Update store settings if provided
-    if (settings) {
+    // Update store settings if provided. Mirror `industries` into
+    // `settings.general.industries` to keep the JSON mirror in sync with
+    // the `stores.industries` column (same pattern as create()).
+    if (settings || storeData.industries?.length) {
+      const mergedSettings = { ...(settings ?? {}) };
+      if (storeData.industries?.length) {
+        mergedSettings.general = {
+          ...(mergedSettings.general ?? {}),
+          industries: storeData.industries,
+        };
+      }
       await this.prisma.store_settings.upsert({
         where: { store_id: id },
-        update: { settings },
-        create: { store_id: id, settings },
+        update: { settings: mergedSettings },
+        create: { store_id: id, settings: mergedSettings },
       });
     }
 

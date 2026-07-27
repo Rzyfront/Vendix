@@ -583,12 +583,12 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         text-align: center;
       }
       .loading-banner {
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         color: #475569;
       }
       .error-banner {
-        background: #fef2f2;
-        border: 1px solid #fecaca;
+        background: var(--color-error-50, #fef2f2);
+        border: 1px solid var(--color-error-200, #fecaca);
         color: #991b1b;
       }
 
@@ -607,7 +607,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
       // Header card
       .header-card {
-        background: #ffffff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         padding: 1.5rem;
@@ -635,11 +635,11 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
           background: #ecfdf5;
           color: #047857;
           &:has(app-icon[name='alert-triangle']) {
-            background: #fee2e2;
+            background: var(--color-error-100, #fee2e2);
             color: #b91c1c;
           }
           &:has(app-icon[name='clock']) {
-            background: #fef3c7;
+            background: var(--color-warning-100, #fef3c7);
             color: #92400e;
           }
         }
@@ -683,7 +683,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
       }
 
       .card {
-        background: #ffffff;
+        background: var(--color-surface);
         border: 1px solid #e2e8f0;
         border-radius: 14px;
         padding: 1.25rem;
@@ -702,7 +702,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
       .description {
         margin: 0;
         padding: 1rem;
-        background: #f8fafc;
+        background: var(--color-neutral-50);
         border: 1px solid #e2e8f0;
         border-radius: 10px;
         font-family: 'SF Mono', Menlo, Consolas, monospace;
@@ -720,15 +720,15 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         font-size: 0.75rem;
         font-weight: 600;
         &[data-type='PETITION'] {
-          background: #dcfce7;
+          background: var(--color-success-100, #dcfce7);
           color: #15803d;
         }
         &[data-type='COMPLAINT'] {
-          background: #fed7aa;
+          background: var(--color-orange-200, #fed7aa);
           color: #9a3412;
         }
         &[data-type='CLAIM'] {
-          background: #fecaca;
+          background: var(--color-error-200, #fecaca);
           color: #991b1b;
         }
       }
@@ -745,10 +745,10 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         border-radius: 6px;
         font-size: 0.75rem;
         font-weight: 600;
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         color: #475569;
         &[data-status='NEW'] {
-          background: #dbeafe;
+          background: var(--color-info-100, #dbeafe);
           color: #15803d;
         }
         &[data-status='RESOLVED'],
@@ -768,7 +768,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         gap: 0.75rem;
       }
       .comment {
-        background: #f8fafc;
+        background: var(--color-neutral-50);
         border: 1px solid #e2e8f0;
         border-radius: 10px;
         padding: 0.875rem 1rem;
@@ -838,8 +838,8 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         .comment-edit-error {
           margin: 0;
           padding: 0.375rem 0.625rem;
-          background: #fef2f2;
-          border: 1px solid #fecaca;
+          background: var(--color-error-50, #fef2f2);
+          border: 1px solid var(--color-error-200, #fecaca);
           color: #991b1b;
           border-radius: 6px;
           font-size: 0.75rem;
@@ -875,7 +875,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
           display: inline-block;
           padding: 0.125rem 0.5rem;
           border-radius: 6px;
-          background: #f1f5f9;
+          background: var(--color-neutral-100);
           color: #475569;
           font-weight: 600;
           font-size: 0.75rem;
@@ -915,8 +915,8 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
       .hint {
         margin: 0.75rem 0 0;
         padding: 0.625rem 0.75rem;
-        background: #fffbeb;
-        border: 1px solid #fde68a;
+        background: var(--color-warning-50, #fffbeb);
+        border: 1px solid var(--color-warning-200, #fde68a);
         border-radius: 8px;
         color: #92400e;
         font-size: 0.8125rem;
@@ -964,8 +964,8 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
       }
       .error-inline {
         margin: 0.5rem 0 0;
-        background: #fef2f2;
-        border: 1px solid #fecaca;
+        background: var(--color-error-50, #fef2f2);
+        border: 1px solid var(--color-error-200, #fecaca);
         color: #991b1b;
         padding: 0.5rem 0.75rem;
         border-radius: 8px;
@@ -1007,7 +1007,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         cursor: not-allowed;
       }
       .ghost-btn {
-        background: #ffffff;
+        background: var(--color-surface);
         border: 1px solid #16a34a;
         color: #15803d;
         border-radius: 8px;
@@ -1045,7 +1045,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         z-index: 100;
       }
       .modal {
-        background: #ffffff;
+        background: var(--color-surface);
         border-radius: 12px;
         padding: 1.5rem;
         width: min(540px, 90vw);
@@ -1068,7 +1068,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         padding: 0.5rem 0.75rem;
         font-family: inherit;
         font-size: 0.9rem;
-        background: #ffffff;
+        background: var(--color-surface);
         // Fixed height so text/email/tel/select all line up.
         height: 40px;
         box-sizing: border-box;
@@ -1082,8 +1082,8 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
       .modal-hint {
         margin: 0 0 1rem;
         padding: 0.625rem 0.75rem;
-        background: #fef3c7;
-        border: 1px solid #fde68a;
+        background: var(--color-warning-100, #fef3c7);
+        border: 1px solid var(--color-warning-200, #fde68a);
         border-radius: 8px;
         color: #92400e;
         font-size: 0.8125rem;
@@ -1103,7 +1103,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
           border-radius: 10px;
           padding: 0.75rem 1rem 1rem;
           margin: 0 0 1rem;
-          background: #f0fdf4;
+          background: var(--color-success-50, #f0fdf4);
 
           > legend {
             padding: 0 0.5rem;

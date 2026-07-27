@@ -1516,6 +1516,7 @@ export class AccountingEventsListener {
   @OnEvent('ap.payment_registered')
   async handleApPaymentRegistered(event: {
     ap_id: number;
+    ap_payment_id?: number;
     organization_id: number;
     store_id: number;
     supplier_id: number;
@@ -1528,6 +1529,7 @@ export class AccountingEventsListener {
       if (!(await this.isFlowEnabled(event.store_id, 'ar_ap'))) return;
       await this.auto_entry_service.onApPaymentRegistered({
         ap_id: event.ap_id,
+        ap_payment_id: event.ap_payment_id ?? event.ap_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
         amount: Number(event.amount),

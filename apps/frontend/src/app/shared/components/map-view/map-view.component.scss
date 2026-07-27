@@ -1,7 +1,10 @@
 /* Global MapLibre stylesheet (controls, marker, canvas positioning).
    Inlined by the build via node_modules resolution; applies globally because
    this component uses ViewEncapsulation.None. */
-@import 'maplibre-gl/dist/maplibre-gl.css';
+/* @import 'maplibre-gl/dist/maplibre-gl.css'; -- disabled: maplibre-gl package
+   is not installed in node_modules. The type stub at src/types/maplibre-gl.d.ts
+   silences TS2307, but Vite cannot resolve the actual CSS asset. Uncomment
+   after running `npm install` in the frontend workspace. */
 
 .map-view {
   position: relative;

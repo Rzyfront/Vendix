@@ -1,5 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, movement_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -21,6 +21,58 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 import { resolveProductLowStockThreshold } from '../../inventory/shared/helpers/low-stock-threshold.helper';
+
+/**
+ * One row of the stock-levels report. RAW values only — numbers are plain
+ * numbers, there is NO pre-formatting and NO presentation fallback strings.
+ * The emission phase (ReportBuilder) owns headers, currency/number formatting,
+ * and how `null` fields render.
+ */
+export interface StockLevelExportRow {
+  product_id: number;
+  product_name: string;
+  sku: string | null;
+  image_url: string | null;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+  reorder_point: number;
+  cost_per_unit: number;
+  total_value: number;
+  status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'overstock';
+}
+
+/**
+ * One row of the inventory-movements report. RAW values only: `created_at` is a
+ * raw `Date` (NOT a `YYYY-MM-DD` string), `movement_type` is the raw enum, and
+ * absent related names are `null` (not `'-'`/`'Desconocido'`). The emission
+ * phase formats the date in the store timezone and resolves display fallbacks.
+ */
+export interface MovementExportRow {
+  id: number;
+  created_at: Date | null;
+  product_id: number;
+  product_name: string | null;
+  sku: string | null;
+  movement_type: movement_type_enum;
+  quantity: number;
+  from_location: string | null;
+  to_location: string | null;
+  user_name: string | null;
+  reason: string | null;
+  reference_id: string | null;
+}
+
+/**
+ * Minimal product projection used to compute the summary's count KPIs over a
+ * scope-coherent universe (see {@link InventoryAnalyticsService.getInventorySummary}).
+ */
+interface SummaryProductRow {
+  id: number;
+  stock_quantity: number | null;
+  min_stock_level: number | null;
+  reorder_point: number | null;
+}
 
 @Injectable()
 export class InventoryAnalyticsService {
@@ -45,36 +97,23 @@ export class InventoryAnalyticsService {
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
     const settings = await this.loadMergedSettings();
 
-    // Get all products with stock info (store scoping is automatic)
-    // track_inventory is Boolean @default(false), not nullable
-    const products = await this.prisma.products.findMany({
-      where: {
-        state: 'active',
-        track_inventory: true,
-      },
-      select: {
-        id: true,
-        stock_quantity: true,
-        cost_price: true,
-        min_stock_level: true,
-        reorder_point: true,
-      },
-    });
+    // DATA-SCOPE-1 fix: every KPI in this report shares ONE scope universe.
+    // The universe follows the organization's operating scope (see
+    // vendix-operating-scope): STORE -> the current store in isolation;
+    // ORGANIZATION -> every store consolidated under the organization. This is
+    // exactly the universe getInventoryValuation() resolves, so the
+    // product-derived counts below and the stock value/quantity below agree
+    // instead of mixing a store-level product loop with an org-level valuation.
+    const products = await this.loadScopedSummaryProducts();
 
     let totalSkuCount = 0;
-    let totalStockValue = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
-    let totalQuantity = 0;
 
     for (const product of products) {
       totalSkuCount++;
       const qty = Number(product.stock_quantity || 0);
-      const cost = Number(product.cost_price || 0);
       const reorderPoint = resolveProductLowStockThreshold(settings, product);
-
-      totalQuantity += qty;
-      totalStockValue += qty * cost;
 
       if (qty === 0) {
         outOfStockCount++;
@@ -83,9 +122,17 @@ export class InventoryAnalyticsService {
       }
     }
 
+    // Stock value AND on-hand quantity come from the authoritative valuation
+    // (stock_levels + cost layers), resolved in the SAME operating-scope
+    // universe as the product counts above. Never derive value from
+    // products.cost_price (see vendix-inventory-valuation).
     const valuation = await this.getInventoryValuation(query);
-    totalStockValue = valuation.reduce(
+    const totalStockValue = valuation.reduce(
       (sum, item) => sum + Number(item.total_value || 0),
+      0,
+    );
+    const totalQuantity = valuation.reduce(
+      (sum, item) => sum + Number(item.total_quantity || 0),
       0,
     );
 
@@ -102,7 +149,63 @@ export class InventoryAnalyticsService {
     };
   }
 
-  async getStockLevels(query: InventoryAnalyticsQueryDto) {
+  /**
+   * Loads the active, inventory-tracked product universe that matches the
+   * organization's operating scope, so the summary KPIs share ONE scope
+   * universe with getInventoryValuation():
+   *  - STORE        -> only the current store's products (scoped client).
+   *  - ORGANIZATION -> every store's products under the organization, via the
+   *    APPROVED withoutScope() + manual relational filter
+   *    (products.stores.organization_id) — the same cross-tenant read shape
+   *    getInventoryValuation() uses for stock_levels.
+   */
+  private async loadScopedSummaryProducts(): Promise<SummaryProductRow[]> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const scope = await this.operatingScopeService.getOperatingScope(
+      context.organization_id,
+    );
+
+    const select = {
+      id: true,
+      stock_quantity: true,
+      min_stock_level: true,
+      reorder_point: true,
+    } as const;
+
+    if (scope === 'ORGANIZATION') {
+      const baseClient = this.prisma.withoutScope() as any;
+      const rows = await baseClient.products.findMany({
+        where: {
+          state: 'active',
+          track_inventory: true,
+          stores: { organization_id: context.organization_id },
+        },
+        select,
+      });
+      return rows as SummaryProductRow[];
+    }
+
+    if (!context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // STORE scope: the scoped client already restricts to the current store.
+    return this.prisma.products.findMany({ where: { state: 'active', track_inventory: true }, select });
+  }
+
+  /**
+   * Builds the COMPLETE, unpaginated set of stock-level rows for the current
+   * scope, honoring the `category_id` and `status` filters. Pagination/capping
+   * is applied by the callers that need it, never here — so the export reader
+   * can return every row.
+   */
+  private async buildStockLevelRows(
+    query: InventoryAnalyticsQueryDto,
+  ): Promise<StockLevelExportRow[]> {
     const settings = await this.loadMergedSettings();
 
     const productWhere: any = {
@@ -138,13 +241,13 @@ export class InventoryAnalyticsService {
       },
     });
 
-    let results = products.map((product) => {
+    let results: StockLevelExportRow[] = products.map((product) => {
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
       const reorderPoint = resolveProductLowStockThreshold(settings, product);
       const maxStock = Number(product.max_stock_level || 1000);
 
-      let status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'overstock';
+      let status: StockLevelExportRow['status'];
       if (qty === 0) {
         status = 'out_of_stock';
       } else if (qty <= reorderPoint) {
@@ -175,6 +278,12 @@ export class InventoryAnalyticsService {
       results = results.filter((r) => r.status === query.status);
     }
 
+    return results;
+  }
+
+  async getStockLevels(query: InventoryAnalyticsQueryDto) {
+    const results = await this.buildStockLevelRows(query);
+
     const isPaginated = query.page !== undefined && query.limit !== undefined;
     if (isPaginated) {
       const page = query.page!;
@@ -197,6 +306,24 @@ export class InventoryAnalyticsService {
 
     // Non-paginated: respect original limit behavior
     return results.slice(0, query.limit || 100);
+  }
+
+  /**
+   * DATA-COMPLETE-7 fix: dedicated export reader for stock levels.
+   *
+   * getStockLevels() returns a paginated `{ data, meta }` envelope for the UI
+   * table when page+limit are present, and otherwise a list silently capped at
+   * `limit || 100`. Feeding that to the export made the CSV/XLSX come out empty
+   * (`.length` on the envelope object is `undefined`) or truncated to 100 rows.
+   *
+   * This method ALWAYS returns the COMPLETE array of rows for the current
+   * scope/filters — never an envelope, never capped. `category_id` and `status`
+   * still narrow the report; `page`/`limit` are intentionally ignored.
+   */
+  async getStockLevelsForExport(
+    query: InventoryAnalyticsQueryDto,
+  ): Promise<StockLevelExportRow[]> {
+    return this.buildStockLevelRows(query);
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
@@ -868,7 +995,9 @@ export class InventoryAnalyticsService {
     );
   }
 
-  async getMovementsForExport(query: InventoryAnalyticsQueryDto) {
+  async getMovementsForExport(
+    query: InventoryAnalyticsQueryDto,
+  ): Promise<MovementExportRow[]> {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
@@ -879,7 +1008,7 @@ export class InventoryAnalyticsService {
           lte: endDate,
         },
         ...(query.movement_type && {
-          movement_type: query.movement_type as any,
+          movement_type: query.movement_type as movement_type_enum,
         }),
       },
       include: {
@@ -911,16 +1040,23 @@ export class InventoryAnalyticsService {
       take: 10000,
     });
 
+    // Phase B (data correctness): emit RAW values with clear field keys.
+    // No Spanish header keys, no `.toISOString().split('T')[0]`, no presentation
+    // fallbacks. `created_at` stays a raw Date so the emission phase
+    // (ReportBuilder) formats it in the store timezone.
     return movements.map((m) => ({
-      Fecha: m.created_at?.toISOString().split('T')[0] || '',
-      Producto: m.products?.name || 'Desconocido',
-      SKU: m.products?.sku || '',
-      Tipo: m.movement_type,
-      Cantidad: Number(m.quantity || 0),
-      Origen: m.from_location?.name || '-',
-      Destino: m.to_location?.name || '-',
-      Usuario: m.users?.username || '-',
-      Razón: m.reason || '-',
+      id: m.id,
+      created_at: m.created_at,
+      product_id: m.product_id,
+      product_name: m.products?.name ?? null,
+      sku: m.products?.sku ?? null,
+      movement_type: m.movement_type,
+      quantity: Number(m.quantity ?? 0),
+      from_location: m.from_location?.name ?? null,
+      to_location: m.to_location?.name ?? null,
+      user_name: m.users?.username ?? null,
+      reason: m.reason ?? null,
+      reference_id: m.source_order_id?.toString() ?? null,
     }));
   }
 }

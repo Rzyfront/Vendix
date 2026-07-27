@@ -19,6 +19,8 @@ import {
   BulkEmployeeAnalysisItemDto,
 } from './dto/bulk-employee.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
+import { buildReportBuffer } from '@common/reports/report-builder';
+import type { ReportColumn } from '@common/reports/report-column.types';
 
 @Injectable()
 export class EmployeesBulkService {
@@ -108,7 +110,7 @@ export class EmployeesBulkService {
     private readonly staffProvisioning: StaffProvisioningService,
   ) {}
 
-  generateExcelTemplate(): Buffer {
+  async generateExcelTemplate(): Promise<Buffer> {
     const headers = [
       'Nombre',
       'Apellido',
@@ -366,17 +368,16 @@ export class EmployeesBulkService {
       },
     ];
 
-    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
+    // Cada columna es texto. `key === header` preserva EXACTAMENTE los
+    // encabezados (contrato round-trip: parseFile mapea POR HEADER) y reutiliza
+    // las filas de ejemplo sin reindexar.
+    const columns: ReportColumn[] = headers.map(
+      (header): ReportColumn => ({ key: header, header, type: 'text' }),
+    );
 
-    const colWidths = headers.map((h) => ({
-      wch: Math.max(h.length + 5, 20),
-    }));
-    ws['!cols'] = colWidths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Empleados');
-
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    return buildReportBuffer({
+      sheets: [{ name: 'Plantilla Empleados', columns, rows: exampleData }],
+    });
   }
 
   /**

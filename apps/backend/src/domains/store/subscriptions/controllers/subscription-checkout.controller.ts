@@ -988,6 +988,7 @@ export class SubscriptionCheckoutController {
     // S3.6 — Free-plan downgrade: activate synchronously (no charge, no widget).
     // proration.apply() for paid → free produces a credit; no invoice is emitted.
     if (isFreePlan) {
+      const previousState = sub.state;
       const updated = await this.proration.apply(sub.id, dto.planId);
       // Clear any stale pending fields when moving to free.
       await this.prisma.store_subscriptions.update({
@@ -1001,6 +1002,25 @@ export class SubscriptionCheckoutController {
           pending_revert_state: null,
         },
       });
+      // A free plan committed on a degraded store must unblock it.
+      // proration.apply() swaps the plan but never touches `state`. The
+      // coupon path already reactivates via applyCoupon() ->
+      // PromotionalApplyService.apply(), so only the no-coupon case needs an
+      // explicit transition here. cancelled/expired/no_plan never reach this
+      // branch — Path D handled them above.
+      if (
+        !couponCode &&
+        (previousState === 'grace_soft' ||
+          previousState === 'grace_hard' ||
+          previousState === 'suspended' ||
+          previousState === 'blocked')
+      ) {
+        await this.stateService.transition(storeId, 'active', {
+          reason: 'free_plan_reactivation',
+          triggeredByUserId: context?.user_id ?? undefined,
+          payload: { previous_state: previousState, plan_id: dto.planId },
+        });
+      }
       if (couponCode) {
         await this.safeApplyCoupon(
           storeId,

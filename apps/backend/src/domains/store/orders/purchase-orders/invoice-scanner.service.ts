@@ -519,6 +519,17 @@ export class InvoiceScannerService {
   private async preprocessImage(
     file: Express.Multer.File,
   ): Promise<{ base64: string; mimeType: string }> {
+    return this.prepareImage(file);
+  }
+
+  /**
+   * Public OCR preprocessing — sharp resize to 1536px / q85, returns base64 +
+   * dataUri-compatible mimeType. Espejo del patrón `ExpenseScannerService.prepareImage`
+   * (vendix-ai-queue v2.2 — el processor async recibe la dataUri, no el buffer).
+   */
+  async prepareImage(
+    file: Express.Multer.File,
+  ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
 
@@ -558,6 +569,78 @@ export class InvoiceScannerService {
         mimeType: file.mimetype,
       };
     }
+  }
+
+  /**
+   * Track B2 — worker-side OCR for payment receipts. Calque de
+   * `ExpenseScannerService.scanFromImage`: llama `aiEngine.run()` DIRECTO
+   * (NUNCA `runByApplicationType`, que descarta extra_messages en apps image).
+   * Devuelve `{amount, payment_date, payment_method, reference, currency,
+   * notes, confidence}` parseado de forma defensiva.
+   */
+  async scanPaymentFromImage(
+    dataUri: string,
+    _mimeType: string,
+  ): Promise<{
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+    reference: string | null;
+    currency: string | null;
+    notes: string | null;
+    confidence: number;
+  }> {
+    const imageMessage: any = {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: 'Extract structured payment-receipt data from this image. Return ONLY the JSON object per the schema in your system prompt.',
+        },
+        {
+          type: 'image_url',
+          image_url: { url: dataUri, detail: 'high' },
+        },
+      ],
+    };
+
+    const response = await this.aiEngine.run(
+      'payment_receipt_ocr',
+      {},
+      [imageMessage],
+    );
+
+    if (!response.success) {
+      this.logger.error(
+        `[PaymentReceiptScan] aiEngine.run failed: ${response?.error ?? 'unknown'}`,
+      );
+      throw new Error('AI scan failed');
+    }
+
+    let parsed: any;
+    const raw = (response as any).content ?? (response as any).text ?? '';
+    try {
+      const cleaned = String(raw)
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/i, '')
+        .trim();
+      parsed = JSON.parse(cleaned);
+    } catch (err: any) {
+      this.logger.error(
+        `[PaymentReceiptScan] JSON parse failed: ${err?.message} (raw=${String(raw).slice(0, 200)})`,
+      );
+      throw new Error('OCR parse failed');
+    }
+
+    return {
+      amount: Number(parsed.amount) || 0,
+      payment_date: String(parsed.payment_date ?? ''),
+      payment_method: String(parsed.payment_method ?? 'other'),
+      reference: parsed.reference ?? null,
+      currency: parsed.currency ?? null,
+      notes: parsed.notes ?? null,
+      confidence: Number(parsed.confidence) || 0,
+    };
   }
 
   private normalizeOcrResponse(parsed: any): InvoiceScanResult {

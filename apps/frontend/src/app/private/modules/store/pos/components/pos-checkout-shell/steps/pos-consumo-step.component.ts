@@ -8,10 +8,7 @@ import {
 } from '@angular/core';
 
 import { IconComponent } from '../../../../../../../shared/components';
-import {
-  PosFulfillmentSelectorComponent,
-  FulfillmentType,
-} from '../../pos-fulfillment-selector.component';
+import { FulfillmentType } from '../../pos-fulfillment-selector.component';
 import { PosOpenTableModalComponent } from '../../pos-open-table-modal.component';
 import { OpenTableSessionResult } from '../../../services/pos-restaurant-integration.service';
 import { CartState } from '../../../models/cart.model';
@@ -34,11 +31,7 @@ import { CartState } from '../../../models/cart.model';
   selector: 'app-pos-consumo-step',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [
-    IconComponent,
-    PosFulfillmentSelectorComponent,
-    PosOpenTableModalComponent,
-  ],
+  imports: [IconComponent, PosOpenTableModalComponent],
   templateUrl: './pos-consumo-step.component.html',
   styleUrl: './pos-consumo-step.component.scss',
 })
@@ -79,6 +72,21 @@ export class PosConsumoStepComponent {
   readonly advanceRequested = output<void>();
 
   // ── Handlers (moved verbatim from pos-payment-step) ──────────────────────
+  /**
+   * Single entry point for the inline option rows. Preserves the exact
+   * change-vs-reselect semantics that {@link PosFulfillmentSelectorComponent}
+   * used to encapsulate: picking a NEW option runs {@link onFulfillmentChange};
+   * re-clicking the ALREADY-selected option runs {@link onFulfillmentReselected}
+   * (which advances the wizard, or opens the table picker for consumo).
+   */
+  onOptionClick(type: FulfillmentType): void {
+    if (type === this.fulfillment()) {
+      this.onFulfillmentReselected(type);
+      return;
+    }
+    this.onFulfillmentChange(type);
+  }
+
   onFulfillmentChange(next: FulfillmentType): void {
     this.fulfillment.set(next);
     if (next !== 'consumo') {

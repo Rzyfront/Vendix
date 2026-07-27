@@ -25,8 +25,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'full';
     <!-- Modal backdrop -->
     @if (isOpen()) {
         <div
-          class="fixed inset-0 z-[9999] flex items-center justify-center"
-          [class.p-4]="!isFull()"
+          [class]="wrapperClasses()"
           (click)="onWrapperClick($event)"
         >
         <!-- Backdrop overlay: bg-only, sin backdrop-filter -->
@@ -139,6 +138,13 @@ export class ModalComponent {
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);
   readonly customClasses = input<string>('');
+  /**
+   * Opt-in, backwards-compatible: when `true`, the modal renders as an
+   * edge-to-edge full-screen sheet below the `md:` breakpoint and keeps the
+   * exact `size()` look from `md:` onward. Default `false` means every
+   * existing `<app-modal>` consumer keeps byte-identical classes.
+   */
+  readonly fullScreenOnMobile = input<boolean>(false);
 
   readonly closed = output<void>();
   readonly opened = output<void>();
@@ -159,7 +165,20 @@ export class ModalComponent {
       full: ['max-w-full', 'w-full', 'h-full', 'max-h-full'],
     };
 
-    const classes = [...baseClasses, ...sizeClasses[this.size()]];
+    const size = this.size();
+    const classes = [...baseClasses];
+
+    // `size='full'` is an unconditional takeover at every breakpoint — keep
+    // it untouched and independent from `fullScreenOnMobile`.
+    if (this.fullScreenOnMobile() && size !== 'full') {
+      // Mobile-first full-screen sheet: no width/height caps below `md:`;
+      // reproduce the current `size()` look from `md:` onward.
+      classes.push('h-full', 'max-h-full');
+      classes.push(...sizeClasses[size].map((c) => `md:${c}`));
+      classes.push('md:h-auto');
+    } else {
+      classes.push(...sizeClasses[size]);
+    }
 
     if (this.customClasses()) {
       classes.push(this.customClasses());
@@ -174,14 +193,42 @@ export class ModalComponent {
   /**
    * Inner content shell classes. Full-screen fills the viewport edge-to-edge
    * (no rounding / no outer border / no 90vh cap); other sizes keep the
-   * rounded, bordered, height-capped card look.
+   * rounded, bordered, height-capped card look — unless `fullScreenOnMobile`
+   * is on, in which case that card look only applies from `md:` onward and
+   * the mobile base is an edge-to-edge sheet.
    */
   readonly contentClasses = computed(() => {
     const base =
       'bg-[var(--color-surface)] shadow-xl overflow-hidden flex flex-col';
-    return this.isFull()
-      ? `${base} h-full w-full max-h-full`
-      : `${base} rounded-[var(--radius-lg)] max-h-[90vh] border border-[var(--color-border)]`;
+
+    if (this.isFull()) {
+      return `${base} h-full w-full max-h-full`;
+    }
+
+    if (this.fullScreenOnMobile()) {
+      return `${base} rounded-none border-0 h-full max-h-full md:rounded-[var(--radius-lg)] md:max-h-[90vh] md:border md:border-[var(--color-border)] md:h-auto`;
+    }
+
+    return `${base} rounded-[var(--radius-lg)] max-h-[90vh] border border-[var(--color-border)]`;
+  });
+
+  /**
+   * Backdrop wrapper classes. Default keeps `p-4` unless full-screen;
+   * `fullScreenOnMobile` swaps that to `p-0` below `md:` (edge-to-edge sheet)
+   * and `p-4` from `md:` onward (unchanged desktop look).
+   */
+  readonly wrapperClasses = computed(() => {
+    const base = 'fixed inset-0 z-[9999] flex items-center justify-center';
+
+    if (this.isFull()) {
+      return base;
+    }
+
+    if (this.fullScreenOnMobile()) {
+      return `${base} p-0 md:p-4`;
+    }
+
+    return `${base} p-4`;
   });
 
   readonly hasHeader = computed(() => !!(this.title() || this.subtitle()));

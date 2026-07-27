@@ -258,11 +258,18 @@ export class SubscriptionStateService {
       );
     }
 
-    // Auto-set lock_reason for suspended/blocked transitions
-    const lockReason =
-      toState === 'suspended' || toState === 'blocked'
-        ? (opts.lockReason ?? 'admin_manual')
-        : undefined;
+    // Auto-set lock_reason for suspended/blocked transitions; explicitly
+    // clear it on recovery to active/trial so a stale 'past_due' /
+    // 'admin_manual' label does not linger and keep the store looking locked.
+    // `undefined` leaves the column intact (e.g. transitions to grace_*).
+    let lockReason: string | null | undefined;
+    if (toState === 'suspended' || toState === 'blocked') {
+      lockReason = opts.lockReason ?? 'admin_manual';
+    } else if (toState === 'active' || toState === 'trial') {
+      lockReason = null;
+    } else {
+      lockReason = undefined;
+    }
 
     const graceData: Record<string, any> = {};
     if (toState === 'grace_soft') {
@@ -280,7 +287,8 @@ export class SubscriptionStateService {
       where: { id: current.id },
       data: {
         state: toState,
-        lock_reason: lockReason ?? undefined,
+        // `undefined` = leave intact, `null` = clear (recovery), string = set.
+        lock_reason: lockReason,
         updated_at: new Date(),
         ...graceData,
       },
@@ -624,6 +632,9 @@ export class SubscriptionStateService {
         await this.transition(sub.store_id, targetState, {
           reason,
           triggeredByJob: 'subscription-state-engine',
+          // Dunning-driven suspension: stamp a truthful lock_reason instead of
+          // letting transition() fall back to the 'admin_manual' default.
+          lockReason: targetState === 'suspended' ? 'past_due' : undefined,
           graceSoftUntil: softDeadline,
           graceHardUntil: hardDeadline,
           payload: {

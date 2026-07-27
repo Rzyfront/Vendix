@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -8,7 +9,7 @@ import {
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   PublicPqrView,
   PqrService,
@@ -44,6 +45,7 @@ type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
   styleUrls: ['./pqr-track.component.scss'],
 })
 export class PqrTrackComponent {
+  private destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly pqrService = inject(PqrService);
@@ -149,7 +151,7 @@ export class PqrTrackComponent {
     if (!t) return;
     this.state.set('loading');
     this.errorMsg.set(null);
-    this.pqrService.track(t).subscribe({
+    this.pqrService.track(t).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         if (res.success) {
           this.view.set(res.data);

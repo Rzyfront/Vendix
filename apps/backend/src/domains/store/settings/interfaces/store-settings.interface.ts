@@ -229,7 +229,7 @@ export interface AppSettings {
   primary_color: string;
   secondary_color: string;
   accent_color: string;
-  theme: 'default' | 'aura' | 'monocromo';
+  theme: 'default' | 'aura' | 'glass' | 'monocromo';
   logo_url?: string;
   favicon_url?: string;
 }

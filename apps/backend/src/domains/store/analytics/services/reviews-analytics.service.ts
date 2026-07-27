@@ -105,7 +105,7 @@ export class ReviewsAnalyticsService {
     });
 
     return reviews.map((review) => ({
-      Fecha: review.created_at?.toISOString().split('T')[0] || '',
+      Fecha: review.created_at ?? null,
       Producto: review.products?.name || '',
       SKU: review.products?.sku || '',
       Cliente: review.users

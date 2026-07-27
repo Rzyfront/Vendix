@@ -329,6 +329,10 @@ import {
   BellRing,
   PlayCircle,
   CheckCircle2,
+  // Shipping method icons (POS checkout mobile redesign — "Entrega rápida
+  // local" uses a two-wheeler icon; Lucide has no dedicated
+  // motorcycle/scooter glyph, so Bike is used as the closest available fallback).
+  Bike,
 } from 'lucide-angular';
 
 /**
@@ -746,6 +750,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Serial-numbers module icon
   'fingerprint': Fingerprint,
+
+  // Shipping method icons (POS checkout mobile redesign)
+  'bike': Bike,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

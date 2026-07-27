@@ -48,7 +48,10 @@ export const stage10Withholdings: Stage = {
     let orders = data.orders;
     let concepts: any[] = data.withholdingConcepts ?? [];
     if (!customers?.length) {
-      const customerRole = await prisma.roles.findUnique({ where: { name: 'customer' } });
+      // QUI-473: system role lookup — `name` is no longer a unique selector.
+      const customerRole = await prisma.roles.findFirst({
+        where: { name: 'customer', organization_id: null },
+      });
       if (customerRole) {
         const customerUsers = await prisma.users.findMany({
           where: { user_roles: { some: { role_id: customerRole.id } }, store_users: { some: { store_id: storeId } } },

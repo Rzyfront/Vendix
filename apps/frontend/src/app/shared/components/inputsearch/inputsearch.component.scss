@@ -366,38 +366,10 @@
   animation: inputsearch-clear-appear 0.15s ease-out;
 }
 
-// Clases para temas personalizados
-[data-theme="dark"] {
-  .inputsearch-wrapper {
-    background-color: var(--color-surface);
-    border-color: var(--color-border);
-
-    &:hover:not(.inputsearch-wrapper-disabled) {
-      border-color: var(--color-text-secondary);
-    }
-  }
-
-  .inputsearch-input {
-    color: var(--color-text-primary);
-
-    &::placeholder {
-      color: var(--color-text-secondary);
-    }
-  }
-
-  .inputsearch-icon {
-    color: var(--color-text-secondary);
-  }
-
-  .inputsearch-clear {
-    color: var(--color-text-secondary);
-
-    &:hover:not(:disabled) {
-      background-color: var(--color-background);
-      color: var(--color-text-primary);
-    }
-  }
-}
+// Tema oscuro: bloque eliminado. Re-seteaba --color-surface, --color-border,
+// --color-text-primary/secondary y --color-background a los mismos valores que
+// ya tienen en base y que el bloque global [data-theme="dark"] de styles.scss
+// invierte. Era completamente redundante.
 
 // Prevent iOS Safari auto-zoom on input focus (requires font-size >= 16px)
 @supports (-webkit-touch-callout: none) {

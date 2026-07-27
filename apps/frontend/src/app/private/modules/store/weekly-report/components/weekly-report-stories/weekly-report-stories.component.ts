@@ -41,20 +41,20 @@ const TIER_PALETTE: Record<WeeklyTier, TierPalette> = {
   },
   BELOW: {
     background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-    foreground: '#eff6ff',
-    accent: '#bfdbfe',
+    foreground: 'var(--color-info-50, #eff6ff)',
+    accent: 'var(--color-info-200, #bfdbfe)',
     chip: 'rgba(191, 219, 254, 0.18)',
   },
   ABOVE: {
     background: 'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
-    foreground: '#fffbeb',
-    accent: '#fde68a',
+    foreground: 'var(--color-warning-50, #fffbeb)',
+    accent: 'var(--color-warning-200, #fde68a)',
     chip: 'rgba(253, 230, 138, 0.22)',
   },
   STELLAR: {
     background: 'linear-gradient(135deg, #ec4899 0%, #7c3aed 100%)',
-    foreground: '#fdf2f8',
-    accent: '#fbcfe8',
+    foreground: 'var(--color-pink-50, #fdf2f8)',
+    accent: 'var(--color-pink-200, #fbcfe8)',
     chip: 'rgba(251, 207, 232, 0.22)',
   },
 };

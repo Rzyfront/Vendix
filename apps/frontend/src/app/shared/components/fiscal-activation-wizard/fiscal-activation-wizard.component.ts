@@ -447,9 +447,9 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
 
       .error-banner {
         margin-bottom: 1rem;
-        border: 1px solid #fecaca;
+        border: 1px solid var(--color-error-200, #fecaca);
         border-radius: 0.5rem;
-        background: #fef2f2;
+        background: var(--color-error-50, #fef2f2);
         color: #991b1b;
         padding: 0.75rem 1rem;
         font-size: 0.87rem;

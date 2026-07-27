@@ -573,6 +573,7 @@ export class OrgSubscriptionsController {
 
       // Free plan immediate downgrade (no charge, no widget).
       if (isFreePlan) {
+        const previousState = sub.state;
         const updated = await this.proration.apply(sub.id, dto.planId);
         await this.prisma.store_subscriptions.update({
           where: { id: sub.id },
@@ -585,6 +586,26 @@ export class OrgSubscriptionsController {
             pending_revert_state: null,
           },
         });
+        // Reactivate a degraded store on a free downgrade (proration.apply()
+        // never touches `state`). The coupon path reactivates via
+        // applyCoupon(), so only the no-coupon case transitions here. NOTE:
+        // unlike the store checkout, this org path has no Path D re-subscribe,
+        // so a `cancelled`/`expired` store committing a free plan is NOT
+        // reactivated here — `cancelled/expired -> active` is an illegal
+        // transition and must go through the store-side re-subscribe checkout.
+        if (
+          !couponCode &&
+          (previousState === 'grace_soft' ||
+            previousState === 'grace_hard' ||
+            previousState === 'suspended' ||
+            previousState === 'blocked')
+        ) {
+          await this.stateService.transition(storeId, 'active', {
+            reason: 'free_plan_reactivation',
+            triggeredByUserId: context?.user_id ?? undefined,
+            payload: { previous_state: previousState, plan_id: dto.planId },
+          });
+        }
         if (couponCode) {
           await this.safeApplyCoupon(
             storeId,

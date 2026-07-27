@@ -16,6 +16,7 @@ import {
 } from '../../../interfaces';
 import { PoReceiveModalComponent } from '../po-receive-modal/po-receive-modal.component';
 import { PoPaymentModalComponent } from '../po-payment-modal/po-payment-modal.component';
+import { PoPaymentDetailModalComponent } from '../po-payment-detail-modal/po-payment-detail-modal.component';
 import { PoTimelineComponent } from '../po-timeline/po-timeline.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
@@ -30,6 +31,7 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
     ScrollableTabsComponent,
     PoReceiveModalComponent,
     PoPaymentModalComponent,
+    PoPaymentDetailModalComponent,
     PoTimelineComponent,
   ],
   template: `
@@ -448,7 +450,12 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
           } @else {
             <div class="space-y-2">
               @for (payment of payments(); track payment.id) {
-                <div class="border border-border rounded-lg p-3 flex items-start gap-3 hover:border-border/80 transition-colors">
+                <button
+                  type="button"
+                  class="w-full text-left border border-border rounded-lg p-3 flex items-start gap-3 hover:border-primary/40 hover:bg-surface-2 transition-colors"
+                  (click)="openPaymentDetail(payment)"
+                  [attr.aria-label]="'Ver detalle del pago ' + payment.id"
+                >
                   <div class="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
                     <app-icon name="dollar-sign" [size]="14" class="text-primary"></app-icon>
                   </div>
@@ -479,7 +486,7 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
                       {{ getUserDisplayName(payment.created_by) }}
                     </span>
                   }
-                </div>
+                </button>
               }
             </div>
           }
@@ -632,6 +639,15 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
       (close)="showPaymentModal.set(false)"
       (paymentRegistered)="onPaymentRegistered()"
     ></app-po-payment-modal>
+
+    <!-- FASE TRACK B4 — Modal de detalle de pago con preview del comprobante -->
+    <app-po-payment-detail-modal
+      [isOpen]="showPaymentDetailModal()"
+      [paymentId]="selectedPayment()?.id ?? null"
+      [orderId]="order()?.id ?? null"
+      [payment]="selectedPayment()"
+      (close)="showPaymentDetailModal.set(false)"
+    ></app-po-payment-detail-modal>
   `,
   styles: [`:host { display: block; }`],
 })
@@ -651,6 +667,28 @@ export class PoDetailModalComponent {
   readonly activeTab = signal<string>('detail');
   readonly showReceiveModal = signal(false);
   readonly showPaymentModal = signal(false);
+  // FASE TRACK B4 — modal de detalle de pago con preview del comprobante.
+  readonly showPaymentDetailModal = signal(false);
+  readonly selectedPayment = signal<{
+    id: number;
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+    reference?: string | null;
+    notes?: string | null;
+  } | null>(null);
+
+  openPaymentDetail(p: any): void {
+    this.selectedPayment.set({
+      id: p.id,
+      amount: p.amount,
+      payment_date: p.payment_date,
+      payment_method: p.payment_method,
+      reference: p.reference ?? null,
+      notes: p.notes ?? null,
+    });
+    this.showPaymentDetailModal.set(true);
+  }
 
   // Data signals
   readonly receptions = signal<PurchaseOrderReception[]>([]);

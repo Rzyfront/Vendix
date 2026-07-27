@@ -1,10 +1,12 @@
 import {
   Component,
+  DestroyRef,
   ViewChild,
   inject,
   signal,
   computed,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule } from '@angular/router';
 import {
   SidebarComponent,
@@ -419,6 +421,8 @@ export class OrganizationAdminLayoutComponent {
     this.addDynamicStoresToMenu(this.baseFilteredMenuItems()),
   );
 
+  private destroyRef = inject(DestroyRef);
+
   constructor() {
     // Load stores for sidebar
     this.loadStores();
@@ -427,7 +431,7 @@ export class OrganizationAdminLayoutComponent {
   loadStores(): void {
     this.isLoadingStores.set(true);
 
-    this.storesService.getStores().subscribe({
+    this.storesService.getStores().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.stores.set(

@@ -414,7 +414,7 @@ export class MembershipAccessService {
 
         if (reEntry.mode === 'block') {
           return this.logAndReturn(storeId, {
-            result: membership_access_result_enum.denied_re_entry,
+            result: 'denied_re_entry',
             reason: `Reingreso hace ${reEntryMinutes} min`,
             customer_id: customerId,
             membership_id: active.id,

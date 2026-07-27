@@ -54,6 +54,10 @@
 
 /* Main content area styles */
 main {
+  /* Compensa el alto recortado del header (ver --admin-header-gap). Mismo
+     tratamiento en los tres layouts admin para que la banda superior se lea
+     igual en tienda, organización y super admin. */
+  padding-top: var(--admin-header-gap);
   background-color: var(--color-background);
   min-width: 0;
   max-width: 100%;

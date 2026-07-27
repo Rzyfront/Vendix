@@ -12,6 +12,7 @@ describe('PromotionalApplyService', () => {
   let eventEmitterMock: any;
   let redisMock: any;
   let evaluatorMock: any;
+  let stateServiceMock: any;
 
   const baseFlags = {
     text_generation: {
@@ -46,6 +47,7 @@ describe('PromotionalApplyService', () => {
         reasons_blocked: [],
       }),
     };
+    stateServiceMock = { transition: jest.fn().mockResolvedValue({}) };
 
     service = new PromotionalApplyService(
       prismaMock,
@@ -53,6 +55,7 @@ describe('PromotionalApplyService', () => {
       eventEmitterMock,
       redisMock,
       evaluatorMock,
+      stateServiceMock,
     );
   });
 

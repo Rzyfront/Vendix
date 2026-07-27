@@ -230,17 +230,32 @@ export class ReportDataAdapterService {
 
     const summaryData: Record<string, any> = { _count: rows.length };
 
-    const numericKeys = new Set<string>();
-    for (const row of rows) {
-      for (const [key, value] of Object.entries(row)) {
-        if (typeof value === 'number' && !key.startsWith('_')) {
-          numericKeys.add(key);
-        }
-      }
-    }
+    // Only aggregate columns whose definition declares HOW they aggregate via
+    // `footer`. Blindly summing every numeric field produced nonsense stats
+    // (summing IDs, unit prices, percentages, averages). Without a report
+    // definition we cannot know what is summable, so we emit only the count.
+    const aggregatable = (report?.columns ?? []).filter(
+      (c) => c.footer && c.type !== 'percentage',
+    );
 
-    for (const key of numericKeys) {
-      summaryData[key] = rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+    for (const col of aggregatable) {
+      const numeric = rows
+        .map((row) => Number(row[col.key]))
+        .filter((n) => !Number.isNaN(n));
+      if (numeric.length === 0) continue;
+
+      switch (col.footer) {
+        case 'sum':
+          summaryData[col.key] = numeric.reduce((sum, n) => sum + n, 0);
+          break;
+        case 'average':
+          summaryData[col.key] =
+            numeric.reduce((sum, n) => sum + n, 0) / numeric.length;
+          break;
+        case 'count':
+          summaryData[col.key] = numeric.length;
+          break;
+      }
     }
 
     return Object.keys(summaryData).length > 1 ? summaryData : undefined;
@@ -258,9 +273,20 @@ export class ReportDataAdapterService {
     return rows.map(row => {
       const mapped: Record<string, any> = {};
 
+      // 1) Copy through only the keys the mapping does NOT rename, so a raw key
+      //    can never survive under a name the mapping also targets.
       for (const [key, value] of Object.entries(row)) {
-        const targetKey = mapping[key] ?? key;
-        mapped[targetKey] = value;
+        if (!(key in mapping)) {
+          mapped[key] = value;
+        }
+      }
+
+      // 2) Apply the mapping last so renamed values deterministically win any
+      //    collision with a pre-existing raw key of the same target name.
+      for (const [sourceKey, targetKey] of Object.entries(mapping)) {
+        if (sourceKey in row) {
+          mapped[targetKey] = row[sourceKey];
+        }
       }
 
       return mapped;
@@ -296,8 +322,10 @@ export class ReportDataAdapterService {
     // Revenue section
     if (d.revenue) {
       rows.push({ section: 'Ingresos', concept: 'Ingresos Brutos', amount: Number(d.revenue.gross_revenue || 0) });
-      if (d.revenue.discounts) rows.push({ section: 'Ingresos', concept: 'Descuentos', amount: -Number(d.revenue.discounts || 0) });
-      if (d.revenue.shipping_revenue) rows.push({ section: 'Ingresos', concept: 'Envios', amount: Number(d.revenue.shipping_revenue || 0) });
+      // Present the row whenever the field is present (including 0) — a truthy
+      // check silently dropped legitimate zero values, misrepresenting the P&L.
+      if (d.revenue.discounts != null) rows.push({ section: 'Ingresos', concept: 'Descuentos', amount: -Number(d.revenue.discounts || 0) });
+      if (d.revenue.shipping_revenue != null) rows.push({ section: 'Ingresos', concept: 'Envios', amount: Number(d.revenue.shipping_revenue || 0) });
       rows.push({ section: 'Ingresos', concept: 'Ingresos Netos', amount: Number(d.revenue.net_revenue || 0), is_total: true });
     }
 
@@ -432,14 +460,16 @@ export class ReportDataAdapterService {
     const d = raw?.data ?? raw;
     const buckets = d.buckets || {};
 
-    // Build rows from top customers with a single total column
+    // Build per-customer rows. Read each bucket from the customer record when the
+    // backend provides it; hardcoding 0 discarded real per-customer aging detail
+    // and left every bucket column empty regardless of the data.
     const rows: any[] = (d.top_customers || []).map((c: any) => ({
       customer_name: c.customer_name,
-      current: 0,
-      days_1_30: 0,
-      days_31_60: 0,
-      days_61_90: 0,
-      over_90: 0,
+      current: Number(c.current || 0),
+      days_1_30: Number(c.days_1_30 || 0),
+      days_31_60: Number(c.days_31_60 || 0),
+      days_61_90: Number(c.days_61_90 || 0),
+      over_90: Number(c.over_90 ?? c.days_91_120 ?? 0) + Number(c.days_120_plus || 0),
       total: Number(c.total || 0),
     }));
 

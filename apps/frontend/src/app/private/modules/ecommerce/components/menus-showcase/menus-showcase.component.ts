@@ -420,7 +420,7 @@ interface CartaBlock {
         font-weight: var(--fw-semibold);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
-        background: rgba(255, 255, 255, 0.88);
+        background: rgba(var(--color-surface-rgb), 0.88);
         color: var(--color-text-primary);
         border: 1px solid rgba(148, 163, 184, 0.24);
       }
@@ -436,7 +436,7 @@ interface CartaBlock {
         align-items: center;
         justify-content: center;
         color: var(--color-text-primary);
-        background: rgba(255, 255, 255, 0.9);
+        background: rgba(var(--color-surface-rgb), 0.9);
         border: 1px solid rgba(148, 163, 184, 0.24);
         border-radius: 999px;
         backdrop-filter: blur(10px);
@@ -459,7 +459,7 @@ interface CartaBlock {
       }
       .dish-quick-btn:hover {
         color: var(--color-primary);
-        background: #ffffff;
+        background: var(--color-surface);
         border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
         transform: translateY(-1px) scale(1.02);
       }
@@ -533,14 +533,14 @@ interface CartaBlock {
         padding: 0 !important;
         border-radius: 50% !important;
         color: var(--color-text-secondary) !important;
-        background: rgba(255, 255, 255, 0.88) !important;
+        background: rgba(var(--color-surface-rgb), 0.88) !important;
         border: 1px solid rgba(148, 163, 184, 0.22) !important;
         box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.45);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
       }
       :host ::ng-deep .action-btn:hover {
-        background: #ffffff !important;
+        background: var(--color-surface) !important;
         color: var(--color-primary) !important;
       }
       :host ::ng-deep .action-btn.active {

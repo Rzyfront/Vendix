@@ -42,26 +42,30 @@ export async function seedUsers(
   }
 
   // Fetch required roles
-  const superAdminRole = await client.roles.findUnique({
-    where: { name: 'super_admin' },
+  // QUI-473: roles are unique per (organization_id, name) with NULLS NOT
+  // DISTINCT. Prisma's generated `organization_id_name` compound selector
+  // types `organization_id` as `number` (not `number | null`), so we use
+  // `findFirst` with an explicit (name, organization_id) filter instead.
+  const superAdminRole = await client.roles.findFirst({
+    where: { name: 'super_admin', organization_id: null },
   });
-  const ownerRole = await client.roles.findUnique({
-    where: { name: 'owner' },
+  const ownerRole = await client.roles.findFirst({
+    where: { name: 'owner', organization_id: null },
   });
-  const adminRole = await client.roles.findUnique({
-    where: { name: 'admin' },
+  const adminRole = await client.roles.findFirst({
+    where: { name: 'admin', organization_id: null },
   });
-  const managerRole = await client.roles.findUnique({
-    where: { name: 'manager' },
+  const managerRole = await client.roles.findFirst({
+    where: { name: 'manager', organization_id: null },
   });
-  const supervisorRole = await client.roles.findUnique({
-    where: { name: 'supervisor' },
+  const supervisorRole = await client.roles.findFirst({
+    where: { name: 'supervisor', organization_id: null },
   });
-  const employeeRole = await client.roles.findUnique({
-    where: { name: 'employee' },
+  const employeeRole = await client.roles.findFirst({
+    where: { name: 'employee', organization_id: null },
   });
-  const customerRole = await client.roles.findUnique({
-    where: { name: 'customer' },
+  const customerRole = await client.roles.findFirst({
+    where: { name: 'customer', organization_id: null },
   });
 
   if (

@@ -289,14 +289,18 @@ type InstructionField = {
         flex-direction: column;
         gap: 0.875rem;
         padding: 1.125rem 1.25rem 0.5rem;
-        background: #fff;
+        background: var(--color-surface);
       }
 
       .pi-card {
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--color-border);
         border-radius: 14px;
         padding: 0.875rem 1rem;
-        background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+        background: linear-gradient(
+          180deg,
+          var(--color-surface) 0%,
+          var(--color-surface-secondary) 100%
+        );
         animation: pi-card-in 0.4s ease both 0.15s;
       }
 
@@ -360,7 +364,7 @@ type InstructionField = {
         font-size: 1rem;
         letter-spacing: 0.02em;
         padding: 0.25rem 0.5rem;
-        background: #f1f5f9;
+        background: var(--color-neutral-100);
         border-radius: 6px;
       }
 
@@ -372,15 +376,15 @@ type InstructionField = {
         font-size: 0.75rem;
         font-weight: 600;
         color: #2563eb;
-        background: #eff6ff;
-        border: 1px solid #bfdbfe;
+        background: var(--color-info-50, #eff6ff);
+        border: 1px solid var(--color-info-200, #bfdbfe);
         border-radius: 8px;
         cursor: pointer;
         transition: all 0.18s ease;
       }
 
       .pi-copy-btn:hover {
-        background: #dbeafe;
+        background: var(--color-info-100, #dbeafe);
         transform: translateY(-1px);
       }
 
@@ -496,7 +500,7 @@ type InstructionField = {
       .pi-remove-btn {
         flex-shrink: 0;
         padding: 0.375rem;
-        background: rgba(255, 255, 255, 0.7);
+        background: rgba(var(--color-surface-rgb), 0.7);
         border: 1px solid #6ee7b7;
         color: #047857;
         border-radius: 8px;
@@ -505,7 +509,7 @@ type InstructionField = {
       }
 
       .pi-remove-btn:hover {
-        background: #fee2e2;
+        background: var(--color-error-100, #fee2e2);
         border-color: #fca5a5;
         color: #dc2626;
         transform: rotate(90deg);
@@ -517,8 +521,12 @@ type InstructionField = {
         align-items: flex-start;
         gap: 0.625rem;
         padding: 0.875rem 1rem;
-        background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-        border: 1px solid #fcd34d;
+        background: linear-gradient(
+          135deg,
+          var(--color-warning-50) 0%,
+          var(--color-warning-100) 100%
+        );
+        border: 1px solid var(--color-warning-300);
         border-radius: 12px;
         font-size: 0.8125rem;
         color: #92400e;
@@ -535,8 +543,8 @@ type InstructionField = {
         gap: 0.375rem;
         margin-top: 0.5rem;
         padding: 0.5rem 0.75rem;
-        background: #fef2f2;
-        border: 1px solid #fecaca;
+        background: var(--color-error-50, #fef2f2);
+        border: 1px solid var(--color-error-200, #fecaca);
         border-radius: 8px;
         color: #b91c1c;
         font-size: 0.75rem;

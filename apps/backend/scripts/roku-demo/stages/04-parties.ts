@@ -47,7 +47,10 @@ export const stage04Parties: Stage = {
     const { prisma, data, rng, log: out } = ctx;
     const orgId = data.organization.id;
     const storeId = data.store.id;
-    const customerRole = await prisma.roles.findUnique({ where: { name: 'customer' } });
+    // QUI-473: system role lookup — `name` is no longer a unique selector.
+    const customerRole = await prisma.roles.findFirst({
+      where: { name: 'customer', organization_id: null },
+    });
     if (!customerRole) throw new Error('Customer role not found.');
 
     const counts: Record<string, number> = {

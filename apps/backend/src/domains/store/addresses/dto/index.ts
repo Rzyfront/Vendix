@@ -7,7 +7,8 @@ import {
   MaxLength,
   Min,
   IsEnum,
-  IsLatLong,
+  IsLatitude,
+  IsLongitude,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -120,7 +121,7 @@ export class CreateAddressDto {
   })
   @IsString()
   @IsOptional()
-  @IsLatLong()
+  @IsLatitude()
   latitude?: string;
 
   @ApiPropertyOptional({
@@ -129,7 +130,7 @@ export class CreateAddressDto {
   })
   @IsString()
   @IsOptional()
-  @IsLatLong()
+  @IsLongitude()
   longitude?: string;
 
   @ApiPropertyOptional({
@@ -290,10 +291,10 @@ export class AddressQueryDto {
 // GPS Coordinates DTO
 export class UpdateGPSCoordinatesDto {
   @IsString()
-  @IsLatLong()
+  @IsLatitude()
   latitude: string;
 
   @IsString()
-  @IsLatLong()
+  @IsLongitude()
   longitude: string;
 }

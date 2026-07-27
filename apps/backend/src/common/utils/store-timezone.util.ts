@@ -66,9 +66,40 @@ export function assertSafeTimezone(tz?: string | null): string {
 }
 
 /**
- * Resolves a store's IANA timezone from `store_settings.settings.general.timezone`,
- * falling back to {@link DEFAULT_STORE_TIMEZONE}. This is the ONE reader every
- * analytics/report service must use (do not reimplement privately).
+ * Resolves the effective timezone from the ordered candidate sources, COLUMN
+ * FIRST. Returns the first candidate that is a syntactically safe IANA-like
+ * identifier; a null/empty/whitespace/invalid candidate is skipped (it falls
+ * through to the next source) so a store whose settings JSON is still the seeded
+ * default never masks a real timezone stored in `stores.timezone`. When no
+ * candidate qualifies, returns {@link DEFAULT_STORE_TIMEZONE}.
+ *
+ * Source of truth: `stores.timezone` (the column the settings service writes and
+ * the settings read/UI serve column-first) is authoritative over the
+ * `store_settings.settings.general.timezone` JSON mirror.
+ */
+function resolveTimezoneCascade(
+  ...candidates: Array<string | null | undefined>
+): string {
+  for (const candidate of candidates) {
+    if (candidate && SAFE_TZ_REGEX.test(candidate)) {
+      return candidate;
+    }
+  }
+  return DEFAULT_STORE_TIMEZONE;
+}
+
+/**
+ * Resolves a store's IANA timezone COLUMN-FIRST:
+ *   1. `stores.timezone` (the authoritative column the settings service writes
+ *      and the settings read/UI serve first),
+ *   2. `store_settings.settings.general.timezone` (legacy JSON mirror),
+ *   3. {@link DEFAULT_STORE_TIMEZONE}.
+ *
+ * This closes the silent bug where a store whose real timezone lives in the
+ * column but whose settings JSON is still the seeded `America/Bogota` default
+ * would resolve to Bogota. Read in a single query via the `store_settings ->
+ * stores` relation so the column is fetched alongside the JSON. This is the ONE
+ * reader every analytics/report service must use (do not reimplement privately).
  */
 export async function resolveStoreTimezone(
   prisma: StorePrismaService,
@@ -76,12 +107,14 @@ export async function resolveStoreTimezone(
 ): Promise<string> {
   const settings = await prisma.store_settings.findFirst({
     where: { store_id: storeId },
-    select: { settings: true },
+    select: { settings: true, stores: { select: { timezone: true } } },
   });
-  const tz = (settings?.settings as any)?.general?.timezone as
+  const columnTz = settings?.stores?.timezone;
+  const jsonTz = (settings?.settings as any)?.general?.timezone as
     | string
+    | null
     | undefined;
-  return assertSafeTimezone(tz);
+  return resolveTimezoneCascade(columnTz, jsonTz);
 }
 
 /**
@@ -92,19 +125,24 @@ export async function resolveStoreTimezone(
  */
 interface StoreSettingsReader {
   store_settings: {
-    findFirst: (args: unknown) => Promise<{ settings: unknown } | null>;
+    findFirst: (args: unknown) => Promise<{
+      settings: unknown;
+      stores?: { timezone: string | null } | null;
+    } | null>;
   };
 }
 
 /**
  * Resolves a representative IANA timezone for an ORGANIZATION dashboard that
- * aggregates across its stores. Reads the timezone of the org's first active
- * store from `store_settings.settings.general.timezone`, falling back to
- * {@link DEFAULT_STORE_TIMEZONE}. Org-level views are cross-store; in practice
- * an organization's stores share a country/timezone, so the first store's tz is
- * the correct business-day anchor. Must be called with an UNSCOPED client
- * (`withoutScope()`) so the `store_settings` -> `stores` join can filter by
- * `organization_id` without the store-scope guard rejecting it.
+ * aggregates across its stores, COLUMN-FIRST for the org's first active store:
+ *   1. `stores.timezone` (authoritative column),
+ *   2. `store_settings.settings.general.timezone` (legacy JSON mirror),
+ *   3. {@link DEFAULT_STORE_TIMEZONE}.
+ * Org-level views are cross-store; in practice an organization's stores share a
+ * country/timezone, so the first store's tz is the correct business-day anchor.
+ * Must be called with an UNSCOPED client (`withoutScope()`) so the
+ * `store_settings` -> `stores` join can filter by `organization_id` without the
+ * store-scope guard rejecting it.
  */
 export async function resolveOrganizationTimezone(
   prisma: StoreSettingsReader,
@@ -112,13 +150,15 @@ export async function resolveOrganizationTimezone(
 ): Promise<string> {
   const settings = await prisma.store_settings.findFirst({
     where: { stores: { organization_id: organizationId, is_active: true } },
-    select: { settings: true },
+    select: { settings: true, stores: { select: { timezone: true } } },
     orderBy: { store_id: 'asc' },
   } as unknown);
-  const tz = (settings?.settings as any)?.general?.timezone as
+  const columnTz = settings?.stores?.timezone;
+  const jsonTz = (settings?.settings as any)?.general?.timezone as
     | string
+    | null
     | undefined;
-  return assertSafeTimezone(tz);
+  return resolveTimezoneCascade(columnTz, jsonTz);
 }
 
 // ---------------------------------------------------------------------------

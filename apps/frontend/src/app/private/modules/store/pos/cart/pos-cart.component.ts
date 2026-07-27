@@ -152,9 +152,7 @@ import {
                     </span>
                   </div>
                   @for (disc of getPromotionDiscounts(); track disc.id) {
-                    <div
-                      class="flex items-start justify-between gap-2 py-0.5"
-                    >
+                    <div class="flex items-start justify-between gap-2 py-0.5">
                       <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1 min-w-0">
                           <span class="text-[11px] text-green-700 truncate">{{
@@ -184,6 +182,14 @@ import {
                               {{ disc.badge_label }}
                             </app-badge>
                           }
+                          <app-badge
+                            variant="success"
+                            size="xsm"
+                            badgeStyle="solid"
+                            title="Esta es la promoción aplicada. El motor descartó las demás promos elegibles porque solo se permite una promoción por orden."
+                          >
+                            Aplicada
+                          </app-badge>
                         </div>
                       </div>
                       <div class="flex items-center gap-1 shrink-0">

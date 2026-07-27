@@ -26,7 +26,7 @@
       <span
         class="text-xs font-semibold px-2 py-0.5 rounded-md"
         [style.color]="canConfirm() ? '#16a34a' : '#b45309'"
-        [style.backgroundColor]="canConfirm() ? '#dcfce7' : '#fef3c7'"
+        [style.backgroundColor]="canConfirm() ? 'var(--color-success-100, #dcfce7)' : 'var(--color-warning-100, #fef3c7)'"
       >
         {{ totalSelected() }} / {{ quantity() }}
       </span>

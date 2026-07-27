@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   effect,
   inject,
@@ -40,6 +41,7 @@ import { PosCustomer } from '../../models/customer.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
 import { PosOrderCreateResult } from '../../models/order.model';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
@@ -104,6 +106,7 @@ export class PosCheckoutShellComponent {
   private readonly integration = inject(PosRestaurantIntegrationService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   // ── Child references ────────────────────────────────────────────────────
   protected readonly consumoStep = viewChild(PosConsumoStepComponent);
@@ -211,6 +214,52 @@ export class PosCheckoutShellComponent {
     () => this.currentStep() === this.stepKeys().length - 1,
   );
 
+  /**
+   * Barras de progreso (móvil, estilo Pencil): un item por paso con su estado
+   * (done | active | todo). Reemplaza los círculos numerados de `app-steps-line`
+   * en <767px; en desktop se sigue usando `app-steps-line`.
+   */
+  readonly progressBars = computed<{ label: string; done: boolean; active: boolean }[]>(() => {
+    const cur = this.currentStep();
+    return this.steps().map((s, i) => ({
+      label: s.label ?? '',
+      done: i < cur,
+      active: i === cur,
+    }));
+  });
+
+  /**
+   * Subtítulo dinámico del header (estilo Pencil: "<Paso> · <Sub-paso>"). Los
+   * sub-pasos de Cliente/Envío se leen de los childs (señales públicas); Cobro
+   * se distingue por modo. Lazy-eval: aunque referencie señales declaradas más
+   * abajo, la función solo corre al leerse (ya inicializadas).
+   */
+  readonly stepSubtitle = computed<string>(() => {
+    switch (this.currentStepKey()) {
+      case 'consumo':
+        return 'Consumo · Tipo de servicio';
+      case 'cliente': {
+        const sub = this.clienteSubSteps()[this.clienteSubStep()]?.label ?? 'Tipo';
+        return `Cliente · ${sub}`;
+      }
+      case 'envio':
+        return `Envío · ${(this.shippingStep()?.shipSubStep() ?? 0) === 0 ? 'Método' : 'Costo'}`;
+      case 'cobro': {
+        const pay = this.paymentStep();
+        if (!pay) return 'Cobro';
+        if (pay.mode() === 'credito') return 'Cobro · Crédito';
+        // Forma de pago → Método → Monto (frames PyHka / a7mp1 / G0dg6). En el
+        // sub-paso Forma se muestra "Forma de pago"; una vez elegido el método,
+        // el subtítulo refleja su nombre (p. ej. "Cobro · Efectivo").
+        if (pay.subStep() < pay.modoOffset()) return 'Cobro · Forma de pago';
+        const method = pay.selectedMethodName();
+        return method ? `Cobro · ${method}` : 'Cobro · Método de pago';
+      }
+      default:
+        return 'Finalizar venta';
+    }
+  });
+
   /** Live shipping cost projected from the Envío step (0 when not mounted). */
   readonly shippingCost = computed<number>(
     () => this.shippingStep()?.shippingCost() ?? 0,
@@ -288,6 +337,16 @@ export class PosCheckoutShellComponent {
   // ── Draft-order (Guardar borrador) submission state ──────────────────────
   readonly submittingDraft = signal(false);
 
+  // ── Mobile summary accordion (Resumen colapsable, solo <767px) ───────────
+  /** Collapsed by default on mobile; the header chip covers the total. Has
+   *  no visual effect on desktop — the CSS collapse rule only applies inside
+   *  `@media (max-width: 767px)`, so the rail stays always-expanded there. */
+  readonly summaryExpanded = signal<boolean>(false);
+
+  toggleSummary(): void {
+    this.summaryExpanded.update((v) => !v);
+  }
+
   // ── Footer projections (read from the Cobro + Envío steps) ───────────────
   readonly footerProcessing = computed<boolean>(
     () =>
@@ -324,6 +383,20 @@ export class PosCheckoutShellComponent {
     if (type === 'wallet') return 'Pagar con Wallet';
     return 'Confirmar Pago';
   });
+
+  /**
+   * True while the major step is 'cobro' AND the Cobro sub-wizard still has
+   * sub-steps pending before Monto. Lets the footer keep showing "Siguiente"
+   * (driving Forma de pago → Método → Monto via {@link attemptNextStep}) instead
+   * of the terminal CTA — even in delivery, where Cobro is the LAST major step
+   * and {@link isLastStep} would otherwise force "Finalizar venta" from the very
+   * first sub-step, leaving the payment sub-wizard un-navigable (the bug).
+   */
+  readonly cobroNeedsAdvance = computed<boolean>(
+    () =>
+      this.currentStepKey() === 'cobro' &&
+      (this.paymentStep()?.hasPendingSubSteps() ?? false),
+  );
 
   /**
    * Remount key for the projected checkout content. Incremented ONLY by
@@ -509,6 +582,10 @@ export class PosCheckoutShellComponent {
       // Dirección → exige dirección válida (con teléfono) antes de avanzar.
       if (sub === 2 && this.requiresAddress() && !this.addressValid()) {
         this.showAddressErrors.set(true);
+        // Lleva el foco/viewport al primer campo inválido (ej. teléfono, que
+        // en pantallas chicas queda fuera de vista). Reusa el utilitario del
+        // fiscal-wizard; el navegador hace scroll nativo al enfocar.
+        focusFirstInvalid(this.host);
         return;
       }
       this.nextStep();
@@ -526,12 +603,36 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    // ── Cobro: conduce el sub-wizard del collector (Forma → Método → Monto)
+    // antes de saltar al siguiente paso mayor. En pickup, Cobro NO es el último
+    // paso (Consumo → Cobro → Cliente); sin esto, "Siguiente" saltaba directo a
+    // Cliente omitiendo Método y Monto (frames a7mp1 / G0dg6). El paso confirma
+    // el monto en el último sub-paso, cuyo amountConfirmed avanza el paso mayor.
+    if (key === 'cobro') {
+      if (this.paymentStep()?.advanceSubStepOrConfirm()) return;
+      this.nextStep();
+      return;
+    }
+
     this.nextStep();
   }
 
   /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
   prevStep(): void {
     this.goToStep(this.currentStep() - 1);
+  }
+
+  /**
+   * Botón "Atrás" del footer móvil (estilo Pencil): retrocede un paso, o cierra
+   * el modal cuando ya está en el primero (equivale a Cancelar). En desktop el
+   * footer conserva Cancelar/Anterior por separado.
+   */
+  onBackMobile(): void {
+    if (this.isFirstStep()) {
+      this.onModalClosed();
+    } else {
+      this.prevStep();
+    }
   }
 
   /** Navigate by step key; no-op when the key is not part of the current flow. */
@@ -586,7 +687,10 @@ export class PosCheckoutShellComponent {
       if (this.isLastStep()) {
         this.onConfirm();
       } else {
-        this.attemptNextStep();
+        // El monto ya se confirmó dentro del collector: avanzamos el paso mayor
+        // directamente. Usar nextStep() (no attemptNextStep) evita re-entrar en
+        // la rama Cobro del sub-wizard, que volvería a confirmar y se colgaría.
+        this.nextStep();
       }
     }, 420);
   }

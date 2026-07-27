@@ -39,6 +39,13 @@
   position: relative;
   overflow: hidden;
 
+  // Móvil: garantiza el touch target mínimo de 44px (vendix-ui-ux) sin tocar
+  // el padding/tamaño usado en desktop por los demás consumidores del mixin
+  // (payment-collector y pos-checkout-shell).
+  @media (max-width: 767px) {
+    min-height: 44px;
+  }
+
   // One-shot green fill: sweeps left→right once, then `forwards` holds it full.
   &::after {
     content: '';

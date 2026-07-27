@@ -193,6 +193,16 @@ export const Endpoints = {
       CONVERT: '/store/quotations/:id/convert',
       DUPLICATE: '/store/quotations/:id/duplicate',
     },
+    LAYAWAY: {
+      CREATE: '/store/layaway',
+      LIST: '/store/layaway',
+      GET: '/store/layaway/:id',
+      STATS: '/store/layaway/stats',
+      PAYMENT: '/store/layaway/:id/payment',
+      MODIFY_INSTALLMENTS: '/store/layaway/:id/installments',
+      CANCEL: '/store/layaway/:id/cancel',
+      COMPLETE: '/store/layaway/:id/complete',
+    },
     SHIPPING_METHODS: {
       LIST: '/store/shipping-methods',
       ENABLE: '/store/shipping-methods/enable',

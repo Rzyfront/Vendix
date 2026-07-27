@@ -32,12 +32,12 @@
             [attr.aria-selected]="selectedCycle() === cycle"
             (click)="selectCycle(cycle)"
             class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
-            [class.bg-white]="selectedCycle() === cycle"
+            [class.bg-surface]="selectedCycle() === cycle"
             [class.shadow-md]="selectedCycle() === cycle"
             [class.text-primary-700]="selectedCycle() === cycle"
             [class.text-text-secondary]="selectedCycle() !== cycle"
             [class.hover:text-text-primary]="selectedCycle() !== cycle"
-            [class.hover:bg-white/50]="selectedCycle() !== cycle"
+            [class.hover:bg-surface/50]="selectedCycle() !== cycle"
           >
             {{ cycleLabel(cycle) }}
           </button>

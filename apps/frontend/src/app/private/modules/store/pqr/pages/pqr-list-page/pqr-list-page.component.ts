@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -8,7 +9,7 @@ import {
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { PqrAdminService } from '../../services/pqr-admin.service';
 import { Pqr, PqrQuery, PqrStats, PqrType, PqrStatus, PqrPriority } from '../../models/pqr.model';
 import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
@@ -65,6 +66,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
   styleUrls: ['./pqr-list-page.component.scss'],
 })
 export class PqrListPageComponent {
+  private destroyRef = inject(DestroyRef);
   private readonly adminService = inject(PqrAdminService);
   private readonly pqrService = inject(PqrService);
   private readonly authFacade = inject(AuthFacade);
@@ -247,7 +249,7 @@ export class PqrListPageComponent {
   }
 
   refreshStats() {
-    this.adminService.getStats().subscribe({
+    this.adminService.getStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         if (res.success) this.stats.set(res.data);
       },
@@ -260,7 +262,7 @@ export class PqrListPageComponent {
   private fetch(q: PqrQuery) {
     this.loading.set(true);
     this.errorMsg.set(null);
-    this.adminService.list(q).subscribe({
+    this.adminService.list(q).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         // Quick filter is a client-side post-filter (mirrors super-admin)
         // so the backend stays platform-neutral and we don't need a new
@@ -553,6 +555,7 @@ export class PqrListPageComponent {
         requester_document_num:
           this.newPqrRequesterDocNum().trim() || undefined,
       })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.newPqrSubmitting.set(false);

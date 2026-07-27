@@ -88,17 +88,22 @@
   --color-border: #e6edf3;
   --color-ring: rgba(var(--color-primary-rgb), 0.2);
 
-  /* RGB values for gradient/rgba usage */
-  --color-primary-rgb: 126, 215, 165;
-  --color-secondary-rgb: 47, 111, 78;
-  --color-accent-rgb: 255, 255, 255;
-  --color-destructive-rgb: 196, 99, 99;
+  /* RGB values for gradient/rgba usage.
+     NOTA: cada *-rgb debe coincidir con su HEX correspondiente para que
+     rgba(var(--color-*-rgb), α) sea consistente con el color sólido. */
+  --color-primary-rgb: 46, 204, 113; /* #2ecc71 */
+  --color-secondary-rgb: 22, 43, 33; /* #162b21 */
+  --color-accent-rgb: 161, 244, 217; /* #a1f4d9 */
+  --color-destructive-rgb: 196, 99, 99; /* #c46363 */
   --color-success-rgb: 34, 197, 94;
   --color-warning-rgb: 251, 146, 60;
   --color-info-rgb: 59, 130, 246;
+  --color-error-rgb: 239, 68, 68; /* #ef4444 */
   --color-gaming-rgb: 139, 92, 246;
   --color-royal-rgb: 245, 158, 11;
   --color-muted-rgb: 148, 163, 184;
+  --color-surface-rgb: 255, 255, 255; /* #ffffff */
+  --color-background-rgb: 244, 244, 244; /* #f4f4f4 */
 
   /* Light variants for backgrounds */
   --color-primary-light: rgba(126, 215, 165, 0.1);
@@ -124,6 +129,80 @@
   --color-neutral: #94a3b8;
   --color-muted: rgba(148, 163, 184, 0.1);
 
+  /* ── Escalas de tokens (50–900) ──
+     Base del remapeo Tailwind: gray→neutral, blue→info, emerald/green→success,
+     amber→warning, red→error, slate→neutral. Cada shade tiene su *-rgb para
+     rgba(var(--color-*-NNN-rgb), α). En dark se invierte la luminosidad
+     preservando el hue (ver bloque [data-theme="dark"]). */
+  --color-neutral-50: #f8fafc;  --color-neutral-50-rgb: 248, 250, 252;
+  --color-neutral-100: #f1f5f9;  --color-neutral-100-rgb: 241, 245, 249;
+  --color-neutral-200: #e2e8f0;  --color-neutral-200-rgb: 226, 232, 240;
+  --color-neutral-300: #cbd5e1;  --color-neutral-300-rgb: 203, 213, 225;
+  --color-neutral-400: #94a3b8;  --color-neutral-400-rgb: 148, 163, 184;
+  --color-neutral-500: #64748b;  --color-neutral-500-rgb: 100, 116, 139;
+  --color-neutral-600: #475569;  --color-neutral-600-rgb: 71, 85, 105;
+  --color-neutral-700: #334155;  --color-neutral-700-rgb: 51, 65, 85;
+  --color-neutral-800: #1e293b;  --color-neutral-800-rgb: 30, 41, 59;
+  --color-neutral-900: #0f172a;  --color-neutral-900-rgb: 15, 23, 42;
+
+  --color-info-50: var(--color-info-50, #eff6ff);  --color-info-50-rgb: 239, 246, 255;
+  --color-info-100: var(--color-info-100, #dbeafe);  --color-info-100-rgb: 219, 234, 254;
+  --color-info-200: var(--color-info-200, #bfdbfe);  --color-info-200-rgb: 191, 219, 254;
+  --color-info-300: #93c5fd;  --color-info-300-rgb: 147, 197, 253;
+  --color-info-400: #60a5fa;  --color-info-400-rgb: 96, 165, 250;
+  --color-info-500: #3b82f6;  --color-info-500-rgb: 59, 130, 246;
+  --color-info-600: #2563eb;  --color-info-600-rgb: 37, 99, 235;
+  --color-info-700: #1d4ed8;  --color-info-700-rgb: 29, 78, 216;
+  --color-info-800: #1e40af;  --color-info-800-rgb: 30, 64, 175;
+  --color-info-900: #1e3a8a;  --color-info-900-rgb: 30, 58, 138;
+
+  --color-success-50: #ecfdf5;  --color-success-50-rgb: 236, 253, 245;
+  --color-success-100: #d1fae5;  --color-success-100-rgb: 209, 250, 229;
+  --color-success-200: #a7f3d0;  --color-success-200-rgb: 167, 243, 208;
+  --color-success-300: #6ee7b7;  --color-success-300-rgb: 110, 231, 183;
+  --color-success-400: #34d399;  --color-success-400-rgb: 52, 211, 153;
+  --color-success-500: #22c55e;  --color-success-500-rgb: 34, 197, 94;
+  --color-success-600: #16a34a;  --color-success-600-rgb: 22, 163, 74;
+  --color-success-700: #15803d;  --color-success-700-rgb: 21, 128, 61;
+  --color-success-800: #166534;  --color-success-800-rgb: 22, 101, 52;
+  --color-success-900: #14532d;  --color-success-900-rgb: 20, 83, 45;
+
+  --color-warning-50: var(--color-warning-50, #fffbeb);  --color-warning-50-rgb: 255, 251, 235;
+  --color-warning-100: var(--color-warning-100, #fef3c7);  --color-warning-100-rgb: 254, 243, 199;
+  --color-warning-200: var(--color-warning-200, #fde68a);  --color-warning-200-rgb: 253, 230, 138;
+  --color-warning-300: #fcd34d;  --color-warning-300-rgb: 252, 211, 77;
+  --color-warning-400: #fbbf24;  --color-warning-400-rgb: 251, 191, 36;
+  --color-warning-500: #f59e0b;  --color-warning-500-rgb: 245, 158, 11;
+  --color-warning-600: #d97706;  --color-warning-600-rgb: 217, 119, 6;
+  --color-warning-700: #b45309;  --color-warning-700-rgb: 180, 83, 9;
+  --color-warning-800: #92400e;  --color-warning-800-rgb: 146, 64, 14;
+  --color-warning-900: #78350f;  --color-warning-900-rgb: 120, 53, 15;
+
+  --color-error-50: var(--color-error-50, #fef2f2);  --color-error-50-rgb: 254, 242, 242;
+  --color-error-100: var(--color-error-100, #fee2e2);  --color-error-100-rgb: 254, 226, 226;
+  --color-error-200: var(--color-error-200, #fecaca);  --color-error-200-rgb: 254, 202, 202;
+  --color-error-300: #fca5a5;  --color-error-300-rgb: 252, 165, 165;
+  --color-error-400: #f87171;  --color-error-400-rgb: 248, 113, 113;
+  --color-error-500: #ef4444;  --color-error-500-rgb: 239, 68, 68;
+  --color-error-600: #dc2626;  --color-error-600-rgb: 220, 38, 38;
+  --color-error-700: #b91c1c;  --color-error-700-rgb: 185, 28, 28;
+  --color-error-800: #991b1b;  --color-error-800-rgb: 153, 27, 27;
+  --color-error-900: #7f1d1d;  --color-error-900-rgb: 127, 29, 29;
+
+  /* ── Tokens huérfanos referenciados por tailwind.config.js y componentes ──
+     Sin estos, var(--color-foreground)/(--color-input)/(--radius-button) etc.
+     resolvían a invalid y rompían pintado. */
+  --color-foreground: #0f172a; /* texto base = text-primary */
+  --color-input: var(--color-neutral-200); /* borde de input por defecto */
+  --color-muted-foreground: var(--color-text-muted);
+  --color-accent-foreground: #ffffff;
+  --color-destructive-foreground: #ffffff;
+  --radius-button: var(--radius-md); /* 0.5rem */
+  --radius-card: var(--radius-lg); /* 0.75rem */
+  --radius-input: var(--radius-md); /* 0.5rem */
+  --radius-xl: 1rem;
+  --shadow-card: var(--shadow-md);
+
   /* Alias for backward compatibility */
   --text: var(--color-text-primary);
   --secondary: var(--color-text-secondary);
@@ -138,6 +217,12 @@
   --color-text-muted: #94a3b8;
   --color-text-on-primary: #ffffff;
   /* Example for text on primary buttons */
+  /* RGB variants — habilitan modificadores de opacidad Tailwind (bg-X/N,
+     text-X/N, border-X/N) sobre los colores de texto remapeados. */
+  --color-text-primary-rgb: 15, 23, 42;
+  --color-text-secondary-rgb: 148, 163, 184;
+  --color-text-muted-rgb: 148, 163, 184;
+  --color-foreground-rgb: 15, 23, 42;
 
   /* Radii */
   --border-radius: 0.375rem;
@@ -198,6 +283,22 @@
   /* 8px 10px - ~20% smaller */
   --transition-fast: 160ms;
 
+  /* Cabecera de los layouts admin (tienda / organización / super admin).
+     El <header> del panel y la cabecera-logo del sidebar deben leerse como una
+     sola banda: mismo alto exacto, arrancando ambos en top: 0. Vive aquí como
+     token compartido porque los dos elementos pertenecen a componentes
+     distintos (app-header y app-sidebar) y, si cada uno declara su propio
+     número, divergen a la primera edición — es lo que ya había pasado (84px
+     contra 72px).
+     El GAP es el alto que se le quitó al header (84 → 72), devuelto como
+     padding-top del <main> de cada layout admin para no perder la proporción
+     vertical original. Lo consume el outlet, no el header: al vivir dentro del
+     contenedor con scroll, el hueco se desplaza con el contenido. */
+  --admin-header-h: 4.5rem;
+  /* 72px */
+  --admin-header-gap: 0.75rem;
+  /* 12px = 84px previos - 72px */
+
   /* Responsive Spacing - Mobile Optimized */
   --spacing-xs-mobile: 0.25rem;
   /* 4px */
@@ -211,6 +312,61 @@
   /* 18px */
   --spacing-2xl-mobile: 1.375rem;
   /* 22px */
+}
+
+/* ============================================
+ * ALIAS DE TOKENS HUÉRFANOS
+ *
+ * 21 nombres de token se usaban en el código (≈200 declaraciones) sin estar
+ * definidos en ninguna parte, ni aquí ni en ThemeService. Una `var()` sin
+ * fallback que apunta a un token inexistente es INVÁLIDA a nivel de valor
+ * computado: la declaración se descarta en silencio. El síntoma no es un error
+ * sino un hueco — `background-color` cae a `transparent` (el elemento deja ver
+ * lo que hay detrás; con Aura activo, la flama del contenedor padre se veía
+ * atravesar tarjetas y pies de modal) y `color` cae a herencia.
+ *
+ * Se resuelven aquí, en var-a-var, en vez de editar ~100 archivos: al apuntar a
+ * tokens canónicos heredan automáticamente el valor de cada modo, así que el
+ * bloque [data-theme="dark"] no necesita duplicarlos.
+ *
+ * Estos alias son DEUDA: lo correcto a futuro es migrar los usos al token
+ * canónico y borrar este bloque. Mientras existan, el sistema de temas
+ * (incluidos los presets) los cubre.
+ * ============================================ */
+:root {
+  /* Superficies: variantes que el código pedía por nombres alternos. */
+  --color-surface-elevated: var(--color-surface);
+  --color-surface-alt: var(--color-surface-secondary);
+  --color-surface-dim: var(--color-surface-secondary);
+  --color-surface-muted: var(--color-surface-secondary);
+  --color-surface-hover: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+
+  /* Nomenclatura `bg-*` de un puñado de componentes (ai-chat-widget). */
+  --color-bg-primary: var(--color-background);
+  --color-bg-secondary: var(--color-surface);
+  --color-bg-tertiary: var(--color-surface-secondary);
+
+  /* Bordes y estados de hover genéricos. */
+  --color-border-light: color-mix(in srgb, var(--color-border) 55%, transparent);
+  --color-hover: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+
+  /* Escala gris legacy → escala neutral canónica (que sí invierte en dark). */
+  --color-gray-100: var(--color-neutral-100);
+  --color-gray-800: var(--color-neutral-800);
+
+  /* Escalas del primario que faltaban. `-dark`/-hover se derivan del primario
+     del comercio, no de un verde fijo, para no delatar la marca Vendix. */
+  --color-primary-50: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  --color-primary-100: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface));
+  --color-primary-dark: color-mix(in srgb, var(--color-primary) 78%, #000);
+  --color-primary-hover: color-mix(in srgb, var(--color-primary) 88%, #000);
+  --color-primary-fade: rgba(var(--color-primary-rgb), 0.08);
+  --color-success-dark: color-mix(in srgb, var(--color-success) 78%, #000);
+
+  /* Texto: `--color-text` (≈100 usos) siempre quiso decir el texto primario, y
+     `--color-text-tertiary` el más apagado de los tres. */
+  --color-text: var(--color-text-primary);
+  --color-text-tertiary: var(--color-text-muted);
 }
 
 /* Base form control interaction states */
@@ -232,6 +388,15 @@ select {
 
 /* Dark Theme */
 [data-theme="dark"] {
+  /* Los widgets nativos (barras de scroll, selectores de fecha, autofill) no leen
+     nuestros tokens: se pintan según `color-scheme`, que por defecto es `normal` y
+     equivale a claro. Sin esto, cualquier contenedor con overflow en modo oscuro
+     muestra una barra BLANCA —el defecto se veía dentro de los modales— y el
+     calendario nativo de <input type="date"> sale claro sobre superficie oscura.
+     Declararlo aquí lo arregla en los tres presets a la vez; en claro no hay nada
+     que declarar porque `normal` ya se comporta como `light`. */
+  color-scheme: dark;
+
   /* Dark Theme Colors */
   --color-background: #0b1220;
   --color-surface: #0f1724;
@@ -244,16 +409,19 @@ select {
   --color-ring: rgba(var(--color-primary-rgb), 0.28);
 
   /* RGB values for gradient/rgba usage (dark theme) */
-  --color-primary-rgb: 126, 215, 165;
-  --color-secondary-rgb: 47, 111, 78;
-  --color-accent-rgb: 6, 182, 212;
+  --color-primary-rgb: 126, 215, 165; /* #7ed7a5 */
+  --color-secondary-rgb: 47, 111, 78; /* #2f6f4e */
+  --color-accent-rgb: 6, 182, 212; /* #06b6d4 */
   --color-destructive-rgb: 239, 68, 68;
   --color-success-rgb: 34, 197, 94;
   --color-warning-rgb: 251, 146, 60;
   --color-info-rgb: 96, 165, 250;
+  --color-error-rgb: 239, 68, 68; /* #ef4444 */
   --color-gaming-rgb: 167, 139, 250;
   --color-royal-rgb: 251, 191, 36;
   --color-muted-rgb: 154, 166, 178;
+  --color-surface-rgb: 15, 23, 36; /* #0f1724 */
+  --color-background-rgb: 11, 18, 32; /* #0b1220 */
 
   /* Light variants for backgrounds (Dark theme) */
   --color-primary-light: rgba(126, 215, 165, 0.15);
@@ -277,6 +445,79 @@ select {
   --color-neutral: #9aa6b2;
   --color-muted: rgba(154, 166, 178, 0.15);
 
+  /* ── Escalas de tokens (50–900) en dark ──
+     Inversión de luminosidad preservando hue: los shades claros (50–200,
+     usados como superficies/bordes en light) se vuelven oscuros; los oscuros
+     (700–900, usados como texto en light) se vuelven claros. Así
+     bg-gray-100 → superficie oscura y text-gray-900 → texto claro sin
+     tocar la clase. Los mid tones (400/500) se mantienen cercanos. */
+  --color-neutral-50: #0b1220;  --color-neutral-50-rgb: 11, 18, 32;
+  --color-neutral-100: #0f1724;  --color-neutral-100-rgb: 15, 23, 36;
+  --color-neutral-200: #1a2332;  --color-neutral-200-rgb: 26, 35, 50;
+  --color-neutral-300: #334155;  --color-neutral-300-rgb: 51, 65, 85;
+  --color-neutral-400: #64748b;  --color-neutral-400-rgb: 100, 116, 139;
+  --color-neutral-500: #94a3b8;  --color-neutral-500-rgb: 148, 163, 184;
+  --color-neutral-600: #cbd5e1;  --color-neutral-600-rgb: 203, 213, 225;
+  --color-neutral-700: #e2e8f0;  --color-neutral-700-rgb: 226, 232, 240;
+  --color-neutral-800: #f1f5f9;  --color-neutral-800-rgb: 241, 245, 249;
+  --color-neutral-900: #f8fafc;  --color-neutral-900-rgb: 248, 250, 252;
+
+  --color-info-50: #172554;  --color-info-50-rgb: 23, 37, 84;
+  --color-info-100: #1e3a8a;  --color-info-100-rgb: 30, 58, 138;
+  --color-info-200: #1e40af;  --color-info-200-rgb: 30, 64, 175;
+  --color-info-300: #1d4ed8;  --color-info-300-rgb: 29, 78, 216;
+  --color-info-400: #3b82f6;  --color-info-400-rgb: 59, 130, 246;
+  --color-info-500: #60a5fa;  --color-info-500-rgb: 96, 165, 250;
+  --color-info-600: #93c5fd;  --color-info-600-rgb: 147, 197, 253;
+  --color-info-700: var(--color-info-200, #bfdbfe);  --color-info-700-rgb: 191, 219, 254;
+  --color-info-800: var(--color-info-100, #dbeafe);  --color-info-800-rgb: 219, 234, 254;
+  --color-info-900: var(--color-info-50, #eff6ff);  --color-info-900-rgb: 239, 246, 255;
+
+  --color-success-50: #052e1b;  --color-success-50-rgb: 5, 46, 27;
+  --color-success-100: #064e3b;  --color-success-100-rgb: 6, 78, 59;
+  --color-success-200: #065f46;  --color-success-200-rgb: 6, 95, 70;
+  --color-success-300: #047857;  --color-success-300-rgb: 4, 120, 87;
+  --color-success-400: #16a34a;  --color-success-400-rgb: 22, 163, 74;
+  --color-success-500: #22c55e;  --color-success-500-rgb: 34, 197, 94;
+  --color-success-600: #4ade80;  --color-success-600-rgb: 74, 222, 128;
+  --color-success-700: #86efac;  --color-success-700-rgb: 134, 239, 172;
+  --color-success-800: var(--color-success-200, #bbf7d0);  --color-success-800-rgb: 187, 247, 208;
+  --color-success-900: #d1fae5;  --color-success-900-rgb: 209, 250, 229;
+
+  --color-warning-50: #451a03;  --color-warning-50-rgb: 69, 26, 3;
+  --color-warning-100: #78350f;  --color-warning-100-rgb: 120, 53, 15;
+  --color-warning-200: #92400e;  --color-warning-200-rgb: 146, 64, 14;
+  --color-warning-300: #b45309;  --color-warning-300-rgb: 180, 83, 9;
+  --color-warning-400: #d97706;  --color-warning-400-rgb: 217, 119, 6;
+  --color-warning-500: #f59e0b;  --color-warning-500-rgb: 245, 158, 11;
+  --color-warning-600: #fbbf24;  --color-warning-600-rgb: 251, 191, 36;
+  --color-warning-700: #fcd34d;  --color-warning-700-rgb: 252, 211, 77;
+  --color-warning-800: var(--color-warning-200, #fde68a);  --color-warning-800-rgb: 253, 230, 138;
+  --color-warning-900: var(--color-warning-100, #fef3c7);  --color-warning-900-rgb: 254, 243, 199;
+
+  --color-error-50: #450a0a;  --color-error-50-rgb: 69, 10, 10;
+  --color-error-100: #7f1d1d;  --color-error-100-rgb: 127, 29, 29;
+  --color-error-200: #991b1b;  --color-error-200-rgb: 153, 27, 27;
+  --color-error-300: #b91c1c;  --color-error-300-rgb: 185, 28, 28;
+  --color-error-400: #dc2626;  --color-error-400-rgb: 220, 38, 38;
+  --color-error-500: #ef4444;  --color-error-500-rgb: 239, 68, 68;
+  --color-error-600: #f87171;  --color-error-600-rgb: 248, 113, 113;
+  --color-error-700: #fca5a5;  --color-error-700-rgb: 252, 165, 165;
+  --color-error-800: var(--color-error-200, #fecaca);  --color-error-800-rgb: 254, 202, 202;
+  --color-error-900: var(--color-error-100, #fee2e2);  --color-error-900-rgb: 254, 226, 226;
+
+  /* Tokens huérfanos en dark */
+  --color-foreground: #e6eef6;
+  --color-input: var(--color-neutral-700);
+  --color-muted-foreground: var(--color-text-muted);
+  --color-accent-foreground: #0f1724;
+  --color-destructive-foreground: #ffffff;
+  --radius-button: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-input: var(--radius-md);
+  --radius-xl: 1rem;
+  --shadow-card: var(--shadow-md);
+
   /* Alias for backward compatibility (Dark theme) */
   --text: var(--color-text-primary);
   --secondary: var(--color-text-secondary);
@@ -289,12 +530,17 @@ select {
   --color-text-primary: #e6eef6;
   --color-text-secondary: #9aa6b2;
   --color-text-muted: #9aa6b2;
+  /* RGB variants dark — invertidos para legibilidad sobre superficies oscuras. */
+  --color-text-primary-rgb: 230, 238, 246;
+  --color-text-secondary-rgb: 154, 166, 178;
+  --color-text-muted-rgb: 154, 166, 178;
+  --color-foreground-rgb: 230, 238, 246;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  /* Shadows — mayor opacidad en dark para que se lean sobre superficies oscuras */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.45);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.55), 0 8px 10px -6px rgb(0 0 0 / 0.5);
 }
 
 /* ── Accessibility: honor prefers-reduced-motion ──
@@ -448,6 +694,30 @@ small {
 header,
 nav {
   padding: var(--spacing-sm-mobile) var(--spacing-xs-mobile);
+}
+
+/* Módulos con app-sticky-header: la banda pegajosa va A RAS del header del
+   layout, sin el respiro de --admin-header-gap. El gap existe para separar
+   contenido suelto del header; una barra que se queda pegada arriba al hacer
+   scroll tiene que leerse como CONTINUACIÓN de esa cabecera, no como una tarjeta
+   flotando debajo. Además el hueco solo se veía en reposo: al desplazar, el
+   padding del contenedor con scroll se va y la barra sube igual, así que el
+   arranque no coincidía con el estado pegado.
+
+   Se retira el padding en vez de compensar con margen negativo en el componente
+   (regla explícita de la skill vendix-frontend-sticky-header: el padding se
+   mueve al área de contenido, no se cancela con margen). El propio
+   app-sticky-header ya trae `mb-2 md:mb-3`, así que la separación con lo que
+   viene debajo no se pierde.
+
+   Vive en la hoja global y no en el SCSS de cada layout por dos motivos: el
+   selector cruza el límite del router-outlet (el sticky-header pertenece al
+   componente enrutado, no al layout) y el shim de encapsulación de Angular
+   puede reescribir el interior de :has() con el atributo del layout, que jamás
+   casaría. Aquí gana por especificidad (0,1,2) contra el `main` del layout,
+   que con su atributo de encapsulación es (0,1,1). */
+.main-content main:has(app-sticky-header) {
+  padding-top: 0;
 }
 
 /* Footer mobile spacing */
@@ -701,12 +971,207 @@ footer {
 }
 
 /* ============================================
- * GLASS THEME - Frosted Glass / Glassmorphism
- * Activated via data-theme-preset="glass"
+ * AURA THEME - Flama viva DENTRO de las superficies
+ * Activated via data-theme-preset="aura"
+ *
+ * SPEC: los fondos (background/surface/texto) son EXACTAMENTE los del tema
+ * default — aura no reencuadra la paleta. Lo único que cambia es que toda
+ * superficie `surface` (cards, contenedores, modales, header, sidebar) lleva
+ * una flama en movimiento derivada del primario del comercio, con un apoyo
+ * menor del secundario. Nada de morado fijo: todo sale de --color-*-rgb.
+ *
+ * POR QUÉ background-image Y NO UN PSEUDO-ELEMENTO:
+ * la capa de flama vive en el propio background-image del elemento, que se
+ * pinta SOBRE background-color y DEBAJO del contenido por definición del
+ * modelo de pintado. Eso evita las tres trampas de un ::before absoluto:
+ *   1. no hace falta `position: relative` (cambiaría el bloque contenedor de
+ *      descendientes absolutos y rompería popovers/badges posicionados);
+ *   2. no hace falta `overflow: hidden` (recortaría dropdowns dentro de cards);
+ *   3. no hace falta z-index negativo ni `isolation` (el bug de la capa
+ *      sepultada bajo el fondo en-flujo, ver historia del preset glass).
+ * El movimiento se logra animando `background-position` de tres capas con
+ * `background-size` > 100%, cada una a un ritmo distinto → deriva orgánica.
  * ============================================ */
 
-/* Animated background blobs that move behind the glass layers */
+/* Intensidad por modo en variables: así la lista de selectores de superficie
+   se escribe UNA vez. En dark hace falta más alpha para que la flama se lea
+   sobre #0f1724; en light menos, o el texto pierde contraste. */
+[data-theme-preset="aura"] {
+  --aura-a1: 0.22; /* primario, esquina superior izquierda */
+  --aura-a2: 0.07; /* secundario, acento en la esquina superior derecha */
+  --aura-a3: 0.18; /* primario, base (la "lengua" de la flama) */
+}
+
+html[data-theme="dark"][data-theme-preset="aura"] {
+  --aura-a1: 0.28;
+  --aura-a2: 0.085;
+  --aura-a3: 0.23;
+}
+
+/* Por qué el alpha del secundario es ~3× menor que el del primario y no la
+   mitad: el secundario del comercio puede ser un hue MUY distinto del primario
+   (en la tienda de prueba, primario #7FC775 verde y secundario #0d6dfc azul
+   eléctrico). Igualados en alpha, el azul se comía la superficie y la flama
+   dejaba de leerse como "el color de la marca": la spec es primario dominante
+   con un apoyo de secundario. Un secundario análogo al primario apenas se nota
+   a este alpha, que es el resultado correcto — no debe competir. */
+
+/* ── Qué cuenta como "superficie" para la flama ──
+   CRITERIO: paneles y tarjetas (áreas de contenido) SÍ; controles de formulario,
+   botones, chips y filas NO. Un input con flama se lee como glitch y le quita
+   contraste al texto que se escribe; una card con flama se lee como aura.
+
+   Fuera a propósito, aunque pinten var(--color-surface):
+     · inputs      .form-input .selector-wrapper .selector-select .inputsearch-*
+                   .date-filter-input .customer-search-input .notes-textarea
+                   .time-input .color-hex-input .sort-select
+     · botones     .keypad-btn .quick-btn .payment-method-btn .credit-method-btn
+                   .frequency-btn .wompi-submethod-btn .sale-type-btn .icon-btn
+                   .action-btn .see-all-btn .options-dropdown-trigger .scrollable-tab
+     · chips/filas .date-chip .date-pill .slot-chip .receipt-chip .duration-badge
+                   .time-slot .day-cell .day-row .item-row .option-row .installment-row
+     · modal       .modal-header y .modal-footer — ver nota del modal más abajo
+
+   `[class*="bg-[var(--color-surface)]"]` cubre los 241 usos de la clase
+   arbitraria de Tailwind (incluida la variante `md:`) sin escapes SCSS frágiles;
+   `.bg-surface` cubre los 648 usos de la utilidad remapeada; `app-card > div`
+   porque el host del componente no pinta — el fondo vive en su primer div hijo.
+
+   No hay acumulación de tinte en superficies anidadas: el hijo pinta su propio
+   background-color opaco, así que tapa la flama del padre y solo se ve la suya.
+
+   La lista vive en una variable SCSS porque se usa en TRES reglas (flama,
+   desfase de animación par e impar); escribirla a mano tres veces garantiza
+   que se desincronicen a la primera edición. */
+$aura-surfaces: 'app-card > div, .card, .bg-surface, [class*="bg-[var(--color-surface)]"], .table-container, .pagination, .stat-card, .analytics-card, .summary-card, .cost-card, .brand-card, .method-card, .service-card, .order-card, .order-header-card, .item-card, .address-card, .category-card, .pc-card, .app-type-card, .loading-card, .skeleton-card, .notif-panel, .dropdown-menu, .user-dropdown-container, .options-dropdown-content, .card-menu-dropdown, .guest-dropdown, .cart-sidebar, .catalog-sidebar, .summary-panel, .reservations-panel, .bill-panel, .mb-window, .table-action-sheet, .sort-options, .cdk-overlay-pane .tier-menu, .settings-section, .card-section, .account-section, .payment-section, .cliente-section, .welcome-section, .mb-section, .empty-state, .empty-cart, .empty-wishlist, .nested-report, .general-settings-form, .inventory-settings-form, .receipts-settings-form, .address-form, .template-selection, .day-view-body, .week-body, .legal-document-paper, .quick-book-modal, .reservations-page, .booking-page, .modal-body, .storefront-header, .ecommerce-header, .ecommerce-footer, .checkout-main, .checkout-header, .catalog-header, .account-header, .table-banner, .cart-list-banner, .hero-banner';
+
+[data-theme-preset="aura"] :is(#{$aura-surfaces}),
+[data-theme-preset="aura"] app-header > header,
+[data-theme-preset="aura"] app-sidebar .sidebar,
+[data-theme-preset="aura"] .mobile-sidebar {
+  background-image:
+    radial-gradient(58% 72% at 8% 2%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--aura-a1)) 0%, transparent 62%),
+    radial-gradient(36% 46% at 99% 8%, rgba(var(--color-secondary-rgb, 47, 111, 78), var(--aura-a2)) 0%, transparent 60%),
+    radial-gradient(68% 86% at 44% 106%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--aura-a3)) 0%, transparent 66%);
+  background-repeat: no-repeat;
+  /* El secundario va a 115% —no 150%— a propósito: el radio del blob se escala
+     con el tamaño de SU capa, así que en una superficie chica (una .app-type-card,
+     un .stat-card) un blob grande deja de ser esquina y se convierte en un baño
+     plano de color. Con el secundario sobredimensionado, esas tarjetas salían
+     enteras azules en vez de "primario con algo de secundario". Los primarios sí
+     pueden ser grandes: son el color que debe dominar. */
+  background-size: 170% 170%, 115% 115%, 190% 190%;
+  animation: aura-flame 16s ease-in-out infinite alternate;
+}
+
+/* ── Desincronizar hermanas ──
+   Con la misma animación arrancando a la vez, cuatro stat-cards en fila laten
+   como un solo bloque y el efecto se lee mecánico. Un delay NEGATIVO adelanta
+   la animación (no la retrasa: no hay pausa inicial), así cada card entra en un
+   punto distinto del ciclo y el conjunto respira desordenado.
+
+   Hacen falta DOS formas del selector: muchas superficies son hijo ÚNICO de su
+   componente (`<app-stats><div class="stat-card">`), así que todas son
+   :nth-child(1) y el índice real vive en el host. La segunda variante
+   (`:nth-child(2n) > superficie`) lee ese índice desde el wrapper. */
+[data-theme-preset="aura"] :is(#{$aura-surfaces}):nth-child(2n),
+[data-theme-preset="aura"] :nth-child(2n) > :is(#{$aura-surfaces}) {
+  animation-delay: -5s;
+}
+
+[data-theme-preset="aura"] :is(#{$aura-surfaces}):nth-child(3n),
+[data-theme-preset="aura"] :nth-child(3n) > :is(#{$aura-surfaces}) {
+  animation-delay: -9.5s;
+}
+
+/* ── Modales: por qué la flama va SOLO en .modal-body ──
+   El modal son TRES cajas apiladas que pintan superficie por separado:
+   .modal-header (gradiente surface→surface), .modal-body (surface plano) y
+   .modal-footer (gradiente teñido del background). Meter la flama en las tres
+   parte el efecto en tres manchas cortadas por los bordes y rompe la jerarquía
+   header/body/footer que el modal usa a propósito. El body es el área grande:
+   lleva la flama; header y footer conservan sus colores intactos.
+
+   El body además necesita blobs MÁS GRANDES y despegados del borde superior: si
+   el núcleo del blob primario queda pegado al corte con el header, se ve un
+   escalón de color en la costura en vez de una transición. */
+[data-theme-preset="aura"] .modal-body {
+  background-image:
+    radial-gradient(72% 62% at 4% 18%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--aura-a1)) 0%, transparent 68%),
+    radial-gradient(50% 44% at 98% 30%, rgba(var(--color-secondary-rgb, 47, 111, 78), var(--aura-a2)) 0%, transparent 66%),
+    radial-gradient(80% 70% at 46% 108%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--aura-a3)) 0%, transparent 72%);
+  background-size: 200% 200%, 130% 130%, 220% 220%;
+  animation-duration: 24s;
+}
+
+
+/* Sidebar y header son superficies altas o anchas: la flama se estira en el eje
+   largo para que se lea como llama y no como manchón centrado. */
+[data-theme-preset="aura"] app-sidebar .sidebar,
+[data-theme-preset="aura"] .mobile-sidebar {
+  background-size: 220% 120%, 200% 110%, 240% 140%;
+  animation-duration: 22s;
+}
+
+[data-theme-preset="aura"] app-header > header {
+  background-size: 120% 220%, 110% 200%, 140% 240%;
+  animation-duration: 20s;
+}
+
+@keyframes aura-flame {
+  0% {
+    background-position: 0% 0%, 100% 0%, 50% 100%;
+  }
+  35% {
+    background-position: 18% 14%, 74% 16%, 34% 84%;
+  }
+  70% {
+    background-position: 34% 4%, 90% 34%, 62% 96%;
+  }
+  100% {
+    background-position: 10% 26%, 96% 46%, 44% 88%;
+  }
+}
+
+/* Borde con un hilo del primario para cerrar el look, sin tocar el fondo. */
+[data-theme-preset="aura"] app-card > div,
+[data-theme-preset="aura"] .card {
+  border-color: color-mix(in oklab, var(--color-primary) 16%, var(--color-border));
+}
+
+/* ============================================
+ * GLASS THEME - Liquid Glass (estilo iOS/macOS)
+ * Activated via data-theme-preset="glass"
+ *
+ * SPEC: TODA superficie surface — cards, contenedores, modales, header,
+ * sidebar, overlays — es vidrio: relleno translúcido + blur del fondo +
+ * saturación + brillo especular en el borde superior + sombra difusa. El fondo
+ * de pantalla lleva blobs animados del primario/secundario para que el blur
+ * tenga algo que refractar (sin eso el vidrio se ve como un gris plano).
+ * ============================================ */
+
+/* ── Capa ambiental: por qué html pinta y body/main no ──
+   Los blobs viven en body::before con z-index:-1 para quedar detrás del
+   contenido. En el orden de pintado CSS, un descendiente con z-index negativo se
+   pinta ANTES del fondo en-flujo de <body>, así que cualquier color opaco en body
+   —o en el <main> con scroll, que además lo trae inline vía var(--background)—
+   los sepulta y el preset se ve idéntico a default. Solución: el color de fondo
+   sube al <html> (canvas) y la cadena por encima de la capa queda transparente.
+   El <main> se libera desde ThemeService poniendo --background translúcido. */
+html[data-theme-preset="glass"] {
+  /* Canvas coloreado: el vidrio SOLO existe si hay algo que refractar. Un
+     background plano dejaba el preset indistinguible del default en claro, así
+     que el canvas lleva un wash estático del primario/secundario del comercio
+     además de los blobs animados de body::before. */
+  background-color: var(--color-background);
+  background-image:
+    radial-gradient(120% 90% at 12% 0%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--glass-wash)) 0%, transparent 58%),
+    radial-gradient(110% 85% at 100% 30%, rgba(var(--color-secondary-rgb, 47, 111, 78), var(--glass-wash-2)) 0%, transparent 60%);
+  background-attachment: fixed;
+}
+
 [data-theme-preset="glass"] body {
+  background-color: transparent;
   position: relative;
   overflow-x: hidden;
 }
@@ -721,38 +1186,689 @@ footer {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(circle at 20% 30%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.18) 0%, transparent 45%),
-    radial-gradient(circle at 75% 60%, rgba(var(--color-secondary-rgb, 47, 111, 78), 0.14) 0%, transparent 45%),
-    radial-gradient(circle at 50% 90%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.12) 0%, transparent 40%);
-  animation: glass-blobs 12s ease-in-out infinite alternate;
+    radial-gradient(circle at 20% 30%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--glass-blob-1)) 0%, transparent 45%),
+    radial-gradient(circle at 75% 60%, rgba(var(--color-secondary-rgb, 47, 111, 78), var(--glass-blob-2)) 0%, transparent 45%),
+    radial-gradient(circle at 50% 90%, rgba(var(--color-primary-rgb, 126, 215, 165), var(--glass-blob-3)) 0%, transparent 40%);
+  /* Se animan POSICIONES (background-position), no la lista de gradientes: la
+     versión anterior redefinía `background` completo en cada keyframe, lo que
+     obliga al motor a reinterpolar imágenes distintas → saltos en vez de deriva. */
+  background-repeat: no-repeat;
+  background-size: 140% 140%, 130% 130%, 150% 150%;
+  animation: glass-blobs 18s ease-in-out infinite alternate;
 }
 
 @keyframes glass-blobs {
   0% {
-    background:
-      radial-gradient(circle at 20% 30%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.18) 0%, transparent 45%),
-      radial-gradient(circle at 75% 60%, rgba(var(--color-secondary-rgb, 47, 111, 78), 0.14) 0%, transparent 45%),
-      radial-gradient(circle at 50% 90%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.12) 0%, transparent 40%);
+    background-position: 0% 0%, 100% 20%, 40% 100%;
   }
-  33% {
-    background:
-      radial-gradient(circle at 40% 70%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.20) 0%, transparent 50%),
-      radial-gradient(circle at 80% 25%, rgba(var(--color-secondary-rgb, 47, 111, 78), 0.16) 0%, transparent 45%),
-      radial-gradient(circle at 15% 50%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.10) 0%, transparent 40%);
-  }
-  66% {
-    background:
-      radial-gradient(circle at 60% 20%, rgba(var(--color-secondary-rgb, 47, 111, 78), 0.15) 0%, transparent 45%),
-      radial-gradient(circle at 25% 80%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.18) 0%, transparent 50%),
-      radial-gradient(circle at 85% 50%, rgba(var(--color-secondary-rgb, 47, 111, 78), 0.12) 0%, transparent 40%);
+  50% {
+    background-position: 30% 22%, 70% 0%, 60% 78%;
   }
   100% {
-    background:
-      radial-gradient(circle at 70% 45%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.16) 0%, transparent 45%),
-      radial-gradient(circle at 30% 15%, rgba(var(--color-secondary-rgb, 47, 111, 78), 0.14) 0%, transparent 45%),
-      radial-gradient(circle at 55% 75%, rgba(var(--color-primary-rgb, 126, 215, 165), 0.13) 0%, transparent 40%);
+    background-position: 12% 40%, 96% 46%, 26% 92%;
   }
 }
+
+/* ── Parámetros del vidrio, por modo ──
+   DOS NIVELES, no uno. Un modal y un `.keypad-btn` no pueden llevar el mismo
+   vidrio: cada `backdrop-filter` crea una capa de composición en GPU, así que
+   el blur fuerte se reserva a los contenedores grandes (`pane`) y los controles
+   pequeños (`chip`) llevan uno ligero y MÁS relleno, porque sobre un panel que
+   ya es translúcido un control translúcido encima pierde legibilidad.
+
+   `--glass-fill` es el alpha del relleno sobre --color-surface-rgb. Bajó de 0.44
+   a 0.30 en claro: a 0.44 sobre surface blanco el panel quedaba casi opaco y el
+   preset se leía igual que default —el "es un poco tímido" del usuario—. */
+[data-theme-preset="glass"] {
+  /* TRES niveles de densidad, no uno. Cuánto relleno necesita el vidrio depende
+     de QUÉ hay detrás:
+       - panel  (0.3):  se apoya en el canvas, que es suave y de bajo contraste.
+       - chip   (0.5):  control sobre un panel ya translúcido; si fuera igual de
+                        translúcido dejaría de leerse como control.
+       - float  (0.86): menú o popover sobre contenido arbitrario (tablas, texto).
+                        Con 0.5 se leía la tabla A TRAVÉS del menú y el resultado
+                        era inutilizable. Sigue siendo vidrio porque el COLOR del
+                        fondo lo atraviesa, aunque el detalle no. */
+  --glass-fill: 0.3;
+  --glass-fill-chip: 0.5;
+  --glass-fill-float: 0.86;
+  --glass-blur: 22px;
+  --glass-blur-chip: 8px;
+  --glass-sat: 180%;
+  --glass-sheen: rgba(255, 255, 255, 0.9);
+  --glass-sheen-soft: rgba(255, 255, 255, 0.55);
+  --glass-edge: rgba(255, 255, 255, 0.85);
+  /* Bisel: Apple ilumina el canto superior y OSCURECE el inferior. Sin este
+     segundo canto el panel parece una calcomanía plana en vez de un bloque con
+     grosor. */
+  --glass-edge-low: rgba(15, 23, 42, 0.07);
+  --glass-shade: rgba(15, 23, 42, 0.16);
+  --glass-wash: 0.3;
+  --glass-wash-2: 0.24;
+  --glass-blob-1: 0.42;
+  --glass-blob-2: 0.34;
+  --glass-blob-3: 0.28;
+
+  /* OJO: --color-text-muted / --color-text-tertiary NO se pueden endurecer desde
+     aquí. El ThemeService los escribe como estilo INLINE en <html> y el inline
+     gana a la hoja, así que declararlos en este bloque es un no-op silencioso.
+     El ajuste de contraste de glass vive en theme.service.ts, `case 'glass'`. */
+}
+
+html[data-theme="dark"][data-theme-preset="glass"] {
+  --glass-fill: 0.34;
+  --glass-fill-chip: 0.5;
+  /* En oscuro hace falta algo MÁS de relleno: el texto claro sobre vidrio oscuro
+     translúcido pierde antes el contraste que el texto oscuro sobre vidrio claro. */
+  --glass-fill-float: 0.9;
+  --glass-blur: 24px;
+  --glass-blur-chip: 8px;
+  --glass-sat: 165%;
+  --glass-sheen: rgba(255, 255, 255, 0.22);
+  --glass-sheen-soft: rgba(255, 255, 255, 0.1);
+  --glass-edge: rgba(255, 255, 255, 0.2);
+  --glass-edge-low: rgba(0, 0, 0, 0.25);
+  --glass-shade: rgba(0, 0, 0, 0.45);
+  --glass-wash: 0.26;
+  --glass-wash-2: 0.2;
+  --glass-blob-1: 0.34;
+  --glass-blob-2: 0.28;
+  --glass-blob-3: 0.22;
+
+}
+
+/* ── Liquid Glass en TODA superficie surface ──
+   DOS REGLAS QUE NO SE PUEDEN ROMPER AQUÍ:
+   1. `app-card` es el elemento del componente; su superficie es el primer div
+      hijo. `.app-card` (clase) no existe en el DOM → el selector debe ser
+      `app-card > div`.
+   2. `backdrop-filter` crea un stacking context. Aplicado al HOST `app-header`
+      (display:block, position:static, z-index:auto) atrapa el `<header>` interno
+      —que sí tiene z-index 35— dentro de un contexto en `auto`, y `<main>`, al
+      venir después en el DOM, pinta encima: los dropdowns del header quedan
+      debajo del contenido y dejan de ser clicables. Por eso el filtro va sobre
+      los elementos internos que YA tienen position + z-index propios
+      (`> header`, `.sidebar`), nunca sobre el host del componente. */
+/* 3. El contorno NO puede ir en `border-color`. Casi todas estas superficies
+      declaran `border: 0` (o nunca declaran ancho), así que el `border-color`
+      del preset anterior era un no-op silencioso: el canto especular jamás se
+      dibujó. Y subir el ancho a 1px movería el layout de los que sí tienen
+      tamaño fijo. Solución: el contorno se pinta con `inset 0 0 0 1px`, que
+      ocupa cero espacio.
+   4. La lista sale de un censo de las 140 clases que pintan `--color-surface` o
+      blanco en la app; se excluyen a mano los elementos diminutos (puntos de
+      timeline, flechas de tooltip, spinners) donde el vidrio no se lee y solo
+      costaría una capa de GPU. */
+/* 5. La lista se declara UNA vez porque hace falta dos veces: para pintar y para
+      el escape de `position: fixed` de más abajo. Duplicar 70 selectores a mano
+      garantizaría que las dos copias se desincronicen. */
+$glass-panes:
+  "app-card > div, \
+  .card, .card-footer, .stat-card, .step-card, .cost-card, .method-card, \
+  .payroll-card, .pc-card, .promo-card, .history-card, .guest-order-card, \
+  .document-card, .order-header-card, .order-header-hero, .dish-card, \
+  .cta-card, .loading-card, \
+  .modal-content, .modal-actions, .quick-book-modal, .sheet-drawer, \
+  .table-action-sheet__panel, .bill-panel__drawer, .bill-panel__summary, \
+  .dropdown-menu, .notif-panel, .dropdown-header, .card-menu-dropdown, \
+  .tier-menu, .search-suggestions, .wr-banner__menu-panel, .card-tooltip, \
+  .shortcuts-help-content, .store-switcher__select, \
+  .summary-panel, .selected-summary, .reservations-panel, \
+  .reservations-panel-mobile, .reservations-panel-wrapper, .items-list, \
+  .top-products-container, .categories-container, .chart-container, \
+  .payment-methods-container, .product-search-container, .cart-promotions-wrap, \
+  .form-section, .settings-section, .payment-section, .cliente-section, \
+  .filter-section, .filters-bar, .pqr-form, .pqr-subheader, .address-form, \
+  .table-wrapper, .week-body, .day-view-body, .tab-bar, .steps, \
+  .cart-sidebar, .cart-item, .sidebar-mobile, .checkout-main, \
+  .storefront-header, .delivery-header, .delivery-bottom-nav, \
+  .receipt-container, .pi-body, .rv-info, .rv-response, .rv-summary, \
+  .current-info, .error-banner, .validation-row, .installment-row, \
+  .bg-surface, [class*=\"bg-[var(--color-surface)]\"]";
+
+html[data-theme-preset="glass"] :is(#{$glass-panes}) {
+  background-color: rgba(var(--color-surface-rgb, 255, 255, 255), var(--glass-fill));
+  /* Especular diagonal (el "líquido") + realce inferior del primario. */
+  background-image:
+    linear-gradient(135deg, var(--glass-sheen-soft) 0%, transparent 46%),
+    linear-gradient(to top, rgba(var(--color-primary-rgb, 126, 215, 165), 0.1) 0%, transparent 55%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 var(--glass-sheen),
+    inset 0 -1px 0 var(--glass-edge-low),
+    0 8px 32px var(--glass-shade);
+}
+
+/* ESCAPE DE `position: fixed` — no es cosmético, es funcional.
+   `backdrop-filter` crea un containing block para los descendientes `fixed`. El
+   modal de la app es inline (`fixed inset-0 z-[9999]` en modal.component.ts, no
+   se porta a body), así que si el `<app-modal>` queda dentro de uno de estos
+   paneles, deja de anclarse al viewport y sale encajonado dentro del panel: se ve
+   el modal recortado sobre el outlet de contenido en vez de cubrir la app.
+   `:has()` detecta el modal abierto (`.modal-content` sólo existe con el @if
+   activo) y le retira el filtro al contenedor durante ese rato. Perder el vidrio
+   de ese panel no se nota: el backdrop del modal lo tapa igual. */
+html[data-theme-preset="glass"] :is(#{$glass-panes}):has(.modal-content) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Flotantes: están DENTRO de un panel en el DOM pero visualmente FUERA de él
+   (se despliegan por encima), así que conservan su vidrio propio y quedan
+   exentos del reset de anidamiento de abajo. `.card-footer` y `.modal-actions`
+   se incluyen porque son zonas con color intencional del diseño de modales, no
+   contenido anidado. */
+$glass-floating:
+  ".modal-content, .modal-actions, .card-footer, .sheet-drawer, \
+  .table-action-sheet__panel, .bill-panel__drawer, .quick-book-modal, \
+  .dropdown-menu, .notif-panel, .card-menu-dropdown, .tier-menu, \
+  .search-suggestions, .wr-banner__menu-panel, .card-tooltip, \
+  .store-switcher__select, .shortcuts-help-content";
+
+/* El vidrio NO es composable: dos backdrop-filter anidados suman relleno y el
+   hijo termina MÁS claro que el padre, que el ojo lee como un parche pegado y no
+   como profundidad (era visible como un rectángulo claro en `.chart-container`
+   dentro del panel de Tendencia de Ventas). Solo el panel más externo lo lleva;
+   los de dentro se disuelven. Además ahorra una capa de composición GPU por
+   panel anidado. */
+html[data-theme-preset="glass"]
+  :is(#{$glass-panes})
+  :is(#{$glass-panes}):not(#{$glass-floating}) {
+  background-color: transparent;
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* REFUERZO DE ESPECIFICIDAD — lista cerrada, detectada por auditoría.
+   Estos elementos declaran su superficie en el SCSS de su propio componente con
+   un selector anidado que, con la encapsulación de Angular, resuelve a (0,3,0)
+   —p. ej. `.user-dropdown-container .dropdown-menu[_ngcontent]`— y gana a las
+   reglas de arriba, que son (0,2,1). Repetir el atributo sube esta regla a
+   (0,3,1) sin recurrir a `!important`, que sí pisaría los estados (:hover,
+   :disabled) definidos en esos componentes.
+   Es una lista CERRADA a propósito: el refuerzo se aplica solo a lo que la
+   auditoría detectó opaco, no a las ~70 clases de paneles, para no arrasar con
+   comportamientos que hoy funcionan. Si aparece otro opaco, se añade aquí. */
+/* Menús y popovers: reciben el nivel `float`. Están en la lista de paneles, así
+   que sin esta regla heredarían --glass-fill (0.3) y se leería el contenido de
+   debajo a través de ellos. Va DESPUÉS de la regla de paneles para pisar solo el
+   relleno y conservar el resto (contornos, sombra). */
+html[data-theme-preset="glass"]
+  :is(
+    .notif-panel,
+    .card-menu-dropdown,
+    .tier-menu,
+    .search-suggestions,
+    .wr-banner__menu-panel,
+    .store-switcher__select,
+    .shortcuts-help-content,
+    .card-tooltip
+  ) {
+  background-color: rgba(
+    var(--color-surface-rgb, 255, 255, 255),
+    var(--glass-fill-float)
+  );
+  backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px))
+    saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 var(--glass-sheen),
+    0 12px 36px var(--glass-shade);
+}
+
+/* `.dropdown-menu` y `.dropdown-header` NO están aquí: su componente los declara
+   con selectores anidados que resuelven a (0,4,0) y ganan incluso al atributo
+   duplicado (la columna de clases/atributos se compara antes que la de
+   elementos, así que 4 > 3 y el `html` extra no sirve de nada). Se pintan en
+   user-dropdown.component.scss y notifications-dropdown.component.scss. */
+html[data-theme-preset="glass"][data-theme-preset="glass"]
+  :is(.inputsearch-wrapper, .options-dropdown-trigger) {
+  background-color: rgba(
+    var(--color-surface-rgb, 255, 255, 255),
+    var(--glass-fill-chip)
+  );
+  backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+  box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+
+/* El trigger es un control: necesita respuesta al puntero, y como la regla de
+   arriba pisa el hover de su componente hay que reponerlo aquí. */
+html[data-theme-preset="glass"][data-theme-preset="glass"]
+  .options-dropdown-trigger:hover {
+  background-color: rgba(
+    var(--color-surface-rgb, 255, 255, 255),
+    calc(var(--glass-fill-chip) + 0.2)
+  );
+}
+
+/* Sub-superficies neutras (`bg-gray-50` y familia). Son los bloques agrupadores
+   que la app usa DENTRO de un panel —los recuadros de datos del modal de perfil,
+   por ejemplo—, y al ser grises opacos abrían tres parches blancos sólidos en
+   medio del vidrio. Van translúcidas pero SIN backdrop-filter propio: se ven a
+   través del vidrio del panel que las contiene, así que el efecto se conserva sin
+   gastar una capa de composición extra por bloque. */
+html[data-theme-preset="glass"]
+  :is(
+    .bg-gray-50, .bg-gray-100,
+    .bg-neutral-50, .bg-neutral-100,
+    .bg-slate-50, .bg-slate-100
+  ) {
+  background-color: rgba(
+    var(--color-surface-rgb, 255, 255, 255),
+    calc(var(--glass-fill-chip) - 0.12)
+  );
+}
+
+/* Controles: mismo vidrio, menos blur y más relleno. Van aparte porque sobre un
+   panel ya translúcido un control igual de translúcido deja de leerse como
+   control. */
+html[data-theme-preset="glass"] :is(
+  .chip, .domain-chip, .keypad-btn, .quick-btn, .method-btn, .save-btn,
+  .draft-btn, .ghost-btn, .secondary-btn, .shipping-btn, .random-btn,
+  .frequency-btn, .credit-method-btn, .wompi-submethod-btn, .sale-type-btn,
+  .payment-method-btn, .summary-custom-item-btn, .validation-row__cta,
+  .area-option, .option-row, .pc-option-row, .business-type-option,
+  .store-type-option, .fulfillment-option, .floor-tile, .inactive-tab,
+  .date-range-select, .group-select, .open-table-cta
+) {
+  background-color: rgba(var(--color-surface-rgb, 255, 255, 255), var(--glass-fill-chip));
+  backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 var(--glass-sheen-soft);
+}
+
+/* Header: el filtro va al elemento interno con stacking context propio, nunca al
+   host (un backdrop-filter en `app-header` atrapa el <header> y <main> pinta
+   encima). El sidebar NO está aquí: su `:host-context(...) .sidebar` compila a
+   (0,3,0) y gana a cualquier cosa que escribamos desde aquí, así que se pinta en
+   sidebar.component.scss consumiendo los mismos tokens --glass-*. */
+html[data-theme-preset="glass"] app-header > header,
+html[data-theme-preset="glass"] .mobile-sidebar {
+  background-color: rgba(var(--color-surface-rgb, 255, 255, 255), calc(var(--glass-fill) - 0.06)) !important;
+  background-image: linear-gradient(180deg, var(--glass-sheen-soft) 0%, transparent 60%);
+  backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 4px)) saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 1px 0 var(--glass-sheen),
+    inset -1px 0 0 var(--glass-edge-low);
+}
+
+/* Modales y overlays CDK: vidrio más denso (van sobre contenido, no sobre el
+   canvas) para que el texto no compita con lo que hay detrás. */
+html[data-theme-preset="glass"] .modal-content,
+html[data-theme-preset="glass"] .cdk-overlay-pane .tier-menu {
+  background-color: rgba(var(--color-surface-rgb, 255, 255, 255), calc(var(--glass-fill) + 0.3));
+  backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 8px)) saturate(var(--glass-sat));
+}
+
+/* Pills del header (selector de tienda, chip de plan). El "user badge"
+   (.user-trigger-full) NO está aquí: se pinta en user-dropdown.component.scss,
+   donde su selector anidado gana la cascada y donde el hover puede seguir
+   variando el relleno sin pelear con un `!important`. */
+html[data-theme-preset="glass"] :is(.store-switcher, .plan-chip) {
+  background-color: rgba(var(--color-surface-rgb, 255, 255, 255), var(--glass-fill-chip)) !important;
+  backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur-chip)) saturate(var(--glass-sat));
+  box-shadow:
+    inset 0 0 0 1px var(--glass-edge),
+    inset 0 1px 0 var(--glass-sheen-soft),
+    0 2px 10px var(--glass-shade);
+}
+
+/* ============================================
+ * MONOCROMO — un solo tono, dos niveles SÓLIDOS
+ * Activated via data-theme-preset="monocromo"
+ *
+ * SPEC: `background` = variante OSCURA del primario del comercio, `surface` =
+ * variante CLARA. Mismo tinte que aura, pero plano: sin degradados y sin
+ * animación. Casi todo el preset se resuelve por tokens en ThemeService
+ * (applyStylePreset + applyMonocromoScale); aquí solo van las tres cosas que
+ * los tokens no pueden arreglar solos.
+ * ============================================ */
+
+/* 1) Fallback del token de texto sobre lienzo. ThemeService lo pinea inline en
+      <html> (inline gana), pero si el preset entra por atributo antes de que el
+      servicio corra —SSR, hidratación— sin esto el rótulo hereda `initial`. */
+[data-theme-preset="monocromo"] {
+  --color-text-on-background: var(--color-text-primary);
+  /* Igual para el lienzo: ThemeService lo pinea, pero sin servicio las reglas de
+     abajo se quedarían sin valor y body/main perderían el fondo. */
+  --mono-canvas: var(--color-background);
+  /* Los shades claros del primario (bg-primary-50/100/200/300, ~215 usos: avatares,
+     chips, iconos en mosaico) son "primario diluido". Su ancla por defecto es
+     blanco literal, así que sobre una superficie teñida se veían como parches
+     casi blancos —medido rgb(226,232,226) sobre rgb(192,228,187)—. Anclarlos al
+     surface los devuelve a la familia en los DOS modos: en claro quedan un paso
+     por debajo de la tarjeta, en oscuro dejan de ser manchas blancas. */
+  --color-primary-tint-base: var(--color-surface);
+  /* `color-scheme` ya evita la barra BLANCA en oscuro, pero deja la barra gris del
+     sistema, que en un preset monocromático es el único elemento fuera de familia.
+     Aquí se pinta con los tokens: pulgar en el borde (el paso que ya separa
+     tarjeta de lienzo) y canal transparente para que herede la superficie. */
+  scrollbar-color: var(--color-border) transparent;
+}
+
+/* 1·bis) El LIENZO, pintado aparte del token. `--color-background` significa en
+   el código "un escalón por dentro del surface" (bandas de panel, hovers, el
+   <thead> de app-table) y por eso en monocromo lleva la variante CLARA; ver la
+   nota larga en ThemeService. Los pocos elementos que de verdad son la página
+   —el body y la raíz de cada layout— se pintan aquí desde `--mono-canvas`.
+
+   Van con `html` delante a propósito: `main` lo declara cada layout desde su
+   propio SCSS, y con la encapsulación emulada esa regla pesa (0,1,1); el prefijo
+   de tipo sube esta a (0,1,2) y le gana pese a inyectarse antes. */
+html[data-theme-preset="monocromo"] body,
+html[data-theme-preset="monocromo"] main,
+html[data-theme-preset="monocromo"] .ecommerce-layout,
+html[data-theme-preset="monocromo"] .storefront-container,
+html[data-theme-preset="monocromo"] .delivery-shell {
+  background-color: var(--mono-canvas);
+}
+
+/* 2) Chrome sobre el lienzo oscuro: se REDEFINEN LOS TOKENS en el subárbol.
+      El sidebar y el header pintan `--color-background` (la variante oscura), y
+      sus rótulos fijan `--color-text-primary`, que en light es oscuro → texto
+      oscuro sobre fondo oscuro (medido: contraste 2.18 en los ítems del menú).
+
+      Las custom properties heredan, así que redefinirlas AQUÍ reapunta de golpe
+      a todo descendiente que use `var(--color-text-*)` sin enumerar ni un
+      selector de componente, y sin filtrarse fuera del chrome. Es lo contrario
+      de lo que se intentó primero —`color` heredado en `main`—, que sí se
+      filtraba: los subtítulos `.stat-small` de las stat-cards acabaron
+      claro-sobre-claro, contraste 1.0, invisibles.
+
+      En dark no hace daño: `--color-text-on-background` es el extremo legible de
+      la escala en cada modo, que en dark ya coincide con el texto normal. */
+[data-theme-preset="monocromo"] app-sidebar .sidebar,
+[data-theme-preset="monocromo"] .mobile-sidebar,
+[data-theme-preset="monocromo"] app-header > header {
+  --color-text-primary: var(--color-text-on-background);
+  --color-text-secondary: color-mix(in srgb, var(--color-text-on-background) 78%, transparent);
+  --color-text-muted: color-mix(in srgb, var(--color-text-on-background) 62%, transparent);
+  --color-border: color-mix(in srgb, var(--color-text-on-background) 20%, transparent);
+  color: var(--color-text-on-background);
+}
+
+/* Dentro del cromo el "escalón" SÍ es el lienzo: el sidebar se pinta con
+   `--color-background` y, con él, sus máscaras internas (el punto del submenú y
+   el corte de la línea vertical, que existen para tapar la línea con el MISMO
+   color del sidebar). Reapuntar el token en el subárbol resuelve las tres cosas
+   de una vez y sin pelear especificidad con el componente: la declaración local
+   gana a la heredada por definición, no por peso.
+
+   Hover/selección va en el mismo bloque: los componentes lo resuelven con un
+   velo del primario sobre `surface`, que aquí es CLARO — el velo salía como una
+   mancha blanca. Se reapunta a un velo del primario sobre el lienzo. */
+[data-theme-preset="monocromo"] app-sidebar .sidebar,
+[data-theme-preset="monocromo"] .mobile-sidebar,
+[data-theme-preset="monocromo"] app-header > header {
+  --color-background: var(--mono-canvas);
+  /* El primario vuelve a ser el crudo del comercio: en claro el servicio lo
+     oscurece para que se lea sobre las superficies pálidas, pero aquí el fondo es
+     el lienzo OSCURO y un primario oscuro desaparecería (el ítem activo del menú
+     y el avatar dejarían de destacar). En oscuro `--mono-brand` ya es el mismo
+     valor, así que la declaración no hace nada. */
+  --color-primary: var(--mono-brand);
+  --color-primary-rgb: var(--mono-brand-rgb);
+  --color-surface-hover: color-mix(in srgb, var(--mono-brand) 22%, var(--mono-canvas));
+}
+
+/* Escala neutral ESPEJADA dentro del chrome, solo en modo claro. Muchos rótulos
+   —el <h1> del título de página entre ellos— no usan `--color-text-*` sino la
+   escala (`text-gray-900`), que en light es oscura por definición: seguían
+   oscuros sobre el chrome oscuro aunque los tokens de texto ya fueran claros.
+   Espejar hace que el subárbol se comporte como modo oscuro para CUALQUIER
+   utilidad de escala, texto o fondo, sin enumerar clases.
+
+   En dark no aplica: la escala ya viene invertida de generateScale y espejarla
+   la devolvería a claro→oscuro, rompiendo justo lo que ya funciona.
+
+   Se lee de `--mono-*` (copia cruda que pinea ThemeService) y no de
+   `--color-neutral-*`: leer y reescribir el mismo nombre en un bloque es un
+   ciclo y CSS descarta las dos declaraciones. */
+html[data-theme="light"][data-theme-preset="monocromo"] app-sidebar .sidebar,
+html[data-theme="light"][data-theme-preset="monocromo"] .mobile-sidebar,
+html[data-theme="light"][data-theme-preset="monocromo"] app-header > header {
+  --color-neutral-900: var(--mono-50);
+  --color-neutral-800: var(--mono-100);
+  --color-neutral-700: var(--mono-200);
+  --color-neutral-600: var(--mono-300);
+  --color-neutral-500: var(--mono-400);
+  --color-neutral-400: var(--mono-500);
+  --color-neutral-300: var(--mono-600);
+  --color-neutral-200: var(--mono-700);
+  --color-neutral-100: var(--mono-800);
+  --color-neutral-50: var(--mono-900);
+  --color-neutral-900-rgb: var(--mono-50-rgb);
+  --color-neutral-800-rgb: var(--mono-100-rgb);
+  --color-neutral-700-rgb: var(--mono-200-rgb);
+  --color-neutral-600-rgb: var(--mono-300-rgb);
+  --color-neutral-500-rgb: var(--mono-400-rgb);
+  --color-neutral-400-rgb: var(--mono-500-rgb);
+  --color-neutral-300-rgb: var(--mono-600-rgb);
+  --color-neutral-200-rgb: var(--mono-700-rgb);
+  --color-neutral-100-rgb: var(--mono-800-rgb);
+  --color-neutral-50-rgb: var(--mono-900-rgb);
+}
+
+/* Cajones móviles: son cromo, pero pintan `--color-surface` —la variante CLARA—,
+   así que con los tokens de texto ya reapuntados a claro el menú quedaba
+   invisible (claro sobre claro) en móvil. Se les pone el lienzo oscuro, igual
+   que al sidebar de escritorio, y así el subárbol vuelve a ser coherente.
+   `aside.mobile-sidebar` lleva el tipo a propósito: los estilos de componente
+   se inyectan después de esta hoja y con igual especificidad ganarían. */
+[data-theme-preset="monocromo"] app-sidebar .sidebar.sidebar-mobile,
+[data-theme-preset="monocromo"] aside.mobile-sidebar {
+  background-color: var(--color-background);
+}
+
+/* Islas de superficie DENTRO del cromo: el disparador del usuario y los paneles
+   flotantes que cuelgan del header pintan su propio `--color-surface` (claro),
+   pero heredan los tokens claros del cromo → texto claro sobre panel claro
+   (medido: `.user-name` con contraste 1.0, ilegible). Se deshace la herencia
+   leyendo otra vez la escala cruda `--mono-*`, que es el mismo extremo legible
+   en los dos modos: en light `--mono-900` es casi negro y en dark es casi
+   blanco, y en ambos casos es el color correcto sobre la superficie del modo.
+   El espejo de la escala también se revierte, y solo en light, porque es donde
+   se aplicó. */
+[data-theme-preset="monocromo"] :is(app-header, app-sidebar, .mobile-sidebar) :is(.user-trigger-full, .dropdown-menu, .notif-panel) {
+  --color-text-primary: var(--mono-900);
+  --color-text-secondary: var(--mono-600);
+  --color-text-muted: var(--mono-500);
+  --color-border: var(--mono-200);
+  color: var(--mono-900);
+}
+
+html[data-theme="light"][data-theme-preset="monocromo"] :is(app-header, app-sidebar, .mobile-sidebar) :is(.user-trigger-full, .dropdown-menu, .notif-panel) {
+  --color-neutral-900: var(--mono-900);
+  --color-neutral-800: var(--mono-800);
+  --color-neutral-700: var(--mono-700);
+  --color-neutral-600: var(--mono-600);
+  --color-neutral-500: var(--mono-500);
+  --color-neutral-400: var(--mono-400);
+  /* Los cuatro pasos claros vuelven al tramo COMPRIMIDO, no al crudo: dentro de la
+     isla el fondo es `--color-surface`, así que `bg-gray-50/100` tiene que ser un
+     matiz sobre la tarjeta y no el casi-blanco de la escala de texto. */
+  --color-neutral-300: var(--mono-tile-300, var(--mono-300));
+  --color-neutral-200: var(--mono-tile-200, var(--mono-200));
+  --color-neutral-100: var(--mono-tile-100, var(--mono-100));
+  --color-neutral-50: var(--mono-tile-50, var(--mono-50));
+  --color-neutral-900-rgb: var(--mono-900-rgb);
+  --color-neutral-800-rgb: var(--mono-800-rgb);
+  --color-neutral-700-rgb: var(--mono-700-rgb);
+  --color-neutral-600-rgb: var(--mono-600-rgb);
+  --color-neutral-500-rgb: var(--mono-500-rgb);
+  --color-neutral-400-rgb: var(--mono-400-rgb);
+  --color-neutral-300-rgb: var(--mono-tile-300-rgb, var(--mono-300-rgb));
+  --color-neutral-200-rgb: var(--mono-tile-200-rgb, var(--mono-200-rgb));
+  --color-neutral-100-rgb: var(--mono-tile-100-rgb, var(--mono-100-rgb));
+  --color-neutral-50-rgb: var(--mono-tile-50-rgb, var(--mono-50-rgb));
+
+  /* El reparto de texto de la isla se corre un paso, igual que en la raíz: estas
+     islas pintan `--color-surface`, que en claro ya no es casi blanco sino el
+     verde de la cabecera de tabla. Con el reparto viejo (600/500) el rol del
+     usuario caía a 3.5 y el correo a 2.7; con 800/700 vuelven a 6.7 y 4.9.
+     Se leen de `--mono-*` porque esa copia es simétrica por modo, pero el bloque
+     es light-only: en oscuro la isla es oscura y el reparto original ya sirve. */
+  --color-text-secondary: var(--mono-800);
+  --color-text-muted: var(--mono-700);
+  --color-border: color-mix(in srgb, var(--mono-brand) 62%, #fff);
+}
+
+/* 2·bis) BLANCO LITERAL. Unos 50 usos de la utilidad `bg-white` no pasan por
+   ningún token: pintan #fff pase lo que pase, así que en monocromo aparecen como
+   parches blancos flotando sobre el verde (y en oscuro, en cualquier preset, como
+   paneles blancos: el mismo defecto, solo que allí ya se aceptaba).
+
+   Se seleccionan por token EXACTO con `~=`, no por subcadena: `[class*="bg-white"]`
+   también casaría `hover:bg-white`, y entonces el fondo se pintaría SIEMPRE en vez
+   de solo al pasar el ratón.
+
+   Las variantes con alpha se parten en dos grupos a propósito:
+     · /70 /80 /90 /95 → paneles semi-opacos (cabeceras sticky, tarjetas sobre
+       imagen). Asumen lienzo casi blanco; sobre el verde componen un velo lechoso.
+       Se vuelven la superficie opaca, igual que se hizo con `bg-surface/xx`.
+     · /10 /15 /20 → velos translúcidos SOBRE medios o color (botones encima de una
+       foto de portada, realces del hero). Ahí el blanco translúcido es el efecto
+       buscado y se dejan intactos.
+   Ningún `hover:bg-white/7…9` existe en el código, así que el segundo grupo puede
+   ir por subcadena sin falsos positivos. */
+[data-theme-preset="monocromo"] [class~="bg-white"],
+[data-theme-preset="monocromo"] [class*="bg-white/7"],
+[data-theme-preset="monocromo"] [class*="bg-white/8"],
+[data-theme-preset="monocromo"] [class*="bg-white/9"] {
+  background-color: var(--color-surface);
+}
+
+/* 3) Sólidos donde el diseño usa degradados de superficie. El pie del modal
+      mezcla background con surface: en monocromo eso significa mezclar el
+      lienzo OSCURO con la superficie CLARA, y el modal terminaba con un pie
+      sucio de otro nivel. Igual el encabezado. Se fuerzan planos, un escalón por
+      dentro del surface para que la jerarquía header/body/footer siga leyéndose. */
+[data-theme-preset="monocromo"] .modal-header,
+[data-theme-preset="monocromo"] .modal-footer {
+  background: var(--color-surface-secondary);
+}
+
+/* Los paneles flotantes cuelgan del cromo, así que HEREDAN el reapuntado de
+   arriba (`--color-background` = lienzo) — y sus bandas de encabezado, que usan
+   ese token para quedar un escalón por dentro de la superficie, volvían a salir
+   negras con texto oscuro (medido antes del arreglo: el correo del usuario a
+   1.62). Se les devuelve el significado global del token: el escalón claro.
+   Intentar `background: …` desde aquí no serviría: la encapsulación emulada de
+   Angular repite `[_ngcontent-…]` en CADA compuesto del selector, así que la
+   regla del componente pesa (0,6,0) y ninguna cadena razonable de esta hoja la
+   alcanza. Reapuntar el token sí gana, porque compite solo contra otras
+   declaraciones del mismo token en el mismo elemento.
+   El disparador del usuario entra en la misma lista por lo mismo: su `:hover`
+   vuela a `--color-background` y con el token del cromo se volvía negro. */
+[data-theme-preset="monocromo"] :is(.dropdown-menu, .notif-panel, .user-trigger-full) {
+  /* un escalón dentro de la familia clara, nunca el lienzo */
+  --color-background: var(--color-surface-secondary);
+}
+
+/* 4) Chips de estado. El RDV pinta sus badges INLINE desde su colorMap:
+      `background-color: rgba(<tinte>, .15)` + `color: <tinte>` sólido. Ese velo
+      del 15% se compone contra la superficie, y los tintes están calibrados para
+      la superficie del tema base (blanco en claro, casi negro en oscuro). En
+      monocromo la superficie está un paso adentro en las dos direcciones y los
+      chips pierden contraste: el índigo del canal POS caía a 1.63 en oscuro y el
+      azul de "Procesando" a 2.57 en claro. Se les pone debajo el paso `--mono-50`
+      —el extremo de superficie de la escala, que es casi blanco teñido en claro y
+      casi negro teñido en oscuro— y así el tinte recupera el fondo para el que fue
+      calibrado sin salirse de la familia monocroma ni tocar el color del texto,
+      que sigue siendo la señal semántica.
+
+      El respaldo NO puede REEMPLAZAR el `background-color` inline: hacerlo (primer
+      intento, con `!important`) aplanaba los doce estados al mismo verde pálido y
+      el chip perdía su tinte —quedaba una píldora casi blanca con texto de color,
+      justo el "los badges siguen siendo blancos" que se quería arreglar—.
+
+      Se pinta DEBAJO con un pseudo-elemento en z-index negativo: sin stacking
+      context propio, un hijo con z-index:-1 se dibuja por detrás del fondo de su
+      padre pero por delante del de la fila. Así el velo del 15% se sigue
+      componiendo —el chip conserva su hue— sobre un fondo claro/oscuro de la
+      familia en vez de sobre la superficie teñida.
+
+      El paso es `--mono-100` crudo, no el comprimido `--mono-tile-*`: el chip SÍ
+      quiere despegarse de la tarjeta (1.10:1, como en el tema base), al revés que
+      los mosaicos `bg-gray-*`, que quieren fundirse con ella. */
+[data-theme-preset="monocromo"] .status-badge-custom {
+  position: relative;
+}
+
+[data-theme-preset="monocromo"] .status-badge-custom::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: var(--mono-100);
+}
+
+/* 5) Colores semánticos en modo CLARO. No son monocromos a propósito —el rojo de
+      un error tiene que seguir siendo rojo—, pero están calibrados contra un
+      surface BLANCO y la superficie de monocromo es un paso más oscura: el
+      naranja de aviso caía a 1.73:1 en el panel ("14 bajo stock") y el rojo a
+      2.72. Se oscurecen dentro de su propio hue, que sube las dos lecturas: el
+      texto sobre la superficie clara y el blanco sobre el relleno (un badge
+      naranja con rótulo blanco pasa de ~2.2 a ~4.9).
+
+      Solo en claro: en oscuro la superficie es casi negra y estos mismos tonos
+      ya contrastan; oscurecerlos allí los hundiría. */
+/* 6) Superficies TRANSLÚCIDAS (`bg-surface/80`, `/50`, … 41 usos: encabezados
+      sticky, barras de acciones) → opacas. Esas utilidades asumen que lo que hay
+      detrás es el lienzo casi blanco del tema base, así que un 80% de superficie
+      sigue siendo casi blanco. Detrás de ellas en monocromo está el lienzo VERDE
+      PROFUNDO: la banda compone a un tono medio (lum 0.58 medido en el encabezado
+      sticky del detalle de orden) y todos sus rótulos pierden contraste —el
+      subtítulo de fecha caía a 2.22:1 con el mismo color que sobre la superficie
+      opaca da 5.9.
+
+      Una sola regla por atributo cubre los 41 usos sin enumerarlos; el preset es
+      sólido por definición, así que perder la translucidez es lo correcto aquí.
+      No se toca `bg-white/xx`: eso son velos claros SOBRE el cromo oscuro y ahí
+      la translucidez es justo el efecto buscado. */
+[data-theme-preset="monocromo"] [class*="bg-surface/"] {
+  background-color: var(--color-surface);
+}
+
+html[data-theme="light"][data-theme-preset="monocromo"] {
+  --color-warning: color-mix(in srgb, #fb923c 55%, #000);
+  --color-error: color-mix(in srgb, #ef4444 60%, #000);
+  --color-success: color-mix(in srgb, #22c55e 58%, #000);
+  --color-info: color-mix(in srgb, #3b82f6 72%, #000);
+
+  /* Hover un escalón más marcado que en el tema base. El hover no es un color
+     propio: la raíz lo define como `surface + 6% del primario`. Ese 6% se
+     calculó contra un surface casi blanco, donde alcanza para notarse; ahora
+     que la superficie ya nace teñida (63% blanco), el mismo 6% se pierde
+     dentro del propio verde. Subirlo a 12% devuelve el escalón —luminancia
+     0.76 → 0.64— sin salirse de la familia, porque el velo sigue siendo el
+     primario del comercio y no un gris.
+     Solo en claro: en oscuro la superficie es oscura y un velo más denso del
+     primario la ACLARA, que es el comportamiento correcto y ya está calibrado. */
+  --color-surface-hover: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+}
+
+/* ── Swatches del selector de estilo ──
+   Ya no hay regla de protección aquí. El swatch de "Default" era `.bg-surface` y
+   por eso caía en la lista de superficies de aura y de glass —mostraba la flama
+   o el vidrio del preset activo—, y neutralizarlo desde esta hoja obligaba a
+   pelear especificidad con `:is()`, que adopta la de su miembro más específico
+   (`.cdk-overlay-pane .tier-menu`, 0,2,0 → la regla del preset pesa 0,3,0).
+   Ahora el swatch usa su propia clase `.default-preview` con los colores base
+   escritos a mano en settings-modal.component.scss: no hay colisión que
+   neutralizar y el swatch dice la verdad en cualquier preset. */
 
 /* Price tier selector menu (CDK overlay portal — lives outside Angular view encapsulation) */
 .cdk-overlay-pane.tier-menu-panel .tier-menu {
