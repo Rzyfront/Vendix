@@ -222,7 +222,7 @@ import {
                   <div class="flex items-center justify-between">
                     <span class="text-sm font-semibold truncate" style="color: var(--color-text)">{{ entry.product?.name }}</span>
                     <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
-                      [style.background]="entry.status === 'completed' ? '#dcfce7' : entry.status === 'confirmed' ? '#dbeafe' : '#fee2e2'"
+                      [style.background]="entry.status === 'completed' ? 'var(--color-success-100, #dcfce7)' : entry.status === 'confirmed' ? 'var(--color-info-100, #dbeafe)' : 'var(--color-error-100, #fee2e2)'"
                       [style.color]="entry.status === 'completed' ? '#166534' : entry.status === 'confirmed' ? '#1e40af' : '#991b1b'">
                       {{ getBookingStatusLabel(entry.status) }}
                     </span>

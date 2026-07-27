@@ -152,7 +152,7 @@ import {
                   <th class="px-3 py-2 text-left font-medium text-gray-500">Teléfono</th>
                 </tr>
               </thead>
-              <tbody class="bg-white divide-y divide-gray-200">
+              <tbody class="bg-surface divide-y divide-gray-200">
                 @for (item of parsedData()!.slice(0, 5); track item.row_number) {
                   <tr>
                     <td class="px-3 py-2 text-gray-400 text-xs">{{ item.row_number }}</td>
@@ -204,7 +204,7 @@ import {
           <!-- Results -->
           @if (!isUploading() && hasBulkResults()) {
             <div class="space-y-5">
-              <div class="bg-white border rounded-lg overflow-hidden">
+              <div class="bg-surface border rounded-lg overflow-hidden">
                 <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
                   <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
                   <span class="text-sm text-gray-500">
@@ -230,7 +230,7 @@ import {
                     <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
                     Detalle de Errores
                   </div>
-                  <div class="max-h-60 overflow-y-auto bg-white">
+                  <div class="max-h-60 overflow-y-auto bg-surface">
                     <table class="min-w-full divide-y divide-gray-200">
                       <thead class="bg-gray-50">
                         <tr>
@@ -238,7 +238,7 @@ import {
                           <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
                         </tr>
                       </thead>
-                      <tbody class="bg-white divide-y divide-gray-200">
+                      <tbody class="bg-surface divide-y divide-gray-200">
                         @for (result of uploadResults()!.results; track result; let i = $index) {
                           @if (result.status === 'error') {
                             <tr>

@@ -129,7 +129,7 @@ const COSTING_METHOD_DETAILS: Record<CostingMethod, CostingMethodDetails> = {
           </div>
         </header>
 
-        <div class="rounded-md bg-white/70 border border-emerald-100 p-2.5">
+        <div class="rounded-md bg-surface/70 border border-emerald-100 p-2.5">
           <div class="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
             Ejemplo
           </div>

@@ -302,13 +302,13 @@ import {
       font-family: monospace;
     }
 
-    .method-get { background: #dbeafe; color: #1d4ed8; }
-    .method-post { background: #dcfce7; color: #15803d; }
-    .method-put { background: #fef3c7; color: #b45309; }
-    .method-delete { background: #fee2e2; color: #b91c1c; }
-    .method-patch { background: #f3e8ff; color: #7c3aed; }
-    .method-options { background: #f1f5f9; color: #64748b; }
-    .method-head { background: #f1f5f9; color: #64748b; }
+    .method-get { background: var(--color-info-100, #dbeafe); color: #1d4ed8; }
+    .method-post { background: var(--color-success-100, #dcfce7); color: #15803d; }
+    .method-put { background: var(--color-warning-100, #fef3c7); color: #b45309; }
+    .method-delete { background: var(--color-error-100, #fee2e2); color: #b91c1c; }
+    .method-patch { background: var(--color-purple-100, #f3e8ff); color: #7c3aed; }
+    .method-options { background: var(--color-neutral-100); color: #64748b; }
+    .method-head { background: var(--color-neutral-100); color: #64748b; }
 
     .status-badge {
       padding: 2px 6px;
@@ -317,9 +317,9 @@ import {
       font-weight: 500;
     }
 
-    .status-active { background: #dcfce7; color: #15803d; }
-    .status-inactive { background: #fef3c7; color: #b45309; }
-    .status-deprecated { background: #fee2e2; color: #b91c1c; }
+    .status-active { background: var(--color-success-100, #dcfce7); color: #15803d; }
+    .status-inactive { background: var(--color-warning-100, #fef3c7); color: #b45309; }
+    .status-deprecated { background: var(--color-error-100, #fee2e2); color: #b91c1c; }
 
     .permission-checkbox {
       width: 16px;

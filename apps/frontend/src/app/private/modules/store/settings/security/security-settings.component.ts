@@ -12,7 +12,7 @@ import { Component } from '@angular/core';
         <p class="text-gray-600">Gestionar políticas de seguridad y control de acceso</p>
       </div>
 
-      <div class="bg-white rounded-lg shadow-sm border p-8">
+      <div class="bg-surface rounded-lg shadow-sm border p-8">
         <div class="text-center">
           <div
             class="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4"

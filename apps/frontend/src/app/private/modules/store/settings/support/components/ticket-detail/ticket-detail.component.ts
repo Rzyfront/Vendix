@@ -210,7 +210,7 @@ import {
               <div class="mb-3">
                 <textarea
                   formControlName="content"
-                  class="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none h-24"
+                  class="w-full bg-surface border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none h-24"
                   placeholder="Escribe un comentario..."
                   rows="3"
                 ></textarea>

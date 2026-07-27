@@ -385,7 +385,7 @@
       width: 20px;
       left: 3px;
       bottom: 3px;
-      background-color: white;
+      background-color: var(--color-surface);
       transition: 0.3s;
       border-radius: 50%;
       box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -747,13 +747,13 @@
 
 .color-card {
   padding: 14px;
-  background: #f9fafb;
+  background: var(--color-neutral-50);
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   transition: background 200ms ease;
 
   &:hover {
-    background: #f3f4f6;
+    background: var(--color-neutral-100);
   }
 }
 
@@ -806,7 +806,7 @@
   font-size: 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   text-transform: uppercase;
-  background: #fff;
+  background: var(--color-surface);
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   color: #111827;
@@ -835,13 +835,13 @@
   gap: 12px;
   min-height: 76px;
   padding: 12px;
-  background: #f9fafb;
+  background: var(--color-neutral-50);
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   transition: border-color 180ms ease, background 180ms ease;
 
   &:hover {
-    background: #fff;
+    background: var(--color-surface);
     border-color: #d1d5db;
   }
 }
@@ -850,7 +850,7 @@
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--color-surface);
   border: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
@@ -878,7 +878,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(var(--color-surface-rgb), 0.82);
 }
 
 .brand-content {
@@ -929,14 +929,14 @@
   width: 30px;
   height: 30px;
   border-radius: 8px;
-  border: 1px solid #fee2e2;
+  border: 1px solid var(--color-error-100, #fee2e2);
   color: #dc2626;
-  background: #fff;
+  background: var(--color-surface);
   transition: background 180ms ease, border-color 180ms ease;
 
   &:hover {
-    background: #fef2f2;
-    border-color: #fecaca;
+    background: var(--color-error-50, #fef2f2);
+    border-color: var(--color-error-200, #fecaca);
   }
 }
 

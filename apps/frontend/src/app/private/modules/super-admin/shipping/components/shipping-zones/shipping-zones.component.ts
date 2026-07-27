@@ -54,7 +54,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           @for (zone of zones(); track zone.id) {
             <div
-              class="bg-white rounded-2xl border border-[var(--color-border)] p-6 hover:shadow-lg transition-all group flex flex-col justify-between h-full"
+              class="bg-surface rounded-2xl border border-[var(--color-border)] p-6 hover:shadow-lg transition-all group flex flex-col justify-between h-full"
             >
               <div>
                 <div class="flex justify-between items-start mb-4">

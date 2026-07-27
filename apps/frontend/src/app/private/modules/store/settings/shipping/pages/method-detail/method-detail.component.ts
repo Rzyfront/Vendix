@@ -88,7 +88,7 @@ import { AddRateWizardModalComponent } from '../../components/index';
             title="Tarifas activas"
             [value]="active_rates_count()"
             iconName="tag"
-            iconBgColor="#F5F3FF"
+            iconBgColor="var(--color-violet-50, #F5F3FF)"
             iconColor="#8B5CF6"
             [loading]="is_loading()"
           />
@@ -96,7 +96,7 @@ import { AddRateWizardModalComponent } from '../../components/index';
             title="Pedidos este mes"
             [value]="0"
             iconName="package"
-            iconBgColor="#FFF7ED"
+            iconBgColor="var(--color-orange-50, #FFF7ED)"
             iconColor="#F59E0B"
             [loading]="is_loading()"
             smallText="—"
@@ -105,7 +105,7 @@ import { AddRateWizardModalComponent } from '../../components/index';
             title="Ingresos envio"
             [value]="'—'"
             iconName="banknote"
-            iconBgColor="#EEF2FF"
+            iconBgColor="var(--color-indigo-50, #EEF2FF)"
             iconColor="#6366F1"
             [loading]="is_loading()"
           />

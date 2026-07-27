@@ -44,7 +44,7 @@
     <!-- Tipo de Producto — oculto en insumos (siempre Producto Físico) -->
     @if (!isIngredient()) {
       <section
-        class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
+        class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
       >
         <div class="flex items-center gap-2 mb-4">
           <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
@@ -66,7 +66,7 @@
       <div class="lg:col-span-2 space-y-4 md:space-y-6">
         <!-- Información General Section -->
         <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
         >
           <div class="flex items-center gap-2">
             <app-icon name="info" size="18" class="text-primary-600"></app-icon>
@@ -183,7 +183,7 @@
         <!-- Precios y Rentabilidad Section -->
         <section
           [hidden]="isPureIngredient()"
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
         >
           <div class="flex items-center gap-2">
             <app-icon
@@ -310,7 +310,7 @@
 
             <!-- Precio Final + Toggle Oferta -->
             <div
-              class="bg-white px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
+              class="bg-surface px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
             >
               <!-- Precio Final -->
               <div class="flex flex-col">
@@ -367,7 +367,7 @@
                     prefix="$"
                     placeholder="0.00"
                     customWrapperClass="!mt-0 flex-1"
-                    customInputClass="!border-rose-300 !bg-white focus:!border-rose-500 !text-lg !font-bold !text-rose-600"
+                    customInputClass="!border-rose-300 !bg-surface focus:!border-rose-500 !text-lg !font-bold !text-rose-600"
                   >
                   </app-input>
                 </div>
@@ -379,7 +379,7 @@
         <!-- ─── Multi-Tarifa (Phase 4) ───────────────────────────────── -->
         <section
           [hidden]="isPureIngredient()"
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
             <app-icon name="tags" size="18" class="text-primary-600"></app-icon>
@@ -639,7 +639,7 @@
 
         <!-- MOBILE: Images Section (visible only on mobile, after pricing) -->
         <section
-          class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
+          class="lg:hidden bg-surface rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
             <app-icon
@@ -664,7 +664,7 @@
               @if (imageUrls.length > 0) {
                 <img
                   [src]="imageUrls[activeImageIndex]"
-                  class="w-full h-full object-contain p-3 bg-white"
+                  class="w-full h-full object-contain p-3 bg-surface"
                   (error)="onImageError($event)"
                 />
                 <!-- Carousel Controls -->
@@ -732,7 +732,7 @@
                   class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-4 text-center cursor-pointer"
                 >
                   <div
-                    class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-2"
+                    class="w-12 h-12 bg-surface rounded-full flex items-center justify-center shadow-sm mb-2"
                   >
                     <app-icon
                       name="image"
@@ -753,7 +753,7 @@
                 <button
                   type="button"
                   (click)="triggerFileUpload()"
-                  class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all"
+                  class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-surface hover:border-primary-400 transition-all"
                 >
                   <app-icon
                     name="image-plus"
@@ -784,7 +784,7 @@
                   (click)="setActiveImage(i)"
                   [class.ring-2]="activeImageIndex === i"
                   [class.ring-primary-500]="activeImageIndex === i"
-                  class="relative flex-shrink-0 w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm"
+                  class="relative flex-shrink-0 w-16 h-16 bg-surface rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm"
                 >
                   <img
                     [src]="url"
@@ -804,7 +804,7 @@
 
         <!-- Disponibilidad y Estado Section -->
         <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
         >
           <div class="flex items-center gap-2">
             <app-icon
@@ -1053,7 +1053,7 @@
         <!-- ─── QUI-431: Números de serie — resumen + acceso al gestor ──── -->
         @if (isSerialized) {
           <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+            class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
           >
             <div
               class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
@@ -1155,7 +1155,7 @@
         <!-- Compra online — oculta en insumos no vendibles (no se venden online) -->
         @if (isEditMode() && !isPureIngredient()) {
           <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
+            class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
           >
             <div
               class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
@@ -1203,7 +1203,7 @@
                   <img
                     [src]="onlinePurchaseQrCode()"
                     alt="QR de compra online"
-                    class="h-32 w-32 rounded-lg bg-white object-contain"
+                    class="h-32 w-32 rounded-lg bg-surface object-contain"
                   />
                 </div>
 
@@ -1246,7 +1246,7 @@
                     <button
                       type="button"
                       (click)="copyOnlinePurchaseLink()"
-                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-surface px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                       aria-label="Copiar link de compra"
                     >
                       <app-icon name="copy" [size]="15" />
@@ -1255,7 +1255,7 @@
                     <button
                       type="button"
                       (click)="openOnlinePurchaseLink()"
-                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-surface px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                       aria-label="Abrir link de compra"
                     >
                       <app-icon name="external-link" [size]="15" />
@@ -1264,7 +1264,7 @@
                     <button
                       type="button"
                       (click)="downloadOnlinePurchaseQr()"
-                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-surface px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
                       aria-label="Descargar QR de compra"
                     >
                       <app-icon name="download" [size]="15" />
@@ -1297,7 +1297,7 @@
 
         <!-- Clasificación y Medidas (unificada: marca/categorías + dimensiones/peso) -->
         <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
             <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
@@ -1419,7 +1419,7 @@
         <!-- Service-Specific Fields -->
         @if (isService) {
           <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+            class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
           >
             <div class="flex items-center gap-2">
               <app-icon
@@ -1598,7 +1598,7 @@
       <div class="hidden lg:flex flex-col gap-4 md:gap-6">
         <!-- Images Section (Desktop) -->
         <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col"
         >
           <div class="flex items-center gap-2 mb-4">
             <app-icon
@@ -1619,7 +1619,7 @@
               @if (imageUrls.length > 0) {
                 <img
                   [src]="imageUrls[activeImageIndex]"
-                  class="w-full h-full object-contain p-4 bg-white"
+                  class="w-full h-full object-contain p-4 bg-surface"
                   (error)="onImageError($event)"
                 />
                 <!-- Carousel Controls (Floating) -->
@@ -1691,7 +1691,7 @@
                   class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-6 text-center bg-gray-50/50"
                 >
                   <div
-                    class="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"
+                    class="w-16 h-16 bg-surface rounded-full flex items-center justify-center shadow-sm mb-4"
                   >
                     <app-icon
                       name="image"
@@ -1716,7 +1716,7 @@
                   (click)="setActiveImage(i)"
                   [class.ring-2]="activeImageIndex === i"
                   [class.ring-primary]="activeImageIndex === i"
-                  class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300"
+                  class="relative flex-none w-16 h-16 bg-surface rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300"
                 >
                   <img
                     [src]="url"
@@ -1743,7 +1743,7 @@
               @if (imageUrls.length < 5 && imageUrls.length > 0) {
                 <div
                   (click)="triggerFileUpload()"
-                  class="flex-none w-16 h-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all group"
+                  class="flex-none w-16 h-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:bg-surface hover:border-primary-400 transition-all group"
                 >
                   <app-icon
                     name="image-plus"
@@ -1775,12 +1775,12 @@
                 }
                 <div
                   (click)="triggerFileUpload()"
-                  class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
+                  class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-surface hover:border-primary-300 hover:shadow-md"
                   [class.opacity-50]="isLoadingImages()"
                   [class.pointer-events-none]="isLoadingImages()"
                 >
                   <div
-                    class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
+                    class="p-2 bg-surface rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
                   >
                     <app-icon
                       name="image-plus"
@@ -1815,7 +1815,7 @@
 
         <!-- Stock Section (Desktop) -->
         <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm flex flex-col"
         >
           <!-- Header -->
           <div class="flex items-center gap-2 mb-4">
@@ -2156,7 +2156,7 @@
 
         <!-- Promociones & Operaciones (Desktop sidebar, unificada) -->
         <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+          class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
             <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
@@ -2222,7 +2222,7 @@
         <!-- Proveedores del Servicio (Desktop sidebar) -->
         @if (productForm.get("requires_booking")?.value) {
           <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+            class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
           >
             <div class="flex items-center gap-2">
               <app-icon
@@ -2294,7 +2294,7 @@
     <!-- MOBILE: Inventario Section (visible only on mobile) -->
     @if (productForm.get("track_inventory")?.value) {
       <section
-        class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
+        class="lg:hidden bg-surface rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
       >
         <div class="flex items-center gap-2">
           <app-icon
@@ -2440,7 +2440,7 @@
     <!-- MOBILE: Proveedores del Servicio (visible only on mobile) -->
     @if (productForm.get("requires_booking")?.value) {
       <section
-        class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
+        class="lg:hidden bg-surface rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
       >
         <div class="flex items-center gap-2">
           <app-icon name="users" size="20" class="text-indigo-500"></app-icon>
@@ -2502,7 +2502,7 @@
 
     <!-- MOBILE: Promociones & Operaciones (unificada) -->
     <section
-      class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
+      class="lg:hidden bg-surface rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
     >
       <div class="flex items-center gap-2">
         <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
@@ -2566,7 +2566,7 @@
     <!-- Variants Section (Full Width) -->
     @if (hasVariants) {
       <section
-        class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5"
+        class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5"
       >
         <div class="flex items-center gap-2 min-w-0">
           <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
@@ -2738,7 +2738,7 @@
                 <button
                   type="button"
                   (click)="applyBasePriceToAll()"
-                  class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-gray-700 border border-gray-200 bg-white hover:border-primary/40 hover:text-primary-700 transition-colors"
+                  class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-gray-700 border border-gray-200 bg-surface hover:border-primary/40 hover:text-primary-700 transition-colors"
                   data-tooltip="Copia el precio base del producto al precio de venta de todas las variantes."
                 >
                   <app-icon name="dollar-sign" [size]="13"></app-icon>
@@ -2747,7 +2747,7 @@
                 <button
                   type="button"
                   (click)="applyBaseCostToAll()"
-                  class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-gray-700 border border-gray-200 bg-white hover:border-primary/40 hover:text-primary-700 transition-colors"
+                  class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-gray-700 border border-gray-200 bg-surface hover:border-primary/40 hover:text-primary-700 transition-colors"
                   data-tooltip="Copia el precio de costo del producto al costo de todas las variantes."
                 >
                   <app-icon name="calculator" [size]="13"></app-icon>
@@ -2781,7 +2781,7 @@
                           ? openVariantImageEditor(idx)
                           : openVariantImageModal(idx)
                       "
-                      class="relative flex-shrink-0 w-10 h-10 rounded-lg border border-gray-200 bg-white cursor-pointer group"
+                      class="relative flex-shrink-0 w-10 h-10 rounded-lg border border-gray-200 bg-surface cursor-pointer group"
                     >
                       @if (variant.image_url) {
                         <img
@@ -3058,7 +3058,7 @@
                     <th class="px-3 py-3 w-10"></th>
                   </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
+                <tbody class="bg-surface divide-y divide-gray-200">
                   @for (
                     variant of generatedVariants;
                     track variant;
@@ -3073,7 +3073,7 @@
                               ? openVariantImageEditor(idx)
                               : openVariantImageModal(idx)
                           "
-                          class="relative w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group"
+                          class="relative w-12 h-12 rounded-lg border border-gray-200 bg-surface cursor-pointer group"
                         >
                           @if (variant.image_url) {
                             <img
@@ -3464,7 +3464,7 @@
       <div class="lg:hidden space-y-2">
         @for (sl of product?.stock_levels; track sl) {
           <div
-            class="p-3 bg-white rounded-lg border border-gray-200"
+            class="p-3 bg-surface rounded-lg border border-gray-200"
             [class.bg-destructive/5]="isStockLevelLowStock(sl)"
           >
             <div class="flex justify-between items-start mb-2">
@@ -3515,7 +3515,7 @@
       </div>
       <!-- Desktop: Table view -->
       <div
-        class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-white"
+        class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-surface"
       >
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-bg">
@@ -3610,7 +3610,7 @@
         <!-- Mobile: Cards view -->
         <div class="lg:hidden space-y-2">
           @for (batch of product?.inventory_batches; track batch) {
-            <div class="p-3 bg-white rounded-lg border border-gray-200">
+            <div class="p-3 bg-surface rounded-lg border border-gray-200">
               <div class="flex justify-between items-start mb-2">
                 <span
                   class="text-sm font-bold text-text-primary underline decoration-primary/30"
@@ -3642,7 +3642,7 @@
         </div>
         <!-- Desktop: Table view -->
         <div
-          class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-white"
+          class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-surface"
         >
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-bg">

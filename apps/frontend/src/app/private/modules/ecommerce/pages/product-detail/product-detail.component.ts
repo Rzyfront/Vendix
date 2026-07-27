@@ -743,7 +743,7 @@ import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
       .main-image-wrapper {
         width: 100%;
         aspect-ratio: 1;
-        background: white;
+        background: var(--color-surface);
         border-radius: var(--radius-xl);
         overflow: hidden;
         img {

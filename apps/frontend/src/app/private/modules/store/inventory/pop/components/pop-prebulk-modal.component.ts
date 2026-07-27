@@ -209,7 +209,7 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
                   </div>
                   @if (unitCapacity(); as cap) {
                     <div
-                      class="flex items-center gap-2 text-xs text-primary bg-white/60 rounded-lg px-2 py-1.5"
+                      class="flex items-center gap-2 text-xs text-primary bg-surface/60 rounded-lg px-2 py-1.5"
                       data-testid="pop-prebulk-capacity-preview"
                     >
                       <app-icon name="info" [size]="12"></app-icon>

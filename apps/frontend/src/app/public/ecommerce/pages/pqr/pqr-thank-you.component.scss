@@ -5,7 +5,7 @@
 }
 
 .card {
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   padding: 2rem;
@@ -40,7 +40,7 @@ h1 {
 }
 
 .ticket-block {
-  background: #f8fafc;
+  background: var(--color-neutral-50);
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 1.25rem;
@@ -66,14 +66,14 @@ h1 {
   font-size: 1.25rem;
   font-weight: 700;
   color: #4f46e5;
-  background: #eef2ff;
+  background: var(--color-indigo-50, #eef2ff);
   padding: 0.5rem 1rem;
   border-radius: 8px;
   letter-spacing: 0.02em;
 }
 
 .copy-btn {
-  background: #ffffff;
+  background: var(--color-surface);
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 0.5rem;
@@ -83,7 +83,7 @@ h1 {
   align-items: center;
 
   &:hover {
-    background: #f8fafc;
+    background: var(--color-neutral-50);
     border-color: #94a3b8;
   }
 }
@@ -140,7 +140,7 @@ h1 {
   transition: background-color 0.15s ease, border-color 0.15s ease;
 
   &:hover {
-    background: #f8fafc;
+    background: var(--color-neutral-50);
     border-color: #cbd5e1;
   }
 }

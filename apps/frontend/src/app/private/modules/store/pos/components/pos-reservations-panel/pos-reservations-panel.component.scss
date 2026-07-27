@@ -158,7 +158,7 @@
   }
 
   &.status-pending {
-    background: #fef9c3;
+    background: var(--color-yellow-100, #fef9c3);
     border-left-color: #f59e0b;
     color: #92400e;
   }
@@ -176,13 +176,13 @@
   }
 
   &.status-cancelled {
-    background: #fee2e2;
+    background: var(--color-error-100, #fee2e2);
     border-left-color: #ef4444;
     color: #991b1b;
   }
 
   &.status-no_show {
-    background: #f3f4f6;
+    background: var(--color-neutral-100);
     border-left-color: #9ca3af;
     color: #6b7280;
   }

@@ -106,50 +106,118 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
                 Preferencias
               </h4>
               <div class="flex flex-col gap-4">
-                <!-- Inline Theme Selector -->
-                <div class="theme-grid">
-                  <div
-                    class="theme-box"
-                    [class.active]="
-                      settingsForm.get('preferences.theme')?.value === 'default'
-                    "
-                    (click)="selectTheme('default')"
-                  >
-                    <div class="theme-preview bg-gray-200"></div>
-                    <span>Default</span>
-                  </div>
-                  <div
-                    class="theme-box disabled"
-                    [class.active]="
-                      settingsForm.get('preferences.theme')?.value === 'aura'
-                    "
-                  >
+                <!-- Eje MODO: claro / oscuro / sistema -->
+                <div>
+                  <span class="text-[11px] font-medium text-gray-500 mb-1.5 block">
+                    Modo
+                  </span>
+                  <div class="mode-grid">
                     <div
-                      class="theme-preview bg-gradient-to-br from-purple-500 to-pink-500"
-                    ></div>
-                    <span>Aura</span>
-                    <span class="coming-soon-label">Próximamente</span>
+                      class="mode-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme_mode')?.value === 'light'
+                      "
+                      (click)="selectMode('light')"
+                      (keydown.enter)="selectMode('light')"
+                      (keydown.space)="selectMode('light')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <app-icon name="sun" [size]="18"></app-icon>
+                      <span>Claro</span>
+                    </div>
+                    <div
+                      class="mode-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme_mode')?.value === 'dark'
+                      "
+                      (click)="selectMode('dark')"
+                      (keydown.enter)="selectMode('dark')"
+                      (keydown.space)="selectMode('dark')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <app-icon name="moon" [size]="18"></app-icon>
+                      <span>Oscuro</span>
+                    </div>
+                    <div
+                      class="mode-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme_mode')?.value === 'system'
+                      "
+                      (click)="selectMode('system')"
+                      (keydown.enter)="selectMode('system')"
+                      (keydown.space)="selectMode('system')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <app-icon name="monitor" [size]="18"></app-icon>
+                      <span>Sistema</span>
+                    </div>
                   </div>
-                  <div
-                    class="theme-box"
-                    [class.active]="
-                      settingsForm.get('preferences.theme')?.value ===
-                      'monocromo'
-                    "
-                    (click)="selectTheme('monocromo')"
-                  >
-                    <div class="theme-preview bg-slate-700"></div>
-                    <span>Mono</span>
-                  </div>
-                  <div
-                    class="theme-box disabled"
-                    [class.active]="
-                      settingsForm.get('preferences.theme')?.value === 'glass'
-                    "
-                  >
-                    <div class="theme-preview glass-preview"></div>
-                    <span>Glass</span>
-                    <span class="coming-soon-label">Próximamente</span>
+                </div>
+                <!-- Eje ESTILO: default / aura / monocromo / glass -->
+                <div>
+                  <span class="text-[11px] font-medium text-gray-500 mb-1.5 block">
+                    Estilo
+                  </span>
+                  <div class="theme-grid">
+                    <div
+                      class="theme-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme')?.value === 'default'
+                      "
+                      (click)="selectTheme('default')"
+                      (keydown.enter)="selectTheme('default')"
+                      (keydown.space)="selectTheme('default')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <div class="theme-preview default-preview"></div>
+                      <span>Default</span>
+                    </div>
+                    <div
+                      class="theme-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme')?.value === 'aura'
+                      "
+                      (click)="selectTheme('aura')"
+                      (keydown.enter)="selectTheme('aura')"
+                      (keydown.space)="selectTheme('aura')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <div class="theme-preview aura-preview"></div>
+                      <span>Aura</span>
+                    </div>
+                    <div
+                      class="theme-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme')?.value === 'monocromo'
+                      "
+                      (click)="selectTheme('monocromo')"
+                      (keydown.enter)="selectTheme('monocromo')"
+                      (keydown.space)="selectTheme('monocromo')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <div class="theme-preview mono-preview"></div>
+                      <span>Mono</span>
+                    </div>
+                    <div
+                      class="theme-box"
+                      [class.active]="
+                        settingsForm.get('preferences.theme')?.value === 'glass'
+                      "
+                      (click)="selectTheme('glass')"
+                      (keydown.enter)="selectTheme('glass')"
+                      (keydown.space)="selectTheme('glass')"
+                      role="button"
+                      tabindex="0"
+                    >
+                      <div class="theme-preview glass-preview"></div>
+                      <span>Glass</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -298,6 +366,7 @@ export class SettingsModalComponent {
       }),
       preferences: this.fb.group({
         language: ['es'],
+        theme_mode: ['light'],
         theme: ['default'],
       }),
     });
@@ -346,6 +415,10 @@ export class SettingsModalComponent {
   });
 
   onOpen() {
+    // Capturar el (modo, estilo) persistido ANTES de cualquier preview, para
+    // poder revertir al cancelar. El effect de auth ya aplicó el tema al
+    // login/restore, así que el estado vivo == persistido.
+    this.themeService.snapshotTheme();
     this.loadSettings();
 
     const context = this.globalFacade.getUserContext();
@@ -372,7 +445,10 @@ export class SettingsModalComponent {
     this.closeModal();
   }
 
-  closeModal() {
+  async closeModal() {
+    // Revertir el preview de tema si el usuario cancela (no Guardar).
+    // restoreTheme no-op si no hay snapshot.
+    await this.themeService.restoreTheme();
     this.isOpen.set(false);
     this.isOpenChange.emit(false);
     this.settingsForm.reset();
@@ -450,8 +526,17 @@ export class SettingsModalComponent {
     this.settingsForm.patchValue({
       preferences: { theme },
     });
-    // Apply immediate preview
-    this.themeService.applyUserTheme(theme);
+    // Preview inmediato del eje estilo (sin revert: al Guardar se persiste,
+    // al Cancelar restoreTheme() revierte al snapshot capturado en onOpen).
+    this.themeService.applyStylePreset(theme);
+  }
+
+  selectMode(mode: 'light' | 'dark' | 'system') {
+    this.settingsForm.patchValue({
+      preferences: { theme_mode: mode },
+    });
+    // Preview inmediato del eje modo.
+    this.themeService.applyMode(mode);
   }
 
   // ===== Editor integration =====
@@ -594,6 +679,7 @@ export class SettingsModalComponent {
       },
       preferences: {
         language: 'es',
+        theme_mode: 'light',
         theme: 'default',
       },
     };
@@ -603,9 +689,10 @@ export class SettingsModalComponent {
     patchObj.panel_ui.ORG_ADMIN = orgAdminPatch;
     patchObj.panel_ui.STORE_ADMIN = storeAdminPatch;
 
-    // Update preferences
-    const prefs = config.preferences || { language: 'es', theme: 'default' };
+    // Update preferences (legacy sin theme_mode → 'light', sin theme → 'default')
+    const prefs = config.preferences || { language: 'es', theme_mode: 'light', theme: 'default' };
     patchObj.preferences.language = prefs.language;
+    patchObj.preferences.theme_mode = prefs.theme_mode || 'light';
     patchObj.preferences.theme = prefs.theme || 'default';
 
     // Apply all patches at once
@@ -637,6 +724,7 @@ export class SettingsModalComponent {
           preferences: {
             ...currentConfig.preferences,
             language: formValue.preferences.language,
+            theme_mode: formValue.preferences.theme_mode,
             theme: formValue.preferences.theme,
           },
         };
@@ -662,6 +750,9 @@ export class SettingsModalComponent {
 
         // Use AuthFacade to update settings through NgRx
         this.authFacade.updateUserSettings(dto);
+        // El effect de auth re-aplicará el tema nuevo desde las prefs persistidas.
+        // Descartar el snapshot para que el cierre del modal NO lo revierta.
+        this.themeService.clearThemeSnapshot();
         this.saving.set(false);
 
         // Close modal after a short delay to allow store to update

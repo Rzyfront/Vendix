@@ -31,14 +31,14 @@ interface StatusConfig {
 }
 
 const STATUS_MAP: Record<BookingStatus, StatusConfig> = {
-  pending: { label: 'Pendiente', color: '#92400e', bgColor: '#fef3c7' },
+  pending: { label: 'Pendiente', color: '#92400e', bgColor: 'var(--color-warning-100, #fef3c7)' },
   confirmed: {
     label: 'Confirmada',
     color: 'var(--color-primary)',
     bgColor: 'color-mix(in srgb, var(--color-primary) 12%, transparent)'},
-  in_progress: { label: 'En Progreso', color: '#1d4ed8', bgColor: '#dbeafe' },
+  in_progress: { label: 'En Progreso', color: '#1d4ed8', bgColor: 'var(--color-info-100, #dbeafe)' },
   completed: { label: 'Completada', color: '#065f46', bgColor: '#d1fae5' },
-  cancelled: { label: 'Cancelada', color: '#991b1b', bgColor: '#fee2e2' },
+  cancelled: { label: 'Cancelada', color: '#991b1b', bgColor: 'var(--color-error-100, #fee2e2)' },
   no_show: { label: 'No Asistió', color: '#4b5563', bgColor: '#f3f4f6' }};
 
 @Component({

@@ -1,3 +1,18 @@
+/* ── Sistema de temas de dos ejes ──
+   modo (claro/oscuro/sistema) × estilo (default/aura/glass/monocromo).
+   El modo se persiste en config.preferences.theme_mode y el estilo en
+   config.preferences.theme. Valores legacy (theme sin theme_mode) se
+   interpretan como estilo con modo claro. */
+export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemePreset = 'default' | 'aura' | 'monocromo' | 'glass';
+
+/* Preferencias de tema del usuario (viven en user_settings.config.preferences). */
+export interface ThemePreferences {
+  theme_mode?: ThemeMode;
+  theme?: ThemePreset | string;
+  language?: string;
+}
+
 export interface TenantConfig {
   organization: OrganizationConfig;
   store?: StoreConfig;

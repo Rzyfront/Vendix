@@ -23,7 +23,10 @@
   .modal-footer {
     border-top: 1px solid var(--color-border);
     padding: 1rem 1.5rem;
-    background-color: var(--color-background-secondary);
+    // `--color-background-secondary` NO existe en el sistema de tokens: la
+    // declaración era inválida y el pie quedaba SIN fondo (transparente).
+    // Mismo tinte que el pie del modal base (modal.component.scss).
+    background-color: color-mix(in srgb, var(--color-background) 30%, var(--color-surface));
   }
 }
 
@@ -41,7 +44,7 @@
 
 // Slug confirmation box
 .slug-confirmation-box {
-  background-color: #fef3c7;
+  background-color: var(--color-warning-100, #fef3c7);
   border: 1px solid #f59e0b;
   border-radius: 8px;
   padding: 1rem;
@@ -56,7 +59,7 @@
 }
 
 .slug-display {
-  background-color: #fef3c7;
+  background-color: var(--color-warning-100, #fef3c7);
   color: #92400e;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
@@ -121,7 +124,7 @@
   display: flex;
   align-items: flex-start;
   gap: 0.75rem;
-  background-color: #fee2e2;
+  background-color: var(--color-error-100, #fee2e2);
   border: 1px solid #ef4444;
   border-radius: 8px;
   padding: 0.75rem 1rem;

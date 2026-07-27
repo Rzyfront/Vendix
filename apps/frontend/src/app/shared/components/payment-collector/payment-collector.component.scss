@@ -144,7 +144,8 @@
 .tab-btn.active {
   background: var(--color-surface);
   color: var(--color-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  /* Sombra sutil — neutral-rgb adapta a light/dark */
+  box-shadow: 0 1px 3px rgba(var(--color-neutral-900-rgb), 0.08);
 }
 
 /* Payment methods grid */
@@ -387,7 +388,7 @@
   /* ── Pencil redesign (frames PyHka / a7mp1 / G0dg6) — STEPPED ONLY ──────────
      Todo lo siguiente vive dentro de `.pc-stepped`, por lo que NUNCA alcanza la
      rama flat (membership / table / order / ecommerce). Tokens del proyecto:
-     verde = var(--color-primary); relleno claro (#DCFCE7) =
+     verde = var(--color-primary); relleno claro (var(--color-success-100, #DCFCE7)) =
      rgba(var(--color-success-rgb), .15); superficie tenue (#F2F4F7) =
      var(--color-muted); ink-900 = var(--color-text-primary). */
 
