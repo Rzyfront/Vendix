@@ -70,6 +70,29 @@ export class RecipesService {
     return storeId;
   }
 
+  /**
+   * Guard used by update()/restore(): prevents (re)activating a recipe whose
+   * sub-components have an invalid quantity (<= 0 or null). The migration
+   * backfilled existing rows, but the guard is defense in depth against
+   * regressions and against any concurrent path that could leave items
+   * invalid again.
+   */
+  private async assertItemsValidForActivation(recipeId: number): Promise<void> {
+    const items = await this.prisma.recipe_items.findMany({
+      where: { recipe_id: recipeId },
+      select: { id: true, component_product_id: true, quantity: true },
+    });
+    const invalid = items.find(
+      (it) => it.quantity == null || Number(it.quantity) <= 0,
+    );
+    if (invalid) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS,
+        `No se puede activar la receta: el sub-componente ${invalid.component_product_id} tiene cantidad ${invalid.quantity}. Corregila antes de activar.`,
+      );
+    }
+  }
+
   // --------------------------------------------------------- Recipe CRUD
 
   async create(dto: CreateRecipeDto) {
@@ -241,6 +264,14 @@ export class RecipesService {
   async update(id: number, dto: UpdateRecipeDto) {
     await this.findOne(id);
 
+    // If we're transitioning the recipe to active, every sub-component must
+    // have a positive quantity. Without this guard the recipe could be
+    // (re)activated with an invalid BOM, silently producing wrong costing
+    // in production.
+    if (dto.is_active === true) {
+      await this.assertItemsValidForActivation(id);
+    }
+
     const data: Prisma.recipesUpdateInput = {
       ...(dto.yield_quantity !== undefined && {
         yield_quantity: new Prisma.Decimal(dto.yield_quantity),
@@ -269,6 +300,8 @@ export class RecipesService {
 
   async restore(id: number) {
     await this.findOne(id);
+    // Block restoring a recipe whose BOM has invalid items.
+    await this.assertItemsValidForActivation(id);
     return this.prisma.recipes.update({
       where: { id },
       data: { is_active: true, updated_at: new Date() },
@@ -279,6 +312,15 @@ export class RecipesService {
 
   async addItem(recipeId: number, dto: CreateRecipeItemDto) {
     const recipe = await this.findOne(recipeId);
+
+    // 0. Quantity must be > 0. The DTO already enforces this, but a service
+    //    guard catches direct internal calls and gives a precise error code.
+    if (!(dto.quantity > 0)) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_ITEM_INVALID_QUANTITY,
+        `La cantidad debe ser mayor a 0 (recibido: ${dto.quantity})`,
+      );
+    }
 
     // 1. Self-reference: a recipe cannot include its own yield product.
     if (dto.component_product_id === recipe.product_id) {
@@ -364,6 +406,14 @@ export class RecipesService {
     });
     if (!item) {
       throw new VendixHttpException(ErrorCodes.RECIPE_ITEM_NOT_FOUND);
+    }
+
+    // Quantity, if provided, must be > 0.
+    if (dto.quantity !== undefined && !(dto.quantity > 0)) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_ITEM_INVALID_QUANTITY,
+        `La cantidad debe ser mayor a 0 (recibido: ${dto.quantity})`,
+      );
     }
 
     const data: Prisma.recipe_itemsUpdateInput = {

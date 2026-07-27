@@ -18,6 +18,10 @@ function buildPromotion(overrides: Partial<Record<string, unknown>> = {}) {
     type: 'percentage',
     value: 10,
     scope: 'order',
+    // Default to legacy cart_total so existing test cases that aggregate
+    // quantity across lines keep working. Tests that want per-product
+    // grouping pass `quantity_grouping: 'per_product'` via overrides.
+    quantity_grouping: 'cart_total',
     min_purchase_amount: null,
     max_discount_amount: null,
     usage_limit: null,
@@ -367,8 +371,11 @@ describe('PromotionEngineService - quoteDiscounts', () => {
     });
   });
 
-  describe('stacking', () => {
-    it('combines multiple auto-apply promotions by priority desc', async () => {
+  describe('winner-takes-all', () => {
+    // Promotions do NOT stack. When several auto-apply promos are eligible,
+    // exactly ONE is applied: the lowest priority NUMBER wins (1 = highest
+    // importance, like a priority queue).
+    it('applies only the promotion with the lowest priority number', async () => {
       prisma.promotions.findMany.mockResolvedValue([
         buildPromotion({
           id: 71,
@@ -397,18 +404,57 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         now: REFERENCE_NOW,
       });
 
-      // subtotal = 200
-      // First (priority 10): order scope, 5% of 200 = 10
-      // Second (priority 5): product scope, fixed 20 on product 10
+      // subtotal = 200. Promo 72 (priority 5) beats promo 71 (priority 10),
+      // so ONLY the $20 fixed discount on product 10 applies — the order-wide
+      // 5% is evaluated and discarded, not added on top.
       expect(result.subtotal).toBe(200);
-      expect(result.total_discount).toBe(30);
-      expect(result.promotional_subtotal).toBe(170);
-      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([71, 72]);
+      expect(result.total_discount).toBe(20);
+      expect(result.promotional_subtotal).toBe(180);
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([72]);
 
       const item10 = result.items.find((i) => i.product_id === 10)!;
-      // Item 10 got order share (5% of 100 = 5) + product (20) = 25
-      expect(item10.promotion_discount).toBe(25);
-      expect(item10.promotion_ids).toEqual([71, 72]);
+      expect(item10.promotion_discount).toBe(20);
+      expect(item10.promotion_ids).toEqual([72]);
+
+      const item20 = result.items.find((i) => i.product_id === 20)!;
+      expect(item20.promotion_discount).toBe(0);
+      expect(item20.promotion_ids).toEqual([]);
+    });
+
+    // Tie-break contract. `promotions.priority` defaults to 0, so equal
+    // priorities are the COMMON case, not an edge case. On a tie the oldest
+    // promo (lowest id) wins, and every read path must agree on that —
+    // quoteDiscounts, getEligiblePromotions and the product-card badge.
+    it('breaks a priority tie by lowest promotion id (oldest wins)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 82,
+          name: 'Nueva 30% OFF',
+          type: 'percentage',
+          value: 30,
+          scope: 'order',
+          priority: 0,
+        }),
+        buildPromotion({
+          id: 81,
+          name: 'Vieja 10% OFF',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+          priority: 0,
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'l1', product_id: 1, unit_price: 100, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+
+      // Same priority → id 81 wins even though 82 offers a bigger discount
+      // and was listed first. The rule is deterministic, not "best for the
+      // customer", so the POS snapshot and /check-eligibility never diverge.
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([81]);
+      expect(result.total_discount).toBe(10);
     });
   });
 
@@ -573,6 +619,90 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(a.promotion_discount).toBe(10); // 100 * 10%
       expect(b.promotion_discount).toBe(20); // 200 * 10%
       expect(result.applied_promotions[0].promotion_id).toBe(102);
+    });
+
+    // Case 2b — per_product grouping with order scope. With 2 distinct single-unit
+    // lines, each product has qty=1, below min_quantity=2. NO discount must apply.
+    // This is the EXACT scenario from the issue (3 different SKUs, 1 unit each).
+    it('per_product: 2 distinct SKUs qty1 each do NOT trigger the tier (issue repro)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 201,
+          name: 'Super promo per_product 5% desde 2 und',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [
+            { product_id: 1 },
+            { product_id: 2 },
+            { product_id: 3 },
+          ],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 201, min_quantity: 2, max_quantity: null, value: 5, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 49499, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 43500, quantity: 1 },
+          { line_id: 'l3', product_id: 3, unit_price: 69000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Each product has qty=1 < min_quantity=2 → no tier matches any product
+      // → no discount applied to any line.
+      expect(result.total_discount).toBe(0);
+      for (const line of result.items) {
+        expect(line.promotion_discount).toBe(0);
+        expect(line.promotion_ids).toEqual([]);
+      }
+      expect(result.applied_promotions).toEqual([]);
+    });
+
+    // Case 2c — per_product grouping: 1 product reaches min_quantity on its own.
+    // Product A has qty=2 (qualifies); products B and C have qty=1 each (don't).
+    // The discount applies to product A only.
+    it('per_product: 1 product with qty=2 triggers the tier, others do not', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 202,
+          name: 'Per-product 10% desde 2 und',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          promotion_products: [{ product_id: 1 }, { product_id: 2 }, { product_id: 3 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 202, min_quantity: 2, max_quantity: null, value: 10, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 100, quantity: 2 },  // qualifies
+          { line_id: 'l2', product_id: 2, unit_price: 100, quantity: 1 },  // no
+          { line_id: 'l3', product_id: 3, unit_price: 100, quantity: 1 },  // no
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // Product 1 (qty=2) qualifies → 10% of 200 = 20. Others 0.
+      expect(result.total_discount).toBe(20);
+      const l1 = result.items.find((i) => i.line_id === 'l1')!;
+      const l2 = result.items.find((i) => i.line_id === 'l2')!;
+      const l3 = result.items.find((i) => i.line_id === 'l3')!;
+      expect(l1.promotion_discount).toBe(20);
+      expect(l1.promotion_ids).toEqual([202]);
+      expect(l2.promotion_discount).toBe(0);
+      expect(l2.promotion_ids).toEqual([]);
+      expect(l3.promotion_discount).toBe(0);
+      expect(l3.promotion_ids).toEqual([]);
+      expect(result.applied_promotions).toHaveLength(1);
+      expect(result.applied_promotions[0].promotion_id).toBe(202);
+      expect(result.applied_promotions[0].applicable_item_ids).toEqual(['l1']);
     });
 
     // Case 3 — product scope with base + variant sharing the same product_id.
@@ -851,6 +981,86 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.tier_progress[0].remaining_quantity).toBe(1); // 3 - 2
       expect(result.tier_progress[0].benefit_type).toBe('percentage');
       expect(result.tier_progress[0].benefit_value).toBe(15);
+    });
+
+    // Promos do NOT stack, so a nudge for a promo that would lose the
+    // winner-takes-all comparison is a lie: the customer adds product and the
+    // discount never changes. Only promos that could actually take over are
+    // advertised.
+    it('suppresses the nudge of a promo that would lose to the applied one', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 401,
+          name: 'Orden 10% (gana)',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+          priority: 1,
+        }),
+        buildPromotion({
+          id: 402,
+          name: 'Escala desde 3 und (pierde)',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          priority: 5,
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 402, min_quantity: 3, max_quantity: null, value: 25, type: 'percentage', sort_order: 0 }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 10000, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 20000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 401 (priority 1) applies. 402 (priority 5) has a tier one unit away,
+      // but even reaching it would not beat 401, so no nudge is emitted.
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([401]);
+      expect(result.total_discount).toBe(3000);
+      expect(result.tier_progress).toEqual([]);
+    });
+
+    it('keeps the nudge of a promo that would beat the applied one', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 403,
+          name: 'Escala desde 3 und (ganaria)',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          priority: 0,
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 403, min_quantity: 3, max_quantity: null, value: 25, type: 'percentage', sort_order: 0 }),
+          ],
+        }),
+        buildPromotion({
+          id: 404,
+          name: 'Orden 10% (aplica ahora)',
+          type: 'percentage',
+          value: 10,
+          scope: 'order',
+          priority: 5,
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 10000, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 20000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 404 applies today (403's tier is not reached yet), but 403 has a lower
+      // priority number, so reaching its tier WOULD take over — the nudge is
+      // actionable and must survive.
+      expect(result.applied_promotions.map((p) => p.promotion_id)).toEqual([404]);
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].promotion_id).toBe(403);
+      expect(result.tier_progress[0].remaining_quantity).toBe(1);
     });
 
     it('emits no nudge when there are no in-scope items yet (scopedQty=0)', async () => {

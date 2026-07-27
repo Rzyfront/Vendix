@@ -22,6 +22,7 @@ import {
 } from '@/shared/components/selector/selector';
 import NotificationSoundSettings from '@/features/store/components/notification-sound-settings';
 import { SettingsService } from '@/features/store/services/settings.service';
+import { buildSettingsUpdatePayload } from '@/features/store/utils/settings-payload';
 import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
 import type {
   StoreSettings,
@@ -1129,11 +1130,19 @@ function GeneralTab() {
 
   const updateMutation = useMutation({
     mutationFn: (data: Partial<StoreSettings>) => SettingsService.updateSettings(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['store-settings'] });
+    onSuccess: (response) => {
+      // Refresca cache y form con la respuesta canónica del backend
+      // (preserva `panel_ui.STORE_ADMIN`/STORE_ECOMMERCE anidados).
+      if (response) {
+        queryClient.setQueryData(['store-settings'], response);
+        setForm(response);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['store-settings'] });
+      }
       toastSuccess('Configuración guardada');
     },
-    onError: () => toastError('Error al guardar la configuración'),
+    onError: (error) =>
+      toastError(SettingsService.extractErrorMessage(error, 'Error al guardar la configuración')),
   });
 
   const updateGeneralField = (key: keyof GeneralSettings & string, value: any) => {
@@ -1312,13 +1321,21 @@ function GeneralTab() {
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
 
-    const payload: Partial<StoreSettings> = {
+    // PATCH mínimo: solo secciones que cambiaron respecto al snapshot.
+    // El adapter `buildSettingsUpdatePayload` aísla `panel_ui.STORE_ADMIN`,
+    // omite secciones no editadas y bloquea el envío si nada cambió.
+    const formWithName: Partial<StoreSettings> = {
       ...form,
       general: {
         ...form.general,
         name: storeName?.trim(),
       } as GeneralSettings,
     };
+    const payload = buildSettingsUpdatePayload(formWithName, settings);
+    if (!payload) {
+      toastInfo('Sin cambios para guardar');
+      return;
+    }
     updateMutation.mutate(payload);
   };
 
@@ -1572,7 +1589,7 @@ function GeneralTab() {
                         // `isOn` mantiene el valor real del usuario (preservado en `form.panel_ui`
                         // aunque la industria lo gatee — así si la regla cambia, su preferencia
                         // resurge sin perder data).
-                        const isOn = form.panel_ui?.[mod.key] !== false; // default true
+                        const isOn = form.panel_ui?.STORE_ADMIN?.[mod.key] !== false; // default true
                         const isGatedByIndustry = hiddenByIndustries.includes(mod.key);
                         // Cuando el padre está gated, **forzar render apagado** (parity con web
                         // `panel-toggle-row`: el padre se ve en gris aunque su `panel_ui` real
@@ -1622,17 +1639,24 @@ function GeneralTab() {
                                   // Gated toggles no son interactivos (parity con web `onToggle`).
                                   if (isGatedByIndustry) return;
                                   setForm((prev) => {
-                                    const newPanelUi = { ...prev.panel_ui, [mod.key]: val };
+                                    const current = prev.panel_ui?.STORE_ADMIN ?? {};
+                                    const newStoreAdmin = { ...current, [mod.key]: val };
                                     if (!val && mod.children) {
                                       mod.children.forEach(child => {
-                                        newPanelUi[child.key] = false;
+                                        newStoreAdmin[child.key] = false;
                                       });
                                     } else if (val && mod.children) {
-                                        mod.children.forEach(child => {
-                                            newPanelUi[child.key] = true;
-                                        });
+                                      mod.children.forEach(child => {
+                                        newStoreAdmin[child.key] = true;
+                                      });
                                     }
-                                    return { ...prev, panel_ui: newPanelUi };
+                                    return {
+                                      ...prev,
+                                      panel_ui: {
+                                        ...(prev.panel_ui ?? {}),
+                                        STORE_ADMIN: newStoreAdmin,
+                                      },
+                                    };
                                   });
                                 }}
                               />
@@ -1642,7 +1666,7 @@ function GeneralTab() {
                             {mod.children && mod.children.length > 0 && (
                               <View style={{ marginTop: 12, marginLeft: 12, borderLeftWidth: 1.5, borderLeftColor: '#111827' }}>
                                 {mod.children.map(child => {
-                                  const isChildOn = form.panel_ui?.[child.key] !== false;
+                                  const isChildOn = form.panel_ui?.STORE_ADMIN?.[child.key] !== false;
                                   const isChildGatedByIndustry = hiddenByIndustries.includes(child.key);
                                   // Cascada: si el padre está gated, todos los hijos se ven apagados
                                   // aunque su valor real esté en `true`.
@@ -1691,7 +1715,16 @@ function GeneralTab() {
                                           disabled={!visualOn || isChildGatedByIndustry}
                                           onValueChange={(val) => {
                                             if (isChildGatedByIndustry) return;
-                                            setForm((prev) => ({ ...prev, panel_ui: { ...prev.panel_ui, [child.key]: val } }));
+                                            setForm((prev) => {
+                                              const current = prev.panel_ui?.STORE_ADMIN ?? {};
+                                              return {
+                                                ...prev,
+                                                panel_ui: {
+                                                  ...(prev.panel_ui ?? {}),
+                                                  STORE_ADMIN: { ...current, [child.key]: val },
+                                                },
+                                              };
+                                            });
                                           }}
                                         />
                                       </View>

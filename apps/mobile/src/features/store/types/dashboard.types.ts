@@ -131,3 +131,37 @@ export interface DateRange {
   end_date: string;
   preset?: DatePreset;
 }
+
+/**
+ * Resumen Profit & Loss (paridad con `apps/frontend` `ProfitLossSummary`).
+ * Consumido por el dashboard Store Admin para mostrar Ganancias y Gastos
+ * del mismo período que las métricas de ventas. Los valores monetarios
+ * vienen como `number` (el backend los entrega numéricos).
+ */
+export interface ProfitLossSummary {
+  period: { start_date: string; end_date: string };
+  revenue: {
+    gross_revenue: number;
+    discounts: number;
+    net_revenue: number;
+    shipping_revenue: number;
+    tax_collected: number;
+  };
+  costs: {
+    cost_of_goods_sold: number;
+    gross_profit: number;
+    gross_margin: number;
+  };
+  refunds: {
+    total_refunds: number;
+    subtotal_refunds: number;
+    tax_refunds: number;
+    shipping_refunds: number;
+  };
+  operating_expenses: number;
+  bottom_line: {
+    net_profit: number;
+    net_margin: number;
+    order_count: number;
+  };
+}

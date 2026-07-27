@@ -9,6 +9,7 @@ import {
   Modal,
   TextInput,
   TouchableOpacity,
+  Pressable,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -35,7 +36,9 @@ import { generateTempProductId } from '../../../src/features/pop/types';
 import type { ScanResult } from '../../../src/features/pop/components/pop-invoice-scanner';
 import { InventoryService } from '../../../src/features/store/services/inventory.service';
 import { ProductService } from '../../../src/features/store/services/product.service';
-import { borderRadius, colorScales, colors } from '../../../src/shared/theme';
+import { borderRadius, colorScales, colors, spacing, typography } from '../../../src/shared/theme';
+import { Icon } from '../../../src/shared/components/icon/icon';
+import { useRouter } from 'expo-router';
 import { toastError } from '../../../src/shared/components/toast/toast.store';
 
 const LOCATION_TYPE_LABELS: Record<string, string> = {
@@ -84,7 +87,34 @@ const ltStyles = StyleSheet.create({
   pickerTextActive: { color: '#22C55E', fontWeight: '600' },
 });
 
+const popStyles = StyleSheet.create({
+  quickLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[2],
+  },
+  quickLinkChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing[3],
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+  },
+  quickLinkText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: '600' as any,
+    color: '#166534',
+  },
+});
+
 export default function PopScreen() {
+  const router = useRouter();
   const [suppliers, setSuppliers] = useState<PopSupplier[]>([]);
   const [locations, setLocations] = useState<PopLocation[]>([]);
   const [products, setProducts] = useState<PopProduct[]>([]);
@@ -489,6 +519,31 @@ export default function PopScreen() {
           onQuickAddSupplier={() => setShowSupplierCreate(true)}
           onQuickAddLocation={() => setShowLocationCreate(true)}
         />
+
+        {/* Quick links de paridad web — navegación rápida desde el módulo POP */}
+        <View style={popStyles.quickLinksRow}>
+          <Pressable
+            onPress={() => router.push('/(store-admin)/inventory/suppliers' as never)}
+            style={({ pressed }) => [popStyles.quickLinkChip, pressed && { opacity: 0.7 }]}
+          >
+            <Icon name="truck" size={14} color={colors.primary} />
+            <Text style={popStyles.quickLinkText}>Proveedores</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/(store-admin)/inventory/locations' as never)}
+            style={({ pressed }) => [popStyles.quickLinkChip, pressed && { opacity: 0.7 }]}
+          >
+            <Icon name="map-pin" size={14} color={colors.primary} />
+            <Text style={popStyles.quickLinkText}>Bodegas</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push('/(store-admin)/inventory/movements' as never)}
+            style={({ pressed }) => [popStyles.quickLinkChip, pressed && { opacity: 0.7 }]}
+          >
+            <Icon name="repeat" size={14} color={colors.primary} />
+            <Text style={popStyles.quickLinkText}>Movimientos</Text>
+          </Pressable>
+        </View>
 
         <PopProductGrid
           products={products}

@@ -142,7 +142,7 @@ export interface StoreSettings {
   dispatch?: DispatchSettings;
   restaurant?: RestaurantSettings;
   membership?: MembershipSettings;
-  panel_ui?: any;
+  panel_ui?: PanelUiSettings;
 
   // Compatibility fields
   name?: string;
@@ -154,6 +154,20 @@ export interface StoreSettings {
   logo_url?: string;
   currency?: string;
   country?: string;
+}
+
+/**
+ * Estado de visibilidad de módulos en el panel. Refleja el shape que el
+ * backend persiste y devuelve (`store_settings.settings.panel_ui`):
+ * `{ [app: string]: { [moduleKey: string]: boolean } }`. El adapter en
+ * `settings.service.ts` aplana la raíz `panel_ui` (`STORE_ADMIN`,
+ * `STORE_ECOMMERCE`) cuando escribe y la vuelve a anidar al normalizar
+ * la respuesta.
+ */
+export interface PanelUiSettings {
+  STORE_ADMIN?: Record<string, boolean>;
+  STORE_ECOMMERCE?: Record<string, boolean>;
+  [app: string]: Record<string, boolean> | undefined;
 }
 
 export interface StoreUser {

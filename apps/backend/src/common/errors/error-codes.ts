@@ -309,6 +309,14 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Store is unavailable for checkout',
   },
+  // QUI-467: la billetera es saldo prepago por cliente, así que exige
+  // identidad autenticada. Se mantiene en 400 (era un BadRequestException) para
+  // no disparar el interceptor de refresh/logout que sí reacciona al 401.
+  ECOM_CHECKOUT_005: {
+    code: 'ECOM_CHECKOUT_005',
+    httpStatus: 400,
+    devMessage: 'Wallet payment requires an authenticated customer',
+  },
   ECOM_ACCOUNT_001: {
     code: 'ECOM_ACCOUNT_001',
     httpStatus: 404,
@@ -2879,6 +2887,18 @@ export const ErrorCodes = {
     code: 'RECIPE_ITEM_NOT_FOUND',
     httpStatus: 404,
     devMessage: 'Componente de receta no encontrado',
+  },
+  RECIPE_ITEM_INVALID_QUANTITY: {
+    code: 'RECIPE_ITEM_INVALID_QUANTITY',
+    httpStatus: 422,
+    devMessage:
+      'La cantidad del sub-componente debe ser mayor a 0 (no se permite 0 ni nula)',
+  },
+  RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS: {
+    code: 'RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS',
+    httpStatus: 409,
+    devMessage:
+      'La receta no puede activarse porque tiene sub-componentes con cantidad invalida (0 o nula). Corregir antes de activar.',
   },
 
   // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C

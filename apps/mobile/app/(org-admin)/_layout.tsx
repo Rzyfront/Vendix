@@ -12,6 +12,9 @@ const routeTitles: Record<string, string> = {
   orders: 'Órdenes',
   subscriptions: 'Suscripciones',
   settings: 'Configuración',
+  logs: 'Registros de auditoría',
+  sessions: 'Sesiones',
+  'login-attempts': 'Intentos de inicio de sesión',
 };
 
 // Breadcrumb = sección padre (sin rutas hijas con padre en org-admin actualmente, pero se deja para futuro)

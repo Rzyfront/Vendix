@@ -22,6 +22,8 @@ import { SessionsService } from '../../../cash-registers/sessions/sessions.servi
 import { MovementsService } from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { WalletService } from '../../../wallet/wallet.service';
+import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 
 const REFUNDABLE_STATES = ['delivered', 'finished'];
 
@@ -40,6 +42,9 @@ export class RefundFlowService {
     // QUI-431 — serial pool + enforcement (no-op for non-serialized products).
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
+    // QUI-457 — credit customer wallet on `store_credit` refunds.
+    private readonly walletService: WalletService,
+    private readonly walletBalance: WalletBalanceService,
   ) {}
 
   async previewRefund(
@@ -312,8 +317,50 @@ export class RefundFlowService {
             `${calculation.total_refund.toFixed(2)} (${calculation.is_full_refund ? 'full' : 'partial'})`,
         );
 
-        // Record cash register refund movement (non-blocking)
-        if (userId) {
+        // QUI-457: If refund_method === 'store_credit', credit the customer's
+        // wallet so the refund value is actually available to them. Non-blocking
+        // because the refund row is already committed — a credit failure only
+        // means an operator alert via log; the sale refund is intact.
+        if (dto.refund_method === 'store_credit' && order.customer_id) {
+          try {
+            const customerWallet =
+              await this.walletService.getOrCreateWallet(order.customer_id);
+            await this.walletBalance.credit(
+              customerWallet.id,
+              Number(calculation.total_refund),
+              {
+                reference_type: 'refund',
+                reference_id: completedRefund.id,
+                description: `Refund #${completedRefund.id} for order #${orderId}`,
+                created_by: userId,
+              },
+            );
+            this.logger.log(
+              `Wallet credited: customer=${order.customer_id} amount=${calculation.total_refund} refund=#${completedRefund.id}`,
+            );
+          } catch (e) {
+            this.logger.error(
+              `Failed to credit wallet for refund #${completedRefund.id} (customer=${order.customer_id}): ${e?.message ?? e}`,
+            );
+          }
+        }
+
+        // Record cash register refund movement (non-blocking).
+        //
+        // Sólo para métodos que realmente sacan efectivo del cajón:
+        // `recordRefundCashRegisterMovement` registra el movimiento con
+        // `payment_method: 'cash'` fijo. Con caja habilitada y sesión abierta
+        // —el flujo normal de un reembolso en tienda— un `store_credit`
+        // pagaría dos veces: crédito en la billetera del cliente (arriba) más
+        // salida de efectivo acá. `bank_transfer` tiene el mismo problema: sale
+        // por banco, no por caja.
+        //
+        // `original_payment` se sigue registrando como hoy: depende del método
+        // del pago original, que este servicio no resuelve todavía.
+        const movesCash =
+          dto.refund_method !== 'store_credit' &&
+          dto.refund_method !== 'bank_transfer';
+        if (userId && movesCash) {
           this.recordRefundCashRegisterMovement(
             order.store_id,
             userId,

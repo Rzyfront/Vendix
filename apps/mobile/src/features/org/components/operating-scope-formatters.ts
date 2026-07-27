@@ -51,6 +51,8 @@ export function blockerTitle(b: BlockerLike): string {
       return 'Tiendas activas insuficientes';
     case 'NO_ACTIVE_STORES':
       return 'No hay tiendas activas';
+    case 'OPERATING_SCOPE_FISCAL_COMBINATION_INVALID':
+      return 'Combinación inválida de modos operativo y fiscal';
     default:
       return b.code;
   }

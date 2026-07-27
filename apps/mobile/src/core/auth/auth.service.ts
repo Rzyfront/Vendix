@@ -27,6 +27,7 @@ export class AuthService {
       user_settings: data.user_settings,
       store_settings: data.store_settings,
       default_panel_ui: data.default_panel_ui,
+      permissions: data.permissions,
       access_token: data.access_token,
       refresh_token: data.refresh_token,
     });
@@ -45,6 +46,7 @@ export class AuthService {
       user_settings: result.user_settings,
       store_settings: result.store_settings,
       default_panel_ui: result.default_panel_ui,
+      permissions: result.permissions,
       access_token: result.access_token,
       refresh_token: result.refresh_token,
     });
@@ -128,6 +130,7 @@ export class AuthService {
       user_settings: data.user_settings,
       store_settings: data.store_settings,
       default_panel_ui: data.default_panel_ui,
+      permissions: data.permissions,
       access_token: data.access_token,
       refresh_token: data.refresh_token,
     });

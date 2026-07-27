@@ -249,11 +249,22 @@ const DashboardScreen = () => {
     queryFn: () => AnalyticsService.getSalesByChannel(dateRange),
   });
 
+  const { data: profitLoss, refetch: refetchProfitLoss } = useQuery({
+    queryKey: ['profit-loss-summary', preset],
+    queryFn: () => DashboardService.getProfitLossSummary(dateRange),
+  });
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refetchSummary(), refetchTrends(), refetchStats(), refetchInventory()]);
+    await Promise.all([
+      refetchSummary(),
+      refetchTrends(),
+      refetchStats(),
+      refetchInventory(),
+      refetchProfitLoss(),
+    ]);
     setRefreshing(false);
-  }, [refetchSummary, refetchTrends, refetchStats, refetchInventory]);
+  }, [refetchSummary, refetchTrends, refetchStats, refetchInventory, refetchProfitLoss]);
 
   const chartData = useMemo(() => {
     if (!trends?.length) return [];
@@ -342,6 +353,8 @@ const DashboardScreen = () => {
     { label: 'Gastos', icon: 'credit-card', route: '/expenses' },
     { label: 'Clientes', icon: 'users', route: '/customers' },
     { label: 'Compras', icon: 'shopping-bag', route: '/inventory/pop' },
+    { label: 'POS', icon: 'shopping-bag', route: '/pos' },
+    { label: 'Marketing', icon: 'megaphone', route: '/marketing/promotions' },
   ];
 
   if (summaryError) {
@@ -352,22 +365,6 @@ const DashboardScreen = () => {
     <View style={styles.root}>
       <PullToRefresh refreshing={refreshing} onRefresh={onRefresh}>
         <View style={styles.inner}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
-            {PRESETS.map((p) => (
-              <Pressable
-                key={p.value}
-                onPress={() => setPreset(p.value)}
-                style={preset === p.value ? styles.presetActive : styles.presetInactive}
-              >
-                <Text
-                  style={preset === p.value ? styles.presetTextActive : styles.presetTextInactive}
-                >
-                  {p.label}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
           {summaryLoading ? (
             <View style={styles.loaderContainer}>
               <Spinner />
@@ -388,6 +385,16 @@ const DashboardScreen = () => {
                       : undefined,
                 },
                 {
+                  label: 'Ganancias',
+                  value: formatCurrency(profitLoss?.bottom_line?.net_profit || 0),
+                  icon: <Icon name="trending-up" size={14} color={colorScales.green[600]} />,
+                  iconBg: colorScales.green[50],
+                  iconColor: colorScales.green[600],
+                  description: profitLoss?.bottom_line
+                    ? `Margen ${(profitLoss.bottom_line.net_margin || 0).toFixed(1)}%`
+                    : 'margen neto',
+                },
+                {
                   label: 'Órdenes',
                   value: summary.total_orders.toLocaleString(),
                   icon: <Icon name="shopping-cart" size={14} color={colorScales.blue[500]} />,
@@ -399,20 +406,12 @@ const DashboardScreen = () => {
                       : undefined,
                 },
                 {
-                  label: 'Ticket Prom.',
-                  value: formatCurrency(summary.average_order_value || 0),
-                  icon: <Icon name="receipt" size={14} color={colorScales.blue[600]} />,
-                  iconBg: colorScales.blue[50],
-                  iconColor: colorScales.blue[600],
-                  description: `${summary.total_units_sold || 0} uds. vendidas`,
-                },
-                {
-                  label: 'Clientes',
-                  value: (summary.total_customers || 0).toLocaleString(),
-                  icon: <Icon name="users" size={14} color={colorScales.amber[600]} />,
-                  iconBg: colorScales.amber[50],
-                  iconColor: colorScales.amber[600],
-                  description: 'clientes únicos',
+                  label: 'Gastos',
+                  value: formatCurrency(profitLoss?.operating_expenses || 0),
+                  icon: <Icon name="trending-down" size={14} color={colorScales.red[600]} />,
+                  iconBg: colorScales.red[50],
+                  iconColor: colorScales.red[600],
+                  description: 'gastos operativos',
                 },
               ]}
             />

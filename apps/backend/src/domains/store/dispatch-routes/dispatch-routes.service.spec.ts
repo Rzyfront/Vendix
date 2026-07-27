@@ -8,6 +8,7 @@ describe('DispatchRoutesService — create (route assembly + numbering)', () => 
   let prismaMock: any;
   let routeNumberGeneratorMock: any;
   let eventEmitterMock: any;
+  let orderFlowServiceMock: any;
   let routeFlow: RouteFlowService;
   let context: any;
 
@@ -98,6 +99,7 @@ describe('DispatchRoutesService — create (route assembly + numbering)', () => 
       eventEmitterMock as any,
       {} as any,
       {} as any,
+      orderFlowServiceMock as any,
     );
 
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue(context);
@@ -272,6 +274,7 @@ describe('DispatchRoutesService — addStops (eligibility + auto-confirm)', () =
   let service: DispatchRoutesService;
   let prismaMock: any;
   let eventEmitterMock: any;
+  let orderFlowServiceMock: any;
   let routeFlow: RouteFlowService;
 
   const STORE_ID = 100;
@@ -293,6 +296,7 @@ describe('DispatchRoutesService — addStops (eligibility + auto-confirm)', () =
     prismaMock.$transaction = jest.fn((cb: any) => cb(prismaMock));
 
     eventEmitterMock = { emit: jest.fn() };
+    orderFlowServiceMock = {};
     routeFlow = new RouteFlowService(
       prismaMock as any,
       eventEmitterMock as any,

@@ -493,6 +493,11 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'share-2': Share2,
   printer: Printer,
   refresh: RefreshCw,
+  // Alias con el nombre canónico de lucide. Sin esto, los ~10 sitios de
+  // apps/mobile que piden 'refresh-cw' renderizan un <View/> vacío en
+  // silencio: IconProps.name es `string`, así que el typecheck no lo atrapa y
+  // el componente degrada sin avisar cuando la clave no existe.
+  'refresh-cw': RefreshCw,
   sliders: Sliders,
   'shopping-bag': ShoppingBag,
   'edit-2': Edit2,

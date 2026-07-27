@@ -51,6 +51,13 @@ export interface AppliedPromotion {
    * it falls back to a generic "Promoción" badge.
    */
   type?: 'percentage' | 'fixed_amount';
+  scope?: 'order' | 'product' | 'category';
+  /**
+   * Backend-defined promotion priority that determined this promo as the
+   * winner. With the winner-takes-all engine, an order has at most one
+   * applied promotion; this field is for the operator audit trail.
+   */
+  priority?: number;
 }
 
 /**

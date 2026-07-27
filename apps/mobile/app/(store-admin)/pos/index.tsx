@@ -42,6 +42,7 @@ import {
   PosCustomItemModal,
   PosPaymentModal,
   PosOrderCreateModal,
+  PosLayawayConfigModal,
   PosCashOpenModal,
   PosCashCloseModal,
   PosCashMovementModal,
@@ -2312,6 +2313,12 @@ const PosScreen = () => {
   // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
   const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
 
+  // Modal "Configurar Plan Separé" — paridad web `layaway-config-modal`
+  // (apps/frontend/.../layaway-config-modal.component.ts). Reemplaza el
+  // placeholder toast que tenía el `case 'layaway'` de `handlePrimaryCta`
+  // antes de QUI-499.
+  const [showLayawayConfigModal, setShowLayawayConfigModal] = useState(false);
+
   // Sesión de caja activa — suscrita al store global `useCashRegisterStore`
   // para que el header y los 4 modales PosCash* reflejen cambios síncronos
   // tras open/close sin esperar un refetch. Se hidrata en mount desde
@@ -2346,6 +2353,7 @@ const PosScreen = () => {
     setShowCustomItemModal(false);
     setShowCustomerModal(false);
     setShowOrderCreateModal(false);
+    setShowLayawayConfigModal(false);
   }, []);
   const [activeFilters, setActiveFilters] = useState<{
     category_id: string;
@@ -2658,7 +2666,10 @@ const PosScreen = () => {
   // CTA primario del footer — despacha según el modo activo.
   // - `sale`     → abre modal de pago
   // - `quotation`→ crea cotización (Fase 4 — sólo placeholder)
-  // - `layaway`  → abre layaway-config-modal (Fase 4 — sólo placeholder)
+  // - `layaway`  → abre `PosLayawayConfigModal` (paridad con desktop
+  //   `LayawayConfigModalComponent`, ver QUI-499). El modal POSTea
+  //   directo a `POST /store/layaway` vía `LayawayService.create` y
+  //   no fluye por `PosOrderCreateModal` (R1 del plan).
   const handlePrimaryCta = useCallback(() => {
     if (summary.totalItems === 0) {
       toastWarning('El carrito está vacío');
@@ -2677,7 +2688,7 @@ const PosScreen = () => {
           setShowCustomerModal(true);
           return;
         }
-        toastWarning('Próximamente: Configurar plan separé');
+        setShowLayawayConfigModal(true);
         return;
     }
   }, [mode, customer, summary.totalItems]);
@@ -2829,8 +2840,28 @@ const PosScreen = () => {
           setShowCartModal(false);
           setShowShippingModal(true);
         }}
+        onSaveDraft={() => {
+          // Paridad con web: persiste el cart como orden en draft y
+          // notifica al usuario sin disparar el modal de pago.
+          useCartStore.getState().markAsDraft(`DRAFT_${Date.now()}`);
+          toastSuccess('Borrador guardado');
+        }}
+        hasDraft={useCartStore.getState().draftId != null}
         onCheckout={() => {
           setShowCartModal(false);
+          // En modo `layaway`, "Finalizar Venta" no abre el payment modal
+          // (no hay nada que cobrar aún — el plan difiere el pago). Dispara
+          // directamente el modal de configuración de cuotas (paridad web
+          // `pos.component.ts:onLayaway`, QUI-499 R2).
+          if (mode === 'layaway') {
+            if (!customer) {
+              toastWarning('Debes asignar un cliente para crear un plan separé');
+              setShowCustomerModal(true);
+              return;
+            }
+            setShowLayawayConfigModal(true);
+            return;
+          }
           setShowPaymentModal(true);
         }}
         canCreateCustomItems
@@ -2873,6 +2904,18 @@ const PosScreen = () => {
       <PosOrderCreateModal
         visible={showOrderCreateModal}
         onClose={() => setShowOrderCreateModal(false)}
+      />
+
+      {/* Layaway Config Modal — Plan Separé mobile (QUI-499).
+          Paridad web: apps/frontend/.../layaway-config-modal.component.ts */}
+      <PosLayawayConfigModal
+        visible={showLayawayConfigModal}
+        onClose={() => setShowLayawayConfigModal(false)}
+        onSuccess={(planNumber) => {
+          closeCheckoutModals();
+          setOrderNumber(planNumber);
+          setShowSuccess(true);
+        }}
       />
 
       {/* Success Modal */}

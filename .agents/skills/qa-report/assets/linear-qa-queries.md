@@ -33,8 +33,9 @@ where `type` ∈ `triage|backlog|unstarted|started|completed|canceled`.
 
 ## A. Bugs FOUND in the window (created in `[START,END]`, label bug)
 
-`createdAt` bounds the "found" set. Adjust the label name to your bug label (see
-`linear-issues/references/labels.md`).
+`createdAt` bounds the "found" set. The bug label is `Bug` — **capital B**, a workspace-level label.
+Linear's `name: { eq: ... }` filter is case-sensitive, so `"bug"` silently returns zero rows instead
+of erroring. Full catalog in `linear-issues/references/labels.md`.
 
 ```graphql
 query BugsFound($projectId: ID!, $start: DateTimeOrDuration!, $end: DateTimeOrDuration!) {
@@ -43,7 +44,7 @@ query BugsFound($projectId: ID!, $start: DateTimeOrDuration!, $end: DateTimeOrDu
     orderBy: createdAt
     filter: {
       project: { id: { eq: $projectId } }
-      labels: { some: { name: { eq: "bug" } } }
+      labels: { some: { name: { eq: "Bug" } } }
       createdAt: { gte: $start, lte: $end }
     }
   ) {
@@ -78,7 +79,7 @@ query BugsResolved($projectId: ID!, $start: DateTimeOrDuration!, $end: DateTimeO
     orderBy: updatedAt
     filter: {
       project: { id: { eq: $projectId } }
-      labels: { some: { name: { eq: "bug" } } }
+      labels: { some: { name: { eq: "Bug" } } }
       completedAt: { gte: $start, lte: $end }
     }
   ) { nodes { identifier title url completedAt state { name type } } pageInfo { hasNextPage endCursor } }
@@ -105,8 +106,21 @@ query Validated($projectId: ID!, $start: DateTimeOrDuration!, $end: DateTimeOrDu
 }
 ```
 
-**C2 — by label** (e.g. a `qa-validated` label): swap the `state` clause for
-`labels: { some: { name: { eq: "qa-validated" } } }`.
+C1 is the **pipeline default**: `Done` is reached only when QA verified the ticket in production with
+`verify-ticket-prod`, so `state.type == "completed"` *is* the validated set. There is no separate
+`qa-validated` label — do not invent one.
+
+**C2 — tickets QA REJECTED in the window** (`Devuelto`). These are the counterpart to C1 and the most
+report-worthy bucket: each one burned a full dev + review + release cycle and still failed. Swap the
+`state` clause for the label:
+
+```graphql
+      labels: { some: { name: { eq: "Devuelto" } } }
+```
+
+Same shape for the code-review verdicts if the report needs them: `Aprobado` (merged to dev) and
+`Requiere cambios` (PR sent back). All three are mutually exclusive — an issue carries at most one.
+See `linear-issues/references/labels.md`.
 
 > The E2E verdict (Cumple / Con defectos / No cumple / Bloqueado) is **not** a Linear field — it comes
 > from the QA's `verify-ticket-prod` run (a comment, the paste-text, or the user). Ask which encoding

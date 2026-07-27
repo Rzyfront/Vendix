@@ -16,6 +16,7 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
+  DialogService,
   ToastService} from '../../../../../../shared/components/index';
 import { StoreRolesService } from '../services/store-roles.service';
 import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
@@ -36,6 +37,7 @@ import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
+      [canClose]="canCloseRoleModal"
       title="Crear Nuevo Rol"
       subtitle="Define un nombre y descripcion para el nuevo rol"
     >
@@ -91,9 +93,21 @@ export class StoreRoleCreateModalComponent {
   readonly onRoleCreated = output<void>();
 
   roleForm: FormGroup;
+
+  // QUI-438: confirma antes de descartar cambios si el form tiene datos.
+  canCloseRoleModal = (): Promise<boolean> => {
+    if (this.roleForm.pristine) return Promise.resolve(true);
+    return this.dialogService.confirm({
+      title: 'Descartar rol',
+      message: 'Tienes datos sin guardar. ¿Cerrar y descartarlos?',
+      confirmText: 'Descartar',
+      cancelText: 'Seguir editando',
+      confirmVariant: 'danger'});
+  };
   readonly isCreating = signal(false);
   private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
 
   constructor(private fb: FormBuilder) {
     this.roleForm = this.fb.group({

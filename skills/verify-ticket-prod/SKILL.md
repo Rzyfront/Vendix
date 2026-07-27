@@ -14,10 +14,12 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Verifying a Linear ticket is correctly applied in production"
+    - "Closing a Linear ticket to Done after QA verifies it in production"
+    - "Returning a failed ticket to Todo with the Devuelto label and raised priority"
     - "Running a controlled E2E verification of a shipped ticket on www.vendix.online"
     - "Confirming a production fix matches its requirement or reporting defects"
     - "Non-destructive production verification with the demo account"
@@ -165,9 +167,10 @@ Every run ends in exactly one verdict, backed by evidence:
    suspicious becomes a finding, not an exploit.
 7. **Compare to the requirement** — resolve to one verdict. Every "pass" claim must trace to an
    acceptance criterion and an observed result.
-8. **Report** — deliver the coverage matrix + verdict + evidence (see Reporting). Update the Linear
-   ticket status only if the user asks or the team flow requires it (`linear-issues` /
-   `pr-code-review`).
+8. **Report** — deliver the coverage matrix + verdict + evidence (see Reporting).
+9. **Close the loop in Linear** — this skill is the **last gate of the Vendix pipeline**; the verdict
+   decides whether the ticket ships or goes back. See **Closing the Ticket** below. Suggest the
+   transition and confirm it — never apply it silently.
 
 ## The Three Flow Schemes (production-adapted)
 
@@ -259,6 +262,7 @@ Never mark a ticket "verified" on prod from a build-passing or happy-path-only s
 | Local pre-merge verification | `how-to-test` (not this skill) |
 | "Does it compile / boot?" | `buildcheck-dev` |
 | Read or update the ticket | `linear-issues` |
+| Verdict reached — where does the ticket go? | **Closing the Ticket** section: ✅ → `Done`; ⚠️/❌ → `Todo` + `Devuelto` + prioridad Alta; ⛔/🚫 → no mover |
 | Deep prod infra diagnosis (logs, SSH, AWS) | `vendix-cloud-operations` |
 
 ## Anti-Patterns
@@ -271,7 +275,52 @@ Never mark a ticket "verified" on prod from a build-passing or happy-path-only s
 | Reporting "works" from happy path only | Run Happy + Sad + Controlled Probe and report the matrix + verdict |
 | Adding a cert-ignore flag on prod | Prod has a valid cert; Playwright MCP needs no flag there — only override after confirming a real TLS issue |
 | Marking a ticket verified because the build passed | Build/deploy ≠ behaves; verify the flow E2E |
+| Moving a ticket to `Done` on a green Happy Path alone | `Done` requires Happy + Sad + Controlled Probe reported |
+| Tagging `Devuelto` when the change never reached prod (⛔) | That is a release gap, not a defect — leave it in `In Review` and report it to whoever ran the release |
+| Sending `labelIds` without reading the ticket's current labels first | Linear replaces the whole set — read, strip the 3 workflow labels, send the union |
 | Reading further after seeing another tenant's data | Stop immediately; that read is itself the incident to report |
+
+## Closing the Ticket (SUGGESTED — ask, don't block)
+
+This skill is the **last gate** of the Vendix pipeline. A ticket arrives here in `In Review` (put
+there by the release, `git-workflow` RULE 10) carrying **no workflow labels**. The verdict decides
+where it goes next.
+
+| Verdict | Estado destino | Label | Prioridad |
+| --- | --- | --- | --- |
+| ✅ **Matches** | `Done` (`30f4c5c5-e1de-43a7-b00e-b737fc6e73a4`) | — | sin cambio |
+| ⚠️ **Deployed with defects** | `Todo` (`1c3e8e81-3fa4-46fa-9674-0d46e6bb003f`) | **`Devuelto`** (`dbdfcb7c-af6f-49bb-825f-3f38f9df218e`) | **Alta (2)**, salvo Urgente |
+| ❌ **Does not match requirement** | `Todo` | **`Devuelto`** | **Alta (2)**, salvo Urgente |
+| ⛔ **Not deployed / not reachable** | **sin cambio** — se queda en `In Review` | — | sin cambio |
+| 🚫 **Blocked** | **sin cambio** — se queda en `In Review` | — | sin cambio |
+
+**Priority escalation on `Devuelto`:**
+
+```js
+priority = current === 1 ? 1 : 2   // Urgente se respeta; nunca degradar
+```
+
+A ticket that reached production and failed already burned a full dev + review + release cycle. It
+jumps the queue over work nobody has attempted yet. The Urgent carve-out exists because `2` would be
+a **demotion** for a ticket already flagged critical.
+
+**Why `⛔ Not deployed` does NOT get `Devuelto`:** the ticket is not defective — it never shipped.
+That is a release gap, not an implementation gap, and tagging the dev's work as returned would be
+wrong. Leave it in `In Review` and **report the discrepancy to whoever ran the release**: something
+moved this ticket to the QA queue without the change actually reaching prod.
+
+**Mechanics (delegate every write to `linear-issues`):**
+
+- `Devuelto` is **mutually exclusive** with `Aprobado` and `Requiere cambios`. Linear's
+  `issueUpdate.labelIds` **replaces the whole set** — read the issue's current labels, strip the
+  three workflow labels, add `Devuelto`, send the union. A bare array wipes the ticket's topic labels
+  (`Bug`, `Feature`, `IA`, …).
+- **Verify the write landed.** A dead label UUID fails with `Entity not found: IssueLabel` while the
+  state change succeeds — the agent reports success and the label never appears. Read the issue back.
+- **Never close a ticket on a partial run.** `Done` requires Happy + Sad + Controlled Probe all
+  reported. A green Happy Path alone is not a verdict (see Anti-Patterns).
+- Include the coverage matrix and the evidence in a Linear comment alongside the transition, so the
+  dev picking up a `Devuelto` ticket knows exactly which criterion failed and where.
 
 ## Related Skills
 

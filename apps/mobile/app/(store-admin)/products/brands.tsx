@@ -37,6 +37,7 @@ export default function BrandsListScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const canCreate = useCan('store:brands:create');
+  const canUpdate = useCan('store:brands:update');
   const canDelete = useCan('store:brands:delete');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -82,6 +83,28 @@ export default function BrandsListScreen() {
     onError: () => {
       toastError('No se pudo eliminar la marca');
     },
+  });
+
+  // Toggle rápido de estado (Activar/Desactivar) — paridad con web.
+  const stateMutation = useMutation({
+    mutationFn: ({ id, nextState }: { id: number; nextState: BrandState }) =>
+      BrandService.update(id, { state: nextState }),
+    onSuccess: () => {
+      toastSuccess('Estado actualizado');
+      queryClient.invalidateQueries({ queryKey: ['brands'] });
+      queryClient.invalidateQueries({ queryKey: ['brands-stats'] });
+    },
+    onError: () => toastError('No se pudo cambiar el estado'),
+  });
+
+  const featuredMutation = useMutation({
+    mutationFn: ({ id, is_featured }: { id: number; is_featured: boolean }) =>
+      BrandService.update(id, { is_featured }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['brands'] });
+      queryClient.invalidateQueries({ queryKey: ['brands-stats'] });
+    },
+    onError: () => toastError('No se pudo cambiar el destaque'),
   });
 
   function handleSearch(value: string) {
@@ -257,6 +280,15 @@ export default function BrandsListScreen() {
               brand={item}
               onPress={() => router.push(`/(store-admin)/products/brands/${item.id}`)}
               onLongPress={canDelete ? () => setDeleteTarget(item) : undefined}
+              onToggleFeatured={canUpdate ? () =>
+                featuredMutation.mutate({ id: item.id, is_featured: !item.is_featured }) : undefined}
+              isTogglingFeatured={featuredMutation.isPending}
+              onToggleState={canUpdate ? () => {
+                const nextState: BrandState = item.state === 'active' ? 'inactive' : 'active';
+                stateMutation.mutate({ id: item.id, nextState });
+              } : undefined}
+              onEdit={canUpdate ? () => router.push(`/(store-admin)/products/brands/${item.id}`) : undefined}
+              onDelete={canDelete ? () => setDeleteTarget(item) : undefined}
             />
           )}
           ListFooterComponent={
@@ -296,15 +328,22 @@ function BrandCard({
   onLongPress,
   onToggleFeatured,
   isTogglingFeatured,
+  onToggleState,
+  onEdit,
+  onDelete,
 }: {
   brand: Brand;
   onPress: () => void;
   onLongPress?: () => void;
   onToggleFeatured?: () => void;
   isTogglingFeatured?: boolean;
+  onToggleState?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   const stateVariant = brand.state === 'active' ? 'success' : brand.state === 'inactive' ? 'default' : 'warning';
   const stateLabel = brand.state === 'active' ? 'Activa' : brand.state === 'inactive' ? 'Inactiva' : 'Archivada';
+  const showActions = Boolean(onEdit || onToggleState || onToggleFeatured || onDelete);
 
   return (
     <Pressable
@@ -397,6 +436,53 @@ function BrandCard({
             color={brand.is_featured ? colors.warning : colors.text.muted}
           />
         </Pressable>
+      ) : null}
+      {showActions ? (
+        <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+          {onEdit ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onEdit(); }}
+              hitSlop={8}
+              accessibilityLabel="Editar marca"
+              style={({ pressed }) => [
+                { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon name="edit-2" size={16} color={colors.primary} />
+            </Pressable>
+          ) : null}
+          {onToggleState ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onToggleState(); }}
+              hitSlop={8}
+              accessibilityLabel={brand.state === 'active' ? 'Desactivar marca' : 'Activar marca'}
+              style={({ pressed }) => [
+                { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon
+                name={brand.state === 'active' ? 'toggle-right' : 'toggle-left'}
+                size={16}
+                color={brand.state === 'active' ? colors.success : colors.text.muted}
+              />
+            </Pressable>
+          ) : null}
+          {onDelete ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation?.(); onDelete(); }}
+              hitSlop={8}
+              accessibilityLabel="Eliminar marca"
+              style={({ pressed }) => [
+                { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+                pressed && { opacity: 0.6 },
+              ]}
+            >
+              <Icon name="trash-2" size={16} color={colors.error} />
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
       <Icon name="chevron-right" size={18} color={colors.text.muted} />
     </Pressable>

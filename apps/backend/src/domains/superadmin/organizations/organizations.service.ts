@@ -272,8 +272,26 @@ export class OrganizationsService {
       );
     }
 
-    return this.prisma.organizations.delete({
-      where: { id },
+    // QUI-473: deleting the organization must clean up its roles too.
+    //
+    // Background: the FK `roles_organization_id_fkey` is `ON DELETE SET NULL`
+    // and the new unique `roles_organization_id_name_key` uses NULLS NOT
+    // DISTINCT. If two organizations share a role name (e.g. both have a
+    // 'Preventista' role), the SET NULL would orphan both rows to
+    // `(NULL, 'Preventista')` — and NULLS NOT DISTINCT treats those as a
+    // duplicate → PostgreSQL raises 23505 (P2002) on the second delete.
+    //
+    // The pre-checks in `organization/roles.service.ts` and
+    // `store-roles.service.ts` already block creation of roles with
+    // system-role names, so names that legitimately collide here are
+    // always between TWO organizations. We delete the org's roles in the
+    // same transaction; FK `role_permissions.role_id` is ON DELETE CASCADE
+    // (cleaned automatically), and `user_roles.role_id` / `organization_users`
+    // / `store_staff` cannot reference these roles because we just verified
+    // the org has zero users / stores.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.roles.deleteMany({ where: { organization_id: id } });
+      return tx.organizations.delete({ where: { id } });
     });
   }
 

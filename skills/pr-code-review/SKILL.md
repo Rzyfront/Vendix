@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "revisar PR"
@@ -17,7 +17,8 @@ metadata:
     - "revisar pull request"
     - "Running the 80% pass gate before merging a PR (git-workflow RULE 8)"
     - "Re-developing solutions identified by a code review below 80%"
-    - "Updating a Linear issue to In Review after merging a PR to dev"
+    - "Tagging a Linear issue Aprobado after merging a PR to dev"
+    - "Tagging a Linear issue Requiere cambios after requesting changes on a PR"
 ---
 
 ## When to Use
@@ -304,14 +305,22 @@ Did the user ask to review PRs?
 ├─ Are there PRs from the same author in both frontend AND backend?
 │  └─ YES → Mention possible relationship between PRs (complete front+back feature)
 │
-└─ Did the user just MERGE a PR to dev?  (Post-Merge — suggested)
-   └─ Suggest updating the Linear issue:
-       → Find it: PR body reference (## Linear / QUI-XXX) → else linear-issues
-         (search) → else ask the user.
-       → Update via linear-issues: state → In Review + add 'dev' label
-         (union). NEVER to any other state.
-       → If the issue is terminal (Done/Canceled/Duplicate) → ask extra
-         confirmation before reverting it.
+└─ Did the review reach a verdict?  (suggested — label only, NEVER advance state)
+   ├─ >= 80% and merged to dev → label 'Aprobado'
+   └─ <  80% and sent back     → label 'Requiere cambios'
+       → Find the issue, tiered — stop at the first hit:
+           0. PR body reference (## Linear / QUI-XXX)
+           1. linear-issues search RESTRICTED to state 'Code Review'
+           2. linear-issues search across In Progress / Todo / Backlog
+              (devs forget to move the ticket — a tier-1 miss is normal)
+           3. Ask the user. Never invent one.
+       → Tier 2 hit → say the state is out of sync, offer to correct it
+         into Code Review (confirmation required, never silent).
+       → Read current labels, strip the other workflow labels, write the
+         verdict (labelIds REPLACES the set — never send a bare array).
+       → Read back and confirm the label landed. A dead UUID fails silently.
+       → The issue STAYS in Code Review. Release moves it out (git-workflow
+         RULE 10); QA closes it (verify-ticket-prod).
 ```
 
 ---
@@ -510,25 +519,63 @@ When the review posts a score **below 80%** or REQUEST CHANGES for any reason, t
 
 ---
 
-## Post-Merge: Update Linear Issue Status (SUGGESTED — ask, don't block)
+## Review Verdict: Update the Linear Issue (SUGGESTED — ask, don't block)
 
-**At the end of the review flow, when the user merges a PR to `dev`,** suggest moving the related Linear issue to **In Review** and tagging it **dev**. This is a suggestion with confirmation — never silent, never blocking.
+The review has two possible outcomes, and **each one writes a label, not a state**. Both are suggestions with confirmation — never silent, never blocking.
 
-**Scope rule (hard):** the only target state is **In Review**. From ANY source state → In Review. **Never move the issue to any other state** (not Done, not In Progress, not Backlog). The merge to `dev` means "the change is now on the dev environment, ready to be reviewed there" — that is exactly `In Review`.
+**Scope rule (hard): the review verdict NEVER advances the issue's state.** The issue stays in `Code Review` for the entire PR loop, however many round trips it takes. Only the release to prod moves it out (`git-workflow` RULE 10), and only QA closes it (`verify-ticket-prod`). Do not move the issue to `In Review`, `Done`, `In Progress`, or `Backlog` from this skill — ever.
 
-**Flow (after `gh pr merge <N>` to `dev`):**
+The one **state write** this skill may propose is a *correction*, not a transition: pulling a ticket **into** `Code Review` when the dev forgot to move it on opening the PR (tier 2 below). That is putting the ticket where it already should have been, and it still requires confirmation.
 
-1. **Find the related Linear issue:**
-   - **First**, parse the PR body for a Linear reference (the `## Linear` section / `QUI-XXX` / `linear.app/quickss/issue/QUI-XXX` URL that `git-workflow` RULE 9 leaves). If found, use that identifier.
-   - **Else**, invoke the **`linear-issues`** skill (`search` action) with the PR title / branch keywords; show candidates and confirm with the user.
-   - **Else** (nothing found), ask the user for the `QUI-XXX`, or skip if there is no issue. Never invent one.
-2. **Update via the `linear-issues` skill (`update` action / `issueUpdate`):**
-   - `stateId` → **In Review** (`d123e233-1f17-422e-b7c0-06f463e798df`).
-   - Add the **dev** label (`a9523fa5-931b-40ce-99b1-320831d46e58`) — pass the **union** of existing + `dev` labels (Linear's `labelIds` replaces the whole set).
-   - IDs live in `linear-issues/references/states.md` and `labels.md` — that skill owns the actual API call; do not call Linear directly from here.
-3. **Terminal-state guard:** if the issue is currently in a terminal state (`Done` / `Canceled` / `Duplicate`), **ask for extra confirmation** before reverting it to In Review — moving a closed issue back is unusual and may be a closed-by-mistake reference. Only proceed on explicit yes.
+| Outcome | GitHub action | Linear label | Linear state |
+| ------- | ------------- | ------------ | ------------ |
+| Review ≥ 80% → merged to `dev` | `gh pr merge <N>` | **`Aprobado`** | unchanged (`Code Review`) |
+| Review < 80% → sent back | `gh pr review <N> --request-changes` | **`Requiere cambios`** | unchanged (`Code Review`) |
 
-**Why:** keeps Linear in sync with the real state of the code without manual bookkeeping. The single allowed transition (→ In Review + dev) prevents the agent from accidentally closing or regressing an issue's state on a routine dev merge.
+**Flow (both outcomes):**
+
+1. **Find the related Linear issue — tiered search, stop at the first tier that hits:**
+
+   | Tier | Where to look | Why this order |
+   | ---- | ------------- | -------------- |
+   | **0** | PR body reference — the `## Linear` section / `QUI-XXX` / `linear.app/quickss/issue/QUI-XXX` URL that `git-workflow` RULE 9 leaves | Explicit and unambiguous. Use it directly, no search at all. |
+   | **1** | Candidates in state **`Code Review`** (`17d15a4c-92b4-4d6e-92d7-bc7c201fb465`) | These are precisely the tickets with an open PR awaiting review. Highest signal-to-noise on the board. |
+   | **2** | Candidates in the remaining **active** states — `In Progress`, `Todo`, `Backlog` | **Devs routinely forget to move the ticket when they open the PR.** A tier-1 miss is normal, not an anomaly. |
+   | **3** | Ask the user for the `QUI-XXX` | Never invent one. Skip if there genuinely is no issue. |
+
+   **Tiers 1 and 2 are ONE `linear-issues` (`search`) call, re-ranked locally — not two calls.** `searchIssues` takes no state filter: it is relevance-ranked and returns `state { name type }` on every node, so the tiering is a client-side sort. It is also rate-limited to 30 req/min, and a second call would return the same corpus anyway. Recipe in `linear-issues/references/graphql-mutations.md`.
+
+   Build the search term from the PR title, branch name, and key changed paths. Show candidates **with their current state** and confirm with the user — never guess silently, at any tier.
+
+   **Drop `Done` / `Canceled` / `Duplicate` / `In Review` from the candidate list.** A PR matching a closed ticket is usually a wrong reference; a PR matching an `In Review` ticket means that change already shipped. If tiers 0–3 all come up empty, only then offer to widen the search to those states.
+
+   **When the match comes from tier 2, say so explicitly:**
+
+   > Encontré `QUI-418` en `In Progress`, no en `Code Review` — el ticket no se movió al abrir el PR. ¿Lo muevo a `Code Review` junto con la label?
+
+   Fixing the drift is a suggestion with confirmation, same as everything else here. Reporting it matters more than fixing it: a tier-2 hit is evidence that `git-workflow` RULE 9 is being skipped, and that is worth surfacing to the team rather than papering over on every PR.
+2. **Read the issue's current labels first.** Linear's `issueUpdate.labelIds` **replaces the whole set** — it does not append. Sending a bare array wipes every other label on the ticket.
+3. **Write the verdict label via the `linear-issues` skill**, stripping the other two workflow labels:
+   - `Aprobado` — `c41a06ad-bc03-4baf-a36a-93df6230054b`
+   - `Requiere cambios` — `1b0a8cac-be15-4aaf-9e68-ba9f86f57574`
+   - `Devuelto` — `dbdfcb7c-af6f-49bb-825f-3f38f9df218e` (owned by QA, never written here — but strip it if present, since a new review supersedes the old QA verdict)
+
+   ```js
+   const WORKFLOW_LABELS = [
+     'c41a06ad-bc03-4baf-a36a-93df6230054b', // Aprobado
+     '1b0a8cac-be15-4aaf-9e68-ba9f86f57574', // Requiere cambios
+     'dbdfcb7c-af6f-49bb-825f-3f38f9df218e', // Devuelto
+   ]
+   const labelIds = [...current.filter(id => !WORKFLOW_LABELS.includes(id)), verdict]
+   ```
+
+   The three are **mutually exclusive** — they answer the same question ("what did the last reviewer decide?"), so a leftover one contradicts the current truth.
+4. **Verify the write landed.** A label UUID that no longer exists fails with `Entity not found: IssueLabel` while the rest of the mutation succeeds — the agent reports success and nothing changed. Read the issue back and confirm the label is present. If it is not, surface the failure; do not report success. IDs live in `linear-issues/references/labels.md` and `states.md`, and that skill owns the actual API call — do not call Linear directly from here.
+5. **State sanity check.** This also applies to a **tier-0** match: a `## Linear` reference in the PR body proves the ticket exists, not that it is in the right state. Whatever the tier, if the issue is not in `Code Review` when you write the verdict, report it and offer the correction (see tier 2). Two cases need more than a nudge:
+   - Issue in `In Review` → it is already in the QA queue. Do **not** pull it back to `Code Review`. Ask the user whether this PR is a follow-up on an already-released change, or the reference is wrong.
+   - Issue in `Done` / `Canceled` / `Duplicate` → ask for explicit confirmation before touching anything. A PR against a closed ticket is usually a bad reference.
+
+**Why:** the state answers "where is this ticket in the pipeline", the label answers "what did the last reviewer decide". Keeping them separate is what lets `Code Review` absorb an arbitrary number of review round trips without the ticket bouncing between states on every push — and it keeps `In Review` meaning exactly one thing: *this is in production, waiting on QA*.
 
 ---
 

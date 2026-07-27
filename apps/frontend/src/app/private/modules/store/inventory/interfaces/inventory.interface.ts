@@ -386,6 +386,9 @@ export interface AdjustmentItem {
   product_id: number;
   product_name: string;
   sku?: string;
+  // QUI-517: requerido para que el backend resuelva la fila de stock del
+  // insumo (los insumos tienen variantes para trazabilidad de empaque).
+  product_variant_id?: number | null;
   stock_on_hand: number;
   type: AdjustmentType;
   quantity_after: number;
