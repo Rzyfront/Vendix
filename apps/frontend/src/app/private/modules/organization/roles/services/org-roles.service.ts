@@ -24,6 +24,10 @@ import {
   RolePermissionsResponse,
   AssignRoleToUserDto,
   RemoveRoleFromUserDto,
+  AssignRoleToUserResponse,
+  RemoveRoleFromUserResponse,
+  RoleUserAssignment,
+  UserRoleAssignment,
 } from '../interfaces/role.interface';
 
 interface CacheEntry<T> {
@@ -88,8 +92,15 @@ export class OrgRolesService {
       );
   }
 
+  /**
+   * `ResponseService` envuelve TODAS las respuestas en `{ success, message,
+   * data }`. Antes estos métodos tipaban la envoltura como `Role`, así que el
+   * llamador recibía `{success, data}` y leía `undefined` en cada campo; sólo
+   * pasaba desapercibido porque nadie usaba el valor de retorno.
+   */
   getRoleById(id: number): Observable<Role> {
-    return this.http.get<Role>(`${this.apiUrl}/organization/roles/${id}`).pipe(
+    return this.http.get<any>(`${this.apiUrl}/organization/roles/${id}`).pipe(
+      map((response) => (response?.data ?? response) as Role),
       catchError((error) => {
         console.error('Error getting role:', error);
         return throwError(() => error);
@@ -97,12 +108,26 @@ export class OrgRolesService {
     );
   }
 
+  /**
+   * Asignaciones del rol (dirección rol → usuario).
+   *
+   * El nivel organización NO expone `GET /organization/roles/:id/users`; el
+   * detalle del rol ya incluye `user_roles` con su usuario y su tienda, así
+   * que se lee de ahí en vez de inventar un endpoint.
+   */
+  getRoleUsers(roleId: number): Observable<RoleUserAssignment[]> {
+    return this.getRoleById(roleId).pipe(
+      map((role) => role?.user_roles ?? []),
+    );
+  }
+
   createRole(roleData: CreateRoleDto): Observable<Role> {
     this.isCreatingRole.set(true);
 
     return this.http
-      .post<Role>(`${this.apiUrl}/organization/roles`, roleData)
+      .post<any>(`${this.apiUrl}/organization/roles`, roleData)
       .pipe(
+        map((response) => (response?.data ?? response) as Role),
         finalize(() => this.isCreatingRole.set(false)),
         catchError((error) => {
           console.error('Error creating role:', error);
@@ -115,8 +140,9 @@ export class OrgRolesService {
     this.isUpdatingRole.set(true);
 
     return this.http
-      .patch<Role>(`${this.apiUrl}/organization/roles/${id}`, roleData)
+      .patch<any>(`${this.apiUrl}/organization/roles/${id}`, roleData)
       .pipe(
+        map((response) => (response?.data ?? response) as Role),
         finalize(() => this.isUpdatingRole.set(false)),
         catchError((error) => {
           console.error('Error updating role:', error);
@@ -185,10 +211,24 @@ export class OrgRolesService {
       );
   }
 
-  assignRoleToUser(roleData: AssignRoleToUserDto): Observable<void> {
+  /**
+   * Asignar rol → usuario. `store_id` opcional: NULL = toda la organización.
+   *
+   * Los errores ya NO llegan como `200 { success:false }`: el backend responde
+   * 403/404/409 con `error_code`, así que el `catchError` sólo re-lanza el
+   * `HttpErrorResponse` crudo para que el componente pueda leer el código con
+   * `extractRoleErrorMessage`. Aplastar el error aquí destruiría esa señal.
+   */
+  assignRoleToUser(
+    roleData: AssignRoleToUserDto,
+  ): Observable<AssignRoleToUserResponse> {
     return this.http
-      .post<void>(`${this.apiUrl}/organization/roles/assign-to-user`, roleData)
+      .post<any>(`${this.apiUrl}/organization/roles/assign-to-user`, {
+        ...roleData,
+        store_id: roleData.store_id ?? null,
+      })
       .pipe(
+        map((response) => (response?.data ?? response) as AssignRoleToUserResponse),
         catchError((error) => {
           console.error('Error assigning role to user:', error);
           return throwError(() => error);
@@ -196,10 +236,19 @@ export class OrgRolesService {
       );
   }
 
-  removeRoleFromUser(roleData: RemoveRoleFromUserDto): Observable<void> {
+  removeRoleFromUser(
+    roleData: RemoveRoleFromUserDto,
+  ): Observable<RemoveRoleFromUserResponse> {
     return this.http
-      .post<void>(`${this.apiUrl}/organization/roles/remove-from-user`, roleData)
+      .post<any>(`${this.apiUrl}/organization/roles/remove-from-user`, {
+        ...roleData,
+        store_id: roleData.store_id ?? null,
+      })
       .pipe(
+        map(
+          (response) =>
+            (response?.data ?? response) as RemoveRoleFromUserResponse,
+        ),
         catchError((error) => {
           console.error('Error removing role from user:', error);
           return throwError(() => error);
@@ -207,13 +256,22 @@ export class OrgRolesService {
       );
   }
 
-  getUserRoles(userId: number): Observable<Role[]> {
+  /**
+   * QUI-72 — asignaciones de un usuario (dirección usuario → rol).
+   *
+   * CAMBIO DE FORMA: antes devolvía filas crudas de `user_roles`; ahora cada
+   * elemento es `{ assignment_id, store_id, store_name, role }`. Se usa el
+   * endpoint nuevo `/organization/users/:userId/roles`; el legado
+   * `/organization/roles/user/:userId/roles` devuelve exactamente lo mismo y se
+   * conserva sólo por compatibilidad de rutas.
+   */
+  getUserRoleAssignments(userId: number): Observable<UserRoleAssignment[]> {
     return this.http
-      .get<any>(`${this.apiUrl}/organization/roles/user/${userId}/roles`)
+      .get<any>(`${this.apiUrl}/organization/users/${userId}/roles`)
       .pipe(
-        map((response) => response.data || []),
+        map((response) => (response?.data ?? []) as UserRoleAssignment[]),
         catchError((error) => {
-          console.error('Error getting user roles:', error);
+          console.error('Error getting user role assignments:', error);
           return throwError(() => error);
         }),
       );

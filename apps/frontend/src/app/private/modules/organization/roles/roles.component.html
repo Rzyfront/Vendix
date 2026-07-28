@@ -41,6 +41,7 @@
       [role]="currentRole()"
       [(isOpen)]="showEditModal"
       (roleUpdated)="onRoleUpdated($event)"
+      (usersChanged)="loadRoles()"
       (cancel)="showEditModal.set(false); currentRole.set(null)"
     ></app-role-edit-modal>
   }
