@@ -7,7 +7,15 @@ import {
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
+import {
+  RoleActor,
+  buildActiveUserRolesWhere,
+  deriveRoleScope,
+} from '@common/utils/role-scope.util';
 import {
   CreateStoreUserDto,
   UpdateStoreUserDto,
@@ -27,7 +35,32 @@ export class StoreUserManagementService {
     private prisma: StorePrismaService,
     private defaultPanelUIService: DefaultPanelUIService,
     private staffProvisioning: StaffProvisioningService,
+    private userRoleAssignment: UserRoleAssignmentService,
   ) {}
+
+  /**
+   * QUI-72 — Actor de este dominio: SIEMPRE nivel `store`.
+   *
+   * Fail-closed en ambos IDs: sin tienda en contexto, una asignación quedaría
+   * org-wide y otorgaría el rol en TODAS las tiendas hermanas.
+   */
+  private buildActor(): RoleActor & {
+    organization_id: number;
+    store_id: number;
+  } {
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+    const store_id = context?.store_id;
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_002);
+    }
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_003);
+    }
+
+    return { level: 'store', organization_id, store_id };
+  }
 
   async create(dto: CreateStoreUserDto) {
     const context = RequestContextService.getContext();
@@ -210,6 +243,14 @@ export class StoreUserManagementService {
   }
 
   async findOne(userId: number) {
+    // QUI-72: `user_roles` ya tiene dimensión de tienda. Sin este filtro, la
+    // ficha de un usuario en la tienda A listaba también los roles que se le
+    // asignaron en la tienda B, y al guardar esa misma lista el nivel tienda
+    // intentaría reasignar roles que no puede ver (404 ROLE_SCOPE_004).
+    // Aplicables aquí = org-wide (`store_id` NULL, heredadas) + las de ESTA
+    // tienda. Sin tienda en contexto sólo quedan las org-wide (fail-closed).
+    const contextStoreId = RequestContextService.getContext()?.store_id ?? null;
+
     const store_user = await this.prisma.store_users.findFirst({
       where: { user_id: userId },
       include: {
@@ -227,6 +268,7 @@ export class StoreUserManagementService {
             avatar_url: true,
             email_verified: true,
             user_roles: {
+              where: buildActiveUserRolesWhere(userId, contextStoreId),
               include: {
                 roles: {
                   select: {
@@ -234,6 +276,8 @@ export class StoreUserManagementService {
                     name: true,
                     description: true,
                     is_system_role: true,
+                    organization_id: true,
+                    store_id: true,
                   },
                 },
               },
@@ -252,8 +296,16 @@ export class StoreUserManagementService {
 
     const { user_roles, user_settings, ...userData } = store_user.user;
 
-    // Extract roles from junction table
-    const roles = user_roles.map((ur: any) => ur.roles);
+    // Extract roles from junction table. Se añade el `scope` derivado y el
+    // `assignment_store_id` para que el frontend distinga un rol heredado de la
+    // organización (no editable desde aquí) de uno propio de la tienda.
+    const roles = user_roles
+      .filter((ur: any) => ur.roles)
+      .map((ur: any) => ({
+        ...ur.roles,
+        scope: deriveRoleScope(ur.roles),
+        assignment_store_id: ur.store_id ?? null,
+      }));
 
     // Merge user's panel_ui with defaults so the frontend sees ALL available keys
     const defaults =
@@ -354,58 +406,29 @@ export class StoreUserManagementService {
     });
   }
 
-  /** Roles that cannot be assigned or removed through the management UI */
-  private readonly IMMUTABLE_ROLES = ['owner', 'super_admin'];
-
+  /**
+   * QUI-72 — Reemplaza los roles del usuario DENTRO del alcance de esta tienda.
+   *
+   * Antes escribía `user_roles` a mano y sin `store_id`: el borrado barría las
+   * asignaciones del usuario en TODAS las tiendas de la organización y las
+   * nuevas nacían org-wide, otorgando el rol también en las tiendas hermanas.
+   *
+   * Ahora se delega en `UserRoleAssignmentService`, que es el único escritor de
+   * `user_roles` en los tres niveles. Ese servicio ya cubre lo que aquí se hacía
+   * a mano: preserva los roles núcleo (`owner`/`super_admin`) al borrar y
+   * rechaza asignarlos (ROLE_ASSIGN_002), valida visibilidad del rol y
+   * pertenencia del usuario, y sólo toca las asignaciones de ESTA tienda — las
+   * org-wide son heredadas y se administran desde el nivel organización.
+   */
   async updateRoles(userId: number, dto: UpdateUserRolesDto) {
     // Verify user belongs to this store
     await this.findOne(userId);
 
-    // Reject if any requested role_id belongs to an immutable role
-    if (dto.role_ids.length > 0) {
-      const requested = await this.prisma.roles.findMany({
-        where: { id: { in: dto.role_ids } },
-        select: { id: true, name: true },
-      });
-
-      const forbidden = requested.filter((r) =>
-        this.IMMUTABLE_ROLES.includes(r.name.toLowerCase()),
-      );
-      if (forbidden.length > 0) {
-        throw new BadRequestException(
-          `Cannot assign immutable roles: ${forbidden.map((r) => r.name).join(', ')}`,
-        );
-      }
-    }
-
-    // Preserve immutable roles the user already has
-    const existingImmutable = await this.prisma.user_roles.findMany({
-      where: {
-        user_id: userId,
-        roles: { name: { in: this.IMMUTABLE_ROLES } },
-      },
-      select: { role_id: true },
+    await this.userRoleAssignment.replaceUserRoles({
+      user_id: userId,
+      role_ids: dto.role_ids,
+      actor: this.buildActor(),
     });
-    const immutableIds = existingImmutable.map((r) => r.role_id);
-
-    // Remove only non-immutable roles
-    await this.prisma.user_roles.deleteMany({
-      where: {
-        user_id: userId,
-        role_id: { notIn: immutableIds },
-      },
-    });
-
-    // Assign new roles (immutable ones already excluded above)
-    if (dto.role_ids.length > 0) {
-      await this.prisma.user_roles.createMany({
-        data: dto.role_ids.map((role_id) => ({
-          user_id: userId,
-          role_id,
-        })),
-        skipDuplicates: true,
-      });
-    }
 
     // Salvaguarda de reversión (Vendix Repartos): asignar `carrier` YA NO mueve
     // al usuario a STORE_DELIVERY — esa decisión es explícita vía `setAppType`.

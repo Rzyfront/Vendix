@@ -1,10 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-  ForbiddenException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -12,6 +6,17 @@ import {
   OperatingScopeService,
   OrganizationOperatingScope,
 } from '@common/services/operating-scope.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
+import {
+  HIDDEN_ROLE_NAMES,
+  RoleActor,
+  assertRoleEditable,
+  buildRoleVisibilityWhere,
+  deriveRoleScope,
+  resolveNewRoleOwnership,
+} from '@common/utils/role-scope.util';
 import {
   CreateStoreRoleDto,
   UpdateStoreRoleDto,
@@ -21,24 +26,60 @@ import {
 
 @Injectable()
 export class StoreRolesService {
-  /** Core roles that are never exposed to store-level UIs */
-  private readonly HIDDEN_ROLES = ['owner', 'super_admin'];
+  /**
+   * Core roles that are never exposed to store-level UIs.
+   * QUI-72: the canonical list lives in `role-scope.util` so the three levels
+   * (superadmin / organization / store) hide exactly the same rows.
+   */
+  private readonly HIDDEN_ROLES: string[] = [...HIDDEN_ROLE_NAMES];
 
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly operatingScope: OperatingScopeService,
+    private readonly userRoleAssignment: UserRoleAssignmentService,
   ) {}
 
   // ===== PRIVATE HELPERS =====
 
   /**
+   * QUI-72 — Actor de este dominio. SIEMPRE nivel `store`: la pantalla de roles
+   * de tienda no puede hablar en nombre de la organización.
+   *
+   * Fail-closed en ambos IDs: sin organización no hay tenant y sin tienda el
+   * filtro de visibilidad colapsaría a "cualquier tienda", que es exactamente
+   * la fuga que reporta el ticket.
+   */
+  private buildActor(): RoleActor & {
+    organization_id: number;
+    store_id: number;
+  } {
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+    const store_id = context?.store_id;
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_002);
+    }
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_003);
+    }
+
+    return { level: 'store', organization_id, store_id };
+  }
+
+  /**
    * Builds the tenant filter applied to the nested `user_roles` `_count`.
    *
-   * `user_roles` has no `store_id`/`organization_id`, and system roles
-   * (`is_system_role=true`, `organization_id=null`) are shared platform-wide,
-   * so an unfiltered `_count` aggregates users from EVERY tenant. Nested
-   * `_count` selects are NOT intercepted by the scoped Prisma extensions, so
-   * the tenant predicate must be applied explicitly here.
+   * System roles (`is_system_role=true`, `organization_id=null`) are shared
+   * platform-wide, so an unfiltered `_count` aggregates users from EVERY
+   * tenant. Nested `_count` selects are NOT intercepted by the scoped Prisma
+   * extensions, so the tenant predicate must be applied explicitly here.
+   *
+   * QUI-72: la asignación ya tiene dimensión propia (`user_roles.store_id`), así
+   * que a nivel tienda no basta con "usuarios de esta tienda": hay que contar
+   * SÓLO las asignaciones aplicables aquí — las org-wide (`store_id` NULL, que
+   * son heredadas) y las de esta misma tienda. Sin ese segundo filtro, el
+   * contador sumaría asignaciones hechas en tiendas hermanas.
    */
   private buildUserRolesCountWhere(
     scope: OrganizationOperatingScope,
@@ -52,9 +93,12 @@ export class StoreRolesService {
     // there is no store context — a `store_id: undefined` would collapse the
     // filter to "any store" and re-introduce the cross-tenant leak.
     if (!storeId) {
-      throw new ForbiddenException('Store context required');
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_003);
     }
-    return { users: { store_users: { some: { store_id: storeId } } } };
+    return {
+      users: { store_users: { some: { store_id: storeId } } },
+      OR: [{ store_id: null }, { store_id: storeId }],
+    };
   }
 
   private transformRole(role: any) {
@@ -64,6 +108,10 @@ export class StoreRolesService {
       description: role.description,
       is_system_role: role.is_system_role,
       organization_id: role.organization_id,
+      store_id: role.store_id ?? null,
+      // QUI-72: el alcance NO se persiste, se deriva. Se expone ya derivado para
+      // que el frontend no reimplemente la matriz (y se desincronice).
+      scope: deriveRoleScope(role),
       created_at: role.created_at,
       updated_at: role.updated_at,
       permissions:
@@ -77,13 +125,8 @@ export class StoreRolesService {
   // ===== CRUD =====
 
   async findAll() {
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
-    const store_id = context?.store_id;
-
-    if (!organization_id) {
-      throw new ForbiddenException('Organization context required');
-    }
+    const actor = this.buildActor();
+    const { organization_id, store_id } = actor;
 
     const scope = await this.operatingScope.getOperatingScope(organization_id);
     const userRolesCountWhere = this.buildUserRolesCountWhere(
@@ -93,11 +136,14 @@ export class StoreRolesService {
     );
 
     // Roles are NOT auto-scoped in StorePrismaService, so we filter manually.
-    // Include both org-specific roles AND system roles, but exclude core hidden roles.
+    // QUI-72: el filtro sale del contrato compartido — sistema + roles de la
+    // organización (heredados, sólo lectura) + SÓLO los de esta tienda. El
+    // `OR: [{ organization_id }, { is_system_role: true }]` anterior no tenía
+    // dimensión de tienda, por eso un rol creado en la tienda A aparecía en B.
     const roles = await this.prisma.roles.findMany({
       where: {
         name: { notIn: this.HIDDEN_ROLES },
-        OR: [{ organization_id }, { is_system_role: true }],
+        ...buildRoleVisibilityWhere(actor),
       },
       include: {
         role_permissions: {
@@ -118,13 +164,8 @@ export class StoreRolesService {
   }
 
   async findOne(id: number) {
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
-    const store_id = context?.store_id;
-
-    if (!organization_id) {
-      throw new ForbiddenException('Organization context required');
-    }
+    const actor = this.buildActor();
+    const { organization_id, store_id } = actor;
 
     const scope = await this.operatingScope.getOperatingScope(organization_id);
     const userRolesCountWhere = this.buildUserRolesCountWhere(
@@ -136,7 +177,7 @@ export class StoreRolesService {
     const role = await this.prisma.roles.findFirst({
       where: {
         id,
-        OR: [{ organization_id }, { is_system_role: true }],
+        ...buildRoleVisibilityWhere(actor),
       },
       include: {
         role_permissions: {
@@ -153,36 +194,46 @@ export class StoreRolesService {
     });
 
     if (!role) {
-      throw new NotFoundException('Role not found');
+      // Mismo 404 para "no existe" y "no visible": distinguirlos permitiría
+      // enumerar roles de otras tiendas/tenants por ID (IDOR de lectura).
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_004);
     }
 
     return this.transformRole(role);
   }
 
   async create(dto: CreateStoreRoleDto) {
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
-    const store_id = context?.store_id;
+    const actor = this.buildActor();
+    const { organization_id, store_id } = actor;
 
-    if (!organization_id) {
-      throw new ForbiddenException('Organization context required');
-    }
+    // QUI-72 — RAÍZ DEL BUG: un rol creado desde la tienda nacía como rol de
+    // ORGANIZACIÓN (`store_id` inexistente), así que aparecía en las tiendas
+    // hermanas. La propiedad ahora la resuelve el contrato compartido.
+    const ownership = resolveNewRoleOwnership(actor);
 
-    // Check name uniqueness within organization. QUI-473: preserve the
-    // collision guard against GLOBAL system roles (organization_id IS NULL)
-    // while letting different orgs share the same role name.
+    // Unicidad por (organization_id, store_id, name) — que es exactamente el
+    // unique de la tabla. QUI-473: se CONSERVA la guarda anti-colisión contra
+    // los roles de SISTEMA globales (is_system_role=true, organization_id NULL),
+    // que comparten espacio de nombres con todas las tiendas.
     const existing = await this.prisma.roles.findFirst({
       where: {
         name: dto.name,
         OR: [
-          { organization_id },
+          {
+            organization_id: ownership.organization_id,
+            store_id: ownership.store_id,
+          },
           { is_system_role: true, organization_id: null },
         ],
       },
     });
 
     if (existing) {
-      throw new ConflictException('A role with this name already exists');
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        'Ya existe un rol con este nombre en esta tienda',
+        { name: dto.name },
+      );
     }
 
     const scope = await this.operatingScope.getOperatingScope(organization_id);
@@ -192,12 +243,12 @@ export class StoreRolesService {
       organization_id,
     );
 
-    // Store admins can NEVER create system roles
+    // Store admins can NEVER create system roles.
     // QUI-473: catch P2002 (race condition: two concurrent requests pass the
     // pre-check above and both reach INSERT; with the composite unique on
-    // (organization_id, name) the second one will fail. Translate the raw
-    // Prisma error into a clean 409 ConflictException so the UI can show a
-    // useful message instead of leaking Prisma internals.
+    // (organization_id, store_id, name) the second one will fail). Translate the
+    // raw Prisma error into a clean typed 409 so the UI can show a useful
+    // message instead of leaking Prisma internals.
     let role;
     try {
       role = await this.prisma.roles.create({
@@ -205,7 +256,8 @@ export class StoreRolesService {
           name: dto.name,
           description: dto.description,
           is_system_role: false,
-          organization_id,
+          organization_id: ownership.organization_id,
+          store_id: ownership.store_id,
         },
         include: {
           role_permissions: {
@@ -225,8 +277,10 @@ export class StoreRolesService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        throw new ConflictException(
-          'A role with this name already exists in this organization',
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un rol con este nombre en esta tienda',
+          { name: dto.name },
         );
       }
       throw err;
@@ -236,34 +290,37 @@ export class StoreRolesService {
   }
 
   async update(id: number, dto: UpdateStoreRoleDto) {
+    const actor = this.buildActor();
+    const { organization_id, store_id } = actor;
+
     const role = await this.findOne(id);
 
-    if (role.is_system_role) {
-      throw new ForbiddenException('System roles cannot be modified');
-    }
+    // QUI-72: la matriz de edición sustituye al chequeo ad-hoc de
+    // `is_system_role`. Además de los roles de sistema, bloquea editar roles de
+    // ORGANIZACIÓN desde la tienda: son heredados y sólo lectura aquí.
+    assertRoleEditable(role, actor);
 
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
-    const store_id = context?.store_id;
-
-    if (!organization_id) {
-      throw new ForbiddenException('Organization context required');
-    }
-
-    // Check name uniqueness if changing. QUI-473: same fix as in create().
+    // Check name uniqueness if changing. QUI-473 + QUI-72: la colisión se evalúa
+    // en el mismo espacio que el unique de la tabla — (organization_id,
+    // store_id, name) — más los roles de sistema globales.
     if (dto.name && dto.name !== role.name) {
       const existing = await this.prisma.roles.findFirst({
         where: {
           name: dto.name,
+          id: { not: id },
           OR: [
-            { organization_id: context?.organization_id },
+            { organization_id: role.organization_id, store_id: role.store_id },
             { is_system_role: true, organization_id: null },
           ],
         },
       });
 
       if (existing) {
-        throw new ConflictException('A role with this name already exists');
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un rol con este nombre en esta tienda',
+          { name: dto.name },
+        );
       }
     }
 
@@ -300,8 +357,10 @@ export class StoreRolesService {
         err instanceof Prisma.PrismaClientKnownRequestError &&
         err.code === 'P2002'
       ) {
-        throw new ConflictException(
-          'A role with this name already exists in this organization',
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un rol con este nombre en esta tienda',
+          { name: dto.name },
         );
       }
       throw err;
@@ -311,18 +370,12 @@ export class StoreRolesService {
   }
 
   async remove(id: number) {
+    const actor = this.buildActor();
+    const organization_id = actor.organization_id;
+
     const role = await this.findOne(id);
 
-    if (role.is_system_role) {
-      throw new ForbiddenException('System roles cannot be deleted');
-    }
-
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
-
-    if (!organization_id) {
-      throw new ForbiddenException('Organization context required');
-    }
+    assertRoleEditable(role, actor);
 
     // Deleting a role cascades to its `user_roles` across the ENTIRE
     // organization, so the delete guard must count org-wide, never by the
@@ -384,11 +437,11 @@ export class StoreRolesService {
   }
 
   async assignPermissions(role_id: number, dto: AssignPermissionsDto) {
+    const actor = this.buildActor();
     const role = await this.findOne(role_id);
 
-    if (role.is_system_role) {
-      throw new ForbiddenException('Cannot modify permissions of system roles');
-    }
+    // QUI-72: sistema Y organización son sólo lectura desde la tienda.
+    assertRoleEditable(role, actor);
 
     // Validate all permissions exist and have store: prefix
     const permissions = await this.prisma.permissions.findMany({
@@ -407,8 +460,10 @@ export class StoreRolesService {
     );
 
     if (non_store_permissions.length > 0) {
-      throw new ForbiddenException(
-        'Only store:* permissions can be assigned to store roles',
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_PERM_001,
+        'Solo se pueden asignar permisos store:* a roles de tienda',
+        { invalid: non_store_permissions.map((p) => p.name) },
       );
     }
 
@@ -430,11 +485,10 @@ export class StoreRolesService {
   }
 
   async removePermissions(role_id: number, dto: RemovePermissionsDto) {
+    const actor = this.buildActor();
     const role = await this.findOne(role_id);
 
-    if (role.is_system_role) {
-      throw new ForbiddenException('Cannot modify permissions of system roles');
-    }
+    assertRoleEditable(role, actor);
 
     await this.prisma.role_permissions.deleteMany({
       where: {
@@ -448,44 +502,82 @@ export class StoreRolesService {
     return updated_role;
   }
 
+  // ===== ROLE -> USER ASSIGNMENTS (QUI-72) =====
+  //
+  // Dirección que faltaba en el nivel tienda: desde el ROL hacia los usuarios.
+  // Toda escritura sobre `user_roles` se delega en `UserRoleAssignmentService`
+  // para que las dos vistas del mismo dato (usuario→roles y rol→usuarios) no
+  // diverjan, y para que la matriz de autorización se aplique una sola vez.
+
+  async listRoleUsers(role_id: number) {
+    return this.userRoleAssignment.listRoleUsers(role_id, this.buildActor());
+  }
+
+  async assignRoleToUser(role_id: number, user_id: number) {
+    return this.userRoleAssignment.assign({
+      user_id,
+      role_id,
+      actor: this.buildActor(),
+    });
+  }
+
+  async removeRoleFromUser(role_id: number, user_id: number) {
+    return this.userRoleAssignment.remove({
+      user_id,
+      role_id,
+      actor: this.buildActor(),
+    });
+  }
+
   // ===== STATS =====
 
   async getStats() {
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
+    const actor = this.buildActor();
+    const { organization_id, store_id } = actor;
 
-    if (!organization_id) {
-      throw new ForbiddenException('Organization context required');
-    }
+    // Mismo universo visible que `findAll()`: sistema + organización + ESTA
+    // tienda, sin los roles núcleo ocultos.
+    const visibleWhere: Prisma.rolesWhereInput = {
+      name: { notIn: this.HIDDEN_ROLES },
+      ...buildRoleVisibilityWhere(actor),
+    };
 
-    const [total_roles, system_roles, total_store_permissions] =
-      await Promise.all([
-        this.prisma.roles.count({
-          where: {
-            name: { notIn: this.HIDDEN_ROLES },
-            OR: [{ organization_id }, { is_system_role: true }],
-          },
-        }),
-        this.prisma.roles.count({
-          where: {
-            is_system_role: true,
-            name: { notIn: this.HIDDEN_ROLES },
-          },
-        }),
-        this.prisma.permissions.count({
-          where: {
-            name: { startsWith: 'store:' },
-            status: 'active',
-          },
-        }),
-      ]);
+    const [
+      total_roles,
+      system_roles,
+      organization_roles,
+      store_roles,
+      total_store_permissions,
+    ] = await Promise.all([
+      this.prisma.roles.count({ where: visibleWhere }),
+      this.prisma.roles.count({
+        where: { ...visibleWhere, is_system_role: true, organization_id: null },
+      }),
+      this.prisma.roles.count({
+        where: { ...visibleWhere, organization_id, store_id: null },
+      }),
+      this.prisma.roles.count({
+        where: { ...visibleWhere, organization_id, store_id },
+      }),
+      this.prisma.permissions.count({
+        where: {
+          name: { startsWith: 'store:' },
+          status: 'active',
+        },
+      }),
+    ]);
 
-    const custom_roles = total_roles - system_roles;
+    // `custom_roles` se conserva por compatibilidad con el frontend actual y
+    // sigue valiendo lo mismo: todo lo que no es de sistema (organización +
+    // tienda). Los tres alcances se reportan aparte.
+    const custom_roles = organization_roles + store_roles;
 
     return {
       total_roles,
       system_roles,
       custom_roles,
+      organization_roles,
+      store_roles,
       total_store_permissions,
     };
   }
