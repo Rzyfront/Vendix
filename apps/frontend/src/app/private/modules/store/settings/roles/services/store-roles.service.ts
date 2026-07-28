@@ -17,6 +17,9 @@ import {
   CreateStoreRoleDto,
   UpdateStoreRoleDto,
   RolePermissionsResponse,
+  StoreRoleUserAssignment,
+  AssignRoleToUserResult,
+  RemoveRoleFromUserResult,
 } from '../interfaces/store-role.interface';
 
 // Cache estatico global (persiste entre instancias del servicio)
@@ -27,6 +30,19 @@ interface CacheEntry<T> {
 
 let storeRolesStatsCache: CacheEntry<Observable<StoreRoleStats>> | null = null;
 
+/**
+ * Servicio ÚNICO del catálogo de roles de tienda y de la dirección
+ * rol → usuarios (QUI-72).
+ *
+ * También lo consume el módulo `settings/users` (vía el effect
+ * `loadAvailableRoles$`) para que el selector de roles del modal de usuario y
+ * la pestaña "Usuarios" del detalle del rol lean EXACTAMENTE el mismo catálogo
+ * — con `scope` incluido — y no diverjan.
+ *
+ * Contrato de errores: estos endpoints ya NO devuelven `200 { success:false }`.
+ * Emiten 403/404/409 con `error_code`; usa `storeRoleErrorMessage()` para el
+ * texto de UI.
+ */
 @Injectable({
   providedIn: 'root',
 })
@@ -44,14 +60,16 @@ export class StoreRolesService {
   readonly isUpdating$ = toObservable(this.isUpdating);
 
   /**
-   * Obtener lista de roles de la tienda
+   * Obtener lista de roles visibles en la tienda (sistema + organización +
+   * esta tienda). Cada fila trae `scope` y `store_id` ya derivados.
    */
-  getRoles(): Observable<{ data: StoreRole[] }> {
+  getRoles(): Observable<StoreRole[]> {
     this.isLoading.set(true);
 
     return this.http
       .get<{ data: StoreRole[] }>(this.baseUrl)
       .pipe(
+        map((response) => response?.data ?? []),
         finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading store roles:', error);
@@ -134,8 +152,9 @@ export class StoreRolesService {
     this.isCreating.set(true);
 
     return this.http
-      .post<StoreRole>(this.baseUrl, data)
+      .post<{ data: StoreRole }>(this.baseUrl, data)
       .pipe(
+        map((response) => response.data),
         finalize(() => this.isCreating.set(false)),
         catchError((error) => {
           console.error('Error creating store role:', error);
@@ -151,8 +170,9 @@ export class StoreRolesService {
     this.isUpdating.set(true);
 
     return this.http
-      .patch<StoreRole>(`${this.baseUrl}/${id}`, data)
+      .patch<{ data: StoreRole }>(`${this.baseUrl}/${id}`, data)
       .pipe(
+        map((response) => response.data),
         finalize(() => this.isUpdating.set(false)),
         catchError((error) => {
           console.error('Error updating store role:', error);
@@ -200,6 +220,70 @@ export class StoreRolesService {
       .pipe(
         catchError((error) => {
           console.error('Error removing permissions:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  // ── Rol → Usuarios (QUI-72) ──────────────────────────────────────────
+  //
+  // Dirección que el nivel tienda no tenía. La contraparte (usuario → roles)
+  // sigue viviendo en `StoreUsersManagementService.updateUserRoles`, pero AMBAS
+  // terminan en el mismo `UserRoleAssignmentService` del backend, así que no
+  // pueden divergir en la escritura. Aquí se comparte además el catálogo
+  // (`getRoles`) para que tampoco diverjan en la lectura.
+
+  /**
+   * Usuarios asignados a un rol dentro de esta tienda.
+   * Incluye las asignaciones heredadas de la organización (`store_id === null`),
+   * que se muestran pero NO se pueden quitar desde este nivel.
+   */
+  getRoleUsers(role_id: number): Observable<StoreRoleUserAssignment[]> {
+    return this.http
+      .get<{ data: StoreRoleUserAssignment[] }>(
+        `${this.baseUrl}/${role_id}/users`,
+      )
+      .pipe(
+        map((response) => response?.data ?? []),
+        catchError((error) => {
+          console.error('Error loading role users:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  /** Asigna el rol a un usuario de esta tienda. 201 en éxito. */
+  assignRoleToUser(
+    role_id: number,
+    user_id: number,
+  ): Observable<AssignRoleToUserResult> {
+    return this.http
+      .post<{ data: AssignRoleToUserResult }>(
+        `${this.baseUrl}/${role_id}/users/${user_id}`,
+        {},
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => {
+          console.error('Error assigning role to user:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  /** Quita el rol a un usuario. Sólo aplica a asignaciones de ESTA tienda. */
+  removeRoleFromUser(
+    role_id: number,
+    user_id: number,
+  ): Observable<RemoveRoleFromUserResult> {
+    return this.http
+      .delete<{ data: RemoveRoleFromUserResult }>(
+        `${this.baseUrl}/${role_id}/users/${user_id}`,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => {
+          console.error('Error removing role from user:', error);
           return throwError(() => error);
         }),
       );

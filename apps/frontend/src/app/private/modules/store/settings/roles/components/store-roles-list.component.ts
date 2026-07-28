@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 
 import {
   ResponsiveDataViewComponent,
@@ -14,7 +14,17 @@ import {
   DropdownAction,
   CardComponent,
 } from '../../../../../../shared/components';
+import {
+  ROLE_SCOPE_COLOR_MAP,
+  ROLE_SCOPE_FILTER_OPTIONS,
+  canEditRoleScope,
+  getRoleReadOnlyReason,
+  getRoleScopeLabel,
+} from '../../../../../../shared/constants/role-scope.constant';
 import { StoreRole } from '../interfaces/store-role.interface';
+
+/** Este listado siempre habla desde el nivel tienda. */
+const ACTOR_LEVEL = 'store' as const;
 
 @Component({
   selector: 'app-store-roles-list',
@@ -61,7 +71,7 @@ import { StoreRole } from '../interfaces/store-role.interface';
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs"
-              [filterValues]="filterValues"
+              [filterValues]="filterValues()"
               [actions]="dropdownActions"
               [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
@@ -139,6 +149,7 @@ export class StoreRolesListComponent {
 
   readonly create = output<void>();
   readonly edit = output<StoreRole>();
+  readonly manageUsers = output<StoreRole>();
   readonly managePermissions = output<StoreRole>();
   readonly delete = output<StoreRole>();
   readonly searchChange = output<string>();
@@ -148,20 +159,28 @@ export class StoreRolesListComponent {
     direction: 'asc' | 'desc' | null;
   }>();
 
-  searchTerm = '';
-  filterValues: FilterValues = {};
+  /** Estado de UI leído por la plantilla ⇒ signal (zoneless). */
+  readonly searchTerm = signal('');
+  readonly filterValues = signal<FilterValues>({});
 
   // ── Filter Configs ──────────────────────────────────────────────────
 
+  /**
+   * Filtro por ALCANCE (QUI-72). Sustituye al binario Sistema/Personalizado,
+   * que ocultaba la diferencia entre un rol heredado de la organización y uno
+   * propio de la tienda — justo la distinción que decide si es editable.
+   */
   filterConfigs: FilterConfig[] = [
     {
-      key: 'type',
-      label: 'Tipo',
+      key: 'scope',
+      label: 'Alcance',
       type: 'select',
       options: [
         { value: '', label: 'Todos' },
-        { value: 'system', label: 'Sistema' },
-        { value: 'custom', label: 'Personalizado' },
+        ...ROLE_SCOPE_FILTER_OPTIONS.map((option) => ({
+          value: option.value,
+          label: option.label,
+        })),
       ],
     },
   ];
@@ -190,12 +209,19 @@ export class StoreRolesListComponent {
       priority: 2,
     },
     {
-      key: 'system_role',
-      label: 'Tipo',
+      // `colorMap` se resuelve contra el valor CRUDO de la columna, por eso la
+      // clave es `scope` y no una etiqueta ya traducida.
+      key: 'scope',
+      label: 'Alcance',
       sortable: true,
       priority: 1,
       badge: true,
-      transform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
+      badgeConfig: {
+        type: 'custom',
+        colorMap: ROLE_SCOPE_COLOR_MAP,
+        size: 'sm',
+      },
+      transform: (value: any) => getRoleScopeLabel(value),
     },
     {
       key: '_count.user_roles',
@@ -221,9 +247,13 @@ export class StoreRolesListComponent {
     subtitleTransform: (value: any) => value || 'Sin descripcion',
     avatarFallbackIcon: 'shield',
     avatarShape: 'square',
-    badgeKey: 'system_role',
-    badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
+    badgeKey: 'scope',
+    badgeConfig: {
+      type: 'custom',
+      colorMap: ROLE_SCOPE_COLOR_MAP,
+      size: 'sm',
+    },
+    badgeTransform: (value: any) => getRoleScopeLabel(value),
     detailKeys: [
       {
         key: '_count',
@@ -242,38 +272,79 @@ export class StoreRolesListComponent {
 
   // ── Table Actions ───────────────────────────────────────────────────
 
+  /**
+   * QUI-72 — Sólo `scope === 'store'` es gestionable desde este nivel.
+   * `canEditRoleScope` es el espejo de la matriz del backend; se usa para NO
+   * ofrecer la acción, no para autorizar (eso lo hace el 403 tipado).
+   */
+  isManageable(row: StoreRole): boolean {
+    return canEditRoleScope(row?.scope, ACTOR_LEVEL);
+  }
+
+  readOnlyReason(row: StoreRole): string {
+    return getRoleReadOnlyReason(row?.scope, ACTOR_LEVEL) ?? '';
+  }
+
   tableActions: TableAction[] = [
     {
+      // Se deshabilita en vez de ocultarse: el tooltip explica POR QUÉ este rol
+      // no se toca aquí, que es la información que faltaba.
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
-      action: (row: StoreRole) => this.edit.emit(row),
-      show: (row: StoreRole) => !row.system_role,
+      action: (row: StoreRole) => {
+        if (!this.isManageable(row)) return;
+        this.edit.emit(row);
+      },
+      disabled: (row: StoreRole) => !this.isManageable(row),
+      tooltip: (row: StoreRole) =>
+        this.isManageable(row) ? 'Editar rol' : this.readOnlyReason(row),
     },
     {
+      label: 'Usuarios',
+      icon: 'users',
+      variant: 'ghost',
+      action: (row: StoreRole) => this.manageUsers.emit(row),
+      tooltip: (row: StoreRole) =>
+        this.isManageable(row)
+          ? 'Ver y administrar los usuarios con este rol'
+          : 'Ver los usuarios con este rol (sólo lectura)',
+    },
+    {
+      // Los permisos de un rol heredado también son sólo lectura (el backend
+      // aplica la misma matriz en assign/removePermissions).
       label: 'Permisos',
       icon: 'key',
       variant: 'ghost',
       action: (row: StoreRole) => this.managePermissions.emit(row),
+      tooltip: (row: StoreRole) =>
+        this.isManageable(row)
+          ? 'Configurar permisos'
+          : 'Ver permisos (sólo lectura)',
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
-      action: (row: StoreRole) => this.delete.emit(row),
-      show: (row: StoreRole) => !row.system_role,
+      action: (row: StoreRole) => {
+        if (!this.isManageable(row)) return;
+        this.delete.emit(row);
+      },
+      disabled: (row: StoreRole) => !this.isManageable(row),
+      tooltip: (row: StoreRole) =>
+        this.isManageable(row) ? 'Eliminar rol' : this.readOnlyReason(row),
     },
   ];
 
   // ── Event Handlers ──────────────────────────────────────────────────
 
   onSearch(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
     this.searchChange.emit(term);
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filterValues = { ...values };
+    this.filterValues.set({ ...values });
     const result: Record<string, string> = {};
     for (const [key, val] of Object.entries(values)) {
       result[key] = (val as string) || '';
@@ -282,17 +353,12 @@ export class StoreRolesListComponent {
   }
 
   onClearFilters(): void {
-    this.filterValues = {};
-    this.filterChange.emit({ type: '' });
+    this.filterValues.set({});
+    this.filterChange.emit({ scope: '' });
   }
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

@@ -1,4 +1,5 @@
 import {Component,
+  computed,
   input,
   output,
   model,
@@ -14,9 +15,16 @@ import {
   InputsearchComponent,
   ModalComponent,
   ToastService} from '../../../../../../shared/components/index';
+import {
+  canEditRoleScope,
+  getRoleReadOnlyReason,
+} from '../../../../../../shared/constants/role-scope.constant';
 import { StoreRolesService } from '../services/store-roles.service';
 import { StoreRole, StorePermission } from '../interfaces/store-role.interface';
+import { storeRoleErrorMessage } from '../utils/store-role-errors';
 import { forkJoin } from 'rxjs';
+
+const ACTOR_LEVEL = 'store' as const;
 
 interface PermissionGroup {
   module: string;
@@ -105,6 +113,23 @@ const ACTION_LABELS: Record<string, string> = {
 
       @if (!isLoadingPermissions()) {
         <div class="space-y-3">
+          <!-- Sólo lectura: los permisos de un rol de sistema o heredado de la
+               organización no se administran desde la tienda (el backend
+               responde 403 ROLE_SCOPE_001 en assign/removePermissions). -->
+          @if (!canEdit()) {
+            <div
+              class="flex items-start gap-2 px-3 py-2 rounded-lg border border-border bg-surface/50"
+            >
+              <app-icon
+                name="lock"
+                [size]="14"
+                class="text-text-secondary mt-0.5 shrink-0"
+              ></app-icon>
+              <p class="text-[11px] text-text-secondary">
+                {{ readOnlyReason() }}
+              </p>
+            </div>
+          }
           <!-- Search & Module Filter -->
           <div class="flex flex-col sm:flex-row gap-2">
             <app-inputsearch
@@ -199,8 +224,9 @@ const ACTION_LABELS: Record<string, string> = {
                       type="checkbox"
                       [checked]="isGroupFullySelected(group)"
                       [indeterminate]="isGroupPartiallySelected(group)"
+                      [disabled]="!canEdit()"
                       (change)="toggleGroup(group, $any($event.target).checked)"
-                      class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)]"
+                      class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                   </label>
                 </div>
@@ -227,8 +253,9 @@ const ACTION_LABELS: Record<string, string> = {
                         <input
                           type="checkbox"
                           [checked]="selectedPermissionIds.has(perm.id)"
+                          [disabled]="!canEdit()"
                           (change)="togglePermission(perm.id)"
-                          class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)] shrink-0"
+                          class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                         />
                         <span class="text-text-primary leading-tight truncate">
                           {{ getPermissionLabel(perm) }}
@@ -264,20 +291,22 @@ const ACTION_LABELS: Record<string, string> = {
           variant="outline"
           (clicked)="onCancel()"
           [disabled]="isSaving()"
-          >Cancelar</app-button
+          >{{ canEdit() ? 'Cancelar' : 'Cerrar' }}</app-button
         >
-        <app-button
-          variant="primary"
-          (clicked)="onSave()"
-          [disabled]="isSaving()"
-          [loading]="isSaving()"
-        >
-          {{
-            getChangeCount() > 0
-              ? 'Guardar (' + getChangeCount() + ' cambios)'
-              : 'Guardar Permisos'
-          }}
-        </app-button>
+        @if (canEdit()) {
+          <app-button
+            variant="primary"
+            (clicked)="onSave()"
+            [disabled]="isSaving()"
+            [loading]="isSaving()"
+          >
+            {{
+              getChangeCount() > 0
+                ? 'Guardar (' + getChangeCount() + ' cambios)'
+                : 'Guardar Permisos'
+            }}
+          </app-button>
+        }
       </div>
     </app-modal>
   `,
@@ -308,6 +337,15 @@ export class StoreRolePermissionsModalComponent
 
   readonly isLoadingPermissions = signal(false);
   readonly isSaving = signal(false);
+
+  /** QUI-72: sólo `scope === 'store'` permite tocar permisos desde la tienda. */
+  readonly canEdit = computed(() =>
+    canEditRoleScope(this.role()?.scope, ACTOR_LEVEL),
+  );
+  readonly readOnlyReason = computed(
+    () => getRoleReadOnlyReason(this.role()?.scope, ACTOR_LEVEL) ?? '',
+  );
+
   private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
 ngOnChanges(): void {
@@ -465,6 +503,7 @@ ngOnChanges(): void {
   }
 
   toggleGroup(group: PermissionGroup, checked: boolean): void {
+    if (!this.canEdit()) return;
     for (const perm of group.permissions) {
       if (checked) {
         this.selectedPermissionIds.add(perm.id);
@@ -476,6 +515,7 @@ ngOnChanges(): void {
   }
 
   togglePermission(permissionId: number): void {
+    if (!this.canEdit()) return;
     if (this.selectedPermissionIds.has(permissionId)) {
       this.selectedPermissionIds.delete(permissionId);
     } else {
@@ -488,7 +528,7 @@ ngOnChanges(): void {
 
   onSave(): void {
     const currentRole = this.role();
-    if (!currentRole || this.isSaving()) return;
+    if (!currentRole || this.isSaving() || !this.canEdit()) return;
 
     const toAdd: number[] = [];
     const toRemove: number[] = [];
@@ -531,20 +571,18 @@ ngOnChanges(): void {
         next: () => {
           this.isSaving.set(false);
           this.toastService.success('Permisos actualizados exitosamente');
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.onPermissionsUpdated.emit();
           this.isOpenChange.emit(false);
         },
-        error: (error: any) => {
+        error: (error: unknown) => {
           this.isSaving.set(false);
           console.error('Error updating permissions:', error);
-          const message =
-            error?.error?.message || 'Error al actualizar los permisos';
-          this.toastService.error(message);
+          this.toastService.error(
+            storeRoleErrorMessage(
+              error,
+              'Error al actualizar los permisos',
+            ),
+          );
         }});
   }
 

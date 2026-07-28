@@ -40,8 +40,18 @@ import {
   ScrollableTab,
 } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { getModulesHiddenByIndustries } from '../../../../../../shared/constants/industry-modules.constant';
+import {
+  RoleScope,
+  ROLE_SCOPE_COLOR_MAP,
+  ROLE_SCOPE_ICONS,
+  ROLE_SCOPE_LABELS,
+} from '../../../../../../shared/constants/role-scope.constant';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
-import { StoreUser, StoreUserDetail } from '../interfaces/store-user.interface';
+import {
+  Role,
+  StoreUser,
+  StoreUserDetail,
+} from '../interfaces/store-user.interface';
 import {
   StoreUsersManagementService,
   CarrierTariff,
@@ -52,6 +62,22 @@ import {
   selectDetailLoading,
   selectAvailableRoles,
 } from '../state/selectors/store-users.selectors';
+
+/** Orden fijo de los grupos del selector: de lo más global a lo más local. */
+const ROLE_SCOPE_ORDER: readonly RoleScope[] = [
+  'system',
+  'organization',
+  'store',
+];
+
+/** Un grupo del selector de roles agrupado por alcance. */
+interface RoleScopeGroup {
+  scope: RoleScope;
+  label: string;
+  icon: string;
+  color: string;
+  roles: Role[];
+}
 
 @Component({
   selector: 'app-store-user-edit-modal',
@@ -255,53 +281,89 @@ import {
                     </div>
                   }
 
-                  <!-- Cards compactas (<=300px) que se acomodan en el ancho
-                       disponible (flex-wrap) en vez de apilarse verticalmente,
+                  <!-- QUI-72 — Opciones AGRUPADAS por alcance (Sistema /
+                       Organizacion / Tienda). Las cards siguen siendo compactas
+                       (<=300px) y se acomodan con flex-wrap dentro de su grupo,
                        para dejar visible la seccion "Tipo de aplicacion". -->
-                  <div class="flex flex-wrap gap-2">
-                    @for (role of sortedRoles(); track role.id) {
-                      <label
-                        class="flex-1 min-w-[220px] max-w-[300px] flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all min-h-[44px]"
-                        [class]="
-                          isRoleAssigned(role.id)
-                            ? 'border-primary/30 bg-primary/5 hover:bg-primary/10'
-                            : 'border-border hover:bg-surface'
-                        "
-                      >
-                        <input
-                          type="checkbox"
-                          [checked]="isRoleAssigned(role.id)"
-                          (change)="toggleRole(role.id)"
-                          class="w-4 h-4 rounded border-border text-primary focus:ring-primary shrink-0"
+                  @for (group of roleGroups(); track group.scope) {
+                    <div class="space-y-1.5">
+                      <div class="flex items-center gap-1.5">
+                        <span
+                          class="inline-block w-2 h-2 rounded-full shrink-0"
+                          [style.background-color]="group.color"
+                        ></span>
+                        <app-icon
+                          [name]="group.icon"
+                          [size]="12"
+                          class="text-text-secondary"
                         />
-                        <div class="flex-1 min-w-0">
-                          <div class="flex items-center gap-1.5">
-                            <span
-                              class="text-sm font-medium text-text-primary truncate"
-                              >{{ role.name }}</span
-                            >
-                            @if (role.is_system_role) {
-                              <app-badge variant="info" size="xsm"
-                                >Sistema</app-badge
-                              >
-                            }
-                            @if (isRoleAssigned(role.id)) {
-                              <app-badge variant="success" size="xsm"
-                                >Asignado</app-badge
-                              >
-                            }
-                          </div>
-                          @if (role.description) {
-                            <p
-                              class="text-xs text-text-secondary mt-0.5 truncate"
-                            >
-                              {{ role.description }}
-                            </p>
-                          }
-                        </div>
-                      </label>
-                    }
-                  </div>
+                        <span
+                          class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary"
+                        >
+                          {{ group.label }}
+                        </span>
+                        <span class="text-[10px] text-text-secondary"
+                          >({{ group.roles.length }})</span
+                        >
+                      </div>
+
+                      <div class="flex flex-wrap gap-2">
+                        @for (role of group.roles; track role.id) {
+                          <label
+                            class="flex-1 min-w-[220px] max-w-[300px] flex items-center gap-2.5 p-2.5 rounded-lg border transition-all min-h-[44px]"
+                            [class]="roleCardClass(role)"
+                            [attr.title]="roleLockReason(role)"
+                          >
+                            <input
+                              type="checkbox"
+                              [checked]="isRoleChecked(role)"
+                              [disabled]="isRoleLocked(role)"
+                              (change)="toggleRole(role.id)"
+                              class="w-4 h-4 rounded border-border text-primary focus:ring-primary shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                            />
+                            <div class="flex-1 min-w-0">
+                              <div class="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  class="text-sm font-medium text-text-primary truncate"
+                                  >{{ role.name }}</span
+                                >
+                                @if (isRoleInherited(role)) {
+                                  <app-badge
+                                    variant="info"
+                                    size="xsm"
+                                    badgeStyle="outline"
+                                    >Heredado</app-badge
+                                  >
+                                } @else if (isRoleChecked(role)) {
+                                  <app-badge variant="success" size="xsm"
+                                    >Asignado</app-badge
+                                  >
+                                }
+                                @if (
+                                  role.scope === 'system' &&
+                                  !isRoleInherited(role)
+                                ) {
+                                  <app-badge
+                                    variant="neutral"
+                                    size="xsm"
+                                    badgeStyle="outline"
+                                    >No asignable</app-badge
+                                  >
+                                }
+                              </div>
+                              @if (role.description) {
+                                <p
+                                  class="text-xs text-text-secondary mt-0.5 truncate"
+                                >
+                                  {{ role.description }}
+                                </p>
+                              }
+                            </div>
+                          </label>
+                        }
+                      </div>
+                    </div>
+                  }
 
                   <!-- ── Tipo de aplicacion (app_type) ─────────────── -->
                   <div class="pt-3 mt-1 border-t border-border space-y-2">
@@ -623,15 +685,36 @@ export class StoreUserEditModalComponent implements OnChanges {
   });
 
   /**
+   * QUI-72 — Roles del detalle cuya asignación es HEREDADA de la organización
+   * (`assignment_store_id === null`). El nivel tienda no puede quitarlas: el
+   * backend las conserva al guardar porque su `deleteMany` sólo alcanza las
+   * asignaciones de ESTA tienda. Por eso van marcadas y bloqueadas, y NO viajan
+   * en `role_ids` (incluirlas crearía una asignación duplicada store-scoped).
+   */
+  readonly inheritedRoleIds = computed<Set<number>>(
+    () =>
+      new Set(
+        (this.userDetail()?.roles ?? [])
+          .filter((r) => r.assignment_store_id == null)
+          .map((r) => r.id),
+      ),
+  );
+
+  /** Conjunto efectivo de roles del usuario: propios de la tienda + heredados. */
+  readonly effectiveRoleIds = computed<Set<number>>(
+    () => new Set([...this.selectedRoleIds(), ...this.inheritedRoleIds()]),
+  );
+
+  /**
    * True when the edited user has the `carrier` role — derived from the roles
-   * currently toggled in the Roles tab (`selectedRoleIds` ∩ `availableRoles`)
+   * currently toggled in the Roles tab (`effectiveRoleIds` ∩ `availableRoles`)
    * OR from the loaded detail. Gates the "Tarifa" tab (Vendix Repartos F9).
    */
   readonly isCarrierUser = computed<boolean>(() => {
     const byId = new Map(
       this.availableRoles().map((r) => [r.id, r.name.toLowerCase()]),
     );
-    const fromAssigned = Array.from(this.selectedRoleIds()).some(
+    const fromAssigned = Array.from(this.effectiveRoleIds()).some(
       (id) => byId.get(id) === 'carrier',
     );
     const fromDetail = (this.userDetail()?.roles ?? []).some(
@@ -691,7 +774,7 @@ export class StoreUserEditModalComponent implements OnChanges {
     const roles = this.availableRoles().filter(
       (r) => !this.IMMUTABLE_ROLES.includes(r.name.toLowerCase()),
     );
-    const assigned = this.selectedRoleIds();
+    const assigned = this.effectiveRoleIds();
     return [...roles].sort((a, b) => {
       const aAssigned = assigned.has(a.id) ? 0 : 1;
       const bAssigned = assigned.has(b.id) ? 0 : 1;
@@ -699,10 +782,25 @@ export class StoreUserEditModalComponent implements OnChanges {
     });
   });
 
+  /**
+   * QUI-72 — Catálogo del selector agrupado por ALCANCE, reutilizando las
+   * constantes compartidas. Los grupos vacíos no se renderizan.
+   */
+  readonly roleGroups = computed<RoleScopeGroup[]>(() => {
+    const roles = this.sortedRoles();
+    return ROLE_SCOPE_ORDER.map((scope) => ({
+      scope,
+      label: ROLE_SCOPE_LABELS[scope],
+      icon: ROLE_SCOPE_ICONS[scope],
+      color: ROLE_SCOPE_COLOR_MAP[scope],
+      roles: roles.filter((r) => r.scope === scope),
+    })).filter((group) => group.roles.length > 0);
+  });
+
   /** Check if user has admin or owner role */
   isAdminOrOwner = computed(() => {
     const roles = this.availableRoles();
-    const assigned = this.selectedRoleIds();
+    const assigned = this.effectiveRoleIds();
     return roles.some(
       (r) =>
         assigned.has(r.id) &&
@@ -796,7 +894,19 @@ export class StoreUserEditModalComponent implements OnChanges {
           username: detail.username || '',
           phone: detail.phone || '',
         });
-        this.selectedRoleIds.set(new Set(detail.roles?.map((r) => r.id) || []));
+        // Sólo las asignaciones PROPIAS de esta tienda son editables. Las
+        // heredadas (`assignment_store_id === null`) viven en
+        // `inheritedRoleIds()` y se pintan bloqueadas; los roles de sistema no
+        // se pueden asignar desde aquí, así que tampoco entran al set editable.
+        this.selectedRoleIds.set(
+          new Set(
+            (detail.roles ?? [])
+              .filter(
+                (r) => r.assignment_store_id != null && r.scope !== 'system',
+              )
+              .map((r) => r.id),
+          ),
+        );
         const snapshot = detail.panel_ui
           ? JSON.parse(JSON.stringify(detail.panel_ui))
           : {};
@@ -866,10 +976,53 @@ export class StoreUserEditModalComponent implements OnChanges {
   // ── Roles ──────────────────────────────────────────────────────
 
   isRoleAssigned(roleId: number): boolean {
-    return this.selectedRoleIds().has(roleId);
+    return this.effectiveRoleIds().has(roleId);
+  }
+
+  /** Asignación heredada de la organización: se ve, no se toca desde aquí. */
+  isRoleInherited(role: Role): boolean {
+    return this.inheritedRoleIds().has(role.id);
+  }
+
+  /**
+   * Motivos independientes de bloqueo:
+   *  - heredado de la organización (la tienda no administra esa asignación);
+   *  - rol de SISTEMA (el backend responde 403 `ROLE_ASSIGN_003`: sólo el
+   *    administrador de la plataforma los asigna).
+   */
+  isRoleLocked(role: Role): boolean {
+    return this.isRoleInherited(role) || role.scope === 'system';
+  }
+
+  isRoleChecked(role: Role): boolean {
+    return this.effectiveRoleIds().has(role.id);
+  }
+
+  roleLockReason(role: Role): string | null {
+    if (this.isRoleInherited(role)) {
+      return 'Rol heredado de la organizacion: se administra desde el panel de la organizacion.';
+    }
+    if (role.scope === 'system') {
+      return 'Los roles de sistema solo los asigna el administrador de la plataforma.';
+    }
+    return null;
+  }
+
+  roleCardClass(role: Role): string {
+    if (this.isRoleLocked(role)) {
+      return this.isRoleChecked(role)
+        ? 'border-border bg-surface/60 opacity-80 cursor-not-allowed'
+        : 'border-border bg-surface/40 opacity-60 cursor-not-allowed';
+    }
+    return this.isRoleChecked(role)
+      ? 'border-primary/30 bg-primary/5 hover:bg-primary/10 cursor-pointer'
+      : 'border-border hover:bg-surface cursor-pointer';
   }
 
   toggleRole(roleId: number): void {
+    const role = this.availableRoles().find((r) => r.id === roleId);
+    if (role && this.isRoleLocked(role)) return;
+
     const current = new Set(this.selectedRoleIds());
     if (current.has(roleId)) {
       current.delete(roleId);
@@ -879,13 +1032,34 @@ export class StoreUserEditModalComponent implements OnChanges {
     this.selectedRoleIds.set(current);
   }
 
+  /**
+   * `role_ids` describe SÓLO las asignaciones de esta tienda:
+   *  - se excluyen las heredadas (el backend las conserva; mandarlas crearía una
+   *    fila duplicada store-scoped para el mismo rol);
+   *  - se intersecta con el catálogo visible, que ya excluye los roles núcleo
+   *    (`owner`, `super_admin`) y de sistema no asignables — enviarlos abortaría
+   *    el guardado completo con 403.
+   */
+  private buildRoleIdsPayload(): number[] {
+    const assignable = new Set(
+      this.availableRoles()
+        .filter((r) => r.scope !== 'system')
+        .map((r) => r.id),
+    );
+    const inherited = this.inheritedRoleIds();
+    return Array.from(this.selectedRoleIds()).filter(
+      (id) => assignable.has(id) && !inherited.has(id),
+    );
+  }
+
   saveRoles(): void {
     const currentUser = this.user();
     if (!currentUser) return;
+
     this.store.dispatch(
       StoreUsersActions.updateUserRoles({
         id: currentUser.id,
-        role_ids: Array.from(this.selectedRoleIds()),
+        role_ids: this.buildRoleIdsPayload(),
       }),
     );
   }
@@ -1006,7 +1180,9 @@ export class StoreUserEditModalComponent implements OnChanges {
     // Enviamos los roles seleccionados localmente (incluye carrier aun sin
     // guardar) para que el backend los persista ANTES de validar el app_type.
     // Asi asignar rol carrier + STORE_DELIVERY funciona en un solo paso.
-    const roleIds = Array.from(this.selectedRoleIds());
+    // Mismo saneo que `saveRoles`: sin heredados ni roles de sistema, o el
+    // backend abortaría el guardado completo con 403.
+    const roleIds = this.buildRoleIdsPayload();
     this.storeUsersService
       .setAppType(currentUser.id, appType, roleIds)
       .pipe(takeUntilDestroyed(this.destroyRef))

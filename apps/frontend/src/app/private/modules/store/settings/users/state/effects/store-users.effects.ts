@@ -4,6 +4,7 @@ import { Store } from '@ngrx/store';
 import { of } from 'rxjs';
 import { map, switchMap, catchError, withLatestFrom } from 'rxjs/operators';
 import { ToastService } from '../../../../../../../shared/components/index';
+import { StoreRolesService } from '../../../roles/services/store-roles.service';
 import { StoreUsersManagementService } from '../../services/store-users-management.service';
 import * as StoreUsersActions from '../actions/store-users.actions';
 import { selectStoreUsersState } from '../selectors/store-users.selectors';
@@ -13,6 +14,13 @@ export class StoreUsersEffects {
   private actions$ = inject(Actions);
   private store = inject(Store);
   private usersService = inject(StoreUsersManagementService);
+  /**
+   * QUI-72 — El catálogo de roles se toma del MISMO servicio que alimenta la
+   * pestaña "Usuarios" del detalle del rol (`StoreRolesService`), no de una
+   * copia local en `StoreUsersManagementService`. Así el `scope` de cada rol es
+   * idéntico en las dos direcciones y no pueden divergir.
+   */
+  private rolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
 
   loadUsers$ = createEffect(() =>
@@ -240,7 +248,7 @@ export class StoreUsersEffects {
     this.actions$.pipe(
       ofType(StoreUsersActions.loadAvailableRoles),
       switchMap(() =>
-        this.usersService.getAvailableRoles().pipe(
+        this.rolesService.getRoles().pipe(
           map((roles) => StoreUsersActions.loadAvailableRolesSuccess({ roles })),
           catchError((error) =>
             of(

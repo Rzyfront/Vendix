@@ -5,10 +5,16 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreRole, StoreRoleStats } from './interfaces/store-role.interface';
 import { StoreRolesService } from './services/store-roles.service';
+import { storeRoleErrorMessage } from './utils/store-role-errors';
+import {
+  RoleScope,
+  canEditRoleScope,
+} from '../../../../../shared/constants/role-scope.constant';
 
 import {
   StoreRoleCreateModalComponent,
   StoreRoleEditModalComponent,
+  StoreRoleDetailTab,
   StoreRolePermissionsModalComponent,
   StoreRolesListComponent} from './components/index';
 
@@ -36,7 +42,7 @@ import {
         <app-stats
           title="Total Roles"
           [value]="roleStats()?.total_roles ?? 0"
-          smallText="en la tienda"
+          smallText="visibles en la tienda"
           iconName="shield"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
@@ -47,17 +53,27 @@ import {
           title="Sistema"
           [value]="roleStats()?.system_roles ?? 0"
           smallText="roles del sistema"
-          iconName="lock"
-          iconBgColor="bg-blue-100"
-          iconColor="text-blue-600"
+          iconName="shield-check"
+          iconBgColor="bg-indigo-100"
+          iconColor="text-indigo-600"
           [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
-          title="Personalizados"
-          [value]="roleStats()?.custom_roles ?? 0"
-          smallText="roles personalizados"
-          iconName="edit"
+          title="Organizacion"
+          [value]="roleStats()?.organization_roles ?? 0"
+          smallText="heredados (solo lectura)"
+          iconName="building-2"
+          iconBgColor="bg-sky-100"
+          iconColor="text-sky-600"
+          [loading]="statsLoading()"
+        ></app-stats>
+
+        <app-stats
+          title="Tienda"
+          [value]="roleStats()?.store_roles ?? 0"
+          smallText="propios de esta tienda"
+          iconName="store"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
           [loading]="statsLoading()"
@@ -80,7 +96,8 @@ import {
         [loading]="isLoading()"
         [totalCount]="roles().length"
         (create)="openCreateModal()"
-        (edit)="openEditModal($event)"
+        (edit)="openDetailModal($event, 'general')"
+        (manageUsers)="openDetailModal($event, 'users')"
         (managePermissions)="openPermissionsModal($event)"
         (delete)="deleteRole($event)"
         (searchChange)="onSearchChange($event)"
@@ -88,25 +105,29 @@ import {
         (sort)="onSortChange($event)"
       ></app-store-roles-list>
 
-      @defer (when showCreateModal) {
+      @defer (when showCreateModal()) {
         <app-store-role-create-modal
-          [(isOpen)]="showCreateModal"
+          [isOpen]="showCreateModal()"
+          (isOpenChange)="showCreateModal.set($event)"
           (onRoleCreated)="onRoleCreated()"
         />
       }
 
-      @defer (when showEditModal && currentRole) {
+      @defer (when showDetailModal() && !!currentRole()) {
         <app-store-role-edit-modal
-          [role]="currentRole"
-          [(isOpen)]="showEditModal"
+          [role]="currentRole()"
+          [initialTab]="detailTab()"
+          [isOpen]="showDetailModal()"
+          (isOpenChange)="onDetailOpenChange($event)"
           (onRoleUpdated)="onRoleUpdated()"
         />
       }
 
-      @defer (when showPermissionsModal && permissionsRole) {
+      @defer (when showPermissionsModal() && !!permissionsRole()) {
         <app-store-role-permissions-modal
-          [role]="permissionsRole"
-          [(isOpen)]="showPermissionsModal"
+          [role]="permissionsRole()"
+          [isOpen]="showPermissionsModal()"
+          (isOpenChange)="showPermissionsModal.set($event)"
           (onPermissionsUpdated)="onPermissionsUpdated()"
         />
       }
@@ -125,15 +146,17 @@ export class StoreRolesSettingsComponent implements OnInit {
   readonly statsLoading = signal(false);
 
   // Filters
-  searchTerm = '';
-  typeFilter = '';
+  private searchTerm = '';
+  /** QUI-72: filtro por alcance ('' = todos). */
+  private scopeFilter: RoleScope | '' = '';
 
-  // Modals
-  currentRole: StoreRole | null = null;
-  permissionsRole: StoreRole | null = null;
-  showCreateModal = false;
-  showEditModal = false;
-  showPermissionsModal = false;
+  // Modals — signals: la plantilla los lee y estamos en zoneless.
+  readonly currentRole = signal<StoreRole | null>(null);
+  readonly permissionsRole = signal<StoreRole | null>(null);
+  readonly detailTab = signal<StoreRoleDetailTab>('general');
+  readonly showCreateModal = signal(false);
+  readonly showDetailModal = signal(false);
+  readonly showPermissionsModal = signal(false);
 
   ngOnInit(): void {
     this.loadRoles();
@@ -146,8 +169,8 @@ loadRoles(): void {
       .getRoles()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => {
-          this.roles.set(response.data || []);
+        next: (roles) => {
+          this.roles.set(roles);
           this.applyFilters();
         },
         error: (error) => {
@@ -184,8 +207,8 @@ loadRoles(): void {
   }
 
   onFilterChange(filters: Record<string, string>): void {
-    if (filters['type'] !== undefined) {
-      this.typeFilter = filters['type'];
+    if (filters['scope'] !== undefined) {
+      this.scopeFilter = (filters['scope'] as RoleScope | '') || '';
     }
     this.applyFilters();
   }
@@ -207,10 +230,8 @@ loadRoles(): void {
   private applyFilters(): void {
     let filtered = [...this.roles()];
 
-    if (this.typeFilter === 'system') {
-      filtered = filtered.filter((r) => r.system_role);
-    } else if (this.typeFilter === 'custom') {
-      filtered = filtered.filter((r) => !r.system_role);
+    if (this.scopeFilter) {
+      filtered = filtered.filter((r) => r.scope === this.scopeFilter);
     }
 
     if (this.searchTerm) {
@@ -228,37 +249,56 @@ loadRoles(): void {
   // ── Modals ───────────────────────────────────────────────────────────
 
   openCreateModal(): void {
-    this.showCreateModal = true;
+    this.showCreateModal.set(true);
   }
 
   onRoleCreated(): void {
-    this.showCreateModal = false;
+    this.showCreateModal.set(false);
     this.refreshData();
   }
 
-  openEditModal(role: StoreRole): void {
-    this.currentRole = role;
-    this.showEditModal = true;
+  /**
+   * Abre el detalle del rol. `tab` decide si entra por General (Editar) o por
+   * Usuarios: la pestaña Usuarios se abre para CUALQUIER alcance porque leer
+   * quién tiene el rol es legítimo aunque el rol sea heredado.
+   */
+  openDetailModal(role: StoreRole, tab: StoreRoleDetailTab): void {
+    if (tab === 'general' && !canEditRoleScope(role.scope, 'store')) return;
+    this.currentRole.set(role);
+    this.detailTab.set(tab);
+    this.showDetailModal.set(true);
+  }
+
+  onDetailOpenChange(open: boolean): void {
+    this.showDetailModal.set(open);
+    if (!open) {
+      this.currentRole.set(null);
+    }
   }
 
   onRoleUpdated(): void {
-    this.showEditModal = false;
-    this.currentRole = null;
     this.refreshData();
   }
 
   openPermissionsModal(role: StoreRole): void {
-    this.permissionsRole = role;
-    this.showPermissionsModal = true;
+    this.permissionsRole.set(role);
+    this.showPermissionsModal.set(true);
   }
 
   onPermissionsUpdated(): void {
-    this.showPermissionsModal = false;
-    this.permissionsRole = null;
+    this.showPermissionsModal.set(false);
+    this.permissionsRole.set(null);
     this.refreshData();
   }
 
   deleteRole(role: StoreRole): void {
+    if (!canEditRoleScope(role.scope, 'store')) {
+      this.toastService.error(
+        'Este rol es de solo lectura en la tienda y no se puede eliminar.',
+      );
+      return;
+    }
+
     this.dialogService
       .confirm({
         title: 'Eliminar Rol',
@@ -268,17 +308,20 @@ loadRoles(): void {
         confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
-          this.storeRolesService.deleteRole(role.id).subscribe({
-            next: () => {
-              this.toastService.success('Rol eliminado exitosamente');
-              this.refreshData();
-            },
-            error: (error) => {
-              console.error('Error deleting role:', error);
-              const message =
-                error?.error?.message || 'Error al eliminar el rol';
-              this.toastService.error(message);
-            }});
+          this.storeRolesService
+            .deleteRole(role.id)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: () => {
+                this.toastService.success('Rol eliminado exitosamente');
+                this.refreshData();
+              },
+              error: (error) => {
+                console.error('Error deleting role:', error);
+                this.toastService.error(
+                  storeRoleErrorMessage(error, 'Error al eliminar el rol'),
+                );
+              }});
         }
       });
   }
