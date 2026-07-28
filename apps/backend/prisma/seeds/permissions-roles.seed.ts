@@ -214,6 +214,37 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Usuario → Roles (QUI-72)
+    //
+    // Dirección que el nivel organización no tenía: administrar los roles DE un
+    // usuario. Los handlers declaran estos nombres junto a
+    // `organization:users:read` / `organization:users:update` como fallback
+    // (PermissionsGuard usa semántica OR), así que sembrarlos REFINA la
+    // autorización sin quitarle acceso a quien ya administra usuarios de la
+    // organización.
+    //
+    // Los `path` conservan los placeholders del route pattern de Express
+    // (`:userId`, `:roleId`) porque PermissionsGuard compara contra
+    // `route.path`, no contra la URL concreta.
+    {
+      name: 'organization:users:roles:read',
+      description: 'Leer los roles asignados a un usuario de la organización',
+      path: '/api/organization/users/:userId/roles',
+      method: 'GET',
+    },
+    {
+      name: 'organization:users:roles:assign',
+      description: 'Asignar un rol a un usuario de la organización',
+      path: '/api/organization/users/:userId/roles/:roleId',
+      method: 'POST',
+    },
+    {
+      name: 'organization:users:roles:remove',
+      description: 'Quitar un rol a un usuario de la organización',
+      path: '/api/organization/users/:userId/roles/:roleId',
+      method: 'DELETE',
+    },
+
     // Organizaciones
     {
       name: 'organization:organizations:read',
@@ -2874,6 +2905,57 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // ──── Roles y usuarios de plataforma (QUI-72) ────
+    //
+    // DECLARATIVOS POR AHORA. `SuperadminRolesController` y
+    // `SuperadminUsersController` se protegen hoy con
+    // `@UseGuards(RolesGuard)` + `@Roles(SUPER_ADMIN)`; `PermissionsGuard` NO
+    // está registrado en ellos, así que estos nombres todavía no se evalúan en
+    // runtime. Se siembran igual para que el día que se registre el guard los
+    // `@Permissions(...)` que esos controladores YA declaran encuentren su fila
+    // y nada devuelva 403 por catálogo faltante.
+    //
+    // Se asignan EXCLUSIVAMENTE a super_admin (ver exclusiones en los filtros
+    // de owner y manager más abajo).
+    {
+      name: 'superadmin:roles:create',
+      description: 'Crear roles del catálogo global de plataforma',
+      path: '/api/superadmin/roles',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:roles:read',
+      description: 'Leer roles del catálogo global de plataforma',
+      path: '/api/superadmin/roles',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:roles:update',
+      description:
+        'Actualizar roles de plataforma (incl. sus permisos y usuarios)',
+      path: '/api/superadmin/roles/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:roles:delete',
+      description: 'Eliminar roles del catálogo global de plataforma',
+      path: '/api/superadmin/roles/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'superadmin:users:read',
+      description: 'Leer usuarios de cualquier tenant desde la plataforma',
+      path: '/api/superadmin/users',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:users:update',
+      description:
+        'Actualizar usuarios de cualquier tenant desde la plataforma (incl. sus roles)',
+      path: '/api/superadmin/users/:id',
+      method: 'PATCH',
+    },
+
     // ──── Cuentas por Cobrar (Cartera) ────
     {
       name: 'store:accounts_receivable:read',
@@ -4095,9 +4177,18 @@ export async function seedPermissionsAndRoles(
   assignmentsCreated += superAdminSync.added;
 
   // Assign permissions to owner (full control of their organization)
+  //
+  // QUI-72: administrar el catálogo GLOBAL de roles de plataforma y los
+  // usuarios de cualquier tenant es exclusivo de super_admin — un owner sólo
+  // manda dentro de su organización.
+  // Ojo: el filtro histórico `!p.name.includes('super_admin')` NO excluye el
+  // prefijo `superadmin:` (va sin guion bajo), por eso hace falta esta
+  // exclusión explícita.
   const ownerPermissions = allPermissions.filter(
     (p) =>
       !p.name.includes('super_admin') &&
+      !p.name.startsWith('superadmin:roles:') &&
+      !p.name.startsWith('superadmin:users:') &&
       !p.name.includes('system.test') &&
       !p.name.includes('users.impersonate'),
   );
@@ -4193,6 +4284,12 @@ export async function seedPermissionsAndRoles(
       // Gestión de usuarios de tienda (incl. su panel_ui) es exclusiva de
       // owner/admin por decisión de negocio: manager NO administra usuarios.
       !p.name.startsWith('store:users:') &&
+      // QUI-72: el catálogo global de roles de plataforma y los usuarios de
+      // cualquier tenant son exclusivos de super_admin. La cláusula permisiva
+      // de más abajo (el gran `!includes(...)` final) dejaría entrar estos
+      // nombres porque `superadmin:` no contiene `super_admin`.
+      !p.name.startsWith('superadmin:roles:') &&
+      !p.name.startsWith('superadmin:users:') &&
       (p.name.startsWith('store:') ||
         p.name.startsWith('exogenous:') ||
         p.name.startsWith('payroll:') ||

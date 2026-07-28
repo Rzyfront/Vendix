@@ -13,7 +13,8 @@ import { UsersService } from './services/users.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,
-  UserEditModalComponent} from './components/index';
+  UserEditModalComponent,
+  UserRolesModalComponent} from './components/index';
 
 // Import components from shared
 import {
@@ -42,6 +43,7 @@ import {
     UserStatsComponent,
     UserCreateModalComponent,
     UserEditModalComponent,
+    UserRolesModalComponent,
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -66,6 +68,9 @@ export class UsersComponent implements OnInit {
   currentUser: User | null = null;
   readonly showCreateModal = signal(false);
   readonly showEditModal = signal(false);
+  /** QUI-72 — Editor de roles del usuario (dirección usuario → roles). */
+  readonly showRolesModal = signal(false);
+  readonly currentRolesUser = signal<User | null>(null);
 
   private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 // Form for filters
@@ -106,6 +111,11 @@ export class UsersComponent implements OnInit {
       icon: 'edit',
       action: (user: User) => this.editUser(user),
       variant: 'info'},
+    {
+      label: 'Roles',
+      icon: 'shield',
+      action: (user: User) => this.manageRoles(user),
+      variant: 'ghost'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
@@ -361,6 +371,19 @@ loadUsers(): void {
   onUserUpdated(): void {
     this.showEditModal.set(false);
     this.currentUser = null;
+    this.refreshUsers();
+  }
+
+  /**
+   * Roles del usuario. Es la dirección inversa de la pestaña "Usuarios" del
+   * detalle del rol y comparte con ella el mismo `RolesService`.
+   */
+  manageRoles(user: User): void {
+    this.currentRolesUser.set(user);
+    this.showRolesModal.set(true);
+  }
+
+  onUserRolesChanged(): void {
     this.refreshUsers();
   }
 
