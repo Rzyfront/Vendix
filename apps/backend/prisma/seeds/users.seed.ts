@@ -280,13 +280,22 @@ export async function seedUsers(
 
     // Assign roles
     for (const roleId of user.roles) {
-      await client.user_roles.upsert({
-        where: {
-          user_id_role_id: { user_id: createdUser.id, role_id: roleId },
-        },
-        update: {},
-        create: { user_id: createdUser.id, role_id: roleId },
+      // QUI-72: la clave única de `user_roles` incorporó `store_id`, y Prisma
+      // tipa los campos de un compound unique como NO nulos — así que una
+      // asignación org-wide (`store_id = NULL`) no se puede expresar con
+      // `upsert({ where: { user_id_role_id_store_id } })`. El equivalente es
+      // findFirst + create. Los roles del seed son de sistema/organización,
+      // por eso van org-wide.
+      const existingAssignment = await client.user_roles.findFirst({
+        where: { user_id: createdUser.id, role_id: roleId, store_id: null },
+        select: { id: true },
       });
+
+      if (!existingAssignment) {
+        await client.user_roles.create({
+          data: { user_id: createdUser.id, role_id: roleId, store_id: null },
+        });
+      }
       rolesAssigned++;
     }
 

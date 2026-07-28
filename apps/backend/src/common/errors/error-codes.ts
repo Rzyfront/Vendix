@@ -37,6 +37,65 @@ export const ErrorCodes = {
     devMessage: 'Resource conflict',
   },
 
+  // Role scope (QUI-72) — shared by superadmin / organization / store levels.
+  // Live next to SYS_* on purpose: the scope matrix is cross-domain, so the
+  // three levels must answer with the SAME code for the same violation.
+  ROLE_SCOPE_001: {
+    code: 'ROLE_SCOPE_001',
+    httpStatus: 403,
+    devMessage: 'Role is read-only at this level (scope/edit matrix)',
+  },
+  ROLE_SCOPE_002: {
+    code: 'ROLE_SCOPE_002',
+    httpStatus: 403,
+    devMessage: 'Organization context required to resolve role scope',
+  },
+  ROLE_SCOPE_003: {
+    code: 'ROLE_SCOPE_003',
+    httpStatus: 403,
+    devMessage: 'Store context required to resolve role scope',
+  },
+  ROLE_SCOPE_004: {
+    code: 'ROLE_SCOPE_004',
+    httpStatus: 404,
+    devMessage: 'Role not found or not visible at this level',
+  },
+  ROLE_ASSIGN_001: {
+    code: 'ROLE_ASSIGN_001',
+    httpStatus: 403,
+    devMessage: 'Role cannot be assigned to a user outside its scope',
+  },
+  ROLE_ASSIGN_002: {
+    code: 'ROLE_ASSIGN_002',
+    httpStatus: 403,
+    devMessage: 'Immutable role cannot be assigned or removed through this API',
+  },
+  ROLE_ASSIGN_003: {
+    code: 'ROLE_ASSIGN_003',
+    httpStatus: 403,
+    devMessage: 'Only a superadmin can assign or remove system roles',
+  },
+  ROLE_ASSIGN_004: {
+    code: 'ROLE_ASSIGN_004',
+    httpStatus: 404,
+    devMessage: 'Role assignment not found',
+  },
+  ROLE_ASSIGN_005: {
+    code: 'ROLE_ASSIGN_005',
+    httpStatus: 409,
+    devMessage: 'Role is already assigned to this user in this scope',
+  },
+  ROLE_ASSIGN_006: {
+    code: 'ROLE_ASSIGN_006',
+    httpStatus: 404,
+    devMessage: 'Target user not found in this scope',
+  },
+  ROLE_ASSIGN_007: {
+    code: 'ROLE_ASSIGN_007',
+    httpStatus: 403,
+    devMessage: 'Assignment store does not belong to the role organization',
+  },
+
   // Uploads
   UPLOAD_FILE_001: {
     code: 'UPLOAD_FILE_001',

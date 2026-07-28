@@ -11,6 +11,7 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalStatusResolverService } from '@common/services/fiscal-status-resolver.service';
 import { FiscalStatusMigrationService } from '@common/services/fiscal-status-migration.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 
 @Module({
   providers: [
@@ -26,6 +27,7 @@ import { FiscalGateService } from '@common/services/fiscal-gate.service';
     FiscalStatusResolverService,
     FiscalStatusMigrationService,
     FiscalGateService,
+    UserRoleAssignmentService,
   ],
   exports: [
     GlobalPrismaService,
@@ -40,6 +42,7 @@ import { FiscalGateService } from '@common/services/fiscal-gate.service';
     FiscalStatusResolverService,
     FiscalStatusMigrationService,
     FiscalGateService,
+    UserRoleAssignmentService,
   ],
 })
 export class PrismaModule {}
