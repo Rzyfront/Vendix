@@ -16,8 +16,10 @@ import {
   UserQueryDto,
 } from '../../organization/users/dto';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
+import { RoleAssignmentScopeDto } from '../roles/dto/role.dto';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ResponseService } from 'src/common/responses/response.service';
@@ -138,21 +140,57 @@ export class UsersController {
     );
   }
 
+  // ===== Dirección usuario → roles (QUI-72) =====
+  //
+  // Contrapartida de `superadmin/roles/:id/users/:userId`. Ambas atraviesan
+  // `SuperadminRoleAssignmentService`, de modo que `store_id`, las guardas de
+  // roles núcleo y el aprovisionamiento de staff valen igual por los dos lados.
+
+  @Permissions('superadmin:users:read')
+  @Get(':userId/roles')
+  @ApiOperation({
+    summary: 'List the roles assigned to a user, with the scope of each one',
+  })
+  @ApiResponse({ status: 200, description: 'User roles retrieved successfully' })
+  async listRoles(@Param('userId') userId: string) {
+    const result = await this.usersService.listUserRoles(+userId);
+    return this.responseService.success(
+      result,
+      'User roles retrieved successfully',
+    );
+  }
+
+  @Permissions('superadmin:users:update')
   @Post(':userId/roles/:roleId')
-  @ApiOperation({ summary: 'Assign a role to a user' })
+  @ApiOperation({
+    summary:
+      'Assign a role to a user. `store_id` (body or query) scopes the assignment to one store; absent or null means org-wide.',
+  })
   @ApiResponse({ status: 200, description: 'Role assigned successfully' })
   @ApiResponse({ status: 404, description: 'User or role not found' })
   @ApiResponse({ status: 409, description: 'Role already assigned to user' })
   async assignRole(
     @Param('userId') userId: string,
     @Param('roleId') roleId: string,
+    @Body() body: RoleAssignmentScopeDto,
+    @Query() query: RoleAssignmentScopeDto,
   ) {
-    const result = await this.usersService.assignRole(+userId, +roleId);
+    const storeId =
+      body?.store_id !== undefined ? body.store_id : query?.store_id;
+    const result = await this.usersService.assignRole(
+      +userId,
+      +roleId,
+      storeId,
+    );
     return this.responseService.success(result, 'Role assigned successfully');
   }
 
+  @Permissions('superadmin:users:update')
   @Delete(':userId/roles/:roleId')
-  @ApiOperation({ summary: 'Remove a role from a user' })
+  @ApiOperation({
+    summary:
+      'Remove a role from a user. `store_id` selects the store-scoped assignment; absent or null targets the org-wide one.',
+  })
   @ApiResponse({ status: 200, description: 'Role removed successfully' })
   @ApiResponse({
     status: 404,
@@ -165,8 +203,13 @@ export class UsersController {
   async removeRole(
     @Param('userId') userId: string,
     @Param('roleId') roleId: string,
+    @Query() query: RoleAssignmentScopeDto,
   ) {
-    const result = await this.usersService.removeRole(+userId, +roleId);
+    const result = await this.usersService.removeRole(
+      +userId,
+      +roleId,
+      query?.store_id,
+    );
     return this.responseService.success(result, 'Role removed successfully');
   }
 
