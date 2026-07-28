@@ -215,6 +215,11 @@ export class StoreRolesService {
     // unique de la tabla. QUI-473: se CONSERVA la guarda anti-colisión contra
     // los roles de SISTEMA globales (is_system_role=true, organization_id NULL),
     // que comparten espacio de nombres con todas las tiendas.
+    // QUI-72: la guarda cubre además los roles HEREDADOS que ya se ven en esta
+    // tienda (los de organización con store_id NULL). El unique de la tabla no
+    // los detecta —(org, NULL, 'Cajero') y (org, 7, 'Cajero') son filas
+    // distintas— pero para el usuario de la tienda serían dos filas con el mismo
+    // nombre y distinto alcance, imposibles de distinguir al asignar.
     const existing = await this.prisma.roles.findFirst({
       where: {
         name: dto.name,
@@ -223,16 +228,21 @@ export class StoreRolesService {
             organization_id: ownership.organization_id,
             store_id: ownership.store_id,
           },
+          { organization_id: ownership.organization_id, store_id: null },
           { is_system_role: true, organization_id: null },
         ],
       },
+      select: { id: true, is_system_role: true, store_id: true },
     });
 
     if (existing) {
+      const conflictScope = deriveRoleScope(existing);
       throw new VendixHttpException(
         ErrorCodes.SYS_CONFLICT_001,
-        'Ya existe un rol con este nombre en esta tienda',
-        { name: dto.name },
+        conflictScope === 'store'
+          ? 'Ya existe un rol con este nombre en esta tienda'
+          : 'Ya existe un rol heredado con este nombre visible en esta tienda',
+        { name: dto.name, conflict_scope: conflictScope },
       );
     }
 
@@ -310,16 +320,23 @@ export class StoreRolesService {
           id: { not: id },
           OR: [
             { organization_id: role.organization_id, store_id: role.store_id },
+            // Mismo criterio que en create(): un rol de tienda tampoco puede
+            // pasar a llamarse igual que un rol heredado visible aquí.
+            { organization_id: role.organization_id, store_id: null },
             { is_system_role: true, organization_id: null },
           ],
         },
+        select: { id: true, is_system_role: true, store_id: true },
       });
 
       if (existing) {
+        const conflictScope = deriveRoleScope(existing);
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
-          'Ya existe un rol con este nombre en esta tienda',
-          { name: dto.name },
+          conflictScope === 'store'
+            ? 'Ya existe un rol con este nombre en esta tienda'
+            : 'Ya existe un rol heredado con este nombre visible en esta tienda',
+          { name: dto.name, conflict_scope: conflictScope },
         );
       }
     }
