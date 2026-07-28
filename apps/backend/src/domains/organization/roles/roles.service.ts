@@ -1,10 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import {
   AuditService,
@@ -12,6 +6,14 @@ import {
   AuditResource,
 } from '../../../common/audit/audit.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
+import {
+  RoleActor,
+  assertRoleEditable,
+  buildRoleVisibilityWhere,
+  deriveRoleScope,
+  resolveNewRoleOwnership,
+} from '@common/utils/role-scope.util';
 import {
   CreateRoleDto,
   UpdateRoleDto,
@@ -27,14 +29,104 @@ import {
   RoleWithPermissionDescriptionsDto,
 } from './dto/role.dto';
 
+/** `include` común: todo lo que necesita `transformRoleWithPermissionDescriptions`. */
+const ROLE_DETAIL_INCLUDE = {
+  role_permissions: { include: { permissions: true } },
+  stores: { select: { id: true, name: true } },
+  _count: { select: { user_roles: true } },
+} as const;
+
 @Injectable()
 export class RolesService {
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly auditService: AuditService,
+    private readonly userRoleAssignment: UserRoleAssignmentService,
   ) {}
 
   // ===== UTILIDADES PRIVADAS =====
+
+  /**
+   * QUI-72 — actor de nivel ORGANIZACIÓN.
+   *
+   * Todo este dominio vive bajo `/organization/*`, así que el nivel es fijo; lo
+   * único variable es la organización del contexto. Sin ella se falla cerrado:
+   * un `organization_id: undefined` colapsaría los filtros de visibilidad a
+   * "todas las organizaciones", que es exactamente la fuga que cierra QUI-72.
+   */
+  private getActor(): RoleActor {
+    const organization_id = RequestContextService.getContext()?.organization_id;
+    if (organization_id == null) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_002);
+    }
+    return { level: 'organization', organization_id };
+  }
+
+  /**
+   * Carga un rol aplicando la matriz de VISIBILIDAD del actor.
+   *
+   * El filtro va envuelto en `AND` a propósito: `OrganizationPrismaService`
+   * inyecta su propio `OR` de nivel superior sobre el modelo `roles`
+   * (`{...where, OR: [...]}`) y sobrescribiría un `OR` puesto por el llamador.
+   * Con `AND` los dos filtros se componen en vez de pisarse.
+   */
+  private async loadVisibleRoleRow(id: number, actor: RoleActor) {
+    const role = await this.prismaService.roles.findFirst({
+      where: { AND: [{ id }, buildRoleVisibilityWhere(actor)] },
+      include: {
+        ...ROLE_DETAIL_INCLUDE,
+        user_roles: {
+          include: {
+            users: {
+              select: {
+                id: true,
+                email: true,
+                first_name: true,
+                last_name: true,
+                state: true,
+              },
+            },
+            stores: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!role) {
+      // Mismo 404 para "no existe" y "no visible": distinguirlos permitiría
+      // enumerar roles de otros tenants por ID (IDOR de lectura).
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_004);
+    }
+
+    return role;
+  }
+
+  /**
+   * Valida que una tienda exista y pertenezca a la organización del actor.
+   *
+   * `this.prismaService.stores` ya está org-scoped, así que una tienda de otra
+   * organización devuelve `null` y no hay forma de distinguir "no existe" de
+   * "no es tuya" desde fuera.
+   */
+  private async assertStoreBelongsToActor(
+    store_id: number,
+    actor: RoleActor,
+  ): Promise<number> {
+    const store = await this.prismaService.stores.findFirst({
+      where: { id: store_id },
+      select: { id: true },
+    });
+
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.ROLE_ASSIGN_007, undefined, {
+        store_id,
+        organization_id: actor.organization_id,
+        reason: 'store_not_in_organization',
+      });
+    }
+
+    return store.id;
+  }
 
   /**
    * Transforma un rol con permisos completos a un rol con solo descripciones de permisos
@@ -50,6 +142,11 @@ export class RolesService {
       organization_id: role.organization_id,
       description: role.description,
       system_role: role.is_system_role,
+      // QUI-72: alcance derivado + tienda dueña, para que la UI pueda etiquetar
+      // "Sistema / Organización / Tienda X" sin re-derivar la matriz.
+      scope: deriveRoleScope(role),
+      store_id: role.store_id ?? null,
+      store_name: role.stores?.name ?? null,
       created_at: role.created_at,
       updated_at: role.updated_at,
       permissions:
@@ -64,35 +161,47 @@ export class RolesService {
   // ===== CRUD ROLES =====
 
   async create(createRoleDto: CreateRoleDto, userId: number) {
-    const { name, description, system_role } = createRoleDto;
-    const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id;
+    const { name, description, store_id } = createRoleDto;
+    const actor = this.getActor();
 
-    if (!organization_id && !system_role) {
-      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
-    }
+    // QUI-72: la propiedad del rol la decide el CONTEXTO, no el body. El nivel
+    // organización jamás crea roles de sistema (`is_system_role` del DTO se
+    // ignora) ni roles de otra organización.
+    const ownership = resolveNewRoleOwnership(actor);
 
-    // QUI-473: roles are unique per (organization_id, name), not by name alone.
-    // The pre-check must match the scope of the row we are about to insert:
-    // - system_role=true  → look for (organization_id = NULL, name)
-    // - system_role=false → look for (organization_id = <ctx.org>, name)
+    // El admin de organización SÍ puede crear un rol de alcance tienda, pero
+    // sólo para una de SUS tiendas.
+    const target_store_id =
+      store_id != null
+        ? await this.assertStoreBelongsToActor(store_id, actor)
+        : null;
+
+    // QUI-473 + QUI-72: la unicidad es por (organization_id, store_id, name).
+    // Dos cosas que la base NO puede hacer sola y por eso se validan aquí:
     //
-    // Critically, the pre-check must ALSO reject the case where an org tries
-    // to create a role whose name is already taken by a SYSTEM role. Before
-    // QUI-473 this was impossible because `name` had a global UNIQUE; with the
-    // composite unique on (organization_id, name) a row matching
-    // `(NULL, 'carrier')` does NOT collide with `(org_x, 'carrier')` at the
-    // database level, so the application has to enforce it. Mirrors the
-    // pre-check in `store-roles.service.ts:172-177`.
-    const target_organization_id = system_role ? null : organization_id;
+    // 1. El índice único deja convivir `(org_x, NULL, 'carrier')` con
+    //    `(NULL, NULL, 'carrier')` (rol de sistema). Un rol de organización que
+    //    se llame igual que uno de sistema rompería la resolución por nombre,
+    //    así que se rechaza en aplicación.
+    // 2. El `AND` es obligatorio: `OrganizationPrismaService` reescribe el `OR`
+    //    de primer nivel sobre `roles`. Un `OR` suelto aquí sería descartado y
+    //    la pre-verificación pasaría a comprobar otra cosa.
     const existingRole = await this.prismaService.roles.findFirst({
       where: {
-        name,
-        OR: [
-          { organization_id: target_organization_id },
-          { is_system_role: true },
+        AND: [
+          { name },
+          {
+            OR: [
+              {
+                organization_id: ownership.organization_id,
+                store_id: target_store_id,
+              },
+              { is_system_role: true, organization_id: null },
+            ],
+          },
         ],
       },
+      select: { id: true },
     });
 
     if (existingRole) {
@@ -108,28 +217,11 @@ export class RolesService {
         data: {
           name,
           description,
-          is_system_role: system_role || false,
-          organization_id: target_organization_id,
+          is_system_role: false,
+          organization_id: ownership.organization_id,
+          store_id: target_store_id,
         },
-        include: {
-          role_permissions: {
-            include: {
-              permissions: true,
-            },
-          },
-          user_roles: {
-            include: {
-              users: {
-                select: {
-                  id: true,
-                  email: true,
-                  first_name: true,
-                  last_name: true,
-                },
-              },
-            },
-          },
-        },
+        include: ROLE_DETAIL_INCLUDE,
       });
     } catch (err) {
       if (
@@ -150,20 +242,33 @@ export class RolesService {
       newValues: {
         name,
         description,
-        is_system_role: system_role,
+        is_system_role: false,
         organization_id: role.organization_id,
+        store_id: role.store_id,
       },
       metadata: {
         action: 'create_role',
         role_name: name,
+        scope: deriveRoleScope(role),
       },
     });
 
     return this.transformRoleWithPermissionDescriptions(role);
   }
 
+  /**
+   * QUI-72 — listado con la matriz de visibilidad del nivel organización:
+   * roles de sistema (sólo lectura) + TODOS los de la organización, incluidos
+   * los de alcance tienda de sus tiendas.
+   *
+   * Antes esta consulta corría prácticamente sin filtro propio y dependía sólo
+   * del scope implícito del cliente Prisma, lo que dejaba pasar filas de otras
+   * organizaciones en cuanto el contexto quedaba a medias. Ahora el filtro es
+   * explícito y falla cerrado.
+   */
   async findAll(user_id: number) {
-    // OrganizationPrismaService filtra automáticamente por organization_id
+    const actor = this.getActor();
+
     const user_roles = await this.prismaService.user_roles.findMany({
       where: { user_id: user_id },
       include: {
@@ -175,29 +280,18 @@ export class RolesService {
       (ur) => ur.roles?.name === 'owner' || ur.roles?.name === 'admin',
     );
 
-    // Si no es owner/admin, filtrar roles de sistema organizacional
-    const where_clause = is_owner_or_admin
-      ? {}
-      : {
-          name: {
-            notIn: ['owner', 'admin'],
-          },
-        };
+    // Visibilidad de tenant (obligatoria) + ocultamiento de owner/admin para
+    // quien no lo es (regla de producto preexistente, no de seguridad).
+    const and_filters: Prisma.rolesWhereInput[] = [
+      buildRoleVisibilityWhere(actor),
+    ];
+    if (!is_owner_or_admin) {
+      and_filters.push({ name: { notIn: ['owner', 'admin'] } });
+    }
 
     const roles = await this.prismaService.roles.findMany({
-      where: where_clause,
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
-          },
-        },
-        _count: {
-          select: {
-            user_roles: true,
-          },
-        },
-      },
+      where: { AND: and_filters },
+      include: ROLE_DETAIL_INCLUDE,
       orderBy: {
         name: 'asc',
       },
@@ -210,38 +304,8 @@ export class RolesService {
   }
 
   async findOne(id: number, userId?: number) {
-    const role = await this.prismaService.roles.findUnique({
-      where: { id },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
-          },
-        },
-        user_roles: {
-          include: {
-            users: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
-                state: true,
-              },
-            },
-          },
-        },
-        _count: {
-          select: {
-            user_roles: true,
-          },
-        },
-      },
-    });
-
-    if (!role) {
-      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
-    }
+    const actor = this.getActor();
+    const role = await this.loadVisibleRoleRow(id, actor);
 
     // Si se proporciona userId, verificar permisos de acceso
     if (userId) {
@@ -258,7 +322,7 @@ export class RolesService {
 
       // Si el rol es super_admin y el usuario no es super_admin, devolver 404
       if (role.name === 'super_admin' && !isSuperAdmin) {
-        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
+        throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_004);
       }
     }
 
@@ -266,37 +330,44 @@ export class RolesService {
   }
 
   async update(id: number, updateRoleDto: UpdateRoleDto, userId: number) {
-    const role = await this.findOne(id);
+    const actor = this.getActor();
+    const role = await this.loadVisibleRoleRow(id, actor);
     const { name, description } = updateRoleDto;
 
+    // QUI-72: la matriz de edición sustituye al chequeo ad-hoc `system_role`.
+    // Un rol de sistema (o de otra organización) responde 403 ROLE_SCOPE_001,
+    // nunca un 200 silencioso que aparenta haber guardado.
+    assertRoleEditable(role, actor);
+
     // Verificar que el nombre no exista (si se está cambiando)
-    // QUI-473: scope the pre-check to the role's own organization_id (NULL
-    // for system roles). After the composite unique, the same name can
-    // legitimately exist in another organization, so a name-only lookup
-    // would falsely reject the rename.
-    //
-    // We ALSO block a rename that would collide with any SYSTEM role name —
-    // same regression vector as `create()` above. Mirrors
-    // `store-roles.service.ts:248-260`.
+    // QUI-473 + QUI-72: la clave es (organization_id, store_id, name), así que
+    // el rename sólo colisiona dentro del MISMO alcance del rol. Se sigue
+    // bloqueando la colisión contra nombres de roles de sistema (misma razón
+    // que en `create()`). El `AND` evita que el `OR` lo pise el scope de
+    // OrganizationPrismaService.
     if (name && name !== role.name) {
       const existingRole = await this.prismaService.roles.findFirst({
         where: {
-          name,
-          OR: [
-            { organization_id: role.organization_id },
-            { is_system_role: true },
+          AND: [
+            { name },
+            { id: { not: id } },
+            {
+              OR: [
+                {
+                  organization_id: role.organization_id,
+                  store_id: role.store_id,
+                },
+                { is_system_role: true, organization_id: null },
+              ],
+            },
           ],
         },
+        select: { id: true },
       });
 
       if (existingRole) {
         throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
       }
-    }
-
-    // No permitir cambiar roles del sistema
-    if (role.system_role && (name || description)) {
-      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
     }
 
     // Actualizar el rol. QUI-473: catch P2002 from the new composite unique
@@ -309,13 +380,7 @@ export class RolesService {
           ...(name && { name }),
           ...(description !== undefined && { description }),
         },
-        include: {
-          role_permissions: {
-            include: {
-              permissions: true,
-            },
-          },
-        },
+        include: ROLE_DETAIL_INCLUDE,
       });
     } catch (err) {
       if (
@@ -327,9 +392,8 @@ export class RolesService {
       throw err;
     }
 
-    return this.transformRoleWithPermissionDescriptions(updatedRole);
-
-    // Registrar auditoría
+    // Registrar auditoría. Estaba DESPUÉS de un `return`, o sea muerta: ninguna
+    // edición de rol quedaba auditada.
     await this.auditService.log({
       userId,
       action: AuditAction.UPDATE,
@@ -343,19 +407,19 @@ export class RolesService {
       metadata: {
         action: 'update_role',
         role_name: updatedRole.name,
+        scope: deriveRoleScope(updatedRole),
       },
     });
 
-    return updatedRole;
+    return this.transformRoleWithPermissionDescriptions(updatedRole);
   }
 
   async remove(id: number, userId: number) {
-    const role = await this.findOne(id);
+    const actor = this.getActor();
+    const role = await this.loadVisibleRoleRow(id, actor);
 
-    // No permitir eliminar roles del sistema
-    if (role.system_role) {
-      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
-    }
+    // QUI-72: roles de sistema y de otras organizaciones → 403 tipado.
+    assertRoleEditable(role, actor);
 
     // Verificar que no tenga usuarios asignados
     if (role.user_roles && role.user_roles.length > 0) {
@@ -390,13 +454,13 @@ export class RolesService {
     assignPermissionsDto: AssignPermissionsDto,
     userId: number,
   ) {
-    const role = await this.findOne(role_id);
+    const actor = this.getActor();
+    const role = await this.loadVisibleRoleRow(role_id, actor);
     const { permission_ids } = assignPermissionsDto;
 
-    // No permitir modificar permisos de roles del sistema
-    if (role.system_role) {
-      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
-    }
+    // QUI-72: los permisos de un rol son parte de su definición, así que se
+    // rigen por la MISMA matriz de edición que el rol.
+    assertRoleEditable(role, actor);
 
     // Verificar que los permisos existan
     const permissions = await this.prismaService.permissions.findMany({
@@ -433,15 +497,9 @@ export class RolesService {
     });
 
     // Obtener el rol actualizado
-    const updatedRole = await this.prismaService.roles.findUnique({
+    const updatedRole = await this.prismaService.roles.findFirst({
       where: { id: role_id },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
-          },
-        },
-      },
+      include: ROLE_DETAIL_INCLUDE,
     });
 
     // Registrar auditoría
@@ -466,13 +524,12 @@ export class RolesService {
     removePermissionsDto: RemovePermissionsDto,
     userId: number,
   ) {
-    const role = await this.findOne(role_id);
+    const actor = this.getActor();
+    const role = await this.loadVisibleRoleRow(role_id, actor);
     const { permission_ids } = removePermissionsDto;
 
-    // No permitir modificar permisos de roles del sistema
-    if (role.system_role) {
-      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
-    }
+    // QUI-72: misma matriz de edición que `assignPermissions`.
+    assertRoleEditable(role, actor);
 
     // Verificar que no se remuevan permisos del sistema
     const permissions = await this.prismaService.permissions.findMany({
@@ -517,15 +574,9 @@ export class RolesService {
     });
 
     // Obtener el rol actualizado
-    const updatedRole = await this.prismaService.roles.findUnique({
+    const updatedRole = await this.prismaService.roles.findFirst({
       where: { id: role_id },
-      include: {
-        role_permissions: {
-          include: {
-            permissions: true,
-          },
-        },
-      },
+      include: ROLE_DETAIL_INCLUDE,
     });
 
     // Registrar auditoría
@@ -546,14 +597,15 @@ export class RolesService {
   }
 
   async getRolePermissions(role_id: number, userId?: number) {
-    // Verificar que el rol existe
-    const role = await this.prismaService.roles.findUnique({
-      where: { id: role_id },
+    // QUI-72: el rol debe existir Y ser visible para este nivel; si no, 404.
+    const actor = this.getActor();
+    const role = await this.prismaService.roles.findFirst({
+      where: { AND: [{ id: role_id }, buildRoleVisibilityWhere(actor)] },
       select: { id: true, name: true },
     });
 
     if (!role) {
-      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_004);
     }
 
     // Si se proporciona userId, verificar permisos de acceso
@@ -571,7 +623,7 @@ export class RolesService {
 
       // Si el rol es super_admin y el usuario no es super_admin, devolver 404
       if (role.name === 'super_admin' && !isSuperAdmin) {
-        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
+        throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_004);
       }
     }
 
@@ -594,121 +646,51 @@ export class RolesService {
 
   // ===== GESTIÓN DE USUARIOS =====
 
+  /**
+   * QUI-72 — asignación rol→usuario.
+   *
+   * Toda la matriz (visibilidad del rol, roles núcleo, roles de sistema,
+   * pertenencia del usuario al tenant, tienda destino, 409 por duplicado) vive
+   * en `UserRoleAssignmentService`. Este método NO escribe `user_roles`: si lo
+   * hiciera, esta dirección y la de `/organization/users/:id/roles/:roleId`
+   * aplicarían reglas distintas sobre la misma tabla y las dos pantallas
+   * mostrarían estados incompatibles.
+   *
+   * Se conservan la ruta, el 403 de privilegio para `super_admin` y las claves
+   * `id`/`user_id`/`role_id`/`users`/`roles` de la respuesta para no romper al
+   * frontend actual; `store_id` y `scope` son aditivos.
+   */
   async assignRoleToUser(
     assignRoleToUserDto: AssignRoleToUserDto,
     adminUserId: number,
   ) {
-    const { user_id, role_id } = assignRoleToUserDto;
+    const actor = this.getActor();
+    const { user_id, role_id, store_id } = assignRoleToUserDto;
 
-    // Verificar que el usuario existe
-    const user = await this.prismaService.users.findUnique({
-      where: { id: user_id },
-      select: {
-        id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        organization_id: true,
-      },
+    await this.assertSuperAdminGrantAllowed(role_id, adminUserId);
+
+    const assignment = await this.userRoleAssignment.assign({
+      user_id,
+      role_id,
+      actor,
+      store_id: store_id ?? null,
     });
 
-    if (!user) {
-      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
-    }
-
-    // Verificar que el rol existe
-    const role = await this.prismaService.roles.findUnique({
-      where: { id: role_id },
-      select: { id: true, name: true, organization_id: true },
-    });
-
-    if (!role) {
-      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
-    }
-
-    // Validar pertenencia organizacional
-    // Los roles del sistema (organization_id = null) pueden asignarse a cualquier usuario
-    // Los roles específicos de organización solo pueden asignarse a usuarios de la misma organización
-    if (
-      role.organization_id !== null &&
-      role.organization_id !== user.organization_id
-    ) {
-      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
-    }
-
-    // Verificar permisos para asignar el rol super_admin
-    if (role.name === 'super_admin') {
-      const adminUserRoles = await this.prismaService.user_roles.findMany({
-        where: { user_id: adminUserId },
-        include: {
-          roles: true,
+    const [user, role] = await Promise.all([
+      this.prismaService.users.findFirst({
+        where: { id: user_id },
+        select: {
+          id: true,
+          email: true,
+          first_name: true,
+          last_name: true,
         },
-      });
-
-      const isSuperAdmin = adminUserRoles.some(
-        (ur) => ur.roles?.name === 'super_admin',
-      );
-
-      if (!isSuperAdmin) {
-        throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
-      }
-
-      // Verificar que no exista ya un super admin
-      const existingSuperAdmin = await this.prismaService.user_roles.findFirst({
-        where: {
-          roles: {
-            name: 'super_admin',
-          },
-        },
-        include: {
-          users: {
-            select: {
-              id: true,
-              email: true,
-              first_name: true,
-              last_name: true,
-            },
-          },
-        },
-      });
-
-      if (existingSuperAdmin) {
-        throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
-      }
-    }
-
-    // Verificar que no tenga ya este rol
-    const existingUserRole = await this.prismaService.user_roles.findUnique({
-      where: {
-        user_id_role_id: {
-          user_id: user_id,
-          role_id: role_id,
-        },
-      },
-    });
-
-    if (existingUserRole) {
-      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
-    }
-
-    // Asignar el rol
-    const userRole = await this.prismaService.user_roles.create({
-      data: {
-        user_id: user_id,
-        role_id: role_id,
-      },
-      include: {
-        users: {
-          select: {
-            id: true,
-            email: true,
-            first_name: true,
-            last_name: true,
-          },
-        },
-        roles: true,
-      },
-    });
+      }),
+      this.prismaService.roles.findFirst({
+        where: { id: role_id },
+        include: { stores: { select: { id: true, name: true } } },
+      }),
+    ]);
 
     // Registrar auditoría
     await this.auditService.log({
@@ -716,68 +698,53 @@ export class RolesService {
       action: AuditAction.PERMISSION_CHANGE,
       resource: AuditResource.USERS,
       resourceId: user_id,
-      newValues: { assigned_role: role.name },
+      newValues: {
+        assigned_role: role?.name,
+        store_id: assignment.store_id,
+      },
       metadata: {
         action: 'assign_role_to_user',
-        target_user: user.email,
-        role_name: role.name,
+        target_user: user?.email,
+        role_name: role?.name,
+        scope: assignment.scope,
       },
     });
 
-    return userRole;
+    return {
+      id: assignment.assignment_id,
+      assignment_id: assignment.assignment_id,
+      user_id,
+      role_id,
+      store_id: assignment.store_id,
+      store_name: role?.stores?.name ?? null,
+      scope: assignment.scope,
+      users: user,
+      roles: role,
+    };
   }
 
+  /**
+   * QUI-72 — remoción rol→usuario, espejo exacto de `assignRoleToUser`.
+   *
+   * `store_id` omitido remueve la asignación org-wide, NO las de tienda: son
+   * filas distintas desde que el unique es (user_id, role_id, store_id).
+   */
   async removeRoleFromUser(
     removeRoleFromUserDto: RemoveRoleFromUserDto,
     adminUserId: number,
   ) {
-    const { user_id, role_id } = removeRoleFromUserDto;
+    const actor = this.getActor();
+    const { user_id, role_id, store_id } = removeRoleFromUserDto;
 
-    // Verificar que la relación existe
-    const userRole = await this.prismaService.user_roles.findUnique({
-      where: {
-        user_id_role_id: {
-          user_id: user_id,
-          role_id: role_id,
-        },
-      },
-      include: {
-        users: {
-          select: {
-            id: true,
-            email: true,
-            first_name: true,
-            last_name: true,
-            organization_id: true,
-          },
-        },
-        roles: {
-          select: {
-            id: true,
-            name: true,
-            is_system_role: true,
-            organization_id: true,
-          },
-        },
-      },
+    const role = await this.prismaService.roles.findFirst({
+      where: { id: role_id },
+      select: { id: true, name: true, is_system_role: true },
     });
 
-    if (!userRole) {
-      throw new VendixHttpException(ErrorCodes.ORG_USER_001);
-    }
-
-    // Validar pertenencia organizacional (seguridad adicional)
-    // Los roles del sistema (organization_id = null) pueden removerse de cualquier usuario
-    // Los roles específicos de organización solo pueden removerse de usuarios de la misma organización
-    if (
-      userRole.roles?.organization_id !== null &&
-      userRole.roles?.organization_id !== userRole.users?.organization_id
-    ) {
-      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
-    }
-
-    // No permitir remover roles del sistema si es el último rol del usuario
-    if (userRole.roles?.is_system_role) {
+    // Regla preexistente: no dejar al usuario sin ningún rol al quitarle uno
+    // de sistema. Se conserva porque `UserRoleAssignmentService` no la conoce
+    // (es una regla de este dominio, no de la matriz de alcance).
+    if (role?.is_system_role) {
       const userRoleCount = await this.prismaService.user_roles.count({
         where: { user_id: user_id },
       });
@@ -787,14 +754,11 @@ export class RolesService {
       }
     }
 
-    // Remover el rol
-    await this.prismaService.user_roles.delete({
-      where: {
-        user_id_role_id: {
-          user_id: user_id,
-          role_id: role_id,
-        },
-      },
+    const removed = await this.userRoleAssignment.remove({
+      user_id,
+      role_id,
+      actor,
+      store_id: store_id ?? null,
     });
 
     // Registrar auditoría
@@ -803,15 +767,66 @@ export class RolesService {
       action: AuditAction.PERMISSION_CHANGE,
       resource: AuditResource.USERS,
       resourceId: user_id,
-      oldValues: { removed_role: userRole.roles?.name },
+      oldValues: { removed_role: role?.name, store_id: removed.store_id },
       metadata: {
         action: 'remove_role_from_user',
-        target_user: userRole.users?.email,
-        role_name: userRole.roles?.name,
+        role_name: role?.name,
       },
     });
 
-    return { message: 'Rol removido del usuario exitosamente' };
+    return {
+      message: 'Rol removido del usuario exitosamente',
+      user_id,
+      role_id,
+      store_id: removed.store_id,
+    };
+  }
+
+  /**
+   * Preserva la validación histórica de privilegio para `super_admin`.
+   *
+   * `UserRoleAssignmentService` ya bloquea `super_admin` para cualquier actor
+   * que no sea superadmin (ROLE_ASSIGN_002), pero este pre-chequeo se mantiene
+   * para no cambiar el código de error que el frontend ya mapea y para
+   * conservar la invariante "sólo puede existir un super_admin".
+   */
+  private async assertSuperAdminGrantAllowed(
+    role_id: number,
+    adminUserId: number,
+  ) {
+    const role = await this.prismaService.roles.findFirst({
+      where: { id: role_id },
+      select: { id: true, name: true },
+    });
+
+    if (!role) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_004);
+    }
+
+    if (role.name !== 'super_admin') return;
+
+    const adminUserRoles = await this.prismaService.user_roles.findMany({
+      where: { user_id: adminUserId },
+      include: { roles: true },
+    });
+
+    const isSuperAdmin = adminUserRoles.some(
+      (ur) => ur.roles?.name === 'super_admin',
+    );
+
+    if (!isSuperAdmin) {
+      throw new VendixHttpException(ErrorCodes.ORG_PERM_001);
+    }
+
+    // Verificar que no exista ya un super admin
+    const existingSuperAdmin = await this.prismaService.user_roles.findFirst({
+      where: { roles: { name: 'super_admin' } },
+      select: { id: true },
+    });
+
+    if (existingSuperAdmin) {
+      throw new VendixHttpException(ErrorCodes.ORG_ROLE_001);
+    }
   }
 
   // ===== UTILIDADES =====
@@ -846,21 +861,17 @@ export class RolesService {
     return uniquePermissions;
   }
 
+  /**
+   * QUI-72 — asignaciones del usuario CON su `store_id`.
+   *
+   * Sin el `store_id` la lista es ambigua: "Cajero" no dice si aplica en toda
+   * la organización o sólo en una tienda, y la UI no puede ofrecer quitar la
+   * asignación correcta. Delega en el servicio único para que esta lectura y
+   * la de `/organization/roles/:id` describan exactamente las mismas filas.
+   */
   async getUserRoles(userId: number) {
-    return await this.prismaService.user_roles.findMany({
-      where: { user_id: userId },
-      include: {
-        roles: {
-          include: {
-            role_permissions: {
-              include: {
-                permissions: true,
-              },
-            },
-          },
-        },
-      },
-    });
+    const actor = this.getActor();
+    return this.userRoleAssignment.listUserRoles(userId, actor);
   }
 
   // ===== DASHBOARD STATS =====

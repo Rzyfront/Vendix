@@ -5,3 +5,4 @@ export * from './users-dashboard.dto';
 export * from './user-admin.dto';
 export * from './user-config.dto';
 export * from './invite-user.dto';
+export * from './user-role-assignment.dto';
