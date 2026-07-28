@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { DefaultPanelUIService } from './default-panel-ui.service';
+import { UserRoleAssignmentService } from './user-role-assignment.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
 
 /**
@@ -44,6 +45,7 @@ export class StaffProvisioningService {
   constructor(
     private readonly prismaService: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly userRoleAssignment: UserRoleAssignmentService,
   ) {}
 
   /** ¿Alguno de los roles del usuario es de privilegio alto? */
@@ -261,26 +263,14 @@ export class StaffProvisioningService {
         ? null
         : storeId;
 
-      // Idempotencia equivalente a
-      // `UserRoleAssignmentService.ensureAssignmentUnchecked`, pero ejecutada
-      // sobre `db` (la transacción del llamador). No se delega en ese servicio
-      // porque usa su propio cliente Prisma: escribir fuera de esta transacción
-      // reventaría por FK (el usuario aún no es visible) o dejaría la fila
-      // huérfana si el caller hiciera rollback.
-      //
-      // Tampoco se puede usar `upsert`: al entrar `store_id` (nullable) al
-      // unique compuesto, Prisma tipa `user_id_role_id_store_id.store_id` como
-      // `number` NO nulo, así que el where único no puede expresar una
-      // asignación org-wide.
-      const existingAssignment = await db.user_roles.findFirst({
-        where: { user_id: userId, role_id: role.id, store_id: roleStoreId },
-        select: { id: true },
-      });
-      if (!existingAssignment) {
-        await db.user_roles.create({
-          data: { user_id: userId, role_id: role.id, store_id: roleStoreId },
-        });
-      }
+      // Escritura idempotente delegada en el único escritor de `user_roles`,
+      // pasándole la transacción del llamador: con su propio cliente la fila
+      // se escribiría fuera de esta tx y reventaría por FK (el usuario todavía
+      // no es visible) o quedaría huérfana si el caller hiciera rollback.
+      await this.userRoleAssignment.ensureAssignmentUnchecked(
+        { user_id: userId, role_id: role.id, store_id: roleStoreId },
+        tx,
+      );
     }
 
     // 3. app_type en user_settings (fuente única de verdad léxica).

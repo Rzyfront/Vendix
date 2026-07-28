@@ -246,15 +246,26 @@ export class UserRoleAssignmentService {
    * `number` NO nulo, así que `upsert({ where: { user_id_role_id_store_id } })`
    * NO puede expresar una asignación org-wide. El equivalente correcto es
    * findFirst + create, centralizado aquí.
+   *
+   * @param client transacción del llamador. Los flujos de aprovisionamiento
+   *   (staff-provisioning, onboarding) crean el usuario y su membresía dentro
+   *   de una transacción: escribir la asignación con el cliente propio de este
+   *   servicio fallaría por FK (el usuario aún no es visible fuera de la tx) o
+   *   dejaría la fila huérfana si el llamador hiciera rollback. Si se omite, se
+   *   usa el cliente global.
    */
-  async ensureAssignmentUnchecked(params: {
-    user_id: number;
-    role_id: number;
-    store_id?: number | null;
-  }) {
+  async ensureAssignmentUnchecked(
+    params: {
+      user_id: number;
+      role_id: number;
+      store_id?: number | null;
+    },
+    client?: Prisma.TransactionClient,
+  ) {
     const store_id = params.store_id ?? null;
+    const db: any = client ?? this.prisma;
 
-    const existing = await this.prisma.user_roles.findFirst({
+    const existing = await db.user_roles.findFirst({
       where: {
         user_id: params.user_id,
         role_id: params.role_id,
@@ -266,7 +277,7 @@ export class UserRoleAssignmentService {
     if (existing) return existing;
 
     try {
-      return await this.prisma.user_roles.create({
+      return await db.user_roles.create({
         data: {
           user_id: params.user_id,
           role_id: params.role_id,
@@ -280,7 +291,9 @@ export class UserRoleAssignmentService {
         err.code === 'P2002'
       ) {
         // Carrera con otro provisioning concurrente: la fila ya existe.
-        const raced = await this.prisma.user_roles.findFirst({
+        // OJO: dentro de una transacción abortada esta relectura también
+        // fallaría, así que el llamador transaccional debe dejar propagar.
+        const raced = await db.user_roles.findFirst({
           where: {
             user_id: params.user_id,
             role_id: params.role_id,

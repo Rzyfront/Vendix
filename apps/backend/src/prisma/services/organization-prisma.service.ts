@@ -178,16 +178,27 @@ export class OrganizationPrismaService extends BasePrismaService {
         );
       }
 
-      // Filtro especial para roles: incluir roles de la organización actual Y roles del sistema (organization_id = null)
+      // Filtro especial para roles: incluir roles de la organización actual Y
+      // roles del sistema (organization_id = null).
+      //
+      // QUI-72: este bloque hacía `{ ...existingWhere, OR: [...] }`, que
+      // SOBRESCRIBE en silencio cualquier `OR` de primer nivel que traiga el
+      // llamador. Un servicio que pasaba `where: { name, OR: [...] }` para
+      // acotar una búsqueda veía su `OR` descartado y recibía de vuelta todos
+      // los roles de la organización más los de sistema — un filtro de
+      // seguridad que desaparecía sin dejar rastro. Envolver en `AND` compone
+      // ambas condiciones en vez de pisar una con la otra.
       if (model === 'roles') {
-        const existingWhere = scoped_args.where || {};
-        scoped_args.where = {
-          ...existingWhere,
+        const existingWhere = scoped_args.where;
+        const scopeFilter = {
           OR: [
             { organization_id: context.organization_id },
             { organization_id: null },
           ],
         };
+        scoped_args.where = existingWhere
+          ? { AND: [existingWhere, scopeFilter] }
+          : scopeFilter;
       } else if (this.SCOPE_OVERRIDES[model]) {
         // Modelos sin columna directa organization_id (scope relacional).
         const overrideFilter = this.SCOPE_OVERRIDES[model](
