@@ -221,20 +221,32 @@ export class RescheduleModalComponent {
     }
 
     this.loadingSlots.set(true);
-    // `include_booked=false` le pide al backend que DEVUELVA SOLO los
-    // slots libres (omite los `is_booked: true`). Esto evita depender
-    // de la lógica de overlap del backend — que en datos con bookings
-    // legacy / huérfanos puede marcar como ocupados slots que en
-    // realidad están libres. Como el modal de reagendar solo ofrece
-    // huecos, no necesitamos la franja ocupada.
+    // Pedimos `include_booked=false` al backend y, como defensa profunda,
+    // IGNORAMOS `is_booked` que venga en la respuesta forzando todos los
+    // slots a libres. Doble red de seguridad: por un lado el filtro del
+    // backend (omite booked slots), por otro el override local que garantiza
+    // que el modal nunca pinta OCUPADO falso aunque el cálculo del backend
+    // esté contando mal un booking legacy / huérfano / timezone-strange.
+    // El modal de reagendar solo necesita huecos disponibles — nunca
+    // necesitamos mostrar la franja ocupada.
     this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id, undefined, false)
       .pipe(finalize(() => this.loadingSlots.set(false)))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (slots) => {
-          // Forzamos `is_booked: false` en cada slot (ya viene así
-          // del backend con `include_booked=false`, pero defendemos
-          // en profundidad por si la API cambia la semántica).
-          this.slots.set(slots.map((s) => ({ ...s, is_booked: false })));
+          // FORCE_OVERRIDE: ignorar por completo `is_booked` del backend.
+          // El cálculo de overlap del backend tiene al menos un bug que
+          // marca slots libres como booked cuando hay bookings legacy con
+          // formatos de fecha u hora raros. Si en el futuro queremos
+          // volver a pintar OCUPADO falso, primero hay que arreglar el
+          // backend (ver `availability.service.ts`).
+          this.slots.set(
+            (slots ?? []).map((s) => ({
+              ...s,
+              is_booked: false,
+              total_available: 1,
+              available_providers: [],
+            })),
+          );
         },
         error: () => this.slots.set([]),
       });
