@@ -1,4 +1,4 @@
-<app-modal [isOpen]="isOpen()" (isOpenChange)="$event ? null : closed.emit()"
+<app-modal [isOpen]="isOpen()" (isOpenChange)="onModalOpenChange($event)"
   (opened)="onOpen()" title="Reprogramar Reserva" size="md">
 
   @if (booking()) {

@@ -272,9 +272,14 @@ export class ModalComponent {
         if (this.escapeListener) {
           document.removeEventListener('keydown', this.escapeListener);
         }
-        if (this.isOpen()) {
-          document.body.style.overflow = '';
-        }
+        // Always clear body scroll-lock on destroy, even when isOpen() is
+        // already false. Without this, a @defer/@if that removes the modal
+        // synchronously (e.g. parent flips its signal to false in response
+        // to (closed)) can race the effect's overflow-reset: the effect
+        // never runs because the component is gone, and the cleanup's
+        // `if (this.isOpen())` short-circuits to false — leaving
+        // `body.style.overflow = 'hidden'` pegado y la página sin scroll.
+        document.body.style.overflow = '';
       }
     });
   }

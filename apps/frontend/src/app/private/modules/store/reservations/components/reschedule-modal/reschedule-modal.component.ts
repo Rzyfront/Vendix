@@ -43,6 +43,20 @@ export class RescheduleModalComponent {
 
   readonly closed = output<void>();
   readonly rescheduled = output<void>();
+  /**
+   * Two-way binding partner for `isOpen`. Per the modal pattern, we always
+   * emit the raw $event so parents can use `[(isOpen)]` if they prefer.
+   * We also re-emit `closed` on the false transition to keep backwards
+   * compatibility with existing parents that listen to `(closed)` only.
+   */
+  readonly isOpenChange = output<boolean>();
+
+  onModalOpenChange(open: boolean): void {
+    this.isOpenChange.emit(open);
+    if (!open) {
+      this.closed.emit();
+    }
+  }
 
   // Cache of all availability slots fetched in one shot for the next 30
   // days in ecommerce mode — used to filter per-date in memory without
@@ -144,11 +158,15 @@ export class RescheduleModalComponent {
         next: (res) => {
           const slots = res?.data ?? [];
           this.allSlots.set(slots);
-          // Build a unique-date list, only days that have at least one slot
-          // with `available > 0`.
+          // Build a unique-date list, only days that have at least one
+          // AVAILABLE slot. The backend returns `total_available` (not
+          // `available`) — checking `s.available` here used to be a silent
+          // no-op that let booked slots slip through, painting every slot
+          // as OCUPADO downstream. Use the backend's `is_booked` flag
+          // (mismo fix que admin mode en loadSlots).
           const dateMap = new Map<string, ProviderDateInfo>();
           for (const slot of slots) {
-            if ((slot as any).available <= 0) continue;
+            if ((slot as any).is_booked === true) continue;
             const existing = dateMap.get(slot.date);
             if (existing) {
               existing.booking_count += 1;
@@ -205,16 +223,18 @@ export class RescheduleModalComponent {
     if (!b) return;
 
     if (this.mode() === 'ecommerce') {
-      // Already fetched in loadAvailabilityEcommerce — just filter in memory.
+      // Already fetched in loadAvailabilityEcommerce — filter in memory.
+      // El backend SÍ devuelve `is_booked` (lo seteamos en availability.service.ts).
+      // Filtramos los booked y forzamos is_booked=false en los libres, igual
+      // que admin mode — el modal de reagendar solo debe mostrar huecos
+      // disponibles, nunca la franja ocupada.
       const daySlots: AvailabilitySlot[] = this.allSlots()
-        .filter((s: any) => s.date === date)
+        .filter((s: any) => s.date === date && (s as any).is_booked !== true)
         .map((s: any) => ({
           date: s.date,
           start_time: s.start_time,
           end_time: s.end_time,
-          // El endpoint ecommerce no devuelve is_booked. Lo inferimos
-          // desde `available` (>0 = libre).
-          is_booked: (s.available ?? 0) <= 0,
+          is_booked: false,
         } as AvailabilitySlot));
       this.slots.set(daySlots);
       return;
