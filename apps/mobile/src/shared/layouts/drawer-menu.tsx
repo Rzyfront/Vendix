@@ -1,15 +1,23 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet, Linking, Image, Alert, Animated, Platform } from 'react-native';
+import { useState, useMemo, useEffect } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet, Linking, Image, Alert, Platform } from 'react-native';
+import ReanimatedAnimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withSpring,
+} from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
 import { Icon } from '@/shared/components/icon/icon';
-import { colors, colorScales, typography, spacing, borderRadius } from '@/shared/theme';
+import { AnimatedPressable } from '@/shared/components/animated-pressable';
+import { colors, colorScales, typography, spacing, borderRadius, motion } from '@/shared/theme';
 import { useQuery } from '@tanstack/react-query';
 import type { StoreListItem } from '@/core/models/org-admin/store.types';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
-import { toastError } from '@/shared/components/toast/toast.store';
-import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
+import { toastError, toastInfo } from '@/shared/components/toast/toast.store';
+import { performStoreSwitch } from '@/core/auth/store-switcher';
 
 interface MenuItem {
   label: string;
@@ -138,7 +146,7 @@ const baseOrgMenuItems: MenuItem[] = [
   {
     label: 'Auditoría y Cumplimiento',
     icon: 'eye',
-    href: '/(org-admin)/audit/logs',
+    href: '/(org-admin)/audit',
   },
   {
     label: 'Reportes',
@@ -150,25 +158,11 @@ const baseOrgMenuItems: MenuItem[] = [
     ],
   },
   {
-    label: 'Fiscal',
-    icon: 'landmark',
-    alwaysVisible: true,
-    requiredFiscalScope: 'ORGANIZATION',
-    children: [
-      { label: 'Operación fiscal', icon: 'clipboard-list', href: '/(org-admin)/fiscal', alwaysVisible: true, requiredFiscalScope: 'ORGANIZATION' },
-      { label: 'Facturación', icon: 'receipt', href: '/(org-admin)/invoicing', alwaysVisible: true, requiredFiscalScope: 'ORGANIZATION', requiresFiscalArea: 'invoicing' },
-      { label: 'Contabilidad', icon: 'book-open', href: '/(org-admin)/accounting', alwaysVisible: true, requiredFiscalScope: 'ORGANIZATION', requiresFiscalArea: 'accounting' },
-      { label: 'Nómina', icon: 'banknote', href: '/(org-admin)/payroll', alwaysVisible: true, requiredFiscalScope: 'ORGANIZATION', requiresFiscalArea: 'payroll' },
-    ],
-  },
-  {
     label: 'Configuración',
     icon: 'settings',
     children: [
-      { label: 'General', icon: 'sliders', href: '/(org-admin)/settings/application' },
-      { label: 'Modo operativo', icon: 'building', href: '/(org-admin)/settings/operating-scope' },
-      { label: 'Modo fiscal', icon: 'receipt', href: '/(org-admin)/settings/fiscal-scope' },
-      { label: 'Métodos de Pago', icon: 'credit-card', href: '/(org-admin)/settings/payment-methods' },
+      { label: 'General', icon: 'palette', href: '/(org-admin)/config/application' },
+      { label: 'Modo operativo', icon: 'building-2', href: '/(org-admin)/settings/operating-scope' },
     ],
   },
 ];
@@ -206,28 +200,13 @@ const storeMenuItems: MenuItem[] = [
     ],
   },
   { label: 'Tienda en línea', icon: 'shopping-bag', href: '/(store-admin)/online-store' },
-  {
-    label: 'Marketing',
-    icon: 'megaphone',
-    children: [
-      { label: 'Promociones', icon: 'tag', href: '/(store-admin)/marketing/promotions' },
-      { label: 'Cupones', icon: 'ticket', href: '/(store-admin)/marketing/coupons' },
-      { label: 'Social Sales', icon: 'message-circle', href: '/(store-admin)/marketing/social-sales' },
-      { label: 'Anuncios', icon: 'image', href: '/(store-admin)/marketing/anuncios' },
-    ],
-  },
+  { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing' },
   { label: 'Analíticas', icon: 'chart-line', href: '/(store-admin)/analytics' },
   { label: 'Gastos', icon: 'wallet', href: '/(store-admin)/expenses' },
   { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'invoicing' },
   { label: 'Contabilidad', icon: 'book-open', href: '/(store-admin)/accounting', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'accounting' },
   { label: 'Ayuda', icon: 'help-circle', href: '/(store-admin)/help' },
-  {
-    label: 'Configuración',
-    icon: 'settings',
-    children: [
-      { label: 'General', icon: 'sliders', href: '/(store-admin)/settings' },
-    ],
-  },
+  { label: 'Configuración', icon: 'settings', href: '/(store-admin)/settings' },
 ];
 
 const superMenuItems: MenuItem[] = [
@@ -265,9 +244,6 @@ const moduleKeyMap: Record<string, string | string[]> = {
   'Tienda en línea': 'ecommerce',
   Órdenes: 'orders',
   Marketing: 'marketing',
-  Anuncios: 'marketing_anuncios',
-  Promociones: 'marketing_promotions',
-  'Social Sales': 'marketing_social_sales',
   Analíticas: 'analytics',
   Gastos: 'expenses',
   Reportes: 'reports',
@@ -287,40 +263,129 @@ interface CollapsibleSubmenuProps {
 }
 
 function CollapsibleSubmenu({ isExpanded, childrenCount, children }: CollapsibleSubmenuProps) {
-  const animatedHeight = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+  // Reanimated: altura interpolada suavemente con withTiming.
+  // Usamos measuredHeight para saber el alto real del contenido y animar desde
+  // 0 hasta ese alto cuando isExpanded pasa a true.
+  const measuredHeight = useSharedValue(isExpanded ? childrenCount * 40 : 0);
   const [shouldRender, setShouldRender] = useState(isExpanded);
 
   useEffect(() => {
     if (isExpanded) {
       setShouldRender(true);
-      Animated.timing(animatedHeight, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+      measuredHeight.value = withTiming(childrenCount * 40, {
+        duration: motion.duration.base,
+        easing: motion.easing.standard,
+      });
     } else {
-      Animated.timing(animatedHeight, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: false,
-      }).start(() => {
-        setShouldRender(false);
+      measuredHeight.value = withTiming(0, {
+        duration: motion.duration.fast,
+        easing: motion.easing.accelerate,
+      }, (done) => {
+        if (done) {
+          // El callback corre en el UI thread; saltar al JS thread para setState.
+          // Usamos setShouldRender directamente — Reanimated lo aísla del render.
+          // eslint-disable-next-line @typescript-eslint/no-use-before-define
+          runOnJSSafe(() => setShouldRender(false));
+        }
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExpanded]);
 
-  const height = animatedHeight.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, childrenCount * 40], // 10+10 paddingVertical + 2 marginVertical + text height + extra buffer
-  });
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: measuredHeight.value,
+    overflow: 'hidden',
+  }));
 
   if (!shouldRender && !isExpanded) return null;
 
   return (
-    <Animated.View style={{ height, overflow: 'hidden' }}>
+    <ReanimatedAnimated.View style={animatedStyle}>
       {children}
-    </Animated.View>
+    </ReanimatedAnimated.View>
   );
+}
+
+/**
+ * runOnJS helper seguro para ejecutar setState al final de un withTiming.
+ * Evita importar `runOnJS` directamente en sitios donde queremos ser concisos.
+ */
+function runOnJSSafe(fn: () => void) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const { runOnJS } = require('react-native-reanimated');
+  runOnJS(fn)();
+}
+
+/**
+ * Chevron que rota 0° → 90° al expandirse. Sutil pero importante — comunica
+ * el estado del submenu sin necesidad de cambiar el ícono.
+ */
+function RotatingChevron({
+  isExpanded,
+  color,
+  size = 14,
+}: {
+  isExpanded: boolean;
+  color: string;
+  size?: number;
+}) {
+  const rotation = useSharedValue(isExpanded ? 90 : 0);
+  useEffect(() => {
+    rotation.value = withSpring(isExpanded ? 90 : 0, {
+      damping: 18,
+      stiffness: 220,
+      mass: 0.7,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+  return (
+    <ReanimatedAnimated.View style={animatedStyle}>
+      <Icon name="chevron-right" size={size} color={color} />
+    </ReanimatedAnimated.View>
+  );
+}
+
+/**
+ * Wrapper para items de submenu con entrada escalonada (fade + slide).
+ * Solo se anima cuando el submenu pasa de cerrado a abierto — al colapsar,
+ * la altura exterior se encarga y no queremos animar cada item en reverso.
+ */
+function StaggeredSubmenuItem({
+  index,
+  isExpanded,
+  children,
+}: {
+  index: number;
+  isExpanded: boolean;
+  children: React.ReactNode;
+}) {
+  const opacity = useSharedValue(0);
+  const translateX = useSharedValue(-6);
+  useEffect(() => {
+    if (isExpanded) {
+      const delay = 80 + index * 35;
+      opacity.value = withDelay(
+        delay,
+        withTiming(1, { duration: motion.duration.base, easing: motion.easing.standard }),
+      );
+      translateX.value = withDelay(
+        delay,
+        withTiming(0, { duration: motion.duration.base, easing: motion.easing.standard }),
+      );
+    } else {
+      opacity.value = 0;
+      translateX.value = -6;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateX: translateX.value }],
+  }));
+  return <ReanimatedAnimated.View style={animatedStyle}>{children}</ReanimatedAnimated.View>;
 }
 
 interface SidebarButtonProps {
@@ -342,57 +407,20 @@ function SidebarButton({
   baseStyle,
   children,
 }: SidebarButtonProps) {
-  const scale = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(1)).current;
-
-  const handlePressIn = () => {
-    Animated.parallel([
-      Animated.spring(scale, {
-        toValue: 0.97,
-        useNativeDriver: true,
-        speed: 50,
-        bounciness: 0,
-      }),
-      Animated.timing(opacity, {
-        toValue: 0.85,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.parallel([
-      Animated.spring(scale, {
-        toValue: 1.0,
-        useNativeDriver: true,
-        speed: 40,
-        bounciness: 4,
-      }),
-      Animated.timing(opacity, {
-        toValue: 1.0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
-
   return (
-    <Pressable
+    <AnimatedPressable
       onPress={onPress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={({ pressed }) => [
+      pressedScale={0.97}
+      pressedOpacity={0.85}
+      style={({ pressed }: { pressed: boolean }) => [
         baseStyle,
         isActive && activeStyle,
         pressed && pressedStyle,
         isLocked && styles.lockedItem,
       ]}
     >
-      <Animated.View style={{ transform: [{ scale }], opacity, flexDirection: 'row', alignItems: 'center', width: '100%' }}>
-        {children}
-      </Animated.View>
-    </Pressable>
+      {children}
+    </AnimatedPressable>
   );
 }
 
@@ -442,21 +470,15 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     if (!storeToSwitch) return;
     setSwitching(true);
     try {
-      const { AuthService } = await import('@/core/auth/auth.service');
-      await AuthService.switchEnvironment('STORE_ADMIN', storeToSwitch.slug);
-
-      // Crítico: limpiar todo el cache de React Query para que las
-      // queries se ejecuten con el nuevo token STORE_ADMIN
-      const { getQueryClient } = await import('@/core/api/query-client');
-      const qc = getQueryClient();
-      await qc.cancelQueries();
-      qc.clear();
-
+      await performStoreSwitch({
+        kind: 'STORE_ADMIN',
+        storeSlug: storeToSwitch.slug,
+        storeName: storeToSwitch.name,
+      });
       setStoreToSwitch(null);
       onClose();
-      router.replace('/(store-admin)/dashboard' as never);
-    } catch (error: any) {
-      toastError(error?.message || 'No se pudo cambiar al entorno de la tienda. Intenta de nuevo.');
+    } catch {
+      // toastError ya emitido por performStoreSwitch
     } finally {
       setSwitching(false);
     }
@@ -546,23 +568,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     return {};
   }, [store_settings, appType]);
 
-  // Industry ceiling — paridad con settings.tsx y user-settings.tsx.
-  // Lee las industrias desde `store_settings.general.industries` (store-level)
-  // o, en variant='org', desde `orgSettings.general.industries`. Fallback a
-  // `['retail']` cuando la query falla para mantener comportamiento seguro:
-  // 'retail' oculta `restaurant_ops`, `memberships`, `orders_reservations`.
-  const storeIndustries = useMemo<string[]>(() => {
-    return (
-      (store_settings as any)?.general?.industries ??
-      (orgSettings as any)?.general?.industries ??
-      ['retail']
-    ) as string[];
-  }, [store_settings, orgSettings]);
-  const hiddenByIndustries = useMemo(
-    () => getModulesHiddenByIndustries(storeIndustries),
-    [storeIndustries],
-  );
-
   const isModuleKeyVisible = (
     moduleKey: string | string[],
     panelUi: Record<string, boolean>,
@@ -571,12 +576,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     const keys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
     return keys.some((key) => {
       if (storePanelUi[key] === false) {
-        return false;
-      }
-      // Industry ceiling: paridad con web `INDUSTRY_HIDDEN_MODULES`. Si la
-      // industria del store oculta este módulo (p.ej. `restaurant_ops` para
-      // retail), el item desaparece del drawer aunque `panel_ui[key]===true`.
-      if (hiddenByIndustries.includes(key)) {
         return false;
       }
       return panelUi[key] === true && !disabled.has(key);
@@ -693,7 +692,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     };
 
     return filterRecursive(items);
-  }, [items, variant, fiscalScope, operatingScope, activeFiscalAreas, currentAppPanelUi, disabledKeys, hiddenByIndustries, storePanelUi]);
+  }, [items, variant, fiscalScope, operatingScope, activeFiscalAreas, currentAppPanelUi, disabledKeys]);
 
   const handleOpenVlink = () => {
     if (vlinkUrl === '#') return;
@@ -739,6 +738,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   };
 
   const handleLogout = () => {
+    toastInfo('Sesión cerrada');
     onClose();
     logout();
     router.replace('/(auth)/login');
@@ -841,9 +841,8 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                     </View>
                   )}
                   {!item._locked && (
-                    <Icon
-                      name={isExpanded ? 'chevron-down' : 'chevron-right'}
-                      size={14}
+                    <RotatingChevron
+                      isExpanded={isExpanded}
                       color={colorScales.gray[400]}
                     />
                   )}
@@ -854,58 +853,65 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                     {item.children!.map((child, index) => {
                       const isActiveChild = isRouteActive(child.href);
                       const isLastChild = index === item.children!.length - 1;
+                      const childKey = child.href ?? `${child.label}-${index}`;
                       return (
-                        <View key={child.href ?? `${child.label}-${index}`} style={styles.submenuItemWrapper}>
-                          {index === 0 && <View style={styles.submenuTopConnector} />}
-                          <View style={styles.submenuLConnector} />
-                          {!isLastChild && <View style={styles.submenuSegmentAfter} />}
-                          
-                          <View style={[styles.submenuIconContainer, { position: 'absolute', left: SUBMENU_DOT_LEFT, top: '50%', marginTop: -8, zIndex: 2 }]}>
-                            {!child._locked && <View style={isActiveChild ? styles.submenuDotActive : styles.submenuDot} />}
-                            {child._locked && (
-                              <Icon
-                                name="lock"
-                                size={12}
-                                color={colorScales.gray[400]}
-                              />
-                            )}
-                          </View>
+                        <StaggeredSubmenuItem
+                          key={childKey}
+                          index={index}
+                          isExpanded={isExpanded && !item._locked}
+                        >
+                          <View style={styles.submenuItemWrapper}>
+                            {index === 0 && <View style={styles.submenuTopConnector} />}
+                            <View style={styles.submenuLConnector} />
+                            {!isLastChild && <View style={styles.submenuSegmentAfter} />}
 
-                          <SidebarButton
-                            onPress={() => {
-                              if (child._locked) {
-                                handleLockedItemClick(child);
-                              } else if (child.action) {
-                                child.action();
-                              } else if (child.href) {
-                                handleNavigate(child.href);
-                              }
-                            }}
-                            isActive={isActiveChild}
-                            isLocked={child._locked}
-                            baseStyle={styles.subMenuItem}
-                            activeStyle={styles.subMenuItemActive}
-                            pressedStyle={styles.subMenuItemPressed}
-                          >
-                            <Text
-                              style={[
-                                styles.subMenuLabel,
-                                isActiveChild ? styles.subMenuLabelActive : styles.subMenuLabelInactive,
-                                child._locked && styles.lockedSubmenuLabel,
-                              ]}
-                              numberOfLines={1}
+                            <View style={[styles.submenuIconContainer, { position: 'absolute', left: SUBMENU_DOT_LEFT, top: '50%', marginTop: -8, zIndex: 2 }]}>
+                              {!child._locked && <View style={isActiveChild ? styles.submenuDotActive : styles.submenuDot} />}
+                              {child._locked && (
+                                <Icon
+                                  name="lock"
+                                  size={12}
+                                  color={colorScales.gray[400]}
+                                />
+                              )}
+                            </View>
+
+                            <SidebarButton
+                              onPress={() => {
+                                if (child._locked) {
+                                  handleLockedItemClick(child);
+                                } else if (child.action) {
+                                  child.action();
+                                } else if (child.href) {
+                                  handleNavigate(child.href);
+                                }
+                              }}
+                              isActive={isActiveChild}
+                              isLocked={child._locked}
+                              baseStyle={styles.subMenuItem}
+                              activeStyle={styles.subMenuItemActive}
+                              pressedStyle={styles.subMenuItemPressed}
                             >
-                              {child.label}
-                            </Text>
-                            {child._locked && (
-                              <View style={styles.lockedBadge}>
-                                <Text style={styles.lockedBadgeText}>
-                                  {child.lockedBadge || 'ORG'}
-                                </Text>
-                              </View>
-                            )}
-                          </SidebarButton>
-                        </View>
+                              <Text
+                                style={[
+                                  styles.subMenuLabel,
+                                  isActiveChild ? styles.subMenuLabelActive : styles.subMenuLabelInactive,
+                                  child._locked && styles.lockedSubmenuLabel,
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {child.label}
+                              </Text>
+                              {child._locked && (
+                                <View style={styles.lockedBadge}>
+                                  <Text style={styles.lockedBadgeText}>
+                                    {child.lockedBadge || 'ORG'}
+                                  </Text>
+                                </View>
+                              )}
+                            </SidebarButton>
+                          </View>
+                        </StaggeredSubmenuItem>
                       );
                     })}
                   </View>
