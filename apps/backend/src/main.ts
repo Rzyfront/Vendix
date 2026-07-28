@@ -6,6 +6,8 @@ import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
 import { DomainConfigService } from '@common/config/domain.config';
 import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { PublicSeoService } from './domains/public/seo/public-seo.service';
+import { PublicPwaService } from './domains/public/pwa/public-pwa.service';
+import { isPwaIconVariant } from '@common/config/image-presets';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import { json, urlencoded } from 'express';
 import * as v8 from 'v8';
@@ -214,6 +216,115 @@ async function bootstrap() {
       res.status(200).send(txt);
     } catch (error) {
       res.status(500).send('User-agent: *\nAllow: /');
+    }
+  });
+
+  // PWA routes (must be registered before the global prefix, and must stay
+  // OUTSIDE /api/ so the no-store middleware above does not kill their cache).
+  const pwaService = app.get(PublicPwaService);
+
+  // Hostnames of the API itself. In production the CloudFront origin injects a
+  // FIXED custom header `X-Forwarded-Host: vendix.online`, so trusting it would
+  // hand every tenant the platform manifest. The viewer `Host` wins; we only
+  // fall back to `x-forwarded-host` when `Host` is the API's own hostname,
+  // which is the signature of a proxy that did not forward the real Host.
+  const API_HOSTS = new Set(['api.vendix.com', 'api.vendix.online']);
+  const resolveTenantHostname = (req: any): string => {
+    const hostHeader = (req.headers['host'] ?? '').toString().split(':')[0];
+    const forwarded = (req.headers['x-forwarded-host'] ?? '')
+      .toString()
+      .split(',')[0]
+      .trim()
+      .split(':')[0];
+    return hostHeader && !API_HOSTS.has(hostHeader)
+      ? hostHeader
+      : forwarded || hostHeader;
+  };
+
+  httpAdapter.get('/manifest.webmanifest', async (req, res) => {
+    try {
+      const hostname = resolveTenantHostname(req);
+      const manifest = await pwaService.buildManifest(hostname);
+      res.setHeader('Content-Type', 'application/manifest+json');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(200).json(manifest);
+    } catch (error) {
+      // Never 500: a failed manifest makes the app uninstallable. Degrade to a
+      // minimal, valid Vendix-branded manifest instead.
+      res.setHeader('Content-Type', 'application/manifest+json');
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      res.status(200).json({
+        id: '/',
+        name: 'Vendix',
+        short_name: 'Vendix',
+        start_url: '/',
+        scope: '/',
+        display: 'standalone',
+        theme_color: '#2F6F4E',
+        background_color: '#2F6F4E',
+        icons: [
+          {
+            src: '/pwa/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/pwa/icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/pwa/icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+          {
+            src: '/pwa/apple-touch-icon-180.png',
+            sizes: '180x180',
+            type: 'image/png',
+            purpose: 'any',
+          },
+        ],
+      });
+    }
+  });
+
+  // Literal allow-list. The route param is NEVER concatenated into an S3 key —
+  // this is what blocks both path traversal and bucket enumeration.
+  const PWA_ASSETS = new Set([
+    'icon-192.png',
+    'icon-512.png',
+    'icon-maskable-512.png',
+    'apple-touch-icon-180.png',
+  ]);
+
+  httpAdapter.get('/pwa/:asset', async (req, res) => {
+    const asset = String(req.params?.asset ?? '');
+    if (!PWA_ASSETS.has(asset)) {
+      res.status(404).send('Not Found');
+      return;
+    }
+
+    const variant = asset.replace(/\.png$/, '');
+    if (!isPwaIconVariant(variant)) {
+      res.status(404).send('Not Found');
+      return;
+    }
+
+    try {
+      const hostname = resolveTenantHostname(req);
+      const { buffer } = await pwaService.resolveIconBuffer(hostname, variant);
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+      res.status(200).send(buffer);
+    } catch (error) {
+      // An installed app must never show a broken icon: serve the Vendix brand.
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.status(200).send(pwaService.getBrandIconBuffer(variant));
     }
   });
 

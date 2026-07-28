@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PublicDomainsModule } from './domains/public-domains.module';
 import { PublicSeoModule } from './seo/public-seo.module';
+import { PublicPwaModule } from './pwa/public-pwa.module';
 import { PublicPlansModule } from './subscriptions/public-plans.module';
 import { PublicLegalModule } from './legal/public-legal.module';
 import { MetaWhatsappWebhookModule } from './meta-whatsapp/meta-whatsapp-webhook.module';
@@ -14,6 +15,7 @@ import { MetaWhatsappWebhookModule } from './meta-whatsapp/meta-whatsapp-webhook
  * Current modules:
  * - PublicDomainsModule: Domain resolution and availability checking
  * - PublicSeoModule: Sitemap.xml and robots.txt generation
+ * - PublicPwaModule: Per-tenant Web App Manifest and PWA icon binaries
  * - PublicPlansModule: SaaS pricing plans (rate-limited, public-safe fields only)
  * - PublicLegalModule: Active system legal documents (Terms, Privacy, Cookies)
  */
@@ -21,6 +23,7 @@ import { MetaWhatsappWebhookModule } from './meta-whatsapp/meta-whatsapp-webhook
   imports: [
     PublicDomainsModule,
     PublicSeoModule,
+    PublicPwaModule,
     PublicPlansModule,
     PublicLegalModule,
     MetaWhatsappWebhookModule,
