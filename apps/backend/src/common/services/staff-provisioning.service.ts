@@ -243,11 +243,44 @@ export class StaffProvisioningService {
       if (!role) {
         throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
       }
-      await db.user_roles.upsert({
-        where: { user_id_role_id: { user_id: userId, role_id: role.id } },
-        update: {},
-        create: { user_id: userId, role_id: role.id },
+
+      // QUI-72 — Alcance de la asignación.
+      //
+      // Los roles de PRIVILEGIO ALTO (owner/admin/super_admin) gobiernan toda
+      // la organización y son multi-tienda por diseño: van org-wide
+      // (`store_id: null`). Atarlos a `storeId` los dejaría fuera de las
+      // tiendas hermanas y rompería la auto-relación en login/switch, que
+      // depende justamente de ese privilegio.
+      //
+      // Cualquier otro rol es OPERATIVO de tienda (manager, supervisor,
+      // employee, carrier…) y queda atado a la tienda para la que se
+      // aprovisiona: es el mecanismo que permite ser Cajero en la tienda A y
+      // nada en la B. Antes, sin dimensión de tienda, el rol se filtraba a
+      // todas las tiendas de la organización.
+      const roleStoreId = StaffProvisioningService.hasHighPrivilege([role.name])
+        ? null
+        : storeId;
+
+      // Idempotencia equivalente a
+      // `UserRoleAssignmentService.ensureAssignmentUnchecked`, pero ejecutada
+      // sobre `db` (la transacción del llamador). No se delega en ese servicio
+      // porque usa su propio cliente Prisma: escribir fuera de esta transacción
+      // reventaría por FK (el usuario aún no es visible) o dejaría la fila
+      // huérfana si el caller hiciera rollback.
+      //
+      // Tampoco se puede usar `upsert`: al entrar `store_id` (nullable) al
+      // unique compuesto, Prisma tipa `user_id_role_id_store_id.store_id` como
+      // `number` NO nulo, así que el where único no puede expresar una
+      // asignación org-wide.
+      const existingAssignment = await db.user_roles.findFirst({
+        where: { user_id: userId, role_id: role.id, store_id: roleStoreId },
+        select: { id: true },
       });
+      if (!existingAssignment) {
+        await db.user_roles.create({
+          data: { user_id: userId, role_id: role.id, store_id: roleStoreId },
+        });
+      }
     }
 
     // 3. app_type en user_settings (fuente única de verdad léxica).

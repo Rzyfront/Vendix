@@ -228,7 +228,12 @@ export class AuthController {
   @Get('profile')
   async getProfile(@Req() req: AuthenticatedRequest) {
     try {
-      const profile = await this.authService.getProfile(req.user.id);
+      // QUI-72: `store_id` del token = tienda activa de la sesión. Los roles
+      // del perfil se resuelven contra ella (org-wide + los de esa tienda).
+      const profile = await this.authService.getProfile(
+        req.user.id,
+        req.user.store_id ?? null,
+      );
       return this.responseService.success(
         profile,
         'Perfil obtenido exitosamente',
@@ -252,6 +257,7 @@ export class AuthController {
       const result = await this.authService.updateProfile(
         req.user.id,
         updateProfileDto,
+        req.user.store_id ?? null,
       );
       return this.responseService.success(
         result,
@@ -269,7 +275,10 @@ export class AuthController {
   @Get('settings')
   async getSettings(@Req() req: AuthenticatedRequest) {
     try {
-      const settings = await this.authService.getSettings(req.user.id);
+      const settings = await this.authService.getSettings(
+        req.user.id,
+        req.user.store_id ?? null,
+      );
       return this.responseService.success(
         settings,
         'Configuración obtenida exitosamente',
@@ -331,7 +340,10 @@ export class AuthController {
   @Get('me')
   async getCurrentUser(@Req() req: AuthenticatedRequest) {
     try {
-      const user = await this.authService.getCurrentUser(req.user.id);
+      const user = await this.authService.getCurrentUser(
+        req.user.id,
+        req.user.store_id ?? null,
+      );
       if (!user) {
         return this.responseService.error(
           'Usuario no encontrado',
@@ -687,6 +699,7 @@ export class AuthController {
         req.user.id,
         body.key,
         body.app_type,
+        req.user.store_id ?? null,
       );
       return this.responseService.success(
         { config },

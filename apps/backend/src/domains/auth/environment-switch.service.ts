@@ -21,6 +21,7 @@ import {
   getRefreshTokenHmacSecret,
   hmacSha256,
 } from './constants/token.constants';
+import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 
 @Injectable()
 export class EnvironmentSwitchService {
@@ -70,7 +71,15 @@ export class EnvironmentSwitchService {
       );
     }
 
-    // Verificar que el usuario tenga los roles necesarios
+    // Verificar que el usuario tenga los roles necesarios.
+    //
+    // QUI-72 — Lectura deliberadamente ORG-WIDE. Es la puerta de ENTRADA al
+    // entorno ("¿este usuario puede operar tiendas / la organización en algún
+    // lado?"), y se evalúa ANTES de saber a qué tienda va: la auto-selección de
+    // tienda (Estrategias 1/2/3, abajo) depende de `has_high_privilege`, que
+    // depende de estos roles. Scopear aquí sería circular. Los roles y permisos
+    // EFECTIVOS de la sesión resultante se recalculan más abajo, ya con
+    // `store_id` resuelto (ver `effective_user_roles`).
     const user_role_names = user.user_roles
       .map((ur) => ur.roles?.name)
       .filter((name): name is string => Boolean(name));
@@ -320,40 +329,58 @@ export class EnvironmentSwitchService {
       });
     }
 
-    // Obtener el usuario completo con todas las relaciones necesarias
-    const complete_user = await this.prismaService.users.findUnique({
-      where: { id: userId },
-      include: {
-        user_roles: {
-          include: {
-            roles: true,
+    // Obtener el usuario completo con todas las relaciones necesarias.
+    //
+    // QUI-72 — AQUÍ SÍ se scopea: la tienda destino (`store_id`) ya está
+    // resuelta, así que la sesión que devolvemos sólo puede llevar las
+    // asignaciones vigentes en ella. `store_id` NULL en `user_roles` = org-wide
+    // (aplica siempre); con valor = sólo esa tienda. Al cambiar a ORG_ADMIN
+    // `store_id` es null y quedan únicamente las org-wide — fail-closed.
+    // Éste es el punto que hace que cambiar de tienda cambie de verdad los
+    // roles: antes, un usuario con rol sólo en la tienda A se lo llevaba a la B.
+    const [complete_user, effective_user_roles] = await Promise.all([
+      this.prismaService.users.findUnique({
+        where: { id: userId },
+        include: {
+          organizations: {
+            include: {
+              organization_settings: true,
+              domain_settings: {
+                where: {
+                  is_primary: true,
+                  status: 'active',
+                },
+              },
+            },
           },
+          addresses: true,
         },
-        organizations: {
-          include: {
-            organization_settings: true,
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
+      }),
+      this.prismaService.user_roles.findMany({
+        where: buildActiveUserRolesWhere(userId, store_id),
+        include: {
+          roles: {
+            include: {
+              role_permissions: {
+                include: { permissions: true },
               },
             },
           },
         },
-        addresses: true,
-      },
-    });
+      }),
+    ]);
 
     if (!complete_user) {
       throw new Error('Usuario no encontrado');
     }
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
-    const { user_roles, ...user_without_roles } = complete_user;
-    const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
+    const roles = effective_user_roles
+      .map((ur) => ur.roles?.name)
+      .filter(Boolean);
 
     const user_with_roles_array = {
-      ...user_without_roles,
+      ...complete_user,
       roles,
     };
 
@@ -362,7 +389,7 @@ export class EnvironmentSwitchService {
       where: { user_id: userId },
     });
     const defaults = await this.defaultPanelUIService.generatePanelUI('');
-    const permissions = this.getPermissionsFromRoles(user.user_roles);
+    const permissions = this.getPermissionsFromRoles(effective_user_roles);
 
     // Registrar el cambio de entorno en auditoría
     await this.auditService.log({

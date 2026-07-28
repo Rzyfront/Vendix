@@ -5,9 +5,28 @@ import {
 } from '@nestjs/common';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 
+/**
+ * QUI-72 — Nota de alcance para TODO este servicio.
+ *
+ * `user.user_roles` NO viene de la BD cruda: lo arma `JwtStrategy.validate()`,
+ * que desde QUI-72 lo resuelve con `buildActiveUserRolesWhere(userId,
+ * token.store_id)`. Es decir, lo que este servicio ve son SÓLO las asignaciones
+ * vigentes en la tienda activa de la sesión: las org-wide (`store_id` NULL) más
+ * las de esa tienda concreta.
+ *
+ * Consecuencia importante: aquí `store_id == null` significa literalmente
+ * "asignación de alcance organización". Los chequeos que conceden acceso a
+ * TODAS las tiendas de la organización deben exigir esa condición; un rol
+ * `admin` atado a una tienda no puede abrir las hermanas.
+ */
 @Injectable()
 export class AccessValidationService {
   constructor(private prisma: GlobalPrismaService) {}
+
+  /** ¿La asignación vale en toda la organización? (`store_id` NULL) */
+  private isOrgWideAssignment(userRole: any): boolean {
+    return userRole?.store_id == null;
+  }
 
   /**
    * Valida si un usuario tiene acceso a una tienda específica
@@ -33,9 +52,7 @@ export class AccessValidationService {
     }
 
     // 0. Bypass for super_admin
-    const isSuperAdmin = user.user_roles?.some(
-      (userRole: any) => userRole.roles?.name === 'super_admin',
-    );
+    const isSuperAdmin = this.isSuperAdmin(user);
 
     if (isSuperAdmin) {
       return true;
@@ -43,13 +60,20 @@ export class AccessValidationService {
 
     // 1. Check if user is an Organization Admin/Owner for the store's organization
     // Users with organization-level access (Owner, Org Admin) have access to all stores in their org
+    //
+    // QUI-72: el bypass "un rol org-level abre TODAS las tiendas de la org"
+    // sólo es legítimo si la asignación es realmente de alcance organización
+    // (`store_id` NULL). Un `admin` asignado únicamente a la tienda A no debe
+    // poder operar la B: sin este filtro, la dimensión de tienda se podría
+    // saltar por completo desde cualquier servicio que valide por aquí.
     const hasOrgLevelRoleForStoreOrg =
       user.organization_id === store.organization_id &&
       user.user_roles?.some(
         (userRole: any) =>
-          userRole.roles?.name === 'owner' ||
-          userRole.roles?.name === 'admin' ||
-          userRole.roles?.name === 'org_admin',
+          this.isOrgWideAssignment(userRole) &&
+          (userRole.roles?.name === 'owner' ||
+            userRole.roles?.name === 'admin' ||
+            userRole.roles?.name === 'org_admin'),
       );
 
     if (hasOrgLevelRoleForStoreOrg) {
@@ -96,9 +120,7 @@ export class AccessValidationService {
     }
 
     // Verificar si es super_admin
-    const isSuperAdmin = user.user_roles?.some(
-      (userRole: any) => userRole.roles?.name === 'super_admin',
-    );
+    const isSuperAdmin = this.isSuperAdmin(user);
 
     // Si es super_admin, permitir acceso a cualquier organización
     if (isSuperAdmin) {
@@ -116,11 +138,13 @@ export class AccessValidationService {
     // Logic for "belongsToOrg" is redundant if we check user.organization_id
 
     // Check if they have an org-admin role (just in case strict role check is needed)
+    // QUI-72: acceso a NIVEL ORGANIZACIÓN ⇒ la asignación debe ser org-wide.
     const hasOrgAdminRole = user.user_roles?.some(
       (ur: any) =>
-        ur.roles?.name === 'owner' ||
-        ur.roles?.name === 'admin' ||
-        ur.roles?.name === 'org_admin',
+        this.isOrgWideAssignment(ur) &&
+        (ur.roles?.name === 'owner' ||
+          ur.roles?.name === 'admin' ||
+          ur.roles?.name === 'org_admin'),
     );
 
     if (hasOrgAdminRole && user.organization_id === organizationId) {
@@ -143,9 +167,7 @@ export class AccessValidationService {
     currentUser: any,
   ): Promise<boolean> {
     // Un usuario solo puede acceder a sus propios datos, o un super_admin puede acceder a cualquier usuario
-    const isSuperAdmin = currentUser.user_roles?.some(
-      (userRole: any) => userRole.roles?.name === 'super_admin',
-    );
+    const isSuperAdmin = this.isSuperAdmin(currentUser);
 
     if (currentUser.id !== targetUserId && !isSuperAdmin) {
       throw new ForbiddenException('Access denied to this user');
@@ -155,7 +177,12 @@ export class AccessValidationService {
   }
 
   /**
-   * Verifica si un usuario tiene un rol específico
+   * Verifica si un usuario tiene un rol específico EN LA TIENDA ACTIVA.
+   *
+   * QUI-72: no hace falta filtrar aquí — `user.user_roles` ya llega scopeado
+   * desde `JwtStrategy`. Preguntar "¿tiene el rol X?" en el contexto de la
+   * request es exactamente lo que este método debe responder.
+   *
    * @param user Usuario autenticado
    * @param roleName Nombre del rol a verificar
    * @returns true si tiene el rol, false si no
@@ -169,16 +196,32 @@ export class AccessValidationService {
   }
 
   /**
-   * Verifica si un usuario es super_admin
+   * Verifica si un usuario es super_admin.
+   *
+   * QUI-72: `super_admin` es un rol de SISTEMA; su asignación debe ser org-wide
+   * (`store_id` NULL). Exigirlo cierra la puerta a un `super_admin` atado a una
+   * tienda que se comportara como global — fail-closed por diseño.
+   *
    * @param user Usuario autenticado
    * @returns true si es super_admin, false si no
    */
   isSuperAdmin(user: any): boolean {
-    return this.hasRole(user, 'super_admin');
+    return (
+      user.user_roles?.some(
+        (userRole: any) =>
+          this.isOrgWideAssignment(userRole) &&
+          userRole.roles?.name === 'super_admin',
+      ) || false
+    );
   }
 
   /**
    * Obtiene las organizaciones a las que un usuario tiene acceso
+   *
+   * QUI-72: la organización es una dimensión superior a la tienda, así que
+   * esta lectura NO se filtra por tienda a propósito — se responde con el
+   * conjunto que trae la sesión.
+   *
    * @param user Usuario autenticado
    * @returns Array de IDs de organizaciones
    */
@@ -199,9 +242,15 @@ export class AccessValidationService {
   }
 
   /**
-   * Obtiene las tiendas a las que un usuario tiene acceso
+   * Obtiene las tiendas para las que la sesión trae una asignación EXPLÍCITA.
+   *
+   * QUI-72 — Advertencia: esto NO es "todas las tiendas del usuario". Los roles
+   * llegan scopeados a la tienda activa del token, y las asignaciones org-wide
+   * (`store_id` NULL) no aportan ningún id aunque valgan en todas las tiendas.
+   * Para enumerar las tiendas de un usuario, consultar `store_users`.
+   *
    * @param user Usuario autenticado
-   * @returns Array de IDs de tiendas
+   * @returns Array de IDs de tiendas con asignación explícita en esta sesión
    */
   getUserStores(user: any): number[] {
     const storeIds = new Set<number>();
