@@ -28,7 +28,7 @@ import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
-import { RoleActor } from '@common/utils/role-scope.util';
+import { RoleActor, HIDDEN_ROLE_NAMES } from '@common/utils/role-scope.util';
 import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
@@ -690,25 +690,42 @@ export class UsersService {
       }
 
       // 2. Update Roles
+      //
+      // QUI-72 — Este reemplazo es de ALCANCE ORGANIZACIÓN, y sólo puede tocar
+      // la porción org-wide (`store_id: null`).
+      //
+      // Antes de QUI-72 existía a lo sumo UNA fila por (user_id, role_id), así
+      // que `notIn` era un reemplazo correcto. Al incorporar `store_id`, el
+      // mismo usuario puede tener el rol Cajero en la tienda 6 y Supervisor en
+      // la 7: sin acotar por `store_id`, guardar esta pantalla revocaba en
+      // silencio TODAS las asignaciones por tienda que no estuvieran en la
+      // lista — pérdida de datos invisible para quien sólo cambió el app_type.
+      //
+      // Se excluyen además los roles ocultos (owner/super_admin), igual que
+      // hace `UserRoleAssignmentService.replaceUserRoles`: no se administran
+      // desde esta pantalla y borrarlos degradaría al dueño de la cuenta.
       if (roles) {
-        // Remove roles not in the new list
+        // Remove org-wide roles not in the new list
         await tx.user_roles.deleteMany({
           where: {
             user_id: id,
+            store_id: null,
             role_id: { notIn: roles },
+            roles: { name: { notIn: [...HIDDEN_ROLE_NAMES] } },
           },
         });
 
-        // Add new roles
+        // Add new roles (org-wide: aplican en todas las tiendas de la org)
         for (const roleId of roles) {
           const exists = await tx.user_roles.findFirst({
-            where: { user_id: id, role_id: roleId },
+            where: { user_id: id, role_id: roleId, store_id: null },
           });
           if (!exists) {
             await tx.user_roles.create({
               data: {
                 user_id: id,
                 role_id: roleId,
+                store_id: null,
               },
             });
           }
