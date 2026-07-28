@@ -114,3 +114,54 @@ export const IMAGE_PRESETS: Record<ImageContext, ImagePreset> = {
     thumbnail: { width: 200, height: 200, quality: 70, fit: 'cover' },
   },
 };
+
+/**
+ * PWA Icon Derivation
+ *
+ * The installed app (Android/iOS/desktop) cannot consume the tenant logo
+ * directly: it requires square, opaque PNGs in fixed sizes. These variants are
+ * derived from the tenant logo and cached in S3.
+ */
+export type PwaIconVariant =
+  | 'icon-192'
+  | 'icon-512'
+  | 'icon-maskable-512'
+  | 'apple-touch-icon-180';
+
+export interface PwaIconSpec {
+  /** lado del PNG cuadrado resultante, en px */
+  size: number;
+  /** fracción del lienzo que ocupa el logo inscrito (1 = borde a borde) */
+  inscribeRatio: number;
+}
+
+/**
+ * All variants are rendered as square, OPAQUE PNGs (no alpha channel):
+ * Safari paints transparency as black, and Android masks adaptive icons.
+ *
+ * - `icon-192`             Android / Chromium install prompt.
+ * - `icon-512`             Android splash, Windows/Edge taskbar.
+ * - `icon-maskable-512`    Android adaptive icon: the logo is inscribed at 60%
+ *                          so it survives the 20%-per-side safe-zone crop.
+ * - `apple-touch-icon-180` iOS/iPadOS/macOS Safari home-screen icon.
+ */
+export const PWA_ICON_SPECS: Record<PwaIconVariant, PwaIconSpec> = {
+  'icon-192': { size: 192, inscribeRatio: 1 },
+  'icon-512': { size: 512, inscribeRatio: 1 },
+  'icon-maskable-512': { size: 512, inscribeRatio: 0.6 },
+  'apple-touch-icon-180': { size: 180, inscribeRatio: 1 },
+};
+
+/** Every supported PWA icon variant, useful to build manifest entries. */
+export const PWA_ICON_VARIANTS = Object.keys(
+  PWA_ICON_SPECS,
+) as PwaIconVariant[];
+
+/**
+ * Narrows an untrusted string (e.g. a route param) to a supported variant.
+ */
+export function isPwaIconVariant(
+  value: string | null | undefined,
+): value is PwaIconVariant {
+  return !!value && Object.prototype.hasOwnProperty.call(PWA_ICON_SPECS, value);
+}
