@@ -32,7 +32,9 @@ export class StorePrismaService extends BasePrismaService {
     // organizations.fiscal_scope can be ORGANIZATION (store_id IS NULL on the
     // row) or STORE (store_id NOT NULL), we apply a relational OR-scope below
     // so store callers can see both the store-scoped config and the
-    // organization-scoped config that applies to their store.
+    // organization-scoped config that applies to their store. It IS listed in
+    // `all_scoped_models` — the relational entry alone does nothing unless the
+    // model is registered there.
     'promotions',
     'coupons',
     'marketing_ad_creatives',
@@ -250,6 +252,12 @@ export class StorePrismaService extends BasePrismaService {
       'invoice_resolutions', // Fiscal entity scoped
       'invoice_items', // Relational
       'invoice_taxes', // Relational
+      // Relational OR-scope (organization_id + store_id|null). Without this
+      // registration the `dian_configurations` entry in `relational_scopes`
+      // was dead code, leaving every `where: { id }` lookup in the DIAN
+      // domain (test-set status, certificate upload, promote-to-production)
+      // readable and writable across tenants.
+      'dian_configurations',
       'dian_audit_logs', // Relational
       'fiscal_transmissions', // Fiscal entity scoped
       'fiscal_evidences', // Fiscal entity scoped
