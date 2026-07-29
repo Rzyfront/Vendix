@@ -20,6 +20,21 @@
     @if (showHeader()) {
       <thead [class]="headerClasses()">
         <tr>
+          <!-- Selection header (only when selectable) -->
+          @if (selectable()) {
+            <th class="select-cell" (click)="$event.stopPropagation()">
+              <input
+                type="checkbox"
+                class="row-select-checkbox"
+                [checked]="headerSelectionState() === 'all'"
+                [indeterminate]="headerSelectionState() === 'some'"
+                (change)="toggleAllVisible()"
+                aria-label="Seleccionar todo lo visible"
+                title="Seleccionar todo lo visible"
+              />
+            </th>
+          }
+
           <!-- Column headers -->
           @for (column of columns(); track column.key) {
             <th [class]="getCellClasses(column)" (click)="onSort(column)"
@@ -45,7 +60,14 @@
     @if (data().length === 0 && !loading()) {
       <tbody>
         <tr>
-          <td [attr.colspan]="columns().length + (actions() || actionsTemplate ? 1 : 0)" class="empty-cell">
+          <td
+            [attr.colspan]="
+              columns().length +
+              (actions() || actionsTemplate ? 1 : 0) +
+              (selectable() ? 1 : 0)
+            "
+            class="empty-cell"
+          >
             <div class="empty-state">
               <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
@@ -64,6 +86,21 @@
             <tr [class]="getRowClasses(i)" (click)="onRowClick(item)"
               [class.clickable-row]="true"
               [ngClass]="rowClass() ? rowClass()!(item, i) : ''">
+              <!-- Selection cell (only when selectable) -->
+              @if (selectable()) {
+                <!-- stopPropagation here is what keeps the row's (click)="onRowClick(item)"
+                     from firing when the user only wants to tick the checkbox. -->
+                <td class="select-cell" (click)="$event.stopPropagation()">
+                  <input
+                    type="checkbox"
+                    class="row-select-checkbox"
+                    [checked]="isRowSelected(item)"
+                    (change)="toggleRow(item)"
+                    aria-label="Seleccionar fila"
+                  />
+                </td>
+              }
+
               <!-- Data cells -->
               @for (column of columns(); track column.key) {
                 <td [class]="getCellClasses(column)">
@@ -217,6 +254,11 @@
         <tbody>
           @for (item of [1,2,3,4,5,6,7,8]; track item) {
             <tr class="animate-pulse">
+              @if (selectable()) {
+                <td class="select-cell">
+                  <div class="h-4 w-4 bg-gray-200 rounded"></div>
+                </td>
+              }
               @for (column of columns(); track column.key) {
                 <td [class]="getCellClasses(column)">
                   <div class="h-4 bg-gray-200 rounded w-3/4"></div>

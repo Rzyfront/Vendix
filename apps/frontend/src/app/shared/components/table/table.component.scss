@@ -436,6 +436,26 @@
   vertical-align: middle;
 }
 
+// Celda de selección múltiple (solo se renderiza con [selectable]="true";
+// mientras `selectable` sea false estas reglas no tienen a quién aplicar).
+// La especificidad va por encima de `.table-element tbody tr td` y de
+// `.table-element thead th` para poder acotar el ancho.
+.table-element thead th.select-cell,
+.table-element tbody td.select-cell {
+  width: 40px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.row-select-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  vertical-align: middle;
+  accent-color: var(--color-primary);
+}
+
 // Estados de tamaño
 .table-size-sm {
   .table-element {

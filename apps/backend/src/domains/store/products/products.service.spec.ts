@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ProductsService } from './products.service';
+import { ProductsService, MAX_PRODUCT_IDS } from './products.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -13,6 +13,7 @@ import { RemoteImageService } from '@common/services/remote-image.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { SettingsService } from '../settings/settings.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -96,6 +97,47 @@ describe('ProductsService', () => {
     stores: {
       findUnique: jest.fn(),
     },
+    // Modelos que `ProductsService` toca en los caminos de escritura y que la
+    // fixture original no declaraba (el suite fallaba con
+    // "Cannot read properties of undefined").
+    stock_reservations: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+    },
+    units_of_measure: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+    },
+    promotion_products: {
+      findMany: jest.fn(),
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
+    product_price_tier_assignments: {
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
+    order_items: {
+      updateMany: jest.fn(),
+    },
+    invoice_items: {
+      updateMany: jest.fn(),
+    },
+    quotation_items: {
+      updateMany: jest.fn(),
+    },
+    layaway_items: {
+      updateMany: jest.fn(),
+    },
+    dispatch_note_items: {
+      updateMany: jest.fn(),
+    },
+    inventory_adjustments: {
+      updateMany: jest.fn(),
+    },
+    inventory_transactions: {
+      updateMany: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 
@@ -155,6 +197,10 @@ describe('ProductsService', () => {
 
   const mockPromotionEngineService = {
     findActiveAutoPromotionsForProducts: jest.fn().mockResolvedValue(new Map()),
+  };
+
+  const mockSettingsService = {
+    getFiscalData: jest.fn().mockResolvedValue(null),
   };
 
   beforeEach(async () => {
@@ -220,6 +266,10 @@ describe('ProductsService', () => {
         {
           provide: PromotionEngineService,
           useValue: mockPromotionEngineService,
+        },
+        {
+          provide: SettingsService,
+          useValue: mockSettingsService,
         },
       ],
     }).compile();
@@ -1204,6 +1254,167 @@ describe('ProductsService', () => {
       const result = await service.findAll({ page: 1, limit: 10 });
 
       expect((result.data[0] as any).active_promotion).toBeNull();
+    });
+  });
+
+  /**
+   * Bulk-edit prerequisites: el sanitizer de insumo puro debe llegar de verdad
+   * al `prisma.products.update()`, el retorno ligero debe evitar el `findOne()`
+   * completo, y `findIds()` debe materializar ids con tope explícito.
+   */
+  describe('BULK-EDIT PREREQUISITES', () => {
+    const existingProduct = {
+      id: 42,
+      store_id: 1,
+      name: 'Harina de trigo',
+      sku: 'ING-042',
+      slug: 'harina-de-trigo',
+      state: ProductState.ACTIVE,
+      base_price: 12000,
+      product_type: 'physical',
+      track_inventory: true,
+      stock_quantity: 0,
+      requires_booking: false,
+      consultation_template_id: null,
+      preconsultation_template_id: null,
+      send_preconsultation: false,
+      stock_uom_id: null,
+      purchase_uom_id: null,
+      online_purchase_url: null,
+      online_purchase_qr_code: null,
+      online_purchase_domain_id: null,
+    };
+
+    let findOneSpy: jest.SpyInstance;
+
+    /**
+     * Prepara el camino feliz de `update()`: producto existente, tienda con
+     * industria que soporta insumos, sin reservas activas y transacción que
+     * ejecuta el callback contra el propio mock de Prisma.
+     */
+    const primeUpdatePath = (
+      updatedRow: Record<string, any> = {
+        ...existingProduct,
+        base_price: 0,
+      },
+    ) => {
+      mockPrismaService.products.findFirst.mockReset();
+      mockPrismaService.products.findFirst.mockResolvedValueOnce(
+        existingProduct,
+      );
+      mockPrismaService.stores.findUnique.mockReset();
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        industries: ['restaurant'],
+      });
+      mockPrismaService.stock_reservations.findFirst.mockReset();
+      mockPrismaService.product_variants.count.mockReset();
+      mockPrismaService.product_variants.count.mockResolvedValue(0);
+      mockPrismaService.products.update.mockReset();
+      mockPrismaService.products.update.mockResolvedValue(updatedRow);
+      mockPrismaService.$transaction.mockImplementation((callback: any) =>
+        callback(mockPrismaService),
+      );
+    };
+
+    beforeEach(() => {
+      findOneSpy = jest
+        .spyOn(service, 'findOne')
+        .mockResolvedValue({ id: existingProduct.id } as any);
+    });
+
+    afterEach(() => {
+      findOneSpy.mockRestore();
+    });
+
+    it('persiste las neutralizaciones del sanitizer de insumo puro', async () => {
+      primeUpdatePath();
+
+      await service.update(existingProduct.id, {
+        is_ingredient: true,
+        is_sellable: false,
+      } as UpdateProductDto);
+
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+        where: { id: existingProduct.id },
+        data: expect.objectContaining({
+          is_ingredient: true,
+          is_sellable: false,
+          base_price: 0,
+          sale_price: 0,
+          is_on_sale: false,
+          allow_pos_price_override: false,
+          has_multiple_price_tiers: false,
+          available_for_ecommerce: false,
+          is_featured: false,
+          online_purchase_url: null,
+        }),
+      });
+    });
+
+    it('con { lean: true } devuelve solo { id, name, sku } y no invoca findOne', async () => {
+      primeUpdatePath({
+        ...existingProduct,
+        name: 'Harina de trigo',
+        sku: 'ING-042',
+        base_price: 0,
+      });
+
+      const result = await service.update(
+        existingProduct.id,
+        { is_featured: false } as UpdateProductDto,
+        { lean: true },
+      );
+
+      expect(result).toEqual({
+        id: existingProduct.id,
+        name: 'Harina de trigo',
+        sku: 'ING-042',
+      });
+      expect(findOneSpy).not.toHaveBeenCalled();
+    });
+
+    it('sin opciones sigue delegando en findOne (retrocompatibilidad)', async () => {
+      primeUpdatePath();
+
+      await service.update(existingProduct.id, {
+        is_featured: false,
+      } as UpdateProductDto);
+
+      expect(findOneSpy).toHaveBeenCalledWith(existingProduct.id);
+    });
+
+    it('findIds marca capped y trunca los ids en MAX_PRODUCT_IDS', async () => {
+      const rows = Array.from({ length: MAX_PRODUCT_IDS }, (_, index) => ({
+        id: index + 1,
+      }));
+      mockPrismaService.products.findMany.mockResolvedValue(rows);
+      mockPrismaService.products.count.mockResolvedValue(MAX_PRODUCT_IDS + 25);
+
+      const result = await service.findIds({
+        state: ProductState.ACTIVE,
+      } as ProductQueryDto);
+
+      expect(result.capped).toBe(true);
+      expect(result.total).toBe(MAX_PRODUCT_IDS + 25);
+      expect(result.ids).toHaveLength(MAX_PRODUCT_IDS);
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ state: ProductState.ACTIVE }),
+        select: { id: true },
+        orderBy: { created_at: 'desc' },
+        take: MAX_PRODUCT_IDS,
+      });
+    });
+
+    it('findIds no marca capped cuando el total cabe en el tope', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 7 },
+        { id: 9 },
+      ]);
+      mockPrismaService.products.count.mockResolvedValue(2);
+
+      const result = await service.findIds({} as ProductQueryDto);
+
+      expect(result).toEqual({ ids: [7, 9], total: 2, capped: false });
     });
   });
 });

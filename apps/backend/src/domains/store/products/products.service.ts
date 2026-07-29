@@ -57,6 +57,15 @@ import type {
   ActivePromotionProductInput,
 } from '../promotions/dto/promotion-quote.interface';
 
+/**
+ * Tope de ids materializados por `ProductsService.findIds()`.
+ *
+ * Acota "seleccionar todos los resultados del filtro" para no prometer al
+ * cliente una selección impracticable. Cuando el conteo real lo supera, la
+ * respuesta viene con `capped: true` y la UI debe decirlo explícitamente.
+ */
+export const MAX_PRODUCT_IDS = 1000;
+
 type OnlinePurchaseStatusReason =
   | 'ready'
   | 'ecommerce_not_configured'
@@ -996,18 +1005,24 @@ export class ProductsService {
     }
   }
 
-  async findAll(query: ProductQueryDto) {
+  /**
+   * Construye el `where` del catálogo de productos a partir de
+   * `ProductQueryDto`. Fuente ÚNICA de la traducción filtro → Prisma: la
+   * consumen `findAll()` (listado paginado) y `findIds()` (materialización de
+   * ids para selección masiva), de modo que "seleccionar todos los resultados
+   * del filtro" opere exactamente sobre el mismo conjunto que se está viendo.
+   *
+   * El scope por tienda lo inyecta `StorePrismaService`; aquí no se resuelve
+   * tenant a mano.
+   */
+  private buildProductWhere(query: ProductQueryDto): Prisma.productsWhereInput {
     const {
-      page = 1,
-      limit = 10,
       search,
       state,
       brand_id,
       include_inactive,
       pos_optimized,
       barcode,
-      include_stock,
-      include_variants,
       category_id,
       track_inventory,
       product_type,
@@ -1015,11 +1030,6 @@ export class ProductsService {
       is_sellable,
       is_batch_produced,
     } = query;
-    const skip = (page - 1) * limit;
-
-    // Obtener contexto para aplicar scope automático
-    const context = RequestContextService.getContext();
-    // store_id check is handled by StorePrismaService
 
     // Estado: el query param `state` (vía UI o API) tiene prioridad sobre
     // el default. Si el usuario filtra explícitamente por "Archivado",
@@ -1041,7 +1051,7 @@ export class ProductsService {
       effectiveState = { not: ProductState.ARCHIVED };
     }
 
-    const where = {
+    return {
       // Auto-scoped by StorePrismaService
       state: effectiveState,
       ...(barcode && {
@@ -1072,6 +1082,55 @@ export class ProductsService {
       ...(is_sellable !== undefined && { is_sellable }),
       ...(is_batch_produced !== undefined && { is_batch_produced }),
     } as Prisma.productsWhereInput;
+  }
+
+  /**
+   * Materializa los ids de producto que satisfacen los mismos filtros del
+   * listado, con tope explícito (`MAX_PRODUCT_IDS`).
+   *
+   * Habilita "seleccionar todos los resultados del filtro" sin traer productos
+   * completos. `total` es el conteo real sin tope y `capped` avisa cuando el
+   * conjunto real excede lo materializado, para que la UI lo diga en voz alta
+   * en lugar de truncar en silencio.
+   */
+  async findIds(
+    query: ProductQueryDto,
+  ): Promise<{ ids: number[]; total: number; capped: boolean }> {
+    const where = this.buildProductWhere(query);
+
+    const [rows, total] = await Promise.all([
+      this.prisma.products.findMany({
+        where,
+        select: { id: true },
+        orderBy: { created_at: 'desc' },
+        take: MAX_PRODUCT_IDS,
+      }),
+      this.prisma.products.count({ where }),
+    ]);
+
+    return {
+      ids: rows.map((row) => row.id),
+      total,
+      capped: total > MAX_PRODUCT_IDS,
+    };
+  }
+
+  async findAll(query: ProductQueryDto) {
+    const {
+      page = 1,
+      limit = 10,
+      pos_optimized,
+      barcode,
+      include_stock,
+      include_variants,
+    } = query;
+    const skip = (page - 1) * limit;
+
+    // Obtener contexto para aplicar scope automático
+    const context = RequestContextService.getContext();
+    // store_id check is handled by StorePrismaService
+
+    const where = this.buildProductWhere(query);
 
     // Resolve POS stock scope so we can constrain the stock_levels includes at
     // the Prisma layer (server-side filtering) instead of post-filtering rows.
@@ -1813,7 +1872,21 @@ export class ProductsService {
     };
   }
 
-  async update(id: number, updateProductDto: UpdateProductDto) {
+  /**
+   * Actualiza un producto aplicando todas las reglas cruzadas del dominio.
+   *
+   * @param options.lean cuando es `true` devuelve solo `{ id, name, sku }` en
+   *        vez de delegar en `findOne()` (que trae promociones activas, stock
+   *        por ubicación e imágenes firmadas). Pensado para consumidores en
+   *        lote — p.ej. edición masiva — que no consumen el producto completo
+   *        y donde N lecturas completas son puro coste. Sin el parámetro el
+   *        comportamiento es idéntico al histórico.
+   */
+  async update(
+    id: number,
+    updateProductDto: UpdateProductDto,
+    options?: { lean?: boolean },
+  ): Promise<any> {
     // Fase 1: pure-ingredient sanitization. Idempotent.
     let sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
     try {
@@ -1994,6 +2067,15 @@ export class ProductsService {
         sanitizedDto.preconsultation_template_id = undefined;
       }
 
+      // IMPORTANTE: se destructura `sanitizedDto`, NO `updateProductDto`.
+      // `sanitizeIngredientPayload()` y `enforceIngredientCapability()`
+      // devuelven copias con los campos neutralizados, así que leer el DTO
+      // original descartaba silenciosamente esas neutralizaciones y el
+      // `prisma.products.update()` persistía los valores crudos del cliente
+      // (insumo puro conservando precio y flags de venta).
+      // `sanitizedDto` es siempre un superconjunto del DTO original (ambos
+      // helpers hacen spread del objeto completo), luego el resto de los
+      // caminos de `update()` reciben exactamente los mismos campos.
       const {
         category_ids,
         tax_category_ids,
@@ -2007,7 +2089,7 @@ export class ProductsService {
         enabled_price_tier_ids,
         price, // Exclude as it's not in DB
         ...productData
-      } = updateProductDto as UpdateProductDto & { price?: number };
+      } = sanitizedDto as UpdateProductDto & { price?: number };
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         existingProduct.store_id,
         sanitizedDto.slug || existingProduct.slug,
@@ -2642,6 +2724,13 @@ export class ProductsService {
         },
         { timeout: 30000 },
       );
+
+      // Retorno ligero: el consumidor en lote solo reporta identidad, así que
+      // se sirve desde la fila ya devuelta por la transacción sin una lectura
+      // extra.
+      if (options?.lean) {
+        return { id: result.id, name: result.name, sku: result.sku };
+      }
 
       return await this.findOne(result.id);
     } catch (error) {

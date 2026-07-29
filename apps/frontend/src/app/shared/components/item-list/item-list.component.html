@@ -44,6 +44,31 @@
           [ngClass]="rowClass() ? rowClass()!(item, i) : ''">
           <!-- Combined Header & Details Wrap -->
           <div class="card-body">
+            <!-- Selection checkbox (only when selectable). Lives at the start of
+                 the main row (card top-left) so it never competes with the
+                 actions, which render in the card footer. stopPropagation is
+                 what keeps the card's (click)="onItemClick(item)" from firing. -->
+            @if (selectable()) {
+              <div
+                class="card-select-wrapper flex shrink-0 items-start pt-0.5"
+                (click)="$event.stopPropagation()"
+              >
+                <input
+                  type="checkbox"
+                  class="card-select-checkbox"
+                  style="
+                    width: 18px;
+                    height: 18px;
+                    margin: 0;
+                    cursor: pointer;
+                    accent-color: var(--color-primary);
+                  "
+                  [checked]="isRowSelected(item)"
+                  (change)="toggleRow(item)"
+                  aria-label="Seleccionar elemento"
+                />
+              </div>
+            }
             <!-- Avatar Section -->
             @if (showAvatar()) {
               <div

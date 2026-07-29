@@ -1,4 +1,8 @@
-import { TableColumn, TableAction } from '../table/table.component';
+import {
+  TableColumn,
+  TableAction,
+  RowSelectionState,
+} from '../table/table.component';
 
 /**
  * Progress ring data rendered in place of a text detail value.
@@ -85,4 +89,4 @@ export interface ItemListCardConfig {
 export type ItemListSize = 'sm' | 'md' | 'lg';
 
 // Re-export TableAction for convenience
-export type { TableAction, TableColumn };
+export type { TableAction, TableColumn, RowSelectionState };
