@@ -2,6 +2,7 @@ import { Type, Transform } from 'class-transformer';
 import {
   IsString,
   IsOptional,
+  IsNotEmpty,
   IsEnum,
   IsBoolean,
   IsObject,
@@ -83,6 +84,29 @@ export class CreatePaymentMethodDto {
 }
 
 export class UpdatePaymentMethodDto {
+  // QUI-176: `name`, `type` y `provider` faltaban aquí, así que el
+  // ValidationPipe global (forbidNonWhitelisted) rechazaba el PATCH con
+  // "property name should not exist" y el método de pago no se podía editar
+  // desde el panel de superadmin. `name` es @unique en la tabla: al cambiarlo
+  // Prisma puede lanzar P2002, que el service traduce a 409.
+  // `@IsNotEmpty()` es necesario además de `@IsString()`: sin él una cadena
+  // vacía pasa la validación y `name` es @unique en la tabla.
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsEnum(payment_methods_type_enum)
+  type?: payment_methods_type_enum;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  provider?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)

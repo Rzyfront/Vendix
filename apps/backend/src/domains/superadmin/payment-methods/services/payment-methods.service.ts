@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { S3Service } from '@common/services/s3.service';
 import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../dto';
@@ -122,10 +123,37 @@ export class PaymentMethodsService {
   async update(id: number, updatePaymentMethodDto: UpdatePaymentMethodDto) {
     await this.findOne(id);
 
-    return this.globalPrisma.system_payment_methods.update({
-      where: { id },
-      data: updatePaymentMethodDto,
-    });
+    // QUI-176: `name` es @unique. Ahora que el DTO permite editarlo, un
+    // rename hacia un nombre ya tomado llegaría a Prisma como P2002 crudo.
+    // Mismo patrón de pre-check que create(), más el catch para la race:
+    // dos requests concurrentes pueden pasar el pre-check y sólo una insertar.
+    const { name } = updatePaymentMethodDto;
+
+    if (name !== undefined) {
+      const existingMethod =
+        await this.globalPrisma.system_payment_methods.findUnique({
+          where: { name },
+        });
+
+      if (existingMethod && existingMethod.id !== id) {
+        throw new ConflictException(`Payment method '${name}' already exists`);
+      }
+    }
+
+    try {
+      return await this.globalPrisma.system_payment_methods.update({
+        where: { id },
+        data: updatePaymentMethodDto,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(`Payment method '${name}' already exists`);
+      }
+      throw error;
+    }
   }
 
   async remove(id: number) {
