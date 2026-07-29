@@ -67,7 +67,14 @@ export class TodayReservationsPanelComponent {
     effect(() => {
       const bookings = this.bookings();
       for (const booking of bookings) {
-        if (booking.status === 'completed') {
+        // Auto-archive reservas que ya no requieren atención del operador:
+        // `completed` (servicio terminado) y `cancelled` (canceladas
+        // manual o por el cliente). El operador puede descartar antes
+        // con el botón X si quiere; esto es solo el auto-cleanup.
+        if (
+          booking.status === 'completed' ||
+          booking.status === 'cancelled'
+        ) {
           this.reservations.scheduleTodayArchive(
             booking.id,
             TodayReservationsPanelComponent.COMPLETED_VISIBLE_MS,
@@ -198,14 +205,15 @@ export class TodayReservationsPanelComponent {
   }
 
   /**
-   * A booking can be dismissed from the panel only once it's overdue
-   * ("Vencida"). Dismissing is a UI-only action — it hides the row so
-   * the operator can clear the notification when the client says they
-   * will reschedule; the booking itself is left untouched in the
-   * backend so it stays available to reschedule from the calendar.
+   * A booking can be dismissed from the panel once it's overdue
+   * ("Vencida") OR cancelled. Dismissing is a UI-only action — it hides
+   * the row so the operator can clear the notification when the client
+   * says they will reschedule, or after a manual cancellation. The
+   * booking itself is left untouched in the backend so it stays
+   * available to reschedule from the calendar.
    */
   canDismiss(booking: Booking): boolean {
-    return this.isExpired(booking);
+    return this.isExpired(booking) || booking.status === 'cancelled';
   }
 
   /**
