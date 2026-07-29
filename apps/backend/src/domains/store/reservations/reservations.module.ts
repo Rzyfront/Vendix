@@ -10,6 +10,7 @@ import { ProvidersService } from './providers/providers.service';
 import { ProvidersController } from './providers/providers.controller';
 import { ProviderScheduleService } from './providers/provider-schedule.service';
 import { ProviderAvailabilityService } from './providers/provider-availability.service';
+import { AutoNoShowJob } from './jobs/auto-no-show.job';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -40,6 +41,7 @@ import { TablesModule } from '../tables/tables.module';
     ProvidersService,
     ProviderScheduleService,
     ProviderAvailabilityService,
+    AutoNoShowJob,
   ],
   exports: [
     ReservationsService,
