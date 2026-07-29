@@ -10,7 +10,9 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ModuleFlowGuard,
   RequireModuleFlow,
@@ -19,6 +21,10 @@ import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
+import {
+  PRINT_FORMATS,
+  PrintFormat,
+} from '../settings/interfaces/store-settings.interface';
 import { ResponseService } from '../../../common/responses/response.service';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -119,6 +125,35 @@ export class InvoicingController {
       result,
       'Debit note created successfully',
     );
+  }
+
+  /**
+   * Sample invoice in the requested paper format, so the merchant can check the
+   * layout before saving the setting. Streams the PDF instead of persisting it:
+   * no numbering is consumed and nothing is stored.
+   *
+   * Declared before the parameter routes, like every literal path in this
+   * controller — `:id` would otherwise match `pdf-preview`.
+   */
+  @Get('pdf-preview')
+  @Permissions('invoicing:read')
+  async previewInvoicePdf(
+    @Query('format') format: string | undefined,
+    @Res() res: Response,
+  ) {
+    const requested = (format ?? 'letter') as PrintFormat;
+    const safe_format: PrintFormat = PRINT_FORMATS.includes(requested)
+      ? requested
+      : 'letter';
+
+    const buffer = await this.invoice_pdf_service.previewPdf(safe_format);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="muestra-${safe_format}.pdf"`,
+    );
+    res.send(buffer);
   }
 
   // --- Parameter Routes (MUST be last) ---

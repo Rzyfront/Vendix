@@ -3,7 +3,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
-import { FiscalStatusBlock } from '../../../../../core/models/fiscal-status.model';
+import { InvoicingService } from '../../invoicing/services/invoicing.service';
+import { DianEmissionStatus } from '../../invoicing/interfaces/invoice.interface';
+import { EmissionStage } from './components/receipts-settings-form/receipts-settings-form.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
@@ -55,6 +57,7 @@ export class GeneralSettingsComponent implements OnInit {
   private toast_service = inject(ToastService);
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
+  private invoicingService = inject(InvoicingService);
 
   isVendixDomain = signal(false);
   storeAppUrl = signal<string | null>(null);
@@ -88,22 +91,60 @@ export class GeneralSettingsComponent implements OnInit {
   readonly isGym = this.authFacade.isGym;
 
   /**
-   * True when the store is habilitado before the DIAN (fiscal area `invoicing`
-   * ACTIVE or LOCKED). Such a store issues electronic invoices instead of
-   * internal sale receipts, so the Recibos section swaps its controls.
+   * Real emission state, from `GET dian-config/emission-status`.
    *
-   * `AuthFacade.fiscalStatus` is already scope-aware (organization vs store),
-   * so there is no need to re-resolve the fallback chain here.
+   * This used to be derived from `fiscal_status.invoicing.state` (ACTIVE or
+   * LOCKED), which only means the fiscal wizard was completed. A store with its
+   * DIAN test set still pending was therefore shown "Facturación electrónica
+   * activa" and lost the sale-receipt controls it must keep using until the
+   * habilitación reaches production.
    */
-  readonly electronicInvoicingActive = computed(() => {
-    // Typed rather than `as any`: the facade signal is `any` (its toSignal has
-    // `initialValue: null as any`), so without this annotation a typo in the
-    // `invoicing.state` path would compile and silently leave the section on
-    // its legacy receipt controls forever.
-    const status = this.authFacade.fiscalStatus() as FiscalStatusBlock | null;
-    const state = status?.invoicing?.state;
-    return state === 'ACTIVE' || state === 'LOCKED';
+  private readonly emissionStatus = signal<DianEmissionStatus | null>(null);
+
+  readonly electronicInvoicingActive = computed(
+    () => this.emissionStatus()?.is_live === true,
+  );
+
+  /**
+   * `pending` = there IS a DIAN configuration but it is not emitting yet, so the
+   * section keeps the receipt controls and explains the trámite. `receipts` =
+   * nothing configured (also the fallback when the status cannot be read, which
+   * must never silently switch a store to invoice-only).
+   */
+  readonly emissionStage = computed<EmissionStage>(() => {
+    const status = this.emissionStatus();
+    if (!status) return 'receipts';
+    if (status.is_live) return 'live';
+    return status.configuration_id ? 'pending' : 'receipts';
   });
+
+  readonly emissionReason = computed(() => this.emissionStatus()?.reason ?? null);
+
+  readonly emissionBlockers = computed(() =>
+    (this.emissionStatus()?.blockers ?? []).map((blocker) => ({
+      label: blocker.label,
+      action: blocker.action,
+    })),
+  );
+
+  /** `pos.auto_print_receipt`, edited from the Recibos section too. */
+  readonly posAutoPrint = computed(
+    () => this.settings().pos?.auto_print_receipt ?? false,
+  );
+
+  private loadEmissionStatus(): void {
+    this.invoicingService
+      .getDianEmissionStatus()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.emissionStatus.set(response?.data ?? null),
+        // Falling back to `receipts` on error/403 is the safe direction: showing
+        // receipt controls to a store that already invoices is a cosmetic
+        // annoyance, while hiding them from a store that still needs them stops
+        // it from documenting its sales.
+        error: () => this.emissionStatus.set(null),
+      });
+  }
 
   readonly sections = computed(() => {
     const base = [
@@ -167,6 +208,7 @@ export class GeneralSettingsComponent implements OnInit {
   ngOnInit() {
     this.loadSettings();
     this.resolveStoreAppUrl();
+    this.loadEmissionStatus();
   }
 
   private resolveStoreAppUrl(): void {
@@ -215,6 +257,18 @@ export class GeneralSettingsComponent implements OnInit {
     this.settings.update((s) => ({ ...s, [section]: new_settings }));
     this.hasUnsavedChanges.set(true);
     this.lastSaved.set(null);
+  }
+
+  /**
+   * The Recibos section edits `pos.auto_print_receipt`, which belongs to the POS
+   * block. Routed here instead of copying the flag into `receipts` so the setting
+   * keeps a single home.
+   */
+  onPosAutoPrintChange(value: boolean): void {
+    this.onSectionChange('pos', {
+      ...(this.settings().pos ?? {}),
+      auto_print_receipt: value,
+    });
   }
 
   onPendingAppLogo(event: { file: File; preview: string } | null): void {

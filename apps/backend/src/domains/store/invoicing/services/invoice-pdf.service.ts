@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { InvoicePdfBuilder, InvoicePdfData } from './invoice-pdf.builder';
 import {
@@ -219,6 +220,140 @@ export class InvoicePdfService {
     );
 
     return { key: s3_key, url };
+  }
+
+  /**
+   * Renders a sample invoice in the requested format so the merchant can see how
+   * their paper choice looks before saving it.
+   *
+   * Deliberately built from fabricated document data — never from a real sale and
+   * never through the invoice pipeline — so previewing cannot consume resolution
+   * numbering, hit the DIAN, or persist anything. The issuer block IS real,
+   * because the point of the preview is checking that the store's own legal data
+   * fits the chosen format.
+   */
+  async previewPdf(format: PrintFormat): Promise<Buffer> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    const organization_id = context?.organization_id;
+
+    const store = store_id
+      ? await this.prisma.withoutScope().stores.findFirst({
+          where: { id: store_id },
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            logo_url: true,
+            addresses: {
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+            store_settings: { select: { settings: true } },
+          },
+        })
+      : null;
+
+    const org = organization_id
+      ? await this.prisma.withoutScope().organizations.findFirst({
+          where: { id: organization_id },
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            tax_id: true,
+            phone: true,
+            email: true,
+            logo_url: true,
+            fiscal_scope: true,
+            addresses: { take: 1 },
+            organization_settings: { select: { settings: true } },
+          },
+        })
+      : null;
+
+    const issuer = this.resolveIssuer(org, store);
+
+    let logo_buffer: Buffer | undefined;
+    if (issuer.logo_url) {
+      try {
+        logo_buffer = await this.s3_service.downloadImage(issuer.logo_url);
+      } catch {
+        this.logger.warn('Could not download issuer logo for PDF preview');
+      }
+    }
+
+    const today = this.formatDate(new Date());
+
+    return InvoicePdfBuilder.generate({
+      company_name: issuer.legal_name,
+      company_nit: issuer.nit,
+      company_address: issuer.address_line,
+      company_phone: issuer.phone,
+      company_email: issuer.email,
+      company_logo_buffer: logo_buffer,
+      company_trade_name: issuer.trade_name,
+      company_tax_regime: issuer.tax_regime,
+      company_tax_responsibilities: issuer.tax_responsibilities,
+
+      format,
+
+      resolution_number: '00000000000',
+      resolution_date: today,
+      resolution_prefix: 'MUESTRA',
+      resolution_range_from: 1,
+      resolution_range_to: 1000,
+      resolution_valid_from: today,
+      resolution_valid_to: today,
+
+      customer_name: 'CLIENTE DE MUESTRA S.A.S.',
+      customer_tax_id: '900000000-0',
+      customer_address: 'Direccion del cliente',
+      customer_email: 'cliente@ejemplo.com',
+
+      invoice_number: 'MUESTRA-0001',
+      invoice_type: 'invoice',
+      issue_date: today,
+      currency: 'COP',
+      notes: 'Documento de muestra: no corresponde a una venta real.',
+
+      items: [
+        {
+          description: 'Producto de ejemplo con nombre largo para ver el ajuste',
+          quantity: 2,
+          unit_price: 50000,
+          discount_amount: 5000,
+          tax_amount: 18050,
+          total_amount: 113050,
+        },
+        {
+          description: 'Servicio de ejemplo',
+          quantity: 1,
+          unit_price: 120000,
+          discount_amount: 0,
+          tax_amount: 22800,
+          total_amount: 142800,
+        },
+      ],
+      taxes: [
+        {
+          tax_name: 'IVA',
+          tax_rate: 19,
+          taxable_amount: 215000,
+          tax_amount: 40850,
+        },
+      ],
+      subtotal_amount: 220000,
+      discount_amount: 5000,
+      tax_amount: 40850,
+      withholding_amount: 0,
+      total_amount: 255850,
+
+      cufe: 'MUESTRA0000000000000000000000000000000000000000000000000000000000000000000000000000',
+      qr_code: 'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=MUESTRA',
+      payment_form: 'cash',
+      payment_method: 'Efectivo',
+    });
   }
 
   /**

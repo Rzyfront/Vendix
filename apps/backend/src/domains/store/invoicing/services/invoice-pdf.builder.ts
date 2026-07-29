@@ -120,6 +120,12 @@ interface PdfLayout {
   roll: boolean;
   /** Multiplies every font size so narrow paper stays legible. */
   font_scale: number;
+  /**
+   * Blank space before the legal footer, in `moveDown` units. Generous on a
+   * letter sheet, minimal where every point counts (half letter) or where it
+   * would only waste paper (roll).
+   */
+  footer_gap: number;
 }
 
 const GEOMETRY: Record<
@@ -132,14 +138,21 @@ const GEOMETRY: Record<
     margin: 40,
     roll: false,
     font_scale: 1,
+    footer_gap: 1.5,
   },
   half_letter: {
     // Half of a letter sheet, the usual pre-printed invoice stationery.
     width: 612,
     height: 396,
-    margin: 28,
+    // Tighter than letter on purpose: the fixed blocks of an electronic invoice
+    // (issuer, resolution, client, taxes, totals, CUFE, verification URL) add up
+    // to ~514 pt at letter density — more than the whole sheet — so a 2-item
+    // sale spilled onto a second page. `moveDown` is measured in the current
+    // font size, so scaling the type down compresses the vertical rhythm too.
+    margin: 14,
     roll: false,
-    font_scale: 0.9,
+    font_scale: 0.66,
+    footer_gap: 0.3,
   },
   thermal_80: {
     width: 80 * MM,
@@ -148,6 +161,7 @@ const GEOMETRY: Record<
     margin: 10,
     roll: true,
     font_scale: 0.82,
+    footer_gap: 0.8,
   },
   thermal_58: {
     width: 58 * MM,
@@ -155,6 +169,7 @@ const GEOMETRY: Record<
     margin: 7,
     roll: true,
     font_scale: 0.74,
+    footer_gap: 0.8,
   },
 };
 
@@ -1040,7 +1055,7 @@ export class InvoicePdfBuilder {
       minute: '2-digit',
     });
 
-    doc.moveDown(1.5);
+    doc.moveDown(L.footer_gap);
     doc
       .font('Helvetica')
       .fontSize(this.fs(L, 7))
