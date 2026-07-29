@@ -1,3 +1,5 @@
+import { PrintFormat } from '../../../../../core/models/store-settings.interface';
+
 export interface TicketItem {
   id: string;
   name: string;
@@ -52,12 +54,28 @@ export interface TicketData {
   transactionId?: string;
   invoiceDataToken?: string;
   invoiceDataQrUrl?: string;
+  /**
+   * Set when the sale already produced a validated electronic invoice. Turns the
+   * ticket into an informative copy: it points at the invoice instead of
+   * repeating its tax breakdown, and the footer stops claiming the document is
+   * not DIAN-validated.
+   */
+  electronicInvoice?: {
+    number: string;
+    cufe?: string;
+  };
 }
 
 export interface PrinterConfig {
   name: string;
   type: 'thermal' | 'standard' | 'pdf';
   paperWidth: number;
+  /**
+   * Configured paper format (`store_settings.receipts.pos_ticket_format`).
+   * `paperWidth` is derived from it; kept because the `@page size` rule needs
+   * the format, not just the width.
+   */
+  format?: PrintFormat;
   copies: number;
   autoPrint: boolean;
   printHeader: boolean;

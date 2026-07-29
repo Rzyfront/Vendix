@@ -2,8 +2,13 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { InvoicePdfBuilder, InvoicePdfData } from './invoice-pdf.builder';
+import {
+  PRINT_FORMATS,
+  PrintFormat,
+} from '../../settings/interfaces/store-settings.interface';
 
 const INVOICE_PDF_INCLUDE = {
   invoice_items: true,
@@ -18,7 +23,23 @@ const INVOICE_PDF_INCLUDE = {
       phone: true,
       email: true,
       logo_url: true,
+      fiscal_scope: true,
       addresses: { take: 1 },
+      organization_settings: { select: { settings: true } },
+    },
+  },
+  // The graphic representation must show the issuer that actually signed the
+  // XML. Under `fiscal_scope = STORE` that identity lives in the store's
+  // `fiscal_data`, not in the organization row, so both are loaded and the
+  // scope decides. The store also carries the print format.
+  store: {
+    select: {
+      id: true,
+      name: true,
+      legal_name: true,
+      logo_url: true,
+      addresses: { orderBy: [{ is_primary: 'desc' }, { id: 'asc' }], take: 1 },
+      store_settings: { select: { settings: true } },
     },
   },
   customer: {
@@ -29,6 +50,15 @@ const INVOICE_PDF_INCLUDE = {
       email: true,
     },
   },
+};
+
+/** Readable labels for the regime stored in `fiscal_data.tax_regime`. */
+const TAX_REGIME_LABELS: Record<string, string> = {
+  COMUN: 'Responsable de IVA',
+  SIMPLIFICADO: 'No responsable de IVA',
+  SIMPLE: 'Regimen Simple de Tributacion (RST)',
+  GRAN_CONTRIBUYENTE: 'Gran contribuyente',
+  NO_RESPONSABLE: 'No responsable de IVA',
 };
 
 @Injectable()
@@ -55,25 +85,19 @@ export class InvoicePdfService {
     }
 
     const org = invoice.organization;
+    const store = invoice.store;
+    const issuer = this.resolveIssuer(org, store);
 
     // Optionally download logo
+    const logo_url = issuer.logo_url;
     let logo_buffer: Buffer | undefined;
-    if (org?.logo_url) {
+    if (logo_url) {
       try {
-        logo_buffer = await this.s3_service.downloadImage(org.logo_url);
+        logo_buffer = await this.s3_service.downloadImage(logo_url);
       } catch {
-        this.logger.warn(
-          'Could not download organization logo for invoice PDF',
-        );
+        this.logger.warn('Could not download issuer logo for invoice PDF');
       }
     }
-
-    const address = org?.addresses?.[0];
-    const address_line = address
-      ? [address.address_line1, address.city, address.state_province]
-          .filter(Boolean)
-          .join(', ')
-      : undefined;
 
     // Build customer address string from JSON
     const customer_address = this.formatCustomerAddress(
@@ -92,12 +116,18 @@ export class InvoicePdfService {
 
     const pdf_data: InvoicePdfData = {
       // Emisor
-      company_name: org?.legal_name || org?.name || 'N/A',
-      company_nit: org?.tax_id || 'N/A',
-      company_address: address_line,
-      company_phone: org?.phone || undefined,
-      company_email: org?.email || undefined,
+      company_name: issuer.legal_name,
+      company_nit: issuer.nit,
+      company_address: issuer.address_line,
+      company_phone: issuer.phone,
+      company_email: issuer.email,
       company_logo_buffer: logo_buffer,
+      company_trade_name: issuer.trade_name,
+      company_tax_regime: issuer.tax_regime,
+      company_tax_responsibilities: issuer.tax_responsibilities,
+
+      // Paper format configured for this store.
+      format: this.resolveInvoiceFormat(store),
 
       // Resolucion
       resolution_number: resolution?.resolution_number,
@@ -193,6 +223,140 @@ export class InvoicePdfService {
   }
 
   /**
+   * Renders a sample invoice in the requested format so the merchant can see how
+   * their paper choice looks before saving it.
+   *
+   * Deliberately built from fabricated document data — never from a real sale and
+   * never through the invoice pipeline — so previewing cannot consume resolution
+   * numbering, hit the DIAN, or persist anything. The issuer block IS real,
+   * because the point of the preview is checking that the store's own legal data
+   * fits the chosen format.
+   */
+  async previewPdf(format: PrintFormat): Promise<Buffer> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    const organization_id = context?.organization_id;
+
+    const store = store_id
+      ? await this.prisma.withoutScope().stores.findFirst({
+          where: { id: store_id },
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            logo_url: true,
+            addresses: {
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+            store_settings: { select: { settings: true } },
+          },
+        })
+      : null;
+
+    const org = organization_id
+      ? await this.prisma.withoutScope().organizations.findFirst({
+          where: { id: organization_id },
+          select: {
+            id: true,
+            name: true,
+            legal_name: true,
+            tax_id: true,
+            phone: true,
+            email: true,
+            logo_url: true,
+            fiscal_scope: true,
+            addresses: { take: 1 },
+            organization_settings: { select: { settings: true } },
+          },
+        })
+      : null;
+
+    const issuer = this.resolveIssuer(org, store);
+
+    let logo_buffer: Buffer | undefined;
+    if (issuer.logo_url) {
+      try {
+        logo_buffer = await this.s3_service.downloadImage(issuer.logo_url);
+      } catch {
+        this.logger.warn('Could not download issuer logo for PDF preview');
+      }
+    }
+
+    const today = this.formatDate(new Date());
+
+    return InvoicePdfBuilder.generate({
+      company_name: issuer.legal_name,
+      company_nit: issuer.nit,
+      company_address: issuer.address_line,
+      company_phone: issuer.phone,
+      company_email: issuer.email,
+      company_logo_buffer: logo_buffer,
+      company_trade_name: issuer.trade_name,
+      company_tax_regime: issuer.tax_regime,
+      company_tax_responsibilities: issuer.tax_responsibilities,
+
+      format,
+
+      resolution_number: '00000000000',
+      resolution_date: today,
+      resolution_prefix: 'MUESTRA',
+      resolution_range_from: 1,
+      resolution_range_to: 1000,
+      resolution_valid_from: today,
+      resolution_valid_to: today,
+
+      customer_name: 'CLIENTE DE MUESTRA S.A.S.',
+      customer_tax_id: '900000000-0',
+      customer_address: 'Direccion del cliente',
+      customer_email: 'cliente@ejemplo.com',
+
+      invoice_number: 'MUESTRA-0001',
+      invoice_type: 'invoice',
+      issue_date: today,
+      currency: 'COP',
+      notes: 'Documento de muestra: no corresponde a una venta real.',
+
+      items: [
+        {
+          description: 'Producto de ejemplo con nombre largo para ver el ajuste',
+          quantity: 2,
+          unit_price: 50000,
+          discount_amount: 5000,
+          tax_amount: 18050,
+          total_amount: 113050,
+        },
+        {
+          description: 'Servicio de ejemplo',
+          quantity: 1,
+          unit_price: 120000,
+          discount_amount: 0,
+          tax_amount: 22800,
+          total_amount: 142800,
+        },
+      ],
+      taxes: [
+        {
+          tax_name: 'IVA',
+          tax_rate: 19,
+          taxable_amount: 215000,
+          tax_amount: 40850,
+        },
+      ],
+      subtotal_amount: 220000,
+      discount_amount: 5000,
+      tax_amount: 40850,
+      withholding_amount: 0,
+      total_amount: 255850,
+
+      cufe: 'MUESTRA0000000000000000000000000000000000000000000000000000000000000000000000000000',
+      qr_code: 'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=MUESTRA',
+      payment_form: 'cash',
+      payment_method: 'Efectivo',
+    });
+  }
+
+  /**
    * Gets the PDF URL for an invoice. Generates lazily if not yet created.
    */
   async getPdf(invoice_id: number): Promise<string> {
@@ -265,6 +429,79 @@ export class InvoicePdfService {
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────
+
+  /**
+   * Legal identity of whoever issues this invoice. Prefers the `fiscal_data`
+   * block of the scope that owns the DIAN habilitación (store under
+   * `fiscal_scope = STORE`, organization otherwise) and only falls back to the
+   * plain organization row, so the printed document cannot show a different
+   * razón social / NIT than the signed XML.
+   */
+  private resolveIssuer(org: any, store: any) {
+    const scope: string = org?.fiscal_scope ?? 'STORE';
+    const scoped_settings =
+      scope === 'STORE'
+        ? store?.store_settings?.settings
+        : org?.organization_settings?.settings;
+    // `settings` is a Prisma Json column, untyped at runtime.
+    const fiscal = ((scoped_settings as any)?.fiscal_data ?? {}) as {
+      nit?: string;
+      nit_dv?: string;
+      legal_name?: string;
+      tax_regime?: string;
+      tax_responsibilities?: string[];
+      fiscal_address?: string;
+      city?: string;
+      department?: string;
+    };
+
+    const owner = scope === 'STORE' ? store : org;
+    const address = owner?.addresses?.[0] ?? org?.addresses?.[0];
+
+    const address_line =
+      [address?.address_line1, address?.city, address?.state_province]
+        .filter(Boolean)
+        .join(', ') ||
+      [fiscal.fiscal_address, fiscal.city, fiscal.department]
+        .filter(Boolean)
+        .join(', ') ||
+      undefined;
+
+    const nit_base = fiscal.nit || org?.tax_id;
+    const nit = nit_base
+      ? fiscal.nit_dv
+        ? `${nit_base}-${fiscal.nit_dv}`
+        : nit_base
+      : 'N/A';
+
+    const regime_key = (fiscal.tax_regime || '').toUpperCase();
+
+    return {
+      legal_name:
+        fiscal.legal_name || owner?.legal_name || org?.name || 'N/A',
+      nit,
+      trade_name: owner?.name || undefined,
+      address_line,
+      phone: address?.phone_number || org?.phone || undefined,
+      email: org?.email || undefined,
+      logo_url: store?.logo_url || org?.logo_url || undefined,
+      tax_regime: TAX_REGIME_LABELS[regime_key] || fiscal.tax_regime || undefined,
+      tax_responsibilities: Array.isArray(fiscal.tax_responsibilities)
+        ? fiscal.tax_responsibilities
+        : undefined,
+    };
+  }
+
+  /**
+   * Paper format for the graphic representation. Always the store's setting —
+   * printing is a per-store concern even when the fiscal identity is the
+   * organization's. Falls back to `letter`, the historical hardcoded layout.
+   */
+  private resolveInvoiceFormat(store: any): PrintFormat {
+    const receipts = (store?.store_settings?.settings as any)?.receipts;
+    const format = receipts?.invoice_format;
+    return PRINT_FORMATS.includes(format) ? format : 'letter';
+  }
 
   /** Formats a Date as DD/MM/YYYY. */
   private formatDate(date: Date): string {

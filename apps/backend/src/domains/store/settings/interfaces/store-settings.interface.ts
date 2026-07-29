@@ -475,6 +475,25 @@ export interface ScaleDeviceConfig {
   protocol: 'generic' | 'cas' | 'ohaus';
 }
 
+/**
+ * Paper formats a printed sale document may take. Closed set on purpose: the
+ * invoice's graphic representation carries mandatory content (issuer legal data,
+ * CUFE, QR), so the format may change the box but never the contents — a
+ * free-text template would let a merchant emit an invalid document.
+ *
+ * `thermal_*` are roll widths in millimetres; `half_letter` is the common
+ * half-page invoice; `letter` is the current hardcoded default.
+ */
+export const PRINT_FORMATS = [
+  'letter',
+  'half_letter',
+  'thermal_80',
+  'thermal_58',
+] as const;
+
+/** Derived from the runtime list so `@IsEnum` and the type never drift apart. */
+export type PrintFormat = (typeof PRINT_FORMATS)[number];
+
 export interface ReceiptsSettings {
   print_receipt: boolean;
   email_receipt: boolean;
@@ -482,14 +501,29 @@ export interface ReceiptsSettings {
   receipt_footer: string;
   /**
    * Electronic-invoicing block, surfaced instead of the receipt toggles once the
-   * store's `invoicing` fiscal area is ACTIVE/LOCKED. Optional so settings rows
-   * written before this block stay valid.
+   * store is actually issuing electronic invoices — i.e. its DIAN configuration
+   * is `environment='production'` with `enablement_status='enabled'`, NOT merely
+   * when the fiscal wizard was completed. Optional so settings rows written
+   * before this block stay valid.
    */
   auto_issue_invoice?: boolean;
   /** Printed copies per sale. 0 = do not print. */
   invoice_copies?: number;
   send_invoice_email?: boolean;
   print_pos_ticket?: boolean;
+  /**
+   * Handing the printed graphic representation to the buyer. Colombian law
+   * requires the invoice to be DELIVERED to the acquirer, in physical or
+   * electronic form — not specifically by email. So this is the second lawful
+   * channel, and the UI requires at least one of the two to stay on.
+   */
+  deliver_printed?: boolean;
+  /** Paper format of the invoice's graphic representation. */
+  invoice_format?: PrintFormat;
+  /** Paper format of the POS ticket, which may differ from the invoice's. */
+  pos_ticket_format?: PrintFormat;
+  /** Printed POS ticket copies. 0 = do not print. */
+  pos_ticket_copies?: number;
 }
 
 export interface BusinessHoursBlock {

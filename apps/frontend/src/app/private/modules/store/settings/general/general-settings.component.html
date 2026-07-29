@@ -212,8 +212,12 @@
           </div>
           <div class="section-body">
             <app-receipts-settings-form [settings]="settings().receipts"
-              [electronicInvoicingActive]="electronicInvoicingActive()"
-              (settingsChange)="onSectionChange('receipts', $event)" />
+              [emissionStage]="emissionStage()"
+              [pendingReason]="emissionReason()"
+              [pendingBlockers]="emissionBlockers()"
+              [posAutoPrint]="posAutoPrint()"
+              (settingsChange)="onSectionChange('receipts', $event)"
+              (posAutoPrintChange)="onPosAutoPrintChange($event)" />
           </div>
         </section>
       </div>

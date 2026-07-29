@@ -143,6 +143,15 @@ export function getDefaultStoreSettings(): StoreSettings {
       invoice_copies: 1,
       send_invoice_email: true,
       print_pos_ticket: false,
+      // Email is on by default, so the printed hand-off starts off: one delivery
+      // channel is enough to comply, and the UI keeps at least one active.
+      deliver_printed: false,
+      // `letter` mirrors what invoice-pdf.builder produced before the format was
+      // configurable, so existing stores keep the exact same document.
+      invoice_format: 'letter' as const,
+      // 80 mm mirrors the previous hardcoded POS ticket width.
+      pos_ticket_format: 'thermal_80' as const,
+      pos_ticket_copies: 1,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

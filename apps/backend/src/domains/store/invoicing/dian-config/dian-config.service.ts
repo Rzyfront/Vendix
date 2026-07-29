@@ -483,6 +483,76 @@ export class DianConfigService {
   }
 
   /**
+   * Answers a single question for the whole store: is this merchant ACTUALLY
+   * issuing electronic invoices right now?
+   *
+   * The predicate is deliberately the same one the emission path enforces —
+   * `environment='production'` AND `enablement_status='enabled'`, which is what
+   * `promoteToProduction` sets. It is NOT the fiscal wizard's
+   * `fiscal_status.invoicing.state`: that only says the wizard was completed, so
+   * a store whose DIAN test set is still queued would look "active" while being
+   * unable to issue anything. Callers that gate merchant-facing copy or the sale
+   * document itself must use this, never the wizard state.
+   *
+   * Takes no id because the caller (the settings page, the POS) does not know
+   * which configuration applies to it — resolving that is part of the answer.
+   */
+  async getEmissionStatus() {
+    const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    const config = await this.prisma
+      .withoutScope()
+      .dian_configurations.findFirst({
+        where: {
+          ...(fiscalScope === 'ORGANIZATION'
+            ? { organization_id, store_id: null }
+            : { store_id: context.store_id }),
+          configuration_type: 'invoicing',
+        },
+        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+      });
+
+    if (!config) {
+      return {
+        is_live: false,
+        configuration_id: null,
+        environment: null,
+        enablement_status: null,
+        reason:
+          'Esta tienda todavía no tiene configuración de facturación electrónica.',
+        blockers: [] as ProductionReadinessCheck[],
+      };
+    }
+
+    const is_live =
+      config.environment === 'production' &&
+      config.enablement_status === 'enabled';
+
+    // Only pay for the checklist when the answer is "no" — that is the only case
+    // where the caller needs to explain why.
+    const readiness = is_live ? null : await this.getProductionReadiness(config.id);
+
+    return {
+      is_live,
+      configuration_id: config.id,
+      environment: config.environment,
+      enablement_status: config.enablement_status,
+      reason: is_live
+        ? null
+        : config.enablement_status === 'test_set_passed'
+          ? 'La DIAN aprobó el set de pruebas. Falta activar producción.'
+          : config.enablement_status === 'testing'
+            ? 'El set de pruebas está en curso ante la DIAN.'
+            : 'La configuración DIAN aún no está habilitada para producción.',
+      blockers: (readiness?.checks ?? []).filter((c) => !c.satisfied),
+    };
+  }
+
+  /**
    * Read-only production readiness report for a configuration. Evaluated as if
    * the config were already in production + enabled, so the merchant sees the
    * prerequisites that remain *besides* the promotion itself.

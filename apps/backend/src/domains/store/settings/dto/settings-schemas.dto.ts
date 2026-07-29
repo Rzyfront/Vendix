@@ -21,6 +21,10 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { StoreIndustry } from '../../stores/dto/index';
+import {
+  PRINT_FORMATS,
+  PrintFormat,
+} from '../interfaces/store-settings.interface';
 import {} from './shipping-carriers.dto';
 
 export class GeneralSettingsDto {
@@ -498,6 +502,39 @@ export class ReceiptsSettingsDto {
   @IsOptional()
   @IsBoolean()
   print_pos_ticket?: boolean;
+
+  // ── Delivery channel ──────────────────────────────────────
+  // The law requires DELIVERING the invoice to the acquirer, physically or
+  // electronically — email is not the only lawful channel. The frontend enforces
+  // "at least one of send_invoice_email / deliver_printed".
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  deliver_printed?: boolean;
+
+  // ── Print formats ─────────────────────────────────────────
+  @ApiProperty({
+    example: 'letter',
+    required: false,
+    enum: PRINT_FORMATS,
+    description: 'Formato de la representación gráfica de la factura',
+  })
+  @IsOptional()
+  @IsEnum(PRINT_FORMATS)
+  invoice_format?: PrintFormat;
+
+  @ApiProperty({ example: 'thermal_80', required: false, enum: PRINT_FORMATS })
+  @IsOptional()
+  @IsEnum(PRINT_FORMATS)
+  pos_ticket_format?: PrintFormat;
+
+  @ApiProperty({ example: 1, required: false, description: '0 = no imprimir' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  pos_ticket_copies?: number;
+
 }
 
 export class AppSettingsDto {

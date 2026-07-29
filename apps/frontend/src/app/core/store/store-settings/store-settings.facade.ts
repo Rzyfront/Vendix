@@ -7,6 +7,7 @@ import {
   StoreSettings,
   PosSettings,
   NotificationsSettings,
+  ReceiptsSettings,
 } from '../../models/store-settings.interface';
 
 /**
@@ -56,6 +57,11 @@ export class StoreSettingsFacade {
 
   readonly notifications = computed<NotificationsSettings | null>(
     () => this.settings()?.notifications ?? null,
+  );
+
+  /** Print/delivery preferences for receipts, POS tickets and invoices. */
+  readonly receipts = computed<ReceiptsSettings | null>(
+    () => this.settings()?.receipts ?? null,
   );
 
   readonly modules = computed<Record<string, any> | null>(

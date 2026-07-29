@@ -1,16 +1,17 @@
 <div class="receipts-settings-form">
   <div class="space-y-6">
-    @if (electronicInvoicingActive()) {
-      <!-- Habilitado merchant: no internal sale receipts exist anymore, so we
-           state it plainly instead of offering toggles that do nothing. -->
+    @if (isLive()) {
+      <!-- Live merchant: no internal sale receipts exist anymore, so we state it
+           plainly instead of offering toggles that do nothing. -->
       <div class="fe-banner">
         <app-icon name="shield-check" size="18" class="fe-banner__icon"></app-icon>
         <div class="fe-banner__body">
           <p class="fe-banner__title">Facturación electrónica activa</p>
           <p class="fe-banner__text">
-            Esta tienda está habilitada ante la DIAN y <strong>solo emite facturas
-            electrónicas</strong>. Cada venta genera una factura con CUFE, firmada y
-            transmitida a la DIAN; no se emiten recibos internos de compra.
+            Esta tienda está habilitada ante la DIAN en <strong>producción</strong> y
+            <strong>solo emite facturas electrónicas</strong>. Cada venta genera una
+            factura con CUFE, firmada y transmitida a la DIAN; no se emiten recibos
+            internos de compra.
           </p>
         </div>
       </div>
@@ -33,20 +34,55 @@
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <app-setting-toggle
-            [formControl]="printPosTicketControl"
-            label="Imprimir también tiquete POS"
-            description="Copia interna para despacho o cocina"
+            [formControl]="deliverPrintedControl"
+            label="Entregar factura impresa"
+            description="Segundo canal de entrega válido ante la DIAN"
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <app-selector
-            label="Copias impresas por venta"
+            label="Copias impresas de la factura"
             [formControl]="invoiceCopiesControl"
             [options]="copiesOptions"
             (valueChange)="onFieldChange()"
           ></app-selector>
         </div>
+
+        @if (deliveryFallbackApplied()) {
+          <p class="delivery-hint">
+            La factura debe entregarse al adquiriente en forma física o electrónica.
+            Al desactivar el correo se activó la entrega impresa para no dejar la
+            tienda sin ningún canal de entrega.
+          </p>
+        }
       </div>
-    } @else {
+    } @else if (isPending()) {
+      <!-- Trámite in progress: NOT live yet, so the receipt controls stay. -->
+      <div class="fe-banner fe-banner--pending">
+        <app-icon name="clock" size="18" class="fe-banner__icon"></app-icon>
+        <div class="fe-banner__body">
+          <p class="fe-banner__title">Facturación electrónica en trámite</p>
+          <p class="fe-banner__text">
+            {{ pendingReason() || 'La habilitación ante la DIAN todavía no está en producción.' }}
+            Mientras termina el trámite, la tienda
+            <strong>sigue emitiendo recibos de venta</strong>.
+          </p>
+          @if (pendingBlockers().length > 0) {
+            <ul class="fe-banner__list">
+              @for (blocker of pendingBlockers(); track blocker.label) {
+                <li>
+                  <strong>{{ blocker.label }}</strong>
+                  @if (blocker.action) {
+                    <span> — {{ blocker.action }}</span>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      </div>
+    }
+
+    @if (!isLive()) {
       <!-- Receipt Options -->
       <div>
         <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Entrega de Recibos</h4>
@@ -58,6 +94,92 @@
         </div>
       </div>
     }
+
+    <!-- Print formats. The POS ticket format always applies; the invoice format
+         only matters once the store issues electronic invoices. -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
+        Formato de impresión
+      </h4>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        @if (isLive()) {
+          <div class="format-with-preview">
+            <app-selector
+              label="Formato de la factura"
+              [formControl]="invoiceFormatControl"
+              [options]="formatOptions"
+              (valueChange)="onFieldChange()"
+            ></app-selector>
+            <button
+              type="button"
+              class="preview-button"
+              [disabled]="previewLoading() !== null"
+              (click)="openFormatPreview()"
+            >
+              <app-icon
+                [name]="previewLoading() === 'invoice' ? 'loader' : 'eye'"
+                size="14"
+                [class.animate-spin]="previewLoading() === 'invoice'"
+              ></app-icon>
+              <span>{{
+                previewLoading() === 'invoice' ? 'Generando muestra…' : 'Previsualizar'
+              }}</span>
+            </button>
+          </div>
+        }
+        <div class="format-with-preview">
+          <app-selector
+            label="Formato del tiquete POS"
+            [formControl]="posTicketFormatControl"
+            [options]="formatOptions"
+            (valueChange)="onFieldChange()"
+          ></app-selector>
+          <button
+            type="button"
+            class="preview-button"
+            [disabled]="previewLoading() !== null"
+            (click)="openPosTicketPreview()"
+          >
+            <app-icon
+              [name]="previewLoading() === 'pos' ? 'loader' : 'eye'"
+              size="14"
+              [class.animate-spin]="previewLoading() === 'pos'"
+            ></app-icon>
+            <span>{{
+              previewLoading() === 'pos' ? 'Generando muestra…' : 'Previsualizar'
+            }}</span>
+          </button>
+        </div>
+        <app-selector
+          label="Copias del tiquete POS"
+          [formControl]="posTicketCopiesControl"
+          [options]="copiesOptions"
+          (valueChange)="onFieldChange()"
+        ></app-selector>
+        <app-setting-toggle
+          [formControl]="posAutoPrintControl"
+          label="Imprimir el tiquete automáticamente"
+          description="Al cerrar la venta, sin confirmar"
+          (changed)="onPosAutoPrintChange($event)"
+        ></app-setting-toggle>
+        @if (isLive()) {
+          <app-setting-toggle
+            [formControl]="printPosTicketControl"
+            label="Imprimir también tiquete POS"
+            description="Copia interna para despacho o cocina"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+        }
+      </div>
+      @if (previewError()) {
+        <p class="preview-error">{{ previewError() }}</p>
+      }
+      <p class="format-hint">
+        La factura impresa siempre lleva los datos legales vigentes del emisor
+        (razón social, NIT, régimen, resolución de numeración), el CUFE y la URL de
+        verificación en la DIAN, sin importar el formato elegido.
+      </p>
+    </div>
 
     <!-- Receipt Content — applies to the printed document either way -->
     <div>
@@ -87,3 +209,23 @@
     </div>
   </div>
 </div>
+
+<!-- Sample document in both cases: the invoice comes from the backend preview
+     endpoint (never consumes a number of the DIAN resolution) and the POS ticket
+     is rendered by the same service the printer uses. -->
+<app-modal
+  [(isOpen)]="isPreviewOpen"
+  [title]="previewTitle()"
+  [subtitle]="previewSubtitle()"
+  size="lg"
+  (closed)="closeFormatPreview()"
+>
+  @if (previewUrl()) {
+    <!-- `src` is assigned by the component; see `previewFrame`. -->
+    <iframe
+      #previewFrame
+      class="preview-frame"
+      [title]="previewTitle()"
+    ></iframe>
+  }
+</app-modal>

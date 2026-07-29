@@ -15,6 +15,7 @@ import {
   InvoiceStats,
   InvoiceListResponse,
   ApiResponse,
+  DianEmissionStatus,
 } from '../interfaces/invoice.interface';
 
 @Injectable({
@@ -228,6 +229,31 @@ export class InvoicingService {
     return this.http.get(
       this.getApiUrl(`dian-config/${config_id}/production-readiness`),
     );
+  }
+
+  /**
+   * Whether this store is really issuing electronic invoices right now.
+   *
+   * The settings UI must not decide this from `fiscal_status.invoicing.state`:
+   * that flag only says the fiscal wizard was completed, so a store still in the
+   * DIAN test set would be told it is live and would stop offering sale
+   * receipts — which is exactly what it must keep emitting until production.
+   */
+  getDianEmissionStatus(): Observable<ApiResponse<DianEmissionStatus>> {
+    return this.http.get<ApiResponse<DianEmissionStatus>>(
+      this.getApiUrl('dian-config/emission-status'),
+    );
+  }
+
+  /**
+   * Sample invoice PDF in the given paper format. Built from fabricated document
+   * data on the backend, so previewing never consumes resolution numbering.
+   */
+  previewInvoicePdf(format: string): Observable<Blob> {
+    return this.http.get(this.getApiUrl('pdf-preview'), {
+      params: { format },
+      responseType: 'blob',
+    });
   }
 
   /** Switches the config to environment=production + enablement_status=enabled. */

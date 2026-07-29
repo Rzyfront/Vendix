@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
 
 export interface InvoicePdfData {
   // Emisor
@@ -8,6 +9,12 @@ export interface InvoicePdfData {
   company_phone?: string;
   company_email?: string;
   company_logo_buffer?: Buffer;
+  /** Commercial name when it differs from the legal one. */
+  company_trade_name?: string;
+  /** Tax regime label, mandatory on the graphic representation. */
+  company_tax_regime?: string;
+  /** DIAN tax responsibility codes (O-13, O-47, …). */
+  company_tax_responsibilities?: string[];
 
   // Resolucion DIAN
   resolution_number?: string;
@@ -53,6 +60,16 @@ export interface InvoicePdfData {
   // Pago
   payment_form?: string;
   payment_method?: string;
+
+  /**
+   * Paper format of this graphic representation. Comes from
+   * `store_settings.settings.receipts.invoice_format`; defaults to `letter`,
+   * which is what this builder produced before the format was configurable.
+   * The format changes the box only — every mandatory element (issuer legal
+   * data, resolution, items, taxes, totals, CUFE, verification URL) is drawn in
+   * all formats.
+   */
+  format?: PrintFormat;
 }
 
 export interface InvoicePdfItem {
@@ -84,91 +101,213 @@ const COP = new Intl.NumberFormat('es-CO', {
   minimumFractionDigits: 0,
 });
 
-const MARGIN = 40;
-const PAGE_WIDTH = 612; // Letter size
-const PAGE_HEIGHT = 792;
-const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+/** Millimetres to PostScript points, the unit PDFKit works in. */
+const MM = 2.834645669;
+
+/**
+ * Page geometry per format. `roll` switches the whole document to a
+ * single-column layout: a 6-column table is unreadable at 58 mm, and a receipt
+ * printer feeds continuous paper, so the height is measured from the content
+ * instead of being fixed (see `generate`).
+ */
+interface PdfLayout {
+  format: PrintFormat;
+  width: number;
+  height: number;
+  margin: number;
+  /** Drawable width — every `width:` option derives from this. */
+  content: number;
+  roll: boolean;
+  /** Multiplies every font size so narrow paper stays legible. */
+  font_scale: number;
+  /**
+   * Blank space before the legal footer, in `moveDown` units. Generous on a
+   * letter sheet, minimal where every point counts (half letter) or where it
+   * would only waste paper (roll).
+   */
+  footer_gap: number;
+}
+
+const GEOMETRY: Record<
+  PrintFormat,
+  Omit<PdfLayout, 'format' | 'content'> & { height: number }
+> = {
+  letter: {
+    width: 612,
+    height: 792,
+    margin: 40,
+    roll: false,
+    font_scale: 1,
+    footer_gap: 1.5,
+  },
+  half_letter: {
+    // Half of a letter sheet, the usual pre-printed invoice stationery.
+    width: 612,
+    height: 396,
+    // Tighter than letter on purpose: the fixed blocks of an electronic invoice
+    // (issuer, resolution, client, taxes, totals, CUFE, verification URL) add up
+    // to ~514 pt at letter density — more than the whole sheet — so a 2-item
+    // sale spilled onto a second page. `moveDown` is measured in the current
+    // font size, so scaling the type down compresses the vertical rhythm too.
+    margin: 14,
+    roll: false,
+    font_scale: 0.66,
+    footer_gap: 0.3,
+  },
+  thermal_80: {
+    width: 80 * MM,
+    // Replaced by the measured content height; see `generate`.
+    height: 0,
+    margin: 10,
+    roll: true,
+    font_scale: 0.82,
+    footer_gap: 0.8,
+  },
+  thermal_58: {
+    width: 58 * MM,
+    height: 0,
+    margin: 7,
+    roll: true,
+    font_scale: 0.74,
+    footer_gap: 0.8,
+  },
+};
+
+/** Probe height for the measuring pass: tall enough never to break a page. */
+const ROLL_PROBE_HEIGHT = 20000;
 
 export class InvoicePdfBuilder {
   /**
    * Generates a professional invoice PDF compliant with Colombian DIAN requirements.
    */
   static async generate(data: InvoicePdfData): Promise<Buffer> {
+    const layout = this.resolveLayout(data.format);
+
+    if (!layout.roll) {
+      const { buffer } = await this.render(data, layout);
+      return buffer;
+    }
+
+    // Roll paper has no fixed height. Render once on a very tall page just to
+    // measure where the content ends, then render again on a page cut to that
+    // height. Two passes over a small document cost milliseconds and remove the
+    // guesswork entirely: estimating from the item count either wastes paper or
+    // spills onto a second page, and a receipt printer cuts between pages.
+    const probe = await this.render(data, {
+      ...layout,
+      height: ROLL_PROBE_HEIGHT,
+    });
+    // `margin * 2`, not `margin`: PDFKit breaks the page as soon as the next
+    // line would cross `height - bottomMargin`, so cutting the page exactly at
+    // the measured end still spills the last line onto a second page — and a
+    // receipt printer cuts the paper between pages.
+    const { buffer } = await this.render(data, {
+      ...layout,
+      height: Math.max(probe.end_y + layout.margin * 2, 120),
+    });
+    return buffer;
+  }
+
+  private static resolveLayout(format?: PrintFormat): PdfLayout {
+    const key: PrintFormat = format && GEOMETRY[format] ? format : 'letter';
+    const geometry = GEOMETRY[key];
+    return {
+      ...geometry,
+      format: key,
+      content: geometry.width - geometry.margin * 2,
+    };
+  }
+
+  private static render(
+    data: InvoicePdfData,
+    L: PdfLayout,
+  ): Promise<{ buffer: Buffer; end_y: number }> {
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({
-          size: 'LETTER',
-          margin: MARGIN,
+          size: [L.width, L.height],
+          margin: L.margin,
           bufferPages: true,
         });
         const chunks: Buffer[] = [];
+        // Captured before `doc.end()`: reading `doc.y` from the `end` callback
+        // would report the cursor after PDFKit finalised the document.
+        let end_y = L.margin;
 
         doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on('end', () => resolve({ buffer: Buffer.concat(chunks), end_y }));
         doc.on('error', reject);
 
         // --- Header: Logo + Company Info ---
-        this.drawHeader(doc, data);
+        this.drawHeader(doc, L, data);
 
         // --- Invoice Title & Type ---
         doc.moveDown(0.5);
-        this.drawInvoiceTitle(doc, data);
+        this.drawInvoiceTitle(doc, L, data);
 
         // --- Resolution Info ---
         if (data.resolution_number) {
-          this.drawResolutionInfo(doc, data);
+          this.drawResolutionInfo(doc, L, data);
         }
 
         doc.moveDown(0.5);
-        this.drawHorizontalLine(doc);
+        this.drawHorizontalLine(doc, L);
 
         // --- Customer Info ---
         doc.moveDown(0.5);
-        this.drawCustomerInfo(doc, data);
+        this.drawCustomerInfo(doc, L, data);
 
         doc.moveDown(0.5);
-        this.drawHorizontalLine(doc);
+        this.drawHorizontalLine(doc, L);
 
-        // --- Items Table ---
+        // --- Items ---
         doc.moveDown(0.5);
-        this.drawItemsTable(doc, data.items);
+        if (L.roll) {
+          this.drawItemsRoll(doc, L, data.items);
+        } else {
+          this.drawItemsTable(doc, L, data.items);
+        }
 
         doc.moveDown(0.5);
-        this.drawHorizontalLine(doc);
+        this.drawHorizontalLine(doc, L);
 
         // --- Tax Breakdown ---
         if (data.taxes.length > 0) {
           doc.moveDown(0.5);
-          this.drawTaxBreakdown(doc, data.taxes);
+          this.drawTaxBreakdown(doc, L, data.taxes);
           doc.moveDown(0.3);
-          this.drawHorizontalLine(doc);
+          this.drawHorizontalLine(doc, L);
         }
 
         // --- Totals ---
+        // The totals block paints a filled rectangle at absolute coordinates,
+        // which PDFKit will not reflow, so it needs whole-block room.
+        this.ensureSpace(doc, L, 80);
         doc.moveDown(0.5);
-        this.drawTotals(doc, data);
+        this.drawTotals(doc, L, data);
 
         // --- Payment Info ---
         if (data.payment_form || data.notes) {
           doc.moveDown(0.5);
-          this.drawPaymentInfo(doc, data);
+          this.drawPaymentInfo(doc, L, data);
         }
 
         // --- CUFE ---
         if (data.cufe) {
           doc.moveDown(0.8);
-          this.drawCufe(doc, data.cufe);
+          this.drawCufe(doc, L, data.cufe);
         }
 
         // --- QR Code ---
         if (data.qr_code) {
           doc.moveDown(0.5);
-          this.drawQrSection(doc, data.qr_code);
+          this.drawQrSection(doc, L, data.qr_code);
         }
 
         // --- Footer ---
-        this.drawFooter(doc);
+        this.drawFooter(doc, L);
 
+        end_y = doc.y;
         doc.end();
       } catch (error) {
         reject(error);
@@ -178,15 +317,91 @@ export class InvoicePdfBuilder {
 
   // ─── Private Helpers ────────────────────────────────────────────
 
+  /** Scales a design font size to the current paper width. */
+  private static fs(L: PdfLayout, size: number): number {
+    return Math.round(size * L.font_scale * 10) / 10;
+  }
+
+  /**
+   * Starts a new page when `needed` points do not fit. No-op on roll paper,
+   * whose height is cut to the measured content, so nothing can overflow.
+   */
+  private static ensureSpace(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    needed: number,
+  ): void {
+    if (L.roll) return;
+    if (doc.y + needed > L.height - L.margin) {
+      doc.addPage();
+    }
+  }
+
   private static drawHeader(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     data: InvoicePdfData,
   ): void {
     const header_y = doc.y;
 
+    // On roll paper the issuer block is centred under the logo: there is no
+    // horizontal room for a logo-beside-text arrangement.
+    if (L.roll) {
+      if (data.company_logo_buffer) {
+        const size = Math.min(48, L.content);
+        try {
+          doc.image(
+            data.company_logo_buffer,
+            L.margin + (L.content - size) / 2,
+            header_y,
+            { fit: [size, size] },
+          );
+          doc.y = header_y + size + 4;
+        } catch {
+          // If logo fails to load, skip it silently
+        }
+      }
+
+      const center = { align: 'center' as const, width: L.content };
+
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(this.fs(L, 11))
+        .text(data.company_name, L.margin, doc.y, center);
+
+      if (
+        data.company_trade_name &&
+        data.company_trade_name !== data.company_name
+      ) {
+        doc
+          .font('Helvetica')
+          .fontSize(this.fs(L, 8))
+          .text(data.company_trade_name, L.margin, doc.y + 1, center);
+      }
+
+      doc
+        .font('Helvetica')
+        .fontSize(this.fs(L, 8))
+        .text(`NIT: ${data.company_nit}`, L.margin, doc.y + 2, center);
+
+      this.drawIssuerFiscalLines(doc, L, data, L.margin, center);
+
+      if (data.company_address) {
+        doc.text(data.company_address, L.margin, doc.y + 1, center);
+      }
+
+      const roll_contact: string[] = [];
+      if (data.company_phone) roll_contact.push(`Tel: ${data.company_phone}`);
+      if (data.company_email) roll_contact.push(data.company_email);
+      if (roll_contact.length > 0) {
+        doc.text(roll_contact.join('  |  '), L.margin, doc.y + 1, center);
+      }
+      return;
+    }
+
     if (data.company_logo_buffer) {
       try {
-        doc.image(data.company_logo_buffer, MARGIN, header_y, {
+        doc.image(data.company_logo_buffer, L.margin, header_y, {
           width: 60,
           height: 60,
           fit: [60, 60],
@@ -196,27 +411,46 @@ export class InvoicePdfBuilder {
       }
     }
 
-    const text_x = data.company_logo_buffer ? MARGIN + 70 : MARGIN;
+    const text_x = data.company_logo_buffer ? L.margin + 70 : L.margin;
+    const text_width = L.margin + L.content - text_x;
 
     doc
       .font('Helvetica-Bold')
-      .fontSize(14)
-      .text(data.company_name, text_x, header_y);
+      .fontSize(this.fs(L, 14))
+      .text(data.company_name, text_x, header_y, { width: text_width });
+
+    if (
+      data.company_trade_name &&
+      data.company_trade_name !== data.company_name
+    ) {
+      doc
+        .font('Helvetica')
+        .fontSize(this.fs(L, 9))
+        .text(data.company_trade_name, text_x, doc.y + 1, {
+          width: text_width,
+        });
+    }
 
     doc
       .font('Helvetica')
-      .fontSize(9)
-      .text(`NIT: ${data.company_nit}`, text_x, doc.y + 2);
+      .fontSize(this.fs(L, 9))
+      .text(`NIT: ${data.company_nit}`, text_x, doc.y + 2, {
+        width: text_width,
+      });
+
+    this.drawIssuerFiscalLines(doc, L, data, text_x, { width: text_width });
 
     if (data.company_address) {
-      doc.text(data.company_address, text_x, doc.y + 1);
+      doc.text(data.company_address, text_x, doc.y + 1, { width: text_width });
     }
 
     const contact_parts: string[] = [];
     if (data.company_phone) contact_parts.push(`Tel: ${data.company_phone}`);
     if (data.company_email) contact_parts.push(data.company_email);
     if (contact_parts.length > 0) {
-      doc.text(contact_parts.join('  |  '), text_x, doc.y + 1);
+      doc.text(contact_parts.join('  |  '), text_x, doc.y + 1, {
+        width: text_width,
+      });
     }
 
     // Ensure we are past the logo height
@@ -228,8 +462,37 @@ export class InvoicePdfBuilder {
     }
   }
 
+  /**
+   * Regime and DIAN tax responsibilities. Mandatory content of the graphic
+   * representation, so it is drawn identically in every format.
+   */
+  private static drawIssuerFiscalLines(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    data: InvoicePdfData,
+    x: number,
+    options: PDFKit.Mixins.TextOptions,
+  ): void {
+    const fiscal_parts: string[] = [];
+    if (data.company_tax_regime) {
+      fiscal_parts.push(`Regimen: ${data.company_tax_regime}`);
+    }
+    if (data.company_tax_responsibilities?.length) {
+      fiscal_parts.push(
+        `Responsabilidades: ${data.company_tax_responsibilities.join(', ')}`,
+      );
+    }
+    if (fiscal_parts.length === 0) return;
+
+    doc
+      .font('Helvetica')
+      .fontSize(this.fs(L, 8))
+      .text(fiscal_parts.join('  |  '), x, doc.y + 1, options);
+  }
+
   private static drawInvoiceTitle(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     data: InvoicePdfData,
   ): void {
     const type_labels: Record<string, string> = {
@@ -240,19 +503,17 @@ export class InvoicePdfBuilder {
     };
 
     const title = type_labels[data.invoice_type] || 'FACTURA';
-
-    doc.font('Helvetica-Bold').fontSize(14).text(title, MARGIN, doc.y, {
-      align: 'center',
-      width: CONTENT_WIDTH,
-    });
+    const center = { align: 'center' as const, width: L.content };
 
     doc
       .font('Helvetica-Bold')
-      .fontSize(11)
-      .text(`No. ${data.invoice_number}`, MARGIN, doc.y + 4, {
-        align: 'center',
-        width: CONTENT_WIDTH,
-      });
+      .fontSize(this.fs(L, 14))
+      .text(title, L.margin, doc.y, center);
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(this.fs(L, 11))
+      .text(`No. ${data.invoice_number}`, L.margin, doc.y + 4, center);
 
     const date_parts: string[] = [`Fecha de emision: ${data.issue_date}`];
     if (data.due_date) {
@@ -261,15 +522,13 @@ export class InvoicePdfBuilder {
 
     doc
       .font('Helvetica')
-      .fontSize(9)
-      .text(date_parts.join('  |  '), MARGIN, doc.y + 4, {
-        align: 'center',
-        width: CONTENT_WIDTH,
-      });
+      .fontSize(this.fs(L, 9))
+      .text(date_parts.join(L.roll ? '\n' : '  |  '), L.margin, doc.y + 4, center);
   }
 
   private static drawResolutionInfo(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     data: InvoicePdfData,
   ): void {
     doc.moveDown(0.3);
@@ -298,11 +557,11 @@ export class InvoicePdfBuilder {
 
     doc
       .font('Helvetica')
-      .fontSize(7)
+      .fontSize(this.fs(L, 7))
       .fillColor('#555555')
-      .text(parts.join('  |  '), MARGIN, doc.y, {
+      .text(parts.join(L.roll ? '\n' : '  |  '), L.margin, doc.y, {
         align: 'center',
-        width: CONTENT_WIDTH,
+        width: L.content,
       });
 
     doc.fillColor('#000000');
@@ -310,17 +569,44 @@ export class InvoicePdfBuilder {
 
   private static drawCustomerInfo(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     data: InvoicePdfData,
   ): void {
-    this.drawSectionTitle(doc, 'DATOS DEL CLIENTE');
+    this.drawSectionTitle(doc, L, 'DATOS DEL CLIENTE');
 
-    const half = CONTENT_WIDTH / 2;
-    doc.font('Helvetica').fontSize(9);
+    doc.font('Helvetica').fontSize(this.fs(L, 9));
+
+    // Roll paper: stack every field, there is no room for two columns.
+    if (L.roll) {
+      doc.text(`Nombre: ${data.customer_name}`, L.margin, doc.y, {
+        width: L.content,
+      });
+      if (data.customer_tax_id) {
+        doc.text(`NIT/CC: ${data.customer_tax_id}`, L.margin, doc.y + 1, {
+          width: L.content,
+        });
+      }
+      if (typeof data.customer_address === 'string' && data.customer_address) {
+        doc.text(`Direccion: ${data.customer_address}`, L.margin, doc.y + 1, {
+          width: L.content,
+        });
+      }
+      if (data.customer_email) {
+        doc.text(`Email: ${data.customer_email}`, L.margin, doc.y + 1, {
+          width: L.content,
+        });
+      }
+      return;
+    }
+
+    const half = L.content / 2;
 
     const y1 = doc.y;
-    doc.text(`Nombre: ${data.customer_name}`, MARGIN, y1);
+    doc.text(`Nombre: ${data.customer_name}`, L.margin, y1, { width: half });
     if (data.customer_tax_id) {
-      doc.text(`NIT/CC: ${data.customer_tax_id}`, MARGIN + half, y1);
+      doc.text(`NIT/CC: ${data.customer_tax_id}`, L.margin + half, y1, {
+        width: half,
+      });
     }
 
     if (data.customer_address) {
@@ -328,30 +614,43 @@ export class InvoicePdfBuilder {
         typeof data.customer_address === 'string' ? data.customer_address : '';
       if (addr) {
         const y2 = doc.y + 2;
-        doc.text(`Direccion: ${addr}`, MARGIN, y2);
+        doc.text(`Direccion: ${addr}`, L.margin, y2, { width: L.content });
       }
     }
 
     if (data.customer_email) {
       const y3 = doc.y + 2;
-      doc.text(`Email: ${data.customer_email}`, MARGIN, y3);
+      doc.text(`Email: ${data.customer_email}`, L.margin, y3, {
+        width: L.content,
+      });
     }
   }
 
   private static drawItemsTable(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     items: InvoicePdfItem[],
   ): void {
-    this.drawSectionTitle(doc, 'DETALLE DE PRODUCTOS / SERVICIOS');
+    this.drawSectionTitle(doc, L, 'DETALLE DE PRODUCTOS / SERVICIOS');
 
-    // Table header
+    // Column x positions as fractions of the drawable width, so the table also
+    // fits half-letter without overflowing into the margin.
+    const w = L.content;
     const col_x = {
-      qty: MARGIN,
-      description: MARGIN + 50,
-      unit_price: MARGIN + 280,
-      discount: MARGIN + 360,
-      tax: MARGIN + 420,
-      total: MARGIN + 470,
+      qty: L.margin,
+      description: L.margin + w * 0.095,
+      unit_price: L.margin + w * 0.53,
+      discount: L.margin + w * 0.68,
+      tax: L.margin + w * 0.795,
+      total: L.margin + w * 0.89,
+    };
+    const col_w = {
+      qty: w * 0.085,
+      description: w * 0.42,
+      unit_price: w * 0.14,
+      discount: w * 0.105,
+      tax: w * 0.085,
+      total: L.margin + w - col_x.total,
     };
 
     const header_y = doc.y;
@@ -359,201 +658,269 @@ export class InvoicePdfBuilder {
     // Header background
     doc
       .save()
-      .rect(MARGIN, header_y - 2, CONTENT_WIDTH, 16)
+      .rect(L.margin, header_y - 2, w, 16)
       .fill('#f5f5f5')
       .restore();
 
-    doc.font('Helvetica-Bold').fontSize(8).fillColor('#000000');
-    doc.text('Cant.', col_x.qty, header_y, { width: 45 });
-    doc.text('Descripcion', col_x.description, header_y, { width: 225 });
+    doc.font('Helvetica-Bold').fontSize(this.fs(L, 8)).fillColor('#000000');
+    doc.text('Cant.', col_x.qty, header_y, { width: col_w.qty });
+    doc.text('Descripcion', col_x.description, header_y, {
+      width: col_w.description,
+    });
     doc.text('P. Unit.', col_x.unit_price, header_y, {
-      width: 75,
+      width: col_w.unit_price,
       align: 'right',
     });
     doc.text('Desc.', col_x.discount, header_y, {
-      width: 55,
+      width: col_w.discount,
       align: 'right',
     });
-    doc.text('IVA', col_x.tax, header_y, { width: 45, align: 'right' });
+    doc.text('IVA', col_x.tax, header_y, {
+      width: col_w.tax,
+      align: 'right',
+    });
     doc.text('Total', col_x.total, header_y, {
-      width: MARGIN + CONTENT_WIDTH - col_x.total,
+      width: col_w.total,
       align: 'right',
     });
 
     doc.y = header_y + 18;
 
     // Table rows
-    doc.font('Helvetica').fontSize(8);
+    doc.font('Helvetica').fontSize(this.fs(L, 8));
+
+    // Break only when the next row itself would not fit. The old fixed 150 pt
+    // reserve was calibrated for letter: on half-letter it threw away 38% of the
+    // sheet, pushing the second item to a new page. The blocks that follow the
+    // table get their own reserve via `ensureSpace`.
+    const row_limit = L.height - L.margin - this.fs(L, 8) * 3;
 
     for (const item of items) {
-      const row_y = doc.y;
-
-      // Check page break
-      if (row_y > PAGE_HEIGHT - 150) {
+      if (doc.y > row_limit) {
         doc.addPage();
       }
 
       const current_y = doc.y;
 
       doc.text(this.formatQuantity(item.quantity), col_x.qty, current_y, {
-        width: 45,
+        width: col_w.qty,
       });
       doc.text(item.description, col_x.description, current_y, {
-        width: 225,
+        width: col_w.description,
       });
       doc.text(COP.format(item.unit_price), col_x.unit_price, current_y, {
-        width: 75,
+        width: col_w.unit_price,
         align: 'right',
       });
       doc.text(
         item.discount_amount > 0 ? COP.format(item.discount_amount) : '-',
         col_x.discount,
         current_y,
-        { width: 55, align: 'right' },
+        { width: col_w.discount, align: 'right' },
       );
       doc.text(
         item.tax_amount > 0 ? COP.format(item.tax_amount) : '-',
         col_x.tax,
         current_y,
-        { width: 45, align: 'right' },
+        { width: col_w.tax, align: 'right' },
       );
       doc.text(COP.format(item.total_amount), col_x.total, current_y, {
-        width: MARGIN + CONTENT_WIDTH - col_x.total,
+        width: col_w.total,
         align: 'right',
       });
 
       doc.moveDown(0.4);
 
-      // Tier + packaging metadata sub-lines (snapshot, audit trail) — mirrors
-      // order-pdf.builder so invoices show "Empaque por tarifa" details.
-      const has_tier = !!item.applied_price_tier_name;
-      const has_package =
-        typeof item.stock_units_consumed === 'number' &&
-        item.stock_units_consumed > 0 &&
-        item.stock_units_consumed !== item.quantity;
-      const has_serials =
-        typeof item.serial_numbers_snapshot === 'string' &&
-        item.serial_numbers_snapshot.trim().length > 0;
-
-      if (has_tier || has_package || has_serials) {
-        doc.font('Helvetica').fontSize(7).fillColor('#666666');
-        if (has_tier) {
-          doc.text(
-            `Tarifa: ${item.applied_price_tier_name}`,
-            col_x.description + 6,
-            doc.y,
-            { width: 219 },
-          );
+      const sub_lines = this.itemSubLines(item);
+      if (sub_lines.length > 0) {
+        doc.font('Helvetica').fontSize(this.fs(L, 7)).fillColor('#666666');
+        for (const line of sub_lines) {
+          doc.text(line, col_x.description + 6, doc.y, {
+            width: col_w.description - 6,
+          });
         }
-        if (has_package) {
-          const per_unit =
-            Math.round(
-              ((item.stock_units_consumed as number) / item.quantity) * 100,
-            ) / 100;
-          doc.text(
-            `× ${per_unit} unid/empaque (desconto ${item.stock_units_consumed} unid. de stock)`,
-            col_x.description + 6,
-            doc.y,
-            { width: 219 },
-          );
-        }
-        if (has_serials) {
-          doc.text(
-            `Serial(es): ${(item.serial_numbers_snapshot as string).trim()}`,
-            col_x.description + 6,
-            doc.y,
-            { width: 219 },
-          );
-        }
-        doc.font('Helvetica').fontSize(8).fillColor('#000000');
+        doc.font('Helvetica').fontSize(this.fs(L, 8)).fillColor('#000000');
         doc.moveDown(0.4);
       }
     }
   }
 
+  /**
+   * Single-column item list for roll paper: description on its own line, then
+   * `qty × unit price` on the left with the line total right-aligned. Same data
+   * as the table, including the per-line IVA the tabular layout shows.
+   */
+  private static drawItemsRoll(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    items: InvoicePdfItem[],
+  ): void {
+    this.drawSectionTitle(doc, L, 'DETALLE');
+
+    for (const item of items) {
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(this.fs(L, 8))
+        .fillColor('#000000')
+        .text(item.description, L.margin, doc.y, { width: L.content });
+
+      const amount_y = doc.y + 1;
+      doc
+        .font('Helvetica')
+        .fontSize(this.fs(L, 8))
+        .text(
+          `${this.formatQuantity(item.quantity)} x ${COP.format(item.unit_price)}`,
+          L.margin,
+          amount_y,
+          { width: L.content * 0.6 },
+        );
+      doc.text(COP.format(item.total_amount), L.margin, amount_y, {
+        width: L.content,
+        align: 'right',
+      });
+
+      const extra: string[] = [];
+      if (item.discount_amount > 0) {
+        extra.push(`Descuento: -${COP.format(item.discount_amount)}`);
+      }
+      if (item.tax_amount > 0) {
+        extra.push(`IVA: ${COP.format(item.tax_amount)}`);
+      }
+      extra.push(...this.itemSubLines(item));
+
+      if (extra.length > 0) {
+        doc.fontSize(this.fs(L, 7)).fillColor('#666666');
+        for (const line of extra) {
+          doc.text(line, L.margin + 4, doc.y + 1, { width: L.content - 4 });
+        }
+        doc.fillColor('#000000');
+      }
+
+      doc.moveDown(0.35);
+    }
+  }
+
+  /** Tier / packaging / serial snapshot lines shared by both item layouts. */
+  private static itemSubLines(item: InvoicePdfItem): string[] {
+    const lines: string[] = [];
+
+    if (item.applied_price_tier_name) {
+      lines.push(`Tarifa: ${item.applied_price_tier_name}`);
+    }
+
+    if (
+      typeof item.stock_units_consumed === 'number' &&
+      item.stock_units_consumed > 0 &&
+      item.stock_units_consumed !== item.quantity &&
+      item.quantity !== 0
+    ) {
+      const per_unit =
+        Math.round((item.stock_units_consumed / item.quantity) * 100) / 100;
+      lines.push(
+        `× ${per_unit} unid/empaque (desconto ${item.stock_units_consumed} unid. de stock)`,
+      );
+    }
+
+    if (
+      typeof item.serial_numbers_snapshot === 'string' &&
+      item.serial_numbers_snapshot.trim().length > 0
+    ) {
+      lines.push(`Serial(es): ${item.serial_numbers_snapshot.trim()}`);
+    }
+
+    return lines;
+  }
+
   private static drawTaxBreakdown(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     taxes: InvoicePdfTax[],
   ): void {
-    this.drawSectionTitle(doc, 'IMPUESTOS');
+    this.drawSectionTitle(doc, L, 'IMPUESTOS');
 
-    doc.font('Helvetica').fontSize(8);
+    doc.font('Helvetica').fontSize(this.fs(L, 8));
 
     for (const tax of taxes) {
       const y = doc.y;
-      doc.text(`${tax.tax_name} (${tax.tax_rate}%)`, MARGIN + 10, y);
-      doc.text(`Base: ${COP.format(tax.taxable_amount)}`, MARGIN + 200, y);
-      doc.text(COP.format(tax.tax_amount), MARGIN, y, {
-        width: CONTENT_WIDTH - 10,
-        align: 'right',
-      });
+
+      if (L.roll) {
+        doc.text(
+          `${tax.tax_name} (${tax.tax_rate}%) base ${COP.format(tax.taxable_amount)}`,
+          L.margin,
+          y,
+          { width: L.content * 0.68 },
+        );
+        doc.text(COP.format(tax.tax_amount), L.margin, y, {
+          width: L.content,
+          align: 'right',
+        });
+      } else {
+        doc.text(`${tax.tax_name} (${tax.tax_rate}%)`, L.margin + 10, y, {
+          width: L.content * 0.35,
+        });
+        doc.text(
+          `Base: ${COP.format(tax.taxable_amount)}`,
+          L.margin + L.content * 0.4,
+          y,
+          { width: L.content * 0.3 },
+        );
+        doc.text(COP.format(tax.tax_amount), L.margin, y, {
+          width: L.content - 10,
+          align: 'right',
+        });
+      }
+
       doc.moveDown(0.3);
     }
   }
 
   private static drawTotals(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     data: InvoicePdfData,
   ): void {
-    const totals_x = MARGIN + CONTENT_WIDTH / 2;
-    const totals_width = CONTENT_WIDTH / 2;
+    // Roll paper uses the full width; page formats keep the totals block on the
+    // right half, as the letter invoice always did.
+    const totals_x = L.roll ? L.margin : L.margin + L.content / 2;
+    const totals_width = L.roll ? L.content : L.content / 2;
 
-    doc.font('Helvetica').fontSize(9);
+    doc.font('Helvetica').fontSize(this.fs(L, 9));
 
-    // Subtotal
-    let y = doc.y;
-    doc.text('Subtotal:', totals_x, y);
-    doc.text(COP.format(data.subtotal_amount), totals_x, y, {
-      width: totals_width,
-      align: 'right',
-    });
+    const line = (label: string, value: string, y: number) => {
+      doc.text(label, totals_x, y, { width: totals_width * 0.6 });
+      doc.text(value, totals_x, y, { width: totals_width, align: 'right' });
+    };
 
-    // Discount
+    line('Subtotal:', COP.format(data.subtotal_amount), doc.y);
+
     if (data.discount_amount > 0) {
-      y = doc.y + 2;
-      doc.text('Descuento:', totals_x, y);
-      doc.text(`-${COP.format(data.discount_amount)}`, totals_x, y, {
-        width: totals_width,
-        align: 'right',
-      });
+      line('Descuento:', `-${COP.format(data.discount_amount)}`, doc.y + 2);
     }
 
-    // Tax
     if (data.tax_amount > 0) {
-      y = doc.y + 2;
-      doc.text('IVA:', totals_x, y);
-      doc.text(COP.format(data.tax_amount), totals_x, y, {
-        width: totals_width,
-        align: 'right',
-      });
+      line('IVA:', COP.format(data.tax_amount), doc.y + 2);
     }
 
-    // Withholding
     if (data.withholding_amount > 0) {
-      y = doc.y + 2;
-      doc.text('Retencion:', totals_x, y);
-      doc.text(`-${COP.format(data.withholding_amount)}`, totals_x, y, {
-        width: totals_width,
-        align: 'right',
-      });
+      line('Retencion:', `-${COP.format(data.withholding_amount)}`, doc.y + 2);
     }
 
     // Total
     doc.moveDown(0.5);
     const total_y = doc.y;
-    const box_height = 28;
+    const box_height = L.roll ? 24 : 28;
 
     doc
       .save()
-      .rect(totals_x - 5, total_y - 4, totals_width + 5, box_height)
+      .rect(totals_x - 4, total_y - 4, totals_width + 4, box_height)
       .fill('#f0f0f0')
       .restore();
 
     doc
       .font('Helvetica-Bold')
-      .fontSize(12)
+      .fontSize(this.fs(L, 12))
       .fillColor('#000000')
-      .text('TOTAL:', totals_x, total_y + 4);
+      .text('TOTAL:', totals_x, total_y + 4, { width: totals_width * 0.5 });
 
     doc.text(COP.format(data.total_amount), totals_x, total_y + 4, {
       width: totals_width,
@@ -565,11 +932,12 @@ export class InvoicePdfBuilder {
 
   private static drawPaymentInfo(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     data: InvoicePdfData,
   ): void {
-    this.drawSectionTitle(doc, 'INFORMACION DE PAGO');
+    this.drawSectionTitle(doc, L, 'INFORMACION DE PAGO');
 
-    doc.font('Helvetica').fontSize(9);
+    doc.font('Helvetica').fontSize(this.fs(L, 9));
 
     if (data.payment_form) {
       const payment_labels: Record<string, string> = {
@@ -581,58 +949,70 @@ export class InvoicePdfBuilder {
         electronic: 'Pago Electronico',
       };
       const label = payment_labels[data.payment_form] || data.payment_form;
-      doc.text(`Forma de pago: ${label}`, MARGIN, doc.y);
+      doc.text(`Forma de pago: ${label}`, L.margin, doc.y, {
+        width: L.content,
+      });
     }
 
     if (data.payment_method) {
-      doc.text(`Metodo de pago: ${data.payment_method}`, MARGIN, doc.y + 2);
+      doc.text(`Metodo de pago: ${data.payment_method}`, L.margin, doc.y + 2, {
+        width: L.content,
+      });
     }
 
     if (data.notes) {
       doc.moveDown(0.3);
       doc
         .font('Helvetica')
-        .fontSize(8)
+        .fontSize(this.fs(L, 8))
         .fillColor('#444444')
-        .text(`Observaciones: ${data.notes}`, MARGIN, doc.y, {
-          width: CONTENT_WIDTH,
+        .text(`Observaciones: ${data.notes}`, L.margin, doc.y, {
+          width: L.content,
         });
       doc.fillColor('#000000');
     }
   }
 
-  private static drawCufe(doc: PDFKit.PDFDocument, cufe: string): void {
-    this.drawSectionTitle(doc, 'CUFE');
+  private static drawCufe(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    cufe: string,
+  ): void {
+    this.drawSectionTitle(doc, L, 'CUFE');
 
     doc
       .font('Courier')
-      .fontSize(7)
+      .fontSize(this.fs(L, 7))
       .fillColor('#333333')
-      .text(cufe, MARGIN, doc.y, {
-        width: CONTENT_WIDTH,
+      .text(cufe, L.margin, doc.y, {
+        width: L.content,
         align: 'center',
       });
 
     doc.fillColor('#000000');
   }
 
-  private static drawQrSection(doc: PDFKit.PDFDocument, qr_url: string): void {
+  private static drawQrSection(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+    qr_url: string,
+  ): void {
     // Show QR verification URL as text
     doc
       .font('Helvetica')
-      .fontSize(7)
+      .fontSize(this.fs(L, 7))
       .fillColor('#666666')
-      .text('Verificacion DIAN:', MARGIN, doc.y, {
+      .text('Verificacion DIAN:', L.margin, doc.y, {
         align: 'center',
-        width: CONTENT_WIDTH,
+        width: L.content,
       });
 
     doc
       .font('Helvetica')
-      .fontSize(6)
-      .text(qr_url, MARGIN, doc.y + 2, {
+      .fontSize(this.fs(L, 6))
+      .text(qr_url, L.margin, doc.y + 2, {
         align: 'center',
-        width: CONTENT_WIDTH,
+        width: L.content,
         link: qr_url,
       });
 
@@ -641,24 +1021,31 @@ export class InvoicePdfBuilder {
 
   private static drawSectionTitle(
     doc: PDFKit.PDFDocument,
+    L: PdfLayout,
     title: string,
   ): void {
-    doc.font('Helvetica-Bold').fontSize(10).text(title, MARGIN, doc.y);
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(this.fs(L, 10))
+      .text(title, L.margin, doc.y, { width: L.content });
     doc.moveDown(0.3);
   }
 
-  private static drawHorizontalLine(doc: PDFKit.PDFDocument): void {
+  private static drawHorizontalLine(
+    doc: PDFKit.PDFDocument,
+    L: PdfLayout,
+  ): void {
     const y = doc.y;
     doc
-      .moveTo(MARGIN, y)
-      .lineTo(PAGE_WIDTH - MARGIN, y)
+      .moveTo(L.margin, y)
+      .lineTo(L.width - L.margin, y)
       .strokeColor('#cccccc')
       .lineWidth(0.5)
       .stroke();
     doc.strokeColor('#000000');
   }
 
-  private static drawFooter(doc: PDFKit.PDFDocument): void {
+  private static drawFooter(doc: PDFKit.PDFDocument, L: PdfLayout): void {
     const now = new Date();
     const date_str = now.toLocaleDateString('es-CO', {
       day: '2-digit',
@@ -668,21 +1055,21 @@ export class InvoicePdfBuilder {
       minute: '2-digit',
     });
 
-    doc.moveDown(1.5);
+    doc.moveDown(L.footer_gap);
     doc
       .font('Helvetica')
-      .fontSize(7)
+      .fontSize(this.fs(L, 7))
       .fillColor('#999999')
       .text(
         'Esta factura electronica fue generada por Vendix y es valida conforme a la normativa de la DIAN.',
-        MARGIN,
+        L.margin,
         doc.y,
-        { align: 'center', width: CONTENT_WIDTH },
+        { align: 'center', width: L.content },
       );
 
-    doc.text(`Documento generado el ${date_str}`, MARGIN, doc.y + 2, {
+    doc.text(`Documento generado el ${date_str}`, L.margin, doc.y + 2, {
       align: 'center',
-      width: CONTENT_WIDTH,
+      width: L.content,
     });
 
     doc.fillColor('#000000');

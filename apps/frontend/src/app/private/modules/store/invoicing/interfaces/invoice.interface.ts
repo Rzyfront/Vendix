@@ -349,3 +349,33 @@ export interface DianAuditLog {
   duration_ms: number | null;
   created_at: string;
 }
+
+/**
+ * Answer of `GET /store/invoicing/dian-config/emission-status`: whether the
+ * store is actually issuing electronic invoices, and if not, why.
+ *
+ * `is_live` mirrors the backend emission gate (`environment='production'` and
+ * `enablement_status='enabled'`) — NOT `fiscal_status.invoicing.state`, which
+ * only reports that the fiscal wizard was completed.
+ */
+export interface DianEmissionStatus {
+  is_live: boolean;
+  configuration_id: number | null;
+  environment: string | null;
+  enablement_status: string | null;
+  /** Human explanation of the current stage; `null` when already live. */
+  reason: string | null;
+  /**
+   * Unsatisfied production-readiness checks, empty when live. Mirrors the
+   * backend `ProductionReadinessCheck`: `action` is what the merchant has to do,
+   * and `owner` says whether they can do it at all (`platform` means only
+   * Vendix operations can).
+   */
+  blockers: Array<{
+    key: string;
+    label: string;
+    satisfied: boolean;
+    action: string;
+    owner: 'tenant' | 'platform';
+  }>;
+}
