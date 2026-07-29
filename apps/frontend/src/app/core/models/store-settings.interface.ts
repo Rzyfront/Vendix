@@ -409,19 +409,40 @@ export type ScaleConnectionStatus =
   | 'connected'
   | 'error';
 
+/**
+ * Mirror of the backend `PRINT_FORMATS` (store-settings.interface.ts). Closed
+ * set on purpose: the invoice's graphic representation carries mandatory content
+ * (issuer legal data, CUFE, QR), so the format changes the box, never the
+ * contents. `thermal_*` are roll widths in millimetres.
+ */
+export const PRINT_FORMATS = [
+  'letter',
+  'half_letter',
+  'thermal_80',
+  'thermal_58',
+] as const;
+
+export type PrintFormat = (typeof PRINT_FORMATS)[number];
+
+/** Human labels for the selectors, kept next to the list so they cannot drift. */
+export const PRINT_FORMAT_LABELS: Record<PrintFormat, string> = {
+  letter: 'Carta (216 × 279 mm)',
+  half_letter: 'Media carta (216 × 140 mm)',
+  thermal_80: 'Rollo térmico 80 mm',
+  thermal_58: 'Rollo térmico 58 mm',
+};
+
 export interface ReceiptsSettings {
   print_receipt: boolean;
   email_receipt: boolean;
   receipt_header: string;
   receipt_footer: string;
   /**
-   * Electronic-invoicing block. Only meaningful for stores whose `invoicing`
-   * fiscal area is ACTIVE/LOCKED: once DIAN habilitación is in place the store
-   * issues electronic invoices, not internal sale receipts, so these settings
-   * replace the receipt-delivery toggles in the UI.
-   *
-   * Optional across the board for backward compatibility with stores whose
-   * settings row predates the block.
+   * Electronic-invoicing block, surfaced instead of the receipt toggles once the
+   * store is actually issuing electronic invoices — i.e. its DIAN configuration
+   * is `environment='production'` with `enablement_status='enabled'`, NOT merely
+   * when the fiscal wizard was completed. Optional across the board for
+   * backward compatibility with settings rows that predate the block.
    */
   /** Issue (and transmit) the electronic invoice right after the sale closes. */
   auto_issue_invoice?: boolean;
@@ -431,6 +452,21 @@ export interface ReceiptsSettings {
   send_invoice_email?: boolean;
   /** Also print the POS ticket alongside the invoice (kitchen/warehouse copy). */
   print_pos_ticket?: boolean;
+  /**
+   * Handing the printed graphic representation to the buyer. Colombian law
+   * requires the invoice to be DELIVERED to the acquirer, in physical or
+   * electronic form — not specifically by email. Second lawful channel, so the
+   * form keeps at least one of `send_invoice_email` / `deliver_printed` on.
+   */
+  deliver_printed?: boolean;
+  /** Paper format of the invoice's graphic representation. */
+  invoice_format?: PrintFormat;
+  /** Paper format of the POS ticket, which may differ from the invoice's. */
+  pos_ticket_format?: PrintFormat;
+  /** Printed POS ticket copies. 0 = do not print. */
+  pos_ticket_copies?: number;
+  /** Send the POS ticket to the printer without waiting for a click. */
+  pos_ticket_auto_print?: boolean;
 }
 
 export interface BusinessHoursBlock {
