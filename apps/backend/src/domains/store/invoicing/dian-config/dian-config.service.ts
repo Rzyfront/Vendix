@@ -8,7 +8,11 @@ import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CertificateValidationResult } from './certificates/certificate-issuer.interface';
 import { certificateNitMatches } from './certificates/nit-match.util';
-import { FiscalProductionReadinessService } from '../providers/fiscal-production-readiness.service';
+import {
+  FiscalProductionReadinessService,
+  ProductionReadinessCheck,
+} from '../providers/fiscal-production-readiness.service';
+import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
 
 @Injectable()
 export class DianConfigService {
@@ -476,6 +480,114 @@ export class DianConfigService {
         enabled_at: status === 'enabled' ? new Date() : null,
       },
     });
+  }
+
+  /**
+   * Read-only production readiness report for a configuration. Evaluated as if
+   * the config were already in production + enabled, so the merchant sees the
+   * prerequisites that remain *besides* the promotion itself.
+   */
+  async getProductionReadiness(id: number) {
+    const config = await this.prisma.dian_configurations.findFirst({
+      where: { id },
+    });
+    if (!config) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+
+    const report = this.readiness.evaluateProductionReadiness({
+      ...config,
+      environment: 'production',
+      enablement_status: 'enabled',
+    });
+
+    const resolutions = await this.prisma.invoice_resolutions.findMany({
+      where: { is_active: true, document_type: 'sales_invoice' },
+      select: {
+        id: true,
+        prefix: true,
+        resolution_number: true,
+        range_from: true,
+        range_to: true,
+        current_number: true,
+        valid_from: true,
+        valid_to: true,
+        technical_key: true,
+      },
+      orderBy: [{ id: 'desc' }],
+    });
+
+    const now = new Date();
+    // The habilitación range (SETP 990000000-995000000) is DIAN's sandbox
+    // numbering: it is NOT billable. Production needs an "Autorización de
+    // Numeración de Facturación" obtained through Muisca, with its own prefix
+    // and technical key — so a tenant whose only resolution is SETP is not ready
+    // even when every credential check passes.
+    const production_resolutions = resolutions
+      .filter((r) => !isHabilitacionResolution(r.prefix))
+      .filter((r) => r.valid_from <= now && r.valid_to >= now)
+      .filter((r) => r.current_number < r.range_to);
+
+    const resolution_check: ProductionReadinessCheck = {
+      key: 'production_resolution',
+      label: 'Resolución de numeración de producción vigente',
+      satisfied: production_resolutions.length > 0,
+      action:
+        'Solicita la Autorización de Numeración de Facturación en Muisca y registra su prefijo, rango y clave técnica. El rango SETP de habilitación no sirve para facturar.',
+      owner: 'tenant',
+    };
+
+    const checks = [...report.checks, resolution_check];
+    const missing = checks.filter((c) => !c.satisfied).map((c) => c.key);
+
+    return {
+      ...report,
+      // Report the CURRENT state, not the hypothetical one used to evaluate.
+      environment: config.environment,
+      enablement_status: config.enablement_status,
+      ready: missing.length === 0,
+      checks,
+      missing,
+      resolutions: resolutions.map((r) => ({
+        ...r,
+        is_habilitacion_range: isHabilitacionResolution(r.prefix),
+        is_expired: r.valid_to < now,
+        is_exhausted: r.current_number >= r.range_to,
+      })),
+    };
+  }
+
+  /**
+   * Promotes a configuration to production: environment=production +
+   * enablement_status=enabled, gated by the same readiness rules the emission
+   * path enforces. Refuses (412) with the full checklist when anything is
+   * missing, so the UI never has to guess why the switch was rejected.
+   */
+  async promoteToProduction(id: number) {
+    const readiness = await this.getProductionReadiness(id);
+
+    if (!readiness.ready) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_ENABLEMENT_001,
+        'Faltan requisitos para pasar la facturación electrónica a producción.',
+        { dian_configuration_id: id, missing: readiness.missing },
+      );
+    }
+
+    const updated = await this.prisma.dian_configurations.update({
+      where: { id },
+      data: {
+        environment: 'production',
+        enablement_status: 'enabled',
+        enabled_at: new Date(),
+      },
+    });
+
+    this.logger.log(
+      `DIAN config ${id} promoted to production (enablement_status=enabled)`,
+    );
+
+    return this.maskSensitiveFields(updated);
   }
 
   /**

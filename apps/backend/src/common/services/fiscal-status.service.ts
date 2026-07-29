@@ -11,9 +11,11 @@ import {
   FiscalStatusSource,
   FiscalStatusState,
   FiscalWizardPrefill,
+  FiscalWizardPrefillResolution,
   FiscalWizardStepId,
   isFiscalArea,
   isFiscalWizardStep,
+  isHabilitacionResolution,
   normalizeFiscalStatusBlock,
 } from '../interfaces/fiscal-status.interface';
 import { FiscalScopeService } from './fiscal-scope.service';
@@ -158,6 +160,7 @@ export class FiscalStatusService {
       fiscal_scope,
       legal_data: sources.legal_data,
       dian_config: sources.dian_config,
+      resolution: sources.resolution,
       puc: sources.puc,
       accounting_period: sources.accounting_period,
       default_taxes: sources.default_taxes,
@@ -183,6 +186,7 @@ export class FiscalStatusService {
   ): Promise<{
     legal_data: FiscalWizardPrefill['legal_data'];
     dian_config: FiscalWizardPrefill['dian_config'];
+    resolution: FiscalWizardPrefill['resolution'];
     puc: FiscalWizardPrefill['puc'];
     accounting_period: FiscalWizardPrefill['accounting_period'];
     default_taxes: FiscalWizardPrefill['default_taxes'];
@@ -215,6 +219,12 @@ export class FiscalStatusService {
       organization_id,
       store_id,
     );
+    const resolution = await this.readResolution(
+      client,
+      organization_id,
+      store_id,
+      accounting_entity_id,
+    );
     const puc = await this.readPuc(client, accounting_entity_id);
     const accounting_period = await this.readAccountingPeriod(
       client,
@@ -246,6 +256,7 @@ export class FiscalStatusService {
     return {
       legal_data,
       dian_config,
+      resolution,
       puc,
       accounting_period,
       default_taxes,
@@ -265,6 +276,7 @@ export class FiscalStatusService {
   private deriveSatisfiedSteps(sources: {
     legal_data: FiscalWizardPrefill['legal_data'];
     dian_config: FiscalWizardPrefill['dian_config'];
+    resolution: FiscalWizardPrefill['resolution'];
     puc: FiscalWizardPrefill['puc'];
     accounting_period: FiscalWizardPrefill['accounting_period'];
     default_taxes: FiscalWizardPrefill['default_taxes'];
@@ -520,6 +532,9 @@ export class FiscalStatusService {
         is_default: true,
         certificate_s3_key: true,
         certificate_expiry: true,
+        software_id: true,
+        test_set_id: true,
+        software_pin_encrypted: true,
       },
     });
     if (!config) return null;
@@ -539,6 +554,69 @@ export class FiscalStatusService {
       certificate_expiry: config.certificate_expiry
         ? config.certificate_expiry.toISOString()
         : null,
+      // Portal identifiers travel verbatim; the PIN never leaves the backend.
+      software_id: config.software_id || null,
+      test_set_id: config.test_set_id ?? null,
+      has_software_pin: Boolean(config.software_pin_encrypted),
+    };
+  }
+
+  /**
+   * Reads the active numbering resolution for the fiscal entity. Prefers a
+   * store-scoped row, falling back to the accounting entity, so both
+   * fiscal_scope=STORE and fiscal_scope=ORGANIZATION resolve a value.
+   *
+   * Without a resolution the DIAN test set cannot run (it needs prefix, range
+   * and technical key to build the UBL InvoiceControl block), so the wizard
+   * surfaces it as prefill instead of silently dropping what the user typed.
+   */
+  private async readResolution(
+    client: any,
+    organization_id: number,
+    store_id: number | null,
+    accounting_entity_id: number | null,
+  ): Promise<FiscalWizardPrefillResolution | null> {
+    const where: Record<string, unknown> = { is_active: true };
+    if (store_id !== null) {
+      where.store_id = store_id;
+    } else if (accounting_entity_id) {
+      where.accounting_entity_id = accounting_entity_id;
+    } else {
+      where.organization_id = organization_id;
+    }
+
+    const resolution = await client.invoice_resolutions.findFirst({
+      where,
+      orderBy: [{ id: 'desc' }],
+      select: {
+        id: true,
+        document_type: true,
+        resolution_number: true,
+        resolution_date: true,
+        prefix: true,
+        range_from: true,
+        range_to: true,
+        current_number: true,
+        valid_from: true,
+        valid_to: true,
+        technical_key: true,
+      },
+    });
+    if (!resolution) return null;
+
+    return {
+      id: resolution.id,
+      document_type: String(resolution.document_type),
+      resolution_number: resolution.resolution_number,
+      resolution_date: resolution.resolution_date.toISOString(),
+      prefix: resolution.prefix,
+      range_from: resolution.range_from,
+      range_to: resolution.range_to,
+      current_number: resolution.current_number,
+      valid_from: resolution.valid_from.toISOString(),
+      valid_to: resolution.valid_to.toISOString(),
+      technical_key: resolution.technical_key ?? null,
+      is_habilitacion_range: isHabilitacionResolution(resolution.prefix),
     };
   }
 

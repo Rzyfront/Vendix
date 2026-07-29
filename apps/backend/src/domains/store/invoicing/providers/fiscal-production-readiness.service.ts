@@ -13,6 +13,50 @@ type ReadinessDocumentType =
   | 'payroll'
   | 'payroll_adjustment';
 
+/** One unmet prerequisite, phrased for the merchant (not for a log line). */
+export interface ProductionReadinessCheck {
+  key: string;
+  label: string;
+  satisfied: boolean;
+  /** What the merchant has to do about it. Empty when already satisfied. */
+  action: string;
+  /**
+   * `tenant` = the merchant can fix it from the panel.
+   * `platform` = only Vendix operations can fix it (e.g. a missing env var).
+   */
+  owner: 'tenant' | 'platform';
+}
+
+export interface ProductionReadinessReport {
+  ready: boolean;
+  dian_configuration_id: number;
+  environment: string;
+  enablement_status: string;
+  checks: ProductionReadinessCheck[];
+  missing: string[];
+}
+
+/** Shape `assertProductionReady` / `evaluateProductionReadiness` need. */
+type ReadinessConfig = {
+  id: number;
+  operation_mode: string;
+  environment: string;
+  enablement_status: string;
+  software_id: string | null;
+  software_pin_encrypted: string | null;
+  certificate_s3_key: string | null;
+  certificate_password_encrypted: string | null;
+  certificate_expiry: Date | null;
+  certificate_fingerprint?: string | null;
+  certificate_nit?: string | null;
+  enablement_evidence?: unknown;
+  test_set_id: string | null;
+  last_test_result: unknown;
+  nit?: string | null;
+  nit_dv?: string | null;
+  accounting_entity_id?: number | null;
+};
+
 interface ResolveConfigParams {
   organization_id: number;
   store_id?: number | null;
@@ -80,27 +124,151 @@ export class FiscalProductionReadinessService {
     return config;
   }
 
-  assertProductionReady(config: {
-    id: number;
-    operation_mode: string;
-    environment: string;
-    enablement_status: string;
-    software_id: string | null;
-    software_pin_encrypted: string | null;
-    certificate_s3_key: string | null;
-    certificate_password_encrypted: string | null;
-    certificate_expiry: Date | null;
-    certificate_fingerprint?: string | null;
-    certificate_nit?: string | null;
-    enablement_evidence?: unknown;
-    test_set_id: string | null;
-    last_test_result: unknown;
-    nit?: string | null;
-    nit_dv?: string | null;
-    accounting_entity_id?: number | null;
-  }): void {
-    const missing: string[] = [];
+  /**
+   * Non-throwing counterpart of {@link assertProductionReady}. Returns the full
+   * checklist so the UI can show the merchant *what* is missing and *who* has to
+   * fix it, instead of a single opaque 412. The predicates are shared, so the
+   * checklist can never drift from the gate that actually blocks emission.
+   */
+  evaluateProductionReadiness(
+    config: ReadinessConfig,
+  ): ProductionReadinessReport {
+    const certNitMatches =
+      !!config.certificate_nit &&
+      (!config.nit ||
+        certificateNitMatches({
+          certificateTaxId: config.certificate_nit,
+          nit: config.nit,
+          dv: config.nit_dv,
+        }));
+    const certValid =
+      !!config.certificate_expiry && config.certificate_expiry > new Date();
 
+    const checks: ProductionReadinessCheck[] = [
+      {
+        key: 'operation_mode',
+        label: 'Modo de operación "software propio"',
+        satisfied: config.operation_mode === 'own_software',
+        action: 'Vendix debe habilitar el modo software propio para este NIT.',
+        owner: 'platform',
+      },
+      {
+        key: 'test_set_evidence',
+        label: 'Set de pruebas aprobado por la DIAN',
+        satisfied: this.hasPassedTestSet(config.last_test_result),
+        action: 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
+        owner: 'tenant',
+      },
+      {
+        key: 'enablement_evidence',
+        label: 'Evidencia de habilitación almacenada',
+        satisfied: !!config.enablement_evidence,
+        action:
+          'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',
+        owner: 'tenant',
+      },
+      {
+        key: 'enablement_status',
+        label: 'Habilitación marcada como "enabled"',
+        satisfied: config.enablement_status === 'enabled',
+        action:
+          'Promueve la configuración a producción una vez la DIAN apruebe el set.',
+        owner: 'tenant',
+      },
+      {
+        key: 'environment',
+        label: 'Ambiente en producción',
+        satisfied: config.environment === 'production',
+        action: 'Cambia el ambiente a Producción en el paso de Ambiente.',
+        owner: 'tenant',
+      },
+      {
+        key: 'software_id',
+        label: 'Software ID registrado',
+        satisfied: !!config.software_id,
+        action: 'Copia el Software ID del portal DIAN en el paso 1.',
+        owner: 'tenant',
+      },
+      {
+        key: 'software_pin',
+        label: 'PIN del software guardado',
+        satisfied: !!config.software_pin_encrypted,
+        action: 'Ingresa el PIN del software en el paso 1.',
+        owner: 'tenant',
+      },
+      {
+        key: 'test_set_id',
+        label: 'Test Set ID registrado',
+        satisfied: !!config.test_set_id,
+        action: 'Copia el TestSetId que la DIAN asignó a tu software.',
+        owner: 'tenant',
+      },
+      {
+        key: 'accounting_entity_id',
+        label: 'Entidad contable asociada',
+        satisfied: !!config.accounting_entity_id,
+        action: 'Completa los datos fiscales (NIT) de la entidad.',
+        owner: 'tenant',
+      },
+      {
+        key: 'certificate_s3_key',
+        label: 'Certificado digital cargado',
+        satisfied: !!config.certificate_s3_key,
+        action: 'Sube el archivo .p12 en el paso de Certificado.',
+        owner: 'tenant',
+      },
+      {
+        key: 'certificate_password',
+        label: 'Contraseña del certificado guardada',
+        satisfied: !!config.certificate_password_encrypted,
+        action: 'Vuelve a subir el certificado con su contraseña.',
+        owner: 'tenant',
+      },
+      {
+        key: 'certificate_fingerprint',
+        label: 'Huella del certificado calculada',
+        satisfied: !!config.certificate_fingerprint,
+        action: 'Vuelve a subir el certificado para recalcular su huella.',
+        owner: 'tenant',
+      },
+      {
+        key: 'certificate_nit',
+        label: 'Certificado emitido para este NIT',
+        satisfied: certNitMatches,
+        action:
+          'El NIT del certificado debe coincidir con el NIT de la entidad fiscal.',
+        owner: 'tenant',
+      },
+      {
+        key: 'certificate_expiry',
+        label: 'Certificado vigente',
+        satisfied: certValid,
+        action: 'Renueva el certificado digital: está vencido o sin fecha.',
+        owner: 'tenant',
+      },
+      {
+        key: 'DIAN_ENCRYPTION_KEY',
+        label: 'Llave de cifrado de secretos configurada',
+        satisfied: !!process.env.DIAN_ENCRYPTION_KEY,
+        action:
+          'Vendix debe definir DIAN_ENCRYPTION_KEY en el entorno del servidor.',
+        owner: 'platform',
+      },
+    ];
+
+    const missing = checks.filter((c) => !c.satisfied).map((c) => c.key);
+
+    return {
+      ready: missing.length === 0,
+      dian_configuration_id: config.id,
+      environment: config.environment,
+      enablement_status: config.enablement_status,
+      checks,
+      missing,
+    };
+  }
+
+  assertProductionReady(config: ReadinessConfig): void {
     if (config.operation_mode !== 'own_software') {
       throw new VendixHttpException(
         ErrorCodes.DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED,
@@ -109,30 +277,11 @@ export class FiscalProductionReadinessService {
       );
     }
 
-    if (config.environment !== 'production') missing.push('environment');
-    if (config.enablement_status !== 'enabled') {
-      missing.push('enablement_status');
-    }
-    if (!config.software_id) missing.push('software_id');
-    if (!config.software_pin_encrypted) missing.push('software_pin');
-    if (!config.accounting_entity_id) missing.push('accounting_entity_id');
-    if (!config.test_set_id) missing.push('test_set_id');
-    if (!this.hasPassedTestSet(config.last_test_result)) {
-      missing.push('test_set_evidence');
-    }
-    if (!config.enablement_evidence) {
-      missing.push('enablement_evidence');
-    }
-    if (!config.certificate_s3_key) missing.push('certificate_s3_key');
-    if (!config.certificate_password_encrypted) {
-      missing.push('certificate_password');
-    }
-    if (!config.certificate_fingerprint) {
-      missing.push('certificate_fingerprint');
-    }
-    if (!config.certificate_nit) {
-      missing.push('certificate_nit');
-    } else if (
+    // Certificate identity/expiry keep their dedicated error codes: they are not
+    // "incomplete setup" but an actively wrong certificate, and the frontend maps
+    // them to specific remediation copy.
+    if (
+      config.certificate_nit &&
       config.nit &&
       !certificateNitMatches({
         certificateTaxId: config.certificate_nit,
@@ -146,17 +295,17 @@ export class FiscalProductionReadinessService {
         certificate_nit: this.onlyDigits(config.certificate_nit),
       });
     }
-    if (!config.certificate_expiry) {
-      missing.push('certificate_expiry');
-    } else if (config.certificate_expiry <= new Date()) {
+    if (config.certificate_expiry && config.certificate_expiry <= new Date()) {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_003, undefined, {
         dian_configuration_id: config.id,
         certificate_expiry: config.certificate_expiry,
       });
     }
-    if (!process.env.DIAN_ENCRYPTION_KEY) {
-      missing.push('DIAN_ENCRYPTION_KEY');
-    }
+
+    const report = this.evaluateProductionReadiness(config);
+    // `operation_mode` already threw above; drop it so the payload keeps the
+    // exact same `missing` semantics it had before this refactor.
+    const missing = report.missing.filter((key) => key !== 'operation_mode');
 
     if (missing.length > 0) {
       throw new VendixHttpException(
