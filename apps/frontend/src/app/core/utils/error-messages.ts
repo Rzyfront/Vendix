@@ -441,6 +441,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SUBSCRIPTION_008: 'Suscripcion suspendida por falta de pago.',
   SUBSCRIPTION_009: 'Suscripcion bloqueada. Regulariza tu pago para continuar.',
   SUBSCRIPTION_010: 'El plan seleccionado no es valido.',
+  // REGLA DE NEGOCIO (no reescribir con lenguaje de cobranza): esta tienda NO
+  // debe dinero. Su plan salio del catalogo y por eso la renovacion no pudo
+  // ejecutarse. Decirle "falta de pago" a quien no debe nada genera tickets de
+  // soporte y destruye la confianza; el codigo veraz manda. El copy de este
+  // codigo jamas debe mencionar deuda, mora, cobro fallido ni saldo por pagar.
+  SUBSCRIPTION_011:
+    'El plan de tu tienda fue retirado del catalogo. Elige un plan vigente para continuar operando.',
   SUBSCRIPTION_INTERNAL_ERROR:
     'Ocurrio un error al procesar tu suscripcion. Intenta de nuevo.',
   SUBSCRIPTION_VALIDATION:

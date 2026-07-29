@@ -416,6 +416,14 @@ export class SubscriptionWebhookService {
       if (sub.state !== 'suspended' && sub.state !== 'cancelled') {
         await this.stateService.transition(sub.store_id, 'suspended', {
           reason: 'chargeback',
+          // `reason` above is audit payload only (it lands in
+          // `subscription_events.payload.reason`). `lockReason` is what gets
+          // persisted to `store_subscriptions.lock_reason` — the column the
+          // access gate reads to tell the customer WHY its store is degraded.
+          // Omitting it made the column fall back to the `'admin_manual'`
+          // default for suspensions, so a real chargeback was reported to the
+          // customer as a manual admin action. Both are required.
+          lockReason: 'chargeback',
           triggeredByJob: 'webhook',
           payload: {
             invoice_id: invoiceId,

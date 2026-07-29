@@ -30,12 +30,20 @@ const BLOCKING_CODES = new Set<string>([
   'SUBSCRIPTION_007',
   'SUBSCRIPTION_008',
   'SUBSCRIPTION_009',
+  // SUBSCRIPTION_011 — the store's plan was retired from the catalog, so the
+  // renewal could not run. It is a 402 and blocks exactly like 008/009 (the
+  // backend `stateToMode()` keeps mode/severity identical and only swaps the
+  // reason), so it must open the paywall with the same force. What changes is
+  // the truth shown: this store owes nothing, and telling it "falta de pago"
+  // generates support tickets and destroys trust. The truthful code wins.
+  'SUBSCRIPTION_011',
   'PLAN_001',
   'TRIAL_001',
 ]);
 
 const DUNNING_ROUTE = '/admin/subscription/dunning';
 const PICKER_ROUTE = '/admin/subscription/picker';
+const PLANS_ROUTE = '/admin/subscription/plans';
 
 /**
  * Functional HTTP interceptor that listens for subscription / plan enforcement
@@ -87,6 +95,7 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
           // or the picker, which already display their own state UI).
           const onPickerPath = router.url.startsWith(PICKER_ROUTE);
           const onDunningPath = router.url === DUNNING_ROUTE;
+          const onPlansPath = router.url.startsWith(PLANS_ROUTE);
           const onSubscriptionTree = router.url.startsWith('/admin/subscription');
           // We still suppress the modal if the user is already deep in the
           // subscription tree on the matching destination page — the page
@@ -97,6 +106,10 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
               onPickerPath) ||
             ((code === 'SUBSCRIPTION_008' || code === 'SUBSCRIPTION_009') &&
               onDunningPath) ||
+            // SUBSCRIPTION_011 recovers on the plan catalog (there is no debt
+            // to settle on the dunning board), so its "already on the
+            // destination" page is the catalog / picker, not dunning.
+            (code === 'SUBSCRIPTION_011' && (onPlansPath || onPickerPath)) ||
             // The /admin/subscription page (my-subscription) opens its own
             // paywall modal via effect — let that flow win.
             (router.url === '/admin/subscription' && onSubscriptionTree);

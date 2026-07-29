@@ -19,6 +19,10 @@ export type PaywallCode =
   | 'SUBSCRIPTION_007'
   | 'SUBSCRIPTION_008'
   | 'SUBSCRIPTION_009'
+  // Plan retired from the catalog — the renewal could not run because the
+  // store's plan was archived. Blocks with the same weight as the code it
+  // replaces per state (008/009), but the store owes NOTHING.
+  | 'SUBSCRIPTION_011'
   | 'PLAN_001'
   | 'TRIAL_001'
   // Synthetic variants driven by the local subscription state (not by an
@@ -33,6 +37,44 @@ export type PaywallCode =
   | 'STATE_CANCELLED'
   | 'STATE_EXPIRED'
   | 'STATE_PAYMENT_SUCCEEDED';
+
+/**
+ * Mirror of the backend `store_subscriptions.lock_reason` value that means
+ * "we could not renew because this store's plan was retired from the catalog".
+ *
+ * REGLA DE NEGOCIO: a store locked for this reason does NOT owe money. Telling
+ * it "suspendida por falta de pago" charges it with a debt it does not have —
+ * that generates support tickets and destroys trust. The truthful code wins,
+ * so every payment-framed copy must be swapped for the retired-plan copy when
+ * this reason is present.
+ *
+ * Backend source of truth: `LOCK_REASON_PLAN_RETIRED` in
+ * `apps/backend/src/domains/store/subscriptions/services/subscription-state.service.ts`.
+ */
+export const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+/**
+ * States whose payment-framed `STATE_*` variant must be replaced by the
+ * truthful `SUBSCRIPTION_011` variant when `lock_reason` says the plan was
+ * retired. Mirrors 1:1 the states where the backend `stateToMode()` swaps
+ * 007/008/009 for 011 — no more, no less, so the retired-plan case is never
+ * more (nor less) restrictive than the code it replaces.
+ */
+const PLAN_RETIRED_OVERRIDABLE_STATES: ReadonlySet<string> = new Set([
+  'grace_soft',
+  'grace_hard',
+  'suspended',
+  'blocked',
+]);
+
+/**
+ * Machine-readable `lock_reason` tokens that must never be echoed verbatim in
+ * user copy. Their meaning is already carried by a dedicated variant, so
+ * appending "Motivo: <token>" would only leak an internal identifier.
+ */
+const MACHINE_LOCK_REASONS: ReadonlySet<string> = new Set([
+  LOCK_REASON_PLAN_RETIRED,
+]);
 
 /**
  * Subscription states that, when surfaced inside the panel (e.g. on entering
@@ -230,6 +272,31 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     iconName: 'pause-circle',
     badgeLabel: 'Acceso bloqueado',
     secondaryCtaLabel: 'Recordarme luego',
+  },
+  // ── SUBSCRIPTION_011 — plan retired from the catalog (no debt) ────────────
+  // Same blocking weight as the 008/009 variants above (severity 'critical'),
+  // because the backend keeps mode/severity identical and only swaps the
+  // reason. Everything else is deliberately different: the category is
+  // 'upgrade' (not 'payment-due'), the CTA goes to the plan catalog instead of
+  // the dunning board, and the copy never mentions a debt — this store owes
+  // nothing. Accusing it of unpaid balance generates support tickets and
+  // destroys trust; the truthful code wins.
+  SUBSCRIPTION_011: {
+    title: 'Tu plan fue retirado del catálogo',
+    description:
+      'El plan que usaba tu tienda salió del catálogo, así que no pudimos renovarlo. Elige un plan vigente y tu tienda vuelve a operar de inmediato, con todos tus datos intactos.',
+    ctaLabel: 'Elegir un plan vigente',
+    ctaRoute: '/admin/subscription/plans',
+    severity: 'critical',
+    category: 'upgrade',
+    iconName: 'archive',
+    badgeLabel: 'Plan retirado',
+    benefits: [
+      'Conservas tu catálogo, ventas e historial',
+      'Se activa en cuanto eliges el plan nuevo',
+      'Puedes cambiar de plan cuando quieras',
+    ],
+    secondaryCtaLabel: 'Cerrar',
   },
   TRIAL_001: {
     title: 'Tu trial ha terminado',
@@ -499,7 +566,12 @@ export class SubscriptionAccessService {
    */
   openPaywallForState(state: string | null | undefined, details?: PaywallDetails): void {
     if (!state) return;
-    const variantKey = STATE_PAYWALL_MAP[state];
+    // A retired plan must not be dressed up as a payment problem: the
+    // `STATE_SUSPENDED` / `STATE_BLOCKED` / `STATE_GRACE_*` copy all blame an
+    // unpaid invoice, and this store owes nothing. Same states the backend
+    // remaps, same blocking weight — only the stated reason changes.
+    const variantKey =
+      this.planRetiredVariantFor(state, details) ?? STATE_PAYWALL_MAP[state];
     if (!variantKey) return;
     if (this.isOpen()) return;
 
@@ -541,9 +613,30 @@ export class SubscriptionAccessService {
   }
 
   /**
+   * Resolve the truthful retired-plan variant for a state-driven paywall, or
+   * `null` when the lock has nothing to do with a retired plan (in which case
+   * the regular `STATE_PAYWALL_MAP` entry applies untouched).
+   */
+  private planRetiredVariantFor(
+    state: string,
+    details?: PaywallDetails,
+  ): PaywallCode | null {
+    const lock = (details?.lock_reason ?? '').toString().trim();
+    if (lock !== LOCK_REASON_PLAN_RETIRED) return null;
+    return PLAN_RETIRED_OVERRIDABLE_STATES.has(state)
+      ? 'SUBSCRIPTION_011'
+      : null;
+  }
+
+  /**
    * Inject runtime details (lock_reason, grace_period_end, plan_name) into
    * the variant copy so messages are concrete instead of generic. Returns a
    * new object — never mutates the catalog entry.
+   *
+   * Free-text lock reasons (super-admin lock workflows) are appended as
+   * "Motivo: …". Machine tokens are not: their meaning already lives in a
+   * dedicated variant, and echoing the raw identifier would show the merchant
+   * an internal string instead of an explanation.
    */
   private interpolateVariant(
     base: PaywallVariant,
@@ -551,7 +644,7 @@ export class SubscriptionAccessService {
   ): PaywallVariant {
     if (!details) return base;
     const lock = (details.lock_reason ?? '').toString().trim();
-    if (!lock) return base;
+    if (!lock || MACHINE_LOCK_REASONS.has(lock)) return base;
     return {
       ...base,
       description: `${base.description} Motivo: ${lock}.`,

@@ -586,26 +586,31 @@ export class OrgSubscriptionsController {
             pending_revert_state: null,
           },
         });
-        // Reactivate a degraded store on a free downgrade (proration.apply()
-        // never touches `state`). The coupon path reactivates via
-        // applyCoupon(), so only the no-coupon case transitions here. NOTE:
-        // unlike the store checkout, this org path has no Path D re-subscribe,
-        // so a `cancelled`/`expired` store committing a free plan is NOT
-        // reactivated here — `cancelled/expired -> active` is an illegal
-        // transition and must go through the store-side re-subscribe checkout.
-        if (
-          !couponCode &&
-          (previousState === 'grace_soft' ||
-            previousState === 'grace_hard' ||
-            previousState === 'suspended' ||
-            previousState === 'blocked')
-        ) {
-          await this.stateService.transition(storeId, 'active', {
-            reason: 'free_plan_reactivation',
-            triggeredByUserId: context?.user_id ?? undefined,
-            payload: { previous_state: previousState, plan_id: dto.planId },
-          });
-        }
+        // Reactivate a degraded store on a free downgrade: proration.apply()
+        // swaps the plan but never touches `state`, so the reactivation is
+        // this branch's job.
+        //
+        // Called UNCONDITIONALLY through the single reactivation seam, exactly
+        // like the store-side checkout commit. The old guard listed the four
+        // degraded states by hand and skipped the call whenever a coupon was
+        // present, delegating the unblock to safeApplyCoupon() — which
+        // swallows its errors: a coupon that failed to apply returned HTTP 200
+        // on a store that was still suspended. Worse, this org path has no
+        // Path D re-subscribe, so `cancelled`/`expired` never matched the list
+        // and a successful free-plan commit left the store terminal.
+        //
+        // `ensureOperational` owns the policy: it resolves the legal route
+        // (two hops via `pending_payment` for the terminal states), no-ops on
+        // active/trial so the coupon path reaching it again is free, voids the
+        // stale dunning/cancellation columns, and re-reads the row before
+        // returning — it throws rather than let this endpoint answer 200 on a
+        // store that stayed degraded.
+        await this.stateService.ensureOperational(storeId, {
+          reason: 'free_plan_reactivation',
+          triggeredByUserId: context?.user_id ?? undefined,
+          planId: dto.planId,
+          payload: { previous_state: previousState, plan_id: dto.planId },
+        });
         if (couponCode) {
           await this.safeApplyCoupon(
             storeId,

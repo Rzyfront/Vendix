@@ -32,28 +32,6 @@ import { SubscriptionResolverService } from './subscription-resolver.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { isLegacyInlineTokenAllowed } from '../../payments/config/wompi-rollout.config';
 
-/**
- * States from which a successful payment should synchronously promote the
- * subscription to `active` inside the same transaction that flips the
- * payment row to `succeeded`. This eliminates the
- * "payment succeeded but subscription still pending_payment" drift that
- * happens when the post-commit listener (`SubscriptionStateListener`) is
- * delayed, fails, or is silently dropped.
- *
- * Recovery states (grace_soft, grace_hard, suspended, blocked) are included
- * here because the cron / event-driven listener already promote them — doing
- * it synchronously here is a strict superset and safe (the listener becomes
- * a no-op when the sub is already active, see same-state guard in
- * transitionInTx).
- */
-const PROMOTABLE_ON_PAYMENT_SUCCESS = [
-  'pending_payment',
-  'grace_soft',
-  'grace_hard',
-  'suspended',
-  'blocked',
-] as const;
-
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -66,6 +44,37 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * hard-coding a magic number.
  */
 export const MAX_CONSECUTIVE_FAILURES = 3;
+
+/**
+ * Marker stamped on an error raised AFTER the gateway already APPROVED the
+ * charge — today only "the store could not be left operational".
+ *
+ * It exists so `charge()` cannot mistake it for a gateway rejection. That catch
+ * funnels everything into `handleChargeFailure()`, which would flip a payment
+ * the customer really made to `failed` and bump the card's failure counter
+ * toward dunning. The money is captured: the correct answer is to surface the
+ * error, never to rewrite history as a decline.
+ */
+const POST_APPROVAL_FAILURE = Symbol('vendix.subscription.postApprovalFailure');
+
+function markPostApprovalFailure<T>(err: T): T {
+  if (err && typeof err === 'object') {
+    (err as unknown as Record<symbol, unknown>)[POST_APPROVAL_FAILURE] = true;
+  }
+  return err;
+}
+
+/**
+ * True when the error was raised after the gateway approved the charge.
+ * Exported for the specs — the distinction is behavioural, not cosmetic.
+ */
+export function isPostApprovalFailure(err: unknown): boolean {
+  return !!(
+    err &&
+    typeof err === 'object' &&
+    (err as unknown as Record<symbol, unknown>)[POST_APPROVAL_FAILURE] === true
+  );
+}
 
 export interface SaasWompiWidgetConfig {
   public_key: string;
@@ -1097,6 +1106,14 @@ export class SubscriptionPaymentService {
         result.message ?? 'Charge failed',
       );
     } catch (err) {
+      // The gateway APPROVED and the bookkeeping AFTER it failed (state
+      // promotion). This is not a decline: filing it as one would flip a
+      // payment the customer really made to `failed`, mark the paid invoice
+      // overdue and bump the card toward dunning. Propagate it untouched so the
+      // caller gets a 5xx instead of a false success.
+      if (isPostApprovalFailure(err)) {
+        throw err;
+      }
       if (reusablePm) {
         await this.bumpPaymentMethodFailure(
           reusablePm.id,
@@ -1285,6 +1302,13 @@ export class SubscriptionPaymentService {
               `WOMPI_FAILOVER_FAILED subscriptionId=${subscriptionId} invoiceId=${invoiceId} fallbackPmId=${fallbackPmId} message=${retryResult.message ?? 'unknown'}`,
             );
           } catch (e: any) {
+            // Same rule as `charge()`: the failover charge was APPROVED and only
+            // the post-approval promotion failed. Do not fall through to
+            // handleChargeFailure — that would record a decline for money the
+            // customer already paid.
+            if (isPostApprovalFailure(e)) {
+              throw e;
+            }
             this.logger.warn(
               `WOMPI_FAILOVER_THREW subscriptionId=${subscriptionId} invoiceId=${invoiceId} fallbackPmId=${fallbackPmId} error=${e?.message ?? e}`,
             );
@@ -1678,6 +1702,11 @@ export class SubscriptionPaymentService {
     gatewayResponse?: any,
     externalTx?: Prisma.TransactionClient,
   ): Promise<subscription_payments> {
+    // Set when the state promotion failed on a self-owned transaction: the
+    // money rows commit (they are true) and this is rethrown after the
+    // post-commit side effects, so no caller sees a clean success.
+    let promotionFailure: unknown = null;
+
     // If an external transaction is provided (e.g. from the atomic webhook
     // dedup flow), execute writes directly inside it — no nested $transaction.
     // Otherwise open a new transaction (charge() / handleZeroInvoice paths).
@@ -1756,13 +1785,12 @@ export class SubscriptionPaymentService {
       // change). confirmPendingChange() handles plan promotion, period reset,
       // state transition and cache invalidation atomically.
       //
-      // When invoice.to_plan_id is null, this is the legacy flow (renewal of
-      // existing plan, grace reactivation). The original promotion logic runs.
+      // When invoice.to_plan_id is null, this is the renewal / reactivation
+      // flow: no plan changes hands, the collection simply has to leave the
+      // store operational.
       //
-      // Errors are logged and swallowed (not propagated): the payment is
-      // already confirmed by the gateway; we must not roll back to "pending"
-      // because of a state-transition issue. The reconciliation cron picks
-      // up any drift left by this best-effort path.
+      // BOTH branches end in `ensureOperationalInTx`, and a failure there is
+      // NOT swallowed any more — see the catch below.
       if (invoice.store_id) {
         try {
           if (invoice.to_plan_id != null) {
@@ -1778,124 +1806,91 @@ export class SubscriptionPaymentService {
               tx,
             );
           } else {
-            // ── Legacy flow (renewal / grace reactivation) ───────────────
-            const subRow = await tx.store_subscriptions.findUnique({
-              where: { id: invoice.store_subscription_id },
-              select: {
-                state: true,
-                current_period_end: true,
-                plan: { select: { billing_cycle: true } },
-              },
-            });
-            const currentState = subRow?.state as string | undefined;
-            if (
-              currentState &&
-              PROMOTABLE_ON_PAYMENT_SUCCESS.includes(
-                currentState as (typeof PROMOTABLE_ON_PAYMENT_SUCCESS)[number],
-              )
-            ) {
-              // RNC-22 — Reactivation from grace/suspended discounts the days
-              // already consumed in grace. Only applies when the previous
-              // billing period actually ended before the payment landed
-              // (current_period_end < paid_at). Pure new-cycle states
-              // (pending_payment, draft, expired, no_plan, cancelled) get a
-              // clean cycle per RNC-21 and never enter this branch.
-              const isGraceReactivation =
-                currentState === 'grace_soft' ||
-                currentState === 'grace_hard' ||
-                currentState === 'suspended';
-
-              if (
-                isGraceReactivation &&
-                subRow?.current_period_end &&
-                subRow.plan?.billing_cycle
-              ) {
-                const previousPeriodEnd = new Date(subRow.current_period_end);
-                if (previousPeriodEnd.getTime() < now.getTime()) {
-                  const cycleMs = this.billingCycleMs(
-                    subRow.plan.billing_cycle,
-                  );
-                  const cycleDays = Math.max(1, Math.round(cycleMs / DAY_MS));
-                  // Days fully consumed in grace, clamped to [0, cycleDays].
-                  const daysInGraceRaw = Math.floor(
-                    (now.getTime() - previousPeriodEnd.getTime()) / DAY_MS,
-                  );
-                  const daysInGrace = Math.max(
-                    0,
-                    Math.min(cycleDays, daysInGraceRaw),
-                  );
-
-                  // New period: paid_at + (cycle - days_in_grace).
-                  const effectiveDaysGranted = cycleDays - daysInGrace;
-                  const newPeriodEnd = new Date(
-                    now.getTime() + effectiveDaysGranted * DAY_MS,
-                  );
-
-                  await tx.store_subscriptions.update({
-                    where: { id: invoice.store_subscription_id },
-                    data: {
-                      current_period_start: now,
-                      current_period_end: newPeriodEnd,
-                      next_billing_at: newPeriodEnd,
-                      grace_soft_until: null,
-                      grace_hard_until: null,
-                      suspend_at: null,
-                      updated_at: now,
-                    },
-                  });
-
-                  await tx.subscription_events.create({
-                    data: {
-                      store_subscription_id: invoice.store_subscription_id,
-                      type: 'state_transition',
-                      payload: {
-                        reason: 'reactivation_with_grace_discount',
-                        previous_state: currentState,
-                        payment_id: paymentId,
-                        invoice_id: invoiceId,
-                        days_in_grace: daysInGrace,
-                        cycle_days: cycleDays,
-                        original_period_end: previousPeriodEnd.toISOString(),
-                        new_period_end: newPeriodEnd.toISOString(),
-                        paid_at: now.toISOString(),
-                      } as Prisma.InputJsonValue,
-                      triggered_by_job: 'subscription-payment-service',
-                    },
-                  });
-
-                  this.logger.log(
-                    `RNC-22 grace-discount applied sub=${invoice.store_subscription_id} ` +
-                      `previous_state=${currentState} days_in_grace=${daysInGrace} ` +
-                      `original_period_end=${previousPeriodEnd.toISOString()} ` +
-                      `new_period_end=${newPeriodEnd.toISOString()}`,
-                  );
-                }
-              }
-
-              await this.stateService.transitionInTx(
-                tx,
-                invoice.store_id,
-                'active',
-                {
-                  reason: `payment_${paymentId}_approved`,
-                  triggeredByJob: 'webhook',
-                  payload: {
-                    invoice_id: invoiceId,
-                    payment_id: paymentId,
-                    previous_state: currentState,
-                    source: 'handle_charge_success_sync',
-                  },
+            // ── Renewal / reactivation flow (no plan change) ──────────────
+            //
+            // This was the LAST hand-rolled copy of the reactivation policy.
+            // It gated the promotion on a local `PROMOTABLE_ON_PAYMENT_SUCCESS`
+            // list which — like every other deleted copy — left out
+            // `cancelled` / `expired`: a renewal payment collected against a
+            // cancelled store promoted NOTHING, the invoice was marked paid,
+            // and the store stayed terminal behind an HTTP 200. It also
+            // recomputed the consumed-grace discount by hand (RNC-22), a
+            // second implementation of arithmetic the seam already owns, which
+            // is exactly how the two sites drift.
+            //
+            // `ensureOperationalInTx` replaces both: it resolves the legal
+            // route from wherever the row actually sits (two hops via
+            // `pending_payment` for the terminal states), no-ops on
+            // active/trial so nothing is re-transitioned and no free time is
+            // granted, discounts the grace days consumed past a lapsed
+            // `current_period_end`, clears the stale dunning/cancellation
+            // columns, and re-reads the row before returning.
+            //
+            // No state test belongs here any more: which states can reach
+            // `active`, and how, is the seam's policy alone. `tx` is the
+            // caller's transaction — the promotion must be atomic with the
+            // payment/invoice rows, and `ensureOperational` (non-InTx) would
+            // open a second transaction that deadlocks against the
+            // `FOR UPDATE` lock this one already holds. The plan cycle and the
+            // previous state are read from the locked row by the seam, so they
+            // are deliberately not passed in.
+            await this.stateService.ensureOperationalInTx(
+              tx,
+              invoice.store_id,
+              {
+                reason: `payment_${paymentId}_approved`,
+                triggeredByJob: 'webhook',
+                payload: {
+                  invoice_id: invoiceId,
+                  payment_id: paymentId,
+                  source: 'handle_charge_success_sync',
                 },
-              );
-            }
+              },
+            );
           }
         } catch (txStateErr: any) {
-          // The payment is approved by the gateway; never propagate a
-          // state-transition error from here. Log warn so ops can see drift
-          // and the reconciliation cron will clean up.
-          this.logger.warn(
-            `Synchronous state promotion failed for invoice ${invoiceId} (paymentId=${paymentId}): ${txStateErr?.message ?? txStateErr}`,
+          // NOT swallowed any more. This used to log a warning and let the flow
+          // return a clean success: payment committed as `succeeded`, invoice as
+          // `paid`, store still degraded. That silence is the failure mode the
+          // reactivation seam exists to remove and the one that buried both
+          // production incidents — a 200 the customer only discovers while
+          // trying to operate.
+          //
+          // Severity is `error`, with a greppable tag: this is an invariant
+          // break (the seam only throws when no legal route exists or its exit
+          // guard re-read a degraded row), not routine noise.
+          this.logger.error(
+            `PAYMENT_STATE_PROMOTION_FAILED invoice=${invoiceId} payment=${paymentId} ` +
+              `store=${invoice.store_id} subscription=${invoice.store_subscription_id} ` +
+              `tx_owner=${externalTx ? 'caller' : 'self'}: ` +
+              `${txStateErr?.message ?? txStateErr}`,
+            txStateErr?.stack,
           );
+
+          markPostApprovalFailure(txStateErr);
+
+          // WHO OWNS THE TRANSACTION decides what "not silent" costs here.
+          //
+          // Caller-owned tx (webhook): rethrow now. It aborts the caller's
+          // transaction, so the payment/invoice rows roll back together with
+          // the failed promotion, the webhook answers non-2xx and Wompi
+          // REDELIVERS the same transaction — one capture, retried end to end,
+          // promotion included. Rolling back is strictly better there.
+          if (externalTx) {
+            throw txStateErr;
+          }
+
+          // Self-owned tx (inline charge / zero invoice): nobody will redeliver.
+          // Rolling back would leave the invoice unpaid with the money already
+          // captured, and the renewal retry queue would then charge the card a
+          // SECOND time (`charge()` only refuses an invoice that is already
+          // `paid`). So the money rows — which are TRUE, we were paid — commit,
+          // and the error is rethrown after the post-commit side effects so the
+          // caller still cannot report success. The retry queue then short-
+          // circuits on the paid invoice, and the listener's own
+          // `ensureOperational` (fed by the emit below) gets a second chance at
+          // the promotion.
+          promotionFailure = txStateErr;
         }
       }
 
@@ -2008,6 +2003,13 @@ export class SubscriptionPaymentService {
           `subscription.payment.succeeded emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
         );
       }
+    }
+
+    // The collection is recorded, the side effects fired — and the store is NOT
+    // operational. Fail the call: a caller that got a `subscription_payments`
+    // row back would answer 200 to a customer whose store is still locked.
+    if (promotionFailure) {
+      throw promotionFailure;
     }
 
     return result;
