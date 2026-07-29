@@ -12,6 +12,7 @@ export enum PricingType {
 export enum ProductType {
   PHYSICAL = 'physical',
   SERVICE = 'service',
+  PREPARED = 'prepared',
 }
 
 export enum ServiceModality {

@@ -162,6 +162,39 @@ export class ProductsController {
     }
   }
 
+  /**
+   * GET /api/store/products/ids
+   *
+   * Materializa sólo los ids que satisfacen los mismos filtros del listado,
+   * para habilitar "seleccionar todos los resultados del filtro" en la edición
+   * masiva (QUI-567) sin traer productos completos.
+   *
+   * `total` es el conteo real sin tope y `capped` avisa cuando el conjunto real
+   * excede `MAX_PRODUCT_IDS`, para que la UI lo diga en voz alta en lugar de
+   * truncar en silencio.
+   *
+   * IMPORTANTE: debe declararse ANTES de `@Get(':id')` — Nest resuelve por
+   * orden de declaración y `:id` capturaría `ids` como parámetro, haciendo
+   * fallar el `ParseIntPipe` con un 400.
+   */
+  @Get('ids')
+  @Permissions('store:products:read')
+  async findIds(@Query() query: ProductQueryDto) {
+    try {
+      const result = await this.productsService.findIds(query);
+      return this.responseService.success(
+        result,
+        'IDs de productos obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener los IDs de productos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Get(':id')
   @Permissions('store:products:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
