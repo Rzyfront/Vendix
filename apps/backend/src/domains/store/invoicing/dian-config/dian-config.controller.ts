@@ -68,6 +68,19 @@ export class DianConfigController {
     );
   }
 
+  /**
+   * Whether this store is actually issuing electronic invoices right now.
+   * Declared BEFORE `@Get(':id')` on purpose: Nest matches in declaration order,
+   * so the param route would otherwise swallow this path and ParseIntPipe would
+   * reject it with a 400.
+   */
+  @Get('emission-status')
+  @Permissions('invoicing:read')
+  async getEmissionStatus() {
+    const result = await this.dian_config_service.getEmissionStatus();
+    return this.response_service.success(result);
+  }
+
   @Get(':id')
   @Permissions('invoicing:read')
   async getConfigById(@Param('id', ParseIntPipe) id: number) {
