@@ -97,6 +97,9 @@ export class InvoicingService {
    * Usa el MISMO criterio (ACTIVE || LOCKED, vía FiscalGateService.isAreaEnabled)
    * y el MISMO error que InvoiceFlowService.assertInvoicingAreaActive
    * (invoice-flow.service.ts) para no divergir del gate de send/accept.
+   *
+   * Encima de eso aplica `assertElectronicEmissionLive`: el área activa no basta
+   * cuando el tenant ya configuró FE y su habilitación sigue en trámite.
    */
   private async assertInvoicingAreaActive(context: {
     organization_id?: number;
@@ -110,6 +113,65 @@ export class InvoicingService {
     if (!enabled) {
       throw new ForbiddenException(
         'Fiscal area "invoicing" is inactive for this tenant',
+      );
+    }
+
+    await this.assertElectronicEmissionLive(context);
+  }
+
+  /**
+   * Segunda compuerta: si el tenant SÍ configuró facturación electrónica, crear
+   * facturas exige que la habilitación esté viva (producción + enabled).
+   *
+   * `fiscal_status.invoicing` sólo afirma que el área fiscal está activa, y se
+   * pone ACTIVE al terminar el wizard fiscal. Una tienda en set de pruebas la
+   * pasaba y creaba facturas que consumen numeración: InvoiceNumberGenerator
+   * elige la resolución por `accounting_entity_id` + `document_type` con
+   * `is_active`, sin distinguir ambiente, así que los números que gastara un
+   * trámite salían del rango que la tienda usará en producción, y la DIAN
+   * rechaza numeración duplicada o con huecos que no puede explicar.
+   *
+   * NO se exige a quien no tiene configuración DIAN: la facturación de Vendix
+   * también emite documentos para comercios sin habilitación, y bloquearlos
+   * convertiría una compuerta en una pérdida de función. El criterio es "si
+   * configuraste FE, no emites hasta estar habilitado".
+   *
+   * El set de pruebas no pasa por aquí: DianTestService reserva su bloque
+   * directamente sobre `invoice_resolutions`, sin crear facturas.
+   */
+  private async assertElectronicEmissionLive(context: {
+    organization_id?: number;
+    store_id?: number;
+  }): Promise<void> {
+    const organization_id = Number(context.organization_id);
+    if (!Number.isFinite(organization_id)) return;
+
+    const scope = await this.fiscalScope.requireFiscalScope(organization_id);
+
+    // Same resolution as DianConfigService.getEmissionStatus: the habilitación
+    // belongs to the scope that owns the NIT.
+    const config = await this.prisma
+      .withoutScope()
+      .dian_configurations.findFirst({
+        where: {
+          ...(scope === 'ORGANIZATION'
+            ? { organization_id, store_id: null }
+            : { store_id: context.store_id }),
+          configuration_type: 'invoicing',
+        },
+        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+        select: { environment: true, enablement_status: true },
+      });
+
+    if (!config) return;
+
+    const is_live =
+      config.environment === 'production' &&
+      config.enablement_status === 'enabled';
+
+    if (!is_live) {
+      throw new ForbiddenException(
+        'La facturación electrónica de esta tienda aún no está habilitada en producción ante la DIAN, así que no puede emitir facturas que consuman la numeración de la resolución. Completa el set de pruebas y activa producción.',
       );
     }
   }
