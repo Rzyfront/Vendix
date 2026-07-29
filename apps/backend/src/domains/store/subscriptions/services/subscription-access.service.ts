@@ -52,6 +52,22 @@ type Mode = 'allow' | 'warn' | 'block';
 type Severity = 'info' | 'warning' | 'critical' | 'blocker';
 
 /**
+ * `store_subscriptions.lock_reason` stamped by the renewal job
+ * (`subscription-renewal-billing.job.ts`) when the subscription's plan was
+ * archived and therefore could not be renewed. The store does NOT owe money:
+ * the plan it was on simply stopped existing (e.g. the free plan was retired).
+ */
+const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+/**
+ * States in which `lock_reason` can carry the real cause of the lock. Any other
+ * state short-circuits the lookup so the happy path never pays for it.
+ */
+const LOCK_REASON_STATES: ReadonlySet<store_subscription_state_enum> = new Set<
+  store_subscription_state_enum
+>(['grace_soft', 'grace_hard', 'suspended', 'blocked']);
+
+/**
  * Central AI gate for the SaaS subscription system.
  *
  * Semantics:
@@ -138,9 +154,11 @@ export class SubscriptionAccessService {
       };
     }
 
+    const lockReason = await this.readLockReason(storeId, resolved.state);
     const stateMode = this.stateToMode(
       resolved.state,
       resolved.features[feature],
+      lockReason,
     );
     if (stateMode.mode === 'block') {
       return {
@@ -234,7 +252,8 @@ export class SubscriptionAccessService {
       };
     }
 
-    const stateMode = this.stateToMode(resolved.state, undefined);
+    const lockReason = await this.readLockReason(storeId, resolved.state);
+    const stateMode = this.stateToMode(resolved.state, undefined, lockReason);
     const inGrace =
       resolved.state === 'grace_soft' || resolved.state === 'grace_hard';
     const mode =
@@ -476,7 +495,9 @@ export class SubscriptionAccessService {
       for (const key of AI_FEATURE_KEYS) {
         const cfg = resolved.features[key];
         if (!cfg || cfg.enabled === false) continue;
-        const mode = this.stateToMode(state, cfg);
+        // `sub` is the full subscription row, so the truthful lock reason is
+        // already in hand — no extra lookup needed here.
+        const mode = this.stateToMode(state, cfg, sub.lock_reason);
         if (mode.mode === 'block') {
           features_lost.push(key);
         } else {
@@ -596,11 +617,24 @@ export class SubscriptionAccessService {
   /**
    * Map subscription state to base gate mode. Feature-level degradation is
    * considered for grace_hard.
+   *
+   * `lockReason` is the raw `store_subscriptions.lock_reason`. The real cause of
+   * the lock was already recorded there, but this mapping used to discard it and
+   * derive the reason from the state alone — so a store whose plan was retired
+   * at renewal (owing nothing) was told "suspendida por falta de pago".
+   * Charging someone with a debt they don't have is false information: it
+   * generates support tickets and destroys trust. The truthful code wins.
+   *
+   * Only the `reason` changes: `mode` and `severity` per state stay exactly as
+   * before, so the retired-plan case is not more (nor less) restrictive.
    */
   private stateToMode(
     state: store_subscription_state_enum,
     feature: FeatureConfig | undefined,
+    lockReason?: string | null,
   ): { mode: Mode; severity: Severity; reason?: string } {
+    const planRetired = lockReason === LOCK_REASON_PLAN_RETIRED;
+
     switch (state) {
       case 'active':
       case 'trial':
@@ -609,7 +643,7 @@ export class SubscriptionAccessService {
         return {
           mode: 'warn',
           severity: 'warning',
-          reason: 'SUBSCRIPTION_007',
+          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
         };
       case 'grace_hard': {
         // Degradation per feature. Default = warn.
@@ -618,26 +652,26 @@ export class SubscriptionAccessService {
           return {
             mode: 'block',
             severity: 'critical',
-            reason: 'SUBSCRIPTION_009',
+            reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_009',
           };
         }
         return {
           mode: 'warn',
           severity: 'critical',
-          reason: 'SUBSCRIPTION_007',
+          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_007',
         };
       }
       case 'suspended':
         return {
           mode: 'block',
           severity: 'critical',
-          reason: 'SUBSCRIPTION_008',
+          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_008',
         };
       case 'blocked':
         return {
           mode: 'block',
           severity: 'blocker',
-          reason: 'SUBSCRIPTION_009',
+          reason: planRetired ? 'SUBSCRIPTION_011' : 'SUBSCRIPTION_009',
         };
       case 'cancelled':
         return {
@@ -664,6 +698,39 @@ export class SubscriptionAccessService {
           severity: 'blocker',
           reason: 'SUBSCRIPTION_002',
         };
+    }
+  }
+
+  /**
+   * Reads the truthful `store_subscriptions.lock_reason` so `stateToMode()` can
+   * name the real cause of the lock instead of assuming unpaid balance.
+   *
+   * The resolver cache (`ResolvedSubscription`) does not carry `lock_reason`
+   * today, so we read the single column here. Cost control:
+   *   - Only queried for `LOCK_REASON_STATES`; `active`/`trial` — the hot path
+   *     for `StoreOperationsGuard` on every store write — never touch the DB.
+   *   - Failures degrade to `null`, which reproduces the previous state-only
+   *     reason. Losing message precision is acceptable; failing the gate for
+   *     every write because of a lookup hiccup is not.
+   */
+  private async readLockReason(
+    storeId: number,
+    state: store_subscription_state_enum,
+  ): Promise<string | null> {
+    if (!LOCK_REASON_STATES.has(state)) return null;
+    if (!Number.isInteger(storeId) || storeId <= 0) return null;
+
+    try {
+      const row = await this.prisma.store_subscriptions.findUnique({
+        where: { store_id: storeId },
+        select: { lock_reason: true },
+      });
+      return row?.lock_reason ?? null;
+    } catch (err) {
+      this.logger.debug(
+        `lock_reason lookup failed for store=${storeId} state=${state}: ${(err as Error).message}`,
+      );
+      return null;
     }
   }
 

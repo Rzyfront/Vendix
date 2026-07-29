@@ -17,6 +17,7 @@ describe('SubscriptionStateService', () => {
       store_subscriptions: {
         findUnique: jest.fn(),
         findUniqueOrThrow: jest.fn(),
+        findFirst: jest.fn(),
         update: jest.fn(),
       },
       subscription_events: {
@@ -27,6 +28,9 @@ describe('SubscriptionStateService', () => {
       },
       subscription_payments: {
         findFirst: jest.fn(),
+      },
+      subscription_plans: {
+        findUnique: jest.fn(),
       },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
       $queryRaw: jest.fn(),
@@ -378,6 +382,382 @@ describe('SubscriptionStateService', () => {
       const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
       expect(evtArg.data.to_state).toBe('cancelled');
       expect(evtArg.data.triggered_by_job).toBe('subscription-state-engine');
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // ensureOperational — the single reactivation seam
+  // ----------------------------------------------------------------------
+
+  describe('ensureOperational', () => {
+    const SUB_ID = 100;
+    const STORE_ID = 10;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    /**
+     * Primes `$queryRaw` for the seam's lock read + one read per expected hop,
+     * plus the exit-guard `findFirst`.
+     *
+     * The route is declared by the TEST, so a SUT that walks a different route
+     * desynchronises the `$queryRaw` sequence and fails (either an illegal
+     * transition or an exhausted mock) on top of the explicit `path` assertion.
+     */
+    function primeRoute(opts: {
+      from: string;
+      hops: string[];
+      planId?: number | null;
+      currentPeriodEnd?: Date | null;
+      scheduledCancelAt?: Date | null;
+      /** State the exit guard re-reads. Defaults to the last hop. */
+      finalState?: string;
+    }) {
+      prismaMock.$queryRaw.mockReset();
+
+      // 1. Seam lock read (includes the period columns).
+      prismaMock.$queryRaw.mockResolvedValueOnce([
+        {
+          id: SUB_ID,
+          state: opts.from,
+          plan_id: opts.planId ?? null,
+          current_period_end: opts.currentPeriodEnd ?? null,
+          scheduled_cancel_at: opts.scheduledCancelAt ?? null,
+        },
+      ]);
+
+      // 2. One FOR UPDATE read per hop, reflecting the state before it.
+      let cursor = opts.from;
+      for (const hop of opts.hops) {
+        prismaMock.$queryRaw.mockResolvedValueOnce([
+          { id: SUB_ID, state: cursor },
+        ]);
+        cursor = hop;
+      }
+
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: SUB_ID,
+        state: cursor,
+      });
+
+      prismaMock.store_subscriptions.findFirst.mockResolvedValue({
+        state: opts.finalState ?? cursor,
+        current_period_end: null,
+        scheduled_cancel_at: null,
+      });
+    }
+
+    /** Last `store_subscriptions.update` = the reactivation-window write. */
+    function lastUpdateData() {
+      const calls = prismaMock.store_subscriptions.update.mock.calls;
+      return calls[calls.length - 1][0].data;
+    }
+
+    it('rejects invalid storeId', async () => {
+      await expect(
+        service.ensureOperational(0, { reason: 'bad' }),
+      ).rejects.toBeDefined();
+    });
+
+    it('throws when the store has no subscription row', async () => {
+      prismaMock.$queryRaw.mockReset();
+      prismaMock.$queryRaw.mockResolvedValueOnce([]);
+
+      await expect(
+        service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' }),
+      ).rejects.toBeDefined();
+      expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
+    });
+
+    // ---- Idempotence: already operational -------------------------------
+
+    it.each(['active', 'trial'])(
+      'is an idempotent NO-OP when already %s (no writes, no free period)',
+      async (state) => {
+        primeRoute({ from: state, hops: [] });
+
+        const result = await service.ensureOperational(STORE_ID, {
+          reason: 'duplicate_webhook',
+        });
+
+        expect(result.finalState).toBe(state);
+        expect(result.path).toEqual([]);
+        // No state write, no audit row, and crucially NO period extension:
+        // an already-paid window must not be gifted a fresh cycle.
+        expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
+        expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+        expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+        expect(accessServiceMock.invalidateCache).not.toHaveBeenCalled();
+      },
+    );
+
+    // ---- One entry route per degraded state -----------------------------
+
+    it.each([
+      'grace_soft',
+      'grace_hard',
+      'suspended',
+      'blocked',
+      'no_plan',
+      'draft',
+      'pending_payment',
+    ])('recovers %s with a single direct hop to active', async (from) => {
+      primeRoute({ from, hops: ['active'] });
+
+      const result = await service.ensureOperational(STORE_ID, {
+        reason: 'payment_confirmed',
+      });
+
+      expect(result.finalState).toBe('active');
+      expect(result.path).toEqual(['active']);
+    });
+
+    it.each(['cancelled', 'expired'])(
+      'recovers %s by WALKING through pending_payment (terminality preserved)',
+      async (from) => {
+        primeRoute({ from, hops: ['pending_payment', 'active'] });
+
+        const result = await service.ensureOperational(STORE_ID, {
+          reason: 're_subscribe_paid',
+        });
+
+        expect(result.finalState).toBe('active');
+        // Two hops: `active` is NOT in TRANSITIONS[cancelled|expired], so the
+        // legal path is walked instead of the table being widened.
+        expect(result.path).toEqual(['pending_payment', 'active']);
+      },
+    );
+
+    it('writes one audit row per hop for the two-hop route', async () => {
+      primeRoute({ from: 'cancelled', hops: ['pending_payment', 'active'] });
+
+      await service.ensureOperational(STORE_ID, { reason: 're_subscribe_paid' });
+
+      const events = prismaMock.subscription_events.create.mock.calls.map(
+        (c: any[]) => c[0].data,
+      );
+      expect(events).toHaveLength(2);
+      expect(events[0].from_state).toBe('cancelled');
+      expect(events[0].to_state).toBe('pending_payment');
+      expect(events[1].from_state).toBe('pending_payment');
+      expect(events[1].to_state).toBe('active');
+      // Path is diagnosable from the audit payload.
+      expect(events[0].payload.ensure_operational).toBe(true);
+      expect(events[0].payload.ensure_operational_route).toEqual([
+        'pending_payment',
+        'active',
+      ]);
+      expect(events[0].payload.ensure_operational_hop).toBe(1);
+      expect(events[1].payload.ensure_operational_hop).toBe(2);
+    });
+
+    // ---- Exit guard ------------------------------------------------------
+
+    it('throws instead of reporting success when the path leaves the store degraded', async () => {
+      // SIMULATED transition failure: the hop is a no-op, so the store stays
+      // suspended even though the route "completed".
+      primeRoute({
+        from: 'suspended',
+        hops: ['active'],
+        finalState: 'suspended',
+      });
+      jest
+        .spyOn(service, 'transitionInTx')
+        .mockResolvedValue({ id: SUB_ID, state: 'suspended' } as any);
+
+      await expect(
+        service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' }),
+      ).rejects.toMatchObject({
+        // Server invariant broke; the client did nothing wrong.
+        errorCode: 'SUBSCRIPTION_INTERNAL_ERROR',
+      });
+
+      // A failed reactivation must not look like a success to listeners.
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('throws when the exit guard finds no row at all', async () => {
+      primeRoute({ from: 'suspended', hops: ['active'] });
+      prismaMock.store_subscriptions.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' }),
+      ).rejects.toBeDefined();
+    });
+
+    // ---- Grace discount + scheduled-cancel cleanup -----------------------
+
+    it('discounts consumed grace days: 5 days past due on an annual plan → now + 360d', async () => {
+      const originalPeriodEnd = new Date(Date.now() - 5 * DAY_MS);
+      primeRoute({
+        from: 'grace_hard',
+        hops: ['active'],
+        planId: 7,
+        currentPeriodEnd: originalPeriodEnd,
+        scheduledCancelAt: new Date(Date.now() + 10 * DAY_MS),
+      });
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        billing_cycle: 'annual',
+      });
+
+      const before = Date.now();
+      await service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' });
+      const after = Date.now();
+
+      const data = lastUpdateData();
+      const expectedMin = before + 360 * DAY_MS;
+      const expectedMax = after + 360 * DAY_MS;
+
+      // 365 (annual) - 5 (consumed operating during grace) = 360.
+      expect(data.current_period_end.getTime()).toBeGreaterThanOrEqual(
+        expectedMin,
+      );
+      expect(data.current_period_end.getTime()).toBeLessThanOrEqual(expectedMax);
+      expect(data.next_billing_at.getTime()).toBe(
+        data.current_period_end.getTime(),
+      );
+
+      // A reactivation voids any scheduled cancellation: no cron may cancel
+      // what the customer just paid for.
+      expect(data.scheduled_cancel_at).toBeNull();
+      expect(data.auto_renew).toBe(true);
+      // Stale dunning deadlines must not survive either.
+      expect(data.suspend_at).toBeNull();
+      expect(data.cancel_at).toBeNull();
+      // The seam never touches plan ownership (ADR-7).
+      expect(data.plan_id).toBeUndefined();
+      expect(data.paid_plan_id).toBeUndefined();
+    });
+
+    it('applies the discount on top of an explicit ctx.periodEnd', async () => {
+      const originalPeriodEnd = new Date(Date.now() - 5 * DAY_MS);
+      const requested = new Date(Date.now() + 30 * DAY_MS);
+      primeRoute({
+        from: 'grace_soft',
+        hops: ['active'],
+        planId: 7,
+        currentPeriodEnd: originalPeriodEnd,
+      });
+
+      await service.ensureOperational(STORE_ID, {
+        reason: 'manual_payment',
+        periodEnd: requested,
+      });
+
+      const data = lastUpdateData();
+      expect(data.current_period_end.getTime()).toBe(
+        requested.getTime() - 5 * DAY_MS,
+      );
+      // An explicit base needs no plan lookup.
+      expect(prismaMock.subscription_plans.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('leaves an unexpired period untouched (no free cycle on mid-period unblock)', async () => {
+      const originalPeriodEnd = new Date(Date.now() + 20 * DAY_MS);
+      primeRoute({
+        from: 'blocked',
+        hops: ['active'],
+        planId: 7,
+        currentPeriodEnd: originalPeriodEnd,
+      });
+
+      await service.ensureOperational(STORE_ID, { reason: 'admin_unblock' });
+
+      const data = lastUpdateData();
+      expect(data.current_period_end).toBeUndefined();
+      expect(data.current_period_start).toBeUndefined();
+      expect(data.next_billing_at).toBeUndefined();
+      // Cleanup still applies.
+      expect(data.scheduled_cancel_at).toBeNull();
+    });
+
+    it('clamps the discount so the new period never lands in the past', async () => {
+      // 45 days past due on a monthly (30d) plan: a naive discount would put
+      // the new period end BEFORE now and drop the store straight back into
+      // dunning — the exact degradation this seam prevents.
+      const originalPeriodEnd = new Date(Date.now() - 45 * DAY_MS);
+      primeRoute({
+        from: 'suspended',
+        hops: ['active'],
+        planId: 7,
+        currentPeriodEnd: originalPeriodEnd,
+      });
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        billing_cycle: 'monthly',
+      });
+
+      const before = Date.now();
+      await service.ensureOperational(STORE_ID, { reason: 'payment_confirmed' });
+
+      const data = lastUpdateData();
+      expect(data.current_period_end.getTime()).toBeGreaterThan(before);
+      // Floor of one day of runway.
+      expect(data.current_period_end.getTime() - before).toBeGreaterThanOrEqual(
+        DAY_MS - 5,
+      );
+    });
+
+    it('falls back to the monthly cycle when the subscription has no plan', async () => {
+      primeRoute({
+        from: 'no_plan',
+        hops: ['active'],
+        planId: null,
+        currentPeriodEnd: null,
+      });
+
+      const before = Date.now();
+      await service.ensureOperational(STORE_ID, { reason: 'free_plan_grant' });
+
+      const data = lastUpdateData();
+      expect(prismaMock.subscription_plans.findUnique).not.toHaveBeenCalled();
+      // No previous period end → nothing consumed → full 30-day cycle.
+      expect(data.current_period_end.getTime()).toBeGreaterThanOrEqual(
+        before + 30 * DAY_MS,
+      );
+    });
+
+    // ---- Side effects ----------------------------------------------------
+
+    it('invalidates the access cache and emits one state.changed carrying the path', async () => {
+      primeRoute({ from: 'cancelled', hops: ['pending_payment', 'active'] });
+
+      await service.ensureOperational(STORE_ID, {
+        reason: 're_subscribe_paid',
+        triggeredByUserId: 42,
+      });
+
+      expect(accessServiceMock.invalidateCache).toHaveBeenCalledWith(STORE_ID);
+      expect(eventEmitterMock.emit).toHaveBeenCalledTimes(1);
+      const [evtName, payload] = eventEmitterMock.emit.mock.calls[0];
+      expect(evtName).toBe('subscription.state.changed');
+      expect(payload.fromState).toBe('cancelled');
+      expect(payload.toState).toBe('active');
+      expect(payload.path).toEqual(['pending_payment', 'active']);
+      expect(payload.triggeredByUserId).toBe(42);
+    });
+
+    it('ensureOperationalInTx leaves cache + events to the caller', async () => {
+      primeRoute({ from: 'cancelled', hops: ['pending_payment', 'active'] });
+
+      const result = await service.ensureOperationalInTx(
+        prismaMock as any,
+        STORE_ID,
+        { reason: 'payment_confirmed_in_tx' },
+      );
+
+      expect(result.finalState).toBe('active');
+      expect(result.path).toEqual(['pending_payment', 'active']);
+      // Runs inside the caller's tx: no nested $transaction, and no
+      // side effects that could fire on a rolled-back change.
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(accessServiceMock.invalidateCache).not.toHaveBeenCalled();
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+    });
+
+    it('ensureOperationalInTx rejects invalid storeId', async () => {
+      await expect(
+        service.ensureOperationalInTx(prismaMock as any, -1, {
+          reason: 'bad',
+        }),
+      ).rejects.toBeDefined();
     });
   });
 });

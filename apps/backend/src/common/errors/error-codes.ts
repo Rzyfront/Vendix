@@ -2646,6 +2646,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Invalid subscription state transition',
   },
+  SUBSCRIPTION_011: {
+    code: 'SUBSCRIPTION_011',
+    httpStatus: 402,
+    devMessage: 'Plan retired — choose an active plan to continue',
+  },
   SUBSCRIPTION_INTERNAL_ERROR: {
     code: 'SUBSCRIPTION_INTERNAL_ERROR',
     httpStatus: 500,

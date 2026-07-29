@@ -24,6 +24,7 @@ import { SubscriptionPaymentRetryJob } from './subscription-payment-retry.job';
 import { SubscriptionWebhookReconcilerJob } from './subscription-webhook-reconciler.job';
 import { SubscriptionWebhookReconcilerController } from './subscription-webhook-reconciler.controller';
 import { SubscriptionTrialNotifierJob } from './subscription-trial-notifier.job';
+import { SubscriptionArchivedPlanNotifierJob } from './subscription-archived-plan-notifier.job';
 import { PaymentMethodExpiryNotifierJob } from './payment-method-expiry-notifier.job';
 import { MembershipExpiryNotifierJob } from './membership-expiry-notifier.job';
 import { MembershipAforoJob } from './membership-aforo.job';
@@ -103,6 +104,7 @@ import { ResponseModule } from '../common/responses/response.module';
     SubscriptionPaymentRetryJob,
     SubscriptionWebhookReconcilerJob,
     SubscriptionTrialNotifierJob,
+    SubscriptionArchivedPlanNotifierJob,
     PaymentMethodExpiryNotifierJob,
     MembershipExpiryNotifierJob,
     MembershipAforoJob,

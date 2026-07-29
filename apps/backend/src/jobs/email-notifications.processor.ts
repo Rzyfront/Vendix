@@ -14,6 +14,7 @@ import { SubscriptionEmailTemplates } from '../email/templates/subscription-emai
  *   - subscription.reactivation.email        (G3)
  *   - payment.confirmed.email                (post-payment listener)
  *   - trial.ending.email                     (G2 trial notifier — buckets 3d/1d/today)
+ *   - subscription.archived-plan-ending.email (archived-plan notifier — buckets 3d/1d/today)
  *
  * Future job names (templates exist as stubs, no caller yet — see
  * SubscriptionEmailTemplates):
@@ -78,6 +79,8 @@ export class EmailNotificationsProcessor extends WorkerHost {
           return await this.handlePaymentConfirmed(job);
         case 'trial.ending.email':
           return await this.handleTrialEnding(job);
+        case 'subscription.archived-plan-ending.email':
+          return await this.handleArchivedPlanEnding(job);
         case 'subscription.payment-method-expiring.email':
           return await this.handlePaymentMethodExpiring(job);
         case 'subscription.payment-method-expired.email':
@@ -254,6 +257,58 @@ export class EmailNotificationsProcessor extends WorkerHost {
         ? new Date(trialEndsAt).toLocaleDateString('es-CO')
         : ctx.trialEndsAt,
       upgradeUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
+   * `subscription.archived-plan-ending.email` handler.
+   *
+   * Triggered by `SubscriptionArchivedPlanNotifierJob` (daily 09:00 UTC) when
+   * an active/trial subscription's `current_period_end` falls inside the
+   * 3d/1d/today ladder AND its plan is `state='archived'`. Idempotency is
+   * enforced at the cron level (one `subscription_events` audit row per
+   * subscription+bucket+period), so we trust the payload here.
+   *
+   * These stores owe nothing — the template copy must stay debt-free.
+   */
+  private async handleArchivedPlanEnding(
+    job: Job<{
+      subscriptionId: number;
+      storeId: number;
+      bucket: 'today' | '1d' | '3d';
+      planName?: string | null;
+      periodEndsAt?: string;
+    }>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { subscriptionId, storeId, bucket, planName, periodEndsAt } =
+      job.data;
+
+    if (!['today', '1d', '3d'].includes(bucket)) {
+      this.logger.warn(
+        `EMAIL_SKIP name=subscription.archived-plan-ending.email jobId=${job.id} reason=invalid_bucket bucket=${bucket}`,
+      );
+      return { success: false };
+    }
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId);
+    if (!ctx) return { success: false };
+
+    const tpl = SubscriptionEmailTemplates.archivedPlanEnding({
+      storeName: ctx.storeName,
+      organizationName: ctx.organizationName,
+      planName: planName || ctx.planName,
+      bucket,
+      // `current_period_end` is a period BOUNDARY (usually midnight UTC), so it
+      // is rendered in UTC to avoid the off-by-one day documented in
+      // `vendix-date-timezone`.
+      periodEndsAt: periodEndsAt
+        ? new Date(periodEndsAt).toLocaleDateString('es-CO', {
+            timeZone: 'UTC',
+          })
+        : ctx.currentPeriodEnd,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      choosePlanUrl: undefined,
     });
     return this.dispatch(ctx.recipient, tpl, job);
   }
