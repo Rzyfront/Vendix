@@ -1029,6 +1029,7 @@ export class ProductsService {
       requires_booking,
       is_sellable,
       is_batch_produced,
+      ids,
     } = query;
 
     // Estado: el query param `state` (vía UI o API) tiene prioridad sobre
@@ -1081,6 +1082,12 @@ export class ProductsService {
       ...(requires_booking !== undefined && { requires_booking }),
       ...(is_sellable !== undefined && { is_sellable }),
       ...(is_batch_produced !== undefined && { is_batch_produced }),
+      // Hidratación del stack de selección de la edición masiva: el cliente
+      // guarda ids que pueden no estar en la página cargada y los pide de golpe.
+      // Se combina con el resto de los filtros (no los reemplaza), así que un id
+      // archivado no reaparece: el `effectiveState` por defecto lo sigue
+      // excluyendo, igual que en el listado.
+      ...(ids?.length && { id: { in: ids } }),
     } as Prisma.productsWhereInput;
   }
 
