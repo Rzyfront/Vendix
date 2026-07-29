@@ -137,6 +137,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       email_receipt: false,
       receipt_header: '',
       receipt_footer: '¡Gracias por su compra!',
+      // Electronic invoicing: safe defaults for a store that later gets DIAN
+      // habilitación — issue automatically, one printed copy, email the invoice.
+      auto_issue_invoice: true,
+      invoice_copies: 1,
+      send_invoice_email: true,
+      print_pos_ticket: false,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

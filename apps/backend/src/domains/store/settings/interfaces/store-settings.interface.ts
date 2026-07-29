@@ -480,6 +480,16 @@ export interface ReceiptsSettings {
   email_receipt: boolean;
   receipt_header: string;
   receipt_footer: string;
+  /**
+   * Electronic-invoicing block, surfaced instead of the receipt toggles once the
+   * store's `invoicing` fiscal area is ACTIVE/LOCKED. Optional so settings rows
+   * written before this block stay valid.
+   */
+  auto_issue_invoice?: boolean;
+  /** Printed copies per sale. 0 = do not print. */
+  invoice_copies?: number;
+  send_invoice_email?: boolean;
+  print_pos_ticket?: boolean;
 }
 
 export interface BusinessHoursBlock {

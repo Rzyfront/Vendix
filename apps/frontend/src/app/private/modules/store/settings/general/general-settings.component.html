@@ -206,10 +206,13 @@
             <div class="section-icon section-icon--indigo">
               <app-icon name="file-text" size="18"></app-icon>
             </div>
-            <h2 class="section-title">Recibos y Facturación</h2>
+            <h2 class="section-title">
+              {{ electronicInvoicingActive() ? 'Facturación Electrónica' : 'Recibos y Facturación' }}
+            </h2>
           </div>
           <div class="section-body">
             <app-receipts-settings-form [settings]="settings().receipts"
+              [electronicInvoicingActive]="electronicInvoicingActive()"
               (settingsChange)="onSectionChange('receipts', $event)" />
           </div>
         </section>

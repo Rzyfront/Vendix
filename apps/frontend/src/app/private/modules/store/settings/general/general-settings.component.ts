@@ -86,6 +86,19 @@ export class GeneralSettingsComponent implements OnInit {
    */
   readonly isGym = this.authFacade.isGym;
 
+  /**
+   * True when the store is habilitado before the DIAN (fiscal area `invoicing`
+   * ACTIVE or LOCKED). Such a store issues electronic invoices instead of
+   * internal sale receipts, so the Recibos section swaps its controls.
+   *
+   * `AuthFacade.fiscalStatus` is already scope-aware (organization vs store),
+   * so there is no need to re-resolve the fallback chain here.
+   */
+  readonly electronicInvoicingActive = computed(() => {
+    const state = (this.authFacade.fiscalStatus() as any)?.invoicing?.state;
+    return state === 'ACTIVE' || state === 'LOCKED';
+  });
+
   readonly sections = computed(() => {
     const base = [
       { id: 'identity', label: 'Identidad', icon: 'user' },
@@ -96,7 +109,11 @@ export class GeneralSettingsComponent implements OnInit {
       { id: 'reparto', label: 'Reparto', icon: 'coins' },
       { id: 'notifications', label: 'Alertas', icon: 'bell' },
       { id: 'pos', label: 'POS', icon: 'monitor' },
-      { id: 'receipts', label: 'Recibos', icon: 'file-text' },
+      {
+        id: 'receipts',
+        label: this.electronicInvoicingActive() ? 'Facturación' : 'Recibos',
+        icon: 'file-text',
+      },
     ];
     if (this.isRestaurant()) {
       // Insert "Mesas" right after "Operaciones" for restaurants only.
