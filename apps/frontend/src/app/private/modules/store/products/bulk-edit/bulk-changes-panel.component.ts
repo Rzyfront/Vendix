@@ -1,0 +1,214 @@
+/**
+ * Panel de cambios de la edición masiva (QUI-567).
+ *
+ * ## El tipo objetivo conduce el catálogo
+ *
+ * Arriba del panel vive el selector de `product_type`. No es un campo más: es
+ * el conductor. Cambiarlo recalcula qué grupos y qué campos existen, porque el
+ * registro (`bulk-editable-fields.constant.ts`) declara para cada campo a qué
+ * `product_type` aplica. Es la petición central del usuario: "si estoy
+ * configurando el producto como producto me salen todas las configuraciones que
+ * le puedo cambiar; si selecciono que todos van a ser un servicio, salen todas
+ * las configuraciones que puede llevar como servicio".
+ *
+ * Elegir el tipo objetivo NO implica cambiarlo en los productos: son dos cosas
+ * distintas y se piden por separado. El selector siempre filtra el catálogo,
+ * pero `product_type` solo viaja en `changes` si su casilla de activación está
+ * marcada, exactamente igual que los otros 33 campos. Así "quiero ver qué le
+ * puedo cambiar a mis servicios" no acaba convirtiendo 100 productos en
+ * servicios.
+ *
+ * ## Por qué el estado no vive aquí
+ *
+ * El `FormGroup` y el conjunto de campos activados los crea la PÁGINA, porque es
+ * la que tiene que construir el payload de `preview`/`apply`. Este componente
+ * recibe el `FormGroup` como input (los controles existen desde el principio;
+ * ninguno se crea ni se destruye al navegar el catálogo) y el conjunto de
+ * activados como `model`, así que escribe sobre la señal del padre sin outputs
+ * intermedios.
+ *
+ * ## Sin validadores globales — decisión deliberada
+ *
+ * Ningún control lleva `Validators`. En este repo un validador global sobre
+ * campos condicionales ya produjo un bloqueo irresoluble que `resetUomControls()`
+ * tuvo que mitigar en el formulario individual: el usuario no podía guardar por
+ * un campo que su configuración ni siquiera mostraba. Aquí el criterio es más
+ * fuerte todavía, porque el panel edita un SUBCONJUNTO de campos de N productos
+ * distintos: validar "el producto completo" es literalmente imposible. Las
+ * reglas cruzadas las evalúa el backend producto a producto y el preview las
+ * devuelve como `warning`/`error` ANTES de escribir nada.
+ */
+
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  input,
+  model,
+  output,
+} from '@angular/core';
+import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+
+import {
+  ButtonComponent,
+  IconComponent,
+  InputButtonsComponent,
+  type InputButtonOption,
+  type SelectorOption,
+} from '../../../../../shared/components/index';
+import { BulkEditFieldControlComponent } from './bulk-edit-field-control.component';
+import type {
+  BulkEditFieldOption,
+  BulkEditVisibleGroup,
+  BulkEditableField,
+  BulkEditableFieldKey,
+} from './bulk-edit.interface';
+
+/** Clave del campo conductor. El panel la trata aparte del `@for` de grupos. */
+const TYPE_FIELD_KEY: BulkEditableFieldKey = 'product_type';
+
+@Component({
+  selector: 'app-bulk-changes-panel',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [
+    ReactiveFormsModule,
+    IconComponent,
+    ButtonComponent,
+    InputButtonsComponent,
+    BulkEditFieldControlComponent,
+  ],
+  templateUrl: './bulk-changes-panel.component.html',
+})
+export class BulkChangesPanelComponent {
+  /**
+   * Grupos ya resueltos por tipo objetivo + industrias, SIN el grupo `type`
+   * (el conductor se pinta aparte, arriba).
+   */
+  readonly groups = input<readonly BulkEditVisibleGroup[]>([]);
+  /** `FormGroup` con un control por campo del contrato. Lo crea la página. */
+  readonly form = input.required<FormGroup>();
+  /** Opciones de `product_type` ya gateadas por industria. */
+  readonly typeOptions = input<readonly BulkEditFieldOption[]>([]);
+  /** Catálogo de unidades de medida (`optionsRef: 'uom-*'`). */
+  readonly uomOptions = input<readonly SelectorOption[]>([]);
+  /** Catálogo de plantillas de consulta (`optionsRef: 'document-templates'`). */
+  readonly templateOptions = input<readonly SelectorOption[]>([]);
+  /** Cuántos productos hay en el stack, para el aviso de alcance. */
+  readonly selectionCount = input<number>(0);
+
+  /** Campos que el usuario activó explícitamente. */
+  readonly activeFields = model<ReadonlySet<BulkEditableFieldKey>>(
+    new Set<BulkEditableFieldKey>(),
+  );
+
+  /** El usuario pidió limpiar todos los cambios pendientes. */
+  readonly resetRequested = output<void>();
+
+  readonly typeFieldKey = TYPE_FIELD_KEY;
+
+  /** `app-input-buttons` exige `value: string`, no `string | number`. */
+  readonly typeButtonOptions = computed<InputButtonOption[]>(() =>
+    this.typeOptions().map((option) => ({
+      value: String(option.value),
+      label: option.label,
+    })),
+  );
+
+  /**
+   * Configuraciones activadas que además EXISTEN para el tipo objetivo actual.
+   * Se cuenta contra los grupos visibles y no contra el `Set` crudo: al cambiar
+   * de tipo puede quedar activado un campo que ya no aplica, y anunciar "5
+   * configuraciones" cuando solo 3 van a viajar sería mentir. La página aplica
+   * la misma intersección al construir el payload.
+   */
+  readonly activeCount = computed<number>(() => {
+    const active = this.activeFields();
+    let count = active.has(TYPE_FIELD_KEY) ? 1 : 0;
+    for (const group of this.groups()) {
+      for (const field of group.fields) {
+        if (active.has(field.key)) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  });
+
+  isActive(key: BulkEditableFieldKey): boolean {
+    return this.activeFields().has(key);
+  }
+
+  /**
+   * Un campo con `dependsOn` cuyo campo padre no está activado. Es un aviso, no
+   * una restricción: el backend evalúa la dependencia contra el valor efectivo
+   * (DTO ?? producto existente), así que activar solo `sale_price` sobre
+   * productos que ya están en oferta es perfectamente legítimo.
+   */
+  dependencyPending(field: BulkEditableField): boolean {
+    const dependsOn = field.dependsOn;
+    if (!dependsOn) {
+      return false;
+    }
+    return !this.activeFields().has(dependsOn);
+  }
+
+  /** Catálogo dinámico que le toca al campo según su `optionsRef`. */
+  dynamicOptionsFor(field: BulkEditableField): readonly SelectorOption[] {
+    switch (field.optionsRef) {
+      case 'uom-purchase':
+      case 'uom-stock':
+        return this.uomOptions();
+      case 'document-templates':
+        return this.templateOptions();
+      default:
+        return [];
+    }
+  }
+
+  /**
+   * Activa/desactiva un campo. Publica SIEMPRE un `Set` nuevo: mutar el
+   * existente no cambiaría la referencia y la señal no notificaría a nadie
+   * (bug silencioso clásico de zoneless).
+   */
+  onFieldActiveChange(key: BulkEditableFieldKey, next: boolean): void {
+    const current = new Set(this.activeFields());
+    if (next) {
+      current.add(key);
+    } else {
+      current.delete(key);
+      this.resetControl(key);
+    }
+    this.activeFields.set(current);
+  }
+
+  onTypeActiveChange(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.onFieldActiveChange(TYPE_FIELD_KEY, Boolean(target?.checked));
+  }
+
+  /**
+   * Al desactivar un campo se limpia su control: si no se limpiara, reactivarlo
+   * más tarde lo reabriría con un valor que el usuario ya había descartado — y
+   * ese valor SÍ viajaría al backend.
+   *
+   * `product_type` es la excepción: sigue conduciendo el catálogo aunque no se
+   * vaya a aplicar, así que resetearlo dejaría el panel sin tipo objetivo.
+   */
+  private resetControl(key: BulkEditableFieldKey): void {
+    if (key === TYPE_FIELD_KEY) {
+      return;
+    }
+    const control = this.form().get(key);
+    if (!control) {
+      return;
+    }
+    if (control instanceof FormGroup) {
+      control.reset({ length: null, width: null, height: null });
+      return;
+    }
+    // Los toggles son `nonNullable` con default `false`; `reset()` los devuelve
+    // a ese default y el resto de controles a `null`.
+    control.reset();
+  }
+}

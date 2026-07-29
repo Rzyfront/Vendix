@@ -1,0 +1,328 @@
+<app-modal
+  [(isOpen)]="modalOpen"
+  size="xl"
+  title="Confirmar edición masiva"
+  subtitle="Revisa qué cambia en cada producto antes de aplicar"
+  [closeOnBackdrop]="false"
+>
+  <!-- ═══════════════ Calculando el dry-run ═══════════════════════════════ -->
+  @if (stage() === 'previewing') {
+    <div class="flex flex-col items-center gap-2 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-primary" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Calculando el impacto sobre {{ ids().length }}
+        {{ ids().length === 1 ? 'producto' : 'productos' }}…
+      </p>
+      <p class="text-[11px] text-text-secondary">
+        Es una simulación: todavía no se ha escrito nada.
+      </p>
+
+      @if (progress().totalBatches > 1) {
+        <p class="text-[11px] text-text-secondary">
+          Lote {{ progress().doneBatches }} de {{ progress().totalBatches }}
+        </p>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ El preview entero se cayó ═══════════════════════════ -->
+  @if (stage() === 'preview-failed') {
+    <div class="flex flex-col gap-3 py-2">
+      <app-alert-banner variant="danger" icon="alert-triangle">
+        No pudimos calcular la previsualización, así que no se aplicó ningún
+        cambio.
+      </app-alert-banner>
+
+      <ul class="flex flex-col gap-2">
+        @for (row of requestRequirements(); track row.id) {
+          <li class="rounded-lg border border-border bg-surface px-3 py-2">
+            <p class="text-xs font-semibold text-text-primary">{{ row.label }}</p>
+            <p class="mt-0.5 text-[11px] leading-tight text-text-secondary">
+              {{ row.reason }}
+            </p>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  <!-- ═══════════════ Preview listo: el consentimiento informado ══════════ -->
+  @if (stage() === 'ready' && previewResult()) {
+    <div class="flex flex-col gap-3">
+      <!-- Conteo y desglose -->
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">
+            Productos
+          </p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ previewResult()!.total }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-green-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-green-700">
+            Se aplicarán
+          </p>
+          <p class="text-lg font-bold text-green-700">{{ previewResult()!.ok }}</p>
+        </div>
+        <div class="rounded-xl border border-border bg-amber-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-amber-700">
+            Con ajustes
+          </p>
+          <p class="text-lg font-bold text-amber-700">
+            {{ previewResult()!.warnings }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-red-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-error">Fallarán</p>
+          <p class="text-lg font-bold text-error">
+            {{ previewResult()!.errors }}
+          </p>
+        </div>
+      </div>
+
+      @if (applicableCount() === 0) {
+        <app-alert-banner variant="danger" icon="alert-triangle">
+          Ninguno de los productos seleccionados admite estos cambios. Corrige
+          los motivos de abajo o cambia la selección: confirmar ahora solo
+          produciría fallos.
+        </app-alert-banner>
+      } @else if (previewResult()!.errors > 0) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          {{ previewResult()!.errors }} de {{ previewResult()!.total }} productos
+          no se van a poder editar. Al confirmar, los otros
+          {{ applicableCount() }} sí se editan: la operación es parcial a
+          propósito.
+        </app-alert-banner>
+      }
+
+      @if (progress().totalBatches > 1) {
+        <p class="text-[11px] text-text-secondary">
+          Se enviará en {{ progress().totalBatches }} lotes de 100 productos.
+        </p>
+      }
+
+      <!-- Diff producto por producto -->
+      <div class="max-h-[45vh] overflow-y-auto rounded-xl border border-border">
+        <ul class="divide-y divide-border">
+          @for (item of previewItems(); track item.id) {
+            <li class="px-3 py-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
+                <p class="min-w-0 truncate text-xs font-semibold text-text-primary">
+                  {{ item.name }}
+                  @if (item.sku) {
+                    <span class="font-normal text-text-secondary">
+                      · {{ item.sku }}
+                    </span>
+                  }
+                </p>
+
+                <span
+                  class="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  [class.bg-green-100]="item.status === 'ok'"
+                  [class.text-green-700]="item.status === 'ok'"
+                  [class.bg-amber-100]="item.status === 'warning'"
+                  [class.text-amber-700]="item.status === 'warning'"
+                  [class.bg-red-100]="item.status === 'error'"
+                  [class.text-error]="item.status === 'error'"
+                >
+                  <app-icon
+                    [name]="
+                      item.status === 'ok'
+                        ? 'circle-check'
+                        : item.status === 'warning'
+                          ? 'alert-triangle'
+                          : 'circle-x'
+                    "
+                    [size]="11"
+                  />
+                  {{ statusLabel(item.status) }}
+                </span>
+              </div>
+
+              @if (item.status !== 'error' && item.changes.length > 0) {
+                <ul class="mt-1.5 flex flex-col gap-0.5">
+                  @for (diff of item.changes; track diff.field) {
+                    <li
+                      class="flex flex-wrap items-center gap-1 text-[11px] leading-tight"
+                    >
+                      <span class="font-medium text-text-secondary">
+                        {{ describeField(diff.field) }}:
+                      </span>
+                      <span class="text-text-secondary line-through">
+                        {{ formatValue()(diff.field, diff.current) }}
+                      </span>
+                      <app-icon name="chevron-right" [size]="11" class="text-muted" />
+                      <span class="font-semibold text-text-primary">
+                        {{ formatValue()(diff.field, diff.next) }}
+                      </span>
+                    </li>
+                  }
+                </ul>
+              }
+
+              @if (item.status !== 'error' && item.changes.length === 0) {
+                <p class="mt-1 text-[11px] italic text-text-secondary">
+                  Sin cambios efectivos: los valores propuestos ya son los
+                  actuales.
+                </p>
+              }
+
+              @if (item.message || item.status === 'error') {
+                <p
+                  class="mt-1 flex items-start gap-1 text-[11px] leading-tight"
+                  [class.text-error]="item.status === 'error'"
+                  [class.text-amber-700]="item.status === 'warning'"
+                >
+                  <app-icon name="info" [size]="12" class="mt-px shrink-0" />
+                  {{ describeFailure(item.code, item.message) }}
+                </p>
+              }
+            </li>
+          }
+        </ul>
+      </div>
+    </div>
+  }
+
+  <!-- ═══════════════ Aplicando: progreso por lotes ═══════════════════════ -->
+  @if (stage() === 'applying') {
+    <div class="flex flex-col items-center gap-3 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-primary" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Aplicando cambios… {{ progress().doneIds }} de {{ progress().totalIds }}
+      </p>
+
+      <div class="h-2 w-full max-w-sm overflow-hidden rounded-full bg-gray-200">
+        <div
+          class="h-full rounded-full bg-primary"
+          [style.width.%]="progressPercent()"
+        ></div>
+      </div>
+
+      <p class="text-[11px] text-text-secondary">
+        Lote {{ progress().doneBatches }} de {{ progress().totalBatches }} · no
+        cierres esta ventana.
+      </p>
+    </div>
+  }
+
+  <!-- ═══════════════ Informe final ═══════════════════════════════════════ -->
+  @if (stage() === 'done') {
+    <div class="flex flex-col gap-3">
+      @if (applyResult()) {
+        <div class="grid grid-cols-3 gap-2">
+          <div class="rounded-xl border border-border bg-surface px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-text-secondary">
+              Enviados
+            </p>
+            <p class="text-lg font-bold text-text-primary">
+              {{ applyResult()!.total }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-green-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-green-700">
+              Editados
+            </p>
+            <p class="text-lg font-bold text-green-700">
+              {{ applyResult()!.successful }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-red-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-error">Fallidos</p>
+            <p class="text-lg font-bold text-error">
+              {{ applyResult()!.failed }}
+            </p>
+          </div>
+        </div>
+
+        @if (applyResult()!.failed === 0) {
+          <app-alert-banner variant="success" icon="circle-check">
+            Los {{ applyResult()!.successful }} productos quedaron con los cambios
+            aplicados.
+          </app-alert-banner>
+        } @else {
+          <app-alert-banner variant="warning" icon="alert-triangle">
+            {{ applyResult()!.successful }} productos se editaron y
+            {{ applyResult()!.failed }} no. Los que fallaron quedaron
+            exactamente como estaban.
+          </app-alert-banner>
+
+          <div class="max-h-[35vh] overflow-y-auto rounded-xl border border-border">
+            <ul class="divide-y divide-border">
+              @for (row of failedResults(); track row.id) {
+                <li class="px-3 py-2">
+                  <p class="text-xs font-semibold text-text-primary">
+                    {{ row.name }}
+                  </p>
+                  <p class="mt-0.5 text-[11px] leading-tight text-error">
+                    {{ describeFailure(row.code, row.message) }}
+                  </p>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+      }
+
+      @if (requestRequirements().length > 0) {
+        <ul class="flex flex-col gap-2">
+          @for (row of requestRequirements(); track row.id) {
+            <li class="rounded-lg border border-border bg-surface px-3 py-2">
+              <p class="text-xs font-semibold text-text-primary">{{ row.label }}</p>
+              <p class="mt-0.5 text-[11px] leading-tight text-text-secondary">
+                {{ row.reason }}
+              </p>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ Pie ═════════════════════════════════════════════════ -->
+  <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
+    @if (stage() === 'ready') {
+      <app-button variant="outline" size="sm" (clicked)="onClose()">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="primary"
+        size="sm"
+        [disabled]="!canConfirm()"
+        (clicked)="onConfirm()"
+      >
+        <app-icon slot="icon" name="check" [size]="14" />
+        Aplicar a {{ applicableCount() }}
+        {{ applicableCount() === 1 ? 'producto' : 'productos' }}
+      </app-button>
+    }
+
+    @if (stage() === 'preview-failed') {
+      <app-button variant="outline" size="sm" (clicked)="onClose()">
+        Cerrar
+      </app-button>
+      <app-button variant="primary" size="sm" (clicked)="onRetryPreview()">
+        <app-icon slot="icon" name="refresh-cw" [size]="14" />
+        Reintentar
+      </app-button>
+    }
+
+    @if (stage() === 'previewing' || stage() === 'applying') {
+      <app-button
+        variant="outline"
+        size="sm"
+        [disabled]="stage() === 'applying'"
+        (clicked)="onClose()"
+      >
+        Cancelar
+      </app-button>
+    }
+
+    @if (stage() === 'done') {
+      <app-button variant="primary" size="sm" (clicked)="onClose()">
+        Listo
+      </app-button>
+    }
+  </div>
+</app-modal>

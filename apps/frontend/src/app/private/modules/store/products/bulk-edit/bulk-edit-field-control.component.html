@@ -1,0 +1,139 @@
+<div
+  class="rounded-xl border transition-colors"
+  [class.border-border]="!active()"
+  [class.bg-surface]="!active()"
+  [class.border-primary]="active()"
+  [class.bg-primary-50]="active()"
+>
+  <!-- Cabecera: casilla de activación + etiqueta del registro -->
+  <label class="flex cursor-pointer items-start gap-2.5 p-3">
+    <input
+      type="checkbox"
+      class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+      [checked]="active()"
+      (change)="onToggleActive($event)"
+      [attr.aria-label]="'Aplicar ' + field().label"
+    />
+
+    <span class="min-w-0 flex-1">
+      <span class="flex flex-wrap items-center gap-1.5">
+        <span class="text-xs font-semibold text-text-primary">{{ field().label }}</span>
+
+        @if (industryRequirement()) {
+          <span
+            class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+          >
+            <app-icon name="info" [size]="10" />
+            {{ industryRequirement() }}
+          </span>
+        }
+      </span>
+
+      @if (field().description) {
+        <span class="mt-0.5 block text-[10px] leading-tight text-text-secondary">
+          {{ field().description }}
+        </span>
+      }
+
+      @if (active() && dependencyPending()) {
+        <span
+          class="mt-1 flex items-start gap-1 text-[10px] leading-tight text-amber-600"
+        >
+          <app-icon name="alert-triangle" [size]="11" class="mt-px shrink-0" />
+          Depende de <b>{{ dependsOnKey() }}</b
+          >, que no está en esta edición. Se enviará igual: el backend lo evalúa
+          contra el valor actual de cada producto.
+        </span>
+      }
+    </span>
+  </label>
+
+  <!-- Control: solo existe si el campo está activado -->
+  @if (active()) {
+    <div class="border-t border-border/60 p-3" [formGroup]="form()">
+      @switch (field().control) {
+        @case ('toggle') {
+          <app-setting-toggle
+            [formControlName]="field().key"
+            label="Nuevo valor"
+            description="Activado: se marca en todos los seleccionados. Desactivado: se desmarca en todos."
+          />
+        }
+
+        @case ('selector') {
+          <app-selector
+            [formControlName]="field().key"
+            [options]="options()"
+            placeholder="Selecciona un valor"
+            size="sm"
+          />
+        }
+
+        @case ('input-buttons') {
+          <app-input-buttons
+            [formControlName]="field().key"
+            [options]="buttonOptions()"
+          />
+        }
+
+        @case ('number') {
+          <app-input
+            [formControlName]="field().key"
+            type="number"
+            size="sm"
+            [min]="field().min ?? ''"
+            [max]="field().max ?? ''"
+            [placeholder]="field().suffix ? 'Valor en ' + field().suffix! : 'Valor'"
+          />
+        }
+
+        @case ('currency') {
+          <app-input
+            [formControlName]="field().key"
+            [currency]="true"
+            size="sm"
+            placeholder="0"
+          />
+        }
+
+        @case ('text') {
+          <app-input [formControlName]="field().key" size="sm" placeholder="Valor" />
+        }
+
+        @case ('textarea') {
+          <app-textarea
+            [formControlName]="field().key"
+            [rows]="3"
+            placeholder="Texto que se aplicará a todos los seleccionados"
+          />
+        }
+
+        @case ('dimensions') {
+          <div class="grid grid-cols-3 gap-2" [formGroupName]="field().key">
+            <app-input
+              formControlName="length"
+              type="number"
+              size="sm"
+              label="Largo (cm)"
+              [min]="0"
+            />
+            <app-input
+              formControlName="width"
+              type="number"
+              size="sm"
+              label="Ancho (cm)"
+              [min]="0"
+            />
+            <app-input
+              formControlName="height"
+              type="number"
+              size="sm"
+              label="Alto (cm)"
+              [min]="0"
+            />
+          </div>
+        }
+      }
+    </div>
+  }
+</div>

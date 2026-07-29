@@ -1,0 +1,115 @@
+<div class="flex flex-col gap-3">
+  <!-- ═══ Conductor: tipo objetivo ═══════════════════════════════════════ -->
+  <section
+    class="rounded-xl border border-border bg-surface p-3"
+    [formGroup]="form()"
+  >
+    <header class="mb-2 flex items-center gap-2">
+      <app-icon name="layers" [size]="15" class="text-primary" />
+      <h3 class="text-xs font-bold uppercase tracking-wide text-text-primary">
+        Tipo de Producto
+      </h3>
+    </header>
+
+    <p class="mb-2 text-[10px] leading-tight text-text-secondary">
+      El tipo elegido decide qué configuraciones se pueden editar en lote.
+    </p>
+
+    <app-input-buttons
+      formControlName="product_type"
+      [options]="typeButtonOptions()"
+    />
+
+    <label
+      class="mt-2 flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 transition-colors"
+      [class.border-border]="!isActive(typeFieldKey)"
+      [class.border-primary]="isActive(typeFieldKey)"
+      [class.bg-primary-50]="isActive(typeFieldKey)"
+    >
+      <input
+        type="checkbox"
+        class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+        [checked]="isActive(typeFieldKey)"
+        (change)="onTypeActiveChange($event)"
+        aria-label="Cambiar también el tipo de producto"
+      />
+      <span class="min-w-0 flex-1">
+        <span class="block text-xs font-semibold text-text-primary">
+          Cambiar también el tipo de producto
+        </span>
+        <span class="mt-0.5 block text-[10px] leading-tight text-text-secondary">
+          Sin marcar, el tipo solo filtra el catálogo de abajo y no se modifica
+          en los productos seleccionados.
+        </span>
+      </span>
+    </label>
+  </section>
+
+  <!-- ═══ Resumen de lo activado ═════════════════════════════════════════ -->
+  <div
+    class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-gray-50 px-3 py-2"
+  >
+    <p class="text-[11px] font-semibold text-text-primary">
+      {{ activeCount() }}
+      {{
+        activeCount() === 1
+          ? 'configuración activada'
+          : 'configuraciones activadas'
+      }}
+      <span class="font-normal text-text-secondary">
+        · se aplicarán a {{ selectionCount() }}
+        {{ selectionCount() === 1 ? 'producto' : 'productos' }}
+      </span>
+    </p>
+
+    @if (activeCount() > 0) {
+      <app-button variant="ghost" size="xsm" (clicked)="resetRequested.emit()">
+        <app-icon slot="icon" name="rotate-ccw" [size]="13" />
+        Limpiar cambios
+      </app-button>
+    }
+  </div>
+
+  <!-- ═══ Grupos del registro, filtrados por tipo + industrias ═══════════ -->
+  @for (group of groups(); track group.key) {
+    <section class="rounded-xl border border-border bg-surface p-3">
+      <header class="mb-1 flex items-center gap-2">
+        <app-icon [name]="group.icon" [size]="15" class="text-primary" />
+        <h3 class="text-xs font-bold uppercase tracking-wide text-text-primary">
+          {{ group.label }}
+        </h3>
+      </header>
+
+      @if (group.hint) {
+        <p class="mb-2 text-[10px] leading-tight text-text-secondary">
+          {{ group.hint }}
+        </p>
+      }
+
+      <div class="flex flex-col gap-2">
+        @for (field of group.fields; track field.key) {
+          <app-bulk-edit-field-control
+            [field]="field"
+            [form]="form()"
+            [active]="isActive(field.key)"
+            [dynamicOptions]="dynamicOptionsFor(field)"
+            [dependencyPending]="dependencyPending(field)"
+            (activeChange)="onFieldActiveChange(field.key, $event)"
+          />
+        }
+      </div>
+    </section>
+  } @empty {
+    <div
+      class="flex flex-col items-center gap-1 rounded-xl border border-dashed border-border px-4 py-8 text-center"
+    >
+      <app-icon name="sliders" [size]="22" class="text-muted" />
+      <p class="text-xs font-semibold text-text-primary">
+        No hay configuraciones para este tipo
+      </p>
+      <p class="text-[10px] text-text-secondary">
+        Elige otro tipo de producto o revisa las industrias activas de la tienda.
+      </p>
+    </div>
+  }
+</div>

@@ -1,0 +1,151 @@
+<app-card [responsive]="true" [padding]="false" [fullHeight]="true">
+  <!-- ═══ Buscador + filtros ══════════════════════════════════════════════ -->
+  <div class="border-b border-border px-3 py-3 md:px-4" [formGroup]="filterForm">
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center gap-2">
+        <app-inputsearch
+          class="flex-1"
+          formControlName="search"
+          placeholder="Buscar por nombre, SKU o código de barras..."
+          size="sm"
+          [debounceTime]="350"
+          (searchChange)="onSearchChange($event)"
+        />
+
+        <app-button
+          variant="ghost"
+          size="sm"
+          [loading]="fetching()"
+          (clicked)="refreshRequested.emit()"
+        >
+          <app-icon slot="icon" name="refresh-cw" [size]="14" />
+        </app-button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <app-selector
+          size="sm"
+          formControlName="state"
+          [options]="stateOptions"
+          placeholder="Estado"
+          (valueChange)="onStateChange($event)"
+        />
+        <app-selector
+          size="sm"
+          formControlName="product_type"
+          [options]="typeOptions"
+          placeholder="Tipo"
+          (valueChange)="onTypeChange($event)"
+        />
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Acciones de selección múltiple ═════════════════════════════════ -->
+  <div
+    class="flex flex-col gap-2 border-b border-border bg-gray-50 px-3 py-2.5 md:px-4"
+  >
+    <div class="flex flex-wrap items-center gap-1.5">
+      <app-button
+        variant="outline"
+        size="xsm"
+        [disabled]="products().length === 0"
+        (clicked)="onTogglePage()"
+      >
+        <app-icon
+          slot="icon"
+          [name]="pageSelectionState() === 'all' ? 'circle-x' : 'circle-check'"
+          [size]="13"
+        />
+        {{
+          pageSelectionState() === 'all'
+            ? 'Quitar esta página'
+            : 'Seleccionar esta página'
+        }}
+      </app-button>
+
+      <app-button
+        variant="outline"
+        size="xsm"
+        [loading]="pickingAll()"
+        [disabled]="total() === 0"
+        (clicked)="selectAllFiltered.emit()"
+      >
+        <app-icon slot="icon" name="list-checks" [size]="13" />
+        Seleccionar los {{ total() }} del filtro
+      </app-button>
+
+      <app-button
+        variant="ghost"
+        size="xsm"
+        [disabled]="products().length === 0"
+        (clicked)="onInvertPage()"
+      >
+        <app-icon slot="icon" name="flip-horizontal" [size]="13" />
+        Invertir
+      </app-button>
+
+      <app-button
+        variant="ghost"
+        size="xsm"
+        [disabled]="selectedCount() === 0"
+        (clicked)="onClearSelection()"
+      >
+        <app-icon slot="icon" name="x" [size]="13" />
+        Limpiar
+      </app-button>
+
+      @if (hasActiveFilters()) {
+        <app-button variant="ghost" size="xsm" (clicked)="onClearFilters()">
+          <app-icon slot="icon" name="filter" [size]="13" />
+          Quitar filtros
+        </app-button>
+      }
+    </div>
+
+    <p class="text-[10px] text-text-secondary">
+      {{ selectedCount() }} seleccionados · {{ total() }} resultados en el filtro
+      actual
+    </p>
+  </div>
+
+  <!-- ═══ Aviso de recorte del endpoint de ids ═══════════════════════════ -->
+  @if (capped()) {
+    <div class="px-3 pt-3 md:px-4">
+      <app-alert-banner variant="warning" icon="alert-triangle">
+        El filtro devuelve {{ total() }} productos y "seleccionar todos" solo
+        puede traer {{ cappedLimit() }} a la vez. Se seleccionaron los primeros
+        {{ cappedLimit() }}: estrecha el filtro para abarcar el resto.
+      </app-alert-banner>
+    </div>
+  }
+
+  <!-- ═══ Resultados con selección ═══════════════════════════════════════ -->
+  <div class="px-2 pb-2 pt-3 md:p-4">
+    <app-responsive-data-view
+      [data]="products()"
+      [columns]="columns"
+      [cardConfig]="cardConfig"
+      [loading]="fetching()"
+      [selectable]="true"
+      rowIdKey="id"
+      [(selectedIds)]="selectedIds"
+      emptyIcon="package"
+      emptyMessage="No hay productos que coincidan"
+      emptyTitle="Sin resultados"
+      emptyDescription="Ajusta la búsqueda o los filtros para encontrar los productos que quieres editar."
+      [showEmptyAction]="false"
+      [showEmptyClearFilters]="hasActiveFilters()"
+      (emptyClearFiltersClick)="onClearFilters()"
+    />
+
+    <app-pagination
+      [currentPage]="page()"
+      [totalPages]="totalPages()"
+      [total]="total()"
+      [limit]="limit()"
+      infoStyle="range"
+      (pageChange)="pageChanged.emit($event)"
+    />
+  </div>
+</app-card>
