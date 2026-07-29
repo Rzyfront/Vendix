@@ -283,8 +283,10 @@ export class DianSoapClient {
     // GetStatusZip) carry StatusCode/StatusMessage/IsValid; the asynchronous
     // SendTestSetAsync only returns a ZipKey acknowledgement that must then be
     // polled via GetStatusZip to obtain the real validation verdict.
+    // Tolerate attributes on the element: a batch still being validated comes
+    // back as `<b:StatusCode i:nil="true"/>` or `<b:StatusCode></b:StatusCode>`.
     const status_code_match = response_xml.match(
-      /<b:StatusCode>(.*?)<\/b:StatusCode>/,
+      /<b:StatusCode\b[^>]*>([\s\S]*?)<\/b:StatusCode>/,
     );
     const status_message_match =
       response_xml.match(/<b:StatusMessage>(.*?)<\/b:StatusMessage>/) ||
@@ -313,7 +315,16 @@ export class DianSoapClient {
       .filter(Boolean);
 
     const zip_key = zip_key_match?.[1];
-    const status_code = status_code_match?.[1] || String(http_status);
+    // An EMPTY StatusCode means DIAN has not judged the batch yet. Collapsing it
+    // to the HTTP status (always 200 at this point) leaked a transport value into
+    // a domain field and made "queued" read as "code 200 / OK" in the UI.
+    const dian_status_code = (status_code_match?.[1] ?? '').trim();
+    const has_dian_verdict = dian_status_code !== '';
+    const status_code = has_dian_verdict
+      ? dian_status_code
+      : zip_key
+        ? 'ZIP_ACCEPTED'
+        : 'NO_VERDICT';
     const status_message =
       status_message_match?.[1] ||
       (zip_key
@@ -324,12 +335,13 @@ export class DianSoapClient {
     return {
       // A bare ZipKey acknowledgement is NOT a final success — the verdict is
       // resolved later via GetStatusZip. Only StatusCode 00 / IsValid is success.
-      success: is_valid || status_code === '00',
+      success: is_valid || dian_status_code === '00',
       status_code,
       status_message,
       raw_response: response_xml,
       duration_ms,
       zip_key,
+      has_dian_verdict,
       error_messages: error_messages.length ? error_messages : undefined,
     };
   }

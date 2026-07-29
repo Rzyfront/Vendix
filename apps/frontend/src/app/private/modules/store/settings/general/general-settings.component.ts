@@ -3,6 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
+import { FiscalStatusBlock } from '../../../../../core/models/fiscal-status.model';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
@@ -86,6 +87,24 @@ export class GeneralSettingsComponent implements OnInit {
    */
   readonly isGym = this.authFacade.isGym;
 
+  /**
+   * True when the store is habilitado before the DIAN (fiscal area `invoicing`
+   * ACTIVE or LOCKED). Such a store issues electronic invoices instead of
+   * internal sale receipts, so the Recibos section swaps its controls.
+   *
+   * `AuthFacade.fiscalStatus` is already scope-aware (organization vs store),
+   * so there is no need to re-resolve the fallback chain here.
+   */
+  readonly electronicInvoicingActive = computed(() => {
+    // Typed rather than `as any`: the facade signal is `any` (its toSignal has
+    // `initialValue: null as any`), so without this annotation a typo in the
+    // `invoicing.state` path would compile and silently leave the section on
+    // its legacy receipt controls forever.
+    const status = this.authFacade.fiscalStatus() as FiscalStatusBlock | null;
+    const state = status?.invoicing?.state;
+    return state === 'ACTIVE' || state === 'LOCKED';
+  });
+
   readonly sections = computed(() => {
     const base = [
       { id: 'identity', label: 'Identidad', icon: 'user' },
@@ -96,7 +115,11 @@ export class GeneralSettingsComponent implements OnInit {
       { id: 'reparto', label: 'Reparto', icon: 'coins' },
       { id: 'notifications', label: 'Alertas', icon: 'bell' },
       { id: 'pos', label: 'POS', icon: 'monitor' },
-      { id: 'receipts', label: 'Recibos', icon: 'file-text' },
+      {
+        id: 'receipts',
+        label: this.electronicInvoicingActive() ? 'Facturación' : 'Recibos',
+        icon: 'file-text',
+      },
     ];
     if (this.isRestaurant()) {
       // Insert "Mesas" right after "Operaciones" for restaurants only.

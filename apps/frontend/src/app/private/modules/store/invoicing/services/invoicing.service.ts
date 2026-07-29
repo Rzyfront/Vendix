@@ -214,6 +214,30 @@ export class InvoicingService {
     return this.http.get(this.getApiUrl(`dian-config/${config_id}/test-results`));
   }
 
+  /**
+   * Re-polls DIAN for the verdict of the ALREADY SUBMITTED test set, using the
+   * stored ZipKey. Safe to call repeatedly — it never re-sends the 50 documents,
+   * so it does not burn resolution numbers.
+   */
+  checkDianTestSetStatus(config_id: number): Observable<any> {
+    return this.http.get(this.getApiUrl(`dian-config/${config_id}/test-set-status`));
+  }
+
+  /** Read-only checklist of what is still missing before emitting real invoices. */
+  getDianProductionReadiness(config_id: number): Observable<any> {
+    return this.http.get(
+      this.getApiUrl(`dian-config/${config_id}/production-readiness`),
+    );
+  }
+
+  /** Switches the config to environment=production + enablement_status=enabled. */
+  promoteDianToProduction(config_id: number): Observable<any> {
+    return this.http.post(
+      this.getApiUrl(`dian-config/${config_id}/promote-to-production`),
+      {},
+    );
+  }
+
   getDianAuditLogs(page = 1, limit = 20, config_id?: number): Observable<any> {
     const params: Record<string, string> = { page: String(page), limit: String(limit) };
     if (config_id) params['config_id'] = String(config_id);

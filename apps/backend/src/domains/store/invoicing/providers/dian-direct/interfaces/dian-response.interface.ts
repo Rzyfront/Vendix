@@ -41,6 +41,13 @@ export interface DianSendBillResponse {
   /** Whether the response is a SOAP Fault (e.g., InvalidSecurity) */
   is_soap_fault?: boolean;
   /**
+   * True when DIAN actually filled `<b:StatusCode>` with a value. A queued batch
+   * comes back with a self-closing `<b:StatusCode/>` and `<b:ErrorMessage
+   * i:nil="true"/>`, which means "no verdict yet" — NOT a rejection. Callers
+   * must use this flag instead of inferring a verdict from `success === false`.
+   */
+  has_dian_verdict?: boolean;
+  /**
    * Async acknowledgement key returned by SendTestSetAsync. Present only on the
    * async submit response; must be polled afterwards via GetStatusZip to obtain
    * the actual validation verdict.

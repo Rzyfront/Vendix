@@ -4,10 +4,12 @@ import {
   IsBoolean,
   IsArray,
   IsInt,
+  Min,
   MinLength,
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { RoleScope } from '@common/utils/role-scope.util';
 
 export class CreateRoleDto {
   @ApiProperty({
@@ -29,14 +31,45 @@ export class CreateRoleDto {
   @IsString()
   description?: string;
 
+  /**
+   * QUI-72 — ⚠️ IGNORADO en el nivel organización.
+   *
+   * Se conserva declarado porque el `ValidationPipe` global corre con
+   * `forbidNonWhitelisted: true`: si se borrara la propiedad, el frontend actual
+   * (que ya envía `system_role`) recibiría un 422 en vez de crear el rol.
+   * `RolesService.create()` NUNCA lee este campo — `is_system_role` sólo lo
+   * decide el nivel superadmin. Dejarlo activo aquí sería mass-assignment:
+   * cualquier org podría fabricarse un rol de sistema y volverse inmune a la
+   * matriz de edición.
+   */
   @ApiPropertyOptional({
-    description: 'Indica si es un rol del sistema (no se puede eliminar)',
+    description:
+      'DEPRECADO en /organization/roles: se ignora. Sólo superadmin crea roles de sistema.',
     example: false,
     default: false,
+    deprecated: true,
   })
   @IsOptional()
   @IsBoolean()
   system_role?: boolean;
+
+  /**
+   * QUI-72 — alcance TIENDA opcional.
+   *
+   * Omitido/NULL → rol de alcance organización (`store_id = NULL`).
+   * Con valor → rol de alcance tienda; el servicio valida que la tienda
+   * pertenezca a la organización del contexto antes de crear nada.
+   * `organization_id` jamás viaja en el body: se toma del contexto.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Tienda dueña del rol (alcance tienda). Omitir para un rol de alcance organización.',
+    example: 3,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  store_id?: number;
 }
 
 export class UpdateRoleDto {
@@ -95,6 +128,22 @@ export class AssignRoleToUserDto {
   })
   @IsInt()
   role_id: number;
+
+  /**
+   * QUI-72 — alcance de la asignación.
+   * `null`/omitido = la asignación aplica en TODA la organización.
+   * Con valor = aplica sólo en esa tienda (permite ser Cajero en A y no en B).
+   */
+  @ApiPropertyOptional({
+    description:
+      'Tienda donde aplica la asignación. NULL/omitido = toda la organización.',
+    example: 3,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  store_id?: number | null;
 }
 
 export class RemoveRoleFromUserDto {
@@ -111,6 +160,21 @@ export class RemoveRoleFromUserDto {
   })
   @IsInt()
   role_id: number;
+
+  /**
+   * QUI-72 — debe coincidir con el alcance con el que se asignó.
+   * Omitirlo remueve la asignación org-wide, NO las de tienda.
+   */
+  @ApiPropertyOptional({
+    description:
+      'Tienda de la asignación a remover. NULL/omitido = la asignación org-wide.',
+    example: 3,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  store_id?: number | null;
 }
 
 export class RoleDashboardStatsDto {
@@ -171,6 +235,34 @@ export class RoleWithPermissionDescriptionsDto {
     example: false,
   })
   system_role: boolean;
+
+  /**
+   * QUI-72 — alcance DERIVADO de `is_system_role` + `organization_id` +
+   * `store_id`. No se persiste; se calcula con `deriveRoleScope()` para que el
+   * frontend no tenga que re-implementar la matriz (y desincronizarse).
+   */
+  @ApiProperty({
+    description: 'Alcance derivado del rol',
+    enum: ['system', 'organization', 'store'],
+    example: 'organization',
+  })
+  scope: RoleScope;
+
+  @ApiProperty({
+    description:
+      'Tienda dueña del rol cuando `scope = store`. NULL en los otros alcances.',
+    example: 3,
+    nullable: true,
+  })
+  store_id?: number | null;
+
+  @ApiProperty({
+    description:
+      'Nombre de la tienda dueña del rol, para mostrarlo en la UI sin un segundo request.',
+    example: 'Sucursal Centro',
+    nullable: true,
+  })
+  store_name?: string | null;
 
   @ApiProperty({
     description: 'Fecha de creación',

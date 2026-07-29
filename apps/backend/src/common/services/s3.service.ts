@@ -4,18 +4,44 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   DeleteObjectCommand,
   ObjectCannedACL,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import sharp = require('sharp');
-import { ImageContext, IMAGE_PRESETS } from '../config/image-presets';
+import {
+  ImageContext,
+  IMAGE_PRESETS,
+  PWA_ICON_SPECS,
+  PwaIconSpec,
+  PwaIconVariant,
+} from '../config/image-presets';
 import {
   extractS3KeyFromUrl,
   isS3Key,
   isSafeS3Key,
 } from '../helpers/s3-url.helper';
+import { S3PathHelper } from '../helpers/s3-path.helper';
+
+/**
+ * Raised when a PWA icon cannot be derived from a tenant logo
+ * (missing/corrupt source, unreadable key, sharp failure).
+ *
+ * Callers MUST catch this and fall back to the Vendix brand icon instead of
+ * serving an empty or broken image to the installed app.
+ */
+export class PwaIconDerivationError extends Error {
+  readonly originalError?: unknown;
+
+  constructor(message: string, originalError?: unknown) {
+    super(message);
+    this.name = 'PwaIconDerivationError';
+    this.originalError = originalError;
+    Object.setPrototypeOf(this, PwaIconDerivationError.prototype);
+  }
+}
 
 @Injectable()
 export class S3Service {
@@ -23,7 +49,10 @@ export class S3Service {
   private readonly bucketName: string;
   private readonly logger = new Logger(S3Service.name);
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly s3PathHelper: S3PathHelper,
+  ) {
     const region = this.configService.get<string>('AWS_REGION') || 'us-east-1';
     const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
     const secretAccessKey = this.configService.get<string>(
@@ -355,6 +384,191 @@ export class S3Service {
       this.logger.error(`Error generating favicon: ${error.message}`);
       return null;
     }
+  }
+
+  /**
+   * Returns the PNG buffer of a PWA icon derived from the tenant logo.
+   *
+   * Reads `{buildPwaIconPath(basePath)}/{variant}.png` from S3 when it already
+   * exists; otherwise derives it from `logoKey` with sharp, persists it under
+   * that key and returns it.
+   *
+   * The binary is ALWAYS served by the backend: this never signs a URL and
+   * never makes the derived object public.
+   *
+   * @param logoKey - S3 key (or legacy S3 URL) of the tenant logo
+   * @param basePath - S3 base path of the tenant (see `S3PathHelper`)
+   * @param variant - PWA icon variant to produce
+   * @param backgroundColor - opaque hex background, e.g. '#2F6F4E'
+   * @throws PwaIconDerivationError when the icon cannot be produced
+   */
+  async getOrCreatePwaIcon(
+    logoKey: string,
+    basePath: string,
+    variant: PwaIconVariant,
+    backgroundColor: string,
+  ): Promise<Buffer> {
+    const spec: PwaIconSpec | undefined = PWA_ICON_SPECS[variant];
+    if (!spec) {
+      throw new PwaIconDerivationError(
+        `Unsupported PWA icon variant: ${String(variant)}`,
+      );
+    }
+
+    const background = this.normalizePwaBackground(backgroundColor);
+    const derivedKey = `${this.s3PathHelper.buildPwaIconPath(basePath)}/${variant}.png`;
+    this.validateS3Key(derivedKey);
+
+    const cached = await this.readCachedPwaIcon(derivedKey);
+    if (cached) {
+      return cached;
+    }
+
+    // Tolerate legacy rows that stored a full S3 URL instead of the key
+    const sourceKey = extractS3KeyFromUrl(logoKey);
+    if (!sourceKey || !isSafeS3Key(sourceKey)) {
+      throw new PwaIconDerivationError(
+        `Invalid source logo key for PWA icon ${variant}`,
+      );
+    }
+
+    let logoBuffer: Buffer;
+    try {
+      logoBuffer = await this.downloadImage(sourceKey);
+    } catch (error) {
+      throw new PwaIconDerivationError(
+        `Source logo "${sourceKey}" could not be read from S3`,
+        error,
+      );
+    }
+
+    if (!logoBuffer || logoBuffer.length === 0) {
+      throw new PwaIconDerivationError(
+        `Source logo "${sourceKey}" is empty; cannot derive PWA icon ${variant}`,
+      );
+    }
+
+    let icon: Buffer;
+    try {
+      icon = await this.renderPwaIcon(logoBuffer, spec, background);
+    } catch (error) {
+      throw new PwaIconDerivationError(
+        `Failed to derive PWA icon ${variant} from "${sourceKey}"`,
+        error,
+      );
+    }
+
+    if (icon.length === 0) {
+      throw new PwaIconDerivationError(
+        `Derived PWA icon ${variant} from "${sourceKey}" is empty`,
+      );
+    }
+
+    // Caching is best-effort: a failed upload must not fail the request
+    try {
+      await this.uploadToS3(icon, derivedKey, 'image/png');
+      this.logger.log(
+        `PWA icon derived and cached: ${derivedKey} (${spec.size}x${spec.size})`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `PWA icon ${derivedKey} derived but could not be cached: ${this.describeError(error)}`,
+      );
+    }
+
+    return icon;
+  }
+
+  /**
+   * Reads an already-derived PWA icon. Returns null when it is not cached yet
+   * (or is unreadable), so the caller falls back to derivation.
+   */
+  private async readCachedPwaIcon(key: string): Promise<Buffer | null> {
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+    } catch {
+      // Not generated yet — expected on first request per tenant/variant
+      return null;
+    }
+
+    try {
+      const cached = await this.downloadImage(key);
+      return cached && cached.length > 0 ? cached : null;
+    } catch (error) {
+      this.logger.warn(
+        `Cached PWA icon ${key} is unreadable, regenerating: ${this.describeError(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Renders the square, OPAQUE PNG for a PWA icon spec.
+   *
+   * `inscribeRatio < 1` inscribes the logo inside the canvas so it survives
+   * the Android adaptive-icon (maskable) safe-zone crop.
+   */
+  private async renderPwaIcon(
+    logoBuffer: Buffer,
+    spec: PwaIconSpec,
+    background: string,
+  ): Promise<Buffer> {
+    const { size, inscribeRatio } = spec;
+
+    if (inscribeRatio >= 1) {
+      return sharp(logoBuffer)
+        .resize(size, size, { fit: 'contain', background })
+        .flatten({ background })
+        .png()
+        .toBuffer();
+    }
+
+    const inscribedSize = Math.max(1, Math.round(size * inscribeRatio));
+    const inscribed = await sharp(logoBuffer)
+      .resize(inscribedSize, inscribedSize, { fit: 'contain', background })
+      .flatten({ background })
+      .png()
+      .toBuffer();
+
+    const composed = await sharp({
+      create: {
+        width: size,
+        height: size,
+        channels: 3,
+        background,
+      },
+    })
+      .composite([{ input: inscribed, gravity: 'centre' }])
+      .png()
+      .toBuffer();
+
+    // sharp applies `flatten` BEFORE `composite` within a single pipeline, so
+    // the alpha channel introduced by the overlay must be dropped in a second
+    // pass — otherwise Safari renders the remaining transparency as black.
+    return sharp(composed).flatten({ background }).png().toBuffer();
+  }
+
+  /**
+   * Ensures the PWA icon background is an opaque hex color usable by sharp.
+   * Falls back to white instead of failing the whole icon.
+   */
+  private normalizePwaBackground(backgroundColor: string): string {
+    const candidate = (backgroundColor ?? '').trim();
+
+    if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(candidate)) {
+      return candidate;
+    }
+
+    this.logger.warn(
+      `Invalid PWA icon background "${backgroundColor}", falling back to #FFFFFF`,
+    );
+    return '#FFFFFF';
+  }
+
+  private describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   /**

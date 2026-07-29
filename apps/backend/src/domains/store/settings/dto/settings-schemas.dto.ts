@@ -473,6 +473,31 @@ export class ReceiptsSettingsDto {
   @IsOptional()
   @IsString()
   receipt_footer?: string;
+
+  // ── Electronic invoicing ──────────────────────────────────
+  // Only meaningful once the store's `invoicing` fiscal area is active: an
+  // habilitado merchant issues electronic invoices, not internal sale receipts.
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
+  @IsBoolean()
+  auto_issue_invoice?: boolean;
+
+  @ApiProperty({ example: 1, required: false, description: '0 = no imprimir' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(5)
+  invoice_copies?: number;
+
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
+  @IsBoolean()
+  send_invoice_email?: boolean;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  print_pos_ticket?: boolean;
 }
 
 export class AppSettingsDto {

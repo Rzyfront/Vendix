@@ -1,4 +1,13 @@
-import { Component, inject, input, output, signal, effect, DestroyRef } from '@angular/core';
+import {
+  Component,
+  computed,
+  DestroyRef,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, DatePipe } from '@angular/common';
 import {
@@ -13,6 +22,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import {
   DianAuditLog,
   DianConfig,
+  DianProductionReadiness,
   DianTestResult,
   InvoiceResolution,
 } from '../../interfaces/invoice.interface';
@@ -46,6 +56,89 @@ interface CredentialsForm {
 
 interface CertificateForm {
   certificate_password: FormControl<string>;
+}
+
+/** Sentinel the API returns instead of a stored secret. */
+const MASKED_SECRET = '****';
+
+/** How often the UI re-asks DIAN for a verdict while a batch is queued. */
+const POLL_INTERVAL_MS = 15_000;
+
+/**
+ * Automatic polls before the UI stops and invites the merchant to come back
+ * later. 20 × 15 s ≈ 5 minutes — long enough for a fast DIAN response, short
+ * enough that nobody sits watching a spinner. The ZipKey is persisted, so
+ * "Consultar estado" resolves the verdict whenever they return.
+ */
+const MAX_AUTO_POLLS = 20;
+
+/** How often the waiting card rotates its fiscal tip. */
+const TIP_ROTATION_MS = 9_000;
+
+/**
+ * Shown while DIAN validates the batch. Real habilitación facts, so the wait
+ * teaches something instead of just spinning.
+ */
+const DIAN_TIPS: ReadonlyArray<{ title: string; body: string }> = [
+  {
+    title: 'El set de pruebas son 50 documentos',
+    body: '30 facturas de venta, 10 notas débito y 10 notas crédito. La DIAN los valida en bloque: o aprueba el conjunto, o reporta los errores de cada documento.',
+  },
+  {
+    title: 'La validación es asíncrona',
+    body: 'La DIAN responde primero con un ZipKey (acuse de recibo) y valida después. Por eso el resultado puede tardar desde segundos hasta varias horas en horas pico.',
+  },
+  {
+    title: 'No reenvíes el set mientras esté en validación',
+    body: 'Un reenvío consume otros 50 números de tu resolución y la DIAN lo rechaza por duplicado. Usa "Consultar estado": no reenvía nada.',
+  },
+  {
+    title: 'La clave técnica (ClTec) alimenta el CUFE',
+    body: 'El CUFE se calcula con el NIT, los totales, la fecha y la clave técnica de la resolución. Si la ClTec está mal, todos los documentos fallan la firma.',
+  },
+  {
+    title: 'La habilitación es automática',
+    body: 'Cuando la DIAN aprueba el set, actualiza tu RUT con la responsabilidad 52 (facturador electrónico). No hay que radicar nada más.',
+  },
+  {
+    title: 'El rango SETP no sirve para facturar',
+    body: 'El rango de habilitación (prefijo SETP) es solo de pruebas. Para producción necesitas la Autorización de Numeración de Facturación que se solicita en Muisca.',
+  },
+  {
+    title: 'Guarda el certificado vigente',
+    body: 'La firma XAdES usa tu certificado digital. Si vence, la DIAN rechaza cada documento aunque el resto de la configuración esté perfecta.',
+  },
+];
+
+/** Visual state of the test-set panel. */
+type TestSetState = 'idle' | 'running' | 'pending' | 'passed' | 'rejected';
+
+/** The persisted `last_test_result` JSON, as returned by GET :id/test-results. */
+interface PersistedTestResult {
+  executed_at?: string;
+  rechecked_at?: string;
+  total_documents?: number;
+  invoices?: number;
+  debit_notes?: number;
+  credit_notes?: number;
+  zip_key?: string | null;
+  pending?: boolean;
+  rejected?: boolean;
+  tracking_id?: string;
+  number_from?: number;
+  number_to?: number;
+  dian_response?: {
+    success?: boolean;
+    status_code?: string;
+    status_message?: string;
+    error_messages?: string[];
+  };
+  poll_history?: Array<{
+    attempt: number;
+    status_code: string;
+    status_message: string;
+    success: boolean;
+  }>;
 }
 
 /**
@@ -144,8 +237,8 @@ interface CertificateForm {
               type="password"
               formControlName="software_pin"
               [control]="softwarePinControl"
-              placeholder="PIN secreto del software"
-              [required]="true"
+              [placeholder]="selectedConfig() ? 'PIN guardado — escribe uno nuevo solo si deseas cambiarlo' : 'PIN secreto del software'"
+              [required]="!selectedConfig()"
             ></app-input>
             <app-input
               label="Test Set ID"
@@ -158,14 +251,24 @@ interface CertificateForm {
             <app-button variant="ghost" size="sm" (clicked)="cancelled.emit()">
               Cancelar
             </app-button>
-            <app-button
-              variant="primary"
-              (clicked)="saveCredentials()"
-              [disabled]="credentialsForm.invalid || savingCredentials()"
-              [loading]="savingCredentials()"
-            >
-              {{ selectedConfig() ? 'Actualizar' : 'Guardar' }} Credenciales
-            </app-button>
+            <div class="flex items-center gap-2">
+              <!-- Already-saved credentials must not force a pointless PATCH just
+                   to move forward. -->
+              @if (selectedConfig()) {
+                <app-button variant="outline" (clicked)="activeStep.set(1)">
+                  Continuar sin cambios
+                  <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
+                </app-button>
+              }
+              <app-button
+                variant="primary"
+                (clicked)="saveCredentials()"
+                [disabled]="credentialsForm.invalid || savingCredentials()"
+                [loading]="savingCredentials()"
+              >
+                {{ selectedConfig() ? 'Actualizar' : 'Guardar' }} Credenciales
+              </app-button>
+            </div>
           </div>
         </div>
       }
@@ -240,18 +343,33 @@ interface CertificateForm {
                   formControlName="certificate_password"
                   [control]="certificatePasswordControl"
                   placeholder="Contrasena del archivo .p12"
-                  [required]="true"
+                  [required]="!!selectedFile()"
+                  [helperText]="selectedFile() ? 'Necesaria para abrir el archivo que acabas de seleccionar.' : 'Solo se pide cuando subes un archivo nuevo.'"
                 ></app-input>
               </form>
-              <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
-                <app-button
-                  variant="primary"
-                  (clicked)="uploadCertificate()"
-                  [disabled]="!selectedFile() || certificateForm.invalid || uploadingCertificate()"
-                  [loading]="uploadingCertificate()"
-                >
-                  Subir Certificado
+              <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
+                <app-button variant="outline" size="sm" (clicked)="activeStep.set(0)">
+                  <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
+                  Anterior
                 </app-button>
+                <div class="flex items-center gap-2">
+                  <!-- A stored certificate is enough to keep going: forcing a
+                       re-upload turned this step into a dead end. -->
+                  @if (hasCertificate() && !selectedFile()) {
+                    <app-button variant="outline" (clicked)="activeStep.set(2)">
+                      Continuar
+                      <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
+                    </app-button>
+                  }
+                  <app-button
+                    variant="primary"
+                    (clicked)="uploadCertificate()"
+                    [disabled]="!selectedFile() || certificateForm.invalid || uploadingCertificate()"
+                    [loading]="uploadingCertificate()"
+                  >
+                    {{ hasCertificate() ? 'Reemplazar Certificado' : 'Subir Certificado' }}
+                  </app-button>
+                </div>
               </div>
             </div>
           }
@@ -306,10 +424,12 @@ interface CertificateForm {
                 </button>
                 <button
                   (click)="setEnvironment('production')"
+                  [disabled]="!testSetPassed()"
                   class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
                     'border-primary bg-[var(--color-primary-light)]': selectedEnvironment() === 'production',
-                    'border-border hover:border-primary': selectedEnvironment() !== 'production'
+                    'border-border hover:border-primary': selectedEnvironment() !== 'production' && testSetPassed(),
+                    'border-border opacity-60 cursor-not-allowed': !testSetPassed()
                   }"
                 >
                   <div class="flex items-center gap-2 mb-2">
@@ -328,6 +448,12 @@ interface CertificateForm {
                   <p class="text-xs text-text-secondary pl-6">
                     Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
                   </p>
+                  @if (!testSetPassed()) {
+                    <p class="text-xs text-warning pl-6 mt-2 flex items-start gap-1">
+                      <app-icon name="lock" [size]="12" class="mt-0.5"></app-icon>
+                      Disponible cuando la DIAN apruebe tu set de pruebas.
+                    </p>
+                  }
                 </button>
               </div>
               <div class="p-3 rounded-lg bg-[var(--color-surface-secondary)] border border-border text-sm">
@@ -344,7 +470,92 @@ interface CertificateForm {
                   <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
                 </div>
               </div>
-              <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
+              <!-- ── Paso a producción ── -->
+              @if (testSetPassed()) {
+                <div class="p-4 rounded-lg border border-border space-y-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                      <app-icon name="shield-check" [size]="16" class="text-primary"></app-icon>
+                      <span class="text-sm font-medium text-text-primary">
+                        Paso a producción
+                      </span>
+                    </div>
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="loadReadiness()"
+                      [loading]="loadingReadiness()"
+                    >
+                      <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                      Verificar requisitos
+                    </app-button>
+                  </div>
+
+                  @if (alreadyInProduction()) {
+                    <div class="p-3 rounded-lg bg-success-light border border-success text-success text-sm flex items-start gap-2">
+                      <app-icon name="check-circle" [size]="16" class="mt-0.5"></app-icon>
+                      <span>
+                        Esta configuración ya está emitiendo facturas electrónicas
+                        reales ante la DIAN.
+                      </span>
+                    </div>
+                  }
+
+                  @if (readiness()) {
+                    <div class="space-y-1.5">
+                      @for (check of readiness()!.checks; track check.key) {
+                        <div class="flex items-start gap-2 text-xs">
+                          <app-icon
+                            [name]="check.satisfied ? 'check-circle' : 'alert-circle'"
+                            [size]="14"
+                            [class]="check.satisfied ? 'text-success mt-0.5' : 'text-warning mt-0.5'"
+                          ></app-icon>
+                          <div>
+                            <span [class]="check.satisfied ? 'text-text-secondary' : 'text-text-primary font-medium'">
+                              {{ check.label }}
+                            </span>
+                            @if (!check.satisfied) {
+                              <div class="text-text-secondary mt-0.5">
+                                {{ check.action }}
+                                @if (check.owner === 'platform') {
+                                  <span class="ml-1 px-1.5 py-0.5 rounded-full bg-[var(--color-surface-secondary)] text-text-secondary">
+                                    lo resuelve Vendix
+                                  </span>
+                                }
+                              </div>
+                            }
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  } @else if (!loadingReadiness()) {
+                    <p class="text-xs text-text-secondary">
+                      Verifica los requisitos para saber si ya puedes emitir facturas reales.
+                    </p>
+                  }
+
+                  @if (!alreadyInProduction()) {
+                    <div class="flex justify-end pt-2">
+                      <app-button
+                        variant="primary"
+                        size="sm"
+                        (clicked)="promoteToProduction()"
+                        [disabled]="promoting() || readiness()?.ready !== true"
+                        [loading]="promoting()"
+                      >
+                        <app-icon slot="icon" name="shield-check" [size]="14"></app-icon>
+                        Activar producción
+                      </app-button>
+                    </div>
+                  }
+                </div>
+              }
+
+              <div class="flex items-center justify-between gap-3 pt-4 border-t border-border">
+                <app-button variant="outline" size="sm" (clicked)="activeStep.set(1)">
+                  <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
+                  Anterior
+                </app-button>
                 <app-button
                   variant="primary"
                   (clicked)="saveEnvironment()"
@@ -394,7 +605,7 @@ interface CertificateForm {
                   }
                 </select>
               </div>
-              <div class="flex items-center gap-3">
+              <div class="flex flex-wrap items-center gap-3">
                 <app-button
                   variant="outline"
                   (clicked)="testConnection()"
@@ -407,12 +618,25 @@ interface CertificateForm {
                 <app-button
                   variant="primary"
                   (clicked)="runTestSet()"
-                  [disabled]="runningTestSet() || !selectedResolutionId()"
+                  [disabled]="runningTestSet() || !selectedResolutionId() || testSetState() === 'pending' || testSetState() === 'passed'"
                   [loading]="runningTestSet()"
                 >
                   <app-icon slot="icon" name="play" [size]="14"></app-icon>
-                  Ejecutar Set de Pruebas
+                  {{ testSetState() === 'rejected' ? 'Reintentar Set de Pruebas' : 'Ejecutar Set de Pruebas' }}
                 </app-button>
+                <!-- Re-poll: resolves the verdict of the batch already sent. It
+                     never re-transmits, so it is always safe to press. -->
+                @if (testSetResult()?.zip_key || testSetState() === 'pending') {
+                  <app-button
+                    variant="outline"
+                    (clicked)="checkTestSetStatus(false)"
+                    [disabled]="checkingStatus()"
+                    [loading]="checkingStatus()"
+                  >
+                    <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                    Consultar estado
+                  </app-button>
+                }
               </div>
               @if (testResult()) {
                 <div class="p-4 rounded-lg border"
@@ -441,23 +665,95 @@ interface CertificateForm {
                   </div>
                 </div>
               }
-              @if (testSetResult()) {
+              <!-- ══ Waiting state: DIAN acknowledged the batch, no verdict yet ══ -->
+              @if (testSetState() === 'running' || testSetState() === 'pending') {
+                <div class="p-4 rounded-lg border border-[var(--color-info)] bg-[var(--color-info-light)] space-y-4">
+                  <div class="flex items-start gap-3">
+                    <div class="mt-0.5 shrink-0">
+                      <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--color-info)]"></div>
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium text-[var(--color-info)]">
+                        {{ testSetState() === 'running'
+                          ? 'Generando, firmando y enviando los 50 documentos…'
+                          : 'La DIAN está validando tu set de pruebas' }}
+                      </p>
+                      <p class="text-xs text-text-secondary mt-1">
+                        {{ testSetState() === 'running'
+                          ? 'No cierres esta ventana: el envío puede tardar hasta un minuto.'
+                          : 'El envío ya se completó. Ahora esperamos el veredicto, que la DIAN entrega de forma asíncrona.' }}
+                      </p>
+                      @if (testSetState() === 'pending' && waitingSinceLabel()) {
+                        <p class="text-xs text-text-secondary mt-1">
+                          Enviado {{ waitingSinceLabel() }}@if (polling()) {, consultando cada 15 segundos}.
+                        </p>
+                      }
+                    </div>
+                  </div>
+
+                  <!-- Fiscal tips: turn dead wait time into something useful. -->
+                  <div class="p-3 rounded-lg bg-[var(--color-surface)] border border-border">
+                    <div class="flex items-start gap-2">
+                      <app-icon name="lightbulb" [size]="16" class="text-primary mt-0.5 shrink-0"></app-icon>
+                      <div class="min-w-0">
+                        <p class="text-xs font-semibold text-text-primary">{{ currentTip().title }}</p>
+                        <p class="text-xs text-text-secondary mt-0.5">{{ currentTip().body }}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  @if (testSetResult()?.zip_key) {
+                    <div class="text-xs text-text-secondary">
+                      ZipKey: <span class="font-mono break-all">{{ testSetResult()!.zip_key }}</span>
+                    </div>
+                  }
+
+                  <!-- Long wait: stop the timer and tell them it is fine to leave. -->
+                  @if (pollExhausted()) {
+                    <div class="p-3 rounded-lg bg-warning-light border border-warning text-xs text-warning space-y-2">
+                      <div class="flex items-start gap-2">
+                        <app-icon name="clock" [size]="14" class="mt-0.5 shrink-0"></app-icon>
+                        <span>
+                          La DIAN se está tomando más de lo habitual. Puedes cerrar
+                          esta ventana y volver más tarde: guardamos el ZipKey, así
+                          que el resultado no se pierde.
+                        </span>
+                      </div>
+                      <div class="flex justify-end">
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          (clicked)="resumePolling()"
+                          [loading]="checkingStatus()"
+                        >
+                          <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                          Seguir consultando
+                        </app-button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- ══ Terminal states: approved / rejected ══ -->
+              @if (testSetState() === 'passed' || testSetState() === 'rejected') {
                 <div class="p-4 rounded-lg border"
                   [ngClass]="{
-                    'bg-success-light border-success': testSetResult()!.success,
-                    'bg-[var(--color-info-light)] border-[var(--color-info)]': !testSetResult()!.success
+                    'bg-success-light border-success': testSetState() === 'passed',
+                    'bg-error-light border-error': testSetState() === 'rejected'
                   }"
                 >
                   <div class="flex items-center gap-2 mb-3">
                     <app-icon
-                      [name]="testSetResult()!.success ? 'check-circle' : 'info'"
+                      [name]="testSetState() === 'passed' ? 'check-circle' : 'x-circle'"
                       [size]="18"
-                      [class]="testSetResult()!.success ? 'text-success' : 'text-[var(--color-info)]'"
+                      [class]="testSetState() === 'passed' ? 'text-success' : 'text-error'"
                     ></app-icon>
-                    <span class="text-sm font-medium" [class]="testSetResult()!.success ? 'text-success' : 'text-[var(--color-info)]'">
+                    <span class="text-sm font-medium" [class]="testSetState() === 'passed' ? 'text-success' : 'text-error'">
                       {{ testSetResult()!.message }}
                     </span>
                   </div>
+
                   <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                     <div class="p-2 bg-[var(--color-surface)] rounded border border-border text-center">
                       <div class="text-text-secondary">Total</div>
@@ -476,14 +772,53 @@ interface CertificateForm {
                       <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.credit_notes_count }}</div>
                     </div>
                   </div>
-                  @if (testSetResult()!.tracking_id && testSetResult()!.tracking_id !== 's:Sender') {
-                    <div class="mt-3 text-xs text-text-secondary">
-                      Tracking ID: <span class="font-mono">{{ testSetResult()!.tracking_id }}</span>
+
+                  <div class="mt-3 space-y-1 text-xs text-text-secondary">
+                    @if (testSetResult()!.number_from && testSetResult()!.number_to) {
+                      <div>
+                        Numeración usada: {{ testSetResult()!.number_from }} — {{ testSetResult()!.number_to }}
+                      </div>
+                    }
+                    @if (testSetResult()!.executed_at) {
+                      <div>Enviado: {{ testSetResult()!.executed_at | date:'dd/MM/yy HH:mm' }}</div>
+                    }
+                    @if (testSetResult()!.rechecked_at) {
+                      <div>Última consulta: {{ testSetResult()!.rechecked_at | date:'dd/MM/yy HH:mm' }}</div>
+                    }
+                    @if (testSetResult()!.zip_key) {
+                      <div>ZipKey: <span class="font-mono break-all">{{ testSetResult()!.zip_key }}</span></div>
+                    }
+                    @if (testSetResult()!.dian_status) {
+                      <div>Estado DIAN: <span class="font-mono">{{ testSetResult()!.dian_status }}</span></div>
+                    }
+                  </div>
+
+                  <!-- Per-document DIAN errors: the only actionable output of a rejection. -->
+                  @if (testSetResult()!.error_messages?.length) {
+                    <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-error/40 max-h-48 overflow-y-auto">
+                      <p class="text-xs font-semibold text-error mb-1">
+                        Errores reportados por la DIAN
+                      </p>
+                      <ul class="list-disc pl-4 space-y-0.5 text-xs text-text-secondary">
+                        @for (msg of testSetResult()!.error_messages; track msg) {
+                          <li>{{ msg }}</li>
+                        }
+                      </ul>
                     </div>
                   }
-                  @if (testSetResult()!.dian_status === 's:Sender') {
-                    <div class="mt-3 p-2 rounded bg-warning-light border border-warning text-xs text-warning">
-                      <strong>Nota:</strong> Los 50 documentos se generaron y firmaron correctamente. La DIAN requiere WS-Security en el envelope SOAP para procesar el set. Esta funcionalidad esta en desarrollo.
+
+                  @if (testSetState() === 'passed') {
+                    <div class="mt-3 p-3 rounded bg-[var(--color-surface)] border border-success/40 text-xs text-text-secondary">
+                      <p class="font-semibold text-success mb-1">Siguiente paso</p>
+                      La DIAN habilitó tu NIT como facturador electrónico. Solicita la
+                      Autorización de Numeración de Facturación en Muisca, regístrala
+                      como resolución y luego activa producción en el paso de Ambiente.
+                      <div class="mt-2">
+                        <app-button variant="outline" size="sm" (clicked)="goToProduction()">
+                          <app-icon slot="icon" name="shield-check" [size]="14"></app-icon>
+                          Ir al paso de producción
+                        </app-button>
+                      </div>
                     </div>
                   }
                 </div>
@@ -649,6 +984,17 @@ export class DianConfigWizardComponent {
   readonly resolutions = signal<InvoiceResolution[]>([]);
   readonly selectedResolutionId = signal<number | null>(null);
   readonly testSetResult = signal<DianTestResult | null>(null);
+  readonly loadingTestSet = signal(false);
+  readonly checkingStatus = signal(false);
+  readonly polling = signal(false);
+  readonly pollAttempts = signal(0);
+  readonly pollExhausted = signal(false);
+  readonly tipIndex = signal(0);
+
+  // Step 3 (production transition)
+  readonly readiness = signal<DianProductionReadiness | null>(null);
+  readonly loadingReadiness = signal(false);
+  readonly promoting = signal(false);
 
   // Step 5
   readonly auditLogs = signal<DianAuditLog[]>([]);
@@ -697,6 +1043,73 @@ export class DianConfigWizardComponent {
     { value: 'NIT_EXTRANJERIA', label: 'NIT Extranjeria' },
   ];
 
+  // ── Derived state ─────────────────────────────────────────
+  /** True when a certificate is already stored, so re-upload is optional. */
+  readonly hasCertificate = computed(
+    () => !!this.selectedConfig()?.certificate_s3_key,
+  );
+
+  /**
+   * Tri-state verdict of the test set. `pending` is the state the old UI could
+   * not express: DIAN has the batch but has not judged it, which is neither
+   * success nor failure and must NOT invite a re-send.
+   */
+  readonly testSetState = computed<TestSetState>(() => {
+    if (this.runningTestSet()) return 'running';
+    const result = this.testSetResult();
+    if (!result) return 'idle';
+    if (result.success) return 'passed';
+    if (result.pending) return 'pending';
+    if (result.rejected) return 'rejected';
+    return 'pending';
+  });
+
+  readonly currentTip = computed(
+    () => DIAN_TIPS[this.tipIndex() % DIAN_TIPS.length],
+  );
+
+  /**
+   * Ticks while the UI is waiting, so the elapsed-time label stays live. A
+   * `computed` reading `Date.now()` alone would never re-evaluate: the signal
+   * graph has no idea the clock moved.
+   */
+  private readonly nowTick = signal(0);
+
+  /** Human "hace X" label for how long DIAN has held the batch. */
+  readonly waitingSinceLabel = computed(() => {
+    this.nowTick();
+    const started = this.testSetResult()?.executed_at;
+    if (!started) return null;
+    const elapsedMs = Date.now() - new Date(started).getTime();
+    if (Number.isNaN(elapsedMs) || elapsedMs < 0) return null;
+    const minutes = Math.floor(elapsedMs / 60_000);
+    if (minutes < 1) return 'hace menos de un minuto';
+    if (minutes < 60) return `hace ${minutes} minuto${minutes === 1 ? '' : 's'}`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `hace ${hours} hora${hours === 1 ? '' : 's'}`;
+    const days = Math.floor(hours / 24);
+    return `hace ${days} día${days === 1 ? '' : 's'}`;
+  });
+
+  /** The DIAN test set is the gate for production; nothing else unlocks it. */
+  readonly testSetPassed = computed(() => {
+    const status = this.selectedConfig()?.enablement_status;
+    return status === 'test_set_passed' || status === 'enabled';
+  });
+
+  readonly alreadyInProduction = computed(
+    () =>
+      this.selectedConfig()?.environment === 'production' &&
+      this.selectedConfig()?.enablement_status === 'enabled',
+  );
+
+  readonly readinessBlockers = computed(
+    () => this.readiness()?.checks.filter((c) => !c.satisfied) ?? [],
+  );
+
+  private pollHandle: ReturnType<typeof setInterval> | null = null;
+  private tipHandle: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     // Sync initial inputs → internal signals (react to changes from parent)
     effect(() => {
@@ -705,6 +1118,10 @@ export class DianConfigWizardComponent {
       if (cfg) {
         this.patchCredentialsForm(cfg);
         this.selectedEnvironment.set(cfg.environment);
+        // Recover the real test-set state from the server instead of showing a
+        // blank panel: a batch submitted in a previous session may still be
+        // pending, or may already have been approved.
+        this.loadTestResults(cfg.id);
       } else {
         this.resetForms();
       }
@@ -715,7 +1132,22 @@ export class DianConfigWizardComponent {
       if (typeof step === 'number') this.activeStep.set(step);
     });
 
+    // The certificate password only matters when a NEW file is being uploaded;
+    // requiring it unconditionally blocked "Continuar" for tenants that already
+    // have a certificate stored.
+    effect(() => {
+      const needsPassword = !!this.selectedFile();
+      const control = this.certificatePasswordControl;
+      if (needsPassword) control.setValidators([Validators.required]);
+      else control.clearValidators();
+      control.updateValueAndValidity({ emitEvent: false });
+    });
+
     this.loadResolutions();
+    this.destroyRef.onDestroy(() => {
+      this.stopPolling();
+      this.stopTips();
+    });
   }
 
   // ── Helpers ───────────────────────────────────────────────
@@ -730,8 +1162,10 @@ export class DianConfigWizardComponent {
     const labels: Record<string, string> = {
       not_started: 'No iniciado',
       testing: 'En pruebas',
+      test_set_passed: 'Set de pruebas aprobado',
       enabled: 'Habilitado',
       suspended: 'Suspendido',
+      expired: 'Vencido',
     };
     return labels[status] || status;
   }
@@ -740,8 +1174,10 @@ export class DianConfigWizardComponent {
     const classes: Record<string, string> = {
       not_started: 'bg-[var(--color-surface-secondary)] text-text-secondary',
       testing: 'bg-warning-light text-warning',
+      test_set_passed: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
       enabled: 'bg-success-light text-success',
       suspended: 'bg-error-light text-error',
+      expired: 'bg-error-light text-error',
     };
     return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
@@ -766,6 +1202,11 @@ export class DianConfigWizardComponent {
     this.testSetResult.set(null);
     this.selectedResolutionId.set(null);
     this.auditLogs.set([]);
+    // A fresh config has no batch in flight; drop any timer from the previous one.
+    this.stopPolling();
+    this.pollAttempts.set(0);
+    this.pollExhausted.set(false);
+    this.readiness.set(null);
   }
 
   private patchCredentialsForm(cfg: DianConfig): void {
@@ -775,9 +1216,11 @@ export class DianConfigWizardComponent {
       nit: cfg.nit,
       nit_dv: cfg.nit_dv || '',
       software_id: cfg.software_id,
-      // On edit: leave empty so user enters only to change. Validator below
-      // is cleared to allow saving other fields without re-entering the pin.
-      software_pin: '',
+      // Prefill the masked sentinel so the merchant SEES the PIN is stored
+      // (a blank field read as "it wasn't saved" and invited a re-type).
+      // `saveCredentials()` strips the sentinel, so the real secret is never
+      // overwritten unless a new value is typed.
+      software_pin: cfg.software_pin_encrypted ? MASKED_SECRET : '',
       test_set_id: cfg.test_set_id || '',
     });
     this.softwarePinControl.clearValidators();
@@ -803,7 +1246,7 @@ export class DianConfigWizardComponent {
     };
     // Only send software_pin when user actually entered one. The masked
     // sentinel '****' is what the backend returns on GET — never a real value.
-    if (v.software_pin && v.software_pin !== '****') {
+    if (v.software_pin && v.software_pin !== MASKED_SECRET) {
       payload['software_pin'] = v.software_pin;
     }
 
@@ -885,9 +1328,19 @@ export class DianConfigWizardComponent {
       });
   }
 
-  // ── Step 3: Environment ───────────────────────────────────
+  // ── Step 3: Environment + production transition ───────────
   setEnvironment(env: 'test' | 'production'): void {
+    // Production is not a free choice: DIAN only authorizes real emission after
+    // the test set passes. Selecting it earlier would produce a 412 on save, so
+    // the option is refused up front with the reason.
+    if (env === 'production' && !this.testSetPassed()) {
+      this.toast.error(
+        'Primero debes aprobar el set de pruebas de la DIAN para pasar a producción.',
+      );
+      return;
+    }
     this.selectedEnvironment.set(env);
+    if (env === 'production') this.loadReadiness();
   }
 
   saveEnvironment(): void {
@@ -919,14 +1372,306 @@ export class DianConfigWizardComponent {
       });
   }
 
+  /** Loads the production checklist so the merchant sees what is still missing. */
+  loadReadiness(): void {
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    this.loadingReadiness.set(true);
+    this.invoicingService
+      .getDianProductionReadiness(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.readiness.set(response?.data ?? response ?? null);
+          this.loadingReadiness.set(false);
+        },
+        error: () => {
+          this.readiness.set(null);
+          this.loadingReadiness.set(false);
+        },
+      });
+  }
+
+  /**
+   * Switches the configuration to real emission. The backend re-checks every
+   * prerequisite, so a stale checklist in the UI can never let this through.
+   */
+  promoteToProduction(): void {
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    this.promoting.set(true);
+    this.invoicingService
+      .promoteDianToProduction(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const persisted: DianConfig = response?.data || response;
+          this.selectedConfig.set(persisted);
+          this.selectedEnvironment.set('production');
+          this.promoting.set(false);
+          this.toast.success(
+            'Facturación electrónica activada en producción. Ya puedes emitir facturas reales.',
+          );
+          this.saved.emit(persisted);
+          this.loadReadiness();
+        },
+        error: (err: any) => {
+          this.promoting.set(false);
+          this.toast.error(
+            extractApiErrorMessage(err) ||
+              'No se pudo pasar a producción: revisa los requisitos pendientes.',
+          );
+          // Refresh the checklist so the reason is visible, not just a toast.
+          this.loadReadiness();
+        },
+      });
+  }
+
   // ── Step 4: Test connection ───────────────────────────────
   private loadResolutions(): void {
     this.invoicingService.getResolutions()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response: any) => this.resolutions.set(response?.data || []),
+        next: (response: any) => {
+          const list: InvoiceResolution[] = response?.data || [];
+          this.resolutions.set(list);
+          // With a single active resolution there is nothing to choose: leaving
+          // the selector empty only disabled the run button for no reason.
+          if (list.length === 1 && this.selectedResolutionId() === null) {
+            this.selectedResolutionId.set(list[0].id);
+          }
+        },
         error: () => this.resolutions.set([]),
       });
+  }
+
+  /**
+   * Rehydrates the test-set panel from the persisted `last_test_result`. Without
+   * this the UI forgot every submission on reload — which is how a perfectly
+   * healthy pending batch looked like "nothing happened".
+   */
+  private loadTestResults(configId: number): void {
+    this.loadingTestSet.set(true);
+    this.invoicingService
+      .getDianTestResults(configId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const payload = response?.data ?? response;
+          const persisted: PersistedTestResult | null =
+            payload?.last_result ?? null;
+          this.loadingTestSet.set(false);
+          if (!persisted || !persisted.executed_at) {
+            this.testSetResult.set(null);
+            return;
+          }
+          const mapped = this.mapPersistedResult(persisted, payload?.environment);
+          this.testSetResult.set(mapped);
+          if (mapped.pending) {
+            // Resolve the verdict right away; DIAN may have finished while the
+            // merchant was away.
+            this.checkTestSetStatus(true);
+          }
+        },
+        error: () => {
+          this.loadingTestSet.set(false);
+        },
+      });
+  }
+
+  private mapPersistedResult(
+    persisted: PersistedTestResult,
+    environment?: string,
+  ): DianTestResult {
+    const dian = persisted.dian_response ?? {};
+    const success = dian.success === true;
+    const pending = persisted.pending === true;
+    const rejected = persisted.rejected === true;
+    return {
+      success,
+      pending,
+      rejected,
+      environment: environment ?? this.selectedConfig()?.environment ?? 'test',
+      response_time_ms: 0,
+      message: success
+        ? 'La DIAN validó el set de pruebas.'
+        : pending
+          ? 'La DIAN recibió el set y sigue validándolo.'
+          : `La DIAN rechazó el set de pruebas: ${dian.status_message ?? 'sin detalle'}`,
+      dian_status: dian.status_code,
+      status_message: dian.status_message,
+      error_messages: dian.error_messages ?? [],
+      tracking_id: persisted.tracking_id ?? persisted.zip_key ?? undefined,
+      zip_key: persisted.zip_key ?? null,
+      total_documents: persisted.total_documents ?? 50,
+      invoices_count: persisted.invoices ?? 30,
+      debit_notes_count: persisted.debit_notes ?? 10,
+      credit_notes_count: persisted.credit_notes ?? 10,
+      executed_at: persisted.executed_at ?? null,
+      rechecked_at: persisted.rechecked_at ?? null,
+      number_from: persisted.number_from ?? null,
+      number_to: persisted.number_to ?? null,
+      poll_history: persisted.poll_history,
+    };
+  }
+
+  /**
+   * Asks DIAN for the verdict of the batch already submitted. NEVER re-sends
+   * documents, so it is safe to call on a timer and from a button.
+   *
+   * @param silent when true (automatic poll) only terminal outcomes raise toasts.
+   */
+  checkTestSetStatus(silent = false): void {
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    if (this.checkingStatus()) return;
+
+    this.checkingStatus.set(true);
+    this.invoicingService
+      .checkDianTestSetStatus(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const result: DianTestResult = response?.data ?? response;
+          this.checkingStatus.set(false);
+          this.applyTestSetOutcome(
+            {
+              ...this.testSetResult(),
+              ...result,
+              // The re-poll response carries no counts when the batch predates
+              // this feature; keep whatever we already had.
+              total_documents:
+                result.total_documents ??
+                this.testSetResult()?.total_documents ??
+                50,
+              invoices_count:
+                result.invoices_count ?? this.testSetResult()?.invoices_count ?? 30,
+              debit_notes_count:
+                result.debit_notes_count ??
+                this.testSetResult()?.debit_notes_count ??
+                10,
+              credit_notes_count:
+                result.credit_notes_count ??
+                this.testSetResult()?.credit_notes_count ??
+                10,
+            } as DianTestResult,
+            silent,
+          );
+        },
+        error: (err: any) => {
+          this.checkingStatus.set(false);
+          if (!silent) {
+            this.toast.error(
+              extractApiErrorMessage(err) || 'No se pudo consultar el estado en la DIAN',
+            );
+          }
+        },
+      });
+  }
+
+  /**
+   * Single place where a test-set outcome updates the UI: keeps the toast, the
+   * polling lifecycle and the config refresh consistent no matter whether the
+   * outcome came from a run, an automatic poll or a manual re-check.
+   */
+  private applyTestSetOutcome(result: DianTestResult, silent: boolean): void {
+    this.testSetResult.set(result);
+
+    if (result.success) {
+      this.stopPolling();
+      this.toast.success('La DIAN aprobó el set de pruebas. Habilitación completa.');
+      this.refreshConfig();
+      return;
+    }
+
+    if (result.rejected) {
+      this.stopPolling();
+      this.toast.error(
+        result.error_messages?.length
+          ? `La DIAN rechazó el set: ${result.error_messages[0]}`
+          : result.message || 'La DIAN rechazó el set de pruebas.',
+      );
+      this.refreshConfig();
+      return;
+    }
+
+    // Still pending.
+    if (!silent) {
+      this.toast.info(
+        'La DIAN sigue validando el set. Te avisamos en cuanto responda.',
+      );
+    }
+    this.startPolling();
+  }
+
+  private refreshConfig(): void {
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    this.invoicingService
+      .getDianConfigById(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const refreshed: DianConfig = response?.data || response;
+          this.selectedConfig.set(refreshed);
+          this.saved.emit(refreshed);
+        },
+      });
+  }
+
+  // ── Polling lifecycle ─────────────────────────────────────
+  private startPolling(): void {
+    this.startTips();
+    if (this.pollHandle || this.pollExhausted()) return;
+    this.polling.set(true);
+    this.pollHandle = setInterval(() => {
+      if (this.pollAttempts() >= MAX_AUTO_POLLS) {
+        // Stop pestering DIAN: the ZipKey is persisted, so the merchant can come
+        // back whenever and resolve the verdict with one click.
+        this.pollExhausted.set(true);
+        this.stopPolling();
+        return;
+      }
+      this.pollAttempts.update((n) => n + 1);
+      this.checkTestSetStatus(true);
+    }, POLL_INTERVAL_MS);
+  }
+
+  private stopPolling(): void {
+    if (this.pollHandle) {
+      clearInterval(this.pollHandle);
+      this.pollHandle = null;
+    }
+    this.polling.set(false);
+    this.stopTips();
+  }
+
+  /** Jumps to the Ambiente step and pulls the production checklist. */
+  goToProduction(): void {
+    this.activeStep.set(2);
+    this.loadReadiness();
+  }
+
+  /** Restarts polling after the automatic window was exhausted. */
+  resumePolling(): void {
+    this.pollExhausted.set(false);
+    this.pollAttempts.set(0);
+    this.checkTestSetStatus(false);
+  }
+
+  private startTips(): void {
+    if (this.tipHandle) return;
+    this.tipHandle = setInterval(() => {
+      this.tipIndex.update((i) => i + 1);
+      this.nowTick.update((n) => n + 1);
+    }, TIP_ROTATION_MS);
+  }
+
+  private stopTips(): void {
+    if (this.tipHandle) {
+      clearInterval(this.tipHandle);
+      this.tipHandle = null;
+    }
   }
 
   testConnection(): void {
@@ -963,31 +1708,49 @@ export class DianConfigWizardComponent {
     const cfg = this.selectedConfig();
     const resId = this.selectedResolutionId();
     if (!cfg || !resId) return;
+    // Guard in the UI too: a pending batch must be polled, never re-sent.
+    if (this.testSetResult()?.pending) {
+      this.toast.warning(
+        'Ya hay un set de pruebas en validación. Consulta su estado en lugar de reenviarlo.',
+      );
+      return;
+    }
+
     this.runningTestSet.set(true);
     this.testSetResult.set(null);
+    this.pollExhausted.set(false);
+    this.pollAttempts.set(0);
+    this.startTips();
+
     this.invoicingService.runDianTestSet(cfg.id, resId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const result: DianTestResult = response?.data || response;
-          this.testSetResult.set(result);
           this.runningTestSet.set(false);
-          if (result.success) {
-            this.toast.success('Set de pruebas enviado exitosamente');
-            // Reload config to reflect updated enablement_status
-            this.invoicingService.getDianConfigById(cfg.id)
-              .pipe(takeUntilDestroyed(this.destroyRef))
-              .subscribe({
-                next: (cfgResponse: any) => {
-                  const refreshed: DianConfig = cfgResponse?.data || cfgResponse;
-                  this.selectedConfig.set(refreshed);
-                  this.saved.emit(refreshed);
-                },
-              });
+          // A non-success response is NOT automatically an error: `pending`
+          // means the batch is queued at DIAN. The old code showed no feedback
+          // at all in that case, which is why a healthy submission looked silent.
+          this.applyTestSetOutcome(result, false);
+          if (result.pending) {
+            this.toast.info(
+              'La DIAN recibió los 50 documentos y los está validando. Puedes esperar aquí o volver más tarde.',
+            );
           }
         },
         error: (err: any) => {
           this.runningTestSet.set(false);
+          this.stopTips();
+          // 409 = a batch is already in flight for this config. Surface the real
+          // state instead of a dead-end error.
+          if (err?.status === 409) {
+            this.toast.warning(
+              extractApiErrorMessage(err) ||
+                'Ya hay un set de pruebas en validación en la DIAN.',
+            );
+            this.checkTestSetStatus(true);
+            return;
+          }
           this.toast.error(extractApiErrorMessage(err) || 'Error al ejecutar set de pruebas');
         },
       });

@@ -9,12 +9,17 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
+  CreateRoleDto,
   Role,
   RoleQueryDto,
-  RoleStats,
   PaginatedRolesResponse,
 } from './interfaces/role.interface';
 import { OrgRolesService } from './services/org-roles.service';
+import { extractRoleErrorMessage } from './services/org-role-errors';
+import {
+  canEditRoleScope,
+  getRoleReadOnlyReason,
+} from '../../../../shared/constants/role-scope.constant';
 import {
   OrgRolesListComponent,
   RoleCreateModalComponent,
@@ -58,23 +63,61 @@ export class RolesComponent implements OnInit {
 
   readonly roles = signal<Role[]>([]);
   readonly searchTerm = signal('');
-  readonly typeFilter = signal('');
+  /** '' | 'system' | 'organization' | 'store' — QUI-72. */
+  readonly scopeFilter = signal('');
   readonly filteredRoles = computed(() => {
-    const type = this.typeFilter();
+    const scope = this.scopeFilter();
     const roles = this.roles();
 
-    if (type === 'system') {
-      return roles.filter((role) => role.system_role);
-    }
-
-    if (type === 'custom') {
-      return roles.filter((role) => !role.system_role);
-    }
-
-    return roles;
+    if (!scope) return roles;
+    return roles.filter((role) => role.scope === scope);
   });
-  readonly roleStats = signal<RoleStats | null>(null);
-  readonly statsItems = signal<StatItem[]>([]);
+  /**
+   * QUI-72 — las tarjetas pasan de "Sistema / Personalizado" a los TRES
+   * alcances y se derivan del listado ya cargado. `GET /organization/roles/stats`
+   * exige rol `super_admin`, así que para un admin de organización siempre
+   * respondía 403 y las tarjetas quedaban en cero.
+   */
+  readonly statsItems = computed<StatItem[]>(() => {
+    const roles = this.roles();
+    const countBy = (scope: string) =>
+      roles.filter((role) => role.scope === scope).length;
+
+    return [
+      {
+        title: 'Total Roles',
+        value: roles.length,
+        smallText: 'visibles en la organización',
+        iconName: 'shield',
+        iconBgColor: 'bg-primary/10',
+        iconColor: 'text-primary',
+      },
+      {
+        title: 'Roles de Sistema',
+        value: countBy('system'),
+        smallText: 'sólo lectura',
+        iconName: 'shield-check',
+        iconBgColor: 'bg-purple-100',
+        iconColor: 'text-purple-600',
+      },
+      {
+        title: 'Roles de Organización',
+        value: countBy('organization'),
+        smallText: 'editables',
+        iconName: 'building-2',
+        iconBgColor: 'bg-blue-100',
+        iconColor: 'text-blue-600',
+      },
+      {
+        title: 'Roles de Tienda',
+        value: countBy('store'),
+        smallText: 'de tus tiendas',
+        iconName: 'store',
+        iconBgColor: 'bg-green-100',
+        iconColor: 'text-green-600',
+      },
+    ];
+  });
   readonly isLoading = signal(false);
   readonly currentRole = signal<Role | null>(null);
   readonly showCreateModal = model<boolean>(false);
@@ -84,7 +127,6 @@ export class RolesComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadRoles();
-    this.loadRoleStats();
   }
 
   loadRoles(): void {
@@ -103,72 +145,14 @@ export class RolesComponent implements OnInit {
         error: (error) => {
           console.error('Error loading roles:', error);
           this.roles.set([]);
-          this.toastService.error('Error al cargar roles');
+          this.toastService.error(
+            extractRoleErrorMessage(error, 'Error al cargar roles'),
+          );
         },
       })
       .add(() => {
         this.isLoading.set(false);
       });
-  }
-
-  loadRoleStats(): void {
-    this.rolesService
-      .getRolesStats()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (stats: RoleStats) => {
-          this.roleStats.set(stats);
-          this.updateStatsItems();
-        },
-        error: (error) => {
-          console.error('Error loading role stats:', error);
-        },
-      });
-  }
-
-  private updateStatsItems(): void {
-    const s = this.roleStats() || {
-      total_roles: 0,
-      system_roles: 0,
-      custom_roles: 0,
-      total_permissions: 0,
-    };
-    const total = s.total_roles || 0;
-
-    this.statsItems.set([
-      {
-        title: 'Total Roles',
-        value: total,
-        smallText: 'en la organización',
-        iconName: 'shield',
-        iconBgColor: 'bg-primary/10',
-        iconColor: 'text-primary',
-      },
-      {
-        title: 'Roles de Sistema',
-        value: s.system_roles || 0,
-        smallText: 'no modificables',
-        iconName: 'lock',
-        iconBgColor: 'bg-purple-100',
-        iconColor: 'text-purple-600',
-      },
-      {
-        title: 'Roles Personalizados',
-        value: s.custom_roles || 0,
-        smallText: 'editables',
-        iconName: 'user-check',
-        iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600',
-      },
-      {
-        title: 'Permisos Disponibles',
-        value: s.total_permissions || 0,
-        smallText: 'configurables',
-        iconName: 'key',
-        iconBgColor: 'bg-blue-100',
-        iconColor: 'text-blue-600',
-      },
-    ]);
   }
 
   onSearchChange(searchTerm: string): void {
@@ -177,12 +161,11 @@ export class RolesComponent implements OnInit {
   }
 
   onFilterChange(filters: Record<string, string>): void {
-    this.typeFilter.set(filters['type'] || '');
+    this.scopeFilter.set(filters['scope'] || '');
   }
 
   refreshRoles(): void {
     this.loadRoles();
-    this.loadRoleStats();
   }
 
   createRole(): void {
@@ -200,8 +183,13 @@ export class RolesComponent implements OnInit {
   }
 
   confirmDelete(role: Role): void {
-    if (role.system_role) {
-      this.toastService.warning('No se pueden eliminar roles del sistema.');
+    // Espejo de la matriz del backend: un rol no editable en este nivel
+    // tampoco es borrable, y el motivo lo da el contrato compartido.
+    if (!canEditRoleScope(role.scope, 'organization')) {
+      this.toastService.warning(
+        getRoleReadOnlyReason(role.scope, 'organization') ??
+          'No puedes eliminar este rol desde la organización.',
+      );
       return;
     }
 
@@ -228,17 +216,21 @@ export class RolesComponent implements OnInit {
   }
 
   deleteRole(id: number): void {
-    this.rolesService.deleteRole(id).subscribe({
-      next: () => {
-        this.loadRoles();
-        this.loadRoleStats();
-        this.toastService.success('Rol eliminado exitosamente');
-      },
-      error: (error) => {
-        console.error('Error deleting role:', error);
-        this.toastService.error('Error al eliminar el rol');
-      },
-    });
+    this.rolesService
+      .deleteRole(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.loadRoles();
+          this.toastService.success('Rol eliminado exitosamente');
+        },
+        error: (error) => {
+          console.error('Error deleting role:', error);
+          this.toastService.error(
+            extractRoleErrorMessage(error, 'Error al eliminar el rol'),
+          );
+        },
+      });
   }
 
   onSortChange(event: {
@@ -259,19 +251,23 @@ export class RolesComponent implements OnInit {
     this.roles.set(sorted);
   }
 
-  onRoleCreated(roleData: { name: string; description?: string }): void {
-    this.rolesService.createRole(roleData).subscribe({
-      next: () => {
-        this.showCreateModal.set(false);
-        this.loadRoles();
-        this.loadRoleStats();
-        this.toastService.success('Rol creado exitosamente');
-      },
-      error: (error) => {
-        console.error('Error creating role:', error);
-        this.toastService.error('Error al crear el rol');
-      },
-    });
+  onRoleCreated(roleData: CreateRoleDto): void {
+    this.rolesService
+      .createRole(roleData)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.showCreateModal.set(false);
+          this.loadRoles();
+          this.toastService.success('Rol creado exitosamente');
+        },
+        error: (error) => {
+          console.error('Error creating role:', error);
+          this.toastService.error(
+            extractRoleErrorMessage(error, 'Error al crear el rol'),
+          );
+        },
+      });
   }
 
   onRoleUpdated(roleData: { name?: string; description?: string }): void {
@@ -283,12 +279,15 @@ export class RolesComponent implements OnInit {
         this.showEditModal.set(false);
         this.currentRole.set(null);
         this.loadRoles();
-        this.loadRoleStats();
         this.toastService.success('Rol actualizado exitosamente');
       },
       error: (error) => {
         console.error('Error updating role:', error);
-        this.toastService.error('Error al actualizar el rol');
+        // El backend ya NO degrada el 403 a `200 { success:false }`: sin este
+        // manejo, editar un rol de sistema mostraba "actualizado" sin guardar.
+        this.toastService.error(
+          extractRoleErrorMessage(error, 'Error al actualizar el rol'),
+        );
       },
     });
   }
@@ -335,7 +334,7 @@ export class RolesComponent implements OnInit {
         }
 
         let completed = 0;
-        let errors = 0;
+        let firstError: unknown = null;
 
         const checkDone = () => {
           completed++;
@@ -344,12 +343,16 @@ export class RolesComponent implements OnInit {
             this.showPermissionsModal.set(false);
             this.currentRole.set(null);
             this.loadRoles();
-            this.loadRoleStats();
-            if (errors === 0) {
+            if (!firstError) {
               this.toastService.success('Permisos actualizados exitosamente');
             } else {
-              this.toastService.warning(
-                'Algunos permisos no se pudieron actualizar',
+              // Un 403 `ROLE_SCOPE_001` aquí significa que el rol es de sólo
+              // lectura: mostrar el motivo real en vez de "algunos permisos".
+              this.toastService.error(
+                extractRoleErrorMessage(
+                  firstError,
+                  'Algunos permisos no se pudieron actualizar',
+                ),
               );
             }
           }
@@ -358,17 +361,19 @@ export class RolesComponent implements OnInit {
         requests.forEach((req) => {
           req.subscribe({
             next: () => checkDone(),
-            error: (e: any) => {
+            error: (e: unknown) => {
               console.error(e);
-              errors++;
+              firstError = firstError ?? e;
               checkDone();
             },
           });
         });
       },
-      error: (err) => {
+      error: (error: unknown) => {
         this.isSubmitting.set(false);
-        this.toastService.error('Error al obtener permisos actuales');
+        this.toastService.error(
+          extractRoleErrorMessage(error, 'Error al obtener permisos actuales'),
+        );
       },
     });
   }

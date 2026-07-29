@@ -1,19 +1,69 @@
 <div class="receipts-settings-form">
   <div class="space-y-6">
-    <!-- Receipt Options -->
-    <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Entrega de Recibos</h4>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <app-setting-toggle [formControl]="printReceiptControl" label="Imprimir Recibo"
-          description="Automáticamente tras venta" (changed)="onFieldChange()"></app-setting-toggle>
-        <app-setting-toggle [formControl]="emailReceiptControl" label="Email al Cliente"
-          description="Enviar copia digital" (changed)="onFieldChange()"></app-setting-toggle>
+    @if (electronicInvoicingActive()) {
+      <!-- Habilitado merchant: no internal sale receipts exist anymore, so we
+           state it plainly instead of offering toggles that do nothing. -->
+      <div class="fe-banner">
+        <app-icon name="shield-check" size="18" class="fe-banner__icon"></app-icon>
+        <div class="fe-banner__body">
+          <p class="fe-banner__title">Facturación electrónica activa</p>
+          <p class="fe-banner__text">
+            Esta tienda está habilitada ante la DIAN y <strong>solo emite facturas
+            electrónicas</strong>. Cada venta genera una factura con CUFE, firmada y
+            transmitida a la DIAN; no se emiten recibos internos de compra.
+          </p>
+        </div>
       </div>
-    </div>
 
-    <!-- Receipt Content -->
+      <div>
+        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
+          Emisión de facturas
+        </h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <app-setting-toggle
+            [formControl]="autoIssueInvoiceControl"
+            label="Emitir factura automáticamente"
+            description="Al cerrar la venta, sin paso manual"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <app-setting-toggle
+            [formControl]="sendInvoiceEmailControl"
+            label="Enviar factura por email"
+            description="Adjunta el PDF y el XML al cliente"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <app-setting-toggle
+            [formControl]="printPosTicketControl"
+            label="Imprimir también tiquete POS"
+            description="Copia interna para despacho o cocina"
+            (changed)="onFieldChange()"
+          ></app-setting-toggle>
+          <app-selector
+            label="Copias impresas por venta"
+            [formControl]="invoiceCopiesControl"
+            [options]="copiesOptions"
+            (valueChange)="onFieldChange()"
+          ></app-selector>
+        </div>
+      </div>
+    } @else {
+      <!-- Receipt Options -->
+      <div>
+        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Entrega de Recibos</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <app-setting-toggle [formControl]="printReceiptControl" label="Imprimir Recibo"
+            description="Automáticamente tras venta" (changed)="onFieldChange()"></app-setting-toggle>
+          <app-setting-toggle [formControl]="emailReceiptControl" label="Email al Cliente"
+            description="Enviar copia digital" (changed)="onFieldChange()"></app-setting-toggle>
+        </div>
+      </div>
+    }
+
+    <!-- Receipt Content — applies to the printed document either way -->
     <div>
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Contenido Personalizado</h4>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">
+        {{ contentSectionTitle() }}
+      </h4>
       <div class="space-y-4">
         <app-textarea
           label="Encabezado"

@@ -27,6 +27,8 @@ import {
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
+import { RoleActor, HIDDEN_ROLE_NAMES } from '@common/utils/role-scope.util';
 import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
@@ -38,7 +40,67 @@ export class UsersService {
     private s3Service: S3Service,
     private defaultPanelUIService: DefaultPanelUIService,
     private staffProvisioning: StaffProvisioningService,
+    private userRoleAssignment: UserRoleAssignmentService,
   ) {}
+
+  /**
+   * QUI-72 — actor de nivel ORGANIZACIÓN para la matriz de roles.
+   *
+   * Idéntico al de `RolesService`: este dominio siempre habla por una
+   * organización concreta y sin ella hay que fallar cerrado, porque un
+   * `organization_id: undefined` haría que los filtros de tenant no filtren.
+   */
+  private getRoleActor(): RoleActor {
+    const organization_id = RequestContextService.getContext()?.organization_id;
+    if (organization_id == null) {
+      throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_002);
+    }
+    return { level: 'organization', organization_id };
+  }
+
+  // ===== QUI-72: ASIGNACIÓN DE ROLES (dirección usuario → rol) =====
+
+  /**
+   * Dirección que faltaba en el nivel organización.
+   *
+   * Antes sólo existía `POST /organization/roles/assign-to-user` (rol → usuario);
+   * la pantalla de usuarios no tenía forma de asignar un rol sin salirse a la
+   * pantalla de roles. Ambas direcciones delegan en el MISMO
+   * `UserRoleAssignmentService`, así que no pueden divergir.
+   */
+  async assignRole(
+    user_id: number,
+    role_id: number,
+    store_id?: number | null,
+  ) {
+    const actor = this.getRoleActor();
+    return this.userRoleAssignment.assign({
+      user_id,
+      role_id,
+      actor,
+      store_id: store_id ?? null,
+    });
+  }
+
+  async removeRole(
+    user_id: number,
+    role_id: number,
+    store_id?: number | null,
+  ) {
+    const actor = this.getRoleActor();
+    return this.userRoleAssignment.remove({
+      user_id,
+      role_id,
+      actor,
+      store_id: store_id ?? null,
+    });
+  }
+
+  /** Asignaciones del usuario con el `store_id` de cada una. */
+  async listRoles(user_id: number) {
+    const actor = this.getRoleActor();
+    return this.userRoleAssignment.listUserRoles(user_id, actor);
+  }
 
   async create(createUserDto: CreateUserDto) {
     const {
@@ -164,13 +226,21 @@ export class UsersService {
       } else {
         // Rol org-level sin tienda: rol + user_settings(ORG_ADMIN) directos
         // (provisionStaffMembership requiere una tienda).
-        await db.user_roles.upsert({
-          where: {
-            user_id_role_id: { user_id: created.id, role_id: role.id },
-          },
-          update: {},
-          create: { user_id: created.id, role_id: role.id },
+        //
+        // QUI-72: ya NO se puede usar `upsert` aquí. Al entrar `store_id` en el
+        // unique compuesto, Prisma tipa `user_id_role_id_store_id` con
+        // `store_id: number` NO nulo, así que una asignación org-wide
+        // (`store_id = NULL`) es inexpresable como `whereUnique`. El equivalente
+        // correcto es findFirst + create.
+        const existingAssignment = await db.user_roles.findFirst({
+          where: { user_id: created.id, role_id: role.id, store_id: null },
+          select: { id: true },
         });
+        if (!existingAssignment) {
+          await db.user_roles.create({
+            data: { user_id: created.id, role_id: role.id, store_id: null },
+          });
+        }
         const orgConfig =
           await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
         await db.user_settings.create({
@@ -620,25 +690,42 @@ export class UsersService {
       }
 
       // 2. Update Roles
+      //
+      // QUI-72 — Este reemplazo es de ALCANCE ORGANIZACIÓN, y sólo puede tocar
+      // la porción org-wide (`store_id: null`).
+      //
+      // Antes de QUI-72 existía a lo sumo UNA fila por (user_id, role_id), así
+      // que `notIn` era un reemplazo correcto. Al incorporar `store_id`, el
+      // mismo usuario puede tener el rol Cajero en la tienda 6 y Supervisor en
+      // la 7: sin acotar por `store_id`, guardar esta pantalla revocaba en
+      // silencio TODAS las asignaciones por tienda que no estuvieran en la
+      // lista — pérdida de datos invisible para quien sólo cambió el app_type.
+      //
+      // Se excluyen además los roles ocultos (owner/super_admin), igual que
+      // hace `UserRoleAssignmentService.replaceUserRoles`: no se administran
+      // desde esta pantalla y borrarlos degradaría al dueño de la cuenta.
       if (roles) {
-        // Remove roles not in the new list
+        // Remove org-wide roles not in the new list
         await tx.user_roles.deleteMany({
           where: {
             user_id: id,
+            store_id: null,
             role_id: { notIn: roles },
+            roles: { name: { notIn: [...HIDDEN_ROLE_NAMES] } },
           },
         });
 
-        // Add new roles
+        // Add new roles (org-wide: aplican en todas las tiendas de la org)
         for (const roleId of roles) {
           const exists = await tx.user_roles.findFirst({
-            where: { user_id: id, role_id: roleId },
+            where: { user_id: id, role_id: roleId, store_id: null },
           });
           if (!exists) {
             await tx.user_roles.create({
               data: {
                 user_id: id,
                 role_id: roleId,
+                store_id: null,
               },
             });
           }

@@ -1,4 +1,24 @@
 import { Injectable } from '@nestjs/common';
+import { isSafeS3Key } from './s3-url.helper';
+
+/**
+ * Path segments that identify a BRANDING asset (logo / favicon).
+ * Only these may be used as the source of a derived PWA icon.
+ */
+const BRANDING_KEY_SEGMENTS = ['/logos/', '/favicons/'] as const;
+
+/**
+ * Path segments explicitly rejected as branding sources. Content images
+ * (products, sliders, ads, receipts, avatars) must never become the app icon.
+ */
+const NON_BRANDING_KEY_SEGMENTS = [
+  '/ecommerce/slider/',
+  '/products/',
+  '/categories/',
+  '/marketing/',
+  '/receipts/',
+  '/avatars/',
+] as const;
 
 /**
  * Interface for organization data needed to build S3 paths
@@ -146,5 +166,44 @@ export class S3PathHelper {
    */
   buildNotificationSoundsPath(): string {
     return 'global/notification-sounds';
+  }
+
+  /**
+   * Builds the path for PWA icons derived from a tenant logo.
+   * `basePath` is normally the store path (see `buildStorePath`).
+   *
+   * @returns `{basePath}/branding/pwa`
+   */
+  buildPwaIconPath(basePath: string): string {
+    const normalized = (basePath ?? '').trim().replace(/\/+$/, '');
+    return `${normalized}/branding/pwa`;
+  }
+
+  /**
+   * Whether an S3 key points to a BRANDING asset (tenant logo or favicon),
+   * i.e. something legitimate to derive a PWA app icon from.
+   *
+   * Accepts keys whose path contains the `/logos/` or `/favicons/` segment and
+   * rejects content asset paths (slider, products, categories, marketing,
+   * receipts, avatars) as well as unsafe keys (path traversal).
+   */
+  isBrandingAssetKey(key: string | null | undefined): boolean {
+    if (!key || typeof key !== 'string') {
+      return false;
+    }
+
+    const trimmed = key.trim();
+    if (!trimmed || !isSafeS3Key(trimmed)) {
+      return false;
+    }
+
+    // Wrap in slashes so leading/trailing segments also match the `/x/` form
+    const normalized = `/${trimmed.replace(/^\/+/, '').replace(/\/+$/, '')}/`;
+
+    if (NON_BRANDING_KEY_SEGMENTS.some((seg) => normalized.includes(seg))) {
+      return false;
+    }
+
+    return BRANDING_KEY_SEGMENTS.some((seg) => normalized.includes(seg));
   }
 }

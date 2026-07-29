@@ -174,6 +174,12 @@ export class StoreUsersManagementService {
       );
   }
 
+  /**
+   * @deprecated QUI-72 — El catálogo de roles lo sirve ahora `StoreRolesService`
+   * (mismo endpoint) para que el selector de roles del usuario y la pestaña
+   * "Usuarios" del detalle del rol lean exactamente la misma fuente, con
+   * `scope` incluido. El effect `loadAvailableRoles$` ya no usa este método.
+   */
   getAvailableRoles(): Observable<Role[]> {
     return this.http
       .get<{ data: Role[] }>(`${environment.apiUrl}/store/roles`)

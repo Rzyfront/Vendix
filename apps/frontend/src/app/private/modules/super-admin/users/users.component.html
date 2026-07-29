@@ -107,4 +107,13 @@
       (onUserUpdated)="onUserUpdated()"
     ></app-user-edit-modal>
   }
+
+  @defer (when showRolesModal()) {
+    <app-user-roles-modal
+      [isOpen]="showRolesModal()"
+      (isOpenChange)="showRolesModal.set($event)"
+      [user]="currentRolesUser()"
+      (rolesChanged)="onUserRolesChanged()"
+    ></app-user-roles-modal>
+  }
 </div>

@@ -32,11 +32,10 @@ import {
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
-import { OrgRolesService } from '../../roles/services/org-roles.service';
+import { UserRolesEditorComponent } from '../../roles/components/user-roles-editor.component';
 import { OrganizationStoresService } from '../../stores/services/organization-stores.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
-import { Role } from '../../roles/interfaces/role.interface';
 import { StoreListItem } from '../../stores/interfaces/store.interface';
 
 type PanelUiAppType = 'STORE_ADMIN' | 'ORG_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
@@ -69,6 +68,7 @@ const CATALOG_APP_TYPES: PanelUiAppType[] = ['STORE_ADMIN', 'ORG_ADMIN'];
     TextareaComponent,
     MultiSelectorComponent,
     PanelUiModulesEditorComponent,
+    UserRolesEditorComponent,
   ],
   template: `
     <app-modal
@@ -155,21 +155,14 @@ const CATALOG_APP_TYPES: PanelUiAppType[] = ['STORE_ADMIN', 'ORG_ADMIN'];
                 </div>
               }
               @case ('roles') {
-                <div class="space-y-4">
-                  <app-multi-selector
-                    [options]="roleOptions()"
-                    [label]="'Roles Asignados'"
-                    [placeholder]="'Seleccionar roles...'"
-                    [helpText]="'Selecciona los roles que tendrá el usuario'"
-                    formControlName="roles"
-                  ></app-multi-selector>
-                  @if (isLoadingRoles()) {
-                    <p class="text-sm text-[var(--color-text-secondary)]">
-                      <span class="inline-block animate-spin mr-1">⟳</span>
-                      Cargando roles...
-                    </p>
-                  }
-                </div>
+                <!-- QUI-72: los roles ya NO viajan en el PATCH de
+                     configuración (ver comentario en onSubmit). El editor
+                     escribe por asignación contra los mismos endpoints que la
+                     pestaña "Usuarios" del detalle del rol. -->
+                <app-user-roles-editor
+                  [userId]="user()?.id ?? null"
+                  (changed)="rolesChanged.emit()"
+                ></app-user-roles-editor>
               }
               @case ('stores') {
                 <div class="space-y-4">
@@ -308,7 +301,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
   private authFacade = inject(AuthFacade);
-  private rolesService = inject(OrgRolesService);
   private storesService = inject(OrganizationStoresService);
   private toastService = inject(ToastService);
 
@@ -316,23 +308,19 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onSaved = output<void>();
+  /**
+   * QUI-72 — los roles se guardan al instante, no al pulsar "Guardar".
+   * `onSaved` cierra el modal en el padre, así que las asignaciones emiten por
+   * su propio canal para que el listado se refresque sin cerrar nada.
+   */
+  readonly rolesChanged = output<void>();
 
   configForm!: FormGroup;
   readonly isSaving = signal(false);
-  readonly isLoadingRoles = signal(false);
   readonly isLoadingStores = signal(false);
   activeTab: 'general' | 'roles' | 'stores' | 'panel_ui' = 'general';
 
-  readonly roles = signal<Role[]>([]);
   readonly stores = signal<StoreListItem[]>([]);
-
-  readonly roleOptions = computed<MultiSelectorOption[]>(() =>
-    this.roles().map((r) => ({
-      value: r.id,
-      label: r.name,
-      description: r.description || undefined,
-    })),
-  );
 
   readonly storeOptions = computed<MultiSelectorOption[]>(() =>
     this.stores().map((s) => ({
@@ -396,7 +384,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   constructor() {
     this.configForm = this.fb.group({
       app: ['VENDIX_LANDING'],
-      roles: [[] as number[]],
       store_ids: [[] as number[]],
     });
 
@@ -430,7 +417,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   }
 
   ngOnInit(): void {
-    this.loadRoles();
     this.loadStores();
   }
 
@@ -481,23 +467,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
     }
   }
 
-  private loadRoles(): void {
-    this.isLoadingRoles.set(true);
-    this.rolesService
-      .getRoles({ limit: 100 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.roles.set(response.data);
-          this.isLoadingRoles.set(false);
-        },
-        error: () => {
-          this.isLoadingRoles.set(false);
-          this.toastService.error('Error cargando roles');
-        },
-      });
-  }
-
   private loadStores(): void {
     this.isLoadingStores.set(true);
     this.storesService
@@ -532,7 +501,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
 
     this.configForm.reset({
       app: 'VENDIX_LANDING',
-      roles: [],
       store_ids: [],
     });
 
@@ -548,7 +516,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
 
           this.configForm.patchValue({
             app: config.app || 'VENDIX_LANDING',
-            roles: config.roles || [],
             store_ids: config.store_ids || [],
           });
 
@@ -594,9 +561,11 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
     this.isSaving.set(true);
     const formVal = this.configForm.value;
 
+    // Sin `roles`: `PATCH /organization/users/:id/configuration` borra por
+    // `role_id` ignorando `store_id`, así que enviarlos aquí destruiría las
+    // asignaciones de tienda que la pestaña Roles administra por asignación.
     const payload = {
       app: formVal.app,
-      roles: formVal.roles as number[],
       store_ids: formVal.store_ids as number[],
       panel_ui: this.localPanelUi(),
     };

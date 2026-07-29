@@ -18,6 +18,7 @@ import { toTitleCase } from '@common/utils/format.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
 import { PRIVILEGED_ROLE_NAMES } from '../../../common/utils/privileged-roles.util';
+import { SuperadminRoleAssignmentService } from '../roles/superadmin-role-assignment.service';
 
 const ELIGIBLE_ROLES = Array.from(PRIVILEGED_ROLE_NAMES);
 
@@ -29,6 +30,7 @@ export class UsersService {
     private readonly prisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly staffProvisioning: StaffProvisioningService,
+    private readonly roleAssignments: SuperadminRoleAssignmentService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -350,122 +352,69 @@ export class UsersService {
     return { message: 'User deactivated successfully' };
   }
 
-  async assignRole(userId: number, roleId: number) {
-    const user = await this.prisma.users.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
-    }
-
-    const role = await this.prisma.roles.findUnique({
-      where: { id: roleId },
-    });
-
-    if (!role) {
-      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
-    }
-
-    // Check if role is already assigned
-    const existingUserRole = await this.prisma.user_roles.findFirst({
-      where: {
-        user_id: userId,
-        role_id: roleId,
-      },
-    });
-
-    if (existingUserRole) {
-      throw new ConflictException('Role already assigned to user');
-    }
-
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.user_roles.create({
-        data: {
-          user_id: userId,
-          role_id: roleId,
-        },
-      });
-
-      // CD7: si el rol es de staff/owner y el usuario pertenece a una org,
-      // aseguramos su vínculo de tienda (store_users + main_store_id 'if-empty')
-      // para no dejarlo huérfano. NO tocamos app_type (setAppType:false) para no
-      // degradar un ORG_ADMIN. Const local `organizationId` para preservar el
-      // narrowing dentro de la closure.
-      const organizationId = user.organization_id;
-      if (
-        role.name !== 'customer' &&
-        role.name !== 'super_admin' &&
-        organizationId
-      ) {
-        const store = await this.staffProvisioning.resolveStoreForStoreAdmin(
-          {
-            id: user.id,
-            organization_id: organizationId,
-            main_store_id: user.main_store_id,
-          },
-          StaffProvisioningService.hasHighPrivilege([role.name]),
-          tx,
-        );
-
-        if (store) {
-          await this.staffProvisioning.provisionStaffMembership(tx, {
-            userId: user.id,
-            storeId: store.id,
-            organizationId,
-            setAppType: false,
-            setMainStore: 'if-empty',
-          });
-        }
-        // CD7 (excepción documentada): si NO hay tienda elegible (store === null)
-        // el usuario queda sin vínculo automático — se resolverá en un segundo
-        // paso manual. No forzamos store_users.
-      }
-      // CD7 (excepción documentada): super_admin (y customer) NO se vinculan a
-      // tienda; su acceso es cross-tenant / no-staff.
-
-      return { message: 'Role assigned successfully' };
-    });
+  /**
+   * QUI-72 — Roles asignados al usuario, con el `store_id` de cada asignación.
+   *
+   * Contrapartida exacta de `GET /superadmin/roles/:id/users`: misma fila de
+   * `user_roles` leída desde el otro extremo y por el mismo servicio.
+   */
+  listUserRoles(userId: number) {
+    return this.roleAssignments.listUserRoles(userId);
   }
 
-  async removeRole(userId: number, roleId: number) {
+  /**
+   * QUI-72 — Delega la escritura en `SuperadminRoleAssignmentService`.
+   *
+   * Antes esta ruta hacía su propio INSERT en `user_roles`. Con la dirección
+   * rol→usuario recién añadida eso significaría dos escritores del mismo dato
+   * con reglas distintas (y ninguno consciente de `store_id`), que es
+   * literalmente el riesgo que documenta el ticket.
+   */
+  async assignRole(
+    userId: number,
+    roleId: number,
+    storeId?: number | null,
+  ): Promise<Record<string, unknown>> {
     const user = await this.prisma.users.findUnique({
       where: { id: userId },
+      select: { id: true },
     });
 
     if (!user) {
       throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
-    const role = await this.prisma.roles.findUnique({
-      where: { id: roleId },
+    const assignment = await this.roleAssignments.assign({
+      user_id: userId,
+      role_id: roleId,
+      store_id: storeId,
     });
 
-    if (!role) {
-      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
-    }
+    // `message` se conserva: el panel de superadmin lo lee tal cual.
+    return { message: 'Role assigned successfully', ...assignment };
+  }
 
-    // Check if user is trying to remove super_admin role from themselves
-    if (role.name === 'super_admin') {
-      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_PERM_001);
-    }
-
-    const userRole = await this.prisma.user_roles.findFirst({
-      where: {
-        user_id: userId,
-        role_id: roleId,
-      },
+  async removeRole(
+    userId: number,
+    roleId: number,
+    storeId?: number | null,
+  ): Promise<Record<string, unknown>> {
+    const user = await this.prisma.users.findUnique({
+      where: { id: userId },
+      select: { id: true },
     });
 
-    if (!userRole) {
-      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_001);
+    if (!user) {
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
-    await this.prisma.user_roles.delete({
-      where: { id: userRole.id },
+    const removal = await this.roleAssignments.remove({
+      user_id: userId,
+      role_id: roleId,
+      store_id: storeId,
     });
 
-    return { message: 'Role removed successfully' };
+    return { message: 'Role removed successfully', ...removal };
   }
 
   async getDashboardStats() {

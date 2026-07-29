@@ -12,6 +12,27 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
 
+  // Alcance y asignación de roles (QUI-72). Compartidos por los tres niveles
+  // (super-admin, organización y tienda): el mismo código debe leerse igual en
+  // las tres pantallas, por eso viven en el catálogo global y no en un mapa
+  // local de cada módulo.
+  ROLE_SCOPE_001:
+    'Este rol es de solo lectura en este nivel. Se administra desde el nivel al que pertenece.',
+  ROLE_SCOPE_002:
+    'No hay una organizacion en contexto para resolver el alcance del rol.',
+  ROLE_SCOPE_003: 'Selecciona una tienda para administrar roles de tienda.',
+  ROLE_SCOPE_004: 'El rol no existe o no es visible en este nivel.',
+  ROLE_ASSIGN_001:
+    'Este rol no se puede asignar a ese usuario: pertenecen a alcances distintos.',
+  ROLE_ASSIGN_002:
+    'Este rol no se puede asignar ni quitar desde esta pantalla.',
+  ROLE_ASSIGN_003:
+    'Solo el administrador de la plataforma puede asignar roles de sistema.',
+  ROLE_ASSIGN_004: 'Esa asignacion de rol ya no existe.',
+  ROLE_ASSIGN_005: 'El usuario ya tiene este rol en este alcance.',
+  ROLE_ASSIGN_006: 'El usuario no existe o no pertenece a este alcance.',
+  ROLE_ASSIGN_007: 'La tienda indicada no corresponde a la organizacion del rol.',
+
   // Categories & Brands extra codes
   CAT_DELETE_HAS_PRODUCTS:
     'Esta categoría tiene productos asignados. Elimínala con la opción de desligar para conservar los productos sin esta categoría.',

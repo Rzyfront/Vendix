@@ -219,4 +219,28 @@ export class DianConfigController {
     const result = await this.dian_test_service.checkTestSetStatus(id);
     return this.response_service.success(result);
   }
+
+  /**
+   * Read-only checklist of everything still missing before this configuration can
+   * emit real invoices. Same predicates as the emission gate, so the UI cannot
+   * promise production readiness the backend would then refuse.
+   */
+  @Get(':id/production-readiness')
+  @Permissions('invoicing:read')
+  async getProductionReadiness(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.getProductionReadiness(id);
+    return this.response_service.success(result);
+  }
+
+  /** Promotes the configuration to production once the checklist is clean. */
+  @Post(':id/promote-to-production')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async promoteToProduction(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_config_service.promoteToProduction(id);
+    return this.response_service.success(
+      result,
+      'Configuración DIAN promovida a producción',
+    );
+  }
 }

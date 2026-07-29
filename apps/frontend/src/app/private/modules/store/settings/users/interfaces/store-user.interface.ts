@@ -12,11 +12,28 @@ export interface StoreUser {
   avatar_url?: string;
 }
 
+import { RoleScope } from '../../../../../../shared/constants/role-scope.constant';
+
+/**
+ * QUI-72 — Rol tal como lo ven las dos direcciones del nivel tienda.
+ *
+ * `scope` viene derivado del backend tanto en `GET /store/roles` (catálogo del
+ * selector) como en `GET /store/users/management/:id` (roles del usuario).
+ *
+ * `assignment_store_id` SÓLO aparece en el detalle del usuario y es la pieza
+ * que decide la UI: `null` ⇒ asignación org-wide HEREDADA, que la tienda no
+ * puede quitar (el backend la conserva al guardar) y que por tanto no debe
+ * poder desmarcarse ni viajar en el payload de `role_ids`.
+ */
 export interface Role {
   id: number;
   name: string;
   description?: string;
   is_system_role?: boolean;
+  scope: RoleScope;
+  organization_id?: number | null;
+  store_id?: number | null;
+  assignment_store_id?: number | null;
 }
 
 export interface StoreUserDetail extends StoreUser {

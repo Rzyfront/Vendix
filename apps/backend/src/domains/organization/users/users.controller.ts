@@ -23,6 +23,7 @@ import {
   AdminResetPasswordDto,
   UserConfigDto,
   InviteUserDto,
+  UserRoleAssignmentScopeDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -268,6 +269,54 @@ export class UsersController {
         error.status || 400,
       );
     }
+  }
+
+  // ===== QUI-72: ROLES DEL USUARIO (dirección usuario → rol) =====
+  //
+  // Estas tres rutas son la dirección que el nivel organización no tenía. Van
+  // ANTES de `:id/configuration` sólo por orden de lectura; no colisionan con
+  // `@Get(':id')` porque tienen más segmentos.
+  //
+  // A diferencia del resto del controlador NO se envuelven en try/catch: las
+  // excepciones tipadas (`ROLE_SCOPE_*`, `ROLE_ASSIGN_*`) deben llegar al
+  // `AllExceptionsFilter` con su `error_code` y su status real. Atraparlas aquí
+  // las degradaría a un 400 genérico y el frontend no podría distinguir
+  // "ya lo tiene" (409) de "no puedes" (403).
+
+  @Get(':userId/roles')
+  @Permissions('organization:users:roles:read', 'organization:users:read')
+  async listRoles(@Param('userId', ParseIntPipe) userId: number) {
+    const result = await this.usersService.listRoles(userId);
+    return this.responseService.success(
+      result,
+      'Roles del usuario obtenidos exitosamente',
+    );
+  }
+
+  @Post(':userId/roles/:roleId')
+  @Permissions('organization:users:roles:assign', 'organization:users:update')
+  async assignRole(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Param('roleId', ParseIntPipe) roleId: number,
+    @Query() query: UserRoleAssignmentScopeDto,
+    @Body() body: UserRoleAssignmentScopeDto,
+  ) {
+    const store_id = body?.store_id ?? query?.store_id ?? null;
+    const result = await this.usersService.assignRole(userId, roleId, store_id);
+    return this.responseService.created(result, 'Rol asignado exitosamente');
+  }
+
+  @Delete(':userId/roles/:roleId')
+  @Permissions('organization:users:roles:remove', 'organization:users:update')
+  async removeRole(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Param('roleId', ParseIntPipe) roleId: number,
+    @Query() query: UserRoleAssignmentScopeDto,
+    @Body() body: UserRoleAssignmentScopeDto,
+  ) {
+    const store_id = body?.store_id ?? query?.store_id ?? null;
+    const result = await this.usersService.removeRole(userId, roleId, store_id);
+    return this.responseService.success(result, 'Rol removido exitosamente');
   }
 
   @Get(':id/configuration')

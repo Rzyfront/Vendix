@@ -182,12 +182,28 @@ export class DianTestService {
    * and sends to DIAN via SendTestSetAsync.
    */
   async runTestSet(config_id: number, resolution_id: number) {
+    const started_at = Date.now();
     const config = await this.getConfigById(config_id);
 
     if (!config.test_set_id) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'No test set ID configured',
+      );
+    }
+
+    // Guard against a second submission while DIAN still owes us a verdict for
+    // the previous ZipKey. Re-sending consumes another 50 resolution numbers and
+    // DIAN rejects the batch as duplicated, which is unrecoverable from the UI.
+    const previous_result = (config.last_test_result ?? {}) as Record<
+      string,
+      any
+    >;
+    if (previous_result.pending === true && previous_result.zip_key) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_002,
+        `El set de pruebas ${previous_result.zip_key} aún está en validación en la DIAN. Consulta su estado antes de reenviar.`,
+        { dian_configuration_id: config_id, zip_key: previous_result.zip_key },
       );
     }
 
@@ -207,6 +223,43 @@ export class DianTestService {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'Resolution not found',
+      );
+    }
+
+    // The 50 documents must consume FRESH numbers. Starting at `range_from`
+    // (the old behaviour) meant a second run re-emitted the exact same numbers
+    // and CUFEs, which DIAN rejects as duplicates. `current_number` is the last
+    // number actually used, so the batch starts right after it.
+    const TEST_SET_SIZE = 50;
+    const next_number = Math.max(
+      resolution.range_from,
+      (resolution.current_number ?? 0) + 1,
+    );
+    if (next_number + TEST_SET_SIZE - 1 > resolution.range_to) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_003,
+        `La resolución ${resolution.prefix}${resolution.resolution_number} solo tiene ${Math.max(0, resolution.range_to - next_number + 1)} números disponibles y el set de pruebas requiere ${TEST_SET_SIZE}.`,
+        { resolution_id, next_number, range_to: resolution.range_to },
+      );
+    }
+
+    // Reserve the block BEFORE building and signing the documents. Advancing
+    // `current_number` afterwards would leave a window where the batch is
+    // already in DIAN's hands but the numbers still look available, so a crash
+    // or a retry would re-send numbering DIAN has — and DIAN rejects duplicated
+    // numbering. Reserving first can only leave an unused gap in the range,
+    // which is harmless; the reverse mistake is not recoverable.
+    // `updateMany` (not `update`) so the guard on `current_number` makes the
+    // reservation atomic: two concurrent runs cannot claim the same block.
+    const reserved = await this.prisma.invoice_resolutions.updateMany({
+      where: { id: resolution_id, current_number: resolution.current_number },
+      data: { current_number: next_number + TEST_SET_SIZE - 1 },
+    });
+    if (reserved.count === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_002,
+        'Otro proceso está consumiendo la numeración de esta resolución. Espera a que termine y vuelve a intentarlo.',
+        { dian_configuration_id: config_id, resolution_id },
       );
     }
 
@@ -312,7 +365,7 @@ export class DianTestService {
 
     // 6a. Generate 30 invoices
     for (let i = 0; i < 30; i++) {
-      const invoice_number = `${resolution.prefix}${resolution.range_from + i}`;
+      const invoice_number = `${resolution.prefix}${next_number + i}`;
       const subtotal = (100000 + i * 15000).toFixed(2);
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
       const total = (parseFloat(subtotal) + parseFloat(tax)).toFixed(2);
@@ -394,7 +447,7 @@ export class DianTestService {
 
     // 6b. Generate 10 debit notes (referencing invoices 0-9)
     for (let i = 0; i < 10; i++) {
-      const note_number = `${resolution.prefix}${resolution.range_from + 30 + i}`;
+      const note_number = `${resolution.prefix}${next_number + 30 + i}`;
       const ref_invoice = invoice_cufes[i];
       const subtotal = (50000 + i * 5000).toFixed(2);
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
@@ -479,7 +532,7 @@ export class DianTestService {
 
     // 6c. Generate 10 credit notes (referencing invoices 10-19)
     for (let i = 0; i < 10; i++) {
-      const note_number = `${resolution.prefix}${resolution.range_from + 40 + i}`;
+      const note_number = `${resolution.prefix}${next_number + 40 + i}`;
       const ref_invoice = invoice_cufes[10 + i];
       const subtotal = (50000 + i * 5000).toFixed(2);
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
@@ -609,6 +662,9 @@ export class DianTestService {
       debit_notes: 10,
       credit_notes: 10,
       zip_key,
+      resolution_id,
+      number_from: next_number,
+      number_to: next_number + TEST_SET_SIZE - 1,
       dian_response: {
         success: verdict.success,
         status_code: verdict.status_code,
@@ -633,11 +689,18 @@ export class DianTestService {
 
     await this.createAuditLog(config.id, {
       action: 'run_test_set',
-      status: success ? 'success' : 'error',
+      // Tri-state: a batch DIAN has not judged yet is `pending`, not `error`.
+      // Labelling it `error` made a perfectly healthy submission look broken.
+      status: success ? 'success' : still_processing ? 'pending' : 'error',
       error_message: success
         ? null
-        : verdict.error_messages?.join(' | ') || verdict.status_message,
-      duration_ms: verdict.duration_ms,
+        : still_processing
+          ? `En validación en la DIAN (ZipKey ${zip_key}) tras ${poll_history.length} consultas.`
+          : verdict.error_messages?.join(' | ') || verdict.status_message,
+      // Total wall time of the whole operation (generate + sign + zip + send +
+      // poll), not just the last SOAP round-trip, which made a ~35 s process
+      // show up as "107ms" in the audit table.
+      duration_ms: Date.now() - started_at,
     });
 
     const is_ws_security_error =
@@ -667,6 +730,11 @@ export class DianTestService {
       zip_key,
       pending: still_processing,
       rejected,
+      executed_at: result_data.executed_at,
+      number_from: next_number,
+      number_to: next_number + TEST_SET_SIZE - 1,
+      enablement_status: success ? 'test_set_passed' : 'testing',
+      response_time_ms: Date.now() - started_at,
     };
   }
 
@@ -677,6 +745,7 @@ export class DianTestService {
    * burn resolution numbers). Updates last_test_result / enablement_status.
    */
   async checkTestSetStatus(config_id: number) {
+    const started_at = Date.now();
     const config = await this.getConfigById(config_id);
     const environment = config.environment as 'test' | 'production';
 
@@ -734,6 +803,17 @@ export class DianTestService {
       },
     });
 
+    await this.createAuditLog(config.id, {
+      action: 'check_test_set_status',
+      status: success ? 'success' : still_processing ? 'pending' : 'error',
+      error_message: success
+        ? null
+        : still_processing
+          ? `Aún en validación en la DIAN (ZipKey ${zip_key}).`
+          : verdict.error_messages?.join(' | ') || verdict.status_message,
+      duration_ms: Date.now() - started_at,
+    });
+
     return {
       success,
       pending: still_processing,
@@ -743,6 +823,21 @@ export class DianTestService {
       status_message: verdict.status_message,
       error_messages: verdict.error_messages ?? [],
       poll_history,
+      // Echo the submission metadata so the UI can render the full picture from
+      // a single re-poll response instead of a second GET.
+      executed_at: previous.executed_at ?? null,
+      rechecked_at: result_data.rechecked_at,
+      total_documents: previous.total_documents ?? null,
+      invoices_count: previous.invoices ?? null,
+      debit_notes_count: previous.debit_notes ?? null,
+      credit_notes_count: previous.credit_notes ?? null,
+      environment,
+      enablement_status: success ? 'test_set_passed' : config.enablement_status,
+      message: success
+        ? 'La DIAN validó el set de pruebas. La habilitación quedó aprobada.'
+        : still_processing
+          ? 'La DIAN sigue validando el set de pruebas. Vuelve a consultar en unos minutos.'
+          : `La DIAN rechazó el set de pruebas: ${verdict.status_message}`,
     };
   }
 
@@ -799,7 +894,13 @@ export class DianTestService {
   private isTerminalZipStatus(status: DianSendBillResponse): boolean {
     if (status.is_soap_fault === true) return true;
     if ((status.error_messages?.length ?? 0) > 0) return true;
-    return /<b:StatusCode>\s*\d+\s*<\/b:StatusCode>/.test(
+    // The parser already distinguishes a populated <b:StatusCode> from the
+    // self-closing/nil one DIAN returns while the batch is queued, so trust that
+    // flag instead of re-scraping the raw XML here.
+    if (typeof status.has_dian_verdict === 'boolean') {
+      return status.has_dian_verdict;
+    }
+    return /<b:StatusCode\b[^>]*>\s*\d+\s*<\/b:StatusCode>/.test(
       status.raw_response || '',
     );
   }

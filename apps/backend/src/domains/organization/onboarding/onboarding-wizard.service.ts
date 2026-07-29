@@ -16,6 +16,7 @@ import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { DomainConfigService } from '@common/config/domain.config';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import {
   DomainGeneratorHelper,
   DomainContext,
@@ -54,6 +55,7 @@ export class OnboardingWizardService {
     private readonly settingsService: SettingsService,
     private readonly orgSettingsService: OrgSettingsService,
     private readonly staffProvisioning: StaffProvisioningService,
+    private readonly userRoleAssignment: UserRoleAssignmentService,
   ) {}
 
   /**
@@ -2323,28 +2325,28 @@ export class OnboardingWizardService {
   }
 
   /**
-   * Assign a role to a user
+   * Assign a role to a user.
+   *
+   * QUI-72 — Alcance: ORG-WIDE (`store_id: null`).
+   *
+   * El único llamador es `createDefaultOrgAdminRole`, que crea el rol
+   * `ORG_ADMIN` de la organización y se lo asigna a su creador. Por definición
+   * ese rol gobierna la organización entera, no una tienda — y en este punto
+   * del onboarding puede que todavía no exista ninguna tienda a la que atarlo.
+   *
+   * Se delega en `UserRoleAssignmentService.ensureAssignmentUnchecked`: es
+   * aprovisionamiento del sistema (no hay actor humano cuyo nivel validar) y
+   * centraliza la idempotencia. Sustituye al `findUnique({ user_id_role_id })`
+   * anterior, que dejó de existir cuando `store_id` entró al unique compuesto.
    */
   private async assignRoleToUser(
     userId: number,
     roleId: number,
   ): Promise<void> {
-    const existingAssignment = await this.prismaService.user_roles.findUnique({
-      where: {
-        user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
-        },
-      },
+    await this.userRoleAssignment.ensureAssignmentUnchecked({
+      user_id: userId,
+      role_id: roleId,
+      store_id: null,
     });
-
-    if (!existingAssignment) {
-      await this.prismaService.user_roles.create({
-        data: {
-          user_id: userId,
-          role_id: roleId,
-        },
-      });
-    }
   }
 }

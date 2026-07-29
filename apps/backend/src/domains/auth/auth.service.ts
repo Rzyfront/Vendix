@@ -27,6 +27,7 @@ import { OnboardingService } from '../organization/onboarding/onboarding.service
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
+import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import {
   TOKEN_DEFAULTS,
   getRefreshTokenHmacSecret,
@@ -225,6 +226,14 @@ export class AuthService {
         // que login() derive los permisos planos desde memoria (sin un segundo
         // fetch). No cambia la semántica: es exactamente la forma que consumía
         // el fetch eliminado (getPermissionsFromRoles).
+        //
+        // QUI-72 — ORG-WIDE A PROPÓSITO: en este punto todavía no existe
+        // "tienda activa" (se resuelve en login(), después de elegir la cuenta).
+        // Además el criterio staff-vs-customer de abajo DEBE mirar todas las
+        // asignaciones: una cuenta es staff si tiene algún rol no-customer en
+        // CUALQUIER tienda. Scopear aquí convertiría a un cajero de la tienda B
+        // en "customer" al entrar por la A y lo mandaría al login equivocado.
+        // El scope por tienda se aplica en login(), sobre `target_store_id`.
         user_roles: {
           include: {
             roles: {
@@ -381,7 +390,11 @@ export class AuthService {
     };
   }
 
-  async updateProfile(userId: number, updateProfileDto: any) {
+  async updateProfile(
+    userId: number,
+    updateProfileDto: any,
+    activeStoreId?: number | null,
+  ) {
     const {
       first_name,
       last_name,
@@ -460,18 +473,24 @@ export class AuthService {
       }
     }
 
-    // Retornar perfil actualizado
-    return this.getProfile(userId);
+    // Retornar perfil actualizado (mismo scope de tienda que la sesión)
+    return this.getProfile(userId, activeStoreId);
   }
 
-  async getSettings(userId: number) {
+  /**
+   * @param activeStoreId tienda activa del token (`req.user.store_id`). El
+   *        panel_ui se resuelve por ROL, así que debe verse el mismo conjunto
+   *        de roles que el resto de la sesión. `null`/`undefined` ⇒ sólo
+   *        asignaciones org-wide (QUI-72, fail-closed).
+   */
+  async getSettings(userId: number, activeStoreId?: number | null) {
     const [settings, defaults, userRoles] = await Promise.all([
       this.prismaService.user_settings.findUnique({
         where: { user_id: userId },
       }),
       this.defaultPanelUIService.generatePanelUI(''),
       this.prismaService.user_roles.findMany({
-        where: { user_id: userId },
+        where: buildActiveUserRolesWhere(userId, activeStoreId),
         include: { roles: { select: { name: true } } },
       }),
     ]);
@@ -528,6 +547,7 @@ export class AuthService {
     userId: number,
     key: string,
     appType: string,
+    activeStoreId?: number | null,
   ): Promise<Record<string, any>> {
     const ALLOWED_APP_TYPES = [
       'STORE_ADMIN',
@@ -593,11 +613,12 @@ export class AuthService {
       },
     });
 
-    // Recalcular new_keys con merge para retornar al cliente
+    // Recalcular new_keys con merge para retornar al cliente.
+    // QUI-72: mismos roles efectivos que el resto de la sesión (tienda activa).
     const [defaults, userRoles] = await Promise.all([
       this.defaultPanelUIService.generatePanelUI(''),
       this.prismaService.user_roles.findMany({
-        where: { user_id: userId },
+        where: buildActiveUserRolesWhere(userId, activeStoreId),
         include: { roles: { select: { name: true } } },
       }),
     ]);
@@ -833,13 +854,16 @@ export class AuthService {
         },
       });
 
-      // Asignar rol owner al usuario (si no lo tiene ya)
+      // Asignar rol owner al usuario (si no lo tiene ya).
+      // QUI-72: el owner es dueño de TODA la organización, así que su
+      // asignación es org-wide (`store_id: null`) — vale en cualquier tienda,
+      // presente o futura. Atarlo a una tienda lo dejaría fuera de las demás.
       const existingUserRole = await tx.user_roles.findFirst({
-        where: { user_id: user.id, role_id: ownerRole.id },
+        where: { user_id: user.id, role_id: ownerRole.id, store_id: null },
       });
       if (!existingUserRole) {
         await tx.user_roles.create({
-          data: { user_id: user.id, role_id: ownerRole.id },
+          data: { user_id: user.id, role_id: ownerRole.id, store_id: null },
         });
       }
 
@@ -1121,11 +1145,17 @@ export class AuthService {
       },
     });
 
-    // Asignar rol customer al usuario
+    // Asignar rol customer al usuario.
+    // QUI-72: `customer` se mantiene ORG-WIDE (`store_id: null`) a propósito.
+    // No es un rol operativo sino el marcador de "esta cuenta NO es staff", y
+    // se consulta antes de conocer la tienda (login-customer, unicidad de
+    // email en staff-provisioning). El acceso real a cada tienda lo gobierna
+    // `store_users`, no este rol.
     await this.prismaService.user_roles.create({
       data: {
         user_id: user.id,
         role_id: customerRole.id,
+        store_id: null,
       },
     });
 
@@ -1299,9 +1329,11 @@ export class AuthService {
 
     // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
     // El include de registerCustomer no trae role_permissions, por eso refetcheamos.
+    // QUI-72: el token que se acaba de emitir lleva `store_id: null`, así que
+    // los permisos se resuelven en el mismo alcance (sólo org-wide).
     const userRolesWithPermissions =
       await this.prismaService.user_roles.findMany({
-        where: { user_id: userWithRoles.id },
+        where: buildActiveUserRolesWhere(userWithRoles.id, null),
         include: {
           roles: {
             include: {
@@ -1451,11 +1483,17 @@ export class AuthService {
       },
     });
 
-    // Asignar rol
+    // Asignar rol.
+    // QUI-72: `validRoles` aquí son SIEMPRE roles operativos de tienda
+    // (manager/supervisor/employee/carrier), nunca owner/admin. Si el alta
+    // indica tienda, la asignación queda atada a ella: un cajero dado de alta
+    // en la tienda A no debe cobrar en la B. Sin tienda indicada cae a
+    // org-wide, que es el comportamiento previo y el único posible sin destino.
     await this.prismaService.user_roles.create({
       data: {
         user_id: user.id,
         role_id: staffRole.id,
+        store_id: store_id ?? null,
       },
     });
 
@@ -1651,7 +1689,16 @@ export class AuthService {
       where: { user_id: user.id },
     });
 
-    // Transformar user_roles a roles array simple para compatibilidad con frontend
+    // Transformar user_roles a roles array simple para compatibilidad con frontend.
+    //
+    // QUI-72: `roles` aquí es la vista ORG-WIDE (todas las asignaciones del
+    // usuario) y se usa a propósito para (a) distinguir cuenta staff vs
+    // customer y (b) calcular `hasHighPrivilege`, que es lo que HABILITA la
+    // resolución de tienda de arranque más abajo. Hay una dependencia circular
+    // real: sin roles no se puede elegir la tienda, y sin tienda no se pueden
+    // scopear los roles. Se rompe resolviendo primero la tienda con la vista
+    // org-wide y recalculando DESPUÉS los roles/permisos efectivos de la sesión
+    // (ver `effective_roles` justo antes de construir la respuesta).
     const { user_roles, ...userWithoutRoles } = user;
     const roles =
       user_roles?.map((ur: any) => ur.roles?.name).filter(Boolean) || [];
@@ -2107,8 +2154,22 @@ export class AuthService {
         }
       : null;
 
+    // QUI-72 — A partir de aquí la tienda activa ya está resuelta
+    // (`target_store_id`), así que la sesión se cierra con los roles/permisos
+    // EFECTIVOS en esa tienda: asignaciones org-wide + las de esta tienda. Un
+    // usuario que es Cajero en la tienda A y nada en la B ya no arrastra el rol
+    // de A al iniciar sesión en B.
+    const effective_user_roles = this.filterUserRolesForActiveStore(
+      (user_roles ?? []) as any[],
+      target_store_id,
+    );
+    const effective_roles = effective_user_roles
+      .map((ur: any) => ur.roles?.name)
+      .filter(Boolean);
+
     const { password: _, ...userWithRolesAndPassword } = {
       ...userWithRolesArray,
+      roles: effective_roles,
       store: cleanStore,
     };
 
@@ -2119,14 +2180,15 @@ export class AuthService {
       config: mergeUserConfigPanelUi(
         userSettings.config as any,
         defaults.panel_ui,
-        roles,
+        effective_roles,
       ),
     };
 
     // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
     // findUserAccountsByEmail ya trae roles.role_permissions.permissions, así que
-    // derivamos los permisos del `user` cargado en memoria (sin segundo fetch).
-    const permissions = this.getPermissionsFromRoles(user_roles ?? []);
+    // derivamos los permisos del `user` cargado en memoria (sin segundo fetch),
+    // filtrando por la tienda activa.
+    const permissions = this.getPermissionsFromRoles(effective_user_roles);
 
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
@@ -2259,11 +2321,18 @@ export class AuthService {
         },
       });
 
+      // QUI-72 — El refresh CONSERVA el scope del token original
+      // (`payload.store_id`), así que los permisos re-hidratados deben
+      // resolverse contra esa misma tienda activa. Sin esto, refrescar la
+      // sesión reintroducía los roles de las tiendas hermanas.
+      const refreshed_user_roles = this.filterUserRolesForActiveStore(
+        ((userWithoutPassword as any).user_roles ?? []) as any[],
+        payload.store_id ?? null,
+      );
+
       return {
-        user: userWithoutPassword,
-        permissions: this.getPermissionsFromRoles(
-          (userWithoutPassword as any).user_roles ?? [],
-        ),
+        user: { ...userWithoutPassword, user_roles: refreshed_user_roles },
+        permissions: this.getPermissionsFromRoles(refreshed_user_roles),
         ...tokens,
       };
     } catch (error) {
@@ -2271,26 +2340,32 @@ export class AuthService {
     }
   }
 
-  async getProfile(userId: number) {
-    const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
-      include: {
-        addresses: true,
-        user_roles: {
-          include: {
-            roles: {
-              include: {
-                role_permissions: {
-                  include: {
-                    permissions: true,
-                  },
+  /**
+   * @param activeStoreId tienda activa del token (`req.user.store_id`). El
+   *        perfil expone `user_roles` al frontend; debe reflejar los roles
+   *        VIGENTES en la tienda activa, no todas las asignaciones (QUI-72).
+   */
+  async getProfile(userId: number, activeStoreId?: number | null) {
+    const [user, userRoles] = await Promise.all([
+      this.prismaService.users.findUnique({
+        where: { id: userId },
+        include: { addresses: true },
+      }),
+      this.prismaService.user_roles.findMany({
+        where: buildActiveUserRolesWhere(userId, activeStoreId),
+        include: {
+          roles: {
+            include: {
+              role_permissions: {
+                include: {
+                  permissions: true,
                 },
               },
             },
           },
         },
-      },
-    });
+      }),
+    ]);
 
     if (!user) {
       throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
@@ -2304,6 +2379,8 @@ export class AuthService {
 
     return {
       ...userWithoutPassword,
+      // Misma forma que consumía el `include` anterior, ya scopeada por tienda.
+      user_roles: userRoles,
       avatar_url: signedAvatarUrl || null,
     };
   }
@@ -3398,6 +3475,14 @@ export class AuthService {
     }
   }
 
+  /**
+   * Carga cruda del usuario con TODAS sus asignaciones de rol.
+   *
+   * QUI-72: intencionalmente SIN dimensión de tienda — no participa en la
+   * resolución de sesión (no la consume ningún guard ni el JwtStrategy) y no
+   * recibe contexto de tienda. Si algún día se usa para autorizar, debe pasar
+   * por `buildActiveUserRolesWhere`.
+   */
   async validateUser(user_id: number) {
     const user = await this.prismaService.users.findUnique({
       where: { id: user_id },
@@ -3426,44 +3511,41 @@ export class AuthService {
     return userWithoutPassword;
   }
 
-  async getCurrentUser(user_id: number) {
-    const user = await this.prismaService.users.findUnique({
-      where: { id: user_id },
-      include: {
-        user_roles: {
-          include: {
-            roles: {
-              include: {
-                role_permissions: {
-                  include: {
-                    permissions: true,
-                  },
+  /**
+   * @param activeStoreId tienda activa del token (`req.user.store_id`).
+   *        `/auth/me` alimenta el gating de UI del frontend, así que debe
+   *        devolver los roles vigentes en esa tienda (QUI-72).
+   */
+  async getCurrentUser(user_id: number, activeStoreId?: number | null) {
+    const [user, userRoles] = await Promise.all([
+      this.prismaService.users.findUnique({
+        where: { id: user_id },
+        include: {
+          organizations: {
+            include: {
+              organization_settings: true,
+              domain_settings: {
+                where: {
+                  is_primary: true,
+                  status: 'active',
                 },
               },
             },
           },
         },
-            organizations: {
-              include: {
-                organization_settings: true,
-                domain_settings: {
-                  where: {
-                    is_primary: true,
-                status: 'active',
-              },
-            },
-          },
-        },
-      },
-    });
+      }),
+      this.prismaService.user_roles.findMany({
+        where: buildActiveUserRolesWhere(user_id, activeStoreId),
+        include: { roles: { select: { name: true } } },
+      }),
+    ]);
 
     if (!user) {
       return null;
     }
 
-    const { password, user_roles, ...userWithoutPassword } = user as any;
-    const roles =
-      user_roles?.map((ur: any) => ur.roles?.name).filter(Boolean) || [];
+    const { password, ...userWithoutPassword } = user as any;
+    const roles = userRoles.map((ur) => ur.roles?.name).filter(Boolean);
 
     return {
       ...userWithoutPassword,
@@ -3790,6 +3872,33 @@ export class AuthService {
     return 'Desktop';
   }
 
+  /**
+   * QUI-72 — Gemelo EN MEMORIA de `buildActiveUserRolesWhere`.
+   *
+   * Los flujos de login/refresh ya traen `user_roles` completo en el mismo
+   * fetch (optimización deliberada para no pegarle dos veces a la BD), pero la
+   * respuesta debe exponer SÓLO los roles vigentes en la tienda activa. Filtrar
+   * en memoria evita el segundo query sin romper el contrato.
+   *
+   * `store_id` NULL = asignación org-wide → siempre aplica.
+   * `store_id` = tienda activa → aplica sólo ahí.
+   * Sin tienda activa → sólo org-wide (fail-closed, nunca "todas").
+   *
+   * DEBE mantenerse equivalente a `buildActiveUserRolesWhere`
+   * (`@common/utils/role-scope.util`). Si esa función cambia, ésta también.
+   */
+  private filterUserRolesForActiveStore<T extends { store_id?: number | null }>(
+    userRoles: T[],
+    activeStoreId?: number | null,
+  ): T[] {
+    if (activeStoreId == null) {
+      return userRoles.filter((ur) => ur.store_id == null);
+    }
+    return userRoles.filter(
+      (ur) => ur.store_id == null || ur.store_id === activeStoreId,
+    );
+  }
+
   // Método auxiliar para obtener permisos de roles
   private getPermissionsFromRoles(userRoles: any[]): string[] {
     const permissions = new Set<string>();
@@ -3845,7 +3954,11 @@ export class AuthService {
       );
     }
 
-    // Verificar que el usuario tenga los roles necesarios
+    // Verificar que el usuario tenga los roles necesarios.
+    // QUI-72: esta lectura es deliberadamente ORG-WIDE — es la puerta de
+    // "¿puede este usuario entrar al entorno X en alguna parte?", previa a
+    // conocer la tienda. Los roles/permisos EFECTIVOS de la sesión se
+    // recalculan más abajo, ya con `store_id` resuelto.
     const userRoles = user.user_roles
       .map((ur) => ur.roles?.name)
       .filter(Boolean);
@@ -3971,9 +4084,17 @@ export class AuthService {
       refreshToken,
     };
 
-    // Obtener permisos y roles actualizados
-    const permissions = this.getPermissionsFromRoles(user.user_roles);
-    const roles = userRoles;
+    // Obtener permisos y roles actualizados.
+    // QUI-72: ya conocemos la tienda destino (`store_id`); la sesión resultante
+    // sólo puede llevar las asignaciones vigentes en ella (+ las org-wide).
+    const effective_user_roles = this.filterUserRolesForActiveStore(
+      user.user_roles as any[],
+      store_id,
+    );
+    const permissions = this.getPermissionsFromRoles(effective_user_roles);
+    const roles = effective_user_roles
+      .map((ur: any) => ur.roles?.name)
+      .filter(Boolean);
 
     // Registrar el cambio de entorno en auditoría
     await this.auditService.log({
@@ -3990,6 +4111,7 @@ export class AuthService {
     // Construir el usuario completo con la misma estructura que el login
     const userWithEnvironment = {
       ...user,
+      user_roles: effective_user_roles, // QUI-72: scopeado a la tienda destino
       store: activeStore, // Store con domain_settings incluido
       organizations: organizations, // Organization con domain_settings incluido
     };
@@ -4092,9 +4214,11 @@ export class AuthService {
 
     // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
     // El include de loginCustomer no trae role_permissions, por eso refetcheamos.
+    // QUI-72: el token de customer siempre nace acotado a `store.id`, así que
+    // los permisos se resuelven contra esa tienda (+ asignaciones org-wide).
     const userRolesWithPermissions =
       await this.prismaService.user_roles.findMany({
-        where: { user_id: user.id },
+        where: buildActiveUserRolesWhere(user.id, store.id),
         include: {
           roles: {
             include: {

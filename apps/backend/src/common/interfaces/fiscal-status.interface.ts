@@ -111,6 +111,40 @@ export interface FiscalWizardPrefillDianConfig {
   is_default: boolean;
   has_certificate: boolean;
   certificate_expiry: string | null;
+  /**
+   * DIAN portal identifiers. NOT secrets — the taxpayer reads them off the
+   * DIAN habilitación portal, so the wizard may prefill them verbatim instead
+   * of forcing a re-type. The PIN is the only secret in this group and is
+   * exposed exclusively as the `has_software_pin` boolean.
+   */
+  software_id: string | null;
+  test_set_id: string | null;
+  has_software_pin: boolean;
+}
+
+/**
+ * Active numbering resolution for the fiscal entity. Surfaced in the prefill so
+ * the activation wizard can show what is already registered instead of asking
+ * for it again — the DIAN test set cannot run without one.
+ */
+export interface FiscalWizardPrefillResolution {
+  id: number;
+  document_type: string;
+  resolution_number: string;
+  resolution_date: string;
+  prefix: string;
+  range_from: number;
+  range_to: number;
+  current_number: number;
+  valid_from: string;
+  valid_to: string;
+  technical_key: string | null;
+  /**
+   * True when this resolution is the DIAN habilitación test range (prefix
+   * SETP). Production invoicing requires a DIFFERENT resolution obtained from
+   * Muisca, so the UI must not offer a production switch backed only by this.
+   */
+  is_habilitacion_range: boolean;
 }
 
 export interface FiscalWizardPrefillPuc {
@@ -209,6 +243,7 @@ export interface FiscalWizardPrefill {
   fiscal_scope: 'STORE' | 'ORGANIZATION';
   legal_data: FiscalWizardPrefillLegalData | null;
   dian_config: FiscalWizardPrefillDianConfig | null;
+  resolution: FiscalWizardPrefillResolution | null;
   puc: FiscalWizardPrefillPuc | null;
   accounting_period: FiscalWizardPrefillAccountingPeriod | null;
   default_taxes: FiscalWizardPrefillDefaultTaxes | null;
@@ -216,6 +251,29 @@ export interface FiscalWizardPrefill {
   initial_inventory: FiscalWizardPrefillInitialInventory | null;
   payroll_config: FiscalWizardPrefillPayrollConfig | null;
   satisfied_steps: FiscalWizardStepId[];
+}
+
+/**
+ * Prefix the DIAN assigns to every taxpayer's habilitación test range. The
+ * range is shared boilerplate (SETP 990000000-995000000, resolution
+ * 18760000001) handed to everyone going through enablement — it is NOT a
+ * billable range.
+ *
+ * Production invoicing requires a separate "Autorización de Numeración de
+ * Facturación" requested through Muisca, with its own prefix and technical key.
+ * See the DIAN enablement guide:
+ * https://micrositios.dian.gov.co/sistema-de-facturacion-electronica/proceso-de-registro-y-habilitacion-como-facturador-electronico/
+ */
+export const DIAN_HABILITACION_PREFIX = 'SETP';
+
+/**
+ * True when the resolution is the DIAN habilitación test range rather than a
+ * real production numbering authorization. Callers use this to refuse promoting
+ * a configuration to production while the only resolution on file is the test
+ * one — invoices issued against SETP have no fiscal validity.
+ */
+export function isHabilitacionResolution(prefix: string | null): boolean {
+  return (prefix ?? '').trim().toUpperCase() === DIAN_HABILITACION_PREFIX;
 }
 
 const AREAS: FiscalArea[] = ['invoicing', 'accounting', 'payroll'];

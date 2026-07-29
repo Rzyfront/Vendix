@@ -238,11 +238,13 @@ model roles {
   description      String?
   is_system_role   Boolean            @default(false)
   organization_id  Int?
+  store_id         Int?
   created_at       DateTime?          @default(now()) @db.Timestamp(6)
   updated_at       DateTime?          @default(now()) @db.Timestamp(6)
   role_permissions role_permissions[]
   user_roles       user_roles[]
   organizations    organizations?     @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  stores           stores?            @relation(fields: [store_id], references: [id], onUpdate: NoAction)
 
   // QUI-473: composite unique on (organization_id, name) replaces the legacy
   // global `@@unique([name])` so two organizations can each have their own
@@ -266,8 +268,27 @@ model roles {
   //
   // If you ever need to enforce a system-vs-org invariant at the SQL layer
   // (e.g. a CHECK constraint), prefer a separate follow-up migration.
-  @@unique([organization_id, name])
+  //
+  // QUI-72: `store_id` adds the missing store dimension. The scope of a role is
+  // DERIVED from the two FKs, never stored as a redundant type column:
+  //
+  //   is_system_role | organization_id | store_id | scope
+  //   ---------------+-----------------+----------+--------------
+  //   true           | NULL            | NULL     | system
+  //   false          | set             | NULL     | organization
+  //   false          | set             | set      | store
+  //
+  // `store_id` set with `organization_id` NULL is invalid and is rejected by the
+  // CHECK constraint `roles_store_requires_organization` (see migration
+  // `20260727120000_qui72_roles_store_scope`). The unique index grows to
+  // (organization_id, store_id, name) and KEEPS `NULLS NOT DISTINCT` — verify:
+  //
+  //   SELECT indnullsnotdistinct FROM pg_index
+  //   WHERE indexrelid = '"roles_organization_id_store_id_name_key"'::regclass;
+  //   -- must be `true`
+  @@unique([organization_id, store_id, name])
   @@index([organization_id])
+  @@index([store_id])
 }
 
 model permissions {
@@ -286,13 +307,29 @@ model permissions {
 }
 
 model user_roles {
-  id      Int    @id @default(autoincrement())
-  user_id Int?
-  role_id Int?
-  roles   roles? @relation(fields: [role_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users   users? @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id       Int     @id @default(autoincrement())
+  user_id  Int?
+  role_id  Int?
+  store_id Int?
+  roles    roles?  @relation(fields: [role_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users    users?  @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores   stores? @relation(fields: [store_id], references: [id], onUpdate: NoAction)
 
-  @@unique([user_id, role_id])
+  // QUI-72: `store_id` NULL means the assignment applies across the whole
+  // organization; a value means it applies ONLY in that store. This is what
+  // lets the same user be Cajero in store A and not in store B.
+  //
+  // ⚠️ The unique index needs `NULLS NOT DISTINCT` for the same reason as
+  // `roles`: with the Postgres default, two org-wide assignments
+  // (user, role, NULL) would NOT collide and the row could be duplicated.
+  // Prisma cannot express it, so it is written by hand in the migration
+  // `20260727120000_qui72_roles_store_scope`. Verify:
+  //
+  //   SELECT indnullsnotdistinct FROM pg_index
+  //   WHERE indexrelid = '"user_roles_user_id_role_id_store_id_key"'::regclass;
+  //   -- must be `true`
+  @@unique([user_id, role_id, store_id])
+  @@index([store_id])
 }
 
 model role_permissions {
@@ -730,6 +767,10 @@ model stores {
   coupons                     coupons[]
   marketing_ad_creatives      marketing_ad_creatives[]
   reviews                     reviews[]
+
+  // QUI-72: roles created with store scope, and per-store role assignments
+  roles      roles[]
+  user_roles user_roles[]
 
   // Cash Register
   cash_registers          cash_registers[]

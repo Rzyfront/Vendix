@@ -160,6 +160,39 @@ export class OrganizationPrismaService extends BasePrismaService {
     return extensions;
   }
 
+  /**
+   * Compone el filtro de alcance con el `where` del llamador sin pisar ninguno
+   * de los dos, y sin romper las operaciones de selector único.
+   *
+   * Hay dos formas incorrectas y una correcta:
+   *
+   * 1. `{ ...where, ...scopeFilter }` — pisa en silencio cualquier `OR` de
+   *    primer nivel del llamador. Era el bug original: un filtro de seguridad
+   *    que desaparecía sin error.
+   * 2. `{ AND: [where, scopeFilter] }` — compone bien, pero sepulta el
+   *    selector único dentro del `AND`. `findUnique`/`update`/`delete`/`upsert`
+   *    tipan su `where` como `Prisma.AtLeast<…, "id" | "<compound>">`, que
+   *    exige el selector único **en el primer nivel**: sin él, Prisma revienta
+   *    en runtime con `PrismaClientValidationError`. El typecheck no lo ve,
+   *    porque el filtro se inyecta con `any` dentro de la extensión de query.
+   * 3. Spread del `where` + acumular el alcance en `AND` — el selector único
+   *    (y el `OR` del llamador) sobreviven arriba, y el alcance se compone en
+   *    vez de sustituir. Es la forma que ya usa `StorePrismaService`.
+   */
+  private mergeScopeFilter(where: any, scopeFilter: Record<string, unknown>) {
+    if (!where) return scopeFilter;
+
+    const existingAnd = where.AND;
+    const previous =
+      existingAnd === undefined
+        ? []
+        : Array.isArray(existingAnd)
+          ? existingAnd
+          : [existingAnd];
+
+    return { ...where, AND: [...previous, scopeFilter] };
+  }
+
   private applyOrganizationScoping(model: string, args: any, query: any) {
     const context = RequestContextService.getContext();
 
@@ -178,25 +211,37 @@ export class OrganizationPrismaService extends BasePrismaService {
         );
       }
 
-      // Filtro especial para roles: incluir roles de la organización actual Y roles del sistema (organization_id = null)
+      // Filtro especial para roles: incluir roles de la organización actual Y
+      // roles del sistema (organization_id = null).
+      //
+      // QUI-72: este bloque hacía `{ ...existingWhere, OR: [...] }`, que
+      // SOBRESCRIBE en silencio cualquier `OR` de primer nivel que traiga el
+      // llamador. Un servicio que pasaba `where: { name, OR: [...] }` para
+      // acotar una búsqueda veía su `OR` descartado y recibía de vuelta todos
+      // los roles de la organización más los de sistema — un filtro de
+      // seguridad que desaparecía sin dejar rastro. `mergeScopeFilter` compone
+      // ambas condiciones en vez de pisar una con la otra, y elige la forma
+      // válida según el `where` sea único o no (ver su documentación).
       if (model === 'roles') {
-        const existingWhere = scoped_args.where || {};
-        scoped_args.where = {
-          ...existingWhere,
+        const scopeFilter = {
           OR: [
             { organization_id: context.organization_id },
             { organization_id: null },
           ],
         };
+        scoped_args.where = this.mergeScopeFilter(
+          scoped_args.where,
+          scopeFilter,
+        );
       } else if (this.SCOPE_OVERRIDES[model]) {
         // Modelos sin columna directa organization_id (scope relacional).
         const overrideFilter = this.SCOPE_OVERRIDES[model](
           context.organization_id,
         );
-        const existingWhere = scoped_args.where;
-        scoped_args.where = existingWhere
-          ? { AND: [existingWhere, overrideFilter] }
-          : overrideFilter;
+        scoped_args.where = this.mergeScopeFilter(
+          scoped_args.where,
+          overrideFilter,
+        );
       } else {
         // Para otros modelos: solo filtrar por organization_id
         const existingWhere = scoped_args.where || {};

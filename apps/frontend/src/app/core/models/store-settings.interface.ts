@@ -414,6 +414,23 @@ export interface ReceiptsSettings {
   email_receipt: boolean;
   receipt_header: string;
   receipt_footer: string;
+  /**
+   * Electronic-invoicing block. Only meaningful for stores whose `invoicing`
+   * fiscal area is ACTIVE/LOCKED: once DIAN habilitación is in place the store
+   * issues electronic invoices, not internal sale receipts, so these settings
+   * replace the receipt-delivery toggles in the UI.
+   *
+   * Optional across the board for backward compatibility with stores whose
+   * settings row predates the block.
+   */
+  /** Issue (and transmit) the electronic invoice right after the sale closes. */
+  auto_issue_invoice?: boolean;
+  /** Printed copies of the electronic invoice per sale. 0 = do not print. */
+  invoice_copies?: number;
+  /** Email the electronic invoice + its XML to the customer. */
+  send_invoice_email?: boolean;
+  /** Also print the POS ticket alongside the invoice (kitchen/warehouse copy). */
+  print_pos_ticket?: boolean;
 }
 
 export interface BusinessHoursBlock {

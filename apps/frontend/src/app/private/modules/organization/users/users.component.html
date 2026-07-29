@@ -115,6 +115,7 @@
       [user]="userForConfig()"
       [(isOpen)]="showConfigModal"
       (onSaved)="onUserConfigured()"
+      (rolesChanged)="loadUsers()"
     ></app-user-config-modal>
   }
 </div>

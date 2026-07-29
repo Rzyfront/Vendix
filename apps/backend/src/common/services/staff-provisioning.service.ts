@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { DefaultPanelUIService } from './default-panel-ui.service';
+import { UserRoleAssignmentService } from './user-role-assignment.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
 
 /**
@@ -44,6 +45,7 @@ export class StaffProvisioningService {
   constructor(
     private readonly prismaService: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly userRoleAssignment: UserRoleAssignmentService,
   ) {}
 
   /** ¿Alguno de los roles del usuario es de privilegio alto? */
@@ -243,11 +245,32 @@ export class StaffProvisioningService {
       if (!role) {
         throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
       }
-      await db.user_roles.upsert({
-        where: { user_id_role_id: { user_id: userId, role_id: role.id } },
-        update: {},
-        create: { user_id: userId, role_id: role.id },
-      });
+
+      // QUI-72 — Alcance de la asignación.
+      //
+      // Los roles de PRIVILEGIO ALTO (owner/admin/super_admin) gobiernan toda
+      // la organización y son multi-tienda por diseño: van org-wide
+      // (`store_id: null`). Atarlos a `storeId` los dejaría fuera de las
+      // tiendas hermanas y rompería la auto-relación en login/switch, que
+      // depende justamente de ese privilegio.
+      //
+      // Cualquier otro rol es OPERATIVO de tienda (manager, supervisor,
+      // employee, carrier…) y queda atado a la tienda para la que se
+      // aprovisiona: es el mecanismo que permite ser Cajero en la tienda A y
+      // nada en la B. Antes, sin dimensión de tienda, el rol se filtraba a
+      // todas las tiendas de la organización.
+      const roleStoreId = StaffProvisioningService.hasHighPrivilege([role.name])
+        ? null
+        : storeId;
+
+      // Escritura idempotente delegada en el único escritor de `user_roles`,
+      // pasándole la transacción del llamador: con su propio cliente la fila
+      // se escribiría fuera de esta tx y reventaría por FK (el usuario todavía
+      // no es visible) o quedaría huérfana si el caller hiciera rollback.
+      await this.userRoleAssignment.ensureAssignmentUnchecked(
+        { user_id: userId, role_id: role.id, store_id: roleStoreId },
+        tx,
+      );
     }
 
     // 3. app_type en user_settings (fuente única de verdad léxica).

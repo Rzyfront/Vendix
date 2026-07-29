@@ -7,14 +7,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
 
-    <!-- PWA / Web App Manifest -->
+    <!-- PWA / Web App Manifest — ESTÁTICOS y del MISMO ORIGEN a propósito.
+         La instalación puede dispararse ANTES de que Angular arranque, así que el
+         manifest y el icono correctos tienen que existir en la primera respuesta
+         HTTP: nada de inyectarlos en runtime (un Blob URL rompe la instalabilidad
+         en Chromium y Safari no lo lee).
+         En producción el backend responde /manifest.webmanifest y /pwa/*.png
+         resueltos por Host, sin firma ni vencimiento; CloudFront rutea esas rutas
+         al backend. El apps/frontend/public/manifest.webmanifest desplegado al
+         bucket S3 queda ENSOMBRECIDO por ese behavior y sólo sirve como último
+         recurso genérico (marca Vendix) si el behavior no aplica. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#2F6F4E" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" href="/pwa/apple-touch-icon-180.png" />
+    <!-- NO declarar aquí <link rel="icon"> apuntando a /pwa/icon-{192,512}.png:
+         el manifest ya los declara para la instalación, y unos rel="icon" PNG de
+         mayor resolución le ganarían la selección de favicon de pestaña al
+         favicon.ico de arriba — que es justo el único que ThemeService.updateFavicon()
+         reescribe en runtime con el favicon del tenant (querySelector devuelve el
+         primer link[rel=icon]). Añadirlos rompería el favicon por tenant. -->
 
-    <!-- iOS / Apple Web App: Safari ignora el manifest (y no lee un Blob URL) para
-         la app instalada; estos meta habilitan modo standalone y el nombre correcto.
-         apple-mobile-web-app-title se sobreescribe en runtime con el nombre del tenant. -->
+    <!-- iOS / Apple Web App: Safari ignora los iconos y el name/short_name del
+         manifest para la app instalada; estos meta habilitan modo standalone y el
+         nombre correcto. apple-mobile-web-app-title se sobreescribe en runtime con
+         el nombre del tenant (ManifestService). -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />

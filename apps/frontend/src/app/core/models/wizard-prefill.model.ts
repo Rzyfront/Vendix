@@ -48,6 +48,31 @@ export interface WizardPrefillDianConfig {
   is_default: boolean;
   has_certificate: boolean;
   certificate_expiry: string | null;
+  /**
+   * DIAN portal identifiers — safe to prefill verbatim. The PIN is a secret and
+   * is only ever reported as `has_software_pin`; the form shows the '****'
+   * sentinel for it, matching what the config endpoints return.
+   */
+  software_id: string | null;
+  test_set_id: string | null;
+  has_software_pin: boolean;
+}
+
+/** Active numbering resolution already registered for the fiscal entity. */
+export interface WizardPrefillResolution {
+  id: number;
+  document_type: string;
+  resolution_number: string;
+  resolution_date: string;
+  prefix: string;
+  range_from: number;
+  range_to: number;
+  current_number: number;
+  valid_from: string;
+  valid_to: string;
+  technical_key: string | null;
+  /** SETP habilitación range — not valid for production invoicing. */
+  is_habilitacion_range: boolean;
 }
 
 export interface WizardPrefillPuc {
@@ -144,6 +169,7 @@ export interface WizardPrefill {
   fiscal_scope: 'STORE' | 'ORGANIZATION';
   legal_data: WizardPrefillLegalData | null;
   dian_config: WizardPrefillDianConfig | null;
+  resolution: WizardPrefillResolution | null;
   puc: WizardPrefillPuc | null;
   accounting_period: WizardPrefillAccountingPeriod | null;
   default_taxes: WizardPrefillDefaultTaxes | null;

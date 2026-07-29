@@ -3,6 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 
 // Domain scope claim — alineado con user_settings.app_type (app_type_enum).
 // Mantener este union manualmente sincronizado con prisma/schema.prisma → enum app_type_enum.
@@ -42,24 +43,35 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
   async validate(payload: JwtPayload) {
     try {
-      const user = await this.prismaService.users.findUnique({
-        where: { id: parseInt(payload.sub.toString()) },
-        include: {
-          user_roles: {
-            include: {
-              roles: {
-                include: {
-                  role_permissions: {
-                    include: {
-                      permissions: true,
-                    },
+      const userId = parseInt(payload.sub.toString());
+
+      // QUI-72 — Los roles de la SESIÓN se resuelven contra la tienda activa del
+      // token, no contra todas las asignaciones del usuario. `store_id` NULL en
+      // `user_roles` = asignación org-wide (vale en todas las tiendas); con valor
+      // = vale SÓLO en esa tienda. Un token sin `store_id` (ORG_ADMIN,
+      // VENDIX_ADMIN) resuelve únicamente las org-wide — fail-closed: nunca
+      // "todas las tiendas".
+      //
+      // Éste es EL punto de verdad: PermissionsGuard, RolesGuard,
+      // RequestContextInterceptor y AccessValidationService consumen lo que
+      // devuelve este método, así que scopear aquí scopea toda la request.
+      const [user, userRoles] = await Promise.all([
+        this.prismaService.users.findUnique({ where: { id: userId } }),
+        this.prismaService.user_roles.findMany({
+          where: buildActiveUserRolesWhere(userId, payload.store_id ?? null),
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
                   },
                 },
               },
             },
           },
-        },
-      });
+        }),
+      ]);
 
       if (!user) {
         throw new UnauthorizedException(
@@ -116,9 +128,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         store_id: payload.store_id || null, // ✅ Del TOKEN - Corregido
         app_type: payload.app_type, // ✅ Del TOKEN — DomainScopeGuard
         stores, // ✅ Objeto store con logo_url para el sidebar
-        user_roles: user.user_roles, // ✅ Mantener para el middleware
-        roles: user.user_roles.map((ur) => ur.roles?.name || ''),
-        permissions: user.user_roles.flatMap(
+        user_roles: userRoles, // ✅ Mantener para el middleware — ya scopeado a la tienda activa
+        roles: userRoles.map((ur) => ur.roles?.name || ''),
+        permissions: userRoles.flatMap(
           (ur) =>
             ur.roles?.role_permissions?.map((rp) => ({
               name: rp.permissions?.name || '',

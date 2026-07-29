@@ -15,6 +15,13 @@ import {
   TableAction,
   TableColumn,
 } from '../../../../../shared/components/index';
+import {
+  ROLE_SCOPE_COLOR_MAP,
+  ROLE_SCOPE_FILTER_OPTIONS,
+  canEditRoleScope,
+  getRoleReadOnlyReason,
+  getRoleScopeLabel,
+} from '../../../../../shared/constants/role-scope.constant';
 
 @Component({
   selector: 'app-org-roles-list',
@@ -142,21 +149,28 @@ export class OrgRolesListComponent {
   }>();
 
   readonly searchTerm = signal('');
-  readonly selectedType = signal('');
+  readonly selectedScope = signal('');
   readonly filterValues = signal<FilterValues>({});
   readonly hasFilters = computed(
-    () => !!(this.searchTerm() || this.selectedType()),
+    () => !!(this.searchTerm() || this.selectedScope()),
   );
 
+  /**
+   * QUI-72 — el filtro pasa de "Sistema / Personalizado" a los TRES alcances.
+   * Las opciones vienen del contrato compartido para que los tres niveles
+   * (superadmin, organización, tienda) filtren exactamente igual.
+   */
   readonly filterConfigs: FilterConfig[] = [
     {
-      key: 'type',
-      label: 'Tipo',
+      key: 'scope',
+      label: 'Alcance',
       type: 'select',
       options: [
         { value: '', label: 'Todos' },
-        { value: 'system', label: 'Sistema' },
-        { value: 'custom', label: 'Personalizado' },
+        ...ROLE_SCOPE_FILTER_OPTIONS.map((option) => ({
+          value: option.value as string,
+          label: option.label,
+        })),
       ],
     },
   ];
@@ -191,20 +205,30 @@ export class OrgRolesListComponent {
       transform: (value: string) => value || 'Sin descripción',
     },
     {
-      key: 'system_role',
-      label: 'Tipo',
+      // El `colorMap` resuelve contra el valor CRUDO de la celda, así que la
+      // clave DEBE ser `scope` ('system' | 'organization' | 'store') y los
+      // colores hex de 7 caracteres: `table`/`item-list` derivan fondo y borde
+      // concatenando alfa (`${color}26` / `${color}40`).
+      key: 'scope',
+      label: 'Alcance',
       sortable: true,
       badge: true,
       priority: 1,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
-        colorMap: {
-          true: '#3b82f6',
-          false: '#10b981',
-        },
+        colorMap: ROLE_SCOPE_COLOR_MAP,
       },
-      transform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
+      transform: (value: string) => getRoleScopeLabel(value as never),
+    },
+    {
+      key: 'store_name',
+      label: 'Tienda',
+      sortable: true,
+      priority: 2,
+      // `app-table` sólo corre `transform` cuando la celda no está vacía, así
+      // que los roles sin tienda caen en `defaultValue`.
+      defaultValue: '—',
     },
     {
       key: '_count.user_roles',
@@ -238,17 +262,23 @@ export class OrgRolesListComponent {
     subtitleTransform: (role: Role) => role.description || 'Sin descripción',
     avatarFallbackIcon: 'shield',
     avatarShape: 'square',
-    badgeKey: 'system_role',
+    badgeKey: 'scope',
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: {
-        true: '#3b82f6',
-        false: '#10b981',
-      },
+      colorMap: ROLE_SCOPE_COLOR_MAP,
     },
-    badgeTransform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
+    badgeTransform: (value: string) => getRoleScopeLabel(value as never),
     detailKeys: [
+      {
+        // `badgeTransform` sólo recibe el valor, nunca la fila, así que la
+        // tienda del rol de alcance TIENDA se muestra en su propio detalle
+        // (`item-list` ya resuelve el nulo a '-' sin llamar al transform).
+        key: 'store_name',
+        label: 'Tienda',
+        icon: 'store',
+        transform: (value: string) => value || '—',
+      },
       {
         key: '_count.user_roles',
         label: 'Usuarios',
@@ -270,30 +300,54 @@ export class OrgRolesListComponent {
     ],
   };
 
+  /**
+   * QUI-72 — las acciones se derivan de `canEditRoleScope(scope, 'organization')`,
+   * no de `system_role`. Es un espejo de la matriz del backend para OCULTAR
+   * acciones imposibles; la autorización real sigue siendo el 403 tipado.
+   *
+   * "Detalle" queda visible siempre (un rol de sistema se puede consultar y ver
+   * sus usuarios); editar, permisos y eliminar se bloquean con el motivo exacto
+   * del contrato compartido en el tooltip.
+   */
   readonly tableActions: TableAction[] = [
     {
-      label: 'Editar',
-      icon: 'edit',
+      label: (role: Role) => (this.canEdit(role) ? 'Editar' : 'Ver detalle'),
+      icon: (role: Role) => (this.canEdit(role) ? 'edit' : 'eye'),
       action: (role: Role) => this.edit.emit(role),
       variant: 'info',
-      show: (role: Role) => !role.system_role,
+      tooltip: (role: Role) =>
+        this.readOnlyReason(role) ?? 'Editar rol y administrar sus usuarios',
     },
     {
       label: 'Permisos',
       icon: 'key',
       action: (role: Role) => this.managePermissions.emit(role),
       variant: 'ghost',
+      disabled: (role: Role) => !this.canEdit(role),
+      tooltip: (role: Role) =>
+        this.readOnlyReason(role) ?? 'Administrar permisos del rol',
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (role: Role) => this.delete.emit(role),
       variant: 'danger',
-      disabled: (role: Role) =>
-        role.system_role || (role._count?.user_roles ?? 0) > 0,
-      show: (role: Role) => !role.system_role,
+      disabled: (role: Role) => (role._count?.user_roles ?? 0) > 0,
+      show: (role: Role) => this.canEdit(role),
+      tooltip: (role: Role) =>
+        (role._count?.user_roles ?? 0) > 0
+          ? 'No se puede eliminar un rol con usuarios asignados'
+          : 'Eliminar rol',
     },
   ];
+
+  canEdit(role: Role): boolean {
+    return canEditRoleScope(role?.scope, 'organization');
+  }
+
+  readOnlyReason(role: Role): string | null {
+    return getRoleReadOnlyReason(role?.scope, 'organization');
+  }
 
   onSearch(term: string): void {
     this.searchTerm.set(term);
@@ -302,17 +356,17 @@ export class OrgRolesListComponent {
 
   onFilterChange(values: FilterValues): void {
     this.filterValues.set({ ...values });
-    const type = typeof values['type'] === 'string' ? values['type'] : '';
-    this.selectedType.set(type);
-    this.filterChange.emit({ type });
+    const scope = typeof values['scope'] === 'string' ? values['scope'] : '';
+    this.selectedScope.set(scope);
+    this.filterChange.emit({ scope });
   }
 
   clearFilters(): void {
     this.searchTerm.set('');
-    this.selectedType.set('');
+    this.selectedScope.set('');
     this.filterValues.set({});
     this.searchChange.emit('');
-    this.filterChange.emit({ type: '' });
+    this.filterChange.emit({ scope: '' });
   }
 
   onActionClick(action: string): void {
