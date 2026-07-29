@@ -1613,6 +1613,24 @@ export const ErrorCodes = {
     devMessage:
       'DIAN test set evidence is required before production enablement',
   },
+  /**
+   * A previously submitted test set is still awaiting DIAN's verdict. Re-sending
+   * would burn a second block of resolution numbers and DIAN would reject the
+   * batch as duplicated, so the caller must poll `:id/test-set-status` instead.
+   */
+  DIAN_TEST_SET_002: {
+    code: 'DIAN_TEST_SET_002',
+    httpStatus: 409,
+    devMessage:
+      'A DIAN test set is already in progress for this configuration; poll its status instead of re-sending',
+  },
+  /** The resolution range has fewer numbers left than the test set requires. */
+  DIAN_TEST_SET_003: {
+    code: 'DIAN_TEST_SET_003',
+    httpStatus: 412,
+    devMessage:
+      'The numbering resolution does not have enough remaining numbers for the 50-document test set',
+  },
   DIAN_ENABLEMENT_001: {
     code: 'DIAN_ENABLEMENT_001',
     httpStatus: 412,
