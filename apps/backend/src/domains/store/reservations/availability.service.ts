@@ -524,41 +524,25 @@ export class AvailabilityService {
     end_time: string,
     exclude_booking_id?: number,
   ): Promise<void> {
-    const targetDate = new Date(date);
-    const requestedStart = this.timeToMinutes(start_time);
-    const requestedEnd = this.timeToMinutes(end_time);
-
-    const activeStatuses = [
-      booking_status_enum.pending,
-      booking_status_enum.confirmed,
-      booking_status_enum.in_progress,
-    ];
-
-    const where: any = {
-      customer_id,
-      date: targetDate,
-      status: { in: activeStatuses },
-    };
-
-    if (exclude_booking_id) {
-      where.id = { not: exclude_booking_id };
-    }
-
-    const customerBookings = await this.prisma.bookings.findMany({
-      where,
-      select: { start_time: true, end_time: true, booking_number: true },
-    });
-
-    for (const booking of customerBookings) {
-      const existingStart = this.timeToMinutes(booking.start_time);
-      const existingEnd = this.timeToMinutes(booking.end_time);
-
-      if (requestedStart < existingEnd && requestedEnd > existingStart) {
-        throw new BadRequestException(
-          `El cliente ya tiene una reserva (${booking.booking_number}) que se superpone con el horario solicitado`,
-        );
-      }
-    }
+    // DISABLED — el check de overlap por cliente estaba bloqueando
+    // casos legítimos como "el cliente reserva para sí mismo Y para un
+    // familiar en el mismo horario" (ej. padre e hijo en paralelo)
+    // o auto-reagendadas que se solapan temporalmente durante el flujo.
+    // El doble-booking real lo evita `isProviderAvailableForSlot`
+    // a nivel de provider — si el provider está ocupado a esa hora,
+    // no hay slots disponibles. El check por cliente era ruido de UX.
+    //
+    // Si en el futuro se quiere reintroducir, considerar:
+    //   - Solo para el MISMO logged-in user (no para guest checkout
+    //     donde "el mismo customer" puede ser ambiguo)
+    //   - Permitir solapamiento entre customer_id distintos
+    //     (reservas para familiares con el mismo email)
+    void customer_id;
+    void date;
+    void start_time;
+    void end_time;
+    void exclude_booking_id;
+    return;
   }
 
   // --- Helpers privados ---
