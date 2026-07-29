@@ -11,6 +11,7 @@ import { RouterModule, ActivatedRoute } from '@angular/router';
 
 
 import { AccountService, OrderDetail } from '../../../services/account.service';
+import { EcommerceBookingService } from '../../../services/ecommerce-booking.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -169,6 +170,7 @@ private toast = inject(ToastService);
 
   constructor(
     private account_service: AccountService,
+    private booking_service: EcommerceBookingService,
     private route: ActivatedRoute,
   ) {}
 
@@ -279,6 +281,153 @@ if (this.wompiPollTimer) {
       error: () => {
         this.is_loading.set(false);
       } });
+  }
+
+  /**
+   * Show the "Reagendar" CTA only when the order contains a service
+   * booking whose status the customer can still change. A booking
+   * that is already in progress, completed, cancelled, or no_show can't
+   * be re-scheduled — only pending or confirmed can.
+   */
+  /**
+   * The booking the customer can reschedule. Prefers the real row
+   * (the canonical source of date/time/address), but falls back to
+   * a synthetic booking derived from the order itself when:
+   *  - The order is a service (hasServiceItems) but has no bookings
+   *    row (e.g. older orders or test data where the booking insert
+   *    was skipped)
+   *  - The order has a `delivery_type` set (home_delivery / pickup)
+   *    and a `shipping_address_snapshot` that we can use to derive
+   *    the address for the reschedule modal
+   *
+   * The synthetic booking only carries the fields the modal actually
+   * reads; it does NOT have a real `id` (passes 0) so the
+   * PATCH /reschedule endpoint must validate it has a real id.
+   * For the order-only path, the modal won't be functional but the
+   * button still appears so the user knows the option exists.
+   */
+  readonly firstReschedulableBooking = computed(() => {
+    const o = this.order();
+    if (!o) return null;
+
+    // 1) Real booking, if present and in a reschedulable status.
+    const real = o.bookings?.[0];
+    if (real) {
+      const status = (real as any).status;
+      if (status === 'pending' || status === 'confirmed') return real;
+    }
+
+    // 2) Synthetic fallback: show the "Reagendar reserva" CTA for ANY
+    //    service-only order, even if the backend never persisted a
+    //    `bookings` row (orphan from the pre-fix checkout silent-failure
+    //    bug, or older orders). Without this the customer never sees
+    //    the option to manage the reservation. The modal will detect
+    //    `id === 0` and refuse to PATCH /reschedule, surfacing a clear
+    //    message so the customer knows to create the booking first.
+    if (!this.hasServiceItems()) return null;
+    const firstServiceItem = o.items.find(
+      (i: any) => i.product_type === 'service',
+    );
+    if (!firstServiceItem) return null;
+
+    const addr = (o as any).shipping_address_snapshot as
+      | {
+          address_line1: string;
+          address_line2: string | null;
+          city: string;
+          state_province: string | null;
+          country_code: string;
+          postal_code: string | null;
+          phone_number: string | null;
+        }
+      | null
+      | undefined;
+
+    return {
+      // id: 0 marks this as a synthetic row — the modal can still
+      // display the address but the API PATCH won't be functional.
+      id: 0,
+      booking_number: o.order_number,
+      date: o.placed_at ?? o.created_at,
+      start_time: '',
+      end_time: '',
+      status: 'pending',
+      product_id: firstServiceItem.product_id,
+      product_name: firstServiceItem.product_name,
+      // The "home vs shop" comes from the order's delivery_type
+      service_location_type:
+        o.delivery_type === 'pickup' ? 'shop' : 'home',
+      service_address: addr
+        ? {
+            id: 0,
+            address_line1: addr.address_line1,
+            address_line2: addr.address_line2,
+            city: addr.city,
+            state_province: addr.state_province,
+            country_code: addr.country_code,
+            postal_code: addr.postal_code,
+          }
+        : null,
+    };
+  });
+
+  openRescheduleModal(): void {
+    const booking = this.firstReschedulableBooking();
+    // Synthetic booking (id=0) means no reservation was ever persisted.
+    // Mirror the admin flow: redirect to the product page so the customer
+    // picks a real date/time and creates the reservation from scratch.
+    if (!booking || booking.id === 0) {
+      const productId = booking?.product_id;
+      if (productId) {
+        this.router.navigate(['/products', productId]);
+      } else {
+        this.toast.warning(
+          'No se encontró el servicio para crear la reserva. Contacta soporte.',
+        );
+      }
+      return;
+    }
+    this.showRescheduleModal.set(true);
+  }
+
+  closeRescheduleModal(): void {
+    this.showRescheduleModal.set(false);
+  }
+
+  onRescheduleComplete(): void {
+    this.closeRescheduleModal();
+    // Refresh the order so the new date/time is reflected in the UI.
+    const id = this.order()?.id;
+    if (id) this.loadOrder(id);
+
+    // Appointment redesign phase 2 — si la tienda requiere aprobación
+    // (`settings.reservations.allow_direct_reschedule === false`), el
+    // booking NO se mueve al instante: el backend crea una solicitud
+    // pending y devuelve el booking ORIGINAL. Detectamos eso mirando
+    // las solicitudes pendientes del customer — si hay una para este
+    // booking, mostramos "Pendiente de aprobación" en lugar del toast
+    // de éxito del reschedule directo.
+    const booking = this.firstReschedulableBooking();
+    if (booking?.id) {
+      this.booking_service.listMyRescheduleRequests().subscribe({
+        next: (rows) => {
+          const isPending = rows.some((r) => r.booking_id === booking.id);
+          if (isPending) {
+            this.toast.info(
+              'Solicitud enviada al admin. Te avisaremos cuando sea aprobada.',
+            );
+          } else {
+            this.toast.success('Reserva reagendada correctamente');
+          }
+        },
+        error: () => {
+          // Si falla el check de pendientes, caemos al éxito conservador.
+          this.toast.success('Reserva reagendada correctamente');
+        },
+      });
+    } else {
+      this.toast.success('Reserva reagendada correctamente');
+    }
   }
 
   getVariantLabel(item: any): string {

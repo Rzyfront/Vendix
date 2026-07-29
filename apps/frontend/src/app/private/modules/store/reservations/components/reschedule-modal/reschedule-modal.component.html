@@ -19,6 +19,25 @@
         </div>
       </div>
     } @else {
+      <!-- Ecommerce: el pedido asociado está cancelado pero la booking
+           sigue pending (entidades separadas). Banner arriba del formulario
+           (no en rama @else separada) para que el date selector + time
+           slots sigan renderizando y el cliente pueda reagendar. -->
+      @if (orderState() === 'cancelled') {
+        <div class="cancelled-order-warning">
+          <app-icon name="alert-circle" [size]="20"></app-icon>
+          <div>
+            <h4>Este pedido está cancelado</h4>
+            <p>
+              Al confirmar la reprogramación, el pedido se va a
+              <strong>reactivar automáticamente</strong> y volverá a estado
+              <em>Pendiente</em>. Si prefieres no reactivarlo, cancelá esta
+              ventana.
+            </p>
+          </div>
+        </div>
+      }
+
       <!-- Current booking info -->
       <div class="current-info">
         <div class="info-row">

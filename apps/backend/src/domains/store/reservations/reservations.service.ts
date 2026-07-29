@@ -807,7 +807,21 @@ export class ReservationsService {
   }
 
   /**
-   * Reprograma una reserva a un nuevo horario
+   * Reprograma una reserva a un nuevo horario.
+   *
+   * Appointment redesign phase 2 — el método respeta
+   * `store_settings.settings.reservations.allow_direct_reschedule`:
+   *
+   *   * `true`  → comportamiento histórico: la reserva se mueve al
+   *     instante y se emite `booking.rescheduled`. Es la ruta
+   *     `reschedule_direct_path()`.
+   *   * `false` → la reserva NO se mueve; se crea una fila
+   *     `booking_reschedule_requests` con status `pending` y se emite
+   *     `booking.reschedule_requested`. El admin debe aprobar o
+   *     rechazar desde la cola. Es la ruta `requestReschedule()`.
+   *
+   * Para preservar paridad exacta con el comportamiento previo
+   * (reschedule siempre directo), el default del setting es `true`.
    */
   async reschedule(id: number, dto: RescheduleBookingDto) {
     const booking = await this.findOne(id);
@@ -822,6 +836,40 @@ export class ReservationsService {
       );
     }
 
+    // Gate de política: si la tienda deshabilitó el reagendamiento directo,
+    // enrutar a la ruta de aprobación y abortar acá.
+    const allowDirect = await this.resolveAllowDirectReschedule(
+      booking.store_id,
+    );
+    if (!allowDirect) {
+      // Importante: NO mutar `bookings` en este branch. Sólo creamos la
+      // solicitud y emitimos el evento. El booking-detail-modal del admin
+      // mostrará el banner "Solicitud de reagenda pendiente".
+      const newRequest = await this.requestReschedule(booking, dto, {
+        requestedByCustomerId: booking.customer_id,
+      });
+
+      return this.findOne(id); // re-leer para devolver el booking SIN cambios
+      // `newRequest` se ignora acá a propósito — el caller no necesita el
+      // id de la solicitud; el ecommerce frontend va a recibir la 202 +
+      // un header `X-Reschedule-Request-Id` que el controller inyecta.
+      // (Ver `ecommerce-reservations.controller.reschedule`.)
+    }
+
+    // --- Reschedule directo (ruta legacy preservada) --------------------
+    return this.rescheduleDirectPath(id, booking, dto);
+  }
+
+  /**
+   * Lógica interna del reagendamiento directo (1 click). Extraída de
+   * `reschedule()` para que `requestReschedule` también pueda reutilizar
+   * la validación de slot/overlap sin duplicarla.
+   */
+  private async rescheduleDirectPath(
+    id: number,
+    booking: Awaited<ReturnType<ReservationsService['findOne']>>,
+    dto: RescheduleBookingDto,
+  ) {
     // Validar disponibilidad del nuevo slot (excluyendo la reserva actual)
     const isAvailable = await this.availabilityService.isSlotAvailable(
       booking.product_id,
@@ -860,6 +908,33 @@ export class ReservationsService {
       }),
     );
 
+    // Side-effect opcional: si el cliente lo pide (`reopen_order=true` desde
+    // ecommerce) y el pedido asociado está cancelado, lo reactivamos a
+    // `processing` (el cliente ya pagó y tiene booking, es el estado
+    // correcto post-pago según VALID_TRANSITIONS del OrderFlowService).
+    // Sin esto, el reschedule mueve la cita pero el pedido se queda
+    // diciendo "Cancelado" — UX rota. El default `false` preserva el
+    // comportamiento histórico del admin flow (no toca orders).
+    if (dto.reopen_order === true && updated.order_id) {
+      const order = await this.prisma.orders.findUnique({
+        where: { id: updated.order_id },
+        select: { id: true, state: true, store_id: true, order_number: true },
+      });
+      if (order && order.state === 'cancelled') {
+        await this.prisma.orders.update({
+          where: { id: order.id },
+          data: { state: 'processing', updated_at: new Date() },
+        });
+        this.eventEmitter.emit('order.status_changed', {
+          store_id: order.store_id,
+          order_id: order.id,
+          order_number: order.order_number,
+          old_state: 'cancelled',
+          new_state: 'processing',
+        });
+      }
+    }
+
     this.eventEmitter.emit('booking.rescheduled', {
       store_id: updated.store_id,
       booking_id: updated.id,
@@ -870,6 +945,301 @@ export class ReservationsService {
     });
 
     return updated;
+  }
+
+  /**
+   * Crea una solicitud de reagendamiento pendiente. NO muta `bookings`.
+   * Valida la disponibilidad del slot solicitado antes de crear la fila
+   * (un slot ya ocupado no debería siquiera generar una solicitud).
+   *
+   * Devuelve la fila creada para que el controller adjunte el id en un
+   * header (`X-Reschedule-Request-Id`) y el frontend del ecommerce pueda
+   * mostrar "Pendiente de aprobación" en la tarjeta del booking.
+   */
+  async requestReschedule(
+    booking: Awaited<ReturnType<ReservationsService['findOne']>>,
+    dto: { date: string; start_time: string; end_time: string; reason?: string },
+    ctx: {
+      requestedByUserId?: number;
+      requestedByCustomerId?: number;
+    },
+  ) {
+    // Si ya existe una solicitud PENDING para esta reserva, no dejamos
+    // crear otra — el cliente debe cancelar la anterior primero.
+    const existing = await this.prisma.booking_reschedule_requests.findFirst({
+      where: { booking_id: booking.id, status: 'pending' },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `Ya existe una solicitud de reagendamiento pendiente (#${existing.id}). Cancélala antes de pedir otra.`,
+      );
+    }
+
+    // Misma validación de slot que el reschedule directo, para que la
+    // solicitud NO se cree sobre un slot ya ocupado. Si el admin
+    // aprueba después y algo cambió, la approval vuelve a chequear.
+    const isAvailable = await this.availabilityService.isSlotAvailable(
+      booking.product_id,
+      dto.date,
+      dto.start_time,
+      dto.end_time,
+      booking.provider_id ?? undefined,
+      booking.id,
+    );
+    if (!isAvailable) {
+      throw new ConflictException(
+        'El horario solicitado no está disponible',
+      );
+    }
+    await this.availabilityService.validateNoOverlapForCustomer(
+      booking.customer_id,
+      dto.date,
+      dto.start_time,
+      dto.end_time,
+      booking.id,
+    );
+
+    const created = await this.prisma.booking_reschedule_requests.create({
+      data: {
+        store_id: booking.store_id,
+        booking_id: booking.id,
+        requested_date: new Date(dto.date),
+        requested_start_time: dto.start_time,
+        requested_end_time: dto.end_time,
+        requested_by_user_id: ctx.requestedByUserId ?? null,
+        requested_by_customer_id: ctx.requestedByCustomerId ?? null,
+        reason: dto.reason ?? null,
+        status: 'pending',
+      },
+    });
+
+    this.eventEmitter.emit('booking.reschedule_requested', {
+      store_id: booking.store_id,
+      booking_id: booking.id,
+      booking_number: booking.booking_number,
+      request_id: created.id,
+      requested_date: dto.date,
+      requested_start_time: dto.start_time,
+      requested_end_time: dto.end_time,
+      requested_by_customer_id: ctx.requestedByCustomerId ?? null,
+      customer_name: `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim(),
+      service_name: booking.product?.name ?? '',
+      reason: dto.reason ?? null,
+    });
+
+    return created;
+  }
+
+  /**
+   * Aprueba una solicitud de reagendamiento pendiente. Aplica el cambio
+   * sobre `bookings` (mueve la reserva al slot solicitado) y marca la
+   * solicitud como `approved`.
+   */
+  async approveRescheduleRequest(
+    requestId: number,
+    ctx: { decidedByUserId: number; decisionReason?: string },
+  ) {
+    const request = await this.prisma.booking_reschedule_requests.findUnique({
+      where: { id: requestId },
+    });
+    if (!request) {
+      throw new NotFoundException(`Solicitud ${requestId} no encontrada`);
+    }
+    if (request.status !== 'pending') {
+      throw new BadRequestException(
+        `La solicitud ya está en estado "${request.status}"`,
+      );
+    }
+
+    const booking = await this.findOne(request.booking_id);
+
+    // Re-validar slot al momento de aprobar (entre la solicitud y la
+    // aprobación algo pudo haber sido ocupado por otro canal).
+    const isAvailable = await this.availabilityService.isSlotAvailable(
+      booking.product_id,
+      this.formatDateOnly(request.requested_date),
+      request.requested_start_time,
+      request.requested_end_time,
+      booking.provider_id ?? undefined,
+      booking.id,
+    );
+    if (!isAvailable) {
+      throw new ConflictException(
+        'El horario solicitado ya no está disponible; rechaza la solicitud y pide al cliente elegir otro slot',
+      );
+    }
+
+    const updated = await this.mapBooking(
+      await this.prisma.bookings.update({
+        where: { id: booking.id },
+        data: {
+          date: request.requested_date,
+          start_time: request.requested_start_time,
+          end_time: request.requested_end_time,
+          updated_at: new Date(),
+        },
+        include: this.BOOKING_INCLUDE,
+      }),
+    );
+
+    await this.prisma.booking_reschedule_requests.update({
+      where: { id: requestId },
+      data: {
+        status: 'approved',
+        decided_by_user_id: ctx.decidedByUserId,
+        decided_at: new Date(),
+        decision_reason: ctx.decisionReason ?? null,
+      },
+    });
+
+    this.eventEmitter.emit('booking.rescheduled', {
+      store_id: updated.store_id,
+      booking_id: updated.id,
+      booking_number: updated.booking_number,
+      new_date: this.formatDateOnly(request.requested_date),
+      new_start_time: request.requested_start_time,
+      new_end_time: request.requested_end_time,
+    });
+
+    this.eventEmitter.emit('booking.reschedule_approved', {
+      store_id: updated.store_id,
+      booking_id: updated.id,
+      booking_number: updated.booking_number,
+      request_id: requestId,
+      new_date: this.formatDateOnly(request.requested_date),
+      new_start_time: request.requested_start_time,
+      new_end_time: request.requested_end_time,
+      customer_id: booking.customer_id,
+      decision_reason: ctx.decisionReason ?? null,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Rechaza una solicitud de reagendamiento pendiente. NO muta `bookings`.
+   */
+  async rejectRescheduleRequest(
+    requestId: number,
+    ctx: { decidedByUserId: number; decisionReason: string },
+  ) {
+    if (!ctx.decisionReason || ctx.decisionReason.trim().length === 0) {
+      throw new BadRequestException(
+        'Debes proporcionar una razón para rechazar la solicitud',
+      );
+    }
+
+    const request = await this.prisma.booking_reschedule_requests.findUnique({
+      where: { id: requestId },
+    });
+    if (!request) {
+      throw new NotFoundException(`Solicitud ${requestId} no encontrada`);
+    }
+    if (request.status !== 'pending') {
+      throw new BadRequestException(
+        `La solicitud ya está en estado "${request.status}"`,
+      );
+    }
+
+    const booking = await this.findOne(request.booking_id);
+
+    await this.prisma.booking_reschedule_requests.update({
+      where: { id: requestId },
+      data: {
+        status: 'rejected',
+        decided_by_user_id: ctx.decidedByUserId,
+        decided_at: new Date(),
+        decision_reason: ctx.decisionReason,
+      },
+    });
+
+    this.eventEmitter.emit('booking.reschedule_rejected', {
+      store_id: request.store_id,
+      booking_id: booking.id,
+      booking_number: booking.booking_number,
+      request_id: requestId,
+      customer_id: booking.customer_id,
+      decision_reason: ctx.decisionReason,
+    });
+
+    return this.findOne(booking.id);
+  }
+
+  /**
+   * Cancela una solicitud pendiente (cliente la retira, o admin la retira).
+   */
+  async cancelRescheduleRequest(
+    requestId: number,
+    ctx: { cancelledByUserId?: number },
+  ) {
+    const request = await this.prisma.booking_reschedule_requests.findUnique({
+      where: { id: requestId },
+    });
+    if (!request) {
+      throw new NotFoundException(`Solicitud ${requestId} no encontrada`);
+    }
+    if (request.status !== 'pending') {
+      throw new BadRequestException(
+        `La solicitud ya está en estado "${request.status}"`,
+      );
+    }
+
+    await this.prisma.booking_reschedule_requests.update({
+      where: { id: requestId },
+      data: {
+        status: 'cancelled',
+        decided_at: new Date(),
+        // Reusamos decided_by_user_id para registrar QUIÉN canceló (admin
+        // o el customer via ecommerce). El customer cancel desde el
+        // ecommerce path no setea decided_by_user_id — el audit queda
+        // en el log de la propia request.
+        decided_by_user_id: ctx.cancelledByUserId ?? null,
+      },
+    });
+
+    const booking = await this.findOne(request.booking_id);
+    this.eventEmitter.emit('booking.reschedule_cancelled', {
+      store_id: request.store_id,
+      booking_id: booking.id,
+      booking_number: booking.booking_number,
+      request_id: requestId,
+      customer_id: booking.customer_id,
+      cancelled_by_user_id: ctx.cancelledByUserId ?? null,
+    });
+
+    return this.findOne(booking.id);
+  }
+
+  /**
+   * Resuelve el flag `settings.reservations.allow_direct_reschedule`
+   * para la tienda dueña de la reserva. Default `true` (comportamiento
+   * legacy: reagendar = 1 click).
+   *
+   * Patrón defensivo, mismo que `AvailabilityService.getStoreWorkingDays`:
+   * la columna `settings` es JSON sin schema enforcement, así que
+   * toleramos valores faltantes / mal-tipos / fila inexistente.
+   */
+  private async resolveAllowDirectReschedule(
+    storeId: number,
+  ): Promise<boolean> {
+    const DEFAULT_ALLOW_DIRECT_RESCHEDULE = true;
+
+    const settingsRow = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+
+    const raw = (settingsRow?.settings as any)?.reservations
+      ?.allow_direct_reschedule;
+    if (typeof raw === 'boolean') return raw;
+    return DEFAULT_ALLOW_DIRECT_RESCHEDULE;
+  }
+
+  /** Helper local: convierte `Date | string` a `YYYY-MM-DD`. */
+  private formatDateOnly(value: Date | string): string {
+    if (typeof value === 'string') return value.split('T')[0];
+    return value.toISOString().split('T')[0];
   }
 
   /**

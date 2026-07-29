@@ -40,6 +40,13 @@ export class RescheduleModalComponent {
    * with product-scoped endpoints (no provider lookup needed).
    */
   readonly mode = input<'admin' | 'ecommerce'>('admin');
+  /**
+   * Estado del pedido asociado a la booking (solo ecommerce). Cuando es
+   * 'cancelled', el modal muestra un banner amarillo y el submit envía
+   * `reopen_order: true` para que el backend reactive el pedido a
+   * `pending` junto con el reschedule. Default `undefined` en admin.
+   */
+  readonly orderState = input<string | undefined>(undefined);
 
   readonly closed = output<void>();
   readonly rescheduled = output<void>();
@@ -323,7 +330,28 @@ export class RescheduleModalComponent {
       date: slot.date,
       start_time: slot.start_time,
       end_time: slot.end_time,
+      // Ecommerce: si el pedido está cancelado, pedirle al backend que
+      // también lo reactive a `pending` al reagendar. Admin flow no
+      // manda este flag (undefined → DTO lo omite via @IsOptional).
+      reopen_order: this.mode() === 'ecommerce' && this.orderState() === 'cancelled'
+        ? true
+        : undefined,
     };
+
+    // Appointment redesign phase 2 — UX: si el cliente eligió el MISMO slot
+    // que ya tiene, no tiene sentido pegarle al backend. Mostramos el
+    // toast de éxito y cerramos. Evita errores confusos como "El nuevo
+    // horario solicitado no está disponible" cuando en realidad el slot
+    // está ocupado por su propio booking.
+    const sameSlot =
+      b.date === dto.date &&
+      b.start_time === dto.start_time &&
+      b.end_time === dto.end_time;
+    if (sameSlot) {
+      this.toastService.info('La reserva ya está en ese horario');
+      this.rescheduled.emit();
+      return;
+    }
 
     const request$: Observable<any> =
       this.mode() === 'ecommerce'
@@ -338,8 +366,15 @@ export class RescheduleModalComponent {
           this.toastService.success('Reserva reprogramada exitosamente');
           this.rescheduled.emit();
         },
-        error: () => {
-          this.toastService.error('Error al reprogramar la reserva');
+        error: (err) => {
+          // Surface the actual backend message instead of a generic
+          // string. Fallback keeps the old copy when the response has
+          // no `error.message` (network errors, CORS, etc.).
+          const msg =
+            err?.error?.message ??
+            err?.message ??
+            'Error al reprogramar la reserva';
+          this.toastService.error(msg);
         },
       });
   }

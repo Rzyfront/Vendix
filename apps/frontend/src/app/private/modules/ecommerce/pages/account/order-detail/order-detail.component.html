@@ -415,3 +415,20 @@
     </div>
   }
 </div>
+
+<!-- Reschedule modal — opened by the "Reagendar reserva" action
+     button. Only mounted for bookings in pending / confirmed state.
+     The booking object from the order endpoint is a subset of the
+     full `Booking` type (no store_id, customer_id, channel, etc.,
+     which the order endpoint doesn't return). The modal only reads
+     fields that ARE present, so the cast is safe. -->
+@if (showRescheduleModal() && firstReschedulableBooking(); as booking) {
+  <app-reschedule-modal
+    [isOpen]="showRescheduleModal()"
+    [booking]="$any(booking)"
+    [mode]="'ecommerce'"
+    [orderState]="order()?.state"
+    (closed)="closeRescheduleModal()"
+    (rescheduled)="onRescheduleComplete()"
+  />
+}
