@@ -71,6 +71,14 @@ export class ProductListComponent {
   /** Granular permission flag driven by the parent page (FIX QUI-503). */
   readonly canCreate = input(false);
 
+  /**
+   * Granular permission flag for the bulk-edit entry point (QUI-567).
+   * Mirrors `canCreate`: the parent derives it from `AuthFacade.hasPermission`
+   * (`store:products:bulk_update`). This is UI affordance only — the backend
+   * `PermissionsGuard` is the real authorization boundary.
+   */
+  readonly canBulkEdit = input(false);
+
   readonly refresh = output<void>();
   readonly search = output<string>();
   readonly filter = output<Partial<ProductQueryDto>>();
@@ -80,6 +88,7 @@ export class ProductListComponent {
   readonly toggleState = output<Product>();
   readonly bulkUpload = output<void>();
   readonly bulkImageUpload = output<void>();
+  readonly bulkEdit = output<void>();
   readonly downloadCurrentProducts = output<void>();
   readonly sort = output<{ column: string; direction: 'asc' | 'desc' | null }>();
   readonly pageChange = output<number>();
@@ -145,8 +154,14 @@ export class ProductListComponent {
   // usuario con read+update y sin create seguía necesitando esas dos.
   // `showActions` queda en su default (true) y `OptionsDropdownComponent`
   // oculta la sección solo si la lista queda vacía.
+  //
+  // QUI-567: 'bulk-edit' es la ÚNICA puerta de entrada a la vista dedicada
+  // /admin/products/bulk-edit (no hay entrada en el sidebar), y se gatea con
+  // `store:products:bulk_update` — el mismo permiso que exige el backend.
   readonly dropdownActions = computed<DropdownAction[]>(() => {
     const creationActions = new Set(['create', 'bulk-upload']);
+    const canCreate = this.canCreate();
+    const canBulkEdit = this.canBulkEdit();
     const all: DropdownAction[] = [
       {
         label: 'Nuevo Producto',
@@ -156,15 +171,18 @@ export class ProductListComponent {
       },
       { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
       { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
+      { label: 'Edición masiva', icon: 'list-checks', action: 'bulk-edit' },
       {
         label: 'Descargar Plantilla con Productos Actuales',
         icon: 'file-spreadsheet',
         action: 'download-current-products',
       },
     ];
-    return this.canCreate()
-      ? all
-      : all.filter((a) => !creationActions.has(a.action));
+    return all.filter((a) => {
+      if (a.action === 'bulk-edit') return canBulkEdit;
+      if (creationActions.has(a.action)) return canCreate;
+      return true;
+    });
   });
 
   // Table configuration
@@ -419,6 +437,9 @@ export class ProductListComponent {
         break;
       case 'bulk-image-upload':
         this.bulkImageUpload.emit();
+        break;
+      case 'bulk-edit':
+        this.bulkEdit.emit();
         break;
       case 'download-current-products':
         this.downloadCurrentProducts.emit();

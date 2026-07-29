@@ -105,6 +105,16 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.BrandsPageComponent,
               ),
           },
+          // MUST stay BEFORE ':id': otherwise the param route swallows the
+          // literal segment 'bulk-edit' and renders the product detail page
+          // for a non-existent id.
+          {
+            path: 'bulk-edit',
+            loadComponent: () =>
+              import('../../private/modules/store/products/bulk-edit/products-bulk-edit-page.component').then(
+                (c) => c.ProductsBulkEditPageComponent,
+              ),
+          },
           {
             path: ':id',
             loadComponent: () =>

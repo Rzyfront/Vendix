@@ -617,6 +617,16 @@ export class BreadcrumbService {
       parent: 'Productos',
       icon: 'edit',
     },
+    // QUI-567. Antes de '/admin/products/:id' por consistencia con el árbol de
+    // rutas de Angular. `findRouteMatch` prueba coincidencia EXACTA primero, así
+    // que el orden no es estrictamente necesario aquí — pero mantenerlo evita
+    // que un futuro cambio del matcher (si pasara a solo-patrón) rompa la ruta.
+    {
+      path: '/admin/products/bulk-edit',
+      title: 'Edición masiva',
+      parent: 'Productos',
+      icon: 'list-checks',
+    },
     {
       path: '/admin/products/:id',
       title: 'Detalles del Producto',
