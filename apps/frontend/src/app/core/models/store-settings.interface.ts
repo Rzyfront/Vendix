@@ -465,8 +465,6 @@ export interface ReceiptsSettings {
   pos_ticket_format?: PrintFormat;
   /** Printed POS ticket copies. 0 = do not print. */
   pos_ticket_copies?: number;
-  /** Send the POS ticket to the printer without waiting for a click. */
-  pos_ticket_auto_print?: boolean;
 }
 
 export interface BusinessHoursBlock {

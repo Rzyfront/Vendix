@@ -152,7 +152,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       // 80 mm mirrors the previous hardcoded POS ticket width.
       pos_ticket_format: 'thermal_80' as const,
       pos_ticket_copies: 1,
-      pos_ticket_auto_print: false,
     },
 
     // Panel UI - Control de módulos disponibles a nivel de tienda

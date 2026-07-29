@@ -7,23 +7,88 @@ import {
   PrintOptions,
 } from '../models/ticket.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { PrintFormat } from '../../../../../core/models/store-settings.interface';
+
+/**
+ * Physical page per configurable format. `width_mm` drives the ticket's CSS
+ * width; `page_size` is the `@page size` rule, without which the browser prints
+ * a roll ticket centred on whatever paper the driver defaults to.
+ */
+const TICKET_PAGE: Record<
+  PrintFormat,
+  { width_mm: number; page_size: string; type: PrinterConfig['type'] }
+> = {
+  thermal_80: { width_mm: 80, page_size: '80mm auto', type: 'thermal' },
+  thermal_58: { width_mm: 58, page_size: '58mm auto', type: 'thermal' },
+  letter: { width_mm: 216, page_size: 'letter', type: 'standard' },
+  half_letter: { width_mm: 216, page_size: '216mm 140mm', type: 'standard' },
+};
 
 @Injectable({
   providedIn: 'root',
 })
 export class PosTicketService {
   private currencyService = inject(CurrencyFormatService);
+  private storeSettings = inject(StoreSettingsFacade);
+  private authFacade = inject(AuthFacade);
 
   private defaultPrinterConfig: PrinterConfig = {
     name: 'Default Thermal Printer',
     type: 'thermal',
     paperWidth: 80,
+    format: 'thermal_80',
     copies: 1,
     autoPrint: true,
     printHeader: true,
     printFooter: true,
     printBarcode: true,
   };
+
+  /**
+   * Printer config resolved from the store's settings, falling back to the
+   * historical 80 mm / 1 copy defaults when the store has none.
+   */
+  private currentPrinterConfig(): PrinterConfig {
+    const receipts = this.storeSettings.receipts();
+    const format: PrintFormat =
+      receipts?.pos_ticket_format && TICKET_PAGE[receipts.pos_ticket_format]
+        ? receipts.pos_ticket_format
+        : 'thermal_80';
+    const page = TICKET_PAGE[format];
+
+    return {
+      ...this.defaultPrinterConfig,
+      type: page.type,
+      paperWidth: page.width_mm,
+      format,
+      // 0 copies means "do not print"; the callers that ask for an explicit
+      // print still get one, so clamp to at least 1 here.
+      copies: Math.max(1, receipts?.pos_ticket_copies ?? 1),
+      // `pos.auto_print_receipt` already models this and is already editable in
+      // the POS settings form; a second key under `receipts` would be a second
+      // source of truth for the same fact. The Recibos section edits this one.
+      autoPrint: this.storeSettings.pos()?.auto_print_receipt ?? false,
+    };
+  }
+
+  /**
+   * Whether the tax breakdown belongs on this ticket.
+   *
+   * The POS ticket is not the fiscal document when the sale already produced an
+   * electronic invoice — repeating the breakdown on an informative copy invites
+   * the buyer to treat the ticket as the invoice. And a merchant that is not
+   * VAT-responsible has no tax to break down at all.
+   *
+   * It is NOT dropped unconditionally: the electronic POS equivalent document
+   * (Res. 000165/2023) does grant the buyer IVA descontable when it identifies
+   * them, and that requires the tax to be stated.
+   */
+  private shouldShowTaxes(ticketData: TicketData): boolean {
+    if (ticketData.electronicInvoice) return false;
+    return this.authFacade.isVatResponsible() !== false;
+  }
 
   private storeConfig = {
     name: 'Vendix Store',
@@ -46,7 +111,7 @@ export class PosTicketService {
       switchMap(async () => {
         if (printOptions.printReceipt) {
           const html = await this.generateTicketHTML(ticketData);
-          this.printHTML(html);
+          this.printHTML(html, printOptions.copies);
         }
 
         if (printOptions.openCashDrawer) {
@@ -67,6 +132,8 @@ export class PosTicketService {
   }
 
   async generateTicketHTML(ticketData: TicketData): Promise<string> {
+    const printer = this.currentPrinterConfig();
+    const showTaxes = this.shouldShowTaxes(ticketData);
     let store = ticketData.store || this.storeConfig;
     let organization = ticketData.organization;
 
@@ -103,10 +170,10 @@ export class PosTicketService {
     const date = new Date(ticketData.date).toLocaleString();
 
     let html = `
-      <div class="ticket" style="font-family: monospace; max-width: ${this.defaultPrinterConfig.paperWidth}mm; margin: 0 auto; padding: 10px; background: white; border: 1px solid #ccc; border-radius: 8px;">
+      <div class="ticket" style="font-family: monospace; max-width: ${printer.paperWidth}mm; margin: 0 auto; padding: 10px; background: white; border: 1px solid #ccc; border-radius: 8px;">
     `;
 
-    if (this.defaultPrinterConfig.printHeader) {
+    if (printer.printHeader) {
       html += `
         <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
       `;
@@ -200,17 +267,20 @@ export class PosTicketService {
       <hr style="border: 1px dashed #000; margin: 10px 0;">
     `;
 
-    // Taxes breakdown
-    ticketData.items.forEach((item, index) => {
-      const calculatedTax = item.totalPrice - item.unitPrice * item.quantity;
-      const taxAmount = item.tax || calculatedTax;
-      const taxPercent = taxAmount
-        ? ((taxAmount / item.totalPrice) * 100).toFixed(2)
-        : '0.00';
-      html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${item.name} - Imp: ${taxPercent}% - ${this.currencyService.format(taxAmount)}</p>`;
-    });
+    // Taxes breakdown — omitted on informative copies of an electronic invoice
+    // and for merchants that are not VAT-responsible (see shouldShowTaxes).
+    if (showTaxes) {
+      ticketData.items.forEach((item, index) => {
+        const calculatedTax = item.totalPrice - item.unitPrice * item.quantity;
+        const taxAmount = item.tax || calculatedTax;
+        const taxPercent = taxAmount
+          ? ((taxAmount / item.totalPrice) * 100).toFixed(2)
+          : '0.00';
+        html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${item.name} - Imp: ${taxPercent}% - ${this.currencyService.format(taxAmount)}</p>`;
+      });
 
-    html += `<hr style="border: 1px dashed #000; margin: 10px 0;">`;
+      html += `<hr style="border: 1px dashed #000; margin: 10px 0;">`;
+    }
 
     html += `
       <div style="margin-bottom: 15px;">
@@ -229,10 +299,16 @@ export class PosTicketService {
           `
               : ''
           }
+          ${
+            showTaxes
+              ? `
           <tr>
             <td style="text-align: left; padding: 2px;">Impuesto:</td>
             <td style="text-align: right; padding: 2px;">${this.currencyService.format(ticketData.tax)}</td>
           </tr>
+          `
+              : ''
+          }
           <tr style="font-weight: bold; border-top: 1px solid #000;">
             <td style="text-align: left; padding: 2px;">TOTAL:</td>
             <td style="text-align: right; padding: 2px;">${this.currencyService.format(ticketData.total)}</td>
@@ -283,11 +359,19 @@ export class PosTicketService {
       }
     }
 
-    if (this.defaultPrinterConfig.printFooter) {
+    if (printer.printFooter) {
+      // The old footer always warned "esta factura electrónica no está avalada
+      // por la DIAN", which is false when the sale did produce a validated
+      // invoice: then the ticket is an informative copy and must point at it.
+      const legalNotice = ticketData.electronicInvoice
+        ? `<p style="margin: 5px 0; font-size: 11px; font-weight: bold;">Copia informativa. Factura electrónica No. ${ticketData.electronicInvoice.number} validada por la DIAN</p>
+           ${ticketData.electronicInvoice.cufe ? `<p style="margin: 2px 0; font-size: 8px; word-break: break-all;">CUFE: ${ticketData.electronicInvoice.cufe}</p>` : ''}`
+        : `<p style="margin: 5px 0; font-size: 11px; font-weight: bold;">Este documento no es una factura electrónica</p>`;
+
       html += `
         <hr style="border: 1px dashed #000; margin: 10px 0;">
         <div style="text-align: center; margin-top: 20px;">
-          <p style="margin: 5px 0; font-size: 11px; font-weight: bold;">Advertencia: Esta factura electrónica no está avalada por la DIAN</p>
+          ${legalNotice}
           <p style="margin: 5px 0; font-size: 11px;">¡Gracias por su compra!</p>
           <p style="margin: 5px 0; font-size: 10px;">Vuelva pronto</p>
           <p style="margin: 10px 0 0 0; font-size: 9px; color: #666;">
@@ -311,7 +395,20 @@ export class PosTicketService {
     );
   }
 
-  private printHTML(html: string): void {
+  private printHTML(html: string, copies?: number): void {
+    const printer = this.currentPrinterConfig();
+    const total_copies = Math.max(1, copies ?? printer.copies);
+    const page_size =
+      TICKET_PAGE[printer.format ?? 'thermal_80']?.page_size ?? '80mm auto';
+
+    // Browsers expose no copy count to window.print(), so extra copies are
+    // extra pages: repeat the markup and force a break between copies.
+    const body = Array.from({ length: total_copies }, (_, i) =>
+      i === 0
+        ? html
+        : `<div style="break-before: page; page-break-before: always;">${html}</div>`,
+    ).join('');
+
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.width = '0';
@@ -328,12 +425,19 @@ export class PosTicketService {
           <head>
             <title>Ticket</title>
             <style>
+              /* Without an explicit @page size the driver falls back to its own
+                 default paper and centres an 80 mm ticket on a letter sheet. */
+              @page { size: ${page_size}; margin: 0; }
               body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
               .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+              @media print {
+                body { padding: 0; background: white; }
+                .ticket { border: none; border-radius: 0; box-shadow: none; }
+              }
             </style>
           </head>
           <body>
-            ${html}
+            ${body}
           </body>
         </html>
       `);
@@ -353,14 +457,29 @@ export class PosTicketService {
   private smsTicket(ticketData: TicketData, phone: string): void {}
 
   private getDefaultPrintOptions(): PrintOptions {
+    const printer = this.currentPrinterConfig();
     return {
-      printer: this.defaultPrinterConfig.name,
-      copies: this.defaultPrinterConfig.copies,
+      printer: printer.name,
+      copies: printer.copies,
       openCashDrawer: true,
       printReceipt: true,
       emailReceipt: false,
       smsReceipt: false,
     };
+  }
+
+  /**
+   * Whether the POS should send the ticket to the printer without asking.
+   * Read by the printer component so the setting drives the flow, not the
+   * component's own default.
+   */
+  shouldAutoPrint(): boolean {
+    return this.currentPrinterConfig().autoPrint;
+  }
+
+  /** Configured POS ticket copies per sale (`receipts.pos_ticket_copies`). */
+  configuredCopies(): number {
+    return this.currentPrinterConfig().copies;
   }
 
   getPrinterConfig(): Observable<PrinterConfig[]> {

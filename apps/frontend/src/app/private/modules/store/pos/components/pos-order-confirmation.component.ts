@@ -402,13 +402,45 @@ private authFacade = inject(AuthFacade);
 effect(() => {
       if (this.orderData()) {
         this.loadOrderData();
+        this.maybeAutoPrint();
       }
     });
   }
 
+  /**
+   * Honours `pos.auto_print_receipt`, which until now was stored and editable
+   * but never read at runtime, so the toggle did nothing.
+   *
+   * Guarded per order id: the effect re-runs on any signal it reads, and a
+   * second run would send the same ticket to the printer again.
+   */
+  private autoPrintedOrderId: string | null = null;
+
+  /** Electronic invoice issued for this sale, once one exists. */
+  readonly electronicInvoice = signal<{
+    number: string;
+    cufe?: string;
+  } | null>(null);
+
+  private maybeAutoPrint(): void {
+    if (!this.isOpen()) return;
+    if (!this.ticketService.shouldAutoPrint()) return;
+    if (!this.orderId || this.autoPrintedOrderId === this.orderId) return;
+
+    this.autoPrintedOrderId = this.orderId;
+    this.printReceipt();
+  }
+
   private loadOrderData(): void {
     const data = this.orderData();
+    const previousOrderId = this.orderId;
     this.orderId = data?.id?.toString?.() || null;
+
+    // The modal is reused across sales: a stale invoice reference would label the
+    // next sale's ticket as a copy of the previous sale's invoice.
+    if (this.orderId !== previousOrderId) {
+      this.electronicInvoice.set(null);
+    }
     this.orderNumber = data.order_number || data.number || 'N/A';
     this.currentDate = data.created_at
       ? new Date(data.created_at).toLocaleString('es-AR')
@@ -558,7 +590,8 @@ effect(() => {
       cashier: this.cashierName,
       transactionId: this.orderNumber,
       invoiceDataToken: this.orderData()?.invoiceDataToken,
-      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl };
+      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl,
+      electronicInvoice: this.electronicInvoice() ?? undefined };
 
     this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
       next: (success: boolean) => {
@@ -654,6 +687,17 @@ effect(() => {
     const action = await actionPromise;
     this.creatingInvoice = false;
     if (action.type === InvoicingActions.createFromOrderSuccess.type) {
+      // Remember the invoice so a ticket printed afterwards identifies itself as
+      // an informative copy instead of claiming it is not DIAN-validated.
+      const invoice = (
+        action as ReturnType<typeof InvoicingActions.createFromOrderSuccess>
+      ).invoice as { invoice_number?: string; cufe?: string } | undefined;
+      if (invoice?.invoice_number) {
+        this.electronicInvoice.set({
+          number: invoice.invoice_number,
+          cufe: invoice.cufe ?? undefined,
+        });
+      }
       this.toastService.success('Factura creada exitosamente');
     } else {
       const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;

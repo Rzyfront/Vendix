@@ -424,6 +424,9 @@ export class PosTicketPrinterComponent {
     openCashDrawer: true,
     emailReceipt: false,
     smsReceipt: false,
+    // Seeded from `receipts.pos_ticket_copies` instead of a hardcoded 1, so the
+    // configured number of copies is what the dialog offers by default. The
+    // cashier can still override it for a single print.
     copies: 1,
   };
 
@@ -432,6 +435,7 @@ export class PosTicketPrinterComponent {
   printing: boolean = false;
 
   constructor() {
+    this.printOptions.copies = this.ticketService.configuredCopies();
     this.loadPreview();
   }
 

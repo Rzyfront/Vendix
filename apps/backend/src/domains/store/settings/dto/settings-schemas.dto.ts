@@ -535,10 +535,6 @@ export class ReceiptsSettingsDto {
   @Max(5)
   pos_ticket_copies?: number;
 
-  @ApiProperty({ example: false, required: false })
-  @IsOptional()
-  @IsBoolean()
-  pos_ticket_auto_print?: boolean;
 }
 
 export class AppSettingsDto {
