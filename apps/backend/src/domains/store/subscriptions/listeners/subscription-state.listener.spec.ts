@@ -7,6 +7,7 @@ import { SubscriptionStateListener } from './subscription-state.listener';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
 import { SubscriptionAccessService } from '../services/subscription-access.service';
+import { PromotionalApplyService } from '../services/promotional-apply.service';
 
 describe('SubscriptionStateListener — onStateChanged', () => {
   let listener: SubscriptionStateListener;
@@ -32,11 +33,18 @@ describe('SubscriptionStateListener — onStateChanged', () => {
         { provide: GlobalPrismaService, useValue: prismaMock },
         {
           provide: SubscriptionStateService,
-          useValue: { transition: jest.fn() },
+          useValue: { ensureOperational: jest.fn() },
         },
         {
           provide: SubscriptionAccessService,
           useValue: { invalidateCache },
+        },
+        // The listener injects PromotionalApplyService (S2.1 pending-coupon
+        // application). Without this provider Nest cannot resolve index [3]
+        // and the whole suite fails before any assertion runs.
+        {
+          provide: PromotionalApplyService,
+          useValue: { applyCoupon: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: getQueueToken('email-notifications'),
@@ -116,19 +124,31 @@ describe('SubscriptionStateListener — onStateChanged', () => {
 });
 
 // ---------------------------------------------------------------------------
-// G12 — onPaymentSucceeded: event-driven recovery from grace/suspended/blocked
+// G12 — onPaymentSucceeded: reactivation delegated to the single seam
+// (`SubscriptionStateService.ensureOperational`). The listener no longer keeps
+// a local allow-list of promotable states, so a paid invoice on a `cancelled`
+// or `expired` subscription must reach `active` too.
 // ---------------------------------------------------------------------------
 
 describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
   let listener: SubscriptionStateListener;
-  let transition: jest.Mock;
+  let ensureOperational: jest.Mock;
   let storeSubsFindUnique: jest.Mock;
   let invoicesFindUnique: jest.Mock;
   let queueAdd: jest.Mock;
   const ORIGINAL_FLAG = process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE;
 
   const buildListener = async (subState: string) => {
-    transition = jest.fn().mockResolvedValue(undefined);
+    // The real seam walks `cancelled`/`expired` through `pending_payment`;
+    // the double-hop route is asserted in the state-service spec, so here we
+    // only need it to report the operational outcome it guarantees.
+    ensureOperational = jest.fn().mockResolvedValue({
+      finalState: 'active',
+      path:
+        subState === 'cancelled' || subState === 'expired'
+          ? ['pending_payment', 'active']
+          : ['active'],
+    });
     queueAdd = jest.fn().mockResolvedValue(undefined);
     storeSubsFindUnique = jest.fn().mockResolvedValue({
       id: 100,
@@ -156,11 +176,15 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
         { provide: GlobalPrismaService, useValue: prismaMock },
         {
           provide: SubscriptionStateService,
-          useValue: { transition },
+          useValue: { ensureOperational },
         },
         {
           provide: SubscriptionAccessService,
           useValue: { invalidateCache: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: PromotionalApplyService,
+          useValue: { applyCoupon: jest.fn().mockResolvedValue(undefined) },
         },
         {
           provide: getQueueToken('email-notifications'),
@@ -185,39 +209,48 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
       process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE = 'true';
     });
 
-    it.each([['grace_soft'], ['grace_hard'], ['suspended'], ['blocked']])(
-      'promotes %s → active',
-      async (state) => {
-        listener = await buildListener(state);
+    it.each([
+      ['grace_soft'],
+      ['grace_hard'],
+      ['suspended'],
+      ['blocked'],
+      // Regression: these two used to be absent from the listener's local
+      // PROMOTABLE_* allow-list, so a confirmed payment logged
+      // STATE_ENGINE_NO_CHANGE and left the store terminal while the webhook
+      // answered 200.
+      ['cancelled'],
+      ['expired'],
+    ])('reactivates %s → active through the seam', async (state) => {
+      listener = await buildListener(state);
 
-        await listener.onPaymentSucceeded({
+      await listener.onPaymentSucceeded({
+        invoiceId: 11,
+        paymentId: 22,
+        subscriptionId: 100,
+        storeId: 50,
+        source: 'webhook',
+      });
+
+      expect(ensureOperational).toHaveBeenCalledTimes(1);
+      const [storeId, ctx] = ensureOperational.mock.calls[0];
+      expect(storeId).toBe(50);
+      expect(ctx.reason).toBe('payment_succeeded_webhook');
+      expect(ctx.triggeredByJob).toBe('subscription-state-listener');
+      expect(ctx.payload.previous_state).toBe(state);
+      expect(ctx.payload.invoice_id).toBe(11);
+      expect(ctx.payload.payment_id).toBe(22);
+
+      // Email enqueue happens in enforce mode.
+      expect(queueAdd).toHaveBeenCalledWith(
+        'payment.confirmed.email',
+        expect.objectContaining({
           invoiceId: 11,
           paymentId: 22,
-          subscriptionId: 100,
           storeId: 50,
-          source: 'webhook',
-        });
-
-        expect(transition).toHaveBeenCalledTimes(1);
-        const [storeId, target, opts] = transition.mock.calls[0];
-        expect(storeId).toBe(50);
-        expect(target).toBe('active');
-        expect(opts.reason).toBe('payment_succeeded_webhook');
-        expect(opts.triggeredByJob).toBe('subscription-state-listener');
-        expect(opts.payload.previous_state).toBe(state);
-
-        // Email enqueue happens in enforce mode.
-        expect(queueAdd).toHaveBeenCalledWith(
-          'payment.confirmed.email',
-          expect.objectContaining({
-            invoiceId: 11,
-            paymentId: 22,
-            storeId: 50,
-          }),
-          expect.any(Object),
-        );
-      },
-    );
+        }),
+        expect.any(Object),
+      );
+    });
 
     it('still promotes pending_payment → active (G3 baseline preserved)', async () => {
       listener = await buildListener('pending_payment');
@@ -229,8 +262,25 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
         storeId: 50,
       });
 
-      expect(transition).toHaveBeenCalledTimes(1);
-      expect(transition.mock.calls[0][1]).toBe('active');
+      expect(ensureOperational).toHaveBeenCalledTimes(1);
+      expect(ensureOperational.mock.calls[0][0]).toBe(50);
+    });
+
+    it('does not swallow a seam failure into a silent success', async () => {
+      listener = await buildListener('cancelled');
+      ensureOperational.mockRejectedValueOnce(new Error('exit guard tripped'));
+
+      await listener.onPaymentSucceeded({
+        invoiceId: 11,
+        paymentId: 22,
+        subscriptionId: 100,
+        storeId: 50,
+      });
+
+      // The handler stays best-effort (it must never break the webhook
+      // response) but it must NOT report activation side effects for a
+      // reactivation that failed.
+      expect(queueAdd).not.toHaveBeenCalled();
     });
 
     it('idempotent on duplicate webhooks: second delivery short-circuits when sub already active', async () => {
@@ -243,7 +293,7 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
         subscriptionId: 100,
         storeId: 50,
       });
-      expect(transition).toHaveBeenCalledTimes(1);
+      expect(ensureOperational).toHaveBeenCalledTimes(1);
 
       // Simulate second webhook arriving AFTER the first one promoted the
       // subscription. Re-stub findUnique to return the new active state.
@@ -260,28 +310,32 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
         storeId: 50,
       });
 
-      // No second transition() call — short-circuited by promotable check.
-      expect(transition).toHaveBeenCalledTimes(1);
+      // No second seam call — an already-operational store short-circuits
+      // straight to the side effects.
+      expect(ensureOperational).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe('flag disabled (default — log-only)', () => {
-    it('grace_soft → active: does NOT call transition() or enqueue email', async () => {
-      delete process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE;
-      listener = await buildListener('grace_soft');
+  describe('flag disabled (default — dry-run / log-only)', () => {
+    it.each([['grace_soft'], ['blocked'], ['cancelled'], ['expired']])(
+      'dry-run for %s writes NOTHING: no seam call, no email',
+      async (state) => {
+        delete process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE;
+        listener = await buildListener(state);
 
-      await listener.onPaymentSucceeded({
-        invoiceId: 11,
-        paymentId: 22,
-        subscriptionId: 100,
-        storeId: 50,
-      });
+        await listener.onPaymentSucceeded({
+          invoiceId: 11,
+          paymentId: 22,
+          subscriptionId: 100,
+          storeId: 50,
+        });
 
-      expect(transition).not.toHaveBeenCalled();
-      expect(queueAdd).not.toHaveBeenCalled();
-    });
+        expect(ensureOperational).not.toHaveBeenCalled();
+        expect(queueAdd).not.toHaveBeenCalled();
+      },
+    );
 
-    it('flag explicitly false: still log-only for blocked state', async () => {
+    it('flag explicitly false: still dry-run for blocked state', async () => {
       process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE = 'false';
       listener = await buildListener('blocked');
 
@@ -292,7 +346,7 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
         storeId: 50,
       });
 
-      expect(transition).not.toHaveBeenCalled();
+      expect(ensureOperational).not.toHaveBeenCalled();
     });
 
     it('pending_payment → active is ALWAYS enforced regardless of flag', async () => {
@@ -306,23 +360,39 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
         storeId: 50,
       });
 
-      expect(transition).toHaveBeenCalledTimes(1);
-      expect(transition.mock.calls[0][1]).toBe('active');
+      expect(ensureOperational).toHaveBeenCalledTimes(1);
+      expect(ensureOperational.mock.calls[0][0]).toBe(50);
     });
 
-    it('skips terminal/active states cleanly (no log-only path needed)', async () => {
-      delete process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE;
-      listener = await buildListener('active');
+    it.each([['active'], ['trial']])(
+      'already-operational %s: no re-transition, side effects still run',
+      async (state) => {
+        delete process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE;
+        listener = await buildListener(state);
 
-      await listener.onPaymentSucceeded({
-        invoiceId: 11,
-        paymentId: 22,
-        subscriptionId: 100,
-        storeId: 50,
-      });
+        await listener.onPaymentSucceeded({
+          invoiceId: 11,
+          paymentId: 22,
+          subscriptionId: 100,
+          storeId: 50,
+        });
 
-      expect(transition).not.toHaveBeenCalled();
-      expect(queueAdd).not.toHaveBeenCalled();
-    });
+        // Idempotency: the store is already operational, so the seam is not
+        // even consulted...
+        expect(ensureOperational).not.toHaveBeenCalled();
+        // ...but the payment DID succeed, so the confirmation email must go
+        // out (the synchronous webhook path may have promoted the row before
+        // this handler ran).
+        expect(queueAdd).toHaveBeenCalledWith(
+          'payment.confirmed.email',
+          expect.objectContaining({
+            invoiceId: 11,
+            paymentId: 22,
+            storeId: 50,
+          }),
+          expect.any(Object),
+        );
+      },
+    );
   });
 });

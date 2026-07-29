@@ -1,4 +1,8 @@
-import { SubscriptionStateService } from './subscription-state.service';
+import {
+  SubscriptionStateService,
+  LOCK_REASON_PLAN_RETIRED,
+  LOCK_REASON_PAST_DUE,
+} from './subscription-state.service';
 
 /**
  * Unit tests for SubscriptionStateService.
@@ -382,6 +386,223 @@ describe('SubscriptionStateService', () => {
       const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
       expect(evtArg.data.to_state).toBe('cancelled');
       expect(evtArg.data.triggered_by_job).toBe('subscription-state-engine');
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // lock_reason — the motive shown to the customer must be the true one
+  // ----------------------------------------------------------------------
+
+  describe('lock_reason write + preservation', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    /** Data of the FIRST `store_subscriptions.update` (the state write). */
+    function stateUpdateData() {
+      return prismaMock.store_subscriptions.update.mock.calls[0][0].data;
+    }
+
+    /**
+     * Primes `evaluateAndTransitionForSubscription` for a subscription whose
+     * period lapsed `daysPastPeriodEnd` ago, on a plan with the 3/7/14/30
+     * dunning cadence used across this spec.
+     */
+    function primeEvaluation(opts: {
+      state: string;
+      lockReason?: string | null;
+      daysPastPeriodEnd: number;
+      planState?: string | null;
+      archivedAt?: Date | null;
+    }) {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue({
+        id: 1,
+        store_id: 10,
+        state: opts.state,
+        lock_reason: opts.lockReason ?? null,
+        metadata: null,
+        trial_ends_at: null,
+        cancelled_at: null,
+        updated_at: new Date(),
+        current_period_end: new Date(
+          Date.now() - opts.daysPastPeriodEnd * DAY,
+        ),
+        promotional_plan_id: null,
+        promotional_plan: null,
+        plan: {
+          state: opts.planState ?? 'active',
+          archived_at: opts.archivedAt ?? null,
+          grace_period_soft_days: 3,
+          grace_period_hard_days: 7,
+          suspension_day: 14,
+          cancellation_day: 30,
+        },
+      });
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 1, state: opts.state }]);
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: 1,
+        state: 'updated',
+      });
+    }
+
+    // ---- Write at the origin (grace is where degradation starts) ---------
+
+    it('persists an explicit lockReason on a grace_soft transition', async () => {
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'active' }]);
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: 100,
+        state: 'grace_soft',
+      });
+
+      await service.transition(10, 'grace_soft', {
+        reason: LOCK_REASON_PLAN_RETIRED,
+        lockReason: LOCK_REASON_PLAN_RETIRED,
+      });
+
+      // The renewal job stamps the motive here; without this write the
+      // SUBSCRIPTION_011 consumer never sees it.
+      expect(stateUpdateData().lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
+    });
+
+    it('leaves lock_reason intact on a grace_soft transition with no motive', async () => {
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'active' }]);
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: 100,
+        state: 'grace_soft',
+      });
+
+      await service.transition(10, 'grace_soft', { reason: 'past_due_soft' });
+
+      // `undefined` = column untouched (never blanked by accident).
+      expect(stateUpdateData().lock_reason).toBeUndefined();
+    });
+
+    it('still defaults a manual suspension to admin_manual', async () => {
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'grace_hard' }]);
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: 100,
+        state: 'suspended',
+      });
+
+      await service.transition(10, 'suspended', { reason: 'admin_action' });
+
+      expect(stateUpdateData().lock_reason).toBe('admin_manual');
+    });
+
+    it('clears lock_reason on recovery to active', async () => {
+      prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'suspended' }]);
+      prismaMock.store_subscriptions.update.mockResolvedValue({
+        id: 100,
+        state: 'active',
+      });
+
+      await service.transition(10, 'active', { reason: 'payment_confirmed' });
+
+      expect(stateUpdateData().lock_reason).toBeNull();
+    });
+
+    // ---- Survival across the dunning escalation --------------------------
+
+    it('grace_soft → grace_hard preserves a retired-plan motive', async () => {
+      primeEvaluation({
+        state: 'grace_soft',
+        lockReason: LOCK_REASON_PLAN_RETIRED,
+        daysPastPeriodEnd: 8, // past hard (7), before suspension (14)
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const data = stateUpdateData();
+      expect(data.state).toBe('grace_hard');
+      expect(data.lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
+    });
+
+    it('grace_hard → suspended preserves a retired-plan motive instead of stamping past_due', async () => {
+      primeEvaluation({
+        state: 'grace_hard',
+        lockReason: LOCK_REASON_PLAN_RETIRED,
+        daysPastPeriodEnd: 20, // past suspension (14), before cancellation (30)
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const data = stateUpdateData();
+      expect(data.state).toBe('suspended');
+      // The store owes nothing: it cannot be told it failed to pay.
+      expect(data.lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
+      expect(data.lock_reason).not.toBe(LOCK_REASON_PAST_DUE);
+    });
+
+    it('preserves any non-null motive, not just the retired-plan one', async () => {
+      primeEvaluation({
+        state: 'grace_hard',
+        lockReason: 'chargeback',
+        daysPastPeriodEnd: 20,
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(stateUpdateData().lock_reason).toBe('chargeback');
+    });
+
+    // ---- The ordinary impago path is untouched ---------------------------
+
+    it('impago with no prior motive still ends up suspended with past_due', async () => {
+      primeEvaluation({
+        state: 'grace_hard',
+        lockReason: null,
+        daysPastPeriodEnd: 20,
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const data = stateUpdateData();
+      expect(data.state).toBe('suspended');
+      expect(data.lock_reason).toBe(LOCK_REASON_PAST_DUE);
+    });
+
+    it('impago on the grace rungs leaves lock_reason untouched (pre-existing behaviour)', async () => {
+      primeEvaluation({
+        state: 'active',
+        lockReason: null,
+        daysPastPeriodEnd: 4, // past soft (3), before hard (7)
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const data = stateUpdateData();
+      expect(data.state).toBe('grace_soft');
+      expect(data.lock_reason).toBeUndefined();
+    });
+
+    // ---- Origin stamp when the state engine detects the retired plan -----
+
+    it('stamps the retired-plan motive when the engine itself degrades an archived-plan store', async () => {
+      primeEvaluation({
+        state: 'active',
+        lockReason: null,
+        daysPastPeriodEnd: 1, // before the soft deadline: planUnavailable drives it
+        planState: 'archived',
+        archivedAt: new Date(Date.now() - 5 * DAY),
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const data = stateUpdateData();
+      expect(data.state).toBe('grace_soft');
+      expect(data.lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
+    });
+
+    it('records the motive decision in the audit payload', async () => {
+      primeEvaluation({
+        state: 'grace_hard',
+        lockReason: LOCK_REASON_PLAN_RETIRED,
+        daysPastPeriodEnd: 20,
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const evt = prismaMock.subscription_events.create.mock.calls[0][0].data;
+      expect(evt.payload.previous_lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
+      expect(evt.payload.lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
     });
   });
 

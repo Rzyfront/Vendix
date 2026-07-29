@@ -34,19 +34,6 @@ const BILLING_CYCLE_DAYS: Record<subscription_billing_cycle_enum, number> = {
 };
 
 /**
- * States a coupon/promo application may reactivate directly to `active`.
- * `cancelled`/`expired` are intentionally excluded: they are terminal and the
- * TRANSITIONS map only lets them exit via `pending_payment` (the re-subscribe
- * checkout, Path D) — a direct `cancelled → active` would be illegal.
- */
-const REACTIVATABLE_STATES: readonly store_subscription_state_enum[] = [
-  'grace_soft',
-  'grace_hard',
-  'suspended',
-  'blocked',
-];
-
-/**
  * Result of a coupon validation request. Distinguishes between a hard "not
  * found" (no plan with that code) and a soft "not eligible" (plan exists but
  * the store fails the promo_rules — expired, max_uses reached, etc.).
@@ -305,50 +292,58 @@ export class PromotionalApplyService {
 
     const now = new Date();
     const currentState = sub.state as store_subscription_state_enum;
-    const needsReactivation = REACTIVATABLE_STATES.includes(currentState);
 
-    // S1+S2 — A coupon/promo is an access overlay; on its own it never
-    // reactivated a degraded store, so a store in grace/suspended/blocked
-    // stayed blocked (SUBSCRIPTION_008/009) even after redeeming a valid
-    // coupon. When the store is in a reactivatable state we (1) transition
-    // back to `active` and (2) open a fresh promo window.
-    let reactivationData: Prisma.store_subscriptionsUncheckedUpdateInput = {};
-    if (needsReactivation) {
-      // Derive the window from the EFFECTIVE (winning) promo plan so the
-      // extension reflects the overlay actually governing features.
-      const effectivePromoFull =
-        sub.promotional_plan &&
-        effectivePromoPlan.id === sub.promotional_plan.id
-          ? sub.promotional_plan
-          : promoPlan;
-      const durationDays = this.resolvePromoDurationDays(effectivePromoFull);
-      const periodEnd = new Date(now.getTime() + durationDays * DAY_MS);
+    // Derive the promo window from the EFFECTIVE (winning) promo plan so the
+    // extension reflects the overlay actually governing features.
+    const effectivePromoFull =
+      sub.promotional_plan && effectivePromoPlan.id === sub.promotional_plan.id
+        ? sub.promotional_plan
+        : promoPlan;
+    const durationDays = this.resolvePromoDurationDays(effectivePromoFull);
+    const periodEnd = new Date(now.getTime() + durationDays * DAY_MS);
 
-      // Transition FIRST (own Serializable tx). If the overlay update below
-      // fails, a retry is NOT short-circuited by applyCoupon()'s
-      // promotional_plan_id idempotency guard: the state is already `active`
-      // and the overlay write simply re-runs. transition() also clears
-      // grace_*_until and (per the state-service fix) lock_reason.
-      await this.stateService.transition(storeId, 'active', {
-        reason: 'promotional_coupon_reactivation',
-        payload: {
-          promo_plan_id: effectivePromoPlan.id,
-          previous_state: currentState,
-          duration_days: durationDays,
-          current_period_end: periodEnd.toISOString(),
-        },
-      });
-
-      reactivationData = {
-        current_period_start: now,
-        current_period_end: periodEnd,
-        next_billing_at: periodEnd,
-        grace_soft_until: null,
-        grace_hard_until: null,
-        suspend_at: null,
-        cancel_at: null,
-      };
-    }
+    // BUSINESS RULE — applying a free plan or a coupon IS an activation like
+    // any other: the store must come out operational no matter which state it
+    // came in from.
+    //
+    // This used to be gated on a local `REACTIVATABLE_STATES` list that
+    // deliberately excluded `cancelled` / `expired`. That exclusion WAS the
+    // bug: when the gate evaluated to false the method still wrote the feature
+    // overlay and returned HTTP 200 without ever calling the state service, so
+    // the UI reported "plan activado" while the store stayed degraded — a
+    // silent success, the worst failure mode available.
+    //
+    // Whether a transition is needed, and by which legal route, is no longer
+    // decided here. That policy lives in `ensureOperational`, so the call is
+    // UNCONDITIONAL: the seam is a no-op when the store is already
+    // `active`/`trial`, takes one hop from grace/suspended/blocked/draft/
+    // no_plan/pending_payment, and walks `cancelled`/`expired` out through
+    // `pending_payment` (never by shortcutting their terminality). Its exit
+    // guard re-reads the row and throws if the store did not end up
+    // operational, so a 200 from here now means what it says.
+    //
+    // Runs FIRST, in the seam's own Serializable transaction. If the overlay
+    // write below fails, a retry is NOT short-circuited by applyCoupon()'s
+    // `promotional_plan_id` idempotency guard: the state is already `active`
+    // and the overlay write simply re-runs.
+    //
+    // `periodEnd` is passed as the promo window base. The seam owns the whole
+    // scheduling cleanup from here on — `scheduled_cancel_at`, `auto_renew`,
+    // `suspend_at`, `cancel_at`, `grace_*_until`, `lock_reason` and the
+    // `current_period_*` / `next_billing_at` window (minus the grace days the
+    // store already consumed) — so none of it is duplicated in the overlay
+    // update below. Two writers computing the same window is exactly how they
+    // drift apart again.
+    await this.stateService.ensureOperational(storeId, {
+      reason: 'promotional_coupon_reactivation',
+      periodEnd,
+      payload: {
+        promo_plan_id: effectivePromoPlan.id,
+        previous_state: currentState,
+        duration_days: durationDays,
+        current_period_end: periodEnd.toISOString(),
+      },
+    });
 
     await this.prisma.store_subscriptions.update({
       where: { id: sub.id },
@@ -358,7 +353,6 @@ export class PromotionalApplyService {
         resolved_features: resolvedFeatures as unknown as Prisma.InputJsonValue,
         resolved_at: now,
         updated_at: now,
-        ...reactivationData,
       },
     });
 

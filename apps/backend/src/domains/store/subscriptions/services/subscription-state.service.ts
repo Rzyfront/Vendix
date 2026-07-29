@@ -93,10 +93,37 @@ export interface TransitionOptions {
   triggeredByUserId?: number;
   triggeredByJob?: string;
   payload?: Record<string, unknown>;
+  /**
+   * Value persisted to `store_subscriptions.lock_reason` — the column the
+   * access gate reads to tell the customer WHY its store is degraded.
+   *
+   * `reason` above is audit payload only (it lands in
+   * `subscription_events.payload.reason`); passing the motive there and not
+   * here leaves the column untouched and the customer gets the generic
+   * "payment" story. Both are needed.
+   */
   lockReason?: string;
   graceSoftUntil?: Date;
   graceHardUntil?: Date;
 }
+
+/**
+ * `store_subscriptions.lock_reason` written when the plan a store sits on was
+ * retired from the catalog and therefore could not be re-billed at renewal.
+ * The store does NOT owe money — the plan simply stopped existing.
+ *
+ * Consumer: `SubscriptionAccessService.stateToMode()` matches exactly this
+ * value to answer `SUBSCRIPTION_011` ("Plan retired — choose an active plan")
+ * instead of the past-due codes. It keeps a private copy of the literal on the
+ * read side; the two must stay in sync.
+ */
+export const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+/**
+ * `lock_reason` for the ordinary dunning path: the store crossed its payment
+ * deadlines and really does owe money.
+ */
+export const LOCK_REASON_PAST_DUE = 'past_due';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -317,10 +344,20 @@ export class SubscriptionStateService {
     // Auto-set lock_reason for suspended/blocked transitions; explicitly
     // clear it on recovery to active/trial so a stale 'past_due' /
     // 'admin_manual' label does not linger and keep the store looking locked.
-    // `undefined` leaves the column intact (e.g. transitions to grace_*).
+    // `undefined` leaves the column intact.
+    //
+    // The grace_* branch exists because DEGRADATION STARTS AT GRACE, not at
+    // suspension: a store whose plan was retired at renewal lands in
+    // `grace_soft`, and if the truthful motive is not stamped right there the
+    // consumer (`stateToMode` → SUBSCRIPTION_011) has nothing to read and the
+    // customer is told it failed to pay a bill it never owed. Callers with no
+    // truthful motive pass none and the column is left intact, so this only
+    // ever ADDS information.
     let lockReason: string | null | undefined;
     if (toState === 'suspended' || toState === 'blocked') {
       lockReason = opts.lockReason ?? 'admin_manual';
+    } else if (toState === 'grace_soft' || toState === 'grace_hard') {
+      lockReason = opts.lockReason ?? undefined;
     } else if (toState === 'active' || toState === 'trial') {
       lockReason = null;
     } else {
@@ -1113,12 +1150,32 @@ export class SubscriptionStateService {
       }
 
       if (targetState && targetState !== currentState) {
+        // BUSINESS RULE — the real motive of a lock is stamped WHERE IT
+        // ORIGINATES and SURVIVES the escalation grace_soft → grace_hard →
+        // suspended.
+        //
+        // This used to write 'past_due' unconditionally on the suspension rung,
+        // which overwrote the true motive: a store whose plan was retired was
+        // then told it owed money. It owes nothing, and a debt that does not
+        // exist cannot be collected — that is false information billed to the
+        // customer. So an existing non-null `lock_reason` always wins, and
+        // 'past_due' is stamped only when there is no prior motive (the
+        // ordinary impago path, whose behaviour is unchanged).
+        const existingLockReason = sub.lock_reason ?? null;
+        const originLockReason =
+          existingLockReason ??
+          (planUnavailable ? LOCK_REASON_PLAN_RETIRED : null);
+        const dunningLockReason =
+          targetState === 'suspended'
+            ? (originLockReason ?? LOCK_REASON_PAST_DUE)
+            : (originLockReason ?? undefined);
+
         await this.transition(sub.store_id, targetState, {
           reason,
           triggeredByJob: 'subscription-state-engine',
-          // Dunning-driven suspension: stamp a truthful lock_reason instead of
-          // letting transition() fall back to the 'admin_manual' default.
-          lockReason: targetState === 'suspended' ? 'past_due' : undefined,
+          // transition() persists this only for grace_soft / grace_hard /
+          // suspended / blocked; on the cancellation rung it is ignored.
+          lockReason: dunningLockReason,
           graceSoftUntil: softDeadline,
           graceHardUntil: hardDeadline,
           payload: {
@@ -1130,6 +1187,10 @@ export class SubscriptionStateService {
             plan_unavailable: planUnavailable,
             plan_state: plan?.state ?? null,
             plan_archived_at: plan?.archived_at?.toISOString() ?? null,
+            // Auditable trace of the motive decision: what the row carried
+            // before the rung and what this rung persisted (null = intact).
+            previous_lock_reason: existingLockReason,
+            lock_reason: dunningLockReason ?? null,
           },
         });
       }

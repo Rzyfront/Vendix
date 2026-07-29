@@ -6,7 +6,10 @@ import { Queue } from 'bullmq';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionBillingService } from '../domains/store/subscriptions/services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../domains/store/subscriptions/services/subscription-payment.service';
-import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
+import {
+  SubscriptionStateService,
+  LOCK_REASON_PLAN_RETIRED,
+} from '../domains/store/subscriptions/services/subscription-state.service';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
@@ -308,7 +311,13 @@ export class SubscriptionRenewalBillingJob {
     const softDays = sub.plan?.grace_period_soft_days ?? 5;
     const hardDays = sub.plan?.grace_period_hard_days ?? 10;
     await this.stateService.transition(sub.store_id, 'grace_soft', {
-      reason: 'current_plan_unavailable_at_renewal',
+      reason: LOCK_REASON_PLAN_RETIRED,
+      // `reason` above is audit payload only (subscription_events.payload).
+      // The COLUMN the access gate reads is `store_subscriptions.lock_reason`,
+      // and it is written from `lockReason` — without this line the store is
+      // degraded with an empty motive and SUBSCRIPTION_011 ("plan retirado")
+      // is dead code, so the customer is told it owes a bill it never owed.
+      lockReason: LOCK_REASON_PLAN_RETIRED,
       triggeredByJob: 'subscription-renewal-billing',
       graceSoftUntil: new Date(periodEnd.getTime() + softDays * DAY_MS),
       graceHardUntil: new Date(periodEnd.getTime() + hardDays * DAY_MS),

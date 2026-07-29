@@ -3,6 +3,7 @@ import {
   SubscriptionPaymentService,
   MAX_CONSECUTIVE_FAILURES,
 } from './subscription-payment.service';
+import { SubscriptionStateService } from './subscription-state.service';
 import { VendixHttpException } from '../../../../common/errors';
 import { PlatformGatewayEnvironmentEnum } from '../../../superadmin/subscriptions/gateway/dto/upsert-gateway.dto';
 
@@ -74,6 +75,12 @@ describe('SubscriptionPaymentService', () => {
     stateServiceMock = {
       transitionInTx: jest.fn(),
       transition: jest.fn(),
+      ensureOperationalInTx: jest
+        .fn()
+        .mockResolvedValue({ finalState: 'active', path: ['active'] }),
+      ensureOperational: jest
+        .fn()
+        .mockResolvedValue({ finalState: 'active', path: ['active'] }),
     };
     configMock = { get: jest.fn() };
     eventEmitterMock = { emit: jest.fn() };
@@ -218,9 +225,16 @@ describe('SubscriptionPaymentService', () => {
     expect(updateArg.data.state).toBe('failed');
     expect(updateArg.data.failure_reason).toBe('Insufficient funds');
 
+    // RNC-MF-3 added `amount` + `entryDate` to this payload for the platform
+    // accounting listener, so the assertion matches the contract fields the
+    // subscription listeners actually read instead of the whole object.
     expect(eventEmitterMock.emit).toHaveBeenCalledWith(
       'subscription.payment.failed',
-      { invoiceId: 500, paymentId: 78, reason: 'Insufficient funds' },
+      expect.objectContaining({
+        invoiceId: 500,
+        paymentId: 78,
+        reason: 'Insufficient funds',
+      }),
     );
     expect(result.state).toBe('failed');
   });
@@ -771,6 +785,98 @@ describe('SubscriptionPaymentService', () => {
       };
     }
 
+    /**
+     * Transaction double that ALSO satisfies the reactivation seam, backed by a
+     * single mutable row so the walked path is observable. Used by the tests
+     * that wire the REAL `SubscriptionStateService` (see `useRealStateService`)
+     * to prove the store actually ends up operational.
+     */
+    function makeSeamTxMock(initialState: string) {
+      const row: any = {
+        ...pendingSubFixture({ state: initialState }),
+        current_period_end: null,
+        scheduled_cancel_at: null,
+      };
+      const events: any[] = [];
+
+      const tx: any = {
+        $queryRaw: jest.fn(async () => [
+          {
+            id: row.id,
+            state: row.state,
+            plan_id: row.plan_id,
+            current_period_end: row.current_period_end,
+            scheduled_cancel_at: row.scheduled_cancel_at,
+          },
+        ]),
+        store_subscriptions: {
+          findUniqueOrThrow: jest.fn(async () => ({ ...row })),
+          findFirst: jest.fn(async () => ({ ...row })),
+          update: jest.fn(async ({ data }: any) => {
+            for (const [key, value] of Object.entries(data)) {
+              if (value !== undefined) row[key] = value;
+            }
+            return { ...row };
+          }),
+        },
+        subscription_events: {
+          create: jest.fn(async ({ data }: any) => {
+            events.push(data);
+            return data;
+          }),
+        },
+        subscription_plans: {
+          findUniqueOrThrow: jest.fn(async () => targetPlanFixture()),
+          findUnique: jest.fn(async () => ({ billing_cycle: 'monthly' })),
+        },
+      };
+
+      const hops = () =>
+        events
+          .filter((e) => e.type === 'state_transition')
+          .map((e) => `${e.from_state}->${e.to_state}`);
+
+      return { tx, row, events, hops };
+    }
+
+    /**
+     * Swaps in the real `SubscriptionStateService`. Its prisma double refuses to
+     * open a transaction: this call-site is already inside the payment's
+     * transaction, and a second one would block against the `FOR UPDATE` lock
+     * the first one holds on the same subscription row.
+     */
+    function useRealStateService() {
+      const prismaFake: any = {
+        $transaction: jest.fn(() => {
+          throw new Error(
+            'ensureOperationalInTx must not open its own transaction',
+          );
+        }),
+      };
+      const accessService: any = {
+        invalidateCache: jest.fn().mockResolvedValue(undefined),
+      };
+      const emitter: any = { emit: jest.fn() };
+      const real = new SubscriptionStateService(
+        prismaFake,
+        accessService,
+        emitter,
+      );
+      (service as any).stateService = real;
+      return { real, prismaFake, accessService, emitter };
+    }
+
+    function standardPricing() {
+      billingMock.computePricing = jest.fn().mockReturnValue({
+        base_price: new Prisma.Decimal(200),
+        margin_pct: new Prisma.Decimal(0),
+        margin_amount: new Prisma.Decimal(0),
+        fixed_surcharge: new Prisma.Decimal(0),
+        effective_price: new Prisma.Decimal(200),
+        partner_org_id: null,
+      });
+    }
+
     it('success: promotes plan, clears pending_* fields, transitions to active', async () => {
       const txMock = makeTxMock();
       billingMock.computePricing = jest.fn().mockReturnValue({
@@ -795,14 +901,30 @@ describe('SubscriptionPaymentService', () => {
       expect(updateArg.data.pending_change_invoice_id).toBeNull();
       expect(updateArg.data.pending_change_kind).toBeNull();
       expect(updateArg.data.pending_revert_state).toBeNull();
-      expect(stateServiceMock.transitionInTx).toHaveBeenCalledWith(
+      // Promotion goes through the reactivation seam, on the CALLER's tx.
+      expect(stateServiceMock.ensureOperationalInTx).toHaveBeenCalledWith(
         txMock,
         10,
-        'active',
         expect.objectContaining({
           reason: expect.stringContaining('plan_confirmed_invoice_500'),
         }),
       );
+      expect(stateServiceMock.transitionInTx).not.toHaveBeenCalled();
+    });
+
+    it('hands the seam the SAME tx it received (never a fresh client)', async () => {
+      const txMock = makeTxMock();
+      standardPricing();
+
+      await (service as any).confirmPendingChange(
+        invoiceForConfirm(),
+        txMock as any,
+      );
+
+      // Identity, not shape: a new client would open a second transaction and
+      // self-block against the FOR UPDATE lock this one already holds.
+      const [passedTx] = stateServiceMock.ensureOperationalInTx.mock.calls[0];
+      expect(passedTx).toBe(txMock);
     });
 
     it('mismatch guard: pending_plan_id !== invoice.to_plan_id → returns without mutating', async () => {
@@ -823,6 +945,7 @@ describe('SubscriptionPaymentService', () => {
 
       expect(txMock.store_subscriptions.update).not.toHaveBeenCalled();
       expect(stateServiceMock.transitionInTx).not.toHaveBeenCalled();
+      expect(stateServiceMock.ensureOperationalInTx).not.toHaveBeenCalled();
     });
 
     it('no-op when pending_plan_id is null (already confirmed or fresh sub)', async () => {
@@ -843,17 +966,9 @@ describe('SubscriptionPaymentService', () => {
       expect(txMock.store_subscriptions.update).not.toHaveBeenCalled();
     });
 
-    it('upgrade kind does NOT reset billing period', async () => {
+    it('this service no longer writes the period window nor the scheduling cleanup', async () => {
       const txMock = makeTxMock();
-      billingMock.computePricing = jest.fn().mockReturnValue({
-        base_price: new Prisma.Decimal(200),
-        margin_pct: new Prisma.Decimal(0),
-        margin_amount: new Prisma.Decimal(0),
-        fixed_surcharge: new Prisma.Decimal(0),
-        effective_price: new Prisma.Decimal(200),
-        partner_org_id: null,
-      });
-      stateServiceMock.transitionInTx = jest.fn().mockResolvedValue(undefined);
+      standardPricing();
 
       await (service as any).confirmPendingChange(
         invoiceForConfirm({ change_kind: 'upgrade' }),
@@ -861,32 +976,138 @@ describe('SubscriptionPaymentService', () => {
       );
 
       const updateArg = txMock.store_subscriptions.update.mock.calls[0][0];
-      // upgrade should NOT set current_period_start / current_period_end
+      // All of these now belong to the seam exclusively. Two writers computing
+      // the same window is how the call-sites drifted apart in the first place.
       expect(updateArg.data.current_period_start).toBeUndefined();
       expect(updateArg.data.current_period_end).toBeUndefined();
+      expect(updateArg.data.next_billing_at).toBeUndefined();
+      expect(updateArg.data.scheduled_cancel_at).toBeUndefined();
+      expect(updateArg.data.auto_renew).toBeUndefined();
+      expect(updateArg.data.suspend_at).toBeUndefined();
+      expect(updateArg.data.grace_soft_until).toBeUndefined();
+      expect(updateArg.data.grace_hard_until).toBeUndefined();
+      // Plan/pricing promotion is still this service's job.
+      expect(updateArg.data.plan_id).toBe(7);
+      expect(updateArg.data.paid_plan_id).toBe(7);
     });
 
-    it('initial/resubscribe kind DOES reset billing period', async () => {
+    it('period-resetting kinds hand the seam a periodEnd base + planId', async () => {
       const txMock = makeTxMock();
-      billingMock.computePricing = jest.fn().mockReturnValue({
-        base_price: new Prisma.Decimal(200),
-        margin_pct: new Prisma.Decimal(0),
-        margin_amount: new Prisma.Decimal(0),
-        fixed_surcharge: new Prisma.Decimal(0),
-        effective_price: new Prisma.Decimal(200),
-        partner_org_id: null,
-      });
-      stateServiceMock.transitionInTx = jest.fn().mockResolvedValue(undefined);
+      standardPricing();
 
       await (service as any).confirmPendingChange(
         invoiceForConfirm({ change_kind: 'initial' }),
         txMock as any,
       );
 
+      const [, , ctx] = stateServiceMock.ensureOperationalInTx.mock.calls[0];
+      expect(ctx.periodEnd).toBeInstanceOf(Date);
+      // monthly target plan → 30-day base window; the seam then discounts any
+      // grace days already consumed.
+      const days = Math.round(
+        (ctx.periodEnd.getTime() - Date.now()) / (24 * 60 * 60 * 1000),
+      );
+      expect(days).toBe(30);
+      expect(ctx.planId).toBe(7);
+    });
+
+    it('non-resetting kinds pass no periodEnd, leaving the paid window to the seam', async () => {
+      const txMock = makeTxMock();
+      standardPricing();
+
+      await (service as any).confirmPendingChange(
+        invoiceForConfirm({ change_kind: 'promo_swap' }),
+        txMock as any,
+      );
+
+      const [, , ctx] = stateServiceMock.ensureOperationalInTx.mock.calls[0];
+      expect(ctx.periodEnd).toBeUndefined();
+    });
+
+    it('clears trial_ends_at when a trial converts (the one field the seam does not own)', async () => {
+      const txMock = makeTxMock();
+      txMock.store_subscriptions.findUniqueOrThrow = jest
+        .fn()
+        .mockResolvedValue(
+          pendingSubFixture({
+            state: 'pending_payment',
+            pending_revert_state: 'trial',
+          }),
+        );
+      standardPricing();
+
+      await (service as any).confirmPendingChange(
+        invoiceForConfirm({ change_kind: 'trial_conversion' }),
+        txMock as any,
+      );
+
       const updateArg = txMock.store_subscriptions.update.mock.calls[0][0];
-      expect(updateArg.data.current_period_start).toBeDefined();
-      expect(updateArg.data.current_period_end).toBeDefined();
-      expect(updateArg.data.next_billing_at).toBeDefined();
+      expect(updateArg.data.trial_ends_at).toBeNull();
+    });
+
+    // ────────────────────────────────────────────────────────────────────────
+    // PRODUCTION INCIDENT: a store in `cancelled` bought a plan. The charge
+    // went through, the response was HTTP 200 — and the store stayed blocked.
+    // Root cause: this call-site asked for a single `cancelled -> active` hop,
+    // which is illegal, and handleChargeSuccess swallowed the SUBSCRIPTION_010.
+    // ────────────────────────────────────────────────────────────────────────
+
+    it('INCIDENT: confirmed payment on a `cancelled` store leaves it active', async () => {
+      const seam = makeSeamTxMock('cancelled');
+      const { prismaFake } = useRealStateService();
+      standardPricing();
+
+      await (service as any).confirmPendingChange(
+        invoiceForConfirm({ change_kind: 'resubscribe' }),
+        seam.tx,
+      );
+
+      expect(seam.row.state).toBe('active');
+      // Terminality preserved: walked through pending_payment, never jumped.
+      expect(seam.hops()).toEqual([
+        'cancelled->pending_payment',
+        'pending_payment->active',
+      ]);
+      // Ran inside the caller's transaction — no second one was opened.
+      expect(prismaFake.$transaction).not.toHaveBeenCalled();
+      // And the seam owns the window/cleanup it used to duplicate here.
+      expect(seam.row.current_period_end).toBeInstanceOf(Date);
+      expect(seam.row.scheduled_cancel_at).toBeNull();
+      expect(seam.row.auto_renew).toBe(true);
+      expect(seam.row.cancel_at).toBeNull();
+      expect(seam.row.suspend_at).toBeNull();
+      expect(seam.row.lock_reason).toBeNull();
+    });
+
+    it('confirmed payment on a `pending_payment` store still promotes in one hop', async () => {
+      const seam = makeSeamTxMock('pending_payment');
+      useRealStateService();
+      standardPricing();
+
+      await (service as any).confirmPendingChange(
+        invoiceForConfirm({ change_kind: 'upgrade' }),
+        seam.tx,
+      );
+
+      expect(seam.row.state).toBe('active');
+      expect(seam.hops()).toEqual(['pending_payment->active']);
+    });
+
+    it('a degraded outcome aborts the payment transaction instead of returning success', async () => {
+      const seam = makeSeamTxMock('cancelled');
+      useRealStateService();
+      standardPricing();
+      // Exit guard: the row did not come out operational.
+      seam.tx.store_subscriptions.findFirst = jest
+        .fn()
+        .mockResolvedValue({ state: 'pending_payment' });
+
+      await expect(
+        (service as any).confirmPendingChange(
+          invoiceForConfirm({ change_kind: 'resubscribe' }),
+          seam.tx,
+        ),
+      ).rejects.toBeDefined();
     });
 
     it('emits subscription.plan.changed event on successful confirm', async () => {

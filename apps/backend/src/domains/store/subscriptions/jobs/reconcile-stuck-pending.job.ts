@@ -268,8 +268,8 @@ export class ReconcileStuckPendingJob {
    * are dropped, the subscription stays in `pending_payment` forever.
    *
    * The 1-minute buffer avoids racing the in-flight transaction. Idempotent:
-   * `transition()` no-ops on same-state, so a row promoted by the listener
-   * mid-run will be skipped on the next pass.
+   * `ensureOperational()` no-ops when the store is already active/trial, so a
+   * row promoted by the listener mid-run costs nothing.
    */
   private async reconcileLegacyStuckPayments(): Promise<void> {
     const now = new Date();
@@ -330,16 +330,24 @@ export class ReconcileStuckPendingJob {
       const lastPayment = lastInvoice?.payments[0];
 
       try {
-        await this.stateService.transition(sub.store_id, 'active', {
-          reason: 'webhook_state_drift',
-          triggeredByJob: 'cron_reconciliation',
-          payload: {
-            invoice_id: lastInvoice?.id,
-            payment_id: lastPayment?.id,
-            succeeded_at: lastPayment?.paid_at?.toISOString() ?? null,
-            source: 'reconcile-stuck-pending-job',
+        // Single reactivation seam. It owns the route to `active`, the
+        // idempotent no-op when another writer got there first, the clearing
+        // of stale dunning/cancellation columns, and the exit guard that
+        // throws rather than let this job log a reconciliation that did not
+        // actually leave the store operational.
+        const { finalState, path } = await this.stateService.ensureOperational(
+          sub.store_id,
+          {
+            reason: 'webhook_state_drift',
+            triggeredByJob: 'cron_reconciliation',
+            payload: {
+              invoice_id: lastInvoice?.id,
+              payment_id: lastPayment?.id,
+              succeeded_at: lastPayment?.paid_at?.toISOString() ?? null,
+              source: 'reconcile-stuck-pending-job',
+            },
           },
-        });
+        );
 
         // WARN level — every reconciliation is a signal that the
         // synchronous webhook promotion + listener BOTH missed this row.
@@ -350,6 +358,8 @@ export class ReconcileStuckPendingJob {
           invoiceId: lastInvoice?.id,
           paymentId: lastPayment?.id,
           succeededAt: lastPayment?.paid_at,
+          finalState,
+          path,
           note: 'subscription was stuck in pending_payment despite a succeeded payment; reconciled to active',
         });
       } catch (err: any) {

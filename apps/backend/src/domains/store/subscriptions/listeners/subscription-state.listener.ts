@@ -15,9 +15,9 @@ import { Prisma } from '@prisma/client';
  *  - SubscriptionWebhookService.handleWompiEvent — observability hook with
  *    the same shape (subscriptionId + storeId may be present).
  *
- * `storeId` is required for SubscriptionStateService.transition() (which
- * locks `store_subscriptions` by `store_id`). When missing we resolve it
- * from the invoice as a fallback.
+ * `storeId` is required for SubscriptionStateService.ensureOperational()
+ * (which locks `store_subscriptions` by `store_id`). When missing we resolve
+ * it from the invoice as a fallback.
  */
 interface PaymentSucceededEventPayload {
   invoiceId: number;
@@ -38,19 +38,21 @@ interface PaymentSucceededEventPayload {
  *  - `SubscriptionWebhookService.handleWompiEvent` as an observability hook
  *    (same event name, idempotent on listener side).
  *
- * Promotable source states (G12 — full state engine event-driven recovery):
- *  - `pending_payment` — fresh purchase awaiting first Wompi confirmation.
- *  - `grace_soft`, `grace_hard` — recovered after a missed renewal.
- *  - `suspended` — recovered after dunning suspended the subscription.
- *  - `blocked` — recovered after dunning blocked the subscription.
+ * Which source states can be recovered, and by which route, is NOT decided
+ * here: this listener delegates to
+ * `SubscriptionStateService.ensureOperational()`, the single reactivation
+ * seam. That covers `pending_payment` (fresh purchase awaiting the first
+ * Wompi confirmation), `grace_soft` / `grace_hard` (missed renewal),
+ * `suspended` / `blocked` (dunning) AND the terminal `cancelled` / `expired`
+ * rows that a local allow-list used to drop on the floor while returning a
+ * successful webhook response.
  *
- * Idempotency: the underlying `transition()` already runs inside a
- * Serializable tx with `SELECT ... FOR UPDATE` on the subscription row and
- * is a no-op when source === target. Duplicate webhooks are safe — both
- * land in the same critical section and the second one short-circuits.
- * We do NOT add a separate advisory lock here: the row-level lock taken by
- * `transition()` already prevents the cron + webhook race for the same
- * subscription.
+ * Idempotency: `ensureOperational()` runs inside a Serializable tx with
+ * `SELECT ... FOR UPDATE` on the subscription row and is a no-op when the
+ * store is already active/trial. Duplicate webhooks are safe — both land in
+ * the same critical section and the second one short-circuits. We do NOT add
+ * a separate advisory lock here: that row-level lock already prevents the
+ * cron + webhook race for the same subscription.
  *
  * Errors are caught and logged. Webhook responses MUST NOT fail because of
  * a state-promotion hiccup — the daily 03:00 dunning cron remains the
@@ -73,32 +75,14 @@ interface PaymentSucceededEventPayload {
 export class SubscriptionStateListener {
   private readonly logger = new Logger(SubscriptionStateListener.name);
 
-  // States from which a successful payment SHOULD promote the subscription
-  // back to `active`. Excludes terminal states (cancelled/expired) and
-  // already-active/trial states (which are no-ops anyway).
-  //
-  // Split in two tiers (G12):
-  //  - PROMOTABLE_PENDING — first-payment activation, always-on (G3 baseline).
-  //  - PROMOTABLE_RECOVERY — recovery from dunning, gated by
-  //    `SUBSCRIPTION_EVENT_DRIVEN_STATE` for staged rollout. The daily 03:00
-  //    cron is the canonical fallback while the flag is off.
-  private static readonly PROMOTABLE_PENDING: readonly string[] = [
-    'pending_payment',
-  ];
-  private static readonly PROMOTABLE_RECOVERY: readonly string[] = [
-    'grace_soft',
-    'grace_hard',
-    'suspended',
-    'blocked',
-  ];
-
   /**
    * Read the `SUBSCRIPTION_EVENT_DRIVEN_STATE` env flag at handler time
    * (not at module load) so tests + staged rollouts can flip without
    * a process restart.
    *
-   *  - `'true'`  → enforce: the listener calls `transition()` to promote
-   *    recovery states (grace_soft, grace_hard, suspended, blocked → active).
+   *  - `'true'`  → enforce: the listener calls `ensureOperational()` to
+   *    recover every degraded state (grace_soft, grace_hard, suspended,
+   *    blocked, cancelled, expired... → active).
    *  - anything else (default) → log-only: emits `STATE_ENGINE_OBSERVATION`
    *    so we can compare what the listener WOULD do vs what the cron
    *    actually does. The cron is the source of truth in this mode.
@@ -227,21 +211,23 @@ export class SubscriptionStateListener {
       }
 
       // If the webhook already promoted the subscription synchronously
-      // (handleChargeSuccess now does the transition in-tx), the sub is
-      // already 'active' by the time we get here. Skip the call to
-      // transition() (which would no-op anyway) and proceed straight to
+      // (handleChargeSuccess does the promotion in-tx), the sub is already
+      // operational by the time we get here. `ensureOperational()` would
+      // no-op on active/trial anyway, so skip it and proceed straight to the
       // side effects: coupon apply, confirmation email, commission outbox.
-      // This prevents misleading "illegal transition" log noise and avoids
-      // a redundant DB roundtrip for the SELECT FOR UPDATE.
-      if (sub.state === 'active') {
+      // This is NOT a reactivation policy decision — it mirrors exactly the
+      // seam's own idempotency and only saves a SELECT ... FOR UPDATE
+      // roundtrip.
+      if (sub.state === 'active' || sub.state === 'trial') {
         this.logger.log({
           msg: 'STATE_ENGINE_ALREADY_ACTIVE',
           subscriptionId: sub.id,
           storeId: sub.store_id,
+          state: sub.state,
           source: payload?.source ?? 'unknown',
           invoiceId: payload.invoiceId,
           paymentId: payload.paymentId,
-          note: 'subscription already active, skipping state transition (likely promoted synchronously by webhook)',
+          note: 'subscription already operational, skipping reactivation seam (likely promoted synchronously by webhook)',
         });
 
         // Still run the post-activation side effects: a coupon registered
@@ -273,30 +259,20 @@ export class SubscriptionStateListener {
         return;
       }
 
-      const isPending = SubscriptionStateListener.PROMOTABLE_PENDING.includes(
-        sub.state as string,
-      );
-      const isRecovery = SubscriptionStateListener.PROMOTABLE_RECOVERY.includes(
-        sub.state as string,
-      );
-
-      if (!isPending && !isRecovery) {
-        this.logger.debug({
-          msg: 'STATE_ENGINE_NO_CHANGE',
-          subscriptionId: sub.id,
-          state: sub.state,
-          reason: 'not_in_promotable_set',
-          source: payload?.source ?? 'unknown',
-          invoiceId: payload.invoiceId,
-          paymentId: payload.paymentId,
-        });
-        return;
-      }
-
-      // Recovery transitions (grace_*/suspended/blocked → active) are gated
-      // by SUBSCRIPTION_EVENT_DRIVEN_STATE for staged rollout. The first-
-      // payment path (pending_payment → active) is always enforced.
-      const enforce = isPending || this.isEventDrivenStateEnabled();
+      // There is no local allow-list of "promotable" states any more: which
+      // states can reach `active`, and by which route, is `ensureOperational`'s
+      // policy alone. Keeping a copy here is what let `cancelled` / `expired`
+      // silently fall through this handler — a paid invoice that left the
+      // store terminal and the customer locked out.
+      //
+      // The only distinction still made locally is a ROLLOUT one, not a
+      // reactivation one: the first-payment path (`pending_payment → active`)
+      // predates G12 and has no cron fallback, so it is always enforced.
+      // Every other degraded source state is a recovery and stays gated by
+      // SUBSCRIPTION_EVENT_DRIVEN_STATE, with the daily 03:00 cron as the
+      // canonical fallback while the flag is off.
+      const isFirstPayment = sub.state === 'pending_payment';
+      const enforce = isFirstPayment || this.isEventDrivenStateEnabled();
 
       if (!enforce) {
         // Log-only mode for recovery transitions (default during rollout).
@@ -318,38 +294,44 @@ export class SubscriptionStateListener {
         return;
       }
 
-      // Enforce mode (pending always, recovery only when flag is on).
-      // `transition()` is Serializable + SELECT FOR UPDATE on the row, so
-      // duplicate webhooks and the cron race safely — the second writer
-      // no-ops on the same-state guard inside transition().
-      await this.stateService.transition(sub.store_id, 'active', {
-        reason: 'payment_succeeded_webhook',
-        triggeredByJob: 'subscription-state-listener',
-        payload: {
-          invoice_id: payload.invoiceId,
-          payment_id: payload.paymentId,
-          source: payload.source ?? 'unknown',
-          previous_state: sub.state,
+      // Enforce mode (first payment always, recovery only when flag is on).
+      // The seam runs one Serializable transaction holding SELECT ... FOR
+      // UPDATE for the whole route, so duplicate webhooks and the cron race
+      // safely — the loser either waits or finds the store already
+      // operational and no-ops. It also owns the exit guard: if this returns,
+      // the store IS operational, so no post-check is needed here.
+      const { finalState, path } = await this.stateService.ensureOperational(
+        sub.store_id,
+        {
+          reason: 'payment_succeeded_webhook',
+          triggeredByJob: 'subscription-state-listener',
+          payload: {
+            invoice_id: payload.invoiceId,
+            payment_id: payload.paymentId,
+            source: payload.source ?? 'unknown',
+            previous_state: sub.state,
+          },
         },
-      });
+      );
 
       this.logger.log({
-        msg: isRecovery
-          ? 'STATE_ENGINE_EVENT_RECOVERY'
-          : 'STATE_ENGINE_EVENT_ACTIVATION',
+        msg: isFirstPayment
+          ? 'STATE_ENGINE_EVENT_ACTIVATION'
+          : 'STATE_ENGINE_EVENT_RECOVERY',
         subscriptionId: sub.id,
         storeId: sub.store_id,
         fromState: sub.state,
-        toState: 'active',
+        toState: finalState,
+        path,
         source: payload?.source ?? 'unknown',
         invoiceId: payload.invoiceId,
         paymentId: payload.paymentId,
       });
 
-      // S2.1 — After a pending_payment → active transition, apply any
-      // coupon that was registered at checkout time but couldn't be applied
-      // until the subscription was active.
-      if (isPending) {
+      // S2.1 — After a pending_payment → active promotion, apply any coupon
+      // that was registered at checkout time but couldn't be applied until
+      // the subscription was active.
+      if (isFirstPayment) {
         await this.applyPendingCoupon(sub.id, sub.store_id);
       }
 

@@ -656,7 +656,14 @@ export class SubscriptionPaymentService {
    * Called from: webhook APPROVED, free-plan synchronous path, Wompi polling.
    *
    * Invariant: after this method returns, state=active, plan_id=paid_plan_id,
-   * all pending_* fields are null.
+   * all pending_* fields are null. The state half of that invariant is
+   * ENFORCED, not assumed: `ensureOperationalInTx` re-reads the row and throws
+   * (aborting this transaction) rather than let a confirmed collection commit
+   * against a store that is still degraded.
+   *
+   * Note the returned row is the snapshot taken before the state promotion, so
+   * its `state` / `current_period_*` are stale by design; callers use this for
+   * the plan/pricing fields only.
    */
   async confirmPendingChange(
     invoice: {
@@ -728,7 +735,10 @@ export class SubscriptionPaymentService {
       'downgrade',
     ].includes(changeKind);
 
-    // 6. Calculate new period if needed
+    // 6. Calculate the period the caller WANTS, if the change kind resets it.
+    // This is only the BASE handed to `ensureOperationalInTx` below — the seam
+    // is the single writer of `current_period_*` / `next_billing_at` and
+    // applies the consumed-grace discount on top of this value.
     const now = new Date();
     let newPeriodEnd: Date | undefined;
     if (shouldResetPeriod) {
@@ -757,27 +767,25 @@ export class SubscriptionPaymentService {
       // Clear scheduled downgrade (upgrade cancels deferred downgrade)
       scheduled_plan_id: null,
       scheduled_plan_change_at: null,
-      // Buying a new plan voids any end-of-cycle cancellation.
-      scheduled_cancel_at: null,
-      auto_renew: true,
-      // Clear grace fields when confirming payment
-      grace_soft_until: null,
-      grace_hard_until: null,
-      suspend_at: null,
       updated_at: now,
+      // NOTE: `scheduled_cancel_at`, `auto_renew`, `suspend_at`, `cancel_at`,
+      // `grace_soft_until`, `grace_hard_until`, `lock_reason` and the
+      // `current_period_*` / `next_billing_at` window are deliberately ABSENT
+      // here. `ensureOperationalInTx` (step 8) owns all of them. They used to
+      // be hand-written in this block AND recomputed inside the state service,
+      // which is precisely how the two sites drifted into disagreeing about
+      // when a store is really operational.
     };
 
-    if (shouldResetPeriod && newPeriodEnd) {
-      updateData.current_period_start = now;
-      updateData.current_period_end = newPeriodEnd;
-      updateData.next_billing_at = newPeriodEnd;
-      // Clear trial fields if coming from trial
-      if (
-        sub.state === 'pending_payment' &&
-        sub.pending_revert_state === 'trial'
-      ) {
-        updateData.trial_ends_at = null;
-      }
+    // `trial_ends_at` is the one field of the old hand-rolled cleanup the seam
+    // does NOT cover: it is a plan-change concern (a trial converting to a paid
+    // plan), not a reactivation concern, so it stays here.
+    if (
+      shouldResetPeriod &&
+      sub.state === 'pending_payment' &&
+      sub.pending_revert_state === 'trial'
+    ) {
+      updateData.trial_ends_at = null;
     }
 
     const updated = await tx.store_subscriptions.update({
@@ -785,9 +793,36 @@ export class SubscriptionPaymentService {
       data: updateData,
     });
 
-    // 8. Transition state via stateService
-    await this.stateService.transitionInTx(tx, sub.store_id, 'active', {
+    // 8. Bring the store back to an operational state through the single
+    // reactivation seam.
+    //
+    // This is the call-site that CONFIRMS THE COLLECTION, so it is the one that
+    // must never report success on a store that stays degraded. The previous
+    // `transitionInTx(tx, storeId, 'active', …)` asked for a single hop, which
+    // is illegal from `cancelled` / `expired`: a store that had been cancelled
+    // and then bought a plan got `SUBSCRIPTION_010` swallowed by the caller's
+    // catch (see handleChargeSuccess), the charge went through, the response was
+    // HTTP 200 — and the store stayed blocked.
+    //
+    // `ensureOperationalInTx` resolves the legal route instead of assuming one
+    // (two hops via `pending_payment` for the terminal states), is a no-op when
+    // the subscription is already operational, and re-reads the row before
+    // returning: if the store is not `active`/`trial` it throws, which aborts
+    // THIS transaction — a payment confirmation that cannot leave the store
+    // operational must not commit.
+    //
+    // `tx` is the caller's transaction, not a new one: the state promotion has
+    // to be atomic with the payment/invoice rows, and `ensureOperational`
+    // (non-InTx) would open a second transaction that would deadlock against
+    // the `FOR UPDATE` lock this one already holds on the subscription row.
+    //
+    // `periodEnd`/`planId` are passed when the change kind resets the cycle;
+    // the seam takes them as the base window and discounts the grace days the
+    // store already consumed.
+    await this.stateService.ensureOperationalInTx(tx, sub.store_id, {
       reason: `plan_confirmed_invoice_${invoice.id}`,
+      periodEnd: newPeriodEnd,
+      planId: sub.pending_plan_id ?? undefined,
       payload: {
         from_plan_id: invoice.from_plan_id,
         to_plan_id: invoice.to_plan_id,
