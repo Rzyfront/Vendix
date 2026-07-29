@@ -26,6 +26,18 @@ const TICKET_PAGE: Record<
   half_letter: { width_mm: 216, page_size: '216mm 140mm', type: 'standard' },
 };
 
+/**
+ * Regime label printed on the ticket. Mirrors `TAX_REGIME_LABELS` in
+ * invoice-pdf.service.ts so both documents word the same fact identically.
+ */
+const TAX_REGIME_LABELS: Record<string, string> = {
+  COMUN: 'Responsable de IVA',
+  SIMPLIFICADO: 'No responsable de IVA',
+  SIMPLE: 'Regimen Simple de Tributacion (RST)',
+  GRAN_CONTRIBUYENTE: 'Gran contribuyente',
+  NO_RESPONSABLE: 'No responsable de IVA',
+};
+
 @Injectable({
   providedIn: 'root',
 })
@@ -89,15 +101,70 @@ export class PosTicketService {
     return this.authFacade.isVatResponsible() !== false;
   }
 
+  /**
+   * Last-resort shape when neither the ticket nor the session carries the store.
+   * Deliberately empty instead of the sample values it used to hold: a ticket the
+   * buyer may keep as support for a purchase must never print an invented
+   * address or NIT, and the header omits whatever is missing.
+   */
   private storeConfig = {
-    name: 'Vendix Store',
-    address: '123 Main St, City, State 12345',
-    phone: '+1 (555) 123-4567',
-    email: 'info@vendix.com',
-    taxId: 'TAX-123456789',
+    name: '',
+    address: '',
+    phone: '',
+    email: '',
+    taxId: '',
     id: 0,
     logo: '',
   };
+
+  /**
+   * Legal identity of whoever issues this ticket, mirroring the backend's
+   * `resolveIssuer` (invoice-pdf.service.ts) so the paper cannot state a razón
+   * social or NIT different from the one the DIAN validated.
+   *
+   * `fiscalData()` is already resolved by `fiscal_scope`, the same criterion the
+   * signed XML uses: the habilitación may belong to the store or to the
+   * organization. The header used to print `stores.name` and the raw store id
+   * labelled as CIIU, so a POS equivalent document went out with a commercial
+   * name, no NIT and a bogus economic-activity code.
+   */
+  private resolveIssuer(fallbackOrganization?: any): {
+    legal_name: string;
+    nit: string;
+    address: string;
+    tax_regime: string;
+    ciiu: string;
+  } {
+    const fiscal = (this.authFacade.fiscalData() ?? {}) as Record<string, any>;
+    // The session copy is the fallback for a print issued before the NgRx state
+    // rehydrates; `tax_id` is the real column name — the header used to read a
+    // camelCase `taxId` that never existed, which is why no NIT was printed.
+    const organization = this.authFacade.userOrganization() ?? fallbackOrganization;
+
+    // The check digit must come from the same field as the base it verifies:
+    // `fiscal_data` can carry both `nit`/`nit_dv` and `tax_id`/`tax_id_dv` with
+    // different values, and pairing a base with the other's DV prints an
+    // arithmetically invalid NIT.
+    const [nit_base, dv] = fiscal['nit']
+      ? [fiscal['nit'], fiscal['nit_dv']]
+      : fiscal['tax_id']
+        ? [fiscal['tax_id'], fiscal['tax_id_dv']]
+        : [organization?.tax_id, undefined];
+
+    return {
+      legal_name:
+        fiscal['legal_name'] || organization?.legal_name || organization?.name || '',
+      nit: nit_base ? (dv ? `${nit_base}-${dv}` : `${nit_base}`) : '',
+      address: [fiscal['fiscal_address'], fiscal['city'], fiscal['department']]
+        .filter(Boolean)
+        .join(', '),
+      tax_regime:
+        TAX_REGIME_LABELS[String(fiscal['tax_regime'] ?? '').toUpperCase()] ||
+        fiscal['tax_regime'] ||
+        '',
+      ciiu: fiscal['ciiu_code'] || fiscal['ciiu'] || '',
+    };
+  }
 
   printTicket(
     ticketData: TicketData,
@@ -180,26 +247,44 @@ export class PosTicketService {
     `;
 
     if (printer.printHeader) {
+      const issuer = this.resolveIssuer(organization);
+      // Razón social leads the header; the commercial name only repeats when it
+      // actually differs, so a store trading under its own legal name does not
+      // print the same line twice.
+      const heading = issuer.legal_name || store.name;
+      const trade_name =
+        store.name && store.name !== heading ? store.name : '';
+      // The fiscal address is the one bound to the NIT; the session address is
+      // only a fallback for stores with no fiscal block captured yet.
+      const address = issuer.address || store.address;
+
+      const lines = [
+        trade_name,
+        issuer.nit ? `NIT ${issuer.nit}` : '',
+        address,
+        issuer.tax_regime,
+        // Never the store id: that was printed as a CIIU code and is not one.
+        issuer.ciiu ? `CIIU: ${issuer.ciiu}` : '',
+      ].filter(Boolean);
+
       html += `
         <div style="text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px;">
       `;
       if (store.logo) {
         html += `<img src="${store.logo}" style="max-width: 100px; margin-bottom: 10px;" alt="Logo" />`;
       }
-      html += `
-          <h2 style="margin: 0; font-size: 18px; font-weight: bold;">${store.name}</h2>
-      `;
-      if (organization && organization.name) {
-        html += `<p style="margin: 2px 0; font-size: 12px;">${organization.name}</p>`;
+      if (heading) {
+        html += `
+          <h2 style="margin: 0; font-size: 18px; font-weight: bold;">${heading}</h2>
+        `;
       }
+      html += lines
+        .map(
+          (line) =>
+            `<p style="margin: 2px 0; font-size: 12px;">${line}</p>`,
+        )
+        .join('');
       html += `
-          <p style="margin: 2px 0; font-size: 12px;">${store.address}</p>
-      `;
-      if (organization && organization.taxId) {
-        html += `<p style="margin: 2px 0; font-size: 12px;">${organization.taxId}</p>`;
-      }
-      html += `
-          <p style="margin: 2px 0; font-size: 12px;">CIIU: ${store.id}</p>
         </div>
       `;
     }
