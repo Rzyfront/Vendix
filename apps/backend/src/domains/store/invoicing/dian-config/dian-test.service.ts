@@ -243,6 +243,26 @@ export class DianTestService {
       );
     }
 
+    // Reserve the block BEFORE building and signing the documents. Advancing
+    // `current_number` afterwards would leave a window where the batch is
+    // already in DIAN's hands but the numbers still look available, so a crash
+    // or a retry would re-send numbering DIAN has — and DIAN rejects duplicated
+    // numbering. Reserving first can only leave an unused gap in the range,
+    // which is harmless; the reverse mistake is not recoverable.
+    // `updateMany` (not `update`) so the guard on `current_number` makes the
+    // reservation atomic: two concurrent runs cannot claim the same block.
+    const reserved = await this.prisma.invoice_resolutions.updateMany({
+      where: { id: resolution_id, current_number: resolution.current_number },
+      data: { current_number: next_number + TEST_SET_SIZE - 1 },
+    });
+    if (reserved.count === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_002,
+        'Otro proceso está consumiendo la numeración de esta resolución. Espera a que termine y vuelve a intentarlo.',
+        { dian_configuration_id: config_id, resolution_id },
+      );
+    }
+
     // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
     // numbering-resolution row so the AuthorizedInvoices range and authorization
     // period rendered in the XML are the real habilitación values, not empty.
@@ -665,14 +685,6 @@ export class DianTestService {
         enablement_status: success ? 'test_set_passed' : 'testing',
         enablement_evidence: success ? result_data : undefined,
       },
-    });
-
-    // The numbers were handed to DIAN regardless of the verdict, so they are
-    // burned. Advancing `current_number` is what makes a retry use a fresh
-    // block instead of colliding with this batch.
-    await this.prisma.invoice_resolutions.update({
-      where: { id: resolution_id },
-      data: { current_number: next_number + TEST_SET_SIZE - 1 },
     });
 
     await this.createAuditLog(config.id, {
