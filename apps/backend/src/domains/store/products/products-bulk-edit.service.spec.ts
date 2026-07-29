@@ -3,7 +3,7 @@ import { ProductsBulkEditService } from './products-bulk-edit.service';
 import { ProductsService } from './products.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
-import { BulkEditProductsDto } from './dto';
+import { BulkArchiveProductsDto, BulkEditProductsDto } from './dto';
 import { ProductState, ProductType } from './dto/product-enums';
 
 /**
@@ -28,6 +28,12 @@ const MOCKED_MODELS = [
   'product_variants',
   'recipes',
   'stores',
+  // Archivado masivo: pedidos abiertos, insumo de receta activa y promoción
+  // vigente. Se añaden al mismo array para que las aserciones de "ninguna
+  // escritura" también los cubran.
+  'order_items',
+  'recipe_items',
+  'promotion_products',
 ] as const;
 
 type MockModel = Record<string, jest.Mock>;
@@ -109,14 +115,18 @@ function makeDto(
   return { ids, changes } as BulkEditProductsDto;
 }
 
+function makeArchiveDto(ids: number[]): BulkArchiveProductsDto {
+  return { ids } as BulkArchiveProductsDto;
+}
+
 describe('ProductsBulkEditService', () => {
   let service: ProductsBulkEditService;
   let prisma: MockPrisma;
-  let productsService: { update: jest.Mock };
+  let productsService: { update: jest.Mock; remove: jest.Mock };
 
   beforeEach(async () => {
     prisma = buildMockPrisma();
-    productsService = { update: jest.fn() };
+    productsService = { update: jest.fn(), remove: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -497,6 +507,332 @@ describe('ProductsBulkEditService', () => {
       );
 
       expect(productsService.update).toHaveBeenCalledTimes(1);
+      expect(result.total).toBe(1);
+    });
+  });
+
+  describe('previewArchive()', () => {
+    it('marca error INV_STOCK_001 cuando el producto tiene reservas de stock activas', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+      prisma.stock_reservations.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.total).toBe(1);
+      expect(result.errors).toBe(1);
+      expect(result.ok).toBe(0);
+      expect(result.items[0].status).toBe('error');
+      // Mismo código que el bloqueo del servicio individual en `update()`.
+      expect(result.items[0].code).toBe('INV_STOCK_001');
+      expect(result.items[0].message).toContain('reservas de stock activas');
+      // Desviación deliberada frente a `update()`: NO se filtra
+      // `product_variant_id: null`. Archivar retira también las variantes, así
+      // que una reserva de variante también debe bloquear.
+      const where = prisma.stock_reservations.findMany.mock.calls[0][0].where;
+      expect(where).toEqual({
+        product_id: { in: [1] },
+        status: 'active',
+      });
+      expect(where).not.toHaveProperty('product_variant_id');
+    });
+
+    it('marca error cuando el producto está en un pedido abierto', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+      prisma.order_items.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.errors).toBe(1);
+      expect(result.items[0].status).toBe('error');
+      expect(result.items[0].code).toBe('PROD_VALIDATE_001');
+      expect(result.items[0].message).toContain('pedidos abiertos');
+      // "Abierto" = todo lo que no sea terminal. Réplica de
+      // `orders.service.ts:378` y de `order-flow.service.ts:2314`.
+      expect(prisma.order_items.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            product_id: { in: [1] },
+            orders: {
+              state: { notIn: ['finished', 'cancelled', 'refunded'] },
+            },
+          }),
+        }),
+      );
+    });
+
+    it('marca warning cuando el producto es insumo de una receta activa', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+      prisma.recipe_items.findMany.mockResolvedValue([
+        { component_product_id: 1 },
+      ]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.warnings).toBe(1);
+      expect(result.errors).toBe(0);
+      expect(result.items[0].status).toBe('warning');
+      expect(result.items[0].message).toContain('insumo de una receta activa');
+      // Los warnings no llevan código: no son errores.
+      expect(result.items[0].code).toBeUndefined();
+      // La pregunta es la INVERSA a la del preview de edición: se mira
+      // `component_product_id`, no `recipes.product_id`.
+      expect(prisma.recipe_items.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            component_product_id: { in: [1] },
+            recipe: { is_active: true },
+          }),
+        }),
+      );
+    });
+
+    it('marca warning cuando el producto está en una promoción vigente', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+      prisma.promotion_products.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.warnings).toBe(1);
+      expect(result.items[0].status).toBe('warning');
+      expect(result.items[0].message).toContain('promoción vigente');
+      // Misma ventana de vigencia que el motor de promociones al cotizar un
+      // carrito (`promotion-engine.service.ts:373-375`): `end_date` nulo =
+      // sin caducidad, y el límite es inclusivo.
+      const where = prisma.promotion_products.findMany.mock.calls[0][0].where;
+      expect(where.promotions.state).toEqual({ in: ['active', 'scheduled'] });
+      expect(where.promotions.start_date.lte).toBeInstanceOf(Date);
+      expect(where.promotions.OR).toEqual([
+        { end_date: null },
+        { end_date: { gte: where.promotions.start_date.lte } },
+      ]);
+    });
+
+    it('marca ok un producto sin reservas, pedidos, recetas ni promociones', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.total).toBe(1);
+      expect(result.ok).toBe(1);
+      expect(result.warnings).toBe(0);
+      expect(result.errors).toBe(0);
+      expect(result.items[0]).toEqual({
+        id: 1,
+        name: 'Producto de prueba',
+        sku: 'SKU-1',
+        status: 'ok',
+      });
+    });
+
+    it('acumula los dos avisos cuando el producto es insumo y está en promoción', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+      prisma.recipe_items.findMany.mockResolvedValue([
+        { component_product_id: 1 },
+      ]);
+      prisma.promotion_products.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.items[0].status).toBe('warning');
+      expect(result.items[0].message).toContain('insumo de una receta activa');
+      expect(result.items[0].message).toContain('promoción vigente');
+    });
+
+    it('el bloqueo gana al aviso cuando coinciden en el mismo producto', async () => {
+      prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
+      prisma.stock_reservations.findMany.mockResolvedValue([{ product_id: 1 }]);
+      prisma.promotion_products.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      const result = await service.previewArchive(makeArchiveDto([1]));
+
+      expect(result.items[0].status).toBe('error');
+      expect(result.items[0].code).toBe('INV_STOCK_001');
+    });
+
+    it('reporta error PROD_FIND_001 para ids inexistentes o ya archivados', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 2, state: ProductState.ARCHIVED, name: 'Archivado' }),
+      ]);
+
+      const result = await service.previewArchive(makeArchiveDto([1, 2]));
+
+      expect(result.errors).toBe(2);
+      expect(result.items[0]).toMatchObject({
+        id: 1,
+        status: 'error',
+        code: 'PROD_FIND_001',
+      });
+      expect(result.items[1]).toMatchObject({
+        id: 2,
+        name: 'Archivado',
+        status: 'error',
+        code: 'PROD_FIND_001',
+        message: 'El producto ya está archivado',
+      });
+    });
+
+    it('no consulta las restricciones cuando ningún id es archivable', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, state: ProductState.ARCHIVED }),
+      ]);
+
+      await service.previewArchive(makeArchiveDto([1]));
+
+      expect(prisma.stock_reservations.findMany).not.toHaveBeenCalled();
+      expect(prisma.order_items.findMany).not.toHaveBeenCalled();
+      expect(prisma.recipe_items.findMany).not.toHaveBeenCalled();
+      expect(prisma.promotion_products.findMany).not.toHaveBeenCalled();
+    });
+
+    it('no ejecuta NINGUNA escritura en Prisma', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1 }),
+        makeProduct({ id: 2, sku: 'SKU-2' }),
+      ]);
+      prisma.stock_reservations.findMany.mockResolvedValue([{ product_id: 2 }]);
+      prisma.recipe_items.findMany.mockResolvedValue([
+        { component_product_id: 1 },
+      ]);
+      prisma.promotion_products.findMany.mockResolvedValue([{ product_id: 1 }]);
+
+      await service.previewArchive(makeArchiveDto([1, 2]));
+
+      for (const model of MOCKED_MODELS) {
+        for (const write of WRITE_METHODS) {
+          expect(prisma[model][write]).not.toHaveBeenCalled();
+        }
+      }
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(productsService.remove).not.toHaveBeenCalled();
+      expect(productsService.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('archive()', () => {
+    it('un fallo intermedio no aborta el lote', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+        makeProduct({ id: 2, name: 'Dos' }),
+        makeProduct({ id: 3, name: 'Tres' }),
+      ]);
+      productsService.remove
+        .mockResolvedValueOnce({ id: 1, name: 'Uno' })
+        .mockRejectedValueOnce(
+          new VendixHttpException(ErrorCodes.PROD_FIND_001),
+        )
+        .mockResolvedValueOnce({ id: 3, name: 'Tres' });
+
+      const result = await service.archive(makeArchiveDto([1, 2, 3]));
+
+      expect(result.total).toBe(3);
+      expect(result.successful).toBe(2);
+      expect(result.failed).toBe(1);
+      expect(result.results).toHaveLength(3);
+      expect(result.results.map((row) => row.id)).toEqual([1, 2, 3]);
+      expect(result.results[0]).toMatchObject({
+        id: 1,
+        name: 'Uno',
+        status: 'ok',
+      });
+      expect(result.results[1]).toMatchObject({
+        id: 2,
+        name: 'Dos',
+        status: 'error',
+        code: 'PROD_FIND_001',
+      });
+      expect(result.results[2]).toMatchObject({ id: 3, status: 'ok' });
+      expect(productsService.remove).toHaveBeenCalledTimes(3);
+    });
+
+    it('delega en remove() y no escribe Prisma directamente', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.remove.mockResolvedValue({ id: 1, name: 'Uno' });
+
+      await service.archive(makeArchiveDto([1]));
+
+      // El soft-delete es la primitiva de `remove()`; el bulk no reescribe
+      // `state:'archived'` por su cuenta.
+      expect(productsService.remove).toHaveBeenCalledWith(1);
+      expect(productsService.remove).toHaveBeenCalledTimes(1);
+      for (const model of MOCKED_MODELS) {
+        for (const write of WRITE_METHODS) {
+          expect(prisma[model][write]).not.toHaveBeenCalled();
+        }
+      }
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(productsService.update).not.toHaveBeenCalled();
+    });
+
+    it('re-verifica los bloqueos y no archiva un producto con reservas activas', async () => {
+      // El preview pudo calcularse minutos antes: `remove()` no valida nada, así
+      // que la re-verificación es la única barrera en el momento de escribir.
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+        makeProduct({ id: 2, name: 'Dos' }),
+      ]);
+      prisma.stock_reservations.findMany.mockResolvedValue([{ product_id: 2 }]);
+      productsService.remove.mockResolvedValue({ id: 1, name: 'Uno' });
+
+      const result = await service.archive(makeArchiveDto([1, 2]));
+
+      expect(result.successful).toBe(1);
+      expect(result.failed).toBe(1);
+      expect(result.results[1]).toMatchObject({
+        id: 2,
+        name: 'Dos',
+        status: 'error',
+        code: 'INV_STOCK_001',
+      });
+      expect(productsService.remove).toHaveBeenCalledTimes(1);
+      expect(productsService.remove).toHaveBeenCalledWith(1);
+    });
+
+    it('no bloquea por avisos: insumo de receta y promoción vigente sí se archivan', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      prisma.recipe_items.findMany.mockResolvedValue([
+        { component_product_id: 1 },
+      ]);
+      prisma.promotion_products.findMany.mockResolvedValue([{ product_id: 1 }]);
+      productsService.remove.mockResolvedValue({ id: 1, name: 'Uno' });
+
+      const result = await service.archive(makeArchiveDto([1]));
+
+      expect(result.successful).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(productsService.remove).toHaveBeenCalledWith(1);
+    });
+
+    it('registra un fallo sin error_code con el mensaje crudo', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.remove.mockRejectedValue(new Error('boom'));
+
+      const result = await service.archive(makeArchiveDto([1]));
+
+      expect(result.failed).toBe(1);
+      expect(result.results[0]).toMatchObject({
+        id: 1,
+        name: 'Uno',
+        status: 'error',
+        message: 'boom',
+      });
+      expect(result.results[0].code).toBeUndefined();
+    });
+
+    it('deduplica ids repetidos para no archivar dos veces el mismo producto', async () => {
+      prisma.products.findMany.mockResolvedValue([
+        makeProduct({ id: 1, name: 'Uno' }),
+      ]);
+      productsService.remove.mockResolvedValue({ id: 1, name: 'Uno' });
+
+      const result = await service.archive(makeArchiveDto([1, 1, 1]));
+
+      expect(productsService.remove).toHaveBeenCalledTimes(1);
       expect(result.total).toBe(1);
     });
   });

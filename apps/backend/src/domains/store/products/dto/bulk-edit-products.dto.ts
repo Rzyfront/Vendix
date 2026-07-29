@@ -305,3 +305,88 @@ export class BulkEditResultDto {
   failed: number;
   results: BulkEditResultItemDto[];
 }
+
+// ===========================================================================
+// Archivado masivo (soft-delete) — QUI-567
+// ===========================================================================
+
+/**
+ * Cuerpo de `POST /store/products/bulk-edit/archive` y de su `/preview`.
+ *
+ * ACCIÓN DEDICADA, no un campo más de `BulkEditableChangesDto`. `state` sigue
+ * siendo editable en masa (y `ARCHIVED` sigue entre sus valores válidos), pero
+ * archivar por esa vía es un efecto colateral no anunciado: comparte el permiso
+ * `store:products:bulk_update` con `is_featured`, no tiene preview de bloqueos y
+ * no exige confirmación reforzada. Esta superficie separada existe para que
+ * eliminar N productos tenga permiso propio (`store:products:admin_delete`, el
+ * mismo que el borrado individual), preview propio y confirmación propia.
+ *
+ * Mismos decoradores y mismo tope de 100 ids que `BulkEditProductsDto`: el
+ * `ValidationPipe` global es quien los aplica, el controller no re-valida.
+ *
+ * NO HAY RESTAURACIÓN, ni masiva ni individual: la API no expone ninguna ruta que
+ * saque un producto de `archived` (`update()` y `deactivate()` lo excluyen por
+ * `where`, y no existe `activate`/`restore`). Revertir exige acceso directo a la
+ * base. Decisión asumida en QUI-567: el preview de bloqueos y la confirmación
+ * reforzada son la única red antes de una operación irreversible.
+ */
+export class BulkArchiveProductsDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(MAX_BULK_EDIT_IDS)
+  @IsInt({ each: true })
+  @Type(() => Number)
+  ids: number[];
+}
+
+/**
+ * Resultado read-only por producto del preview de archivado.
+ *
+ * No lleva array de diffs (a diferencia de `BulkEditPreviewItemDto`): no hay
+ * campos que el usuario elija cambiar — se archiva y punto. Lo que el usuario
+ * necesita ver es el MOTIVO, así que la fila lleva `code` + `message`.
+ *
+ * Semántica del `status` (decisión de producto, no derivable del código):
+ * - `error`: el archivado se BLOQUEA. Reservas de stock activas, o el producto
+ *   está en un pedido abierto (no finalizado/cancelado/reembolsado).
+ * - `warning`: el archivado SÍ ocurre, pero con consecuencia que el usuario debe
+ *   conocer. El producto es insumo de una receta activa, o está en una promoción
+ *   vigente.
+ * - `ok`: sin observaciones.
+ *
+ * `code` solo viaja en las filas `error`, igual que en el preview de edición:
+ * los warnings no son errores y el contrato prohíbe inventar códigos nuevos
+ * para reutilizarlos con otra semántica.
+ */
+export class BulkArchivePreviewItemDto {
+  id: number;
+  name: string;
+  sku: string | null;
+  status: BulkEditItemStatus;
+  code?: string;
+  message?: string;
+}
+
+export class BulkArchivePreviewResultDto {
+  total: number;
+  ok: number;
+  warnings: number;
+  errors: number;
+  items: BulkArchivePreviewItemDto[];
+}
+
+/** Resultado por producto tras el archivado real (no hay `warning` aquí). */
+export class BulkArchiveResultItemDto {
+  id: number;
+  name: string;
+  status: Exclude<BulkEditItemStatus, 'warning'>;
+  code?: string;
+  message?: string;
+}
+
+export class BulkArchiveResultDto {
+  total: number;
+  successful: number;
+  failed: number;
+  results: BulkArchiveResultItemDto[];
+}

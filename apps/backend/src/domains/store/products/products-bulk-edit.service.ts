@@ -4,6 +4,11 @@ import { ProductsService } from './products.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import {
+  BulkArchivePreviewItemDto,
+  BulkArchivePreviewResultDto,
+  BulkArchiveProductsDto,
+  BulkArchiveResultDto,
+  BulkArchiveResultItemDto,
   BulkEditFieldDiffDto,
   BulkEditPreviewItemDto,
   BulkEditPreviewResultDto,
@@ -33,6 +38,45 @@ interface EffectiveChanges {
   /** `true` si el sanitizer de insumo puro llegó a disparar. */
   neutralized: boolean;
 }
+
+/** Fila mínima para clasificar un archivado: no hay diff que calcular. */
+interface ArchiveProductRow {
+  id: number;
+  name: string;
+  sku: string | null;
+  state: string;
+}
+
+/**
+ * Restricciones del archivado, resueltas en UNA pasada de 4 lecturas por lote en
+ * vez de 4 por producto.
+ */
+interface ArchiveConstraints {
+  /** BLOQUEA: el producto tiene reservas de stock activas. */
+  reserved: Set<number>;
+  /** BLOQUEA: el producto está en un pedido abierto. */
+  inOpenOrder: Set<number>;
+  /** AVISA: el producto es insumo de una receta activa. */
+  recipeComponent: Set<number>;
+  /** AVISA: el producto está en una promoción vigente. */
+  inLivePromotion: Set<number>;
+}
+
+/**
+ * Estados terminales de una orden. Réplica literal de la lista `terminalStates`
+ * de `order-flow.service.ts:2314` — el único sitio del backend que nombra el
+ * concepto "terminal" para órdenes — y del `where` de `orders.service.ts:378`.
+ *
+ * "Pedido abierto" = TODO lo demás (`draft`, `created`, `pending_payment`,
+ * `processing`, `shipped`, `delivered`). Es la variante más conservadora de las
+ * que existen en el repo: superconjunto de `ORDER_OPEN_STATES`
+ * (`webhook-handler.service.ts:29`) y de la lista de "órdenes activas" que ya
+ * bloquea el borrado de una tienda (`stores.service.ts:311`). Para una operación
+ * destructiva se elige el superconjunto a propósito: sobre-bloquear es
+ * recuperable (el usuario cierra o cancela el pedido), sub-bloquear deja líneas
+ * de pedido apuntando a un producto archivado.
+ */
+const TERMINAL_ORDER_STATES = ['finished', 'cancelled', 'refunded'] as const;
 
 /**
  * Las 34 claves escalares de `BulkEditableChangesDto`, en el orden del DTO.
@@ -285,6 +329,399 @@ export class ProductsBulkEditService {
       failed: results.filter((result) => result.status === 'error').length,
       results,
     };
+  }
+
+  // ===========================================================================
+  // ARCHIVADO MASIVO (soft-delete)
+  // ===========================================================================
+  //
+  // El soft-delete de productos es EXCLUSIVAMENTE `state = 'archived'`
+  // (`products.service.ts:2779-2800`). No hay columna `deleted_at` en el modelo.
+  //
+  // ## Asimetría deliberada: toda la protección vive en el preview
+  //
+  // `ProductsService.remove()` NO VALIDA NADA: llama `findOne(id)` y escribe
+  // `state:'archived'`. No comprueba reservas de stock, pedidos abiertos, recetas
+  // donde el producto es insumo, ni promociones vigentes — y `products` tiene 31
+  // relaciones entrantes. Por tanto las 4 comprobaciones de este bloque son la
+  // ÚNICA barrera que existe.
+  //
+  // Consecuencia: `archive()` RE-VERIFICA los bloqueos antes de archivar, no se
+  // fía del preview. El preview es informativo y el usuario puede confirmar
+  // minutos después; entre ambos momentos puede haberse creado una reserva o un
+  // pedido. Sin la re-verificación, `remove()` no lo detendría.
+  //
+  // Límite conocido: la re-verificación es un snapshot tomado al inicio de
+  // `archive()`, no un lock. Una reserva creada DURANTE el bucle no se detecta.
+  // Cerrar esa ventana exigiría `$transaction` + bloqueo de filas sobre 4 tablas
+  // por producto; queda fuera de alcance y se documenta en vez de simularse.
+
+  /**
+   * Dry-run del archivado: clasifica cada producto sin escribir nada.
+   *
+   * ESTRICTAMENTE READ-ONLY. Ni `update`, ni `create`, ni `delete`, ni
+   * `$transaction`.
+   */
+  async previewArchive(
+    dto: BulkArchiveProductsDto,
+  ): Promise<BulkArchivePreviewResultDto> {
+    const ids = this.dedupeIds(dto.ids);
+
+    const products = await this.loadArchiveRows(ids);
+    const productById = new Map<number, ArchiveProductRow>(
+      products.map((product) => [product.id, product]),
+    );
+
+    // Solo los archivables entran a las comprobaciones: preguntar por reservas de
+    // un id inexistente o ya archivado es gasto sin respuesta útil.
+    const archivableIds = products
+      .filter((product) => product.state !== ProductState.ARCHIVED)
+      .map((product) => product.id);
+
+    const constraints = await this.loadArchiveConstraints(archivableIds);
+
+    const items: BulkArchivePreviewItemDto[] = ids.map((id) => {
+      const product = productById.get(id);
+
+      // `remove()` llama `findOne()`, que filtra `state != archived`
+      // (`products.service.ts:1615-1623`): ausente o ya archivado ⇒ PROD_FIND_001.
+      if (!product || product.state === ProductState.ARCHIVED) {
+        return {
+          id,
+          name: product?.name ?? '',
+          sku: product?.sku ?? null,
+          status: 'error' as const,
+          code: ErrorCodes.PROD_FIND_001.code,
+          message: product
+            ? 'El producto ya está archivado'
+            : ErrorCodes.PROD_FIND_001.devMessage,
+        };
+      }
+
+      const base = {
+        id: product.id,
+        name: product.name,
+        sku: product.sku ?? null,
+      };
+
+      const blocker = this.detectArchiveBlocker(product.id, constraints);
+      if (blocker) {
+        return { ...base, status: 'error' as const, ...blocker };
+      }
+
+      const warnings = this.detectArchiveWarnings(product.id, constraints);
+      if (warnings.length > 0) {
+        return {
+          ...base,
+          status: 'warning' as const,
+          message: warnings.join(' '),
+        };
+      }
+
+      return { ...base, status: 'ok' as const };
+    });
+
+    return {
+      total: items.length,
+      ok: items.filter((item) => item.status === 'ok').length,
+      warnings: items.filter((item) => item.status === 'warning').length,
+      errors: items.filter((item) => item.status === 'error').length,
+      items,
+    };
+  }
+
+  /**
+   * Archiva el lote. Delega en `ProductsService.remove()` producto por producto:
+   * NO escribe `state:'archived'` con Prisma directamente. Misma razón que en
+   * `apply()` — no duplicar la primitiva de soft-delete y no tener que replicar
+   * su manejo de P2025.
+   *
+   * Un fallo NO aborta el lote: cada fila lleva su propio `try/catch`, igual que
+   * `apply()`.
+   */
+  async archive(dto: BulkArchiveProductsDto): Promise<BulkArchiveResultDto> {
+    const ids = this.dedupeIds(dto.ids);
+
+    // Nombres por adelantado: si `remove()` lanza no hay fila devuelta de la que
+    // sacar el nombre, y una fila de resultado sin nombre es inútil en la UI.
+    const products = await this.loadArchiveRows(ids);
+    const knownNames = new Map<number, string>(
+      products.map((product) => [product.id, product.name]),
+    );
+
+    // Re-verificación de los bloqueos (ver el docblock de la sección): el preview
+    // pudo haberse calculado hace minutos.
+    const archivableIds = products
+      .filter((product) => product.state !== ProductState.ARCHIVED)
+      .map((product) => product.id);
+    const constraints = await this.loadArchiveConstraints(archivableIds);
+
+    const results: BulkArchiveResultItemDto[] = [];
+
+    for (const id of ids) {
+      // Los ids inexistentes o ya archivados no están en `constraints`: caen al
+      // `remove()`, que lanza PROD_FIND_001 y se registra como fallo de la fila.
+      const blocker = this.detectArchiveBlocker(id, constraints);
+      if (blocker) {
+        results.push({
+          id,
+          name: knownNames.get(id) ?? '',
+          status: 'error',
+          ...blocker,
+        });
+        continue;
+      }
+
+      try {
+        const archived = await this.productsService.remove(id);
+        results.push({
+          id,
+          name: archived?.name ?? knownNames.get(id) ?? '',
+          status: 'ok',
+        });
+      } catch (error) {
+        const { code, message } = this.extractErrorInfo(error);
+        results.push({
+          id,
+          name: knownNames.get(id) ?? '',
+          status: 'error',
+          ...(code && { code }),
+          message,
+        });
+      }
+    }
+
+    return {
+      total: results.length,
+      successful: results.filter((result) => result.status === 'ok').length,
+      failed: results.filter((result) => result.status === 'error').length,
+      results,
+    };
+  }
+
+  /**
+   * Bloqueos del archivado, en orden de severidad operativa. Devuelve el primero
+   * que aplique para que la UI muestre un motivo único y accionable.
+   */
+  private detectArchiveBlocker(
+    productId: number,
+    constraints: ArchiveConstraints,
+  ): { code: string; message: string } | null {
+    if (constraints.reserved.has(productId)) {
+      // Mismo código que el bloqueo del servicio individual en `update()`
+      // (`products.service.ts:1933-1938`).
+      return {
+        code: ErrorCodes.INV_STOCK_001.code,
+        message:
+          'El producto tiene reservas de stock activas. Libera las reservas antes de archivarlo.',
+      };
+    }
+
+    if (constraints.inOpenOrder.has(productId)) {
+      // Se REUTILIZA PROD_VALIDATE_001 (400, "La validación del producto falló"):
+      // el contrato prohíbe añadir códigos nuevos, y este preview ya lo reutiliza
+      // para los bloqueos de consulta que el servicio individual lanza sin código
+      // tipado (ver `detectConsultationFailure`).
+      return {
+        code: ErrorCodes.PROD_VALIDATE_001.code,
+        message:
+          'El producto está en pedidos abiertos. Finaliza o cancela esos pedidos antes de archivarlo.',
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Avisos: el archivado SÍ se aplica. No llevan `code` — no son errores, y el
+   * contrato prohíbe reutilizar códigos existentes con otra semántica.
+   */
+  private detectArchiveWarnings(
+    productId: number,
+    constraints: ArchiveConstraints,
+  ): string[] {
+    const warnings: string[] = [];
+
+    if (constraints.recipeComponent.has(productId)) {
+      warnings.push(
+        'El producto es insumo de una receta activa: los platos que lo usan quedarán con un componente archivado.',
+      );
+    }
+
+    if (constraints.inLivePromotion.has(productId)) {
+      warnings.push(
+        'El producto está en una promoción vigente: la promoción seguirá activa sin él.',
+      );
+    }
+
+    return warnings;
+  }
+
+  // ===========================================================================
+  // Lecturas auxiliares del archivado (read-only)
+  // ===========================================================================
+
+  private async loadArchiveRows(ids: number[]): Promise<ArchiveProductRow[]> {
+    if (ids.length === 0) return [];
+    // `products` es store-scoped en `StorePrismaService`, así que el filtro por
+    // tienda es automático. No se filtra por `state`: hay que distinguir "no
+    // existe" de "ya archivado" (ambos error, pero el archivado tiene nombre).
+    return (await this.prisma.products.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, sku: true, state: true },
+    })) as ArchiveProductRow[];
+  }
+
+  private async loadArchiveConstraints(
+    archivableIds: number[],
+  ): Promise<ArchiveConstraints> {
+    const empty: ArchiveConstraints = {
+      reserved: new Set(),
+      inOpenOrder: new Set(),
+      recipeComponent: new Set(),
+      inLivePromotion: new Set(),
+    };
+    if (archivableIds.length === 0) return empty;
+
+    const [reserved, inOpenOrder, recipeComponent, inLivePromotion] =
+      await Promise.all([
+        this.loadArchiveBlockingReservationIds(archivableIds),
+        this.loadProductIdsInOpenOrders(archivableIds),
+        this.loadProductIdsUsedAsRecipeComponent(archivableIds),
+        this.loadProductIdsInLivePromotions(archivableIds),
+      ]);
+
+    return { reserved, inOpenOrder, recipeComponent, inLivePromotion };
+  }
+
+  /**
+   * Reservas de stock activas. Predicado tomado de
+   * `products.service.ts:1924-1932`, con UNA desviación deliberada: NO se filtra
+   * `product_variant_id: null`.
+   *
+   * Motivo: el predicado original responde "¿puedo editar un campo escalar del
+   * producto base?", donde una reserva sobre una variante es irrelevante.
+   * Archivar responde otra pregunta: el producto entero — variantes incluidas —
+   * desaparece del catálogo. Una reserva activa sobre una variante quedaría
+   * huérfana apuntando a un producto archivado. La decisión de producto dice
+   * "el producto tiene reservas de stock activas", sin distinguir base de
+   * variante.
+   *
+   * Es un superconjunto del predicado individual: bloquea todo lo que bloquea el
+   * original, más las reservas de variante. Para revertir a fidelidad literal,
+   * añadir `product_variant_id: null` al `where`.
+   *
+   * `stock_reservations` está scopeado relacionalmente por
+   * `inventory_locations.store_id` en `StorePrismaService`, así que no hace falta
+   * filtro de tienda manual.
+   */
+  private async loadArchiveBlockingReservationIds(
+    archivableIds: number[],
+  ): Promise<Set<number>> {
+    const reservations = await this.prisma.stock_reservations.findMany({
+      where: {
+        product_id: { in: archivableIds },
+        status: 'active',
+      },
+      select: { product_id: true },
+    });
+    return new Set(reservations.map((reservation) => reservation.product_id));
+  }
+
+  /**
+   * Productos presentes en un pedido abierto. Se consulta `order_items` filtrando
+   * por el estado de su orden con `TERMINAL_ORDER_STATES` (ver esa constante para
+   * la procedencia del predicado).
+   *
+   * `order_items` está scopeado relacionalmente por `orders.store_id` en
+   * `StorePrismaService`, así que el filtro de tienda es automático.
+   *
+   * Nota: `order_items.product_id` es nullable y existe además
+   * `product_variant_id`. Los flujos de POS/ecommerce escriben `product_id`
+   * también en las líneas de variante, así que filtrar por `product_id` cubre
+   * ambos casos.
+   */
+  private async loadProductIdsInOpenOrders(
+    archivableIds: number[],
+  ): Promise<Set<number>> {
+    const items = await this.prisma.order_items.findMany({
+      where: {
+        product_id: { in: archivableIds },
+        orders: {
+          state: { notIn: [...TERMINAL_ORDER_STATES] as any },
+        },
+      },
+      select: { product_id: true },
+    });
+    return new Set(
+      items
+        .map((item) => item.product_id)
+        .filter((productId): productId is number => productId !== null),
+    );
+  }
+
+  /**
+   * Productos usados como insumo (`component_product_id`) de una receta ACTIVA.
+   *
+   * Ojo con la dirección: `loadProductIdsWithActiveRecipe()` (usado por el
+   * preview de edición) pregunta "¿este producto TIENE receta?" mirando
+   * `recipes.product_id`. Aquí la pregunta es la inversa — "¿este producto ES
+   * insumo de la receta de otro?" — así que se mira
+   * `recipe_items.component_product_id` y se filtra por la receta padre.
+   *
+   * `is_active` en `recipes` es lo que marca una receta como activa
+   * (`schema.prisma`, modelo `recipes`), igual que en
+   * `loadProductIdsWithActiveRecipe()`. `recipe_items` está scopeado
+   * relacionalmente por `recipe.store_id` en `StorePrismaService`.
+   */
+  private async loadProductIdsUsedAsRecipeComponent(
+    archivableIds: number[],
+  ): Promise<Set<number>> {
+    const items = await this.prisma.recipe_items.findMany({
+      where: {
+        component_product_id: { in: archivableIds },
+        recipe: { is_active: true },
+      },
+      select: { component_product_id: true },
+    });
+    return new Set(items.map((item) => item.component_product_id));
+  }
+
+  /**
+   * Productos en una promoción vigente.
+   *
+   * La ventana de vigencia es la MISMA que usa el motor de promociones al cotizar
+   * un carrito (`promotion-engine.service.ts:373-375`, `quoteDiscounts`), que es
+   * la definición canónica del repo y está fijada por su propio test
+   * (`promotion-engine.service.spec.ts:323-331`):
+   *
+   *   state ∈ {active, scheduled} AND start_date <= now
+   *   AND (end_date IS NULL OR end_date >= now)
+   *
+   * `scheduled` entra a propósito: `start_date <= now` es lo que realmente abre la
+   * ventana, así que una promoción `scheduled` cuya fecha de inicio ya pasó está
+   * viva. `end_date` nulo significa sin caducidad, y el límite es inclusivo
+   * (`gte`, no `gt`).
+   *
+   * `promotion_products` está scopeado relacionalmente por
+   * `promotions.store_id` en `StorePrismaService`.
+   */
+  private async loadProductIdsInLivePromotions(
+    archivableIds: number[],
+  ): Promise<Set<number>> {
+    const now = new Date();
+    const rows = await this.prisma.promotion_products.findMany({
+      where: {
+        product_id: { in: archivableIds },
+        promotions: {
+          state: { in: ['active', 'scheduled'] as any },
+          start_date: { lte: now },
+          OR: [{ end_date: null }, { end_date: { gte: now } }],
+        },
+      },
+      select: { product_id: true },
+    });
+    return new Set(rows.map((row) => row.product_id));
   }
 
   // ===========================================================================
