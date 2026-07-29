@@ -50,12 +50,11 @@ export class PosTicketService {
    * Printer config resolved from the store's settings, falling back to the
    * historical 80 mm / 1 copy defaults when the store has none.
    */
-  private currentPrinterConfig(): PrinterConfig {
+  private currentPrinterConfig(formatOverride?: PrintFormat): PrinterConfig {
     const receipts = this.storeSettings.receipts();
+    const requested = formatOverride ?? receipts?.pos_ticket_format;
     const format: PrintFormat =
-      receipts?.pos_ticket_format && TICKET_PAGE[receipts.pos_ticket_format]
-        ? receipts.pos_ticket_format
-        : 'thermal_80';
+      requested && TICKET_PAGE[requested] ? requested : 'thermal_80';
     const page = TICKET_PAGE[format];
 
     return {
@@ -131,8 +130,15 @@ export class PosTicketService {
     );
   }
 
-  async generateTicketHTML(ticketData: TicketData): Promise<string> {
-    const printer = this.currentPrinterConfig();
+  /**
+   * `formatOverride` lets the settings preview render a format the merchant is
+   * still choosing, before it is saved to `receipts.pos_ticket_format`.
+   */
+  async generateTicketHTML(
+    ticketData: TicketData,
+    formatOverride?: PrintFormat,
+  ): Promise<string> {
+    const printer = this.currentPrinterConfig(formatOverride);
     const showTaxes = this.shouldShowTaxes(ticketData);
     let store = ticketData.store || this.storeConfig;
     let organization = ticketData.organization;
@@ -480,6 +486,80 @@ export class PosTicketService {
   /** Configured POS ticket copies per sale (`receipts.pos_ticket_copies`). */
   configuredCopies(): number {
     return this.currentPrinterConfig().copies;
+  }
+
+  /**
+   * Full HTML document of a SAMPLE ticket in the given format, for the settings
+   * preview. Built from the same `generateTicketHTML` the printer uses and
+   * wrapped in the same page rules as `printHTML`, so what the merchant reviews
+   * is what the printer receives — including the `@page size`.
+   *
+   * `asInvoiceCopy` renders it as the informative copy of an electronic invoice,
+   * which is what a store already emitting invoices will actually print (no tax
+   * breakdown, footer pointing at the invoice).
+   */
+  async buildSampleTicketHTML(
+    format: PrintFormat,
+    options: { asInvoiceCopy?: boolean } = {},
+  ): Promise<string> {
+    const sample: TicketData = {
+      id: 'MUESTRA-0001',
+      date: new Date(),
+      items: [
+        {
+          id: '1',
+          name: 'Producto de ejemplo',
+          sku: 'EJ-001',
+          quantity: 2,
+          unitPrice: 50000,
+          totalPrice: 100000,
+          discount: 5000,
+          tax: 18050,
+        },
+        {
+          id: '2',
+          name: 'Servicio de ejemplo',
+          sku: 'EJ-002',
+          quantity: 1,
+          unitPrice: 120000,
+          totalPrice: 120000,
+          tax: 22800,
+        },
+      ],
+      subtotal: 220000,
+      tax: 40850,
+      discount: 5000,
+      total: 255850,
+      paymentMethod: 'Efectivo',
+      cashReceived: 300000,
+      change: 44150,
+      customer: { name: 'Cliente de muestra' },
+      cashier: 'Cajero de muestra',
+      ...(options.asInvoiceCopy
+        ? {
+            electronicInvoice: {
+              number: 'MUESTRA-0001',
+              cufe: 'MUESTRA'.padEnd(96, '0'),
+            },
+          }
+        : {}),
+    };
+
+    const ticket = await this.generateTicketHTML(sample, format);
+    const page_size = TICKET_PAGE[format]?.page_size ?? '80mm auto';
+
+    return `
+      <html>
+        <head>
+          <style>
+            @page { size: ${page_size}; margin: 0; }
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          </style>
+        </head>
+        <body>${ticket}</body>
+      </html>
+    `;
   }
 
   getPrinterConfig(): Observable<PrinterConfig[]> {

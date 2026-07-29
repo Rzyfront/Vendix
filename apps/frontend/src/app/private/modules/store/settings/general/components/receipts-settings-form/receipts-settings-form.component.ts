@@ -19,6 +19,7 @@ import {
   PrintFormat,
 } from '../../../../../../../core/models/store-settings.interface';
 import { InvoicingService } from '../../../../invoicing/services/invoicing.service';
+import { PosTicketService } from '../../../../pos/services/pos-ticket.service';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { TextareaComponent } from '../../../../../../../shared/components';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -67,6 +68,7 @@ export type EmissionStage = 'receipts' | 'pending' | 'live';
 })
 export class ReceiptsSettingsForm {
   private readonly invoicingService = inject(InvoicingService);
+  private readonly posTicketService = inject(PosTicketService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly settings = input.required<ReceiptsSettings>();
@@ -141,8 +143,20 @@ export class ReceiptsSettingsForm {
 
   // ── Format preview ──────────────────────────────────────────
   readonly isPreviewOpen = signal(false);
-  readonly previewLoading = signal(false);
+  /** Which preview is loading, so only its own button shows the spinner. */
+  readonly previewLoading = signal<'invoice' | 'pos' | null>(null);
   readonly previewError = signal<string | null>(null);
+  readonly previewKind = signal<'invoice' | 'pos'>('invoice');
+  readonly previewTitle = computed(() =>
+    this.previewKind() === 'pos'
+      ? 'Vista previa del tiquete POS'
+      : 'Vista previa de la factura',
+  );
+  readonly previewSubtitle = computed(() =>
+    this.previewKind() === 'pos'
+      ? 'Tiquete de muestra con el formato y el contenido configurados'
+      : 'Documento de muestra con los datos legales de esta tienda',
+  );
   /** Blob URL of the sample document, revoked when the modal closes. */
   readonly previewUrl = signal<string | null>(null);
   /**
@@ -237,26 +251,53 @@ export class ReceiptsSettingsForm {
    * previewing never consumes resolution numbering.
    */
   openFormatPreview(): void {
-    this.previewLoading.set(true);
+    this.previewKind.set('invoice');
+    this.previewLoading.set('invoice');
     this.previewError.set(null);
 
     this.invoicingService
       .previewInvoicePdf(this.invoiceFormatControl.value ?? 'letter')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (blob) => {
-          this.releasePreviewUrl();
-          this.previewUrl.set(URL.createObjectURL(blob));
-          this.previewLoading.set(false);
-          this.isPreviewOpen.set(true);
-        },
+        next: (blob) => this.showPreview(blob),
         error: () => {
-          this.previewLoading.set(false);
+          this.previewLoading.set(null);
           this.previewError.set(
             'No se pudo generar la muestra. Revisa que la facturación electrónica esté habilitada para esta tienda.',
           );
         },
       });
+  }
+
+  /**
+   * The POS ticket is rendered in the browser, not by the backend, so the sample
+   * comes from the very service the POS prints with — including the `@page size`
+   * rule, which is what makes the difference between a roll and a sheet visible.
+   */
+  async openPosTicketPreview(): Promise<void> {
+    this.previewKind.set('pos');
+    this.previewLoading.set('pos');
+    this.previewError.set(null);
+
+    try {
+      const html = await this.posTicketService.buildSampleTicketHTML(
+        this.posTicketFormatControl.value ?? 'thermal_80',
+        // A live store prints the ticket as the informative copy of the invoice,
+        // so that is what its preview must show.
+        { asInvoiceCopy: this.isLive() },
+      );
+      this.showPreview(new Blob([html], { type: 'text/html' }));
+    } catch {
+      this.previewLoading.set(null);
+      this.previewError.set('No se pudo generar el tiquete de muestra.');
+    }
+  }
+
+  private showPreview(blob: Blob): void {
+    this.releasePreviewUrl();
+    this.previewUrl.set(URL.createObjectURL(blob));
+    this.previewLoading.set(null);
+    this.isPreviewOpen.set(true);
   }
 
   closeFormatPreview(): void {

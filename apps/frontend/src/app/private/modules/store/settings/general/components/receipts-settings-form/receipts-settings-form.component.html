@@ -113,27 +113,43 @@
             <button
               type="button"
               class="preview-button"
-              [disabled]="previewLoading()"
+              [disabled]="previewLoading() !== null"
               (click)="openFormatPreview()"
             >
               <app-icon
-                [name]="previewLoading() ? 'loader' : 'eye'"
+                [name]="previewLoading() === 'invoice' ? 'loader' : 'eye'"
                 size="14"
-                [class.animate-spin]="previewLoading()"
+                [class.animate-spin]="previewLoading() === 'invoice'"
               ></app-icon>
-              <span>{{ previewLoading() ? 'Generando muestra…' : 'Previsualizar' }}</span>
+              <span>{{
+                previewLoading() === 'invoice' ? 'Generando muestra…' : 'Previsualizar'
+              }}</span>
             </button>
-            @if (previewError()) {
-              <p class="preview-error">{{ previewError() }}</p>
-            }
           </div>
         }
-        <app-selector
-          label="Formato del tiquete POS"
-          [formControl]="posTicketFormatControl"
-          [options]="formatOptions"
-          (valueChange)="onFieldChange()"
-        ></app-selector>
+        <div class="format-with-preview">
+          <app-selector
+            label="Formato del tiquete POS"
+            [formControl]="posTicketFormatControl"
+            [options]="formatOptions"
+            (valueChange)="onFieldChange()"
+          ></app-selector>
+          <button
+            type="button"
+            class="preview-button"
+            [disabled]="previewLoading() !== null"
+            (click)="openPosTicketPreview()"
+          >
+            <app-icon
+              [name]="previewLoading() === 'pos' ? 'loader' : 'eye'"
+              size="14"
+              [class.animate-spin]="previewLoading() === 'pos'"
+            ></app-icon>
+            <span>{{
+              previewLoading() === 'pos' ? 'Generando muestra…' : 'Previsualizar'
+            }}</span>
+          </button>
+        </div>
         <app-selector
           label="Copias del tiquete POS"
           [formControl]="posTicketCopiesControl"
@@ -155,6 +171,9 @@
           ></app-setting-toggle>
         }
       </div>
+      @if (previewError()) {
+        <p class="preview-error">{{ previewError() }}</p>
+      }
       <p class="format-hint">
         La factura impresa siempre lleva los datos legales vigentes del emisor
         (razón social, NIT, régimen, resolución de numeración), el CUFE y la URL de
@@ -191,12 +210,13 @@
   </div>
 </div>
 
-<!-- Sample document, built by the backend from fabricated data: previewing a
-     format never consumes a number of the DIAN resolution. -->
+<!-- Sample document in both cases: the invoice comes from the backend preview
+     endpoint (never consumes a number of the DIAN resolution) and the POS ticket
+     is rendered by the same service the printer uses. -->
 <app-modal
   [(isOpen)]="isPreviewOpen"
-  title="Vista previa del formato"
-  subtitle="Documento de muestra con los datos legales de esta tienda"
+  [title]="previewTitle()"
+  [subtitle]="previewSubtitle()"
   size="lg"
   (closed)="closeFormatPreview()"
 >
@@ -205,7 +225,7 @@
     <iframe
       #previewFrame
       class="preview-frame"
-      title="Vista previa de la factura"
+      [title]="previewTitle()"
     ></iframe>
   }
 </app-modal>
