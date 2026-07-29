@@ -35,7 +35,7 @@ This skill specifies both the **format** of the plan and the **operational workf
 - **Every Step block must contain ALL SIX mandatory fields**, in this order: `Skills`, `Resources`, `Business decision`, `Why`, `Output`, `Verification`. Missing **any** field invalidates the entire plan — it is not approvable until fixed.
 - Every plan step must reference the skills that govern it, or be explicitly marked `Knowledge gap` when no skill exists. Never list `how-to-plan` as a step skill — it governs planning, not execution.
 - Every plan step must declare the `Business decision` it enforces (rule, product behavior, or technical policy). This field is **non-negotiable**.
-- Every plan step must declare its `Resources` — external tooling beyond skills: MCP servers (`pencil`, `github`, etc.), build / test / migration commands, web searches consulted for official docs, third-party APIs, dashboards, or any non-skill input. **Vague resources are forbidden**: write the exact command (`npm run test -w apps/backend -- --runInBand path/to/spec.ts`), not "backend tests".
+- Every plan step must declare its `Resources` — external tooling beyond skills: MCP servers (`pencil`, `github`, etc.), build / test / migration commands, web searches consulted for official docs, third-party APIs, dashboards, or any non-skill input. **Vague resources are forbidden**: write the exact command (`curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices`), not "backend tests".
 - Every plan step must declare its per-step `Verification` (the check that proves *this* step done). E2E verification at plan level does **not** replace per-step verification.
 - Every plan must split outcomes into `General Objective` + `Specific Objectives`. Specific objectives must be individually verifiable.
 - Compare viable approaches and record the chosen one with rationale.
@@ -193,7 +193,7 @@ Each row defines what counts as **acceptable** vs **rejected**. If a field falls
 | `Critical Files` | `apps/backend/src/domains/organization/invoicing/invoicing.controller.ts` | `organization/invoicing/*` (wildcard) |
 | `Reusable Assets` | `apps/backend/src/common/services/fiscal-scope.service.ts — resolves fiscal_scope + entity` | "There are some services we can reuse." |
 | Step `Skills` | `vendix-fiscal-scope, vendix-backend-api, vendix-prisma-scopes, vendix-permissions` | `how-to-plan, vendix-backend` (the first is a planner skill, second is too generic when API is involved) |
-| Step `Resources` | `npm run test -w apps/backend -- --runInBand src/domains/organization/invoicing/invoicing.controller.spec.ts` | "Backend unit tests." |
+| Step `Resources` | `curl -H 'Authorization: Bearer $ORG_TOKEN' http://localhost:3000/organization/invoicing/invoices` | "Backend unit tests." |
 | Step `Business decision` | "ORG_ADMIN supervises invoicing read-only; no DIAN submission from org panel because `fiscal_scope` may target store NIT." | "We want it to work right." |
 | Step `Why` | "Goes first because frontend in step 4 depends on these endpoints existing." | (missing entirely) |
 | Step `Output` | "GET `/organization/invoicing/invoices?store_id=?&from=&to=` returning paginated invoices scoped by `accounting_entity_id`." | "Endpoints for invoicing." |
@@ -210,7 +210,7 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 | `curl` (primary API check) | API contract, auth boundaries & endpoint sanity | `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices` |
 | **Playwright MCP** (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `browser_navigate({url:'https://vendix.com'})` then `browser_snapshot()` (see `how-to-test`; the Playwright MCP server must be launched with `--ignore-https-errors` — a single context-level flag that covers page + subresources on the local self-signed vhost) |
 | `agent-browser` (E2E fallback) | Only when Playwright MCP cannot: wait on a CSS selector, manual scroll, or read page markdown | `agent-browser` support MCP — see `how-to-test` § Fallback |
-| Backend unit test | Service logic | `npm run test -w apps/backend -- --runInBand src/domains/organization/invoicing/invoicing.service.spec.ts` |
+| Backend unit test | Service logic | `npm run buildcheck:test -- src/domains/organization/invoicing/invoicing.service.spec.ts` — **always pass the spec path**; a bare `npm test` runs all 171 specs with a worker pool and exhausts dev-machine RAM (see `buildcheck-dev`) |
 | Frontend build | Type safety after refactor | `npm run build:prod -w apps/frontend` |
 | Zoneless audit | Signal-based components | `npm run zoneless:audit` |
 | Migration verification | DB schema change | `npx prisma migrate status` + targeted SQL `SELECT` |
@@ -301,7 +301,7 @@ The following are prohibited. Each row lists the wrong move and its correct alte
 |--------------|---------------------|
 | Step missing `Why` or `Verification` | All six fields are mandatory: `Skills`, `Resources`, `Business decision`, `Why`, `Output`, `Verification`. No exceptions. |
 | Wildcards in `Critical Files` (`domain/x/*`) | List concrete paths: `apps/.../x.controller.ts`, `apps/.../x.service.ts`, `apps/.../x.dto.ts`. |
-| Vague `Resources` ("backend tests") | Exact command: `npm run test -w apps/backend -- --runInBand <spec>`. Or `none`. |
+| Vague `Resources` ("backend tests") | Exact command: `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/<endpoint>`. Or `none`. |
 | Listing `how-to-plan` as a step skill | `how-to-plan` governs the planner, not the executor. Use the domain skills the step actually invokes. |
 | Adding non-spec sections (`Assumptions`, `Notes`, `Risks`, `TODO`) | Fold into `Context`, the step's `Business decision`, or `Knowledge Gaps`. The plan format is closed. |
 | `Knowledge Gaps` section absent because there are none | Write `None.` explicitly. Section absence is a format break. |
