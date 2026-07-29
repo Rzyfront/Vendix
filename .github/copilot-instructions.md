@@ -184,6 +184,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Designing happy-path, sad-path, or brute-force test flows for a feature | `how-to-test` |
 | Developing features for the mobile app | `mobile-dev` |
+| Diagnosing which node process is consuming the dev machine memory | `buildcheck-dev` |
 | Discovering reusable assets before proposing new code | `how-to-plan` |
 | Displaying data lists, implementing responsive tables, creating mobile card views | `vendix-frontend-data-display` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
@@ -245,6 +246,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Integrating app-address-map-picker (MapLibre) into a form | `vendix-address-geocoding` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
+| Killing orphan ng serve, ng build, prerender or nest start processes | `buildcheck-dev` |
 | Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
 | Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
@@ -291,8 +293,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reusing app-address-form-fields shared component | `vendix-address-geocoding` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running a controlled E2E verification of a shipped ticket on www.vendix.online | `verify-ticket-prod` |
+| Running a production compilation check without leaving orphan processes | `buildcheck-dev` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
+| Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
@@ -332,6 +336,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Verifying a Linear ticket is correctly applied in production | `verify-ticket-prod` |
 | Verifying an API endpoint or auth boundary with curl | `how-to-test` |
 | Verifying plan completeness before approval | `how-to-plan` |
+| Verifying that code compiles without starting any server | `buildcheck-dev` |
 | When adding icons to components, buttons, menus, or using <app-icon> | `vendix-frontend-icons` |
 | When editing product schemas, pricing logic, or advanced product forms | `vendix-product-pricing` |
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |
