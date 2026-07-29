@@ -390,37 +390,28 @@ export class CheckoutComponent implements OnInit {
    */
   private restorePendingBooking(): void {
     try {
-      const stored = sessionStorage.getItem('pending_booking');
-      if (!stored) return;
+      // Buscamos primero el formato nuevo (`pending_bookings` Map); si no
+      // existe, caemos al legacy (`pending_booking` single) — sesiones
+      // anteriores al fix siguen teniendo entries válidos bajo la clave
+      // vieja y la migración las trae al Map nuevo.
+      let stored = sessionStorage.getItem('pending_bookings');
+      if (!stored) {
+        stored = sessionStorage.getItem('pending_booking');
+        if (!stored) return;
+      }
 
-      const booking = JSON.parse(stored);
-      if (
-        booking.product_id &&
-        booking.date &&
-        booking.start_time &&
-        booking.end_time
-      ) {
-        // Verify the product/variant is actually in the current cart.
-        const cartItem = this.cart()?.items?.find(
-          (item) =>
-            item.product_id === booking.product_id &&
-            (booking.product_variant_id
-              ? item.product_variant_id === booking.product_variant_id
-              : true),
-        );
-        if (!cartItem) {
-          sessionStorage.removeItem('pending_booking');
-          return;
-        }
-        this.bookingSelections.set(this.getBookingKey(cartItem), {
-          product_id: booking.product_id,
-          product_variant_id: booking.product_variant_id,
-          date: booking.date,
-          start_time: booking.start_time,
-          end_time: booking.end_time,
-        });
-        // Clean up after reading
-        sessionStorage.removeItem('pending_booking');
+      const parsed = JSON.parse(stored);
+      // El formato nuevo es un Map keyed por `${product_id}:${variant_id}`.
+      // Si sessionStorage tiene el formato viejo (un único objeto bajo la
+      // clave legacy `pending_booking`), lo migramos al Map y borramos
+      // la clave vieja.
+      const bookingsMap: Record<string, Record<string, any>> | null =
+        this.isBookingMap(parsed)
+          ? parsed
+          : this.migrateLegacyPendingBooking();
+      if (!bookingsMap) {
+        sessionStorage.removeItem('pending_bookings');
+        return;
       }
 
       // CRITICAL: bail out if the cart is empty. The cart service may still
@@ -429,38 +420,112 @@ export class CheckoutComponent implements OnInit {
       const cartItems = this.cart()?.items ?? [];
       if (cartItems.length === 0) return;
 
-      const cartItem = cartItems.find(
-        (item) =>
-          item.product_id === booking.product_id &&
-          (booking.product_variant_id
-            ? item.product_variant_id === booking.product_variant_id
-            : true),
-      );
-      if (!cartItem) {
-        // Cart is populated but doesn't contain this product. The user must
-        // have come from a stale flow — clear it.
-        sessionStorage.removeItem('pending_booking');
-        return;
+      const newSelections = new Map(this.bookingSelections());
+      const validKeys = new Set<string>();
+
+      for (const [key, booking] of Object.entries(bookingsMap)) {
+        if (
+          !booking['product_id'] ||
+          !booking['date'] ||
+          !booking['start_time'] ||
+          !booking['end_time']
+        ) {
+          // Entry malformada — la saltamos (no la borramos, podrían
+          // haber otras válidas en el Map).
+          continue;
+        }
+
+        const cartItem = cartItems.find(
+          (item) =>
+            item.product_id === booking['product_id'] &&
+            (booking['product_variant_id']
+              ? item.product_variant_id === booking['product_variant_id']
+              : true),
+        );
+        if (!cartItem) {
+          // El producto no está en el carrito — entry stale, la dejamos
+          // (puede re-emerger si el cliente vuelve a agregarlo).
+          continue;
+        }
+
+        newSelections.set(this.getBookingKey(cartItem), {
+          product_id: booking['product_id'],
+          product_variant_id: booking['product_variant_id'],
+          date: booking['date'],
+          start_time: booking['start_time'],
+          end_time: booking['end_time'],
+          provider_id: booking['provider_id'],
+          provider_name: booking['provider_name'],
+          service_location_type: booking['service_location_type'],
+          service_address_id: booking['service_address_id'],
+          service_address_label: booking['service_address_label'],
+        });
+        validKeys.add(key);
       }
 
-      const newMap = new Map(this.bookingSelections());
-      newMap.set(this.getBookingKey(cartItem), {
-        product_id: booking.product_id,
-        product_variant_id: booking.product_variant_id,
-        date: booking.date,
-        start_time: booking.start_time,
-        end_time: booking.end_time,
-        provider_id: booking.provider_id,
-        provider_name: booking.provider_name,
-        service_location_type: booking.service_location_type,
-        service_address_id: booking.service_address_id,
-        service_address_label: booking.service_address_label,
-      });
-      this.bookingSelections.set(newMap);
-      // Clean up only after successful restore — not before.
+      this.bookingSelections.set(newSelections);
+
+      // NO borramos `pending_bookings` después de restaurar — si el cliente
+      // sale a /cart y vuelve, queremos volver a poblar `bookingSelections`
+      // desde el mismo origen. Solo limpiamos en el catch (JSON corrupto)
+      // o cuando TODAS las entries son inválidas/stale. La señal
+      // `bookingSelections` es la fuente de verdad DURANTE la sesión del
+      // checkout; `pending_bookings` es el backup que persiste entre tabs.
+      if (validKeys.size === 0) {
+        sessionStorage.removeItem('pending_bookings');
+      }
+    } catch {
+      sessionStorage.removeItem('pending_bookings');
+    }
+  }
+
+  /**
+   * Type guard: el Map nuevo es un objeto plano cuyas keys son
+   * `${product_id}:${variant_id}` y cuyos values son objetos con
+   * `product_id`. El formato legacy era un objeto único con `product_id`
+   * directamente.
+   */
+  private isBookingMap(value: unknown): value is Record<string, Record<string, any>> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const entries = Object.values(value as Record<string, unknown>);
+    if (entries.length === 0) return true; // Map vacío es válido
+    // Tomamos la primera entry y verificamos que sea un objeto con product_id
+    // (no un objeto con campos del booking directo).
+    const first = entries[0] as Record<string, unknown>;
+    return !!(first && typeof first === 'object' && 'product_id' in first);
+  }
+
+  /**
+   * Migra el formato legacy `pending_booking` (objeto único) al nuevo
+   * `pending_bookings` (Map). Devuelve el Map migrado o null si no hay
+   * legacy entry válido.
+   */
+  private migrateLegacyPendingBooking(): Record<string, Record<string, any>> | null {
+    try {
+      const legacy = sessionStorage.getItem('pending_booking');
+      if (!legacy) return null;
+      const booking = JSON.parse(legacy);
+      if (
+        !booking['product_id'] ||
+        !booking['date'] ||
+        !booking['start_time'] ||
+        !booking['end_time']
+      ) {
+        sessionStorage.removeItem('pending_booking');
+        return null;
+      }
+      const key = `${booking['product_id']}:${booking['product_variant_id'] ?? 'base'}`;
+      sessionStorage.setItem(
+        'pending_bookings',
+        JSON.stringify({ [key]: booking }),
+      );
       sessionStorage.removeItem('pending_booking');
+      return { [key]: booking };
     } catch {
       sessionStorage.removeItem('pending_booking');
+      return null;
     }
   }
 
@@ -1707,6 +1772,28 @@ export class CheckoutComponent implements OnInit {
 
   goToCart(): void {
     this.router.navigate(['/cart']);
+  }
+
+  /**
+   * Navega al wizard de booking para que el cliente pueda modificar el
+   * horario, profesional o modalidad sin tener que pasar por el carrito.
+   * Prioridad: (1) el primer bookable item sin booking en el carrito,
+   * (2) si todos tienen booking, el primero del carrito. Esto evita
+   * que con múltiples items se sobreescriban las selecciones existentes
+   * al navegar al wizard.
+   */
+  changeSchedule(): void {
+    const firstMissing = this.bookableItems.find(
+      (i) => !this.preBookedSelectionFor(i),
+    );
+    const target = firstMissing ?? this.bookableItems[0];
+    if (!target) {
+      this.toast.warning(
+        'No hay servicios con reserva para modificar en el carrito.',
+      );
+      return;
+    }
+    this.router.navigate(['/book', target.product_id]);
   }
 
   onQuickView(product: EcommerceProduct): void {

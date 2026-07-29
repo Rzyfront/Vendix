@@ -631,15 +631,26 @@
 
         <div class="checkout-actions">
           @if (step() > 1) {
-            <app-button variant="outline" (clicked)="prevStep()">
-              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-              Anterior
-            </app-button>
+            <div class="checkout-actions__left">
+              <app-button variant="outline" (clicked)="prevStep()">
+                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                Anterior
+              </app-button>
+            </div>
           } @else {
-            <app-button variant="outline" (clicked)="goToCart()">
-              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-              Volver al carrito
-            </app-button>
+            <div class="checkout-actions__left">
+              <app-button variant="outline" (clicked)="goToCart()">
+                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                Volver al carrito
+              </app-button>
+              <!-- Paso 1 con booking: permite volver al wizard /book/:id para
+                   modificar horario / profesional / modalidad sin tener que
+                   pasar por el carrito. -->
+              <app-button variant="outline" (clicked)="changeSchedule()">
+                <app-icon slot="icon" name="calendar-clock" [size]="16"></app-icon>
+                Modificar reserva
+              </app-button>
+            </div>
           }
 
           @if (step() < confirmStep) {

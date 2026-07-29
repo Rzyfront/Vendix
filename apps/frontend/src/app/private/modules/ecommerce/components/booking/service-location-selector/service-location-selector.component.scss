@@ -2,6 +2,11 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  // Separación del bloque de booking-details que viene debajo en la
+  // página `/book/:id` — sin esto, los 2 botones de ubicación (local /
+  // domicilio) quedaban visualmente pegados a la card con Servicio /
+  // Profesional / Fecha / Precio.
+  margin-bottom: 1.5rem;
 }
 
 .service-location__title {
@@ -17,7 +22,9 @@
 // sin que el usuario tocara nada.
 .service-location__toggle {
     display: flex;
-    gap: 8px;
+    // 16px entre los dos botones ("En el local" / "En mi domicilio")
+    // — antes 8px se veían visualmente pegados.
+    gap: 16px;
     padding: 4px;
     background: var(--color-background, #f5f6f8);
     border-radius: var(--radius-md, 8px);

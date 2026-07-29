@@ -172,6 +172,13 @@ export class BookingComponent implements OnInit {
    * booking flow hides the 'A domicilio' option.
    */
   readonly offerHomeService = signal<boolean>(true);
+  /**
+   * Appointment redesign phase 2 — per-product home-service
+   * eligibility. When false, hides the 'A domicilio' option for THIS
+   * product only (e.g. "Tintura" no va a domicilio aunque la tienda
+   * sí ofrezca el servicio en otros productos).
+   */
+  readonly productEligibleForHomeService = signal<boolean>(true);
 
   // Confirmation
   bookingResult = signal<any>(null);
@@ -239,14 +246,19 @@ export class BookingComponent implements OnInit {
     this.bookingService.getStoreAddress().subscribe({
       next: (addr) => this.storeAddress.set(addr ?? null),
     });
-    this.bookingService.getStoreServices().subscribe({
+    this.bookingService.getStoreServices(this.productId()).subscribe({
       next: (svc) => {
         this.offerHomeService.set(svc.offer_home_service);
-        // If the store doesn't offer home service, force-pick 'shop'
-        // (the only legal value) and clear any previously-picked
-        // home address so the booking can't be saved against a
-        // disabled option.
-        if (!svc.offer_home_service) {
+        this.productEligibleForHomeService.set(
+          svc.offer_home_service_for_product ?? svc.offer_home_service,
+        );
+        // If the store doesn't offer home service OR the product is
+        // not eligible, force-pick 'shop' (the only legal value) and
+        // clear any previously-picked home address so the booking
+        // can't be saved against a disabled option.
+        const showHome = svc.offer_home_service &&
+          (svc.offer_home_service_for_product ?? true);
+        if (!showHome) {
           this.serviceLocation.set('shop');
           if (this.selectedAddressId() != null) {
             this.selectedAddressId.set(null);
@@ -458,7 +470,12 @@ export class BookingComponent implements OnInit {
           this.formatAddressLabel(address);
       }
     }
-    sessionStorage.setItem('pending_booking', JSON.stringify(bookingSelection));
+    // Merge into `pending_bookings` keyed by product_id (and optionally
+    // product_variant_id) so múltiples servicios reservados en paralelo
+    // — uno confirmado y otro pendiente, o varios en el carrito — no se
+    // pisan entre sí. Antes era un único `pending_booking` que se
+    // sobreescribía al confirmar el segundo servicio.
+    this.savePendingBooking(bookingSelection);
 
     const product = this.product();
     const variant = this.selectedVariant();
@@ -481,6 +498,39 @@ export class BookingComponent implements OnInit {
       }
     } else {
       this.router.navigate(['/checkout']);
+    }
+  }
+
+  /**
+   * Persiste la selección de booking en sessionStorage como entrada
+   * de un Map keyed por `${product_id}:${variant_id}` para que
+   * múltiples reservas en paralelo no se pisen entre sí. El checkout
+   * (`checkout.component.ts → restorePendingBooking`) itera este Map
+   * y popula `bookingSelections` con cada entry.
+   *
+   * Si la entry existente para este product/variant está corrupta, la
+   * sobreescribimos sin romper las demás.
+   */
+  private savePendingBooking(bookingSelection: Record<string, any>): void {
+    try {
+      const raw = sessionStorage.getItem('pending_bookings');
+      const map: Record<string, Record<string, any>> = raw
+        ? JSON.parse(raw)
+        : {};
+      const key = `${bookingSelection['product_id']}:${
+        bookingSelection['product_variant_id'] ?? 'base'
+      }`;
+      map[key] = bookingSelection;
+      sessionStorage.setItem('pending_bookings', JSON.stringify(map));
+    } catch {
+      // Si el JSON está corrupto, sobreescribimos con un Map limpio.
+      const key = `${bookingSelection['product_id']}:${
+        bookingSelection['product_variant_id'] ?? 'base'
+      }`;
+      sessionStorage.setItem(
+        'pending_bookings',
+        JSON.stringify({ [key]: bookingSelection }),
+      );
     }
   }
 

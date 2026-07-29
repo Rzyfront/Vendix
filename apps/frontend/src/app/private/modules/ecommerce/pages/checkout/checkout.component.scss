@@ -578,10 +578,24 @@
 
 .checkout-actions {
     display: flex;
+    flex-wrap: wrap;
+    // Layout 2+1: secundarias agrupadas a la izquierda (Volver +
+    // Modificar), primaria (Continuar) sola a la derecha. Con
+    // `space-between` y el grupo izquierdo envolviendo sus botones con
+    // su propio gap interno, los 3 elementos quedan visualmente
+    // ordenados como "atrás · editar · continuar".
     justify-content: space-between;
+    align-items: center;
+    gap: 16px;
     margin-top: 2rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--color-border);
+
+    &__left {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
 }
 
 .back-btn {
