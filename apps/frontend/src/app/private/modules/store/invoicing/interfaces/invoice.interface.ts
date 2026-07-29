@@ -253,7 +253,18 @@ export interface DianConfig {
   certificate_password_encrypted: string | null; // Always '****' from API
   certificate_expiry: string | null;
   environment: 'test' | 'production';
-  enablement_status: 'not_started' | 'testing' | 'enabled' | 'suspended';
+  /**
+   * Mirrors the backend enum. `test_set_passed` is the state DIAN's approval
+   * leaves behind and the only one that unlocks the production transition — it
+   * was missing here, so the UI could not tell "approved" from "still testing".
+   */
+  enablement_status:
+    | 'not_started'
+    | 'testing'
+    | 'test_set_passed'
+    | 'enabled'
+    | 'suspended'
+    | 'expired';
   test_set_id: string | null;
   last_test_result: any;
   created_at: string;
@@ -271,6 +282,60 @@ export interface DianTestResult {
   invoices_count?: number;
   debit_notes_count?: number;
   credit_notes_count?: number;
+  /**
+   * Tri-state verdict. `pending` means DIAN acknowledged the batch (ZipKey issued)
+   * but has not judged it yet — it is NOT a failure, and re-sending would burn a
+   * second block of resolution numbers. `rejected` is a real DIAN "no".
+   */
+  pending?: boolean;
+  rejected?: boolean;
+  /** DIAN's batch handle; the only way to re-poll without re-sending. */
+  zip_key?: string | null;
+  error_messages?: string[];
+  executed_at?: string | null;
+  rechecked_at?: string | null;
+  number_from?: number | null;
+  number_to?: number | null;
+  enablement_status?: string;
+  status_message?: string;
+  poll_history?: Array<{
+    attempt: number;
+    status_code: string;
+    status_message: string;
+    success: boolean;
+  }>;
+}
+
+/** One prerequisite in `GET dian-config/:id/production-readiness`. */
+export interface DianReadinessCheck {
+  key: string;
+  label: string;
+  satisfied: boolean;
+  action: string;
+  owner: 'tenant' | 'platform';
+}
+
+export interface DianProductionReadiness {
+  ready: boolean;
+  dian_configuration_id: number;
+  environment: string;
+  enablement_status: string;
+  checks: DianReadinessCheck[];
+  missing: string[];
+  resolutions: Array<{
+    id: number;
+    prefix: string;
+    resolution_number: string;
+    range_from: number;
+    range_to: number;
+    current_number: number;
+    valid_from: string;
+    valid_to: string;
+    technical_key: string | null;
+    is_habilitacion_range: boolean;
+    is_expired: boolean;
+    is_exhausted: boolean;
+  }>;
 }
 
 export interface DianAuditLog {

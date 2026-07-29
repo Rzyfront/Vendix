@@ -11,9 +11,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
+  AbstractControl,
   FormControl,
   FormGroup,
   ReactiveFormsModule,
+  ValidationErrors,
   Validators,
 } from '@angular/forms';
 
@@ -26,6 +28,55 @@ import { IconComponent } from '../../icon/icon.component';
 import { formatDateOnlyUTC } from '../../../utils/date.util';
 
 export type DianEnvironment = 'test' | 'production';
+
+/** Fields that together make a persistable numbering resolution. */
+const RESOLUTION_REQUIRED_FIELDS = [
+  'resolution_number',
+  'resolution_prefix',
+  'resolution_range_from',
+  'resolution_range_to',
+  'resolution_valid_from',
+  'resolution_valid_to',
+  'resolution_date',
+] as const;
+
+/** Human labels for the group-level "resolución incompleta" message. */
+const RESOLUTION_FIELD_LABELS: Record<string, string> = {
+  resolution_number: 'número de resolución',
+  resolution_prefix: 'prefijo',
+  resolution_range_from: 'rango desde',
+  resolution_range_to: 'rango hasta',
+  resolution_valid_from: 'vigente desde',
+  resolution_valid_to: 'vigente hasta',
+  resolution_date: 'fecha de la resolución',
+};
+
+function isFilled(value: unknown): boolean {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+/** True when at least one resolution field carries a value. */
+function hasAnyResolutionValue(raw: Record<string, unknown>): boolean {
+  return RESOLUTION_REQUIRED_FIELDS.some((field) => isFilled(raw[field]));
+}
+
+/**
+ * The resolution block is optional as a whole but all-or-nothing once started:
+ * a half-filled resolution cannot be persisted (the API requires number,
+ * prefix, range and both validity dates), and silently dropping it is exactly
+ * the data-loss bug this form had. Reporting it as a group error surfaces the
+ * problem to the user instead.
+ */
+function resolutionCompletenessValidator(
+  group: AbstractControl,
+): ValidationErrors | null {
+  const raw = group.getRawValue() as Record<string, unknown>;
+  if (!hasAnyResolutionValue(raw)) return null;
+  const missing = RESOLUTION_REQUIRED_FIELDS.filter(
+    (field) => !isFilled(raw[field]),
+  );
+  return missing.length ? { resolutionIncomplete: missing } : null;
+}
 
 export interface DianConfigValue {
   name: string;
@@ -42,6 +93,14 @@ export interface DianConfigValue {
   resolution_range_to: number | null;
   resolution_valid_from: string;
   resolution_valid_to: string;
+  /** Date the DIAN issued the numbering authorization. Required by the API. */
+  resolution_date: string;
+  /**
+   * ClTec — 40-char technical key the DIAN prints alongside the numbering
+   * resolution. Feeds the CUFE hash, so an invoice cannot be validated without
+   * it. Optional at the form level because contingency ranges have none.
+   */
+  resolution_technical_key: string;
   certificate_password: string;
   /** File reference. Parent component uploads via multipart endpoint. */
   certificate_file: File | null;
@@ -62,6 +121,8 @@ interface DianConfigControls {
   resolution_range_to: FormControl<number | null>;
   resolution_valid_from: FormControl<string>;
   resolution_valid_to: FormControl<string>;
+  resolution_date: FormControl<string>;
+  resolution_technical_key: FormControl<string>;
   certificate_password: FormControl<string>;
 }
 
@@ -177,6 +238,25 @@ interface DianConfigControls {
             formControlName="resolution_valid_to"
           ></app-input>
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <app-input
+            label="Fecha de la resolución"
+            type="date"
+            formControlName="resolution_date"
+          ></app-input>
+          <app-input
+            label="Clave técnica (ClTec)"
+            formControlName="resolution_technical_key"
+            placeholder="40 caracteres del portal DIAN"
+            helperText="Aparece junto a la resolución en el portal. Sin ella la DIAN rechaza el CUFE."
+          ></app-input>
+        </div>
+        @if (resolutionIncomplete()) {
+          <p class="text-xs text-error" role="alert">
+            Completa todos los datos de la resolución para poder guardarla: falta
+            {{ resolutionMissingLabels() }}.
+          </p>
+        }
       </section>
 
       <!-- Certificado -->
@@ -317,9 +397,21 @@ export class DianConfigFormComponent {
       resolution_range_to: new FormControl<number | null>(null),
       resolution_valid_from: new FormControl('', { nonNullable: true }),
       resolution_valid_to: new FormControl('', { nonNullable: true }),
+      resolution_date: new FormControl('', { nonNullable: true }),
+      resolution_technical_key: new FormControl('', { nonNullable: true }),
       certificate_password: new FormControl('', { nonNullable: true }),
     },
+    { validators: [resolutionCompletenessValidator] },
   );
+
+  /**
+   * True when the user supplied enough resolution data to persist a row. The
+   * parent step uses this to decide whether to POST a resolution — the block is
+   * optional as a whole, but all-or-nothing once started.
+   */
+  hasResolutionInput(): boolean {
+    return hasAnyResolutionValue(this.form.getRawValue());
+  }
 
   readonly nitTypeOptions: SelectorOption[] = [
     { value: 'NIT', label: 'NIT' },
@@ -335,11 +427,27 @@ export class DianConfigFormComponent {
     { value: 'production', label: 'Producción' },
   ];
 
+  /**
+   * Missing resolution fields, mirrored into a signal because a `computed` that
+   * reads `FormControl.value` is NOT reactive under Zoneless — the form does not
+   * notify the signal graph. Updated from `valueChanges` and after every patch.
+   */
+  private readonly resolutionMissing = signal<readonly string[]>([]);
+  readonly resolutionIncomplete = computed(
+    () => this.resolutionMissing().length > 0,
+  );
+  readonly resolutionMissingLabels = computed(() =>
+    this.resolutionMissing()
+      .map((field) => RESOLUTION_FIELD_LABELS[field] ?? field)
+      .join(', '),
+  );
+
   constructor() {
     effect(() => {
       const v = this.initialValue();
       if (v) {
         this.form.patchValue(v, { emitEvent: false });
+        this.syncResolutionErrors();
         this.emitCurrent();
       }
     });
@@ -351,7 +459,16 @@ export class DianConfigFormComponent {
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.emitCurrent());
+      .subscribe(() => {
+        this.syncResolutionErrors();
+        this.emitCurrent();
+      });
+  }
+
+  /** Mirrors the group validator's result into the signal graph. */
+  private syncResolutionErrors(): void {
+    const missing = this.form.errors?.['resolutionIncomplete'];
+    this.resolutionMissing.set(Array.isArray(missing) ? missing : []);
   }
 
   getValue(): DianConfigValue {
