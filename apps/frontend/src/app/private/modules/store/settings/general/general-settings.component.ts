@@ -24,6 +24,7 @@ import { ScrollableTabsComponent } from '../../../../../shared/components/scroll
 import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { ConfigFacade } from '../../../../../core/store/config';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { firstValueFrom } from 'rxjs';
 
 
@@ -363,8 +364,20 @@ export class GeneralSettingsComponent implements OnInit {
         },
         error: (error) => {
           this.isSaving.set(false);
-          console.error('Error saving settings:', error);
-          this.toast_service.error('Error saving settings');
+
+          // QUI-560 — antes se mostraba un literal en inglés y se descartaba
+          // `error_code`, así que un rechazo del guard de transición llegaba al
+          // usuario como "Error saving settings" y sin decirle qué hacer.
+          const parsed = parseApiError(error);
+          console.error(
+            `Error saving settings [${parsed.errorCode ?? 'sin código'}]:`,
+            parsed.devMessage ?? error,
+          );
+          this.toast_service.error(parsed.userMessage);
+
+          // El estado local quedó con el valor rechazado; sin resincronizar, la
+          // UI mostraría un settings que la DB nunca aceptó.
+          this.loadSettings();
         },
       });
     } catch (error) {
