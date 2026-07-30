@@ -38,7 +38,7 @@ import {
   WompiPaymentStatusUpdate,
 } from '../../../../../../../shared/services/wompi.service';
 import { CartState } from '../../../models/cart.model';
-import { extractPosErrorMessage } from '../../../utils/pos-backend-error.util';
+import { extractApiError } from '../../../../../../../shared/utils/http-error.util';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import type { BusinessHours } from '../../../../../../../core/models/store-settings.interface';
 
@@ -634,10 +634,9 @@ export class PosPaymentStepComponent implements OnInit {
             // QUI-559: read the backend reason, not the transport description.
             // A legitimate stock block used to read "Http failure response …
             // 409 Conflict", which tells the cashier nothing actionable.
-            description: extractPosErrorMessage(
-              error,
+            description:
+              extractApiError(error).message ??
               'Error de conexión al procesar el pago',
-            ),
           });
         },
       });
@@ -734,10 +733,9 @@ export class PosPaymentStepComponent implements OnInit {
           variant: 'error',
           title: 'Error',
           // QUI-559: same contract as the cash path — surface the backend reason.
-          description: extractPosErrorMessage(
-            error,
+          description:
+            extractApiError(error).message ??
             'Error al procesar la venta a crédito',
-          ),
         });
       },
     });

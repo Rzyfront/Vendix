@@ -12,29 +12,91 @@
  * helper para decidir qué mostrar. Aplastar el error a `new Error(msg)` en el
  * servicio destruye `error_code`/`status` y rompe cualquier ramificación por código.
  *
+ * `message` NUNCA devuelve el texto de transporte de Angular (QUI-559): ese
+ * string describe cómo falló el HTTP, no por qué el negocio rechazó la
+ * operación, y mostrarlo dejaba al cajero leyendo
+ * `"Http failure response for …/store/payments/pos: 409 Conflict"` en lugar de
+ * `"Stock insuficiente para X: requiere 10, disponible 8."`. Cuando no hay
+ * mensaje de negocio, `message` queda `undefined` a propósito para que el
+ * consumidor aplique SU fallback de dominio (`message || 'No se pudo …'`).
+ *
+ * Se prefiere este helper sobre `extractApiErrorMessage`
+ * (`core/utils/api-error-handler.ts`) cuando el mensaje del backend es
+ * **dinámico**: ese otro camino resuelve por `error_code` contra el catálogo
+ * estático `ERROR_MESSAGES` y descarta el texto del backend, así que perdería
+ * el nombre del producto y las cantidades del bloqueo de stock.
+ *
  * Caso `responseType: 'blob'` (p.ej. descarga de PDF): `err.error` es un `Blob`
- * sin `error_code`/`message` parseables, así que `code` queda `undefined` y
- * `message` cae al genérico de Angular — comportamiento esperado.
+ * sin `error_code`/`message` parseables, así que `code` y `message` quedan
+ * `undefined` — comportamiento esperado, el consumidor usa su fallback.
  */
+
+/** Prefijo con el que Angular arma el texto de transporte de `HttpErrorResponse`. */
+const TRANSPORT_MESSAGE_PREFIX = 'Http failure response';
+
+/** Forma del envelope de error del backend (`VendixHttpException`). */
+interface VendixErrorBody {
+  error_code?: string;
+  /** `string[]` cuando class-validator rechaza un DTO. */
+  message?: string | string[];
+  errors?: Array<{ message?: string }>;
+}
+
 export interface ApiErrorInfo {
   /** `error_code` del backend (p.ej. `DISPATCH_NOTE_NO_SHIPPING_ADDRESS`). */
   code?: string;
-  /** Mensaje de negocio del backend, con fallback al mensaje genérico. */
+  /** Mensaje de negocio del backend; `undefined` si no hay ninguno utilizable. */
   message?: string;
   /** Status HTTP (p.ej. 400, 403, 409). */
   status?: number;
 }
 
 export function extractApiError(err: unknown): ApiErrorInfo {
-  const e = err as {
-    error?: { error_code?: string; message?: string } | unknown;
-    message?: string;
-    status?: number;
-  };
-  const body = (e?.error ?? {}) as { error_code?: string; message?: string };
+  const e = err as
+    | {
+        error?: VendixErrorBody | string | unknown;
+        message?: string;
+        status?: number;
+      }
+    | null
+    | undefined;
+
+  const raw = e?.error;
+  const body = (raw && typeof raw === 'object' ? raw : {}) as VendixErrorBody;
+
   return {
-    code: body?.error_code,
-    message: body?.message ?? e?.message,
-    status: e?.status,
+    code: typeof body.error_code === 'string' ? body.error_code : undefined,
+    message:
+      businessMessage(body) ??
+      // Algunas capas serializan el body antes de re-lanzar.
+      humanText(typeof raw === 'string' ? raw : undefined) ??
+      // Un `Error` lanzado por una guarda del frontend ya es user-facing; el
+      // `message` de un `HttpErrorResponse` no lo es y `humanText` lo descarta.
+      humanText(e?.message),
+    status: typeof e?.status === 'number' ? e.status : undefined,
   };
+}
+
+/** Mensaje de negocio del envelope, resolviendo array y `errors[]` anidado. */
+function businessMessage(body: VendixErrorBody): string | undefined {
+  const { message } = body;
+
+  if (Array.isArray(message)) {
+    const joined = message
+      .filter((item): item is string => typeof item === 'string' && !!item.trim())
+      .join(' ');
+    if (joined) return joined;
+  } else if (typeof message === 'string' && message.trim()) {
+    return message;
+  }
+
+  return body.errors?.find((item) => !!item?.message?.trim())?.message;
+}
+
+/** El texto solo si es legible por un humano — nunca la descripción de transporte. */
+function humanText(value: string | undefined): string | undefined {
+  if (!value?.trim() || value.startsWith(TRANSPORT_MESSAGE_PREFIX)) {
+    return undefined;
+  }
+  return value;
 }
