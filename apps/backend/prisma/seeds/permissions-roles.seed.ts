@@ -843,6 +843,38 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/reservations/schedules/service/:productId',
       method: 'PUT',
     },
+    {
+      name: 'store:reservations:send_confirmation',
+      description: 'Disparar solicitud de confirmación al cliente (doble validación)',
+      path: '/api/store/reservations/:id/send-confirmation',
+      method: 'POST',
+    },
+    {
+      name: 'store:reservations:queue:read',
+      description: 'Leer la cola inteligente de reservas',
+      path: '/api/store/reservations/queue',
+      method: 'GET',
+    },
+    {
+      name: 'store:reservations:check_in:client',
+      description: 'Self check-in del cliente (botón Estoy en sala)',
+      path: '/api/store/reservations/:id/check-in',
+      method: 'POST',
+    },
+
+    // ===== Business hours (appointment redesign phase 1) =====
+    {
+      name: 'store:business_hours:read',
+      description: 'Leer horario maestro de la tienda',
+      path: '/api/store/business-hours',
+      method: 'GET',
+    },
+    {
+      name: 'store:business_hours:write',
+      description: 'Editar horario maestro de la tienda (PUT batch)',
+      path: '/api/store/business-hours',
+      method: 'PUT',
+    },
 
     // Remisiones
     {
@@ -4341,6 +4373,8 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reservations:read') ||
       p.name.includes('store:reservations:read:one') ||
       p.name.includes('store:reservations:update') ||
+      p.name.includes('store:reservations:send_confirmation') ||
+      p.name.includes('store:reservations:queue:read') ||
       p.name.includes('store:dispatch_notes:create') ||
       p.name.includes('store:dispatch_notes:read') ||
       p.name.includes('store:dispatch_notes:read:one') ||
@@ -4528,6 +4562,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reservations:read') ||
       p.name.includes('store:reservations:read:one') ||
       p.name.includes('store:reservations:create') ||
+      p.name.includes('store:reservations:queue:read') ||
       // Remisiones - crear, leer, confirmar (no delete ni void)
       p.name.includes('store:dispatch_notes:create') ||
       p.name.includes('store:dispatch_notes:read') ||

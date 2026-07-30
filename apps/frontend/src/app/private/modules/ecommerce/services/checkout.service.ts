@@ -32,6 +32,23 @@ export interface BookingSelection {
   date: string;
   start_time: string;
   end_time: string;
+  /**
+   * Opcionales: cuando el cliente eligió proveedor en el flujo
+   * `BookingComponent`, los propagamos para que el resumen del checkout
+   * pueda mostrar quién lo va a atender sin obligarlo a re-picar.
+   */
+  provider_id?: number;
+  provider_name?: string;
+  /**
+   * Modalidad de la reserva propagada desde `BookingComponent`:
+   *   - `'shop'`: el cliente va al local del proveedor.
+   *   - `'home'`: el proveedor va a la dirección del cliente.
+   * Si el cliente eligió "a domicilio", `service_address_id` apunta a la
+   * dirección snapshot usada para la reserva.
+   */
+  service_location_type?: 'shop' | 'home';
+  service_address_id?: number;
+  service_address_label?: string;
 }
 
 export interface GuestCheckoutCustomer {

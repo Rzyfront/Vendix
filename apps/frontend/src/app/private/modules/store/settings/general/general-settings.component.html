@@ -33,12 +33,24 @@
             <h2 class="section-title">Identidad y General</h2>
           </div>
           <div class="section-body">
-            <app-general-settings-form [settings]="settings().general"
+            <app-general-settings-form #generalForm [settings]="settings().general" [services]="$any(settings()).services"
               [panelUi]="settings().panel_ui"
               (settingsChange)="onSectionChange('general', $event)"
               (panelUiChange)="onSectionChange('panel_ui', $event)" />
           </div>
         </section>
+
+        <!-- Servicios (own card, only when 'service' industry is selected) -->
+        <!-- Use [style.display] instead of @if so the form is NEVER
+             unmounted. The industries signal transitions multiple times
+             during the parent's effect cascade (load → patch → re-emit
+             → re-patch), and @if would mount/unmount the form on each
+             transition, resetting its `lastLoadedState` flag and the
+             setTimeout poll before the post-patch value can be read.
+             (Section removed 2026-07-26: 'Servicios / Ofrece servicio a
+             domicilio' toggle is no longer shown. The ServicesSettingsForm
+             child component and its `showServicesSection` computed are
+             still wired up so we can re-enable it without code surgery.) -->
 
         <!-- Branding & Customization -->
         <section id="section-branding" class="settings-section">
@@ -106,6 +118,28 @@
           <div class="section-body">
             <app-operations-settings-form [settings]="settings().operations || { default_preparation_time_minutes: 15, ticket_closing_hour: 3 }"
               (settingsChange)="onSectionChange('operations', $event)" />
+          </div>
+        </section>
+
+        <!-- Reservations (Reservas) Section — appointment redesign phase 2.
+             Renders the `allow_direct_reschedule` toggle. Always shown
+             (any store with reservations enabled benefits from this
+             policy; flipping it OFF converts the customer's 1-click
+             reschedule into a pending admin approval flow). -->
+        <section id="section-reservations" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--teal">
+              <app-icon name="calendar-clock" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Reservas</h2>
+          </div>
+          <div class="section-body">
+            <!-- Fall back to { allow_direct_reschedule: true } when the
+                 store has never persisted this section — preserves the
+                 legacy 1-click UX until the operator explicitly opts
+                 into the approval flow. -->
+            <app-reservations-settings-form [settings]="settings().reservations || { allow_direct_reschedule: true }"
+              (settingsChange)="onSectionChange('reservations', $event)" />
           </div>
         </section>
 

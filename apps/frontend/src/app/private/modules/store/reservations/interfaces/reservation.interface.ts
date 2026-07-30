@@ -33,7 +33,36 @@ export interface Booking {
   consultation_notes?: any[];
 }
 
-export type BookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+export type BookingStatus = 'pending' | 'confirmed' | 'arriving' | 'attending' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+
+/**
+ * One entry returned by `GET /store/reservations/queue`. Each booking in
+ * `arriving` or `attending` status is ranked by ABS(starts_at - arrival_at),
+ * with priority + created_at as tiebreakers.
+ */
+export interface QueueEntry {
+  booking_id: number;
+  booking_number: string;
+  customer_id: number;
+  provider_id: number | null;
+  starts_at: string;
+  target_time: string;
+  arrival_at: string;
+  score: number;        // milliseconds of (target - arrival). Lower = closer.
+  priority: number;     // manual override. 0 = default.
+}
+
+/**
+ * One row of the per-store business-hours master calendar. The store
+ * availability service intersects provider schedules against these
+ * windows so a provider can't be booked outside the store's open hours.
+ */
+export interface BusinessHoursRow {
+  day_of_week: number;       // 0 = Sunday, 6 = Saturday
+  start_time: string | null; // HH:mm in 24h, null when closed
+  end_time: string | null;
+  is_active: boolean;
+}
 
 export interface BookingStats {
   today_count: number;
@@ -49,6 +78,22 @@ export interface AvailabilitySlot {
   end_time: string;
   available_providers: AvailableProvider[];
   total_available: number;
+  is_booked?: boolean;
+}
+
+export interface ProviderDateInfo {
+  date: string;
+  day_of_week: number;
+  has_schedule: boolean;
+  booking_count: number;
+  bookings: Array<{
+    id: number;
+    start_time: string;
+    end_time: string;
+    status: string;
+    customer_name: string;
+    service_name: string;
+  }>;
 }
 
 export interface BookingQuery {
@@ -83,6 +128,65 @@ export interface RescheduleBookingDto {
   date: string;
   start_time: string;
   end_time: string;
+}
+
+/**
+ * Appointment redesign phase 2 — pending reschedule request when
+ * `settings.reservations.allow_direct_reschedule === false`. The admin
+ * sees the queue in `RescheduleRequestsPanel` and approves/rejects.
+ */
+export type RescheduleRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'cancelled';
+
+export interface RescheduleRequestBooking {
+  id: number;
+  booking_number: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  customer: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    phone: string | null;
+  };
+  product: { id: number; name: string };
+  provider: { id: number; display_name: string } | null;
+}
+
+export interface RescheduleRequest {
+  id: number;
+  store_id: number;
+  booking_id: number;
+  requested_date: string;
+  requested_start_time: string;
+  requested_end_time: string;
+  requested_by_user_id: number | null;
+  requested_by_customer_id: number | null;
+  requested_at: string;
+  reason: string | null;
+  status: RescheduleRequestStatus;
+  decided_by_user_id: number | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  booking: RescheduleRequestBooking;
+  requested_by_user?: { id: number; first_name: string; last_name: string } | null;
+  decided_by_user?: { id: number; first_name: string; last_name: string } | null;
+}
+
+export interface CreateRescheduleRequestDto {
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason?: string;
+}
+
+export interface DecideRescheduleRequestDto {
+  decision_reason?: string;
 }
 
 export type CalendarViewMode = 'month' | 'week' | 'day';

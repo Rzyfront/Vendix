@@ -151,7 +151,7 @@
 
         <div class="pa-detail__workwindow">
           <app-icon name="clock" [size]="14"></app-icon>
-          <span>Horario de trabajo: <strong>7:00 AM – 10:00 PM</strong> ({{ slotMinutes() }} min por slot)</span>
+          <span>Horario de trabajo: <strong>{{ summaryWorkSchedule() }}</strong></span>
         </div>
 
         <div class="pa-detail__legend">
@@ -164,6 +164,11 @@
             <span class="pa-detail__legend-swatch pa-detail__legend-swatch--free"></span>
             <app-icon name="check" [size]="12"></app-icon>
             Libre
+          </span>
+          <span class="pa-detail__legend-item">
+            <span class="pa-detail__legend-swatch pa-detail__legend-swatch--past"></span>
+            <app-icon name="clock" [size]="12"></app-icon>
+            Ya pasó
           </span>
         </div>
 
@@ -182,9 +187,10 @@
                   class="pa-detail__slot"
                   [class.pa-detail__slot--busy]="slot.status === 'busy'"
                   [class.pa-detail__slot--free]="slot.status === 'free'"
+                  [class.pa-detail__slot--past]="slot.status === 'past'"
                 >
                   <app-icon
-                    [name]="slot.status === 'busy' ? 'lock' : 'check'"
+                    [name]="slot.status === 'busy' ? 'lock' : (slot.status === 'past' ? 'clock' : 'check')"
                     [size]="13"
                   />
                   <span>{{ slot.time }}</span>
@@ -207,9 +213,10 @@
                   class="pa-detail__slot"
                   [class.pa-detail__slot--busy]="slot.status === 'busy'"
                   [class.pa-detail__slot--free]="slot.status === 'free'"
+                  [class.pa-detail__slot--past]="slot.status === 'past'"
                 >
                   <app-icon
-                    [name]="slot.status === 'busy' ? 'lock' : 'check'"
+                    [name]="slot.status === 'busy' ? 'lock' : (slot.status === 'past' ? 'clock' : 'check')"
                     [size]="13"
                   />
                   <span>{{ slot.time }}</span>

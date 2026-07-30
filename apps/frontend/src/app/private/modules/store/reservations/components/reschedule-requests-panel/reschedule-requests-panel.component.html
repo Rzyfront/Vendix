@@ -1,0 +1,126 @@
+<section class="reschedule-requests-panel">
+  <header class="panel-header">
+    <div class="panel-title">
+      <app-icon name="inbox" [size]="16"></app-icon>
+      <h3>Solicitudes de reagenda</h3>
+      @if (requests().length > 0) {
+        <span class="badge-count">{{ requests().length }}</span>
+      }
+    </div>
+    <button
+      type="button"
+      class="refresh-btn"
+      (click)="load()"
+      [disabled]="loading()"
+      aria-label="Actualizar">
+      <app-icon name="rotate-cw" [size]="14"></app-icon>
+      Actualizar
+    </button>
+  </header>
+
+  @if (loading() && requests().length === 0) {
+    <p class="empty">Cargando solicitudes...</p>
+  } @else if (requests().length === 0) {
+    <p class="empty">
+      No hay solicitudes pendientes. Cuando un cliente pida reagendar
+      con aprobación, aparecerá acá.
+    </p>
+  } @else {
+    <ul class="request-list">
+      @for (req of requests(); track req.id) {
+        <li class="request-item">
+          <div class="request-main">
+            <div class="customer-line">
+              <strong>{{ fullName(req) }}</strong>
+              <span class="muted">·</span>
+              <span class="muted">{{ req.booking.product.name }}</span>
+            </div>
+            <div class="slot-row">
+              <span class="slot-label">Actual</span>
+              <span class="slot-current">{{ formatOriginalSlot(req) }}</span>
+              <app-icon name="arrow-right" [size]="12"></app-icon>
+              <span class="slot-label">Solicitado</span>
+              <span class="slot-requested">{{ formatRequestedSlot(req) }}</span>
+            </div>
+            @if (req.reason) {
+              <p class="reason">"{{ req.reason }}"</p>
+            }
+            <p class="meta">
+              Reserva #{{ req.booking.booking_number }} ·
+              Solicitado {{ req.requested_at | date: 'short' }}
+            </p>
+          </div>
+          <div class="request-actions">
+            <button
+              type="button"
+              class="btn btn-primary"
+              [disabled]="processing() === req.id"
+              (click)="approve(req)">
+              @if (processing() === req.id) {
+                Aprobando...
+              } @else {
+                Aprobar
+              }
+            </button>
+            <button
+              type="button"
+              class="btn btn-outline-danger"
+              [disabled]="processing() === req.id"
+              (click)="openRejectModal(req)">
+              Rechazar
+            </button>
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</section>
+
+<!-- Modal: rechazar con razón -->
+@if (rejectModal().open) {
+  <div class="modal-backdrop" (click)="closeRejectModal()">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <header class="modal-header">
+        <h4>Rechazar solicitud de reagenda</h4>
+      </header>
+      <div class="modal-body">
+        @if (rejectModal().request; as req) {
+          <p class="modal-context">
+            <strong>{{ fullName(req) }}</strong> ·
+            {{ formatOriginalSlot(req) }} → {{ formatRequestedSlot(req) }}
+          </p>
+        }
+        <label for="reject-reason" class="field-label">
+          Razón del rechazo <span class="req">*</span>
+        </label>
+        <textarea
+          id="reject-reason"
+          rows="3"
+          [ngModel]="rejectModal().reason"
+          (ngModelChange)="updateRejectReason($event)"
+          placeholder="Ej: Ese horario ya está ocupado, intenta otro..."
+          [disabled]="rejectModal().submitting"></textarea>
+      </div>
+      <footer class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-outline"
+          (click)="closeRejectModal()"
+          [disabled]="rejectModal().submitting">
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="btn btn-danger"
+          (click)="submitReject()"
+          [disabled]="rejectModal().submitting || rejectModal().reason.trim().length < 3">
+          @if (rejectModal().submitting) {
+            Rechazando...
+          } @else {
+            Confirmar rechazo
+          }
+        </button>
+      </footer>
+    </div>
+  </div>
+}

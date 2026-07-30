@@ -1,9 +1,22 @@
 :host {
   display: block;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
 }
 
 .week-view {
+  // Mobile (<768px): the calendar needs ~700px to remain readable. We
+  // let the host scroll horizontally (overflow-x: auto above) so the user
+  // can pan through days without breaking the page layout.
+  // Desktop (≥768px): the calendar fits the viewport without scrolling.
   min-width: 700px;
+  width: 100%;
+
+  @media (min-width: 1024px) {
+    min-width: 0;
+  }
 }
 
 .week-header {
@@ -143,12 +156,34 @@
     background: var(--color-warning-100, #fef3c7);
     border-left: 3px solid #f59e0b;
     color: #92400e;
+
+    // Expired-pending override: pending/confirmed booking past its end_time
+    // without being attended (no customer arrival). Painted red to flag the
+    // no-show visually. The DB status stays as-is so the operator can still
+    // confirm / cancel / no-show as they see fit — this is a visual cue, not
+    // a status change. See `isBookingExpired()` in the .ts for the logic.
+    &.expired-pending {
+      background: #fee2e2;
+      border-left-color: #ef4444;
+      color: #991b1b;
+      // No opacity here — we want this to feel urgent, not faded like
+      // a long-cancelled booking.
+    }
   }
 
   &.status-confirmed {
     background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.2);
     border-left: 3px solid var(--color-primary);
     color: var(--color-text-primary);
+
+    // Same expired override as `status-pending`. A confirmed booking that
+    // the customer never attended is just as much a no-show as an unconfirmed
+    // one — the operator still needs to spot it.
+    &.expired-pending {
+      background: #fee2e2;
+      border-left-color: #ef4444;
+      color: #991b1b;
+    }
   }
 
   &.status-in_progress {
@@ -163,18 +198,34 @@
     color: #065f46;
   }
 
-  &.status-cancelled {
-    background: var(--color-error-100, #fee2e2);
+  // Both `cancelled` and `no_show` are terminal-negative: the slot is no
+  // longer occupied. Red tells the operator "this slot is free again".
+  // Same palette as `expired-pending` so all no-show-style states read
+  // consistently as red — the status text in the detail modal
+  // differentiates `CANCELADA` vs `NO ASISTIÓ` vs `VENCIDA`.
+  &.status-cancelled,
+  &.status-no_show {
+    background: #fee2e2;
     border-left: 3px solid #ef4444;
     color: #991b1b;
     opacity: 0.6;
   }
 
-  &.status-no_show {
-    background: var(--color-neutral-100);
-    border-left: 3px solid #9ca3af;
-    color: #4b5563;
-    opacity: 0.6;
+  // Compact "VENCIDA" badge shown only on expired pending bookings.
+  // Sits at the bottom of the block — least important position, so it
+  // doesn't push the time/title out of view in tight 20-min blocks.
+  .booking-expired-badge {
+    align-self: flex-start;
+    margin-top: auto;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: #dc2626;
+    color: #fff;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    line-height: 1;
   }
 }
 

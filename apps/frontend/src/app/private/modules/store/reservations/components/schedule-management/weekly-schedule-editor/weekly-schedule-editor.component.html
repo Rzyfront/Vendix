@@ -9,6 +9,9 @@
     <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-8-5')">
       <app-icon name="sunrise" [size]="13" slot="icon" /> Lun-Vie 8-5
     </app-button>
+    <app-button variant="outline" size="xsm" (clicked)="applyPreset('weekdays-split')">
+      <app-icon name="sun" [size]="13" slot="icon" /> Partido (8-12, 14-18)
+    </app-button>
     <app-button variant="outline" size="xsm" (clicked)="copyToAll()">
       <app-icon name="copy" [size]="13" slot="icon" /> Copiar a todos
     </app-button>
@@ -46,41 +49,61 @@
       </div>
 
       <!-- Timeline bar -->
-      <div class="timeline-track" (click)="day.is_active ? startEditing(i) : null">
+      <div class="timeline-track">
         @if (day.is_active) {
-          <div
-            class="time-bar"
-            [style.left.%]="getBarLeft(day)"
-            [style.width.%]="getBarWidth(day)"
-            [class.editing]="day.editing">
-            @if (!day.editing) {
-              <span class="bar-label">{{ formatTimeShort(day.start_time) }} - {{ formatTimeShort(day.end_time) }}</span>
-            }
-          </div>
-
-          @if (day.editing) {
-            <div class="edit-overlay" [style.left.%]="getBarLeft(day)" [style.width.%]="getBarWidth(day)">
-              <input
-                type="time"
-                [value]="day.start_time"
-                (change)="updateTime(i, 'start_time', $any($event.target).value)"
-                class="time-input"
-              />
-              <span class="edit-separator">&mdash;</span>
-              <input
-                type="time"
-                [value]="day.end_time"
-                (change)="updateTime(i, 'end_time', $any($event.target).value)"
-                class="time-input"
-              />
-              <!-- Stop propagation wrapper -->
-              <div (click)="$event.stopPropagation()">
-                <app-button variant="primary" size="xsm" (clicked)="stopEditing(i)">
-                  <app-icon name="check" [size]="14" slot="icon" />
-                </app-button>
+          @for (block of day.blocks; track block.block_order; let bi = $index) {
+            <div class="block-row">
+              <div
+                class="time-bar"
+                [class.editing]="day.editingBlock === bi"
+                (click)="startEditing(i, bi)">
+                @if (day.editingBlock !== bi) {
+                  <span class="bar-label">{{ formatTimeShort(block.start_time) }} - {{ formatTimeShort(block.end_time) }}</span>
+                  <!-- Remove block button (only if > 1 block) -->
+                  @if (day.blocks.length > 1) {
+                    <button
+                      class="bar-remove"
+                      (click)="$event.stopPropagation(); removeBlock(i, bi)"
+                      title="Eliminar bloque">
+                      <app-icon name="x" [size]="12" />
+                    </button>
+                  }
+                }
               </div>
+
+              @if (day.editingBlock === bi) {
+                <div class="edit-overlay">
+                  <input
+                    type="time"
+                    [value]="block.start_time"
+                    (change)="updateTime(i, bi, 'start_time', $any($event.target).value)"
+                    class="time-input"
+                  />
+                  <span class="edit-separator">&mdash;</span>
+                  <input
+                    type="time"
+                    [value]="block.end_time"
+                    (change)="updateTime(i, bi, 'end_time', $any($event.target).value)"
+                    class="time-input"
+                  />
+                  <!-- Stop propagation wrapper -->
+                  <div (click)="$event.stopPropagation()">
+                    <app-button variant="primary" size="xsm" (clicked)="stopEditing(i)">
+                      <app-icon name="check" [size]="14" slot="icon" />
+                    </app-button>
+                  </div>
+                </div>
+              }
             </div>
           }
+
+          <!-- Add block button -->
+          <button
+            class="add-block-btn"
+            (click)="$event.stopPropagation(); addBlock(i)"
+            title="Agregar bloque horario">
+            <app-icon name="plus" [size]="14" />
+          </button>
         } @else {
           <div class="inactive-bar">
             <span>Dia libre</span>

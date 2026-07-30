@@ -1,6 +1,7 @@
 import { Component, input, output, computed, signal, DestroyRef, inject } from '@angular/core';
 
 import { Booking } from '../../../interfaces/reservation.interface';
+import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
 
 /**
  * A free slot = a time range where the provider has capacity and no booking.
@@ -106,6 +107,23 @@ export class CalendarWeekViewComponent {
 
   getBookingsForDate(dateStr: string): Booking[] {
     return this.bookingsByDate()[dateStr] || [];
+  }
+
+  /**
+   * A booking is "expired" when it's in a pre-service state AND its
+   * `end_time` is already in the past. The frontend paints these red so
+   * the operator can spot no-shows at a glance — without waiting for them
+   * to be manually cancelled. The status in the DB stays as-is so the
+   * operator can still confirm, no-show or cancel as they see fit.
+   *
+   * Delegates to `isBookingExpired()` in `booking-expired.util.ts` which
+   * handles the multiple date/time shapes the backend can serialize.
+   * The comparison uses the component's `currentTimeSignal` (refreshed
+   * every 60s), so expired bookings transition visually without a page
+   * reload as long as the tab is open.
+   */
+  isBookingExpired(booking: Booking): boolean {
+    return checkBookingExpired(booking, this.currentTimeSignal());
   }
 
   getFreeSlotsForDate(dateStr: string): FreeSlot[] {

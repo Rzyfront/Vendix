@@ -10,7 +10,7 @@ export class ProviderScheduleService {
   async getSchedule(providerId: number) {
     return this.prisma.provider_schedules.findMany({
       where: { provider_id: providerId },
-      orderBy: { day_of_week: 'asc' },
+      orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
     });
   }
 
@@ -30,22 +30,35 @@ export class ProviderScheduleService {
         where: { provider_id: providerId },
       });
 
-      // Create new schedules
+      // Create new schedules. The frontend sends one item per
+      // (day_of_week, block_order) pair; if `block_order` is missing
+      // we fall back to a per-day counter so multiple blocks on the
+      // same day never collide. (The previous implementation used
+      // `Math.floor(index / 7)` which only worked for the first 7
+      // items and collided as soon as a day had two blocks.)
       if (items.length > 0) {
+        const perDayCounter = new Map<number, number>();
         await tx.provider_schedules.createMany({
-          data: items.map((item) => ({
-            provider_id: providerId,
-            day_of_week: item.day_of_week,
-            start_time: item.start_time,
-            end_time: item.end_time,
-            is_active: item.is_active ?? true,
-          })),
+          data: items.map((item) => {
+            const explicit = item.block_order;
+            const fallback = perDayCounter.get(item.day_of_week) ?? 0;
+            const resolved =
+              explicit ?? (perDayCounter.set(item.day_of_week, fallback + 1), fallback);
+            return {
+              provider_id: providerId,
+              day_of_week: item.day_of_week,
+              block_order: resolved,
+              start_time: item.start_time,
+              end_time: item.end_time,
+              is_active: item.is_active ?? true,
+            };
+          }),
         });
       }
 
       return tx.provider_schedules.findMany({
         where: { provider_id: providerId },
-        orderBy: { day_of_week: 'asc' },
+        orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
       });
     });
   }

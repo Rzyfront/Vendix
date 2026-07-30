@@ -1,0 +1,130 @@
+/* Reusable address picker styles. BEM-style naming so it doesn't
+   collide with the consumers' legacy classes (.address-list,
+   .address-card, etc.). */
+
+.customer-address-picker {
+  &__heading {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-primary, #1a1a1a);
+    margin: 0 0 12px;
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  &__card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 8px;
+    background: var(--color-surface, #fff);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+
+    &:hover {
+      border-color: var(--color-primary, #7ed7a5);
+    }
+
+    &--selected {
+      border-color: var(--color-primary, #7ed7a5);
+      background: rgba(126, 215, 165, 0.04);
+    }
+
+    &--add {
+      border-style: dashed;
+      color: var(--color-text-secondary, #666);
+    }
+  }
+
+  &__radio {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid var(--color-border, #d1d5db);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  &__radio-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: transparent;
+    transition: background 0.15s;
+
+    &--checked {
+      background: var(--color-primary, #7ed7a5);
+    }
+
+    &--add {
+      background: transparent;
+      width: 18px;
+      height: 18px;
+      color: var(--color-text-secondary, #666);
+    }
+  }
+
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(126, 215, 165, 0.16);
+    color: #166534;
+    margin-bottom: 4px;
+    align-self: flex-start;
+  }
+
+  &__line {
+    font-size: 14px;
+    color: var(--color-text-primary, #1a1a1a);
+    margin: 0;
+  }
+
+  &__line-secondary {
+    font-size: 13px;
+    color: var(--color-text-secondary, #666);
+    margin: 0;
+  }
+
+  &__line-tertiary {
+    font-size: 12px;
+    color: var(--color-text-muted, #999);
+    margin: 0;
+  }
+
+  &__edit {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 4px 0 0 32px;
+    font-size: 13px;
+    color: var(--color-primary, #2f6f4e);
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 500;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}

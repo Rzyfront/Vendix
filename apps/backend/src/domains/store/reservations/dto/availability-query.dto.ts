@@ -1,5 +1,5 @@
-import { IsDateString, IsInt, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsDateString, IsInt, IsOptional, IsBoolean } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class AvailabilityQueryDto {
   @IsDateString()
@@ -11,5 +11,15 @@ export class AvailabilityQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
+  provider_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
   product_variant_id?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  include_booked?: boolean;
 }

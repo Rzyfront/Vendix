@@ -1,0 +1,421 @@
+.service-location {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  // Separación del bloque de booking-details que viene debajo en la
+  // página `/book/:id` — sin esto, los 2 botones de ubicación (local /
+  // domicilio) quedaban visualmente pegados a la card con Servicio /
+  // Profesional / Fecha / Precio.
+  margin-bottom: 1.5rem;
+}
+
+.service-location__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+// Toggle horizontal: dos botones grandes tipo "segmented control".
+// El cliente VE explícitamente las dos opciones y elige — sin esto
+// el componente decidía solo por la config y mostraba "A domicilio"
+// sin que el usuario tocara nada.
+.service-location__toggle {
+    display: flex;
+    // 16px entre los dos botones ("En el local" / "En mi domicilio")
+    // — antes 8px se veían visualmente pegados.
+    gap: 16px;
+    padding: 4px;
+    background: var(--color-background, #f5f6f8);
+    border-radius: var(--radius-md, 8px);
+}
+
+.service-location__toggle-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 12px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm, 6px);
+    cursor: pointer;
+    text-align: center;
+    transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+
+    &:hover:not(:disabled) {
+        color: var(--color-text-primary);
+    }
+
+    &.active {
+        background: var(--color-surface, #fff);
+        color: var(--color-primary);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        font-weight: 600;
+    }
+
+    &:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+}
+
+.service-location__toggle-hint {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--color-text-secondary);
+    margin-top: 2px;
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.service-location__subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.service-location__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+// Radio card pattern (mirrors app-pos-fulfillment-selector)
+.svc-option {
+  margin-bottom: 0;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--color-text-primary);
+  min-height: 44px; // touch target
+  transition:
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out,
+    background 120ms ease-out;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  &--selected {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-alpha, rgba(99, 102, 241, 0.18));
+    background: var(--color-primary-soft, rgba(99, 102, 241, 0.04));
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+.svc-option__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--color-primary-soft, rgba(99, 102, 241, 0.08));
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.svc-option--selected .svc-option__icon {
+  background: var(--color-primary);
+  color: white;
+}
+
+.svc-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.svc-option__title {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.svc-option__hint {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.3;
+}
+
+.svc-option__check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--color-primary);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+
+.svc-option--selected .svc-option__check {
+  opacity: 1;
+  transform: scale(1);
+}
+
+// Address list (home)
+.service-location__addresses {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;       // visible gap below the radio cards
+  padding-top: 20px;
+  border-top: 1px solid var(--color-border);
+}
+
+.service-location__sub {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.address-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.address-pill {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 36px 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--color-text-primary);
+  min-height: 44px;
+  transition:
+    border-color 120ms ease-out,
+    background 120ms ease-out,
+    box-shadow 120ms ease-out;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  &--selected {
+    border-color: var(--color-primary);
+    background: var(--color-primary-soft, rgba(99, 102, 241, 0.04));
+    box-shadow: 0 0 0 3px var(--color-primary-alpha, rgba(99, 102, 241, 0.18));
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+.address-pill__badge {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--color-primary-soft, rgba(99, 102, 241, 0.08));
+  color: var(--color-primary);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.address-pill__line1 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.address-pill__line2 {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.3;
+}
+
+.address-pill__check {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--color-primary);
+}
+
+// Empty state
+.service-location__empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+// Add-address toggle
+.add-address-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 8px 12px;
+  min-height: 44px;
+  margin-top: 12px;        // visible gap from the address pills above
+  border-radius: 8px;
+  border: 1px dashed var(--color-border);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+
+  &:hover {
+    background: var(--color-primary-soft, rgba(99, 102, 241, 0.05));
+    border-color: var(--color-primary);
+  }
+}
+
+// New-address inline form
+.new-address-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+}
+
+.new-address-form__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  &--cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+}
+
+.new-address-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  > span {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .req {
+    color: var(--color-danger, #dc2626);
+  }
+
+  input {
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    font: inherit;
+    min-height: 44px;
+
+    &:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-alpha, rgba(99, 102, 241, 0.18));
+    }
+  }
+}
+
+.new-address-form__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.new-address-form__submit {
+  align-self: flex-start;
+  padding: 10px 16px;
+  min-height: 44px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-primary);
+  color: white;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+}
+
+// Store address (shop)
+.store-address {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-background);
+
+  app-icon {
+    color: var(--color-primary);
+    margin-top: 2px;
+  }
+}
+
+.store-address__line1 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.store-address__line2 {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.3;
+  margin-top: 2px;
+}

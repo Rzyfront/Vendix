@@ -1,13 +1,16 @@
-import { Component, inject, OnInit, computed, signal, DestroyRef, effect } from '@angular/core';
+import { Component, inject, OnInit, computed, signal, DestroyRef, effect, viewChild } from '@angular/core';
+import { FormGroup } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { StoreSettingsService } from './services/store-settings.service';
+import { StoreSettingsService, StoreSettingsRequestOptions } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { DianEmissionStatus } from '../../invoicing/interfaces/invoice.interface';
 import { EmissionStage } from './components/receipts-settings-form/receipts-settings-form.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
+import { ServicesSettingsForm } from './components/services-settings-form/services-settings-form.component';
+import { ReservationsSettingsForm } from './components/reservations-settings-form/reservations-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
 import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
@@ -35,6 +38,8 @@ import { firstValueFrom } from 'rxjs';
     LucideAngularModule,
     IconComponent,
     GeneralSettingsForm,
+    ServicesSettingsForm,
+    ReservationsSettingsForm,
     InventorySettingsForm,
     NotificationsSettingsForm,
     PosSettingsForm,
@@ -59,6 +64,49 @@ export class GeneralSettingsComponent implements OnInit {
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private invoicingService = inject(InvoicingService);
+
+  /** Reference to the embedded GeneralSettingsForm so we can read
+   * the services FormGroup and pass it to the standalone
+   * ServicesSettingsForm card. */
+  readonly generalForm = viewChild<GeneralSettingsForm>('generalForm');
+
+  /**
+   * Signal that mirrors the current value of `industriesControl`
+   * inside the GeneralSettingsForm sub-form. We need this because
+   * FormControl.value is a getter, not a signal — so reading it
+   * inside a `computed` only samples the initial value, not later
+   * user changes. An `effect` subscribes to `valueChanges` and
+   * pushes every emit into a `signal` that the template can react to.
+   */
+  private readonly industriesSignal = signal<string[]>([]);
+
+  constructor() {
+    // Whenever the GeneralSettingsForm sub-form mounts, wire up
+    // the industries FormControl's valueChanges to our local signal.
+    effect(() => {
+      const form = this.generalForm();
+      // eslint-disable-next-line no-console
+      console.log('[general-settings] effect tick, form =', form ? 'PRESENT' : 'undefined');
+      if (!form) return;
+      const sub = form.industriesControl.valueChanges.subscribe(
+        (value: string[] | null | undefined) => {
+          // eslint-disable-next-line no-console
+          console.log('[general-settings] industries changed:', value);
+          this.industriesSignal.set(value ?? []);
+        },
+      );
+      // Seed the signal with the current value so we don't need to
+      // wait for the first change to render correctly.
+      this.industriesSignal.set(form.industriesControl.value ?? []);
+      this.destroyRef.onDestroy(() => sub.unsubscribe());
+    });
+  }
+
+  /** Show the 'Servicios' card only when 'service' is one of the
+   * selected industries. */
+  readonly showServicesSection = computed(() =>
+    this.industriesSignal().includes('service'),
+  );
 
   isVendixDomain = signal(false);
   storeAppUrl = signal<string | null>(null);
@@ -153,6 +201,7 @@ export class GeneralSettingsComponent implements OnInit {
       { id: 'branding', label: 'Marca', icon: 'palette' },
       { id: 'inventory', label: 'Inventario', icon: 'package' },
       { id: 'operations', label: 'Operaciones', icon: 'clock' },
+      { id: 'reservations', label: 'Reservas', icon: 'calendar-clock' },
       { id: 'dispatch', label: 'Despacho', icon: 'truck' },
       { id: 'reparto', label: 'Reparto', icon: 'coins' },
       { id: 'notifications', label: 'Alertas', icon: 'bell' },
@@ -207,7 +256,10 @@ export class GeneralSettingsComponent implements OnInit {
   });
 
   ngOnInit() {
-    this.loadSettings();
+    // forceRefresh: true on mount too — the 60s cache would otherwise
+    // return the stale pre-save response after navigation, and the form
+    // would re-mount without the persisted `services` sub-section.
+    this.loadSettings({ forceRefresh: true });
     this.resolveStoreAppUrl();
     this.loadEmissionStatus();
   }
@@ -222,8 +274,8 @@ export class GeneralSettingsComponent implements OnInit {
     }
   }
 
-  loadSettings() {
-    this.settings_service.getSettings().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+  loadSettings(options: StoreSettingsRequestOptions = {}) {
+    this.settings_service.getSettings(options).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const data = { ...(response.data as StoreSettings) };
         if ((data as any).shipping) {
@@ -258,6 +310,23 @@ export class GeneralSettingsComponent implements OnInit {
     this.settings.update((s) => ({ ...s, [section]: new_settings }));
     this.hasUnsavedChanges.set(true);
     this.lastSaved.set(null);
+  }
+
+  /**
+   * Recursively mark every control in the form (and nested sub-groups)
+   * as touched + dirty so the red error messages surface under each
+   * invalid field. Used right before showing the 'incomplete form'
+   * toast so the user can see WHICH fields are missing.
+   */
+  private markAllAsTouched(form: FormGroup): void {
+    form.markAllAsTouched();
+    Object.values(form.controls).forEach((ctrl) => {
+      if (ctrl instanceof FormGroup) {
+        this.markAllAsTouched(ctrl);
+      } else {
+        ctrl.markAsDirty();
+      }
+    });
   }
 
   /**
@@ -304,6 +373,22 @@ export class GeneralSettingsComponent implements OnInit {
 
   async saveAllSettings() {
     this.isSaving.set(true);
+
+    // Validate the GeneralSettingsForm (which embeds the services
+    // sub-form) before any save. If the user has enabled
+    // '¿Ofrece servicio a domicilio?' but left the required address
+    // fields empty, the form is invalid and the toast surfaces the
+    // specific reason.
+    const generalForm = this.generalForm();
+    if (generalForm && generalForm.form.invalid) {
+      this.markAllAsTouched(generalForm.form);
+      this.toast_service.error(
+        'Ingrese la dirección en el apartado de Servicio',
+      );
+      this.isSaving.set(false);
+      return;
+    }
+
     if ((this.settings() as any).shipping) {
       this.settings.update((s) => {
         const { shipping, ...rest } = s as any;
@@ -345,7 +430,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'carrier', 'restaurant', 'membership', 'panel_ui',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'carrier', 'restaurant', 'membership', 'panel_ui', 'reservations',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {
@@ -355,12 +440,36 @@ export class GeneralSettingsComponent implements OnInit {
         return acc;
       }, {} as Partial<StoreSettings>);
 
-      // Save all settings
+      // The 'services' sub-form lives outside the top-level sections
+      // (it's a sub-form rendered as its own card). Take the current
+      // value from the GeneralSettingsForm and persist it as
+      // `store_settings.settings.services.*` on the backend.
+      const generalForm = this.generalForm();
+      if (generalForm) {
+        const servicesValue = generalForm.form.get('services')?.value;
+        if (servicesValue) {
+          (sanitizedSettings as any).services = servicesValue;
+        }
+      }
+
+      // Save all settings. After the save succeeds, re-read the
+      // settings from the backend so the `settings` signal reflects
+      // the canonical state — including any defaults the backend
+      // might apply to fields the frontend didn't send. Without this
+      // re-read, navigating away and back would re-mount the
+      // GeneralSettingsForm with the in-memory 'settings' value,
+      // which can be stale if the backend normalized anything.
       this.settings_service.saveSettingsNow(sanitizedSettings).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.isSaving.set(false);
           this.hasUnsavedChanges.set(false);
           this.lastSaved.set(new Date());
+          // CRITICAL: forceRefresh: true to bypass the 60s settings cache.
+          // Without this, loadSettings() returns the stale pre-save
+          // response (which lacks `services`), and the form re-mounts
+          // with the address fields empty even though the save
+          // persisted correctly.
+          this.loadSettings({ forceRefresh: true });
         },
         error: (error) => {
           this.isSaving.set(false);

@@ -1,0 +1,57 @@
+// ============================================================================
+// Reservas sub-form card (appointment redesign phase 2)
+// ============================================================================
+// Single-toggle card. Same visual treatment as the Servicios card so
+// operators don't see a jump in the chrome when scrolling between
+// settings sections.
+:host {
+  display: block;
+  margin-bottom: 24px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-surface, #fff);
+}
+
+.settings-section__header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+}
+
+.settings-section__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-primary, #111827);
+
+  app-icon {
+    color: var(--color-primary, #6366f1);
+  }
+}
+
+.settings-section__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary, #4b5563);
+  line-height: 1.4;
+}
+
+.settings-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

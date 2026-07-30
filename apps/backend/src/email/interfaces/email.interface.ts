@@ -11,6 +11,17 @@ export interface EmailProvider {
     subject: string,
     html: string,
     text?: string,
+    /**
+     * Optional sender override. When provided, the email is sent FROM this
+     * address instead of the default platform `EMAIL_FROM`. Used by
+     * notifications emitted on behalf of a store (e.g. reschedule decisions)
+     * so the customer sees the store owner's name + email — not the generic
+     * Vendix Corp address.
+     *
+     * Shape mirrors the default `fromName` + `fromEmail` so providers can
+     * render `"<name>" <<email>>` directly.
+     */
+    from?: { name: string; email: string },
   ): Promise<EmailResult>;
   sendEmailWithAttachments(
     to: string,
@@ -18,6 +29,7 @@ export interface EmailProvider {
     html: string,
     attachments: EmailAttachment[],
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult>;
   sendVerificationEmail(
     to: string,

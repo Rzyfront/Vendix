@@ -45,6 +45,12 @@ export class StorePrismaService extends BasePrismaService {
     'layaway_plans',
     'exogenous_reports',
     'bookings',
+    // Tiene columna `store_id` propia. Sin este registro el getter
+    // `booking_reschedule_requests` devolvía un delegate SIN scoping, y
+    // `cancelRescheduleRequest` hacía `update({ where: { id } })` antes de
+    // cualquier `findOne` scopeado: un admin de la tienda A podía cancelar
+    // la solicitud pendiente de la tienda B.
+    'booking_reschedule_requests',
     'service_providers',
     'reviews',
     'ai_conversations',
@@ -64,6 +70,7 @@ export class StorePrismaService extends BasePrismaService {
     'booking_metadata_snapshots',
     'customer_consultation_notes',
     'booking_confirmation_tokens',
+    'store_business_hours',
     'email_templates',
     'messaging_channels',
     'social_channels',
@@ -321,6 +328,7 @@ export class StorePrismaService extends BasePrismaService {
       'data_collection_items', // Relational
       'data_collection_template_products', // Relational
       'booking_reminder_logs', // Relational
+      'proximity_notification_log', // Relational (via booking.store_id)
       'subscription_invoices', // Store scoped
       'subscription_payments', // Relational
       'subscription_events', // Relational
@@ -536,6 +544,9 @@ export class StorePrismaService extends BasePrismaService {
         template: { store_id: context.store_id },
       },
       booking_reminder_logs: { booking: { store_id: context.store_id } },
+      proximity_notification_log: {
+        booking: { store_id: context.store_id },
+      },
       subscription_payments: { invoice: { store_id: context.store_id } },
       subscription_events: {
         store_subscription: { store_id: context.store_id },
@@ -1558,6 +1569,16 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.booking_reminder_logs;
   }
 
+  /**
+   * Appointment redesign phase 2 — pending reschedule requests when
+   * `settings.reservations.allow_direct_reschedule === false`. The
+   * scoped client applies the automatic `store_id` predicate; queries
+   * here don't need to add it manually.
+   */
+  get booking_reschedule_requests() {
+    return this.scoped_client.booking_reschedule_requests;
+  }
+
   // Email Templates (store_id nullable - system defaults have null)
   get email_templates() {
     return this.scoped_client.email_templates;
@@ -1578,6 +1599,10 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   // Subscription models
+  get store_business_hours() {
+    return this.scoped_client.store_business_hours;
+  }
+
   get store_subscriptions() {
     return this.scoped_client.store_subscriptions;
   }

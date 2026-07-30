@@ -168,8 +168,37 @@
         </section>
       }
 
-      <!-- Order Timeline -->
-      @if (orderTimelineSteps().length > 0) {
+      <!-- Service-Location Block: shows where the booked service will
+           be performed. The generic shippingBlock above is null for
+           service-only orders, so without this the customer loses
+           the "A domicilio / En el local" address after the booking. -->
+      @if (serviceLocationBlock(); as block) {
+        <section class="card-section card-section--service-location">
+          <div class="section-header">
+            <app-icon
+              [name]="block.type === 'home' ? 'home' : 'store'"
+              [size]="18"
+            ></app-icon>
+            <h3>{{ block.title }}</h3>
+          </div>
+          <div class="section-divider"></div>
+          <div class="shipping-block-content">
+            <div class="shipping-detail">
+              <p class="shipping-method-name">{{ block.addressLine1 }}</p>
+              @if (block.addressLine2) {
+                <p class="shipping-info-text">{{ block.addressLine2 }}</p>
+              }
+            </div>
+          </div>
+        </section>
+      }
+
+      <!-- Order Timeline — only for orders with physical items.
+           Service-only orders use the reservation card (with its own
+           status: PENDIENTE / CONFIRMADA / COMPLETADA) below, so the
+           shipping stepper "Pedido creado / Enviado / Entregado" is
+           misleading for them. -->
+      @if (hasPhysicalItems() && orderTimelineSteps().length > 0) {
         <section class="card-section card-section--timeline">
           <div class="section-header">
             <app-icon name="activity" [size]="16"></app-icon>
@@ -391,13 +420,24 @@
               <app-icon name="eye" [size]="18"></app-icon>
               Ver detalles del pedido
             </a>
-            <button
-              class="action-btn action-btn--secondary"
-              (click)="loadOrder(order!.id)"
-            >
-              <app-icon name="truck" [size]="18"></app-icon>
-              Estado del envío
-            </button>
+            @if (hasPhysicalItems()) {
+              <button
+                class="action-btn action-btn--secondary"
+                (click)="loadOrder(order!.id)"
+              >
+                <app-icon name="truck" [size]="18"></app-icon>
+                Estado del envío
+              </button>
+            }
+            @if (hasServiceItems()) {
+              <button
+                class="action-btn action-btn--secondary"
+                (click)="openRescheduleModal()"
+              >
+                <app-icon name="calendar-clock" [size]="18"></app-icon>
+                Reagendar reserva
+              </button>
+            }
             <div class="section-divider"></div>
             @if (order.invoice_url) {
               <a class="action-link" [href]="getInvoiceUrl()" target="_blank">
@@ -415,3 +455,20 @@
     </div>
   }
 </div>
+
+<!-- Reschedule modal — opened by the "Reagendar reserva" action
+     button. Only mounted for bookings in pending / confirmed state.
+     The booking object from the order endpoint is a subset of the
+     full `Booking` type (no store_id, customer_id, channel, etc.,
+     which the order endpoint doesn't return). The modal only reads
+     fields that ARE present, so the cast is safe. -->
+@if (showRescheduleModal() && firstReschedulableBooking(); as booking) {
+  <app-reschedule-modal
+    [isOpen]="showRescheduleModal()"
+    [booking]="$any(booking)"
+    [mode]="'ecommerce'"
+    [orderState]="order()?.state"
+    (closed)="closeRescheduleModal()"
+    (rescheduled)="onRescheduleComplete()"
+  />
+}

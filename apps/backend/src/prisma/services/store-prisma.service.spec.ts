@@ -44,6 +44,21 @@ describe('StorePrismaService', () => {
     expect(typeof extensions.dian_configurations.update).toBe('function');
   });
 
+  // Mismo fallo que dian_configurations: `booking_reschedule_requests` tenía
+  // getter hacia scoped_client pero no estaba en all_scoped_models, así que
+  // `cancelRescheduleRequest` podía actualizar la solicitud de otra tienda.
+  it('registers booking_reschedule_requests in the query-scoping extensions', () => {
+    const extensions = (service as any).createStoreQueryExtensions();
+
+    expect(extensions.booking_reschedule_requests).toBeDefined();
+    expect(
+      typeof extensions.booking_reschedule_requests.findUnique,
+    ).toBe('function');
+    expect(typeof extensions.booking_reschedule_requests.update).toBe(
+      'function',
+    );
+  });
+
   describe('mergeScopedWhere', () => {
     it('keeps a unique store_id at the top level when applying the same scope', () => {
       const result = (service as any).mergeScopedWhere(

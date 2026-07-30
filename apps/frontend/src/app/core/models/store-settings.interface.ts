@@ -22,6 +22,34 @@ export interface StoreSettings {
   carrier?: CarrierSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
+  /**
+   * Services sub-section (offer_home_service + local_address). Lives
+   * outside the top-level sections in the backend JSON. Mirrors
+   * `store_settings.settings.services.*` on the backend.
+   */
+  services?: any;
+  /**
+   * Reservations sub-section (reminders, confirmation, check_in, and
+   * the operator-facing `allow_direct_reschedule` toggle). Mirrors
+   * `store_settings.settings.reservations.*` on the backend.
+   *
+   * Optional because the backend migrator materializes the defaults
+   * lazily — stores that never edited `reservations` may not have it
+   * persisted. Read paths should fall back to the
+   * `DEFAULT_ALLOW_DIRECT_RESCHEDULE` constant.
+   */
+  reservations?: ReservationsSettings;
+}
+
+/**
+ * Reservations policy. Mirrors backend `ReservationsSettings` in
+ * `store-settings.interface.ts`.
+ */
+export interface ReservationsSettings {
+  /** When true (default), customers reschedule with 1 click. When false,
+   *  the reschedule becomes a pending request routed through the
+   *  `booking_reschedule_requests` admin queue. */
+  allow_direct_reschedule: boolean;
 }
 
 /**

@@ -16,9 +16,9 @@ import {
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
-import { CalendarWeekViewComponent, FreeSlot } from '../calendar/calendar-week-view/calendar-week-view.component';
+import { CalendarDayViewComponent, FreeSlot } from '../calendar/calendar-day-view/calendar-day-view.component';
 import { environment } from '../../../../../../../environments/environment';
-import { debounceTime, Subject, switchMap, of, forkJoin, finalize } from 'rxjs';
+import { debounceTime, Subject, switchMap, of, forkJoin, finalize, map, catchError } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -34,7 +34,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     ToggleComponent,
     InputComponent,
     SelectorComponent,
-    CalendarWeekViewComponent,
+    CalendarDayViewComponent,
     DecimalPipe,
   ],
   templateUrl: './reservation-form-modal.component.html',
@@ -89,6 +89,9 @@ export class ReservationFormModalComponent {
   startTime = signal('');
   endTime = signal('');
   skipAvailabilityCheck = signal(false);
+
+  // Provider schedule blocks (for validation)
+  providerScheduleBlocks = signal<Array<{ day_of_week: number; start_time: string; end_time: string }>>([]);
 
   // Customer
   customerSearch = signal('');
@@ -149,22 +152,277 @@ export class ReservationFormModalComponent {
   readonly confirmStep = computed(() => this.isFreeBooking() ? 3 : 4);
 
   /**
-   * Total free slots across the visible week. Used by the
-   * template to render the empty-state message when no slots
-   * are available — without this, the calendar shows an empty
-   * grid and the user has no idea why.
+   * Free slots for the SELECTED day only. The wizard's step 3 (Horario)
+   * now renders a single-day view, so we filter at the component level
+   * instead of asking the user to pick from a 7-day grid.
+   *
+   * Past-time filter: when the selected day is TODAY, drop any slot
+   * whose start time is already in the past. The backend hands us the
+   * full day-availability (it doesn't know that "now" is 15:24 and
+   * 10:00 is long gone) and the user must not be allowed to book into
+   * the past. For future days we keep every slot — a "10:00 AM"
+   * tomorrow is still bookable. We do NOT filter `dayBookings` because
+   * those carry their own expired → "VENCIDA" treatment via
+   * `isBookingExpired()` in the day-view.
+   *
+   * We re-read `new Date()` on every evaluation instead of caching
+   * `todayString` once: the modal can sit open across the midnight
+   * boundary or stay open while the user picks a new date. Caching
+   * "today" at init would let stale slots slip through the filter.
    */
-  readonly freeSlotsCount = computed(() =>
-    Object.values(this.freeSlotsByDate()).reduce(
-      (sum, slots) => sum + slots.length,
-      0,
-    ),
-  );
+  readonly dayFreeSlots = computed<FreeSlot[]>(() => {
+    const rawDate = this.selectedDate();
+    if (!rawDate) return [];
+    const date = rawDate.split('T')[0];
+    const slots = this.freeSlotsByDate()[date] || [];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (date !== today) return slots;
+    return slots.filter((s) => {
+      const [h, m] = s.start.split(':').map(Number);
+      return h * 60 + m > now.getHours() * 60 + now.getMinutes();
+    });
+  });
+
+  /**
+   * Bookings for the SELECTED day only. Used to render the busy blocks
+   * (red) on top of the day-view.
+   */
+  readonly dayBookings = computed<Booking[]>(() => {
+    const date = this.selectedDate();
+    if (!date) return [];
+    return this.bookingsByDate()[date] || [];
+  });
+
+  /**
+   * Total free slots for the selected day. Drives the empty-state
+   * message when no slots are available — without this, the day-view
+   * shows an empty grid and the user has no idea why.
+   */
+  readonly freeSlotsCount = computed(() => this.dayFreeSlots().length);
+
+  /**
+   * Unavailable slots for the selected day — gaps in the provider's
+   * working schedule (outside their blocks, including lunch breaks).
+   * Rendered as red blocks in the day-view so the user sees at a glance
+   * which times are off-limits. Returns `[]` when:
+   *   - No provider selected ("Cualquiera" — we don't know whose schedule
+   *     applies until backend assignment happens)
+   *   - No schedule loaded yet for the selected provider
+   *
+   * Each gap is split into `slotMinutes`-sized chunks so the visual
+   * granularity matches free-slots and bookings — the eye can scan the
+   * day in uniform rows.
+   */
+  readonly unavailableSlots = computed<FreeSlot[]>(() => {
+    const date = this.selectedDate();
+    const blocks = this.providerScheduleBlocks();
+    if (!date) return [];
+
+    const slotMinutes = this.selectedService()?.service_duration_minutes || 30;
+    const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+
+    // Fallback "Cualquiera": sin proveedor seleccionado no hay
+    // `providerScheduleBlocks` cargados, pero el backend ya nos devolvió
+    // los slots reales via `dayFreeSlots()`. Pintamos como ROJO los huecos
+    // entre [DAY_START, primer slot real], entre slots reales, y entre
+    // [último slot real, DAY_END]. Así el operador ve a simple vista que
+    // una franja como 7-9 AM está cerrada (p.ej. la tienda abre a las 9)
+    // aunque él haya dejado "Cualquiera" como proveedor.
+    if (!blocks.length) {
+      const freeSlots = this.dayFreeSlots();
+      if (!freeSlots.length) return [];
+      const DAY_START = 7 * 60;
+      const DAY_END = 22 * 60;
+      return this.computeGapsAroundFreeSlots(freeSlots, DAY_START, DAY_END, slotMinutes);
+    }
+
+    // Provider path (existing logic).
+
+    // Convert schedule blocks for this day-of-week into minute ranges,
+    // sort by start time, drop degenerate (end <= start) entries.
+    //
+    // Midnight edge case: HTML5 `<input type="time">` returns "00:00" for
+    // midnight — but that's ambiguous (start-of-day vs end-of-day). For an
+    // end_time that would otherwise be ≤ its start_time, the user almost
+    // certainly meant "closes at midnight" → treat as 24:00 (1440 min).
+    // Without this, a block like "2PM - 12AM" gets parsed as
+    // {start: 840, end: 0} → fails the `end > start` filter → block
+    // disappears from the schedule → the whole afternoon gets marked
+    // as unavailable.
+    const sortedBlocks = blocks
+      .filter(b => b.day_of_week === dayOfWeek)
+      .map(b => this.parseScheduleBlock(b))
+      .filter(b => b.end > b.start)
+      .sort((a, b) => a.start - b.start);
+
+    const DAY_START = 7 * 60;
+    const DAY_END = 22 * 60;
+
+    // If the provider doesn't work this day at all, use the SAME gap logic
+    // as the "Cualquiera" fallback above: paint ROJO only the gaps between
+    // the free slots the backend actually returned (via storeWindow /
+    // genericSlots), not the entire day. The previous "split entire day
+    // into red slots" approach double-painted over the green free-slot
+    // overlay — because the green block is rgba(34,197,94,0.16), the red
+    // "NO DISPONIBLE" label showed through, making the same slot read as
+    // both "DISPONIBLE" and "NO DISPONIBLE" at once.
+    //
+    // If the backend returned zero free slots (store closed / no capacity),
+    // we fall back to marking the whole day red — this preserves the
+    // legacy behavior so the operator still sees "this day is dead" instead
+    // of an empty grid that hides WHY nothing is available.
+    if (!sortedBlocks.length) {
+      const freeSlots = this.dayFreeSlots();
+      if (!freeSlots.length) {
+        return this.splitRangeIntoSlots(DAY_START, DAY_END, slotMinutes);
+      }
+      return this.computeGapsAroundFreeSlots(freeSlots, DAY_START, DAY_END, slotMinutes);
+    }
+
+    // Build the GAPS between blocks + day edges — these are the times the
+    // provider is NOT working, regardless of whether the gap is before the
+    // first block, between blocks, or after the last block.
+    // Separamos los huecos en dos categorías porque llevan tratamientos
+    // visuales distintos:
+    //   * edgeGaps  → antes del primer bloque / después del último
+    //                 (la tienda aún no abrió o ya cerró). Se pintan rojo
+    //                 SIEMPRE — son un hecho del horario, no del reloj.
+    //                 "8 AM cuando el store abre 9" debe verse rojo aunque
+    //                 ya sean las 11 AM del día (es un hecho histórico:
+    //                 a las 8 AM el local estaba cerrado).
+    //   * midGaps   → entre bloques (almuerzo / split-shift). Para HOY se
+    //                 filtran los ya pasados para no ensuciar la vista.
+    const edgeGaps: { start: number; end: number }[] = [];
+    const midGaps: { start: number; end: number }[] = [];
+    if (sortedBlocks[0].start > DAY_START) {
+      edgeGaps.push({ start: DAY_START, end: sortedBlocks[0].start });
+    }
+    for (let i = 0; i < sortedBlocks.length - 1; i++) {
+      if (sortedBlocks[i + 1].start > sortedBlocks[i].end) {
+        midGaps.push({ start: sortedBlocks[i].end, end: sortedBlocks[i + 1].start });
+      }
+    }
+    const lastBlock = sortedBlocks[sortedBlocks.length - 1];
+    if (lastBlock.end < DAY_END) {
+      edgeGaps.push({ start: lastBlock.end, end: DAY_END });
+    }
+
+    const edgeSlots = edgeGaps.flatMap((g) => this.splitRangeIntoSlots(g.start, g.end, slotMinutes));
+    const midSlotsAll = midGaps.flatMap((g) => this.splitRangeIntoSlots(g.start, g.end, slotMinutes));
+
+    // Past-time filter: aplica SOLO a midGaps (huecos intermedios como
+    // almuerzos). Los edgeGaps (antes de apertura / después de cierre)
+    // permanecen rojos siempre — son un hecho del horario, no del reloj.
+    //
+    // Normalize `date` a YYYY-MM-DD: `selectedDate()` viene como string
+    // local, pero `date` aquí puede llegar con sufijo "T00:00:00.000Z"
+    // por otra ruta de código; lo recortamos para comparar de forma
+    // confiable contra `today` (también YYYY-MM-DD).
+    const todayDate = date.split('T')[0];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (todayDate !== today) return [...edgeSlots, ...midSlotsAll];
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const midSlots = midSlotsAll.filter((s) => {
+      const [h, m] = s.start.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
+    return [...edgeSlots, ...midSlots];
+  });
+
+  /**
+   * Given the free slots the backend returned for the day, return the
+   * gaps between them and the day edges (DAY_START..DAY_END) split into
+   * `step`-minute chunks. Those gaps are what we paint as red
+   * "NO DISPONIBLE" — the inverse projection of "where there's no
+   * availability".
+   *
+   * Shared by the "Cualquiera" fallback (no provider selected) and the
+   * "provider without blocks for this day" path. Before this helper
+   * existed, each path duplicated the gap-computation logic AND the
+   * provider path took a shortcut (mark the whole day red) that caused
+   * the green free-slot overlay to show a red "NO DISPONIBLE" label
+   * bleeding through, making the same slot read as both DISPONIBLE and
+   * NO DISPONIBLE.
+   */
+  private computeGapsAroundFreeSlots(
+    freeSlots: FreeSlot[],
+    dayStart: number,
+    dayEnd: number,
+    step: number,
+  ): FreeSlot[] {
+    const freeAsRanges = freeSlots
+      .map((s) => ({ start: this.timeToMinutes(s.start), end: this.timeToMinutes(s.end) }))
+      .filter((r) => r.end > r.start)
+      .sort((a, b) => a.start - b.start);
+    if (!freeAsRanges.length) return [];
+
+    const gaps: { start: number; end: number }[] = [];
+    if (freeAsRanges[0].start > dayStart) {
+      gaps.push({ start: dayStart, end: freeAsRanges[0].start });
+    }
+    for (let i = 0; i < freeAsRanges.length - 1; i++) {
+      if (freeAsRanges[i + 1].start > freeAsRanges[i].end) {
+        gaps.push({ start: freeAsRanges[i].end, end: freeAsRanges[i + 1].start });
+      }
+    }
+    const last = freeAsRanges[freeAsRanges.length - 1];
+    if (last.end < dayEnd) {
+      gaps.push({ start: last.end, end: dayEnd });
+    }
+    return gaps.flatMap((g) => this.splitRangeIntoSlots(g.start, g.end, step));
+  }
+
+  /**
+   * Split a minute range [start, end) into consecutive `step`-minute slots.
+   * Used by `unavailableSlots` to chunk gaps into uniform visual rows that
+   * match the free-slot and booking-block granularity.
+   */
+  private splitRangeIntoSlots(start: number, end: number, step: number): FreeSlot[] {
+    const slots: FreeSlot[] = [];
+    for (let t = start; t + step <= end; t += step) {
+      slots.push({
+        start: this.minutesToTime(t),
+        end: this.minutesToTime(t + step),
+      });
+    }
+    return slots;
+  }
+
+  /**
+   * Inverse of `timeToMinutes`. Returns "HH:mm" for a minute-of-day count.
+   */
+  private minutesToTime(minutes: number): string {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  /**
+   * Formats a "HH:mm" wall-clock string into the user-facing 12-hour
+   * label ("8:00 AM"). Used in toast messages so the operator can see
+   * exactly which slot they tried to book. Mirrors the day-view's own
+   * `formatTime` so the labels match between the slot grid and the toast.
+   */
+  private formatTime12h(time: string): string {
+    const [hStr = '0', mStr = '0'] = (time ?? '').split(':');
+    const h = Number(hStr);
+    const m = Number(mStr);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+  }
 
   readonly canGoNext = computed(() => {
     const step = this.currentStep();
-    // Step 0: Service + Date required
-    if (step === 0) return !!this.selectedService() && !!this.selectedDate();
+    // Step 0: Service + Date required AND date must not be in the past.
+    // String comparison works for "YYYY-MM-DD" (lexicographic == chronological)
+    // and avoids Date-parsing timezone surprises.
+    if (step === 0) {
+      if (!this.selectedService() || !this.selectedDate()) return false;
+      return this.selectedDate() >= this.todayString;
+    }
     // Provider step (only in provider mode)
     if (step === this.providerStep()) return true; // "any" is valid
     // Slot step
@@ -218,6 +476,7 @@ export class ReservationFormModalComponent {
     this.notes.set('');
     this.submitting.set(false);
     this.directBooking.set(false);
+    this.providerScheduleBlocks.set([]);
     if (this.initialProduct()) {
       const product = this.initialProduct();
       this.selectedService.set(product);
@@ -271,10 +530,35 @@ export class ReservationFormModalComponent {
     const step = this.currentStep();
 
     if (step === 0) {
-      if (!this.isFreeBooking()) {
-        this.loadProviders();
+      // Defense in depth: even if `canGoNext` somehow let a past date
+      // through (e.g. user typed it after a date-picker paste), surface a
+      // toast and refuse to advance.
+      if (this.selectedDate() < this.todayString) {
+        this.toastService.warning(
+          'No podés agendar en una fecha que ya pasó. Elegí hoy o una fecha futura.',
+        );
+        return;
       }
-      this.currentStep.set(step + 1);
+      // Si la fecha elegida es HOY y la tienda ya cerró sus horarios
+      // (todos los slots restantes son del pasado), no dejamos avanzar:
+      // mostramos un toast claro para que el usuario elija otra fecha.
+      if (this.selectedDate() === this.todayString) {
+        this.guardTodayHasSlotsOrToast();
+        return;
+      }
+      if (!this.isFreeBooking()) {
+        this.loadingProviders.set(true);
+        this.loadProvidersAndAdvance(step);
+      } else {
+        // free_booking no tiene providerStep — pero `loadAvailableSlots`
+        // solía dispararse al cruzar de providerStep → slotStep. Para que
+        // el day-view tenga `dayFreeSlots`/`bookingsByDate` al entrar al
+        // grid (y el fallback de `unavailableSlots` pueda pintar rojo los
+        // huecos antes de la apertura), cargamos availability/calendar
+        // cuando llegamos al slotStep en modo free_booking.
+        this.loadAvailableSlots();
+        this.currentStep.set(step + 1);
+      }
       return;
     }
 
@@ -291,9 +575,19 @@ export class ReservationFormModalComponent {
         this.isPastTime(this.selectedDate(), this.startTime())
       ) {
         this.toastService.warning(
-          `Horario fuera del servicio`,
+          `La hora ${this.formatTime12h(this.startTime())} ya pasó.`,
         );
         return;
+      }
+      // Validate against provider schedule (lunch break, out of range)
+      if (this.startTime() && this.endTime()) {
+        const scheduleError = this.validateTimeAgainstProviderSchedule(
+          this.selectedDate(), this.startTime(), this.endTime()
+        );
+        if (scheduleError) {
+          this.toastService.warning(scheduleError);
+          return;
+        }
       }
       if (this.isFreeBooking()) {
         // For free booking, try loading slots if not already loaded
@@ -316,14 +610,125 @@ export class ReservationFormModalComponent {
 
   loadProviders(): void {
     const productId = this.selectedService()?.id;
+    const date = this.selectedDate();
     if (!productId) return;
 
     this.loadingProviders.set(true);
     this.reservationsService.getProvidersForService(productId)
+      .pipe(
+        switchMap((providers) => {
+          if (!providers.length) return of([]);
+          const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+          // Load schedule for each provider and filter by who works this day
+          const checks = providers.map(p =>
+            this.reservationsService.getProviderSchedule(p.id).pipe(
+              map(blocks => ({
+                provider: p,
+                works: blocks.some(b => b.day_of_week === dayOfWeek && b.is_active)
+              }))
+            )
+          );
+          return forkJoin(checks);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingProviders.set(false)),
+      )
       .subscribe({
-        next: (providers) => {
-          this.providers.set(providers);
-          this.loadingProviders.set(false);
+        next: (results) => {
+          const working = results.filter(r => r.works).map(r => r.provider);
+          this.providers.set(working);
+          if (working.length === 0) {
+            this.toastService.warning('No hay proveedores disponibles este día (dia de descanso)');
+          }
+        },
+        error: () => {
+          this.providers.set([]);
+        },
+      });
+  }
+
+  /**
+   * Guard anti-avance cuando el operador eligió HOY. Si el backend ya no
+   * devuelve slots futuros para hoy (la tienda cerró sus horarios), no
+   * dejamos seguir: mostramos un toast claro y abortamos. Si por el
+   * contrario quedan slots, avanzamos igual que antes (provider → slots).
+   */
+  private guardTodayHasSlotsOrToast(): void {
+    const productId = this.selectedService()?.id;
+    const date = this.selectedDate();
+    if (!productId) return;
+
+    this.loadingProviders.set(true);
+    this.reservationsService
+      .getAvailability(productId, date, date)
+      .pipe(
+        catchError(() => of([] as AvailabilitySlot[])),
+        finalize(() => this.loadingProviders.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (slots) => {
+          const now = new Date();
+          const nowMin = now.getHours() * 60 + now.getMinutes();
+          const hasFuture = (slots ?? []).some((s) => {
+            const [h, m] = (s.start_time ?? '').split(':').map(Number);
+            return !Number.isNaN(h) && h * 60 + m > nowMin;
+          });
+          if (!hasFuture) {
+            this.toastService.warning(
+              'Hoy ya no hay horarios disponibles. Elegí otra fecha.',
+            );
+            return;
+          }
+          if (!this.isFreeBooking()) {
+            this.loadingProviders.set(true);
+            this.loadProvidersAndAdvance(0);
+          } else {
+            // Aseguramos que el slot grid tenga datos al renderizar:
+            // sin esto, `dayFreeSlots` queda vacío y las franjas previas
+            // a la apertura (p.ej. 7-9 AM si el store abre 9) no se pintan
+            // rojas.
+            this.loadAvailableSlots();
+            this.currentStep.set(1);
+          }
+        },
+      });
+  }
+
+  private loadProvidersAndAdvance(currentStep: number): void {
+    const productId = this.selectedService()?.id;
+    const date = this.selectedDate();
+    if (!productId) return;
+
+    this.reservationsService.getProvidersForService(productId)
+      .pipe(
+        switchMap((providers) => {
+          if (!providers.length) return of([]);
+          const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+          const checks = providers.map(p =>
+            this.reservationsService.getProviderSchedule(p.id).pipe(
+              map(blocks => ({
+                provider: p,
+                works: blocks.some(b => b.day_of_week === dayOfWeek && b.is_active)
+              }))
+            )
+          );
+          return forkJoin(checks);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingProviders.set(false)),
+      )
+      .subscribe({
+        next: (results) => {
+          const working = results.filter(r => r.works).map(r => r.provider);
+          this.providers.set(working);
+          if (working.length === 0) {
+            this.toastService.warning('No hay proveedores disponibles este día (dia de descanso)');
+            // Do NOT advance — stay on current step
+          } else {
+            // Advance to provider step
+            this.currentStep.set(currentStep + 1);
+          }
         },
         error: () => {
           this.providers.set([]);
@@ -334,6 +739,15 @@ export class ReservationFormModalComponent {
 
   selectProvider(provider: any | null): void {
     this.selectedProvider.set(provider);
+    // Load provider schedule for time validation
+    if (provider?.id) {
+      this.reservationsService.getProviderSchedule(provider.id).subscribe({
+        next: (blocks) => this.providerScheduleBlocks.set(blocks || []),
+        error: () => this.providerScheduleBlocks.set([]),
+      });
+    } else {
+      this.providerScheduleBlocks.set([]);
+    }
   }
 
   loadAvailableSlots(): void {
@@ -344,11 +758,10 @@ export class ReservationFormModalComponent {
     const providerId = this.selectedProvider()?.id;
     const variantId = this.selectedVariant()?.id;
 
-    // Load both free slots (for the green overlay) and busy bookings (red
-    // blocks) for the selected week. We pick a Monday-aligned range so the
-    // week-view gets a full grid even when the selected date is mid-week.
-    const range = this.getWeekRange(date);
-
+    // Step 3 (Horario) now shows a SINGLE day view, so we only need to
+    // fetch availability + calendar for the selected date. No more
+    // Monday-aligned week range. This drops the payload ~7× and lets
+    // the user iterate fast when they change the date in step 1.
     this.loadingSlots.set(true);
 
     // forkJoin fires once when both requests complete; `finalize` turns off the
@@ -357,9 +770,9 @@ export class ReservationFormModalComponent {
     // auto-unsubscribe if the modal closes mid-request.
     forkJoin({
       availability: this.reservationsService.getAvailability(
-        productId, range.from, range.to, providerId, variantId,
+        productId, date, date, providerId, variantId,
       ),
-      calendar: this.reservationsService.getCalendar(range.from, range.to, productId),
+      calendar: this.reservationsService.getCalendar(date, date, productId),
     })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
@@ -400,23 +813,6 @@ export class ReservationFormModalComponent {
     return out;
   }
 
-  /**
-   * Monday-aligned week containing `date` (YYYY-MM-DD). The calendar week-view
-   * always renders Mon→Sun so we mirror that here.
-   */
-  private getWeekRange(date: string): { from: string; to: string } {
-    const d = new Date(date + 'T12:00:00');
-    const day = d.getDay(); // 0=Sun ... 6=Sat
-    const offsetToMonday = (day + 6) % 7;
-    const monday = new Date(d);
-    monday.setDate(d.getDate() - offsetToMonday);
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    const fmt = (x: Date) =>
-      `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
-    return { from: fmt(monday), to: fmt(sunday) };
-  }
-
   selectSlot(slot: AvailabilitySlot): void {
     this.selectedSlot.set(slot);
     this.startTime.set(slot.start_time);
@@ -424,48 +820,49 @@ export class ReservationFormModalComponent {
   }
 
   /**
-   * Bridge between the calendar's `slotClicked` event (which fires for both
-   * free and busy clicks) and the wizard's slot model. We synthesize an
-   * `AvailabilitySlot`-like object so `selectSlot()` keeps working unchanged.
+   * Bridge between the day-view's `slotClicked` event (which fires only for
+   * the selected date) and the wizard's slot model. The day-view is locked
+   * to `selectedDate()`, so the date-validation block from the old week-view
+   * handler is gone — clicks on other days are physically impossible now.
+   * We synthesize an `AvailabilitySlot`-like object so `selectSlot()` keeps
+   * working unchanged.
    */
-  onCalendarSlotPicked(event: { date: string; time: string }): void {
-    // Bug fix: the date is owned by step 1 — the calendar's `slotClicked`
-    // event must NOT be allowed to silently overwrite it. Clicks on any day
-    // other than the locked date are rejected with a toast so the user
-    // knows they need to go back to step 1 to change the date.
-    if (event.date !== this.selectedDate()) {
+  onCalendarSlotPicked(event: { time: string }): void {
+    const date = this.selectedDate();
+    const time = event.time;
+
+    // Block if the picked slot is already in the past. Mensaje concreto:
+    // incluimos la hora exacta que el operador intentó seleccionar para
+    // que entienda al instante qué slot fue y por qué no pasó.
+    if (this.isPastTime(date, time)) {
       this.toastService.warning(
-        `Para cambiar la fecha del agendamiento, volvé al paso Servicio. La fecha se mantiene en ${this.formatDate(this.selectedDate())}.`,
+        `La hora ${this.formatTime12h(time)} ya pasó.`,
       );
       return;
     }
 
-    // Block if the picked slot is already in the past.
-    if (this.isPastTime(event.date, event.time)) {
-      this.toastService.warning(
-        `Horario fuera del servicio`,
-      );
-      return;
-    }
-
-    // Compute the service-aware end time so the next-step guard passes.
-    const startMinutes = (() => {
-      const [h, m] = event.time.split(':').map(Number);
-      return h * 60 + m;
-    })();
+    // Validate against provider schedule (lunch break, out of range)
     const duration = this.selectedService()?.service_duration_minutes || 60;
-    const endMin = startMinutes + duration;
+    const [h, m] = time.split(':').map(Number);
+    const endMin = h * 60 + m + duration;
     const endH = Math.floor(endMin / 60) % 24;
     const endM = endMin % 60;
     const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
-    this.startTime.set(event.time);
+    const scheduleError = this.validateTimeAgainstProviderSchedule(date, time, endTime);
+    if (scheduleError) {
+      this.toastService.warning(scheduleError);
+      return;
+    }
+
+    // Compute the service-aware end time so the next-step guard passes.
+    this.startTime.set(time);
     this.endTime.set(endTime);
 
     // Build a synthetic slot matching the shape `selectSlot` expects.
     const synthetic: AvailabilitySlot = {
-      date: event.date,
-      start_time: event.time,
+      date,
+      start_time: time,
       end_time: endTime,
       total_available: 1,
     } as AvailabilitySlot;
@@ -481,8 +878,18 @@ export class ReservationFormModalComponent {
     if (!time || !this.selectedDate()) return;
     if (this.isPastTime(this.selectedDate(), time)) {
       this.toastService.warning(
-        `Horario fuera del servicio`,
+        `La hora ${this.formatTime12h(time)} ya pasó.`,
       );
+      return;
+    }
+    // Validate against provider schedule
+    const duration = this.selectedService()?.service_duration_minutes || 60;
+    const [h, m] = time.split(':').map(Number);
+    const endMin = h * 60 + m + duration;
+    const endTime = `${String(Math.floor(endMin / 60) % 24).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+    const scheduleError = this.validateTimeAgainstProviderSchedule(this.selectedDate(), time, endTime);
+    if (scheduleError) {
+      this.toastService.warning(scheduleError);
       return;
     }
     this.startTime.set(time);
@@ -497,6 +904,90 @@ export class ReservationFormModalComponent {
     const now = new Date();
     const selected = new Date(`${date}T${time.length > 5 ? time : time + ':00'}`);
     return selected.getTime() < now.getTime();
+  }
+
+  /**
+   * Validates if a time slot (start, end) is within the provider's schedule blocks
+   * for the given day. Returns null if valid, or an error message if invalid.
+   *
+   * Fallback "Cualquiera": cuando NO hay proveedor seleccionado, no hay
+   * `providerScheduleBlocks` cargados — pero el backend ya nos devolvió los
+   * slots válidos del día via `dayFreeSlots()`. Si el horario elegido no
+   * está dentro de ninguno de esos slots (p.ej. el operador picó 8:00 AM
+   * cuando el store abre 9:00 AM), rechazamos la selección con un toast
+   * claro. Sin este fallback, `onColumnClick` deja pasar cualquier horario
+   * del rango visual 7-22 del day-view aunque esté fuera del horario real.
+   */
+  validateTimeAgainstProviderSchedule(date: string, startTime: string, endTime: string): string | null {
+    const blocks = this.providerScheduleBlocks();
+    if (!blocks.length) {
+      // Fallback al catálogo de slots reales que devolvió el backend.
+      const freeSlots = this.dayFreeSlots();
+      if (freeSlots.length === 0) {
+        return `No hay horarios disponibles para el día seleccionado`;
+      }
+      const startMin = this.timeToMinutes(startTime);
+      const withinAny = freeSlots.some(
+        (s) => startMin >= this.timeToMinutes(s.start) && startMin < this.timeToMinutes(s.end),
+      );
+      return withinAny
+        ? null
+        : `La hora ${this.formatTime12h(startTime)} está fuera del horario de atención`;
+    }
+
+    const dayOfWeek = new Date(date + 'T12:00:00').getDay();
+    const dayBlocks = blocks.filter(b => b.day_of_week === dayOfWeek);
+    if (!dayBlocks.length) return 'El proveedor no trabaja este día';
+
+    const startMin = this.timeToMinutes(startTime);
+    const endMin = this.timeToMinutes(endTime);
+
+    // Check if the slot falls within ANY block
+    for (const block of dayBlocks) {
+      const { start: blockStart, end: blockEnd } = this.parseScheduleBlock(block);
+      if (startMin >= blockStart && endMin <= blockEnd) {
+        return null; // Valid - slot is within a block
+      }
+    }
+
+    // Slot is not within any block - check if it's in a gap (lunch break)
+    const sortedBlocks = [...dayBlocks].sort((a, b) => {
+      const aStart = this.parseScheduleBlock(a).start;
+      const bStart = this.parseScheduleBlock(b).start;
+      return aStart - bStart;
+    });
+    for (let i = 0; i < sortedBlocks.length - 1; i++) {
+      const { end: gapEnd } = this.parseScheduleBlock(sortedBlocks[i]);
+      const { start: gapStart } = this.parseScheduleBlock(sortedBlocks[i + 1]);
+      if (startMin >= gapEnd && endMin <= gapStart) {
+        return 'El proveedor está en hora de almuerzo/descanso en ese horario';
+      }
+    }
+
+    return 'El horario seleccionado está fuera del horario del proveedor';
+  }
+
+  /**
+   * Parses a schedule block's HH:mm start/end into minute-of-day values,
+   * handling the HTML5-time-picker midnight ambiguity: an end_time of
+   * "00:00" combined with a non-zero start_time almost always means
+   * "closes at midnight" (24:00), so we coerce it to 1440 minutes.
+   *
+   * Without this, a block like `2PM - 12AM` would parse as
+   * `{ start: 840, end: 0 }` → validation rejects any time after 14:00,
+   * and the unavailable-slots computation marks the entire afternoon
+   * as "fuera de horario" even though the provider actually works.
+   */
+  private parseScheduleBlock(block: { start_time: string; end_time: string }): { start: number; end: number } {
+    const start = this.timeToMinutes(block.start_time);
+    const endRaw = this.timeToMinutes(block.end_time);
+    const end = endRaw === 0 && start > 0 ? 24 * 60 : endRaw;
+    return { start, end };
+  }
+
+  private timeToMinutes(time: string): number {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
   }
 
   onCustomerSearch(query: string): void {
@@ -627,6 +1118,23 @@ export class ReservationFormModalComponent {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
+  })();
+
+  /**
+   * Today's date as a "YYYY-MM-DD" string in the user's local timezone.
+   * Used as the `min` attribute on the date input and to validate that
+   * `selectedDate()` is not in the past. String comparison (>=) works
+   * lexicographically because YYYY-MM-DD sorts the same as dates.
+   *
+   * Computed lazily once per component lifetime. If the modal stays open
+   * across midnight, this becomes stale — `nextStep` would still toast
+   * for any date older than this snapshot, but a date between the
+   * snapshot and "real today" wouldn't be flagged. Acceptable trade-off
+   * because the modal is short-lived.
+   */
+  readonly todayString = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   })();
 
   /**

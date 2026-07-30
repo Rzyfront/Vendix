@@ -18,6 +18,7 @@ import {
 } from './interfaces/notification-events.interface';
 import { QueueEntryEvent } from '../customer-queue/interfaces/queue-events.interface';
 import { InvoiceDataRequestEvent } from '../invoicing/invoice-data-requests/interfaces/invoice-data-request-events.interface';
+import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -28,8 +29,83 @@ export class NotificationsEventsListener {
     private readonly global_prisma: GlobalPrismaService,
     private readonly email_service: EmailService,
     private readonly s3_service: S3Service,
+    private readonly appointment_queue_service: AppointmentQueueService,
     private readonly event_emitter: EventEmitter2,
   ) {}
+
+  /**
+   * Appointment redesign phase 2 — resolves the FROM address for emails
+   * the listener sends on behalf of a store. Priority chain:
+   *
+   *   1. The specific user who triggered the action (`decidedByUserId`
+   *      from the event payload) — the customer sees "the actual person
+   *      who decided" and can reply directly. PREFERRED.
+   *   2. Store owner — fallback when no decidedByUserId (e.g. automated
+   *      flows) or when that user has no email set.
+   *   3. Organization admin — second fallback.
+   *   4. `null` — caller uses platform default EMAIL_FROM.
+   */
+  private async resolveFromForAction(
+    decidedByUserId: number | undefined,
+    store_id: number,
+  ): Promise<{ name: string; email: string } | null> {
+    try {
+      // 1. The admin who performed the action — most useful for the
+      //    customer (they see who actually decided).
+      if (decidedByUserId) {
+        const actor = await this.global_prisma.users.findUnique({
+          where: { id: decidedByUserId },
+          select: { first_name: true, last_name: true, email: true, state: true },
+        });
+        if (actor?.email && actor.state === 'active') {
+          const fullName = `${actor.first_name ?? ''} ${actor.last_name ?? ''}`.trim() || 'Equipo de la tienda';
+          return { name: fullName, email: actor.email };
+        }
+      }
+      // 2. Store owner fallback
+      const owner = await this.global_prisma.users.findFirst({
+        where: {
+          main_store_id: store_id,
+          state: 'active',
+          user_roles: {
+            some: { roles: { name: { in: ['owner', 'ORG_ADMIN'] } } },
+          },
+        },
+        orderBy: { id: 'asc' },
+        select: { first_name: true, last_name: true, email: true },
+      });
+      if (owner?.email) {
+        const fullName = `${owner.first_name ?? ''} ${owner.last_name ?? ''}`.trim() || 'Store Owner';
+        return { name: fullName, email: owner.email };
+      }
+      // 3. Org admin fallback
+      const org = await this.global_prisma.stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      if (org) {
+        const orgAdmin = await this.global_prisma.users.findFirst({
+          where: {
+            organization_id: org.organization_id,
+            state: 'active',
+            user_roles: { some: { roles: { name: 'ORG_ADMIN' } } },
+          },
+          orderBy: { id: 'asc' },
+          select: { first_name: true, last_name: true, email: true },
+        });
+        if (orgAdmin?.email) {
+          const fullName = `${orgAdmin.first_name ?? ''} ${orgAdmin.last_name ?? ''}`.trim() || 'Org Admin';
+          return { name: fullName, email: orgAdmin.email };
+        }
+      }
+      return null;
+    } catch (err) {
+      this.logger.warn(
+        `[resolveFromForAction] failed for store ${store_id}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
 
   @OnEvent('order.created')
   async handleOrderCreated(event: OrderCreatedEvent) {
@@ -975,6 +1051,10 @@ export class NotificationsEventsListener {
             select: { name: true },
           });
           const storeName = store?.name || 'la tienda';
+          const fromOverride = await this.resolveFromForAction(
+            undefined,
+            event.store_id,
+          );
 
           await this.email_service.sendEmail(
             customer.email,
@@ -1060,8 +1140,8 @@ export class NotificationsEventsListener {
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'booking_arrival',
-      'Cliente llegó',
-      `${event.customer_name} llegó para ${event.service_name} (${event.booking_number})`,
+      'Cliente en sala de espera',
+      `${event.customer_name} en sala de espera para ${event.service_name} (${event.booking_number})`,
       {
         booking_id: event.booking_id,
         booking_number: event.booking_number,
@@ -1111,6 +1191,137 @@ export class NotificationsEventsListener {
     );
   }
 
+  // ===== APPOINTMENT REDESIGN EVENTS (phase 1) =====
+
+  /**
+   * "Tu cita está por comenzar" — emitted by BookingProximityJob at T-30/T-15/T-5.
+   * Reaches both staff (POS panel) and the customer (push/SSE).
+   */
+  @OnEvent('appointment.upcoming')
+  async handleAppointmentUpcoming(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    proximity_minutes: number;
+    customer_name: string;
+    service_name: string;
+    date: string;
+    start_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'appointment_upcoming',
+      'Tu cita está por comenzar',
+      `${event.customer_name}, tu reserva ${event.booking_number} de ${event.service_name} comienza en ${event.proximity_minutes} minutos (${event.start_time})`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        proximity_minutes: event.proximity_minutes,
+        kind: 'proximity',
+      },
+    );
+  }
+
+  /**
+   * Customer arrived at the venue (status arriving). Emitted by ReservationsService.checkIn.
+   */
+  @OnEvent('appointment.checked_in')
+  async handleAppointmentCheckedIn(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    provider_id?: number;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'appointment_checked_in',
+      'Cliente en sala de espera',
+      `${event.customer_name} en sala de espera para ${event.service_name}`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        provider_id: event.provider_id,
+        kind: 'arrival',
+      },
+    );
+  }
+
+  /**
+   * Mirrors the queue promotion notification that
+   * AppointmentQueueService.refreshAndBroadcastQueue emits directly via
+   * notifications.createAndBroadcast. Other services emitting
+   * 'appointment.queued' will also route here.
+   */
+  @OnEvent('appointment.queued')
+  async handleAppointmentQueued(event: {
+    store_id: number;
+    booking_id: number;
+    queue_position: number;
+    customer_name: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'appointment_queued',
+      'Tu turno se acerca',
+      `${event.customer_name}, estás en la posición ${event.queue_position + 1} de la cola. Prepárate para tu cita.`,
+      {
+        booking_id: event.booking_id,
+        queue_position: event.queue_position,
+        kind: 'queue_promotion',
+      },
+    );
+  }
+
+  /**
+   * Fired by ReservationsService.checkIn() whenever a booking gets a new
+   * arrival_at. Triggers the smart queue recalculation + broadcast so the
+   * customer promoted to rank 0 gets notified. Errors here must never crash
+   * the listener chain — they're swallowed + logged.
+   */
+  @OnEvent('booking.arrival_recorded')
+  async handleBookingArrivalRecorded(event: {
+    store_id: number;
+    booking_id: number;
+    date: string;
+  }) {
+    try {
+      await this.appointment_queue_service.refreshAndBroadcastQueue(
+        event.store_id,
+        event.date,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[handleBookingArrivalRecorded] queue refresh failed for booking ${event.booking_id}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
+   * Fired by BookingConfirmationService.processToken when the double-validation
+   * detects a slot conflict. The booking was confirmed anyway (decision: alert
+   * staff to resolve manually) but they need a heads-up.
+   */
+  @OnEvent('booking.double_booking')
+  async handleBookingDoubleBooking(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_attending',
+      'Doble booking detectado',
+      `Revisar reserva ${event.booking_number}: se confirmó pero el slot ya estaba ocupado. Resolver manualmente.`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        kind: 'double_booking',
+      },
+    );
+  }
+
   // ─── Private Helpers ─────────────────────────────────────────────
 
   private formatDate(date: Date): string {
@@ -1153,5 +1364,224 @@ export class NotificationsEventsListener {
     }
 
     return `https://vendix.com/preconsulta/${token}`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Reschedule approval flow (appointment redesign phase 2)
+  // ─────────────────────────────────────────────────────────────────────
+  // Eventos nuevos: requested / approved / rejected / cancelled.
+  // Cada uno dispara un in-app notification (broadcast al admin para
+  // requested; targeted al customer para approved/rejected/cancelled)
+  // y un email al customer cuando aplique.
+
+  /**
+   * Cliente pidió reagendar con aprobación — el admin debe decidir.
+   * Broadcast a la tienda + email al admin con la info del cliente.
+   */
+  @OnEvent('booking.reschedule_requested')
+  async handleBookingRescheduleRequested(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    request_id: number;
+    requested_date: string;
+    requested_start_time: string;
+    requested_end_time: string;
+    requested_by_customer_id: number | null;
+    customer_name: string;
+    service_name: string;
+    reason: string | null;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_reschedule_requested',
+      'Solicitud de reagenda',
+      `${event.customer_name || 'Cliente'} pidió reagendar ${event.service_name || 'su reserva'} ` +
+        `(${event.booking_number}) al ${event.requested_date} ${event.requested_start_time}`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        request_id: event.request_id,
+        kind: 'reschedule_request',
+      },
+    );
+  }
+
+  /**
+   * Admin aprobó la solicitud — el booking fue movido al slot solicitado.
+   * Targeted al customer + email de confirmación.
+   */
+  @OnEvent('booking.reschedule_approved')
+  async handleBookingRescheduleApproved(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    request_id: number;
+    new_date: string;
+    new_start_time: string;
+    new_end_time: string;
+    customer_id: number;
+    decision_reason: string | null;
+    decided_by_user_id: number;
+  }) {
+    await this.notifications_service.sendToUser(
+      event.store_id,
+      event.customer_id,
+      'booking_reschedule_approved',
+      'Tu reagenda fue aprobada',
+      `Tu reserva ${event.booking_number} fue movida al ${event.new_date} a las ${event.new_start_time}`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        request_id: event.request_id,
+        kind: 'reschedule_approved',
+        new_date: event.new_date,
+        new_start_time: event.new_start_time,
+      },
+    );
+
+    // Email al customer (best-effort, no rompe el flow si falla).
+    try {
+      const customer = await this.global_prisma.users.findUnique({
+        where: { id: event.customer_id },
+        select: { email: true, first_name: true, last_name: true },
+      });
+      const store = await this.global_prisma.stores.findUnique({
+        where: { id: event.store_id },
+        select: { name: true },
+      });
+      if (customer?.email) {
+        const fullName = `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim();
+        const subject = `Tu reagenda fue aprobada - ${store?.name ?? 'tu tienda'}`;
+        const html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2 style="color: #1a1a1a; margin-bottom: 8px;">Tu reagenda fue aprobada</h2>
+            <p>Hola ${fullName || ''},</p>
+            <p>Tu solicitud de reagenda para la reserva <strong>${event.booking_number}</strong> fue aprobada.</p>
+            <p><strong>Nuevo horario:</strong> ${event.new_date} a las ${event.new_start_time} - ${event.new_end_time}</p>
+            ${event.decision_reason ? `<p><em>Nota del equipo:</em> ${event.decision_reason}</p>` : ''}
+            <p>¡Te esperamos!</p>
+          </div>`;
+        // Appointment redesign phase 2 — send FROM the person who
+        // actually decided (the admin/staff in session). If that lookup
+        // misses, falls back to store owner / org admin / platform default.
+        // `resolveFromForAction` is best-effort; returns null on error.
+        const fromOverride = await this.resolveFromForAction(
+          event.decided_by_user_id,
+          event.store_id,
+        );
+        await this.email_service.sendEmail(
+          customer.email,
+          subject,
+          html,
+          undefined,
+          fromOverride ?? undefined,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[handleBookingRescheduleApproved] email fallback failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Admin rechazó la solicitud — el booking se queda en su slot original.
+   * Targeted al customer + email con la razón del rechazo.
+   */
+  @OnEvent('booking.reschedule_rejected')
+  async handleBookingRescheduleRejected(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    request_id: number;
+    customer_id: number;
+    decision_reason: string;
+    decided_by_user_id: number;
+  }) {
+    await this.notifications_service.sendToUser(
+      event.store_id,
+      event.customer_id,
+      'booking_reschedule_rejected',
+      'Tu reagenda fue rechazada',
+      `Tu solicitud de reagenda para la reserva ${event.booking_number} fue rechazada. Razón: ${event.decision_reason}`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        request_id: event.request_id,
+        kind: 'reschedule_rejected',
+        decision_reason: event.decision_reason,
+      },
+    );
+
+    try {
+      const customer = await this.global_prisma.users.findUnique({
+        where: { id: event.customer_id },
+        select: { email: true, first_name: true, last_name: true },
+      });
+      const store = await this.global_prisma.stores.findUnique({
+        where: { id: event.store_id },
+        select: { name: true },
+      });
+      if (customer?.email) {
+        const fullName = `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim();
+        const subject = `Tu reagenda fue rechazada - ${store?.name ?? 'tu tienda'}`;
+        const html = `
+          <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+            <h2 style="color: #1a1a1a; margin-bottom: 8px;">Tu reagenda fue rechazada</h2>
+            <p>Hola ${fullName || ''},</p>
+            <p>Tu solicitud de reagenda para la reserva <strong>${event.booking_number}</strong> fue rechazada.</p>
+            <p><strong>Razón:</strong> ${event.decision_reason}</p>
+            <p>Si querés elegir otro horario, podés intentarlo de nuevo desde tu cuenta.</p>
+          </div>`;
+        // Appointment redesign phase 2 — send FROM the person who
+        // actually decided (the admin/staff in session). If that lookup
+        // misses, falls back to store owner / org admin / platform default.
+        // `resolveFromForAction` is best-effort; returns null on error.
+        const fromOverride = await this.resolveFromForAction(
+          event.decided_by_user_id,
+          event.store_id,
+        );
+        await this.email_service.sendEmail(
+          customer.email,
+          subject,
+          html,
+          undefined,
+          fromOverride ?? undefined,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `[handleBookingRescheduleRejected] email fallback failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * El cliente retiró su propia solicitud (o el admin la canceló).
+   * Targeted al customer para confirmar la cancelación.
+   */
+  @OnEvent('booking.reschedule_cancelled')
+  async handleBookingRescheduleCancelled(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    request_id: number;
+    customer_id: number;
+    cancelled_by_user_id: number | null;
+  }) {
+    await this.notifications_service.sendToUser(
+      event.store_id,
+      event.customer_id,
+      'booking_reschedule_cancelled',
+      'Solicitud cancelada',
+      `Tu solicitud de reagenda para la reserva ${event.booking_number} fue cancelada.`,
+      {
+        booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        request_id: event.request_id,
+        kind: 'reschedule_cancelled',
+      },
+    );
   }
 }

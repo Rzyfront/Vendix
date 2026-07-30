@@ -99,56 +99,16 @@
           <div class="checkout-section">
             <h2>Direccion de Envio</h2>
 
-            @if (addresses().length > 0) {
-              <div class="address-list">
-                @for (addr of addresses(); track addr.id) {
-                  <div
-                    class="address-card"
-                    [class.selected]="
-                      selected_address_id() === addr.id && !use_new_address()
-                    "
-                    (click)="selectAddress(addr.id)"
-                  >
-                    <div class="address-radio">
-                      <span
-                        class="radio"
-                        [class.checked]="
-                          selected_address_id() === addr.id &&
-                          !use_new_address()
-                        "
-                      ></span>
-                    </div>
-                    <div class="address-info">
-                      <p class="address-line">{{ addr.address_line1 }}</p>
-                      @if (addr.address_line2) {
-                        <p class="address-line">{{ addr.address_line2 }}</p>
-                      }
-                      <p class="address-city">
-                        {{ addr.city }}, {{ addr.state_province }}
-                      </p>
-                      <p class="address-phone">Tel: {{ addr.phone_number }}</p>
-                    </div>
-                  </div>
-                }
-
-                <div
-                  class="address-card new"
-                  [class.selected]="use_new_address()"
-                  (click)="selectNewAddress()"
-                >
-                  <div class="address-radio">
-                    <span
-                      class="radio"
-                      [class.checked]="use_new_address()"
-                    ></span>
-                  </div>
-                  <div class="address-info">
-                    <i class="pi pi-plus"></i>
-                    <span>Agregar nueva direccion</span>
-                  </div>
-                </div>
-              </div>
-            }
+            <app-customer-address-picker
+              [addresses]="addresses()"
+              [selectedAddressId]="
+                use_new_address() ? null : selected_address_id()
+              "
+              [showAddNew]="addresses().length > 0"
+              [showEditLink]="false"
+              (addressSelected)="onServiceAddressPicked($event)"
+              (addNewClicked)="onServiceNewAddressClicked()"
+            />
 
             @if (use_new_address()) {
               <app-address-map-picker
@@ -275,23 +235,153 @@
         @if (bookingStep !== null && step() === bookingStep) {
           <div class="checkout-section">
             <h2>Reserva de Horario</h2>
-            <p class="booking-description">
-              Selecciona la fecha y horario para tus servicios.
-            </p>
+
+            <!-- Inline address picker — replica el step "Dirección" del
+                 checkout de productos. La MODALIDAD (A domicilio / En el
+                 local) ya la eligió el cliente en el BookingComponent
+                 (en el selector `app-service-location-selector`); acá
+                 dejamos que solo confirme o ajuste la dirección antes de
+                 pagar. Mismo `<app-customer-address-picker>` + mapa +
+                 form que usa el flujo de productos, sin reescribir la
+                 lógica. -->
+            @if (cartHasBookableServices && hasHomeBooking()) {
+              <div class="booking-address-block">
+                <h3>Dirección del servicio</h3>
+
+                <app-customer-address-picker
+                  [addresses]="addresses()"
+                  [selectedAddressId]="
+                    use_new_address() ? null : selected_address_id()
+                  "
+                  [showAddNew]="addresses().length > 0"
+                  [showEditLink]="false"
+                  (addressSelected)="onServiceAddressPicked($event)"
+                  (addNewClicked)="onServiceNewAddressClicked()"
+                />
+
+                @if (use_new_address()) {
+                  <app-address-map-picker
+                    [center]="map_center()"
+                    (located)="onMapLocated($event)"
+                  />
+                  <form [formGroup]="address_form" class="address-form">
+                    <app-input
+                      label="Direccion"
+                      formControlName="address_line1"
+                      placeholder="Calle y numero"
+                      [control]="address_form.get('address_line1')"
+                      [error]="getFieldError('address_line1')"
+                      [required]="true"
+                    ></app-input>
+
+                    <app-input
+                      label="Apartamento, oficina, etc. (opcional)"
+                      formControlName="address_line2"
+                      placeholder="Apto, piso, oficina"
+                      [control]="address_form.get('address_line2')"
+                      [error]="getFieldError('address_line2')"
+                    ></app-input>
+
+                    <div class="form-row">
+                      <app-selector
+                        label="Pais"
+                        formControlName="country_code"
+                        [options]="countryOptions"
+                        placeholder="Selecciona un pais"
+                        [errorText]="getFieldError('country_code')"
+                        [required]="true"
+                      ></app-selector>
+
+                      @if (isColombia()) {
+                        <app-selector
+                          label="Departamento/Estado"
+                          formControlName="state_province"
+                          [options]="departmentOptions"
+                          [placeholder]="
+                            loading_departments()
+                              ? 'Cargando...'
+                              : 'Selecciona un departamento'
+                          "
+                          [errorText]="getFieldError('state_province')"
+                          [required]="true"
+                        ></app-selector>
+                      } @else {
+                        <app-input
+                          label="Departamento/Estado"
+                          formControlName="state_province"
+                          placeholder="Departamento o estado"
+                          [control]="address_form.get('state_province')"
+                          [error]="getFieldError('state_province')"
+                          [required]="true"
+                        ></app-input>
+                      }
+                    </div>
+                  </form>
+                }
+              </div>
+            }
 
             @for (item of bookableItems; track item.id) {
-              <app-booking-slot-picker
-                [productId]="item.product_id"
-                [productVariantId]="item.product_variant_id || undefined"
-                [productName]="
-                  item.variant
-                    ? item.product.name + ' - ' + item.variant.name
-                    : item.product.name
-                "
-                [serviceDuration]="item.product.service_duration_minutes || 60"
-                [bookingMode]="item.product.booking_mode || 'provider_required'"
-                (slotSelected)="onBookingSlotSelected(item, $event)"
-              />
+              @let _bookingForItem = preBookedSelectionFor(item);
+              @if (_bookingForItem) {
+                <!-- El cliente YA eligió fecha + horario + (cuando
+                     aplica) proveedor y modalidad en el flujo
+                     BookingComponent. Mostramos un resumen para confirmar
+                     — no el picker, que forzaría a re-picar todo. -->
+                <div class="prebooked-summary">
+                  <app-icon name="calendar-check" [size]="16"></app-icon>
+                  <div class="prebooked-summary__body">
+                    <strong>Reserva confirmada</strong>
+                    <span>
+                      @if (_bookingForItem.provider_name) {
+                        <span class="prebooked-summary__provider">
+                          <app-icon name="user-circle" [size]="12"></app-icon>
+                          {{ _bookingForItem.provider_name }}
+                        </span>
+                        ·&nbsp;
+                      }
+                      {{ getBookingSummary(item) }}
+                    </span>
+                    @if (_bookingForItem.service_location_type) {
+                      <span class="prebooked-summary__location">
+                        <app-icon
+                          [name]="
+                            _bookingForItem.service_location_type === 'home'
+                              ? 'home'
+                              : 'store'
+                          "
+                          [size]="12"
+                        ></app-icon>
+                        {{
+                          _bookingForItem.service_location_type === 'home'
+                            ? 'A domicilio'
+                            : 'En el local'
+                        }}
+                        @if (_bookingForItem.service_location_type === 'home') {
+                          ·
+                          {{
+                            _bookingForItem.service_address_label ||
+                              'Dirección guardada'
+                          }}
+                        }
+                      </span>
+                    }
+                  </div>
+                </div>
+              } @else {
+                <app-booking-slot-picker
+                  [productId]="item.product_id"
+                  [productVariantId]="item.product_variant_id || undefined"
+                  [productName]="
+                    item.variant
+                      ? item.product.name + ' - ' + item.variant.name
+                      : item.product.name
+                  "
+                  [serviceDuration]="item.product.service_duration_minutes || 60"
+                  [bookingMode]="item.product.booking_mode || 'provider_required'"
+                  (slotSelected)="onBookingSlotSelected(item, $event)"
+                />
+              }
               @if (hasBookingForItem(item)) {
                 <div class="booking-confirmed">
                   <i class="pi pi-check-circle"></i>
@@ -349,6 +439,48 @@
                 <span class="eta-icon">&#128336;</span>
                 <span>{{ etaLabel() }}</span>
               </div>
+            }
+
+            <!-- El resumen de la reserva viaja con el cliente a lo largo
+                 del checkout. Aunque el resumen detallado vive en el
+                 step "Reserva", en el step "Pago" seguimos recordando
+                 qué reserva se está pagando para que el cliente no
+                 tenga que volver atrás a verificar. -->
+            @if (cartHasBookableServices) {
+              @for (item of bookableItems; track item.id) {
+                @let _bookingForItem = preBookedSelectionFor(item);
+                @if (_bookingForItem) {
+                  <div class="payment-booking-summary">
+                    <app-icon name="calendar-check" [size]="14"></app-icon>
+                    <span class="payment-booking-summary__date">
+                      {{ getBookingSummary(item) }}
+                    </span>
+                    @if (_bookingForItem.provider_name) {
+                      <span class="payment-booking-summary__chip">
+                        <app-icon name="user-circle" [size]="12"></app-icon>
+                        {{ _bookingForItem.provider_name }}
+                      </span>
+                    }
+                    @if (_bookingForItem.service_location_type) {
+                      <span class="payment-booking-summary__chip payment-booking-summary__chip--ghost">
+                        <app-icon
+                          [name]="
+                            _bookingForItem.service_location_type === 'home'
+                              ? 'home'
+                              : 'store'
+                          "
+                          [size]="12"
+                        ></app-icon>
+                        {{
+                          _bookingForItem.service_location_type === 'home'
+                            ? 'A domicilio'
+                            : 'En el local'
+                        }}
+                      </span>
+                    }
+                  </div>
+                }
+              }
             }
 
             <h2>Metodo de Pago</h2>
@@ -420,7 +552,7 @@
         <!-- Confirm Step -->
         @if (step() === confirmStep) {
           <div class="checkout-section">
-            <h2>Confirmar Pedido</h2>
+            <h2>{{ cartHasOnlyServices ? 'Confirmar Reserva' : 'Confirmar Pedido' }}</h2>
 
             <div class="confirm-details">
               @if (!cartHasOnlyServices) {
@@ -455,7 +587,7 @@
                 </div>
               }
 
-              @if (cartHasBookableServices && bookingSelections.size > 0) {
+              @if (cartHasBookableServices && bookingSelections().size > 0) {
                 <div class="confirm-block">
                   <h3>Reservas</h3>
                   @for (item of bookableItems; track item.id) {
@@ -499,15 +631,26 @@
 
         <div class="checkout-actions">
           @if (step() > 1) {
-            <app-button variant="outline" (clicked)="prevStep()">
-              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-              Anterior
-            </app-button>
+            <div class="checkout-actions__left">
+              <app-button variant="outline" (clicked)="prevStep()">
+                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                Anterior
+              </app-button>
+            </div>
           } @else {
-            <app-button variant="outline" (clicked)="goToCart()">
-              <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-              Volver al carrito
-            </app-button>
+            <div class="checkout-actions__left">
+              <app-button variant="outline" (clicked)="goToCart()">
+                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                Volver al carrito
+              </app-button>
+              <!-- Paso 1 con booking: permite volver al wizard /book/:id para
+                   modificar horario / profesional / modalidad sin tener que
+                   pasar por el carrito. -->
+              <app-button variant="outline" (clicked)="changeSchedule()">
+                <app-icon slot="icon" name="calendar-clock" [size]="16"></app-icon>
+                Modificar reserva
+              </app-button>
+            </div>
           }
 
           @if (step() < confirmStep) {
@@ -553,7 +696,7 @@
                   ? "Procesando..."
                   : isWompiPayment()
                     ? "Pagar con Wompi"
-                    : "Confirmar Pedido"
+                    : (cartHasOnlyServices ? "Confirmar Reserva" : "Confirmar Pedido")
               }}
             </app-button>
           }

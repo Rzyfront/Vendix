@@ -42,7 +42,7 @@
                 "output": "assets"
               }
             ],
-            "styles": ["src/styles.scss"],
+            "styles": ["src/styles.scss", "maplibre-gl/dist/maplibre-gl.css"],
             "allowedCommonJsDependencies": [
               "dijkstrajs",
               "maplibre-gl",
@@ -108,7 +108,8 @@
           "builder": "@angular/build:dev-server",
           "options": {
             "host": "0.0.0.0",
-            "port": 4200
+            "port": 4200,
+            "allowedHosts": true
           },
           "configurations": {
             "production": {

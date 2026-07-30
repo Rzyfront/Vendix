@@ -1,0 +1,58 @@
+@if (heading()) {
+  <h4 class="customer-address-picker__heading">{{ heading() }}</h4>
+}
+
+<div class="customer-address-picker__list">
+  @for (addr of addresses(); track addr.id) {
+    <div
+      class="customer-address-picker__card"
+      [class.customer-address-picker__card--selected]="isSelected(addr.id)"
+      (click)="select(addr.id)"
+    >
+      <div class="customer-address-picker__radio">
+        <span
+          class="customer-address-picker__radio-dot"
+          [class.customer-address-picker__radio-dot--checked]="isSelected(addr.id)"
+        ></span>
+      </div>
+      <div class="customer-address-picker__info">
+        @if (addr.is_primary) {
+          <span class="customer-address-picker__badge">Principal</span>
+        }
+        <p class="customer-address-picker__line">{{ formatAddressLine1(addr) }}</p>
+        <p class="customer-address-picker__line-secondary">
+          {{ formatAddressCity(addr) }}
+        </p>
+        @if (addr.phone_number) {
+          <p class="customer-address-picker__line-tertiary">Tel: {{ addr.phone_number }}</p>
+        }
+      </div>
+    </div>
+    @if (showEditLink() && isSelected(addr.id)) {
+      <button
+        type="button"
+        class="customer-address-picker__edit"
+        (click)="$event.stopPropagation(); edit()"
+      >
+        Modificar domicilio o elegir otro
+      </button>
+    }
+  }
+
+  @if (showAddNew()) {
+    <button
+      type="button"
+      class="customer-address-picker__card customer-address-picker__card--add"
+      (click)="addNew()"
+    >
+      <div class="customer-address-picker__radio">
+        <span class="customer-address-picker__radio-dot customer-address-picker__radio-dot--add">
+          <app-icon name="plus" [size]="18"></app-icon>
+        </span>
+      </div>
+      <div class="customer-address-picker__info">
+        <span class="customer-address-picker__line">Agregar nueva dirección</span>
+      </div>
+    </button>
+  }
+</div>

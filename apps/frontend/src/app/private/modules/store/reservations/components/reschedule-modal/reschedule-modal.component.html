@@ -1,41 +1,115 @@
-<app-modal [isOpen]="isOpen()" (isOpenChange)="$event ? null : closed.emit()"
+<app-modal [isOpen]="isOpen()" (isOpenChange)="onModalOpenChange($event)"
   (opened)="onOpen()" title="Reprogramar Reserva" size="md">
 
   @if (booking()) {
-    <!-- Current booking info -->
-    <div class="current-info">
-      <div class="info-row">
-        <app-icon name="briefcase" [size]="16"></app-icon>
-        <span>{{ booking()!.product?.name }}</span>
+    <!-- Synthetic booking: id=0 means the backend never persisted a real
+         reservation row for this order (orphan from the checkout silent-
+         failure bug or pre-fix orders). The customer needs to create the
+         booking before they can reschedule it. -->
+    @if (booking()!.id === 0) {
+      <div class="synthetic-warning">
+        <app-icon name="alert-triangle" [size]="20"></app-icon>
+        <div>
+          <h4>Aún no tienes una reserva creada para este servicio</h4>
+          <p>
+            Tu pedido incluye <strong>{{ $any(booking()!).product_name }}</strong>, pero
+            no se generó una reserva. Para reagendar, primero crea una reserva
+            nueva desde la página del producto o contacta a soporte.
+          </p>
+        </div>
       </div>
-      <div class="info-row">
-        <app-icon name="user" [size]="16"></app-icon>
-        <span>{{ booking()!.customer?.first_name }} {{ booking()!.customer?.last_name }}</span>
-      </div>
-      @if (booking()!.provider) {
-        <div class="info-row">
-          <app-icon name="user-circle" [size]="16"></app-icon>
-          <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+    } @else {
+      <!-- Ecommerce: el pedido asociado está cancelado pero la booking
+           sigue pending (entidades separadas). Banner arriba del formulario
+           (no en rama @else separada) para que el date selector + time
+           slots sigan renderizando y el cliente pueda reagendar. -->
+      @if (orderState() === 'cancelled') {
+        <div class="cancelled-order-warning">
+          <app-icon name="alert-circle" [size]="20"></app-icon>
+          <div>
+            <h4>Este pedido está cancelado</h4>
+            <p>
+              Al confirmar la reprogramación, el pedido se va a
+              <strong>reactivar automáticamente</strong> y volverá a estado
+              <em>Pendiente</em>. Si prefieres no reactivarlo, cancelá esta
+              ventana.
+            </p>
+          </div>
         </div>
       }
-      <div class="info-row muted">
-        <app-icon name="calendar" [size]="14"></app-icon>
-        <span>Actual: {{ booking()!.date }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
+
+      <!-- Current booking info -->
+      <div class="current-info">
+        <div class="info-row">
+          <app-icon name="briefcase" [size]="16"></app-icon>
+          <span>{{ booking()!.product?.name }}</span>
+        </div>
+        <div class="info-row">
+          <app-icon name="user" [size]="16"></app-icon>
+          <span>{{ booking()!.customer?.first_name }} {{ booking()!.customer?.last_name }}</span>
+        </div>
+        @if (booking()!.provider) {
+          <div class="info-row">
+            <app-icon name="user-circle" [size]="16"></app-icon>
+            <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+          </div>
+        }
+        <div class="info-row muted">
+          <app-icon name="calendar" [size]="14"></app-icon>
+          <span>Actual: {{ formatDate(booking()!.date) }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
+        </div>
       </div>
-    </div>
 
     <!-- Date selector -->
     <label class="section-label">Seleccionar nueva fecha</label>
-    <div class="date-selector">
-      @for (date of dates(); track date) {
-        <button
-          class="date-chip"
-          [class.selected]="selectedDate() === date"
-          (click)="selectDate(date)">
-          {{ formatDate(date) }}
-        </button>
-      }
-    </div>
+    @if (loadingDates()) {
+      <div class="loading-center">
+        <app-spinner size="sm" color="primary"></app-spinner>
+      </div>
+    } @else if (dates().length === 0) {
+      <p class="empty-slots">No hay fechas disponibles para este proveedor</p>
+    } @else {
+      <div class="date-selector">
+        @for (dateInfo of dates(); track dateInfo.date) {
+          <button
+            class="date-chip"
+            [class.selected]="selectedDate() === dateInfo.date"
+            [class.has-bookings]="dateInfo.booking_count > 0"
+            (click)="selectDate(dateInfo.date)">
+            <span class="date-label">{{ formatDate(dateInfo.date) }}</span>
+            @if (dateInfo.booking_count > 0) {
+              <span class="booking-badge">{{ dateInfo.booking_count }}</span>
+            }
+          </button>
+        }
+      </div>
+    }
+
+    <!-- Existing bookings for selected date -->
+    @if (getSelectedDateBookings().length > 0) {
+      <div class="existing-bookings">
+        <label class="section-label">
+          <app-icon name="calendar" [size]="14"></app-icon>
+          Citas agendadas este día
+        </label>
+        <div class="bookings-list">
+          @for (bk of getSelectedDateBookings(); track bk.id) {
+            <div class="booking-item">
+              <div class="booking-time">
+                {{ formatTime(bk.start_time) }} - {{ formatTime(bk.end_time) }}
+              </div>
+              <div class="booking-details">
+                <span class="booking-customer">{{ bk.customer_name }}</span>
+                <span class="booking-service">{{ bk.service_name }}</span>
+              </div>
+              <span class="booking-status" [class]="getStatusClass(bk.status)">
+                {{ getStatusLabel(bk.status) }}
+              </span>
+            </div>
+          }
+        </div>
+      </div>
+    }
 
     <!-- Time slots -->
     <label class="section-label">Horarios disponibles</label>
@@ -43,34 +117,46 @@
       <div class="loading-center">
         <app-spinner size="sm" color="primary"></app-spinner>
       </div>
-    } @else if (slots().length === 0) {
+    } @else if (visibleSlots().length === 0) {
       <p class="empty-slots">No hay horarios disponibles para esta fecha</p>
     } @else {
       <div class="slots-grid">
-        @for (slot of slots(); track slot.start_time) {
+        @for (slot of visibleSlots(); track slot.start_time) {
           <button
             class="slot-chip"
             [class.selected]="selectedSlot() === slot"
-            (click)="selectSlot(slot)">
+            [class.slot-booked]="slot.is_booked"
+            [class.slot-available]="!slot.is_booked"
+            [disabled]="slot.is_booked"
+            (click)="!slot.is_booked && selectSlot(slot)">
             {{ formatTime(slot.start_time) }}
+            @if (slot.is_booked) {
+              <span class="slot-badge">Ocupado</span>
+            }
           </button>
         }
       </div>
     }
-  }
+    }  <!-- cierra el @else que abrió el bloque normal -->
+  }  <!-- cierra el @if (booking()) -->
 
   <div slot="footer" class="modal-footer">
-    <app-button variant="ghost" size="sm" (click)="closed.emit()">Cancelar</app-button>
-    <app-button
-      variant="primary"
-      size="sm"
-      [disabled]="!selectedSlot() || submitting()"
-      (click)="submit()">
-      @if (submitting()) {
-        <app-spinner size="sm" color="white"></app-spinner>
-      } @else {
-        Confirmar Reprogramación
-      }
-    </app-button>
+    @if (booking()?.id === 0) {
+      <!-- Synthetic booking: no reschedule possible, only close. -->
+      <app-button variant="primary" size="sm" (click)="closed.emit()">Cerrar</app-button>
+    } @else {
+      <app-button variant="ghost" size="sm" (click)="closed.emit()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        size="sm"
+        [disabled]="!selectedSlot() || submitting()"
+        (click)="submit()">
+        @if (submitting()) {
+          <app-spinner size="sm" color="white"></app-spinner>
+        } @else {
+          Confirmar Reprogramación
+        }
+      </app-button>
+    }
   </div>
 </app-modal>
