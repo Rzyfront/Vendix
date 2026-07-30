@@ -1,3 +1,5 @@
+import { HttpErrorResponse } from '@angular/common/http';
+
 import { DEFAULT_ERROR_MESSAGE, ERROR_MESSAGES } from './error-messages';
 import { parseApiError } from './parse-api-error';
 
@@ -63,9 +65,13 @@ describe('ERROR_MESSAGES — SUBSCRIPTION_011 (plan retired from catalog)', () =
  * `new Error(message)` en su `catchError`, y con eso `parseApiError` perdía el
  * `error_code` y devolvía SIEMPRE el mensaje genérico: el backend respondía
  * `409 CASH_REGISTER_DISABLE_001`, la copy existía en `ERROR_MESSAGES`, y el
- * usuario igual veía "ocurrió un error inesperado". El fix preserva los campos
- * tipados como propiedades del Error; estos tests fijan las dos mitades del
- * contrato para que un refactor no lo desarme en silencio.
+ * usuario igual veía "ocurrió un error inesperado".
+ *
+ * El servicio ahora re-lanza el error CRUDO, así que el test que importa es el
+ * del `HttpErrorResponse` real: es la forma exacta que reciben los consumidores.
+ * El último caso fija el bug original — un Error aplanado NO resuelve código —
+ * para que reintroducir el `new Error(message)` rompa la suite en vez de
+ * degradar el mensaje en silencio.
  */
 describe('ERROR_MESSAGES — CASH_REGISTER_DISABLE_001 (caja con sesiones abiertas)', () => {
   it('resuelve a su propia copy y no al DEFAULT_ERROR_MESSAGE', () => {
@@ -96,27 +102,32 @@ describe('ERROR_MESSAGES — CASH_REGISTER_DISABLE_001 (caja con sesiones abiert
     });
   });
 
-  it('lo mapea también cuando un servicio aplanó el error a un Error con los campos tipados', () => {
-    // Forma exacta que produce `store-settings.service.ts#handleError`: un Error
-    // con `.message` intacto y el código colgado como propiedad. `parseApiError`
-    // hace `body = error?.error ?? error`, así que cae en el Error mismo.
-    const flattened = Object.assign(
-      new Error('No se puede deshabilitar la caja registradora: ...'),
-      {
+  it('lo mapea desde un HttpErrorResponse real, que es lo que re-lanza el servicio', () => {
+    const raw = new HttpErrorResponse({
+      status: 409,
+      statusText: 'Conflict',
+      url: 'https://api.vendix.com/api/store/settings',
+      error: {
+        statusCode: 409,
         error_code: 'CASH_REGISTER_DISABLE_001',
+        message: 'Cannot disable the cash register module while ...',
         details: { open_sessions: 2 },
-        status: 409,
       },
-    );
+    });
 
-    const parsed = parseApiError(flattened);
+    const parsed = parseApiError(raw);
 
     expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
     expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
-    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+    // `raw.message` es el texto técnico de Angular ("Http failure response
+    // for ..."): nunca debe convertirse en el mensaje del usuario.
+    expect(parsed.userMessage).not.toContain('Http failure');
+    expect(parsed.details).toEqual({ open_sessions: 2 });
   });
 
-  it('un Error aplanado SIN los campos tipados cae al genérico (el bug original)', () => {
+  it('un Error aplanado cae al genérico — así se veía el bug original', () => {
+    // Regresión: si alguien vuelve a poner `new Error(message)` en un
+    // `catchError`, este es el resultado, y la suite lo deja documentado.
     const parsed = parseApiError(new Error('cualquier cosa'));
 
     expect(parsed.errorCode).toBeNull();

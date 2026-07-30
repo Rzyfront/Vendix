@@ -300,35 +300,23 @@ export class StoreSettingsService {
     };
   }
 
+  /**
+   * QUI-560: re-lanza el error CRUDO.
+   *
+   * Antes aplanaba el `HttpErrorResponse` a `new Error(message)`. Eso descartaba
+   * el cuerpo JSON del backend, así que `parseApiError` — que hace
+   * `body = error?.error ?? error` y lee `body.error_code` — recibía un Error
+   * pelado y devolvía SIEMPRE `DEFAULT_ERROR_MESSAGE`: el backend respondía
+   * `409 CASH_REGISTER_DISABLE_001`, la copy existía en `error-messages.ts`, y
+   * el usuario igual veía "ocurrió un error inesperado".
+   *
+   * Los consumidores NO deben leer `.message` de este error: es el devMessage
+   * del backend (o, con el error crudo, el texto técnico de Angular), y el
+   * contrato de `error-messages.ts` es que eso nunca se muestra al usuario.
+   * Para texto de UI, usar `parseApiError(error).userMessage`.
+   */
   private handleError(error: any): Observable<never> {
-    let error_message = 'An unknown error occurred';
-
-    if (error.error instanceof ErrorEvent) {
-      error_message = error.error.message;
-    } else if (error.error && error.error.message) {
-      error_message = error.error.message;
-    } else if (error.message) {
-      error_message = error.message;
-    }
-
     console.error('StoreSettingsService error:', error);
-
-    // QUI-560: aplanar el HttpErrorResponse a `new Error(message)` perdía el
-    // `error_code`, así que `parseApiError` caía siempre al mensaje genérico y
-    // el catálogo de `error-messages.ts` nunca se activaba para este servicio.
-    // Se preservan los campos tipados COMO PROPIEDADES del Error en vez de
-    // re-lanzar el HttpErrorResponse crudo: `.message` sigue siendo idéntico
-    // para los consumidores que ya lo leen, y `parseApiError` ahora resuelve el
-    // código porque su `body = error?.error ?? error` cae en el Error mismo.
-    const flattened = new Error(error_message) as Error & {
-      error_code?: string;
-      details?: unknown;
-      status?: number;
-    };
-    flattened.error_code = error?.error?.error_code;
-    flattened.details = error?.error?.details;
-    flattened.status = error?.status;
-
-    return throwError(() => flattened);
+    return throwError(() => error);
   }
 }

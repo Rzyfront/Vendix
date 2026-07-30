@@ -57,6 +57,7 @@ import type { ScannerViewMode } from '../../components/aforo-qr-scanner/aforo-qr
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { StoreSettingsService } from '../../../../settings/general/services/store-settings.service';
 import type {
   MembershipSettings,
@@ -1078,8 +1079,18 @@ export class MembershipAccessPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.savingConfig.set(false);
+          // QUI-560: `err.message` traía el devMessage del backend. Con el error
+          // crudo `instanceof Error` ya ni siquiera acierta, y en ningún caso ese
+          // texto debe llegar al usuario: la copy sale del catálogo por código.
+          const parsed = parseApiError(err);
+          console.error(
+            `[aforo] guardar config falló [${parsed.errorCode ?? 'sin código'}]:`,
+            parsed.devMessage ?? err,
+          );
           this.toastService.error(
-            err instanceof Error ? err.message : 'Error al guardar la configuración',
+            parsed.errorCode
+              ? parsed.userMessage
+              : 'Error al guardar la configuración',
           );
         },
       });
@@ -1151,8 +1162,15 @@ export class MembershipAccessPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.savingAccessConfig.set(false);
+          const parsed = parseApiError(err);
+          console.error(
+            `[aforo] guardar config de acceso falló [${parsed.errorCode ?? 'sin código'}]:`,
+            parsed.devMessage ?? err,
+          );
           this.toastService.error(
-            err instanceof Error ? err.message : 'Error al guardar la configuración',
+            parsed.errorCode
+              ? parsed.userMessage
+              : 'Error al guardar la configuración',
           );
         },
       });
