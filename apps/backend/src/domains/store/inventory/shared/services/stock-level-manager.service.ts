@@ -633,6 +633,25 @@ export class StockLevelManager {
    *
    *   El caller que pase `true` es responsable de garantizar que existe una
    *   reserva upstream que cubre la misma cantidad.
+   *
+   * @param allow_negative_available (QUI-557) Permite que la reserva deje
+   *   `quantity_available` por debajo de cero. Por defecto `false`: la reserva
+   *   falla con `INV_STOCK_001` antes de escribir un disponible negativo.
+   *
+   *   Existe porque `validate_availability = false` se usa hoy con DOS
+   *   intenciones distintas que el flag no distingue:
+   *
+   *     a) "ya validé arriba" — checkout, payments, `reactivateOrder` y el
+   *        listener de remisiones. Ahí un disponible negativo significa que la
+   *        validación previa era incorrecta o perdió una carrera, y el sistema
+   *        debe fallar fuerte en vez de corromper la fila.
+   *     b) "vender igual" — POS y el pago de una orden, donde sobrevender es
+   *        comportamiento de producto deliberado ("non-restrictive UX").
+   *
+   *   Antes de este parámetro ambas caían en el paso 4, que resta sin mirar, y
+   *   el caso (a) escribía disponibles negativos en silencio. Ese negativo
+   *   contamina toda lectura posterior de la bodega. Solo el caso (b) pasa
+   *   `true`, y lo hace de forma explícita y nombrada.
    */
   async reserveStock(
     product_id: number,
@@ -647,6 +666,7 @@ export class StockLevelManager {
     expires_at?: Date | null,
     skip_reservation = false,
     stock_units_consumed?: number,
+    allow_negative_available = false,
   ): Promise<void> {
     // P3.4: cuando una reserva upstream ya cubre el stock, evitar doble
     // decremento manteniendo este método como no-op.
@@ -686,6 +706,25 @@ export class StockLevelManager {
         );
       }
 
+      // 2b. QUI-557 — Piso duro: ninguna reserva escribe un disponible
+      // negativo salvo que el caller lo autorice explícitamente. El paso 4
+      // resta sin mirar, así que con `validate_availability = false` una
+      // reserva sobre una identidad sin existencias dejaba la fila en
+      // `quantity_available = -N`. Ese negativo no se queda quieto: toda
+      // lectura posterior de esa bodega — incluido el gate de la remisión —
+      // hereda el faltante y reporta "sin stock" a órdenes que no tienen nada
+      // que ver. Fallar aquí deja el error donde se origina.
+      const resulting_available =
+        stock_level.quantity_available - effectiveQuantity;
+      if (!allow_negative_available && resulting_available < 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          `La reserva de ${effectiveQuantity} unidad(es) dejaría el disponible en ${resulting_available} (producto ${product_id}${
+            variant_id ? `, variante ${variant_id}` : ''
+          }, bodega ${location_id}).`,
+        );
+      }
+
       // 3. Crear reserva
       await prisma.stock_reservations.create({
         data: {
@@ -711,8 +750,7 @@ export class StockLevelManager {
         where: { id: stock_level.id },
         data: {
           quantity_reserved: stock_level.quantity_reserved + effectiveQuantity,
-          quantity_available:
-            stock_level.quantity_available - effectiveQuantity,
+          quantity_available: resulting_available,
           last_updated: new Date(),
           updated_at: new Date(),
         },

@@ -423,6 +423,11 @@ export class OrderFlowService {
           tx,
           undefined, // expires_at
           skip, // skip_reservation: already consumed at fire
+          undefined, // stock_units_consumed
+          // QUI-557: cobrar nunca se bloquea por stock, así que este flujo
+          // autoriza el disponible negativo de forma explícita. El piso duro
+          // de `reserveStock` sigue protegiendo a los demás callers.
+          true,
         );
       }
     });

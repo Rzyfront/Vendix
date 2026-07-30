@@ -298,6 +298,11 @@ export class OrdersService {
               undefined,
               false,
               stockUnitsConsumed,
+              // QUI-557: el POS sobrevende a propósito, así que aquí SÍ se
+              // autoriza el disponible negativo. Es la única forma de que el
+              // piso duro de `reserveStock` proteja al resto de flujos sin
+              // romper esta decisión de producto.
+              true,
             );
           } catch (error) {
             this.logger.warn(
@@ -951,6 +956,7 @@ export class OrdersService {
               undefined,
               false,
               stockUnitsConsumed,
+              true, // QUI-557: oversell deliberado, disponible negativo autorizado.
             );
           } catch (error) {
             this.logger.warn(
