@@ -2629,54 +2629,10 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/orders/return-orders/:id',
       method: 'PATCH',
     },
-    {
-      name: 'store:orders:sales_orders:cancel',
-      description: 'Cancel orders sales orders',
-      path: '/api/store/orders/sales-orders',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:orders:sales_orders:confirm',
-      description: 'Confirm orders sales orders',
-      path: '/api/store/orders/sales-orders',
-      method: 'GET',
-    },
-    {
-      name: 'store:orders:sales_orders:create',
-      description: 'Create orders sales orders',
-      path: '/api/store/orders/sales-orders',
-      method: 'POST',
-    },
-    {
-      name: 'store:orders:sales_orders:delete',
-      description: 'Delete orders sales orders',
-      path: '/api/store/orders/sales-orders',
-      method: 'DELETE',
-    },
-    {
-      name: 'store:orders:sales_orders:invoice',
-      description: 'Invoice orders sales orders',
-      path: '/api/store/orders/sales-orders/:id/invoice',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:orders:sales_orders:read',
-      description: 'Read orders sales orders',
-      path: '/api/store/orders/sales-orders/unique-read',
-      method: 'GET',
-    },
-    {
-      name: 'store:orders:sales_orders:ship',
-      description: 'Ship orders sales orders',
-      path: '/api/store/orders/sales-orders/:id/ship',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:orders:sales_orders:update',
-      description: 'Update orders sales orders',
-      path: '/api/store/orders/sales-orders/:id',
-      method: 'PATCH',
-    },
+    // Los permisos `store:orders:sales_orders:*` se retiraron junto con el CRUD
+    // `store/orders/sales-orders` (implementación deprecada, sin UI y sin datos).
+    // Las tablas `sales_orders`/`sales_order_items` y la FK `sales_order_id`
+    // siguen vivas: despacho, facturación y rutas las leen.
     {
       name: 'store:promotions:cancel',
       description: 'Cancel promotions',

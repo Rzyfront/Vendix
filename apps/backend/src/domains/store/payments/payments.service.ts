@@ -33,6 +33,7 @@ import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface
 import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
+import { pickCostPrice } from '../orders/utils/resolve-cost-price';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
@@ -1195,6 +1196,9 @@ export class PaymentsService {
               customer_id,
               base: Number(order.subtotal_amount || 0),
               ivaAmount: Number(order.tax_amount || 0),
+              // Sin `client` las 6 lecturas de la cadena salen por una segunda
+              // conexión del pool mientras esta transacción sostiene locks.
+              client: tx,
             });
           } catch (error) {
             this.logger.warn(
@@ -1263,6 +1267,11 @@ export class PaymentsService {
               counterparty_type: wh.counterparty_type,
               uvt_value_used: wh.uvt_value_used,
               lines: wh.lines,
+              // `client: tx` es lo que ata estas filas a la venta. Sin él se
+              // confirmaban por su cuenta y un rollback posterior (p.ej. el
+              // `coupon_uses.create` de más abajo violando su unique) revertía la
+              // orden dejando retenciones huérfanas.
+              client: tx,
             });
 
             // 5b. Emit order.completed for COGS on direct POS sales
@@ -1315,6 +1324,9 @@ export class PaymentsService {
               counterparty_type: wh.counterparty_type,
               uvt_value_used: wh.uvt_value_used,
               lines: wh.lines,
+              // Misma razón que en la rama de pago inmediato: la retención de una
+              // venta a crédito no puede sobrevivir al rollback de esa venta.
+              client: tx,
             });
           }
         }
@@ -2326,13 +2338,17 @@ export class PaymentsService {
         }).unitPrice
       : this.resolveCatalogUnitBasePrice(product, variant);
     const catalogUnitPrice = this.roundMoney(tierBaseUnitPrice);
-    // `tx` explícito: sin él esta consulta saldría por otra conexión del pool
-    // mientras la transacción del cobro sostiene locks, y con suficientes cajas
-    // cobrando a la vez el pool se agota y nadie avanza.
+    // `client: tx` explícito: sin él esta consulta saldría por otra conexión del
+    // pool mientras la transacción del cobro sostiene locks, y con suficientes
+    // cajas cobrando a la vez el pool se agota y nadie avanza.
+    // `store_id` explícito: el `tx` viene del `baseClient` (ver
+    // `base-prisma.service.ts:43`), o sea SIN el scoping de la extensión, así que
+    // el filtro de tenant que `product_tax_assignments` traía automáticamente hay
+    // que escribirlo a mano.
     const catalogTaxInfo = await this.taxes_service.calculateProductTaxes(
       product.id,
       catalogUnitPrice,
-      tx,
+      { client: tx, store_id: dtoStoreId },
     );
     const catalogFinalPrice = this.roundMoney(
       catalogUnitPrice + catalogTaxInfo.total_tax_amount,
@@ -2361,15 +2377,10 @@ export class PaymentsService {
     // Misma tasa, otra base gravable: se reescala en memoria en vez de volver a
     // consultar el mismo `product_id` (ver `rescaleTaxInfo`).
     const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, unitBasePrice);
-    // Snapshot de costo de venta (variante > producto > null). Sale de las
-    // filas que esta función ya cargó, y que además validaron la pertenencia
-    // variante→producto que `resolveCostPrice` no verifica.
-    const costPrice =
-      variant?.cost_price != null
-        ? Number(variant.cost_price)
-        : product.cost_price != null
-          ? Number(product.cost_price)
-          : null;
+    // Snapshot de costo de venta. La prioridad variante > producto > null vive en
+    // `pickCostPrice` (único dueño de la regla); aquí se aplica sobre las filas
+    // que esta función ya cargó, así que no cuesta ninguna consulta.
+    const costPrice = pickCostPrice(variant?.cost_price, product.cost_price);
 
     return this.buildOrderItemSnapshot({
       item,

@@ -13,8 +13,16 @@ export class WithholdingCalculatorService {
    * Shared by the calculator and the resolver so UVT lookup logic lives once.
    * Throws WHT_UVT_NOT_FOUND when missing (existing behavior preserved).
    */
-  async getUvtValue(organization_id: number, year: number): Promise<number> {
-    const uvt = await this.prisma.uvt_values.findFirst({
+  async getUvtValue(
+    organization_id: number,
+    year: number,
+    client?: { uvt_values: { findFirst: (args: any) => any } },
+  ): Promise<number> {
+    // `client` permite pasar el `tx` de una transacción en curso: sin él la
+    // consulta sale por otra conexión del pool mientras la transacción sostiene
+    // locks. El `organization_id` explícito mantiene la lectura tenant-safe
+    // aunque el `tx` no lleve el scoping de la extensión.
+    const uvt = await (client ?? this.prisma).uvt_values.findFirst({
       where: { organization_id, year },
     });
 
