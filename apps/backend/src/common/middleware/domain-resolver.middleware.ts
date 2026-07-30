@@ -80,9 +80,26 @@ export class DomainResolverMiddleware implements NestMiddleware {
     }
   }
 
+  /**
+   * INVERTED precedence — known debt, tracked by QUI-569.
+   *
+   * The correct behaviour is `resolveTenantHostname()` from
+   * `@common/utils/tenant-hostname.util`: the viewer `Host` wins and
+   * `x-forwarded-host` is consulted ONLY when `Host` is the API's own hostname.
+   * Here it is still the other way round — the forwarded header always wins —
+   * and in production CloudFront `E1I27OYFJX7VYJ` injects a FIXED
+   * `X-Forwarded-Host: vendix.online` on the `vendix-backend-api` origin.
+   *
+   * Deliberately NOT fixed alongside QUI-564: the `domain_context` produced here
+   * feeds the scoped Prisma services, so flipping the precedence is a
+   * multi-tenant isolation change rather than an SEO one and needs its own
+   * verification pass. It does not misfire today because this middleware only
+   * runs on `/ecommerce/` routes and `api.vendix.online` resolves straight to
+   * the EC2 instance via Route53, never through CloudFront.
+   */
   private extractHostname(req: Request): string {
-    const forwarded_host = req.headers['x-forwarded-host'] as string;
-    const host = req.headers['host'] as string;
+    const forwarded_host = req.headers['x-forwarded-host'] as string; // host-audit:ignore QUI-569
+    const host = req.headers['host'] as string; // host-audit:ignore QUI-569
     return forwarded_host || host || 'localhost';
   }
 }

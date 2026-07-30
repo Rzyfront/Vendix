@@ -4,6 +4,7 @@ import { Cache } from 'cache-manager';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { PublicDomainsService } from '../domains/public-domains.service';
 import { DomainConfigService } from '@common/config/domain.config';
+import { normalizeHostname } from '@common/utils/tenant-hostname.util';
 
 interface DomainContext {
   app_type: string;
@@ -23,6 +24,14 @@ export class PublicSeoService {
   ) {}
 
   async generateSitemap(hostname: string): Promise<string> {
+    // This value becomes a Redis key AND the emitted `base_url`, so its shape is
+    // guaranteed at the entry point rather than trusted from the caller:
+    // `resolveDomain` matches case-insensitively and does not strip the port, so
+    // unnormalized variants resolve to the SAME tenant while each spawns its own
+    // cache entry carrying a full sitemap build.
+    hostname =
+      normalizeHostname(hostname) || DomainConfigService.getBaseDomain();
+
     const cacheKey = `seo:sitemap:${hostname}`;
     const cached = await this.cache.get<string>(cacheKey);
     if (cached) return cached;
@@ -53,6 +62,10 @@ export class PublicSeoService {
   }
 
   async generateRobotsTxt(hostname: string): Promise<string> {
+    // Same contract as generateSitemap: normalize before it becomes a cache key.
+    hostname =
+      normalizeHostname(hostname) || DomainConfigService.getBaseDomain();
+
     const cacheKey = `seo:robots:${hostname}`;
     const cached = await this.cache.get<string>(cacheKey);
     if (cached) return cached;

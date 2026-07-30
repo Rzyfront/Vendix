@@ -3,7 +3,6 @@ import {
   Get,
   Param,
   Query,
-  Headers,
   HttpCode,
   HttpStatus,
   Logger,
@@ -44,7 +43,6 @@ export class PublicDomainsController {
    *
    * @param hostname - El hostname a resolver (ej: "tienda.vendix.com")
    * @param subdomain - Subdominio opcional
-   * @param forwardedHost - Host reenviado por proxy/load balancer
    * @returns Configuración del dominio resuelto
    */
   @Public()
@@ -53,14 +51,12 @@ export class PublicDomainsController {
   async resolveDomain(
     @Param('hostname') hostname: string,
     @Query('subdomain') subdomain?: string,
-    @Headers('x-forwarded-host') forwardedHost?: string,
   ): Promise<SuccessResponse<DomainResolutionResponse>> {
     this.logger.log(`🔍 Public domain resolution request: ${hostname}`);
 
     const result = await this.publicDomainsService.resolveDomain(
       hostname,
       subdomain,
-      forwardedHost,
     );
 
     return this.responseService.success(result, 'Domain resolved successfully');

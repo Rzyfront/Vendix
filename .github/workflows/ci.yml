@@ -56,6 +56,7 @@ jobs:
               - *shared
               - 'apps/backend/**'
               - 'scripts/tz-audit.sh'
+              - 'scripts/tenant-host-audit.sh'
 
   zoneless-audit:
     name: Zoneless Audit
@@ -97,6 +98,21 @@ jobs:
       - uses: actions/checkout@v4
       - run: chmod +x scripts/tz-audit.sh
       - run: ./scripts/tz-audit.sh
+
+  tenant-host-audit:
+    name: Tenant Host Audit
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    # Pure grep guard over the checked-out tree (no build/deps needed): fails if
+    # any module resolves the tenant hostname outside the primitive (QUI-564).
+    # `x-forwarded-host` carries a FIXED value injected by CloudFront in prod, so
+    # reading it first serves the platform's assets to every tenant domain.
+    # See scripts/tenant-host-audit.sh + apps/backend/src/common/utils/tenant-hostname.util.ts.
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/tenant-host-audit.sh
+      - run: ./scripts/tenant-host-audit.sh
 
   mobile-typecheck:
     name: Mobile Typecheck
