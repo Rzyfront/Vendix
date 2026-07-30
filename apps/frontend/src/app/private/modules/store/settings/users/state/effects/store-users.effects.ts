@@ -273,7 +273,7 @@ export class StoreUsersEffects {
    * quedaba con el conteo viejo hasta recargar la página a mano.
    *
    * Protegido por `store-users.effects.spec.ts` y por
-   * `apps/frontend/scripts/state-refresh-audit.sh` en CI.
+   * `scripts/state-refresh-audit.sh` (job `state-refresh-audit` en CI).
    */
   mutationSuccess$ = createEffect(() =>
     this.actions$.pipe(
