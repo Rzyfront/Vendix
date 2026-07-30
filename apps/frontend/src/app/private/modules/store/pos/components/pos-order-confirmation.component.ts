@@ -131,10 +131,12 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
     
           <!-- Summary -->
           <div class="pt-4 border-t border-border space-y-2.5">
-            <div class="flex justify-between text-sm text-text-secondary">
-              <span>Subtotal:</span>
-              <span>{{ formatCurrency(orderSubtotal) }}</span>
-            </div>
+            @if (showSubtotal) {
+              <div class="flex justify-between text-sm text-text-secondary">
+                <span>Subtotal:</span>
+                <span>{{ formatCurrency(orderSubtotal) }}</span>
+              </div>
+            }
             @for (promo of appliedPromotions; track promo.id) {
               <div class="flex justify-between text-xs text-success">
                 <span class="truncate">
@@ -162,10 +164,12 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
                 <span>-{{ formatCurrency(orderDiscount) }}</span>
               </div>
             }
-            <div class="flex justify-between text-sm text-text-secondary">
-              <span>Impuesto:</span>
-              <span>{{ formatCurrency(orderTax) }}</span>
-            </div>
+            @if (printsVatBreakdown()) {
+              <div class="flex justify-between text-sm text-text-secondary">
+                <span>Impuesto:</span>
+                <span>{{ formatCurrency(orderTax) }}</span>
+              </div>
+            }
             <div
               class="flex justify-between items-center pt-3 mt-2 border-t-2 border-double border-border"
               >
@@ -378,6 +382,24 @@ private authFacade = inject(AuthFacade);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   private actions$ = inject(Actions);
+
+  /**
+   * Mismo predicado que el papel (`PosTicketService.shouldShowTaxes`): la
+   * pantalla que el cajero muestra al cliente al cobrar no puede afirmar un IVA
+   * que el tiquete no imprime. Requiere el área fiscal `invoicing` activa y que
+   * el comercio no sea no responsable de IVA.
+   */
+  readonly printsVatBreakdown = this.authFacade.printsVatBreakdown;
+
+  /**
+   * Espejo de `showSubtotal` en `PosTicketService`: sin desglose de IVA un
+   * subtotal que no suma al total deja la diferencia huérfana en pantalla.
+   * Getter y no `computed` porque `orderTax` es una propiedad plana, no un
+   * signal — un `computed` sobre ella no sería reactivo.
+   */
+  get showSubtotal(): boolean {
+    return this.printsVatBreakdown() || !(this.orderTax > 0);
+  }
 
   // DIAN config gate (pre-invoice)
   readonly dianStatus = toSignal(this.store.select(selectDianConfigStatus), {

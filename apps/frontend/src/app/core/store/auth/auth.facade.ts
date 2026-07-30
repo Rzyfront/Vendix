@@ -118,6 +118,9 @@ export class AuthFacade {
   readonly isVatBlocked$ = this.store.select(
     AuthSelectors.selectIsExplicitlyNotVatResponsible,
   );
+  readonly printsVatBreakdown$ = this.store.select(
+    AuthSelectors.selectPrintsVatBreakdown,
+  );
 
   // Panel UI observables
   readonly panelUiConfig$ = this.store.select(
@@ -280,6 +283,12 @@ export class AuthFacade {
   readonly fiscalData = toSignal(this.fiscalData$, { initialValue: null as any });
   readonly isVatResponsible = toSignal(this.isVatResponsible$, { initialValue: true });
   readonly isVatBlocked = toSignal(this.isVatBlocked$, { initialValue: false });
+  // `initialValue: false` es el inverso DELIBERADO de `isVatResponsible`: aquel
+  // default sirve a un gate de bloqueo (no bloquear a quien no cargó datos),
+  // este a una impresión. Un tiquete emitido antes de que NgRx rehidrate los
+  // settings no debe imprimir un desglose de IVA que el comercio no puede
+  // sustentar — el papel se va con el cliente y no se puede retractar.
+  readonly printsVatBreakdown = toSignal(this.printsVatBreakdown$, { initialValue: false });
   readonly panelUiConfig = toSignal(this.panelUiConfig$, { initialValue: null as any });
   readonly selectedAppType = toSignal(this.selectedAppType$, { initialValue: null as any });
   readonly currentAppPanelUi = toSignal(this.currentAppPanelUi$, { initialValue: null as any });
