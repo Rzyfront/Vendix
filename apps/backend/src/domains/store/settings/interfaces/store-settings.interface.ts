@@ -565,6 +565,20 @@ export interface ReservationsSettings {
   reminders: BookingReminderRule[];
   confirmation: BookingConfirmationSettings;
   check_in: BookingCheckInSettings;
+  /**
+   * When true (default), customers can reschedule a booking directly from
+   * the ecommerce portal in a single click — the booking moves to the new
+   * slot immediately and the admin gets an in-app broadcast.
+   *
+   * When false, the customer's reschedule becomes a PENDING REQUEST stored
+   * in `booking_reschedule_requests`. The booking's actual date/time stays
+   * unchanged until an admin approves it. The customer gets notified on
+   * approve/reject.
+   *
+   * Default: true (preserves the historical behavior where every reschedule
+   * was applied directly). Stores that want tighter control flip this off.
+   */
+  allow_direct_reschedule: boolean;
 }
 
 // ============================================================================

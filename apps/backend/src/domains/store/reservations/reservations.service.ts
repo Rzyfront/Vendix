@@ -1112,6 +1112,11 @@ export class ReservationsService {
       new_end_time: request.requested_end_time,
       customer_id: booking.customer_id,
       decision_reason: ctx.decisionReason ?? null,
+      // Appointment redesign phase 2 — propagated so the notifications
+      // listener can send the email "From" this specific admin/staff
+      // (instead of the generic store owner), so the customer sees the
+      // real human who decided.
+      decided_by_user_id: ctx.decidedByUserId,
     });
 
     return updated;
@@ -1161,6 +1166,8 @@ export class ReservationsService {
       request_id: requestId,
       customer_id: booking.customer_id,
       decision_reason: ctx.decisionReason,
+      // Appointment redesign phase 2 — see comment on approved event.
+      decided_by_user_id: ctx.decidedByUserId,
     });
 
     return this.findOne(booking.id);

@@ -3,7 +3,13 @@
        activa/desactiva la captura de dirección abajo. Sin este toggle,
        la UX anterior tomaba la decisión por el cliente en función de
        `offerHomeService`, lo que generaba confusión ("no elegí A
-       domicilio pero aparece A domicilio"). -->
+       domicilio pero aparece A domicilio").
+
+       Appointment redesign phase 2: el botón "En mi domicilio" ahora
+       se oculta completamente cuando el producto NO es elegible
+       (`productEligibleForHomeService=false`), en vez de solo
+       deshabilitarse. La config de tienda sigue mandando: si la tienda
+       no ofrece, el botón tampoco aparece. -->
   <h3 class="service-location__title">¿Dónde se realiza el servicio?</h3>
   <div class="service-location__toggle" role="tablist">
     <button
@@ -11,7 +17,7 @@
       role="tab"
       class="service-location__toggle-btn"
       [class.active]="effectiveServiceLocation() === 'shop'"
-      [disabled]="!offerHomeService()"
+      [disabled]="!showHomeOption()"
       (click)="pickShop()"
     >
       <app-icon name="store" [size]="16"></app-icon>
@@ -22,22 +28,23 @@
         </span>
       }
     </button>
-    <button
-      type="button"
-      role="tab"
-      class="service-location__toggle-btn"
-      [class.active]="effectiveServiceLocation() === 'home'"
-      (click)="pickHome()"
-    >
-      <app-icon name="home" [size]="16"></app-icon>
-      En mi domicilio
-    </button>
+    @if (showHomeOption()) {
+      <button
+        type="button"
+        role="tab"
+        class="service-location__toggle-btn"
+        [class.active]="effectiveServiceLocation() === 'home'"
+        (click)="pickHome()"
+      >
+        <app-icon name="home" [size]="16"></app-icon>
+        En mi domicilio
+      </button>
+    }
   </div>
 
-  <!-- Cuando la tienda NO ofrece servicio a domicilio, el botón de
-       "En mi domicilio" se deshabilita para reflejar la config real,
-       y abajo mostramos solo la dirección del local. -->
-  @if (!offerHomeService() && storeAddress()) {
+  <!-- Cuando el botón "En mi domicilio" está oculto (tienda no ofrece
+       O producto no elegible), mostramos la dirección del local. -->
+  @if (!showHomeOption() && storeAddress()) {
     <div class="store-address">
       <app-icon name="map-pin" [size]="20"></app-icon>
       <div>

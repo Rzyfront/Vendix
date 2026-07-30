@@ -910,6 +910,7 @@ export class ProductCreatePageComponent {
         requires_booking: false,
         booking_mode: null,
         is_recurring: false,
+        is_eligible_for_home_service: false,
         service_instructions: '',
         is_consultation: false,
         send_preconsultation: false,
@@ -1581,6 +1582,12 @@ export class ProductCreatePageComponent {
         is_ingredient: [false],
         is_combo: [false],
         is_batch_produced: [false],
+        // Appointment redesign phase 2 — per-product home-service
+        // eligibility. The form template only renders this toggle when
+        // `service_modality === 'in_person'`, but we still seed it as
+        // a FormControl so PATCHes that don't change modality don't
+        // accidentally drop the value.
+        is_eligible_for_home_service: [false],
         // ===== UoM FKs (Fase UoM) =====
         // The legacy string fields `stock_unit` / `purchase_unit` /
         // `purchase_to_stock_factor` remain untouched for backfill. The
@@ -1799,6 +1806,10 @@ export class ProductCreatePageComponent {
       is_ingredient: !!product.is_ingredient,
       is_combo: !!product.is_combo,
       is_batch_produced: !!product.is_batch_produced,
+      // Appointment redesign phase 2 — load per-product home-service
+      // eligibility. Backend returns the field in the product payload
+      // (see product.interface.ts); default `false` for legacy rows.
+      is_eligible_for_home_service: !!(product as any).is_eligible_for_home_service,
       // UoM FKs (Fase UoM)
       stock_uom_id: (product as any).stock_uom_id ?? null,
       purchase_uom_id: (product as any).purchase_uom_id ?? null,
@@ -3516,6 +3527,9 @@ export class ProductCreatePageComponent {
       // Un insumo no puede ser combo / menú fijo: se neutraliza por robustez.
       is_combo: formValue.is_ingredient ? false : !!formValue.is_combo,
       is_batch_produced: !!formValue.is_batch_produced,
+      // Appointment redesign phase 2 — propagar el flag al DTO
+      // enviado al backend. Default `false` para preservar UX legacy.
+      is_eligible_for_home_service: !!formValue.is_eligible_for_home_service,
       // UoM FKs (Fase UoM) — only sent when the product is an ingredient.
       // Sending `null` for non-ingredients keeps the column clean and the
       // product list filters untouched.

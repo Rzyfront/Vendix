@@ -234,24 +234,7 @@ export class ReservationFormModalComponent {
       if (!freeSlots.length) return [];
       const DAY_START = 7 * 60;
       const DAY_END = 22 * 60;
-      const freeAsRanges = freeSlots
-        .map((s) => ({ start: this.timeToMinutes(s.start), end: this.timeToMinutes(s.end) }))
-        .filter((r) => r.end > r.start)
-        .sort((a, b) => a.start - b.start);
-      const gaps: { start: number; end: number }[] = [];
-      if (freeAsRanges[0].start > DAY_START) {
-        gaps.push({ start: DAY_START, end: freeAsRanges[0].start });
-      }
-      for (let i = 0; i < freeAsRanges.length - 1; i++) {
-        if (freeAsRanges[i + 1].start > freeAsRanges[i].end) {
-          gaps.push({ start: freeAsRanges[i].end, end: freeAsRanges[i + 1].start });
-        }
-      }
-      const last = freeAsRanges[freeAsRanges.length - 1];
-      if (last.end < DAY_END) {
-        gaps.push({ start: last.end, end: DAY_END });
-      }
-      return gaps.flatMap((g) => this.splitRangeIntoSlots(g.start, g.end, slotMinutes));
+      return this.computeGapsAroundFreeSlots(freeSlots, DAY_START, DAY_END, slotMinutes);
     }
 
     // Provider path (existing logic).
@@ -276,10 +259,25 @@ export class ReservationFormModalComponent {
     const DAY_START = 7 * 60;
     const DAY_END = 22 * 60;
 
-    // If the provider doesn't work this day at all, mark the whole day
-    // as unavailable (split into slotMinutes chunks for visual consistency).
+    // If the provider doesn't work this day at all, use the SAME gap logic
+    // as the "Cualquiera" fallback above: paint ROJO only the gaps between
+    // the free slots the backend actually returned (via storeWindow /
+    // genericSlots), not the entire day. The previous "split entire day
+    // into red slots" approach double-painted over the green free-slot
+    // overlay — because the green block is rgba(34,197,94,0.16), the red
+    // "NO DISPONIBLE" label showed through, making the same slot read as
+    // both "DISPONIBLE" and "NO DISPONIBLE" at once.
+    //
+    // If the backend returned zero free slots (store closed / no capacity),
+    // we fall back to marking the whole day red — this preserves the
+    // legacy behavior so the operator still sees "this day is dead" instead
+    // of an empty grid that hides WHY nothing is available.
     if (!sortedBlocks.length) {
-      return this.splitRangeIntoSlots(DAY_START, DAY_END, slotMinutes);
+      const freeSlots = this.dayFreeSlots();
+      if (!freeSlots.length) {
+        return this.splitRangeIntoSlots(DAY_START, DAY_END, slotMinutes);
+      }
+      return this.computeGapsAroundFreeSlots(freeSlots, DAY_START, DAY_END, slotMinutes);
     }
 
     // Build the GAPS between blocks + day edges — these are the times the
@@ -332,6 +330,49 @@ export class ReservationFormModalComponent {
     });
     return [...edgeSlots, ...midSlots];
   });
+
+  /**
+   * Given the free slots the backend returned for the day, return the
+   * gaps between them and the day edges (DAY_START..DAY_END) split into
+   * `step`-minute chunks. Those gaps are what we paint as red
+   * "NO DISPONIBLE" — the inverse projection of "where there's no
+   * availability".
+   *
+   * Shared by the "Cualquiera" fallback (no provider selected) and the
+   * "provider without blocks for this day" path. Before this helper
+   * existed, each path duplicated the gap-computation logic AND the
+   * provider path took a shortcut (mark the whole day red) that caused
+   * the green free-slot overlay to show a red "NO DISPONIBLE" label
+   * bleeding through, making the same slot read as both DISPONIBLE and
+   * NO DISPONIBLE.
+   */
+  private computeGapsAroundFreeSlots(
+    freeSlots: FreeSlot[],
+    dayStart: number,
+    dayEnd: number,
+    step: number,
+  ): FreeSlot[] {
+    const freeAsRanges = freeSlots
+      .map((s) => ({ start: this.timeToMinutes(s.start), end: this.timeToMinutes(s.end) }))
+      .filter((r) => r.end > r.start)
+      .sort((a, b) => a.start - b.start);
+    if (!freeAsRanges.length) return [];
+
+    const gaps: { start: number; end: number }[] = [];
+    if (freeAsRanges[0].start > dayStart) {
+      gaps.push({ start: dayStart, end: freeAsRanges[0].start });
+    }
+    for (let i = 0; i < freeAsRanges.length - 1; i++) {
+      if (freeAsRanges[i + 1].start > freeAsRanges[i].end) {
+        gaps.push({ start: freeAsRanges[i].end, end: freeAsRanges[i + 1].start });
+      }
+    }
+    const last = freeAsRanges[freeAsRanges.length - 1];
+    if (last.end < dayEnd) {
+      gaps.push({ start: last.end, end: dayEnd });
+    }
+    return gaps.flatMap((g) => this.splitRangeIntoSlots(g.start, g.end, step));
+  }
 
   /**
    * Split a minute range [start, end) into consecutive `step`-minute slots.

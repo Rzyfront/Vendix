@@ -184,6 +184,10 @@ export class NotificationsDropdownComponent {
       case 'booking_no_show':
       case 'booking_reminder':
       case 'booking_rescheduled':
+      case 'booking_reschedule_requested':
+      case 'booking_reschedule_approved':
+      case 'booking_reschedule_rejected':
+      case 'booking_reschedule_cancelled':
       case 'booking_started':
       case 'booking_completed':
       case 'booking_arrival':
@@ -191,9 +195,17 @@ export class NotificationsDropdownComponent {
       case 'booking_check_in':
       case 'booking_confirmation_request':
       case 'booking_auto_cancelled':
-        return d?.booking_id
-          ? `/admin/reservations?booking_id=${d.booking_id}`
-          : '/admin/reservations';
+        // Appointment redesign phase 2 — pending reschedule requests
+        // surface in the `<app-reschedule-requests-panel>` at the top
+        // of `/admin/reservations`, NOT in the booking detail modal.
+        // The panel polls every 30s and shows the queue of pending
+        // requests with Aprobar / Rechazar buttons. Sending the admin
+        // to `/admin/reservations` (without `booking_id`) is what gets
+        // them to the panel; the `booking_id` deep-link would drop
+        // them into the booking detail modal where the request is not
+        // actionable. So we strip the param here and go straight to
+        // the queue.
+        return '/admin/reservations';
       // Dine-in QR-por-mesa — staff flow (E2 deep-links).
       // `table_session_id` is the route param (under `tables/session/:id`)
       // so clicking a notification opens the mesero session page, where
@@ -240,6 +252,10 @@ export class NotificationsDropdownComponent {
       booking_no_show: 'user-x',
       booking_reminder: 'bell-ring',
       booking_rescheduled: 'calendar-clock',
+      booking_reschedule_requested: 'inbox',
+      booking_reschedule_approved: 'check-circle-2',
+      booking_reschedule_rejected: 'x-circle',
+      booking_reschedule_cancelled: 'rotate-ccw',
       booking_started: 'play-circle',
       booking_completed: 'check-circle-2',
       booking_arrival: 'door-open',

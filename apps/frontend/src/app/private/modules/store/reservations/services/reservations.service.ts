@@ -1,6 +1,6 @@
 import { Injectable, effect, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map, catchError } from 'rxjs';
+import { Observable, map, tap, catchError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   Booking,
@@ -17,7 +17,17 @@ import {
   AvailabilityOverviewQuery,
   QueueEntry,
   BusinessHoursRow,
+  CreateRescheduleRequestDto,
+  DecideRescheduleRequestDto,
 } from '../interfaces/reservation.interface';
+import { RescheduleRequest } from '../interfaces/reservation.interface';
+
+// Re-export so consumers (reschedule-requests-page, reschedule-requests-panel)
+// can import the type from the service module. The interface lives in
+// `interfaces/reservation.interface.ts` to keep all reservation DTOs
+// co-located; this re-export avoids forcing every component to import
+// from two paths. Use `export type` for `isolatedModules: true` (TS 5+).
+export type { RescheduleRequest };
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -164,10 +174,27 @@ export class ReservationsService {
       next.add(bookingId);
       return next;
     });
-    // Drop any pending auto-archive timer for this booking: the
-    // operator already dismissed it manually, so the interval has
-    // nothing left to do.
     this.completedAtByBookingId.delete(bookingId);
+  }
+
+  /**
+   * Quita un booking del set de archivados del today-panel. Llamado
+   * después de acciones que "resucitan" una reserva archivada:
+   *   - reschedule (la reagendamos a un horario nuevo → vuelve a
+   *     aplicar para hoy y debe salir del archivo)
+   * Sin esto, una reserva que el operador descartó como "vencida" en
+   * una sesión anterior quedaba oculta en el panel para siempre,
+   * incluso después de moverla a un horario vigente — el siguiente
+   * fetch de /today la trae, pero `displayedBookings` la filtra por
+   * estar en `archivedTodayBookingIds` (persistido en localStorage).
+   */
+  unarchiveTodayBooking(bookingId: number): void {
+    if (!this.archivedTodayBookingIds().has(bookingId)) return;
+    this.archivedTodayBookingIds.update((set) => {
+      const next = new Set(set);
+      next.delete(bookingId);
+      return next;
+    });
   }
 
   getTodayArchivedCount(): number {
@@ -243,7 +270,45 @@ export class ReservationsService {
   rescheduleReservation(id: number, dto: RescheduleBookingDto): Observable<Booking> {
     return this.http.patch<any>(`${this.apiUrl}/${id}/reschedule`, dto).pipe(
       map((response) => response.data || response),
+      // Si el booking estaba archivado en el today-panel (operador lo
+      // descartó como "vencida" en una sesión anterior), el reschedule
+      // lo "resucita" → quitarlo del archivo para que vuelva a salir
+      // cuando el panel haga el próximo refetch.
+      tap((booking) => this.unarchiveTodayBooking(booking.id)),
     );
+  }
+
+  /**
+   * Appointment redesign phase 2 — lista las solicitudes de reagendamiento
+   * pendientes (la cola que ve el admin). Por defecto solo `pending`.
+   */
+  listRescheduleRequests(status?: string): Observable<any[]> {
+    let params = new HttpParams();
+    if (status) params = params.set('status', status);
+    return this.http.get<any>(`${this.apiUrl}/reschedule-requests`, { params }).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  approveRescheduleRequest(reqId: number, dto: DecideRescheduleRequestDto): Observable<Booking> {
+    return this.http
+      .patch<any>(`${this.apiUrl}/reschedule-requests/${reqId}/approve`, dto)
+      .pipe(
+        map((response) => response.data || response),
+        tap((booking: Booking) => this.unarchiveTodayBooking(booking.id)),
+      );
+  }
+
+  rejectRescheduleRequest(reqId: number, dto: DecideRescheduleRequestDto): Observable<Booking> {
+    return this.http
+      .patch<any>(`${this.apiUrl}/reschedule-requests/${reqId}/reject`, dto)
+      .pipe(map((response) => response.data || response));
+  }
+
+  cancelRescheduleRequest(reqId: number): Observable<Booking> {
+    return this.http
+      .delete<any>(`${this.apiUrl}/reschedule-requests/${reqId}`)
+      .pipe(map((response) => response.data || response));
   }
 
   /**

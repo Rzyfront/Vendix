@@ -139,6 +139,13 @@ model users {
   // Bookings
   bookings_as_customer bookings[] @relation("bookings_customer")
   bookings_created     bookings[] @relation("bookings_created_by")
+  // Appointment redesign phase 2 — `booking_reschedule_requests`
+  // back-relations. Three named FKs because a single user can be
+  // requester, customer-portal requester, and decider in different
+  // requests (and even within the same one).
+  reschedule_requests_as_user      booking_reschedule_requests[] @relation("reschedule_req_user")
+  reschedule_requests_as_customer  booking_reschedule_requests[] @relation("reschedule_req_customer")
+  reschedule_requests_as_decider   booking_reschedule_requests[] @relation("reschedule_req_decided")
 
   // Dispatch Notes
   dispatch_notes_as_customer  dispatch_notes[] @relation("dispatch_notes_customer")
@@ -834,6 +841,11 @@ model stores {
   booking_metadata_snapshots  booking_metadata_snapshots[]
   customer_consultation_notes customer_consultation_notes[]
   booking_confirmation_tokens booking_confirmation_tokens[]
+  /// Appointment redesign phase 2 — pending reschedule requests when
+  /// `allow_direct_reschedule === false`. Multiple requests per
+  /// store; only one `pending` row per booking at a time (enforced
+  /// in the service layer).
+  booking_reschedule_requests booking_reschedule_requests[]
   email_templates             email_templates[]
   messaging_channels          messaging_channels[]
   social_channels             social_channels[]
@@ -1539,6 +1551,13 @@ model products {
   is_ingredient                  Boolean                          @default(false)
   is_combo                       Boolean                          @default(false)
   is_batch_produced              Boolean                          @default(false)
+  /// Appointment redesign phase 2 — whether this product/service is
+  /// eligible to be performed at the customer's home
+  /// (when `bookings.service_location_type = 'home'`). When false, the
+  /// ecommerce booking flow forces `shop` and hides the "A domicilio"
+  /// selector for this product only (the rest of the catalog keeps
+  /// its own flag). Defaults to `false` for backward compatibility.
+  is_eligible_for_home_service   Boolean                          @default(false)
   stock_unit                     String?                          @db.VarChar(20)
   purchase_unit                  String?                          @db.VarChar(20)
   purchase_to_stock_factor       Int?
@@ -2967,6 +2986,25 @@ enum notification_type_enum {
   booking_no_show
   booking_reminder
   booking_rescheduled
+  /// Appointment redesign phase 2 — fired when a customer requests a
+  /// reschedule that requires admin approval (settings.reservations.
+  /// allow_direct_reschedule === false). The booking itself stays at
+  /// its current slot until the admin approves or rejects the
+  /// `booking_reschedule_requests` row.
+  booking_reschedule_requested
+  /// Fired when an admin approves a pending reschedule. The booking's
+  /// `date / start_time / end_time` have been moved to the requested
+  /// slot and the customer gets a notification + email.
+  booking_reschedule_approved
+  /// Fired when an admin rejects a pending reschedule. The booking
+  /// stays at its original slot and the customer gets a notification
+  /// + email with the admin's reason.
+  booking_reschedule_rejected
+  /// Fired when the customer withdraws their own pending reschedule
+  /// request (via the "Cancelar solicitud" button). The
+  /// `booking_reschedule_requests` row is marked `cancelled` and the
+  /// booking is left untouched.
+  booking_reschedule_cancelled
   booking_started
   booking_completed
   booking_arrival
@@ -7039,6 +7077,11 @@ model bookings {
   consultation_notes          customer_consultation_notes[]
   confirmation_tokens         booking_confirmation_tokens[]
   reminder_logs               booking_reminder_logs[]
+  /// Appointment redesign phase 2 — pending/decided reschedule requests
+  /// when `settings.reservations.allow_direct_reschedule === false`.
+  /// Multiple requests can exist per booking; only one `pending` row
+  /// at a time (enforced in service layer).
+  reschedule_requests         booking_reschedule_requests[]
   proximity_notifications     proximity_notification_log[]
 
   @@unique([store_id, booking_number])
@@ -7923,6 +7966,72 @@ model booking_reminder_logs {
 
   @@unique([booking_id, reminder_key, channel])
   @@index([store_id, sent_at])
+}
+
+/// Appointment redesign phase 2 — pending reschedule requests when
+/// `store_settings.settings.reservations.allow_direct_reschedule` is
+/// `false`. The booking's actual `date / start_time / end_time` stays
+/// unchanged until an admin approves (or rejects) the row.
+///
+/// Status lifecycle:
+///   `pending`  → `approved`   (admin accepted, booking moved)
+///   `pending`  → `rejected`   (admin denied, booking untouched)
+///   `pending`  → `cancelled`  (customer withdrew their request)
+///   `approved` / `rejected` / `cancelled` are terminal.
+model booking_reschedule_requests {
+  id                       Int                                                @id @default(autoincrement())
+  store_id                 Int
+  booking_id               Int
+  /// The new date the customer wants — the booking stays at its
+  /// current `date` until the row is approved.
+  requested_date           DateTime                                           @db.Date
+  requested_start_time     String                                             @db.VarChar(5)
+  requested_end_time       String                                             @db.VarChar(5)
+  /// The admin/employee who created the request, if it was filed from
+  /// the POS/admin side on behalf of the customer. NULL for requests
+  /// filed from the ecommerce portal by the customer themselves.
+  requested_by_user_id     Int?
+  /// The customer who filed the request from the ecommerce portal.
+  /// NULL for admin-side requests (where the customer is implied by
+  /// `booking_id`).
+  requested_by_customer_id Int?
+  requested_at             DateTime                                           @default(now()) @db.Timestamp(6)
+  /// Free-text reason the customer typed in the reschedule modal.
+  reason                   String?                                            @db.Text
+  status                   booking_reschedule_request_status_enum             @default(pending)
+  /// The admin/employee who approved/rejected the request. NULL while
+  /// pending; populated on `approved`/`rejected`.
+  decided_by_user_id       Int?
+  decided_at               DateTime?
+  /// Free-text reason the admin typed when rejecting (also allowed on
+  /// approve, but most approvals won't use it).
+  decision_reason          String?                                            @db.Text
+  created_at               DateTime?                                          @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                                          @default(now()) @db.Timestamp(6)
+
+  booking              bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  store                stores   @relation(fields: [store_id], references: [id])
+  requested_by_user    users?   @relation("reschedule_req_user", fields: [requested_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  requested_by_customer users?  @relation("reschedule_req_customer", fields: [requested_by_customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  decided_by_user      users?   @relation("reschedule_req_decided", fields: [decided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([booking_id])
+  @@index([store_id, status])
+  @@index([store_id, status, requested_at])
+}
+
+enum booking_reschedule_request_status_enum {
+  /// Filed by the customer (or admin on their behalf). The booking's
+  /// date/time is untouched. Awaiting admin decision.
+  pending
+  /// Admin accepted — the booking's date/start_time/end_time were
+  /// updated to the requested_* fields.
+  approved
+  /// Admin denied — the booking stays at its original slot. Customer
+  /// gets the `decision_reason` in the notification/email.
+  rejected
+  /// Customer withdrew their request before the admin decided.
+  cancelled
 }
 
 // ============================================

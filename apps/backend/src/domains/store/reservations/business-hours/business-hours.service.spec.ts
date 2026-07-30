@@ -5,7 +5,16 @@ describe('BusinessHoursService', () => {
   function buildService(initialRows: any[] = []) {
     const prisma: any = {
       store_business_hours: {
-        findMany: jest.fn().mockResolvedValue(initialRows),
+        // Honor the `where.is_active` filter that loadStoreHours /
+        // loadStoreWindows apply, so mocks return the same rows the real
+        // query would (otherwise we accidentally count deactivated rows).
+        findMany: jest.fn().mockImplementation(({ where }: any = {}) =>
+          Promise.resolve(
+            initialRows.filter((r) =>
+              where?.is_active === true ? r.is_active === true : true,
+            ),
+          ),
+        ),
         findFirst: jest
           .fn()
           .mockImplementation(({ where }: any) =>
@@ -19,6 +28,13 @@ describe('BusinessHoursService', () => {
           ),
         deleteMany: jest.fn().mockResolvedValue({ count: initialRows.length }),
         createMany: jest.fn().mockResolvedValue({ count: initialRows.length }),
+      },
+      // loadStoreHoursFromPosSettings / loadStoreWindowsFromPosSettings
+      // read from store_settings first; if absent, fall back to the
+      // legacy store_business_hours table. Tests below don't exercise the
+      // POS path so we mock it to return null and let the fallback run.
+      store_settings: {
+        findUnique: jest.fn().mockResolvedValue(null),
       },
       $transaction: jest.fn(async (cb: any) => {
         // Eagerly evaluate the callback with a passthrough tx.

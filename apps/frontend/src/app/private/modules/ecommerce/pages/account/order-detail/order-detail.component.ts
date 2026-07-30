@@ -387,7 +387,33 @@ if (this.wompiPollTimer) {
       }
       return;
     }
-    this.showRescheduleModal.set(true);
+    // Appointment redesign phase 2 — if the customer already has a
+    // PENDING reschedule request for this booking, block the action and
+    // show a long-lived toast explaining the state. Once the admin
+    // approves/rejects (status leaves 'pending'), the button re-enables.
+    // Only matters when the store has approval enabled; when `direct`,
+    // the booking just moves and there's no pending state.
+    this.booking_service.listMyRescheduleRequests().subscribe({
+      next: (rows) => {
+        const pending = rows.find((r) => r.booking_id === booking.id);
+        if (pending) {
+          this.toast.info(
+            'Ya enviaste una solicitud de reagenda para esta reserva. Espera la respuesta del administrador — te avisaremos por email y en la campanita (🔔) cuando sea aprobada o rechazada.',
+            '⏳ Solicitud pendiente',
+            9000,
+          );
+          return;
+        }
+        this.showRescheduleModal.set(true);
+      },
+      error: () => {
+        // If the check fails, fall through to opening the modal —
+        // the backend will still reject duplicate pending requests with
+        // a 409, so this isn't a hard guarantee but keeps the UX alive
+        // if /reschedule-requests is briefly down.
+        this.showRescheduleModal.set(true);
+      },
+    });
   }
 
   closeRescheduleModal(): void {
@@ -414,19 +440,33 @@ if (this.wompiPollTimer) {
           const isPending = rows.some((r) => r.booking_id === booking.id);
           if (isPending) {
             this.toast.info(
-              'Solicitud enviada al admin. Te avisaremos cuando sea aprobada.',
+              'Tu solicitud de reagenda fue enviada al administrador. Te avisaremos por email y en la campanita de notificaciones (🔔 arriba a la derecha) cuando sea aprobada o rechazada.',
+              '⏳ Solicitud pendiente de aprobación',
+              9000,
             );
           } else {
-            this.toast.success('Reserva reagendada correctamente');
+            this.toast.success(
+              'Tu reserva fue reagendada al instante.',
+              '✅ Reagenda confirmada',
+              5000,
+            );
           }
         },
         error: () => {
           // Si falla el check de pendientes, caemos al éxito conservador.
-          this.toast.success('Reserva reagendada correctamente');
+          this.toast.success(
+            'Tu reserva fue reagendada al instante.',
+            '✅ Reagenda confirmada',
+            5000,
+          );
         },
       });
     } else {
-      this.toast.success('Reserva reagendada correctamente');
+      this.toast.success(
+        'Tu reserva fue reagendada al instante.',
+        '✅ Reagenda confirmada',
+        5000,
+      );
     }
   }
 

@@ -123,10 +123,15 @@ export class DomainScopeGuard implements CanActivate {
       return path.includes(this.CARRIER_PATH_MARKER);
     }
 
-    // 7. app_type fuera de ORG_ADMIN/STORE_ADMIN (p. ej. STORE_ECOMMERCE,
-    //    *_LANDING, VENDIX_*) tocando /store/* o /organization/* es un cruce
-    //    no autorizado. Rechazar.
+    // 6c. Customers (CUSTOMER / STORE_ECOMMERCE): bell notifications
+    //     only. The `/store/notifications` endpoint already filters by
+    //     `data->>'target_user_id'` so the customer can only see their
+    //     own — no need to expose the rest of /store/*. We carve out
+    //     this single namespace below; everything else still 403s.
     if (appType !== 'ORG_ADMIN' && appType !== 'STORE_ADMIN') {
+      if (path.includes('/store/notifications')) {
+        return true;
+      }
       this.logger.warn(
         `app_type=${appType} (user_id=${user.id}) intentó acceder a path admin: ${path}`,
       );

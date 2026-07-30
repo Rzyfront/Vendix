@@ -63,6 +63,40 @@
           </a>
         </app-tooltip>
 
+        <!-- Appointment redesign phase 2 — solicitudes de reagenda.
+             Badge con el count de pending. Click → navega a la página
+             dedicada /admin/reservations/reschedule-requests. -->
+        <app-tooltip
+          [content]="rescheduleRequestsCount() > 0
+            ? 'Tienes ' + rescheduleRequestsCount() + ' solicitud(es) de reagenda pendiente(s)'
+            : 'No hay solicitudes de reagenda pendientes'"
+          position="bottom"
+          size="sm"
+        >
+          <a
+            routerLink="/admin/reservations/reschedule-requests"
+            [class.reschedule-pulse]="rescheduleRequestsCount() > 0"
+            class="relative flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px] border no-underline"
+            [style.color]="rescheduleRequestsCount() > 0 ? '#fff' : 'var(--color-text-primary)'"
+            [style.background]="rescheduleRequestsCount() > 0
+              ? 'var(--color-primary)'
+              : '#fff'"
+            [style.borderColor]="rescheduleRequestsCount() > 0
+              ? 'var(--color-primary)'
+              : 'var(--color-border)'"
+          >
+            <app-icon name="inbox" [size]="14"></app-icon>
+            <span class="hidden sm:inline">Solicitudes de reagenda</span>
+            @if (rescheduleRequestsCount() > 0) {
+              <span
+                class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white text-[var(--color-primary)] text-[10px] font-extrabold leading-none"
+              >
+                {{ rescheduleRequestsCount() }}
+              </span>
+            }
+          </a>
+        </app-tooltip>
+
         <!-- New Reservation Button -->
         <app-tooltip
           content="Crear una nueva reserva para un cliente"
@@ -85,6 +119,11 @@
       </div>
     </div>
   </div>
+
+  <!-- Appointment redesign phase 2 — las solicitudes de reagenda se
+       gestionan en una vista aparte en /admin/reservations/reschedule-requests
+       (botón "Solicitudes de reagenda" en la header de arriba). Este módulo
+       ya no muestra el panel inline para evitar duplicación. -->
 
   <!-- Stats Grid -->
   <div class="stats-container">

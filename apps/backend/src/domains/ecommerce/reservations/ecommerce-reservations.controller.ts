@@ -11,6 +11,7 @@ import {
   ForbiddenException,
   BadRequestException,
   HttpStatus,
+  Delete,
 } from '@nestjs/common';
 import { order_channel_enum } from '@prisma/client';
 import { Public } from '@common/decorators/public.decorator';
@@ -267,7 +268,7 @@ export class EcommerceReservationsController {
    */
   @Public()
   @Get('store/services')
-  async getStoreServices(@Req() req: any) {
+  async getStoreServices(@Req() req: any, @Query('product_id') productIdRaw?: string) {
     // The booking flow on the public ecommerce runs before the
     // customer logs in. The frontend's tenantStoreIdInterceptor
     // sets an `x-store-id` header that we should prefer over
@@ -280,7 +281,7 @@ export class EcommerceReservationsController {
     if (!storeId) {
       return {
         success: true,
-        data: { offer_home_service: true, local_address: null },
+        data: { offer_home_service: true, offer_home_service_for_product: true, local_address: null },
       };
     }
     // Use the unscoped client for the cross-tenant read so the
@@ -292,11 +293,30 @@ export class EcommerceReservationsController {
     });
     const settings = (row?.settings as any) ?? {};
     const services = settings.services ?? {};
+    const offerHomeService = services.offer_home_service !== false; // default true
+
+    // Appointment redesign phase 2 — si el frontend pasa `product_id`,
+    // cruzamos con `products.is_eligible_for_home_service` para que el
+    // selector "¿Dónde se realiza el servicio?" reaccione al PRODUCTO
+    // (no solo a la tienda). Ejemplo: "Corte de cabello" → true,
+    // "Tintura" → false → solo se permite "En el local del técnico".
+    let offerHomeServiceForProduct = offerHomeService;
+    const productId = parseInt(productIdRaw ?? '', 10);
+    if (offerHomeService && !isNaN(productId) && productId > 0) {
+      const product = await this.availabilityService['prisma'].products.findFirst({
+        where: { id: productId, store_id: storeId },
+        select: { is_eligible_for_home_service: true },
+      });
+      if (product) {
+        offerHomeServiceForProduct = !!product.is_eligible_for_home_service;
+      }
+    }
+
     return {
       success: true,
       data: {
-        offer_home_service:
-          services.offer_home_service !== false, // default true
+        offer_home_service: offerHomeService,
+        offer_home_service_for_product: offerHomeServiceForProduct,
         local_address: services.local_address ?? null,
       },
     };
@@ -362,6 +382,29 @@ export class EcommerceReservationsController {
       );
     }
 
+    // Appointment redesign phase 2 — gating per-product para
+    // `service_location_type = 'home'`. Si el cliente eligió "En mi
+    // domicilio" pero el producto NO es elegible (ej: "Tintura"), lo
+    // bloqueamos acá antes de llegar al service. El frontend debería
+    // haber ocultado el selector para este producto, pero validamos en
+    // el backend como segunda línea de defensa.
+    const wantsHome = dto.service_location_type === 'home';
+    if (wantsHome) {
+      const product = await (
+        this.availabilityService as any
+      ).prisma.products.findFirst({
+        where: { id: dto.product_id, store_id: req.store_id ?? undefined },
+        select: { is_eligible_for_home_service: true },
+      });
+      // Si no encontramos el producto o no es elegible, fallback a shop.
+      const eligible = !!product?.is_eligible_for_home_service;
+      if (!eligible) {
+        throw new BadRequestException(
+          'Este servicio no está disponible a domicilio. Por favor elige "En el local del técnico".',
+        );
+      }
+    }
+
     const booking = await this.reservationsService.create({
       customer_id: customerId,
       product_id: dto.product_id,
@@ -371,6 +414,8 @@ export class EcommerceReservationsController {
       end_time: dto.end_time,
       channel: order_channel_enum.ecommerce,
       notes: dto.notes,
+      service_location_type: dto.service_location_type ?? ('shop' as any),
+      service_address_id: dto.service_address_id,
     });
 
     return { success: true, data: booking };
@@ -474,8 +519,85 @@ export class EcommerceReservationsController {
       );
     }
 
+    // Delegamos al service — él bifurca según
+    // `settings.reservations.allow_direct_reschedule`:
+    //   flag=true  → service ejecuta el reschedule directo (legacy).
+    //   flag=false → service crea una fila PENDING y NO muta bookings;
+    //                en ese caso el `booking` que recibimos arriba ya
+    //                tiene el slot original, así que el frontend puede
+    //                mostrar "Pendiente de aprobación".
     const result = await this.reservationsService.reschedule(id, dto);
     return { success: true, data: result };
+  }
+
+  /**
+   * Customer cancela su propia solicitud de reagendamiento pendiente.
+   * Solo el dueño de la reserva puede cancelar; el service verifica
+   * que el `requested_by_customer_id` coincida con `customerId`.
+   */
+  @Delete('reschedule-requests/:reqId')
+  async cancelRescheduleRequest(
+    @Param('reqId', ParseIntPipe) reqId: number,
+    @Req() req: any,
+  ) {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      throw new ForbiddenException(
+        'Debe iniciar sesion para cancelar la solicitud',
+      );
+    }
+    const request = await (
+      this.reservationsService as any
+    ).prisma.booking_reschedule_requests.findUnique({
+      where: { id: reqId },
+      select: { id: true, requested_by_customer_id: true, booking_id: true },
+    });
+    if (!request) {
+      throw new BadRequestException('Solicitud no encontrada');
+    }
+    if (request.requested_by_customer_id !== customerId) {
+      throw new ForbiddenException(
+        'No tiene permiso para cancelar esta solicitud',
+      );
+    }
+    const result = await this.reservationsService.cancelRescheduleRequest(
+      reqId,
+      { cancelledByUserId: undefined },
+    );
+    return { success: true, data: result };
+  }
+
+  /**
+   * Lista las solicitudes pendientes del customer autenticado
+   * (para mostrar el badge "Pendiente de aprobación" en el portal).
+   */
+  @Get('reschedule-requests/mine')
+  async listMyRescheduleRequests(@Req() req: any) {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      throw new ForbiddenException('Debe iniciar sesion');
+    }
+    const rows = await (
+      this.reservationsService as any
+    ).prisma.booking_reschedule_requests.findMany({
+      where: {
+        requested_by_customer_id: customerId,
+        status: 'pending',
+      },
+      orderBy: { requested_at: 'desc' },
+      include: {
+        booking: {
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            start_time: true,
+            end_time: true,
+          },
+        },
+      },
+    });
+    return { success: true, data: rows };
   }
 
   /**

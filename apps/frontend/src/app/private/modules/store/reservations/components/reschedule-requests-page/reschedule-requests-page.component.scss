@@ -1,0 +1,400 @@
+:host {
+  display: block;
+  /* No max-width — let the page use the full viewport width like
+     Disponibilidad does. Inner cards keep their own padding. */
+  padding: 16px 24px 24px;
+  margin: 0 auto;
+  max-width: 1280px;
+}
+
+/* Mini breadcrumb — placed above the sticky header so the operator
+   always knows where they are in the module tree. Styled to match
+   Vendix's admin chrome (small, muted, clickable link for the parent). */
+.page-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 12px 0;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.crumb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-secondary, #6b7280);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 120ms ease-out;
+
+  &:hover {
+    color: var(--color-primary, #6366f1);
+  }
+}
+
+.crumb-sep {
+  color: var(--color-text-muted, #9ca3af);
+  user-select: none;
+}
+
+.crumb-current {
+  color: var(--color-text-primary, #111827);
+  font-weight: 600;
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.page-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-text-primary, #111827);
+
+  app-icon {
+    color: var(--color-primary, #6366f1);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+  }
+}
+
+.page-hint {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.badge-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: #fff;
+  color: var(--color-text-primary, #111827);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out;
+
+  &:hover:not(:disabled) {
+    background: var(--color-background, #f9fafb);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.empty,
+.empty-state {
+  margin: 48px auto;
+  text-align: center;
+  color: var(--color-text-muted, #9ca3af);
+}
+
+.empty-state {
+  padding: 48px 24px;
+  background: var(--color-background, #f9fafb);
+  border: 1px dashed var(--color-border, #e5e7eb);
+  border-radius: 12px;
+
+  app-icon {
+    color: var(--color-text-muted, #9ca3af);
+    margin-bottom: 12px;
+  }
+
+  h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: var(--color-text-secondary, #4b5563);
+  }
+
+  p {
+    margin: 0;
+    font-size: 13px;
+    max-width: 360px;
+    margin-inline: auto;
+    line-height: 1.5;
+  }
+}
+
+.request-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.request-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--color-surface, #fff);
+  transition: box-shadow 120ms ease-out;
+
+  &:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+  }
+}
+
+.request-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.customer-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  color: var(--color-text-primary, #111827);
+  flex-wrap: wrap;
+
+  strong {
+    font-weight: 700;
+  }
+  .muted {
+    color: var(--color-text-secondary, #6b7280);
+  }
+  .provider {
+    color: var(--color-primary, #6366f1);
+    font-weight: 600;
+  }
+}
+
+.customer-contact {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+
+  .contact-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+.slot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.slot-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--color-text-muted, #9ca3af);
+  letter-spacing: 0.04em;
+}
+
+.slot-current {
+  color: var(--color-text-secondary, #6b7280);
+  text-decoration: line-through;
+}
+
+.slot-requested {
+  color: var(--color-primary, #6366f1);
+  font-weight: 700;
+}
+
+.reason {
+  margin: 8px 0 0 0;
+  padding: 10px 12px;
+  background: var(--color-background, #f9fafb);
+  border-left: 3px solid var(--color-primary, #6366f1);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--color-text-secondary, #4b5563);
+  font-style: italic;
+}
+
+.meta {
+  margin: 8px 0 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted, #9ca3af);
+}
+
+.request-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 120px;
+
+  @media (max-width: 640px) {
+    flex-direction: row;
+    width: 100%;
+  }
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 120ms ease-out;
+  min-height: 38px;
+}
+
+.btn-primary {
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  &:hover:not(:disabled) { background: #4f46e5; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+.btn-outline-danger {
+  background: transparent;
+  color: var(--color-error, #dc2626);
+  border-color: var(--color-error, #dc2626);
+  &:hover:not(:disabled) {
+    background: var(--color-error, #dc2626);
+    color: #fff;
+  }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--color-text-secondary, #4b5563);
+  border-color: var(--color-border, #e5e7eb);
+  &:hover:not(:disabled) { background: var(--color-background, #f9fafb); }
+}
+
+.btn-danger {
+  background: var(--color-error, #dc2626);
+  color: #fff;
+  &:hover:not(:disabled) { background: #b91c1c; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal {
+  background: var(--color-surface, #fff);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  h4 { margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text-primary, #111827); }
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-context {
+  margin: 0 0 12px 0;
+  padding: 10px 12px;
+  background: var(--color-background, #f9fafb);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary, #4b5563);
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #4b5563);
+  margin-bottom: 4px;
+  .req { color: var(--color-error, #dc2626); }
+}
+
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+  &:focus {
+    outline: none;
+    border-color: var(--color-primary, #6366f1);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}

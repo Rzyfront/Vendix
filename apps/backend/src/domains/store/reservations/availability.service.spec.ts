@@ -27,6 +27,25 @@ describe('AvailabilityService — business hours integration', () => {
             ]),
         ),
       ),
+      // Mirror of loadStoreHours but in the multi-window shape consumed
+      // by the availability service after the split-shift fix. Tests that
+      // only pass a single row per day still work because each day
+      // collapses to a single-element array.
+      loadStoreWindows: jest.fn().mockResolvedValue(
+        (() => {
+          const out = new Map<
+            number,
+            Array<{ start_time: string; end_time: string }>
+          >();
+          for (const r of storeHours) {
+            if (r.is_active === false) continue;
+            const list = out.get(r.day_of_week) ?? [];
+            list.push({ start_time: r.start_time, end_time: r.end_time });
+            out.set(r.day_of_week, list);
+          }
+          return out;
+        })(),
+      ),
     } as any;
 
     const prisma: any = {
@@ -84,11 +103,14 @@ describe('AvailabilityService — business hours integration', () => {
   }
 
   it('isSlotAvailable returns false when the store has no business hours row for the day', async () => {
-    // Store configured hours only Mon-Fri; Tuesday is closed.
+    // Store configured hours only on Monday; Tuesday is closed.
+    // (Previously this test inadvertently included `day_of_week: 2` in
+    // storeHours, which contradicted the "Tuesday is closed" comment and
+    // made the slot overlap with the configured window. After the
+    // multi-window refactor, the test data matches the intent.)
     const { service } = buildService({
       storeHours: [
         { day_of_week: 1, start_time: '09:00', end_time: '18:00' },
-        { day_of_week: 2, start_time: '09:00', end_time: '18:00' },
       ],
       products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific' }],
       providers: [{ id: 5, display_name: 'Ana', avatar_url: null }],

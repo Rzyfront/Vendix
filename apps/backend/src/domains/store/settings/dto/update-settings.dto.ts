@@ -21,6 +21,7 @@ import {
   ModuleFlowsSettingsDto,
   AvailabilitySettingsDto,
   ServicesSettingsDto,
+  ReservationsSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
@@ -150,6 +151,20 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ServicesSettingsDto)
   services?: ServicesSettingsDto;
+
+  @ApiProperty({
+    type: ReservationsSettingsDto,
+    required: false,
+    description:
+      'Reservations sub-form: how booking flows behave. Today only ' +
+      '`allow_direct_reschedule` is exposed; the rest (reminders, ' +
+      'confirmation, check_in) is consumed by background jobs and not ' +
+      'yet editable from the UI.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ReservationsSettingsDto)
+  reservations?: ReservationsSettingsDto;
 
   @ApiProperty({ required: false, description: 'Semantic fiscal status block' })
   @IsOptional()

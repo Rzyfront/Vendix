@@ -20,6 +20,9 @@ import {
   RescheduleBookingDto,
   CalendarQueryDto,
   SendConfirmationDto,
+  CreateRescheduleRequestDto,
+  ApproveRescheduleRequestDto,
+  RejectRescheduleRequestDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -28,6 +31,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 @Controller('store/reservations')
 @UseGuards(PermissionsGuard)
@@ -38,6 +42,7 @@ export class ReservationsController {
     private readonly bookingConfirmationService: BookingConfirmationService,
     private readonly appointmentQueueService: AppointmentQueueService,
     private readonly responseService: ResponseService,
+    private readonly prisma: StorePrismaService,
   ) {}
 
   @Get()
@@ -132,6 +137,142 @@ export class ReservationsController {
   async confirmByToken(@Param('token') token: string) {
     const result = await this.bookingConfirmationService.processToken(token);
     return this.responseService.success(result);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Reschedule approval flow (appointment redesign phase 2)
+  // ─────────────────────────────────────────────────────────────────────
+  // IMPORTANT: estos endpoints estáticos (`reschedule-requests`, etc.)
+  // deben declararse ANTES de los `@Get(':id')` parametrizados para que
+  // NestJS los matchee primero — si no, `:id = 'reschedule-requests'` se
+  // intenta parsear como int y falla con 400 "numeric string is expected".
+  // Enpoints para cuando la tienda tiene
+  // `settings.reservations.allow_direct_reschedule = false`. La solicitud
+  // del cliente (o del admin en su nombre) queda como fila PENDING en
+  // `booking_reschedule_requests` hasta que un admin apruebe o rechace.
+
+  /**
+   * Lista las solicitudes pendientes (la cola que ve el admin).
+   * Opcional: filtra por `status` (pending/approved/rejected/cancelled).
+   */
+  @Get('reschedule-requests')
+  @Permissions('store:reservations:read')
+  async listRescheduleRequests(
+    @Query('status') status?: string,
+  ) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo determinar la tienda del contexto de la solicitud',
+      );
+    }
+    const rows = await this.prisma.booking_reschedule_requests.findMany({
+      where: {
+        store_id: storeId,
+        ...(status ? { status: status as any } : {}),
+      },
+      orderBy: { requested_at: 'desc' },
+      take: 200,
+      include: {
+        booking: {
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            start_time: true,
+            end_time: true,
+            customer: {
+              select: { id: true, first_name: true, last_name: true, email: true, phone: true },
+            },
+            product: { select: { id: true, name: true } },
+            provider: { select: { id: true, display_name: true } },
+          },
+        },
+        requested_by_user: { select: { id: true, first_name: true, last_name: true } },
+        decided_by_user: { select: { id: true, first_name: true, last_name: true } },
+      },
+    });
+    return this.responseService.success(rows, 'Solicitudes de reagendamiento obtenidas');
+  }
+
+  /**
+   * Aprueba una solicitud pendiente — mueve la reserva al slot solicitado.
+   */
+  @Patch('reschedule-requests/:reqId/approve')
+  @Permissions('store:reservations:update')
+  async approveRescheduleRequest(
+    @Param('reqId', ParseIntPipe) reqId: number,
+    @Body() dto: ApproveRescheduleRequestDto,
+  ) {
+    const userId = RequestContextService.getUserId();
+    if (!userId) {
+      throw new BadRequestException(
+        'No se pudo determinar el usuario del contexto de la solicitud',
+      );
+    }
+    const updated = await this.reservationsService.approveRescheduleRequest(reqId, {
+      decidedByUserId: userId,
+      decisionReason: dto.decision_reason,
+    });
+    return this.responseService.success(updated, 'Solicitud aprobada y reserva reprogramada');
+  }
+
+  /**
+   * Rechaza una solicitud pendiente — la reserva queda en su slot original.
+   */
+  @Patch('reschedule-requests/:reqId/reject')
+  @Permissions('store:reservations:update')
+  async rejectRescheduleRequest(
+    @Param('reqId', ParseIntPipe) reqId: number,
+    @Body() dto: RejectRescheduleRequestDto,
+  ) {
+    const userId = RequestContextService.getUserId();
+    if (!userId) {
+      throw new BadRequestException(
+        'No se pudo determinar el usuario del contexto de la solicitud',
+      );
+    }
+    const result = await this.reservationsService.rejectRescheduleRequest(reqId, {
+      decidedByUserId: userId,
+      decisionReason: dto.decision_reason,
+    });
+    return this.responseService.success(result, 'Solicitud rechazada');
+  }
+
+  /**
+   * Cancela una solicitud pendiente (admin o cliente la retira).
+   */
+  @Delete('reschedule-requests/:reqId')
+  @Permissions('store:reservations:update')
+  async cancelRescheduleRequest(
+    @Param('reqId', ParseIntPipe) reqId: number,
+  ) {
+    const userId = RequestContextService.getUserId();
+    const result = await this.reservationsService.cancelRescheduleRequest(reqId, {
+      cancelledByUserId: userId ?? undefined,
+    });
+    return this.responseService.success(result, 'Solicitud cancelada');
+  }
+
+  /**
+   * Crea una solicitud de reagendamiento pendiente en nombre del cliente.
+   * Usado por el admin/POS cuando quieren reagendar con aprobación.
+   */
+  @Post(':id/reschedule-requests')
+  @Permissions('store:reservations:update')
+  async createRescheduleRequest(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateRescheduleRequestDto,
+  ) {
+    const booking = await this.reservationsService.findOne(id);
+    const userId = RequestContextService.getUserId();
+    const created = await this.reservationsService.requestReschedule(booking, dto, {
+      requestedByUserId: userId ?? undefined,
+    });
+    return this.responseService.created(
+      created,
+      'Solicitud de reagendamiento creada. Queda pendiente hasta que un admin la apruebe.',
+    );
   }
 
   @Get(':id')

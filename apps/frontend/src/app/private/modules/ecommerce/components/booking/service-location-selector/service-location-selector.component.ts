@@ -64,6 +64,17 @@ export class ServiceLocationSelectorComponent {
    * existing callers don't accidentally hide the option.
    */
   readonly offerHomeService = input<boolean>(true);
+  /**
+   * Appointment redesign phase 2 — per-product home-service eligibility.
+   * The booking flow passes `offer_home_service_for_product` from
+   * `GET /ecommerce/store/services?product_id=...`. When false, the
+   * "A domicilio" option is hidden even if the store globally offers
+   * it (e.g. "Tintura" no va a domicilio aunque el salón sí ofrezca
+   * el servicio en otros productos). Defaults to true to preserve
+   * the legacy behavior — only callers that pass the per-product
+   * flag actually gate on it.
+   */
+  readonly productEligibleForHomeService = input<boolean>(true);
 
   /** Resolved service location — driven by la elección explícita del
    *  cliente o, si no eligió todavía, por la config `offerHomeService`.
@@ -77,18 +88,35 @@ export class ServiceLocationSelectorComponent {
   private readonly userChoice = signal<'shop' | 'home' | null>(null);
 
   constructor() {
-    // Re-emite cuando cambia la elección del usuario o el flag de
-    // config. La decisión efectiva es siempre: elección explícita si
-    // existe, sino el fallback de `offerHomeService`.
+    // Re-emite cuando cambia la elección del usuario o los flags de
+    // config (tienda + producto). La decisión efectiva es siempre:
+    // elección explícita si existe, sino el fallback compuesto.
     effect(() => {
       const choice = this.userChoice();
-      const fallback = this.offerHomeService() ? 'home' : 'shop';
-      this.valueChange.emit(choice ?? fallback);
+      const fallback = this.showHomeOption() ? 'home' : 'shop';
+      // Si el producto se volvió NO elegible mientras el usuario tenía
+      // elegida la opción "home", forzamos `shop` y limpiamos la
+      // elección explícita para que el visual no muestre un estado
+      // inconsistente.
+      if (choice === 'home' && !this.showHomeOption()) {
+        this.userChoice.set(null);
+      }
+      this.valueChange.emit(this.userChoice() ?? fallback);
     });
   }
 
+  /**
+   * Computed: ¿mostrar la opción "A domicilio" al cliente?
+   * Combina la config global de la tienda (`offerHomeService`) con
+   * la elegibilidad per-producto (`productEligibleForHomeService`).
+   * Cualquiera de las dos en `false` oculta la opción.
+   */
+  showHomeOption(): boolean {
+    return this.offerHomeService() && this.productEligibleForHomeService();
+  }
+
   pickHome(): void {
-    if (!this.offerHomeService()) return; // la tienda no ofrece a domicilio
+    if (!this.showHomeOption()) return; // tienda o producto no ofrece a domicilio
     this.userChoice.set('home');
   }
 
@@ -98,15 +126,14 @@ export class ServiceLocationSelectorComponent {
 
   /**
    * Modalidad efectiva: la elección EXPLÍCITA del usuario si hizo click,
-   * si no, el fallback de `offerHomeService` (que el backend marca si la
-   * tienda ofrece o no el servicio a domicilio). Lo usamos en el template
-   * para marcar `[class.active]` en el botón correspondiente, así el
-   * visual refleja la decisión actual — no la config del backend.
+   * si no, el fallback compuesto (tienda ∧ producto). Lo usamos en el
+   * template para marcar `[class.active]` en el botón correspondiente,
+   * así el visual refleja la decisión actual.
    */
   effectiveServiceLocation(): ServiceLocation {
     const choice = this.userChoice();
     if (choice) return choice;
-    return this.offerHomeService() ? 'home' : 'shop';
+    return this.showHomeOption() ? 'home' : 'shop';
   }
 
   /**

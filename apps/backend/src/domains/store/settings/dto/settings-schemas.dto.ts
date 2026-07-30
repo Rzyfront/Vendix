@@ -1238,3 +1238,36 @@ export class ServicesSettingsDto {
   @IsOptional() @ValidateNested() @Type(() => ServicesAddressDto)
   local_address?: ServicesAddressDto;
 }
+
+/**
+ * Reservations sub-form: how the booking/reschedule flows behave.
+ * Mirrors `store_settings.settings.reservations` on the backend.
+ *
+ * Captured in Configuración → General → Reservas. Today only the
+ * `allow_direct_reschedule` toggle is exposed — the rest of the
+ * `reservations.*` keys (reminders, confirmation, check_in) are
+ * consumed by background jobs and are not yet editable from the UI.
+ */
+export class ReservationsSettingsDto {
+  /**
+   * When true (default), customers reschedule a booking with a single
+   * click and the change is applied immediately. When false, the
+   * customer's reschedule becomes a PENDING REQUEST routed through
+   * `booking_reschedule_requests` — the booking stays at its current
+   * slot until an admin approves or rejects the request.
+   *
+   * Mirrors `ReservationsSettings.allow_direct_reschedule` in
+   * `store-settings.interface.ts`.
+   */
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Si true, el cliente puede reprogramar su reserva al instante (1 click). ' +
+      'Si false, la reprogramación queda como solicitud pendiente hasta que ' +
+      'un admin apruebe o rechace.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_direct_reschedule?: boolean;
+}

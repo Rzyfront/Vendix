@@ -6,3 +6,4 @@ export * from './reschedule-modal/reschedule-modal.component';
 export * from './today-reservations-panel/today-reservations-panel.component';
 export * from './quick-actions-panel/quick-actions-panel.component';
 export * from './booking-detail-modal/booking-detail-modal.component';
+export * from './reschedule-requests-page/reschedule-requests-page.component';

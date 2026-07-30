@@ -14,6 +14,7 @@ import { RescheduleModalComponent } from './components/reschedule-modal/reschedu
 import { BookingDetailModalComponent } from './components/booking-detail-modal/booking-detail-modal.component';
 import { TodayReservationsPanelComponent } from './components/today-reservations-panel/today-reservations-panel.component';
 import { QuickActionsPanelComponent } from './components/quick-actions-panel/quick-actions-panel.component';
+import { RescheduleRequestsPanelComponent } from './components/reschedule-requests-panel/reschedule-requests-panel.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { ReservationsService } from './services/reservations.service';
@@ -47,6 +48,7 @@ type ReservationView = 'calendar' | 'list';
     BookingDetailModalComponent,
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
+    RescheduleRequestsPanelComponent,
     CardComponent,
     IconComponent,
     TooltipComponent,
@@ -65,6 +67,12 @@ export class ReservationsComponent {
   private destroyRef = inject(DestroyRef);
 
   stats = signal<BookingStats | null>(null);
+
+  // Appointment redesign phase 2 — pending reschedule requests count.
+  // Mirrored from <app-reschedule-requests-panel> so the header can show
+  // a "Solicitudes de reagenda (N)" button with a badge.
+  readonly rescheduleRequestsCount = signal(0);
+  private rescheduleCountPollHandle: ReturnType<typeof setInterval> | null = null;
   bookings = signal<Booking[]>([]);
   loading = signal(false);
   actionLoading = signal(false);
@@ -177,6 +185,11 @@ export class ReservationsComponent {
     this.loadStats();
     this.loadBookings();
     this.loadTodayBookings();
+    this.refreshRescheduleCount();
+    this.rescheduleCountPollHandle = setInterval(
+      () => this.refreshRescheduleCount(),
+      30_000,
+    );
 
     // Auto-refresh the today panel every 2 minutes so the operator
     // sees fresh state without manual reload (newly confirmed bookings,
@@ -187,7 +200,12 @@ export class ReservationsComponent {
       () => this.loadTodayBookings(),
       ReservationsComponent.TODAY_PANEL_REFRESH_MS,
     );
-    this.destroyRef.onDestroy(() => clearInterval(refreshTimer));
+    this.destroyRef.onDestroy(() => {
+      clearInterval(refreshTimer);
+      if (this.rescheduleCountPollHandle) {
+        clearInterval(this.rescheduleCountPollHandle);
+      }
+    });
   }
 
   setActiveView(view: string): void {
@@ -203,6 +221,24 @@ export class ReservationsComponent {
         next: (stats: BookingStats) => this.stats.set(stats),
         error: () => {
           this.toastService.error('Error al cargar estadisticas de reservas');
+        },
+      });
+  }
+
+  /**
+   * Polls the pending-reschedule-requests endpoint every 30s so the
+   * header button badge stays in sync with the dedicated
+   * `/admin/reservations/reschedule-requests` page.
+   */
+  refreshRescheduleCount(): void {
+    this.reservationsService
+      .listRescheduleRequests('pending')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => this.rescheduleRequestsCount.set(rows?.length ?? 0),
+        error: () => {
+          // Silent — the dedicated page surfaces real failures via toast.
+          // The badge just keeps showing the last-known count.
         },
       });
   }

@@ -121,6 +121,28 @@
           </div>
         </section>
 
+        <!-- Reservations (Reservas) Section — appointment redesign phase 2.
+             Renders the `allow_direct_reschedule` toggle. Always shown
+             (any store with reservations enabled benefits from this
+             policy; flipping it OFF converts the customer's 1-click
+             reschedule into a pending admin approval flow). -->
+        <section id="section-reservations" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--teal">
+              <app-icon name="calendar-clock" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Reservas</h2>
+          </div>
+          <div class="section-body">
+            <!-- Fall back to { allow_direct_reschedule: true } when the
+                 store has never persisted this section — preserves the
+                 legacy 1-click UX until the operator explicitly opts
+                 into the approval flow. -->
+            <app-reservations-settings-form [settings]="settings().reservations || { allow_direct_reschedule: true }"
+              (settingsChange)="onSectionChange('reservations', $event)" />
+          </div>
+        </section>
+
         <!-- Restaurant (Mesas) Section — restaurant industry only -->
         @if (isRestaurant()) {
           <section id="section-restaurant" class="settings-section">

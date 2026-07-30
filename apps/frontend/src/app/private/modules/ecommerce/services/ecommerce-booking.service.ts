@@ -119,17 +119,39 @@ export class EcommerceBookingService {
    * address). Used by the booking flow to decide whether to render
    * the 'A domicilio' radio card.
    */
-  getStoreServices(): Observable<{
+  getStoreServices(productId?: number): Observable<{
     offer_home_service: boolean;
+    /**
+     * Appointment redesign phase 2 — per-product home-service
+     * eligibility. Only set when `productId` is passed; mirrors the
+     * `offer_home_service_for_product` field returned by
+     * `GET /ecommerce/store/services?product_id=...`. When the
+     * product is not eligible, the selector hides the "A domicilio"
+     * option even if the store globally offers it.
+     */
+    offer_home_service_for_product?: boolean;
     local_address: any | null;
   }> {
+    let params = new HttpParams();
+    if (productId) params = params.set('product_id', String(productId));
     return this.http
-      .get<any>(`${this.api_url}/store/services`, { headers: this.getHeaders() })
+      .get<any>(`${this.api_url}/store/services`, {
+        headers: this.getHeaders(),
+        params,
+      })
       .pipe(
         map((r) => {
           const data = r?.data ?? r ?? {};
+          const offer = data.offer_home_service !== false;
           return {
-            offer_home_service: data.offer_home_service !== false,
+            offer_home_service: offer,
+            // Cuando no pasamos product_id, el backend no incluye
+            // `offer_home_service_for_product`; caemos al global para
+            // preservar la UX legacy (selector visible por default).
+            offer_home_service_for_product:
+              typeof data.offer_home_service_for_product === 'boolean'
+                ? data.offer_home_service_for_product
+                : offer,
             local_address: data.local_address ?? null,
           };
         }),
@@ -210,6 +232,30 @@ export class EcommerceBookingService {
       data: CustomerBooking;
       message?: string;
     }>(`${this.api_url}/${id}/reschedule`, dto, { headers: this.getHeaders() });
+  }
+
+  /**
+   * Appointment redesign phase 2 — lista las solicitudes de reagenda
+   * pendientes del customer autenticado. Útil para mostrar el badge
+   * "Pendiente de aprobación" en las cards de reservas.
+   */
+  listMyRescheduleRequests(): Observable<any[]> {
+    return this.http
+      .get<{ success: boolean; data: any[] }>(
+        `${this.api_url}/reschedule-requests/mine`,
+        { headers: this.getHeaders() },
+      )
+      .pipe(map((res) => res.data ?? []));
+  }
+
+  /**
+   * El customer cancela su propia solicitud pendiente.
+   */
+  cancelMyRescheduleRequest(reqId: number): Observable<any> {
+    return this.http.delete<{ success: boolean; data: any }>(
+      `${this.api_url}/reschedule-requests/${reqId}`,
+      { headers: this.getHeaders() },
+    );
   }
 
   holdBooking(dto: {

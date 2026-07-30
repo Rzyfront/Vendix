@@ -211,9 +211,10 @@ export class EmailService implements OnModuleInit {
     subject: string,
     html: string,
     text?: string,
+    from?: { name: string; email: string },
   ): Promise<EmailResult> {
     try {
-      const result = await this.provider.sendEmail(to, subject, html, text);
+      const result = await this.provider.sendEmail(to, subject, html, text, from);
 
       if (result.success) {
         this.logger.log(

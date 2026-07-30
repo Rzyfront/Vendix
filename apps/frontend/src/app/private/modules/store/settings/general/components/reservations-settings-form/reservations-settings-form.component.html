@@ -1,0 +1,24 @@
+<div class="settings-section" [formGroup]="form">
+  <div class="settings-section__header">
+    <h3 class="settings-section__title">
+      <app-icon name="calendar-clock" [size]="16"></app-icon>
+      Reservas
+    </h3>
+    <p class="settings-section__hint">
+      Define cómo se gestionan las reprogramaciones de reservas desde
+      el ecommerce y el portal del cliente.
+    </p>
+  </div>
+
+  <div class="settings-section__body">
+    <!-- Toggle: permite reagendamiento directo (1 click).
+         Cuando está OFF, la reprogramación del cliente queda como
+         solicitud pendiente hasta que un admin la apruebe o rechace. -->
+    <app-setting-toggle
+      [formControl]="allowDirectRescheduleControl"
+      label="¿Permitir reagendamiento directo?"
+      description="Si está activo, el cliente puede reprogramar su reserva con un solo click desde el ecommerce. Si lo desactivas, cada reagendamiento quedará como solicitud pendiente y un admin deberá aprobarla."
+      (changed)="onFieldChange()"
+    />
+  </div>
+</div>

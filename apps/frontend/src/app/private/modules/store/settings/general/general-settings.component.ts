@@ -10,6 +10,7 @@ import { EmissionStage } from './components/receipts-settings-form/receipts-sett
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
 import { ServicesSettingsForm } from './components/services-settings-form/services-settings-form.component';
+import { ReservationsSettingsForm } from './components/reservations-settings-form/reservations-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
 import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
@@ -37,6 +38,7 @@ import { firstValueFrom } from 'rxjs';
     IconComponent,
     GeneralSettingsForm,
     ServicesSettingsForm,
+    ReservationsSettingsForm,
     InventorySettingsForm,
     NotificationsSettingsForm,
     PosSettingsForm,
@@ -198,6 +200,7 @@ export class GeneralSettingsComponent implements OnInit {
       { id: 'branding', label: 'Marca', icon: 'palette' },
       { id: 'inventory', label: 'Inventario', icon: 'package' },
       { id: 'operations', label: 'Operaciones', icon: 'clock' },
+      { id: 'reservations', label: 'Reservas', icon: 'calendar-clock' },
       { id: 'dispatch', label: 'Despacho', icon: 'truck' },
       { id: 'reparto', label: 'Reparto', icon: 'coins' },
       { id: 'notifications', label: 'Alertas', icon: 'bell' },
@@ -414,7 +417,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'carrier', 'restaurant', 'membership', 'panel_ui',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'carrier', 'restaurant', 'membership', 'panel_ui', 'reservations',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

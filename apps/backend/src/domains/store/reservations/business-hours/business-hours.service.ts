@@ -116,6 +116,12 @@ export class BusinessHoursService {
    * — and any drift between them produced truncated booking slots. The
    * legacy table is still readable as a fallback (for stores that
    * haven't migrated yet) but is no longer the primary source.
+   *
+   * Collapses each day's blocks to a single (earliest_open, latest_close)
+   * envelope — the slot generator has long assumed a single window per
+   * day. Callers that need to honor lunch breaks / split-shifts should
+   * use `loadStoreWindows` instead, which returns the per-day array of
+   * windows.
    */
   async loadStoreHours(
     storeId: number,
@@ -136,6 +142,120 @@ export class BusinessHoursService {
         { start_time: r.start_time, end_time: r.end_time },
       ]),
     );
+  }
+
+  /**
+   * Returns the FULL set of working windows per day — including any
+   * lunch-break / split-shift gaps when the operator configured
+   * TIPO DE HORARIO = "Personalizado" with multiple blocks.
+   *
+   * Shape: Map<day_of_week (0..6), Array<{ start_time, end_time }>>.
+   * An empty array for a given day means "store closed". For the
+   * continuous mode, each day has exactly one entry [open, close].
+   *
+   * Previously the slot generator collapsed the per-day array to the
+   * OUTER envelope (earliest open, latest close), which silently
+   * destroyed lunch breaks and made "horario personalizado" look like
+   * "horario continuo". This method exposes the per-block fidelity the
+   * availability service needs to skip lunch gaps.
+   */
+  async loadStoreWindows(
+    storeId: number,
+  ): Promise<Map<number, Array<{ start_time: string; end_time: string }>>> {
+    // Try the POS settings JSON first (single source of truth).
+    const fromPos = await this.loadStoreWindowsFromPosSettings(storeId);
+    if (fromPos.size > 0) return fromPos;
+
+    // Fallback: legacy store_business_hours table.
+    const rows = await this.prisma.store_business_hours.findMany({
+      where: { store_id: storeId, is_active: true },
+      select: { day_of_week: true, start_time: true, end_time: true },
+      orderBy: [{ day_of_week: 'asc' }, { start_time: 'asc' }],
+    });
+    const out = new Map<
+      number,
+      Array<{ start_time: string; end_time: string }>
+    >();
+    for (const r of rows) {
+      const list = out.get(r.day_of_week) ?? [];
+      list.push({ start_time: r.start_time, end_time: r.end_time });
+      out.set(r.day_of_week, list);
+    }
+    return out;
+  }
+
+  /**
+   * POS-settings-backed variant of `loadStoreWindows`. Same JSON shape
+   * as `loadStoreHoursFromPosSettings` but preserves every block per
+   * day instead of collapsing to the outer envelope.
+   *
+   * For TIPO DE HORARIO = "Continuo" emits a single window per day.
+   * For "Personalizado" emits ALL the operator-configured blocks in
+   * their `start_time` order, so the slot generator can skip the
+   * lunch gap.
+   */
+  private async loadStoreWindowsFromPosSettings(
+    storeId: number,
+  ): Promise<Map<number, Array<{ start_time: string; end_time: string }>>> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const businessHours = (row?.settings as any)?.pos?.business_hours as
+      | Record<
+          string,
+          | string
+          | {
+              open?: string;
+              close?: string;
+              is_active?: boolean;
+              blocks?: Array<{ open: string; close: string }>;
+            }
+        >
+      | undefined;
+    if (!businessHours) return new Map();
+
+    const out = new Map<
+      number,
+      Array<{ start_time: string; end_time: string }>
+    >();
+    const dowMap: Record<string, number> = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6,
+    };
+    for (const [dayKey, value] of Object.entries(businessHours)) {
+      const dow = dowMap[dayKey.toLowerCase()];
+      if (dow === undefined) continue;
+      if (typeof value === 'string') continue;
+      if (value?.is_active === false) continue;
+
+      const windows: Array<{ start_time: string; end_time: string }> = [];
+      const blocks = (value as any).blocks as
+        | Array<{ open: string; close: string }>
+        | undefined;
+      if (Array.isArray(blocks) && blocks.length > 0) {
+        for (const b of blocks) {
+          if (b?.open && b?.close && b.open < b.close) {
+            windows.push({ start_time: b.open, end_time: b.close });
+          }
+        }
+        windows.sort((a, b) =>
+          a.start_time < b.start_time ? -1 : a.start_time > b.start_time ? 1 : 0,
+        );
+      }
+      const open = (value as any).open as string | undefined;
+      const close = (value as any).close as string | undefined;
+      if (!windows.length && open && close && open < close) {
+        windows.push({ start_time: open, end_time: close });
+      }
+      if (windows.length) out.set(dow, windows);
+    }
+    return out;
   }
 
   /**

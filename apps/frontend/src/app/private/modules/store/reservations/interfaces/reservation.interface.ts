@@ -130,6 +130,65 @@ export interface RescheduleBookingDto {
   end_time: string;
 }
 
+/**
+ * Appointment redesign phase 2 — pending reschedule request when
+ * `settings.reservations.allow_direct_reschedule === false`. The admin
+ * sees the queue in `RescheduleRequestsPanel` and approves/rejects.
+ */
+export type RescheduleRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'cancelled';
+
+export interface RescheduleRequestBooking {
+  id: number;
+  booking_number: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  customer: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    phone: string | null;
+  };
+  product: { id: number; name: string };
+  provider: { id: number; display_name: string } | null;
+}
+
+export interface RescheduleRequest {
+  id: number;
+  store_id: number;
+  booking_id: number;
+  requested_date: string;
+  requested_start_time: string;
+  requested_end_time: string;
+  requested_by_user_id: number | null;
+  requested_by_customer_id: number | null;
+  requested_at: string;
+  reason: string | null;
+  status: RescheduleRequestStatus;
+  decided_by_user_id: number | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  booking: RescheduleRequestBooking;
+  requested_by_user?: { id: number; first_name: string; last_name: string } | null;
+  decided_by_user?: { id: number; first_name: string; last_name: string } | null;
+}
+
+export interface CreateRescheduleRequestDto {
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason?: string;
+}
+
+export interface DecideRescheduleRequestDto {
+  decision_reason?: string;
+}
+
 export type CalendarViewMode = 'month' | 'week' | 'day';
 
 export interface CalendarDateData {

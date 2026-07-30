@@ -1563,6 +1563,16 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.booking_reminder_logs;
   }
 
+  /**
+   * Appointment redesign phase 2 — pending reschedule requests when
+   * `settings.reservations.allow_direct_reschedule === false`. The
+   * scoped client applies the automatic `store_id` predicate; queries
+   * here don't need to add it manually.
+   */
+  get booking_reschedule_requests() {
+    return this.scoped_client.booking_reschedule_requests;
+  }
+
   // Email Templates (store_id nullable - system defaults have null)
   get email_templates() {
     return this.scoped_client.email_templates;
