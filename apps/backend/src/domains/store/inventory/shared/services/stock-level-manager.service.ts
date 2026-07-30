@@ -1494,7 +1494,29 @@ export class StockLevelManager {
   }
 
   /**
-   * Obtiene stock levels por producto
+   * Obtiene los stock levels de UNA identidad de inventario concreta.
+   *
+   * LECTURA CANÓNICA (QUI-557). La identidad de una fila de `stock_levels` es
+   * la tripleta `(product_id, product_variant_id, location_id)` — así lo
+   * declara el `@@unique` del modelo. Por lo tanto `product_variant_id` SIEMPRE
+   * se filtra de forma explícita, incluido el caso `null`:
+   *
+   *   - `variant_id` presente  → filas de esa variante.
+   *   - `variant_id` ausente   → filas de la LÍNEA BASE (`product_variant_id IS NULL`).
+   *
+   * Antes el filtro se omitía cuando `variant_id` era `undefined`
+   * (`...(variant_id && {...})`), de modo que una línea base recibía además las
+   * filas de todas sus variantes. Combinado con el `.find()` de
+   * `StockValidatorService.getStockLevelAtLocation` eso seleccionaba una fila
+   * ARBITRARIA (el orden lo decidía el heap de Postgres): la remisión reportaba
+   * "sin stock" con existencias intactas, y carrito/checkout —que agregan sin
+   * `location_id`— sumaban base + variantes habilitando oversell.
+   *
+   * El `orderBy` fija además un orden determinista: dos lecturas idénticas
+   * devuelven las filas en la misma secuencia.
+   *
+   * Una variante NO es despachable como producto base ni viceversa, así que
+   * mezclar ambas identidades nunca es la lectura correcta.
    */
   async getStockLevels(
     product_id: number,
@@ -1503,8 +1525,9 @@ export class StockLevelManager {
     return await this.prisma.stock_levels.findMany({
       where: {
         product_id: product_id,
-        ...(variant_id && { product_variant_id: variant_id }),
+        product_variant_id: variant_id ?? null,
       },
+      orderBy: { location_id: 'asc' },
       include: {
         inventory_locations: {
           select: {
