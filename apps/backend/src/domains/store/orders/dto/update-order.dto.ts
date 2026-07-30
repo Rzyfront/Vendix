@@ -19,6 +19,15 @@ import { order_delivery_type_enum } from '@prisma/client';
  * - POST /store/orders/:id/flow/confirm-delivery
  * - POST /store/orders/:id/flow/cancel
  * - POST /store/orders/:id/flow/refund
+ *
+ * QUI-557 — Esa nota describe la intención, no lo que la clase impone:
+ * `PartialType(CreateOrderDto)` reexpone `state` y `payment_status`, y el
+ * `whitelist` del ValidationPipe no puede filtrar un campo que el DTO declara.
+ * No se quitan aquí porque cuatro acciones de UI vivas dependen de este
+ * endpoint; en su lugar `OrdersService.update` delega `state: 'cancelled'` en
+ * `OrderFlowService.cancelOrder` para que la cancelación siempre libere sus
+ * reservas. Antes de exponer un estado nuevo por esta vía, verificar que su
+ * transición también pase por el seam.
  */
 export class UpdateOrderDto extends PartialType(CreateOrderDto) {
   @IsOptional()

@@ -27,6 +27,7 @@ import {
   assertCanChargeVat,
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
+import { OrderFlowService } from './order-flow/order-flow.service';
 
 @Injectable()
 export class OrdersService {
@@ -97,6 +98,7 @@ export class OrdersService {
     private scheduleValidationService: ScheduleValidationService,
     private stockLevelManager: StockLevelManager,
     private shippingCalculatorService: ShippingCalculatorService,
+    private orderFlowService: OrderFlowService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -640,6 +642,47 @@ export class OrdersService {
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
+
+    /**
+     * QUI-557 — Cancelar NO puede escribirse en crudo sobre `orders.state`.
+     *
+     * `UpdateOrderDto extends PartialType(CreateOrderDto)`, y `CreateOrderDto`
+     * declara `state`, así que `PartialType` lo reexpone y el `whitelist` del
+     * ValidationPipe no puede filtrarlo — el propio JSDoc del DTO dice que las
+     * transiciones van por `OrderFlowService`, pero la clase base derrota esa
+     * regla. Un `PATCH /store/orders/:id {"state":"cancelled"}` marcaba la
+     * orden cancelada sin liberar sus `stock_reservations`, y esas reservas
+     * huérfanas siguen restando de `quantity_available`: el siguiente intento
+     * de remisión reporta "sin stock" con las existencias intactas. Ese es el
+     * vector de corrupción que hace reaparecer QUI-557 aunque la lectura de
+     * stock ya sea correcta.
+     *
+     * No se rechaza el campo con 400 porque hay cuatro acciones de UI vivas
+     * que pegan a este endpoint (cancelar desde la lista, marcar enviado,
+     * marcar entregado y la transición manual de "listo para recoger");
+     * devolver 400 trasladaría el problema a la UI en vez de resolverlo. Se
+     * delega en el seam canónico, que valida la transición, libera reservas y
+     * emite los eventos, sea cual sea el cliente que llame.
+     *
+     * Solo se intercepta `cancelled`: es el estado que deja reservas activas.
+     * `shipped`/`delivered` siguen el camino crudo a propósito — el modo
+     * manual de la página de detalle los usa justamente para saltarse la
+     * validación de transición, y cambiarlo es una decisión de producto
+     * fuera del alcance de este ticket.
+     */
+    if (
+      updateOrderDto.state === order_state_enum.cancelled &&
+      order.state !== order_state_enum.cancelled
+    ) {
+      await this.orderFlowService.cancelOrder(id, {
+        reason: 'Cancelada desde la gestión de órdenes',
+      });
+
+      delete updateOrderDto.state;
+      if (Object.keys(updateOrderDto).length === 0) {
+        return this.findOne(id);
+      }
+    }
 
     // Derive delivery_type from shipping method if not explicitly provided
     if (updateOrderDto.shipping_method_id && !updateOrderDto.delivery_type) {

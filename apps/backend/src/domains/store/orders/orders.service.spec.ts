@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
+import { OrderFlowService } from './order-flow/order-flow.service';
 import { VendixHttpException } from 'src/common/errors';
 
 describe('OrdersService', () => {
@@ -48,6 +49,7 @@ describe('OrdersService', () => {
     getDefaultLocationForProduct: jest.fn(async () => 1),
   };
   const mockShippingCalculator = { calculateRates: jest.fn() };
+  const mockOrderFlowService = { cancelOrder: jest.fn() };
 
   const mockRequestContextService = {
     getContext: jest.fn(),
@@ -68,6 +70,7 @@ describe('OrdersService', () => {
         { provide: ScheduleValidationService, useValue: mockScheduleValidation },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: ShippingCalculatorService, useValue: mockShippingCalculator },
+        { provide: OrderFlowService, useValue: mockOrderFlowService },
       ],
     }).compile();
 
@@ -228,6 +231,85 @@ describe('OrdersService', () => {
       await expect(service.findOne(404)).rejects.toBeInstanceOf(
         VendixHttpException,
       );
+    });
+  });
+
+  /**
+   * QUI-557 — El vector de corrupción que hacía reaparecer el ticket.
+   *
+   * `UpdateOrderDto extends PartialType(CreateOrderDto)` reexpone `state`, así
+   * que un `PATCH /store/orders/:id {"state":"cancelled"}` escribía el estado
+   * en crudo: la orden quedaba cancelada pero sus `stock_reservations` seguían
+   * activas, restando de `quantity_available`. La siguiente remisión reportaba
+   * "sin stock" con las existencias intactas. `OrdersService.update` delega
+   * ahora esa transición en el seam canónico, que sí libera las reservas.
+   */
+  describe('update — la cancelación pasa por el seam de OrderFlowService', () => {
+    const cancellableOrder = {
+      id: 590,
+      order_number: 'ORD590',
+      state: 'processing',
+      subtotal_amount: '1000.00',
+      tax_amount: '0.00',
+      discount_amount: '0.00',
+    };
+
+    it('delega state=cancelled en cancelOrder y no escribe el estado en crudo', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(cancellableOrder);
+
+      await service.update(590, { state: 'cancelled' } as any);
+
+      expect(mockOrderFlowService.cancelOrder).toHaveBeenCalledWith(
+        590,
+        expect.objectContaining({ reason: expect.any(String) }),
+      );
+      expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('no re-cancela una orden ya cancelada', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        ...cancellableOrder,
+        state: 'cancelled',
+      });
+
+      await service.update(590, { state: 'cancelled' } as any);
+
+      expect(mockOrderFlowService.cancelOrder).not.toHaveBeenCalled();
+    });
+
+    it('deja pasar los demás estados por el camino crudo', async () => {
+      // `shipped`/`delivered` los usa a propósito el modo manual de la página
+      // de detalle para saltarse la validación de transición; cambiarlo es una
+      // decisión de producto ajena a este ticket.
+      mockPrismaService.orders.findFirst.mockResolvedValue(cancellableOrder);
+      mockPrismaService.orders.update.mockResolvedValue({
+        ...cancellableOrder,
+        state: 'shipped',
+      });
+
+      await service.update(590, { state: 'shipped' } as any);
+
+      expect(mockOrderFlowService.cancelOrder).not.toHaveBeenCalled();
+      expect(mockPrismaService.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: 'shipped' }),
+        }),
+      );
+    });
+
+    it('aplica el resto de la metadata cuando el PATCH trae state y otros campos', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(cancellableOrder);
+      mockPrismaService.orders.update.mockResolvedValue(cancellableOrder);
+
+      await service.update(590, {
+        state: 'cancelled',
+        internal_notes: 'cliente desistió',
+      } as any);
+
+      expect(mockOrderFlowService.cancelOrder).toHaveBeenCalled();
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      expect(writtenData.internal_notes).toBe('cliente desistió');
+      expect(writtenData.state).toBeUndefined();
     });
   });
 });
