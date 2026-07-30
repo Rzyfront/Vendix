@@ -73,12 +73,14 @@ import {
   model,
   output,
 } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import {
   ButtonComponent,
   IconComponent,
   InputButtonsComponent,
+  InputsearchComponent,
   type InputButtonOption,
   type SelectorOption,
 } from '../../../../../shared/components/index';
@@ -93,6 +95,25 @@ import type {
 /** Clave del campo conductor. El panel la trata aparte del `@for` de grupos. */
 const TYPE_FIELD_KEY: BulkEditableFieldKey = 'product_type';
 
+/**
+ * Normaliza para comparar: minúsculas y sin tildes. Las etiquetas del registro
+ * están en español ("Precio de oferta", "Duración", "Preparación"), así que sin
+ * quitar diacríticos buscar "duracion" no encontraría "Duración" — y nadie
+ * escribe tildes en un buscador.
+ */
+function normalize(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+/** ¿Alguno de los textos contiene el término ya normalizado? */
+function matches(term: string, ...texts: (string | undefined)[]): boolean {
+  return texts.some((text) => !!text && normalize(text).includes(term));
+}
+
 @Component({
   selector: 'app-bulk-changes-panel',
   standalone: true,
@@ -102,6 +123,7 @@ const TYPE_FIELD_KEY: BulkEditableFieldKey = 'product_type';
     IconComponent,
     ButtonComponent,
     InputButtonsComponent,
+    InputsearchComponent,
     BulkEditFieldControlComponent,
   ],
   templateUrl: './bulk-changes-panel.component.html',
@@ -173,6 +195,77 @@ export class BulkChangesPanelComponent {
     }
     return count;
   });
+
+  /**
+   * Buscador del catálogo. Vive AQUÍ y no en la página a propósito: es filtrado
+   * de presentación y no debe llegar a ninguna parte que construya el payload.
+   * Si el filtro tocara los grupos que la página usa para intersecar los campos
+   * activados, escribir en un buscador silenciaría configuraciones ya activadas
+   * y el `apply` mandaría menos de lo que el usuario ve marcado.
+   *
+   * Es un `FormControl` y no una señal suelta porque el término se limpia desde
+   * dos sitios (la × del propio input y el botón del estado vacío) y
+   * `app-inputsearch` no expone la caja como input: sin un control por medio,
+   * limpiar desde fuera dejaría el filtro vacío con texto todavía escrito.
+   *
+   * `[formControl]`, no `formControlName`: este campo NO pertenece al `FormGroup`
+   * del contrato de edición, aunque el panel esté dentro de su `[formGroup]`.
+   */
+  readonly queryControl = new FormControl<string>('', { nonNullable: true });
+
+  /**
+   * El valor se lee por `toSignal(valueChanges)` y no por `queryControl.value`:
+   * un `computed` que lee `.value` no se recalcula, porque el control no es una
+   * señal y el `computed` no tiene de qué depender.
+   */
+  readonly query = toSignal(this.queryControl.valueChanges, {
+    initialValue: '',
+  });
+
+  /** Hay un término efectivo (no solo espacios). */
+  readonly isFiltering = computed<boolean>(() => normalize(this.query()) !== '');
+
+  /**
+   * Catálogo visible tras el buscador. Solo se usa para PINTAR: `activeCount()`
+   * sigue contando contra `groups()`, porque el contador anuncia lo que va a
+   * viajar y no lo que se está viendo — si contara los filtrados, el número
+   * bajaría mientras el usuario teclea y parecería que se pierden cambios.
+   *
+   * Acertar el nombre del grupo trae el grupo entero (buscar "restaurante" o
+   * "precio" es navegar, no cazar un campo suelto); si no, se filtran los campos
+   * por etiqueta, descripción y clave, y el grupo desaparece si no queda ninguno.
+   */
+  readonly filteredGroups = computed<readonly BulkEditVisibleGroup[]>(() => {
+    const term = normalize(this.query());
+    const groups = this.groups();
+    if (!term) {
+      return groups;
+    }
+
+    const matched: BulkEditVisibleGroup[] = [];
+    for (const group of groups) {
+      if (matches(term, group.label, group.hint)) {
+        matched.push(group);
+        continue;
+      }
+      const fields = group.fields.filter((field) =>
+        matches(term, field.label, field.description, field.key),
+      );
+      if (fields.length > 0) {
+        matched.push({ ...group, fields });
+      }
+    }
+    return matched;
+  });
+
+  /** Cuántas configuraciones sobreviven al filtro, para el contador del buscador. */
+  readonly filteredFieldCount = computed<number>(() =>
+    this.filteredGroups().reduce((total, group) => total + group.fields.length, 0),
+  );
+
+  clearQuery(): void {
+    this.queryControl.setValue('');
+  }
 
   isActive(key: BulkEditableFieldKey): boolean {
     return this.activeFields().has(key);

@@ -68,10 +68,36 @@
         Limpiar cambios
       </app-button>
     }
+
+    <!--
+      Buscador del catálogo. Es filtrado de PRESENTACIÓN: no viaja a la página ni
+      toca el payload, y `activeCount()` de arriba sigue contando contra el
+      catálogo completo. Sin `formControlName` a propósito — el panel está dentro
+      de un `[formGroup]` y este campo no es parte del contrato de edición.
+    -->
+    <app-inputsearch
+      class="w-full"
+      type="search"
+      size="sm"
+      placeholder="Buscar configuración: estado, precio, disponibilidad..."
+      [formControl]="queryControl"
+    />
+
+    @if (isFiltering()) {
+      <p class="w-full text-[10px] leading-tight text-text-secondary">
+        {{ filteredFieldCount() }}
+        {{
+          filteredFieldCount() === 1
+            ? 'configuración coincide'
+            : 'configuraciones coinciden'
+        }}
+        · el filtro solo cambia lo que ves, no lo que se aplica
+      </p>
+    }
   </div>
 
-  <!-- ═══ Grupos del registro, filtrados por tipo + industrias ═══════════ -->
-  @for (group of groups(); track group.key) {
+  <!-- ═══ Grupos: por tipo + industrias, y luego por el buscador ═════════ -->
+  @for (group of filteredGroups(); track group.key) {
     <section class="rounded-xl border border-border bg-surface p-3">
       <header class="mb-1 flex items-center gap-2">
         <app-icon [name]="group.icon" [size]="15" class="text-primary" />
@@ -103,13 +129,30 @@
     <div
       class="flex flex-col items-center gap-1 rounded-xl border border-dashed border-border px-4 py-8 text-center"
     >
-      <app-icon name="sliders" [size]="22" class="text-muted" />
-      <p class="text-xs font-semibold text-text-primary">
-        No hay configuraciones para este tipo
-      </p>
-      <p class="text-[10px] text-text-secondary">
-        Elige otro tipo de producto o revisa las industrias activas de la tienda.
-      </p>
+      @if (isFiltering()) {
+        <!--
+          Vacío por el buscador, no por el tipo objetivo. Distinguirlo importa:
+          "no hay configuraciones para este tipo" mandaría al usuario a cambiar
+          el tipo de producto cuando lo único que sobra es su propio término.
+        -->
+        <app-icon name="search-x" [size]="22" class="text-muted" />
+        <p class="text-xs font-semibold text-text-primary">
+          Ninguna configuración coincide con «{{ query() }}»
+        </p>
+        <app-button variant="ghost" size="xsm" (clicked)="clearQuery()">
+          <app-icon slot="icon" name="rotate-ccw" [size]="13" />
+          Quitar el filtro
+        </app-button>
+      } @else {
+        <app-icon name="sliders" [size]="22" class="text-muted" />
+        <p class="text-xs font-semibold text-text-primary">
+          No hay configuraciones para este tipo
+        </p>
+        <p class="text-[10px] text-text-secondary">
+          Elige otro tipo de producto o revisa las industrias activas de la
+          tienda.
+        </p>
+      }
     </div>
   }
 
