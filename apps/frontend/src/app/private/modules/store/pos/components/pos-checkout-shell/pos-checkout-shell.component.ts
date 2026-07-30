@@ -1095,14 +1095,26 @@ export class PosCheckoutShellComponent {
       .subscribe({
         next: (updated) => {
           const orderId = updated?.order?.id ?? session.order_id;
-          const orderItemIds = (updated?.order?.order_items ?? [])
-            .filter((it: any) =>
-              items.some(
-                (i) =>
-                  i.product_id === it.product_id && i.quantity === it.quantity,
-              ),
-            )
-            .map((it: any) => it.id);
+          // Solo los ítems recién agregados: la orden draft de la mesa puede
+          // arrastrar líneas ya disparadas de una ronda anterior.
+          const justAdded = new Set<number>(
+            (updated?.order?.order_items ?? [])
+              .filter((it: any) =>
+                items.some(
+                  (i) =>
+                    i.product_id === it.product_id &&
+                    i.quantity === it.quantity,
+                ),
+              )
+              .map((it: any) => Number(it.id)),
+          );
+          // …y de esos, solo los `prepared` que el cajero no marcó "usar
+          // stock". Mandar un retail al KDS le pondría
+          // `inventory_consumed_at_fire=true` y el pago dejaría de descontar
+          // su stock (ver skill vendix-restaurant-ops).
+          const orderItemIds = this.preparedItemIdsFromOrder(
+            updated?.order,
+          ).filter((id) => justAdded.has(id));
           this.maybeFireAndFinish(orderId, orderItemIds, state);
         },
         error: (err) => {

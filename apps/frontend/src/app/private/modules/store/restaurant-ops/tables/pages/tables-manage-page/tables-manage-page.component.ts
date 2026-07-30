@@ -437,9 +437,11 @@ export class TablesManagePageComponent implements OnInit {
             next: () => {
               this.releasingTableId.set(null);
               this.toastService.success(
+                // `t.name` ya suele venir con el prefijo ("Mesa 3"), así que
+                // no se le añade otro: "Mesa Mesa 3 liberada" era el bug.
                 sessionId != null
-                  ? `Mesa ${t.name} liberada — cuenta cerrada`
-                  : `Mesa ${t.name} liberada`,
+                  ? `${t.name} liberada — cuenta cerrada`
+                  : `${t.name} liberada`,
               );
               this.load();
             },
