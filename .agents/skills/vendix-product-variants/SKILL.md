@@ -36,8 +36,44 @@ This skill governs business behavior and cross-flow expectations. Pricing detail
 - Do not hide, reject, or block a variant only because `stock_quantity` is `0`.
 - Stock validation applies only when effective inventory tracking is enabled.
 - Service availability is based on booking rules, duration, buffer, provider schedules, and selected variant overrides, not stock.
-- Products with variants must require a selected `product_variant_id` in ecommerce, POS, cart, checkout, and booking flows.
+- Products with variants must require a selected `product_variant_id` in ecommerce, POS, cart, checkout, booking, **and purchase (POP) / reception** flows.
 - Historical commercial records must keep `product_variant_id`, SKU, attributes, price snapshots, and booking references when available.
+
+## Base Line Is Not Purchasable On A Variant Product (QUI-486)
+
+A purchase line against the **base** of a product that has variants
+(`product_variant_id = NULL`) does not fail loudly — it **receives stock into a
+row that no aggregate reads**. The money is spent and the goods are invisible.
+
+The trap is a three-way interaction, and no single function looks wrong:
+
+1. `StockLevelManager.enforceStockLevelsMode` deletes the base `stock_levels`
+   rows (`product_variant_id IS NULL`) as soon as the product has variants, to
+   sustain the invariant *base XOR variant*.
+2. On reception, `updateStock` → `getOrCreateStockLevel` **re-creates** that
+   base row. The reception succeeds; movements and costing all persist.
+3. `syncProductStock` filters `product_variant_id: { not: null }` whenever the
+   product has variants, so those units never reach
+   `products.stock_quantity` — they are absent from the catalog, unsellable,
+   and will be silently destroyed by the next `enforceStockLevelsMode` run.
+
+Rules:
+
+- Reject the base line **at purchase-order creation** (`PurchaseOrdersService.create`)
+  with `PO_VARIANT_001`, so the unusable order never exists.
+- Keep a second guard in `receive()` for legacy orders created before the first
+  guard existed; its message must name the escape hatch (`PATCH /store/purchase-orders/:id/cancel`).
+- Never "fix" this by making the base row readable again — the exclusion in
+  `syncProductStock` is deliberate: counting base **and** variant rows together
+  double-counts the same physical stock.
+- Never auto-assign a default variant: the buyer's intent is unknowable and a
+  wrong pick silently corrupts that variant's weighted-average cost.
+- In the POP product-config modal the "Gestionar variantes" toggle is
+  **immutable** when the product already has variants: the operator chooses
+  *which* variants, never *whether* to use variants.
+
+Any other consumer of `updateStock` that can pass a null `variant_id` for a
+product with variants inherits the same trap — see `vendix-inventory-stock`.
 
 ## Canonical Availability Matrix
 

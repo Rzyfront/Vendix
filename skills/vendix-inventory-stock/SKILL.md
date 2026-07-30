@@ -84,6 +84,24 @@ Variant to simple:
 - Use `transferVariantStockToBase(product_id, variant_ids, user_id, tx)` before deleting variants.
 - It aggregates variant stock by location, creates/updates base rows, zeros variant rows, and syncs.
 
+### Trap: null `variant_id` on a product that has variants (QUI-486)
+
+Calling `updateStock()` with `variant_id: undefined/null` for a product that
+**has variants** does not throw. It silently receives stock into a dead row:
+
+1. `getOrCreateStockLevel()` re-creates the base row that
+   `enforceStockLevelsMode()` deleted on purpose.
+2. `syncProductStock()` then filters `product_variant_id: { not: null }`
+   whenever `variantCount > 0`, so those units never reach
+   `products.stock_quantity`.
+3. The stock is invisible in the catalog, unsellable, and gets destroyed by the
+   next `enforceStockLevelsMode()` run.
+
+Every caller that can pass a null `variant_id` must reject the case **before**
+reaching the manager — the manager itself cannot tell an intentional base write
+(during a variant→simple transition) from an accidental one. `PurchaseOrdersService`
+does this with `PO_VARIANT_001`; see `vendix-product-variants`.
+
 ## Prisma Scope
 
 `StockLevelManager` uses `StorePrismaService`. Some internals use `_baseClient || prisma` for nullable composite keys and cross-mode aggregation. Do not copy that bypass into request handlers; prefer scoped service access unless the stock manager already encapsulates it.

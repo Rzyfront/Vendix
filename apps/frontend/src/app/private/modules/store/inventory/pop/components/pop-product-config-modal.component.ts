@@ -279,15 +279,22 @@ export type { PopProductConfigResult };
               [class.md:grid-cols-2]="configureMode()"
             >
               @if (configureMode()) {
+                <!--
+                  QUI-486 — cuando el producto YA tiene variantes el toggle deja
+                  de ser opcional: comprar contra la línea base genera una orden
+                  irrecibible (el backend la rechaza con PO_VARIANT_001). El
+                  operador elige CUÁLES variantes, nunca SI usa variantes.
+                -->
                 <app-setting-toggle
                   label="Gestionar variantes"
                   [description]="
                     productHasVariants
-                      ? 'Seleccionar variantes del producto para la orden'
+                      ? 'Obligatorio: este producto tiene variantes, selecciona cuál estás comprando'
                       : 'Crear variantes para este producto'
                   "
+                  [disabled]="productHasVariants"
                   [ngModel]="hasVariantsToggle()"
-                  (changed)="hasVariantsToggle.set($event)"
+                  (changed)="onVariantsToggleChange($event)"
                 ></app-setting-toggle>
               }
 
@@ -1020,6 +1027,21 @@ export class PopProductConfigModalComponent {
 
   get productHasVariants(): boolean {
     return !!this.product()?.product_variants?.length;
+  }
+
+  /**
+   * QUI-486 — el toggle de variantes es inmutable cuando el producto ya tiene
+   * variantes. `[disabled]` da la señal visual, pero la regla se hace cumplir
+   * aquí: aunque algo lograra emitir el cambio, apagarlo armaría una línea
+   * base (`product_variant_id = NULL`) que el backend rechaza con
+   * PO_VARIANT_001 — porque recibirla metería el stock en una fila que
+   * `syncProductStock` excluye del agregado cuando hay variantes, dejando
+   * mercancía pagada e invisible. El operador elige CUÁLES variantes, nunca
+   * SI usa variantes.
+   */
+  onVariantsToggleChange(value: boolean): void {
+    if (this.productHasVariants) return;
+    this.hasVariantsToggle.set(value);
   }
 
   get allVariantsSelected(): boolean {

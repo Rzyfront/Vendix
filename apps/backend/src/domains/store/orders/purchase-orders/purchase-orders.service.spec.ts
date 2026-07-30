@@ -88,8 +88,20 @@ describe('PurchaseOrdersService.receive()', () => {
         // guard validates each line belongs to this order and stays within the
         // (ordered - already_received) envelope.
         findMany: jest.fn().mockResolvedValue([
-          { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+          {
+            id: mockOrderItem.id,
+            quantity_ordered: mockOrderItem.quantity_ordered,
+            quantity_received: 0,
+            // QUI-486 — el guard de línea base los lee de esta misma consulta.
+            product_id: PRODUCT_ID,
+            product_variant_id: null,
+          },
         ]),
+      },
+      // QUI-486 — producto de control SIN variantes: el guard consulta y no
+      // encuentra ninguna, así que la recepción base sigue siendo válida.
+      product_variants: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
       // Pre-existing dependencies this spec never mocked:
       // - findFirst: Fase 2 UoM conversion (resolveUoMConversion).
@@ -319,6 +331,142 @@ describe('PurchaseOrdersService.receive()', () => {
   });
 
   /**
+   * QUI-486 — un producto con variantes solo se compra por variante.
+   *
+   * Sin el guard la recepción NO falla — es peor: `getOrCreateStockLevel`
+   * recrea la fila base que `enforceStockLevelsMode` había borrado, y
+   * `syncProductStock` la excluye del agregado (`product_variant_id: { not:
+   * null }` cuando hay variantes). Las unidades se pagan y quedan en una fila
+   * que nadie lee: invisibles en catálogo e invendibles.
+   *
+   * El control de no-regresión vive en los 4 tests de arriba: `mockOrderItem`
+   * usa `product_variant_id: null` sobre un producto SIN variantes y debe
+   * seguir recibiendo exactamente igual.
+   */
+  describe('QUI-486: línea base sobre producto con variantes', () => {
+    const VARIANT_PRODUCT_NAME = 'Smart TV LG 50" NanoCell';
+
+    /**
+     * Reemplaza el `$transaction` del arnés por uno cuyo `product_variants`
+     * SÍ devuelve variantes para `PRODUCT_ID`. Solo se mockean los modelos que
+     * el guard toca: revienta antes de llegar al resto del flujo.
+     */
+    const mockTxWithVariantProduct = () => {
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) =>
+          callback({
+            purchase_order_items: {
+              findMany: jest.fn().mockResolvedValue([
+                {
+                  id: PO_ITEM_ID,
+                  quantity_ordered: 10,
+                  quantity_received: 0,
+                  product_id: PRODUCT_ID,
+                  product_variant_id: null,
+                },
+              ]),
+            },
+            product_variants: {
+              findMany: jest
+                .fn()
+                .mockResolvedValue([{ product_id: PRODUCT_ID }]),
+            },
+            products: {
+              findMany: jest
+                .fn()
+                .mockResolvedValue([
+                  { id: PRODUCT_ID, name: VARIANT_PRODUCT_NAME },
+                ]),
+            },
+            purchase_orders: {
+              findUnique: jest
+                .fn()
+                .mockResolvedValue({ order_number: 'PO-20260706-216' }),
+            },
+            purchase_order_receptions: { create: jest.fn() },
+            purchase_order_reception_items: { create: jest.fn() },
+          }),
+      );
+    };
+
+    it('receive() rechaza con PO_VARIANT_001 y no crea la recepción', async () => {
+      mockTxWithVariantProduct();
+
+      await expect(service.receive(PO_ID, baseDto)).rejects.toMatchObject({
+        errorCode: 'PO_VARIANT_001',
+      });
+
+      // Nada se movió: ni stock, ni costeo, ni recepción.
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(costingService.calculateCostOnReceipt).not.toHaveBeenCalled();
+    });
+
+    it('receive() nombra la orden y la salida en el mensaje de error', async () => {
+      mockTxWithVariantProduct();
+
+      await expect(service.receive(PO_ID, baseDto)).rejects.toMatchObject({
+        response: {
+          error_code: 'PO_VARIANT_001',
+          message: expect.stringContaining('PO-20260706-216'),
+        },
+      });
+    });
+
+    it('create() rechaza la línea base antes de persistir la orden', async () => {
+      const createTx = {
+        product_variants: {
+          findMany: jest.fn().mockResolvedValue([{ product_id: PRODUCT_ID }]),
+        },
+        products: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ id: PRODUCT_ID, name: VARIANT_PRODUCT_NAME }]),
+        },
+        purchase_orders: { create: jest.fn() },
+      };
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) => callback(createTx),
+      );
+
+      await expect(
+        service.create({
+          location_id: LOCATION_ID,
+          items: [{ product_id: PRODUCT_ID, quantity: 6, unit_cost: 230000 }],
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'PO_VARIANT_001' });
+
+      expect(createTx.purchase_orders.create).not.toHaveBeenCalled();
+    });
+
+    it('create() deja pasar la línea base cuando el producto NO tiene variantes', async () => {
+      const productVariantsFindMany = jest.fn().mockResolvedValue([]);
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) => {
+          // El guard consulta y no encuentra variantes; el flujo continúa y
+          // falla más adelante por mocks ausentes — eso basta para probar que
+          // el guard NO fue el que cortó.
+          await callback({
+            product_variants: { findMany: productVariantsFindMany },
+          }).catch(() => undefined);
+        },
+      );
+
+      await service
+        .create({
+          location_id: LOCATION_ID,
+          items: [{ product_id: PRODUCT_ID, quantity: 6, unit_cost: 230000 }],
+        } as any)
+        .catch(() => undefined);
+
+      expect(productVariantsFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { product_id: { in: [PRODUCT_ID] } },
+        }),
+      );
+    });
+  });
+
+  /**
    * D2 — partial receptions must post proportional accounting entries with
    * a distinct `reception_id` as `source_id` each time (see
    * vendix-auto-entries skill: "Purchase order receptions are the special
@@ -404,8 +552,18 @@ describe('PurchaseOrdersService.receive()', () => {
           update: jest.fn().mockResolvedValue({}),
           // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
           findMany: jest.fn().mockResolvedValue([
-            { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+            {
+              id: mockOrderItem.id,
+              quantity_ordered: mockOrderItem.quantity_ordered,
+              quantity_received: 0,
+              product_id: PRODUCT_ID,
+              product_variant_id: null,
+            },
           ]),
+        },
+        // QUI-486 — producto de control SIN variantes.
+        product_variants: {
+          findMany: jest.fn().mockResolvedValue([]),
         },
         products: {
           findFirst: jest.fn().mockResolvedValue({
@@ -670,8 +828,18 @@ describe('PurchaseOrdersService.receive()', () => {
             update: jest.fn().mockResolvedValue({}),
             // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
             findMany: jest.fn().mockResolvedValue([
-              { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+              {
+                id: mockOrderItem.id,
+                quantity_ordered: mockOrderItem.quantity_ordered,
+                quantity_received: 0,
+                product_id: PRODUCT_ID,
+                product_variant_id: null,
+              },
             ]),
+          },
+          // QUI-486 — producto de control SIN variantes.
+          product_variants: {
+            findMany: jest.fn().mockResolvedValue([]),
           },
           products: {
             findFirst: jest.fn().mockResolvedValue({

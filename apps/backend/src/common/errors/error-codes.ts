@@ -783,6 +783,23 @@ export const ErrorCodes = {
     devMessage: 'Shipping rate does not belong to the selected method',
   },
 
+  // Purchase Orders
+  // QUI-486: comprar/recibir contra la línea base (product_variant_id = NULL)
+  // de un producto que TIENE variantes recibe mercancía a un limbo contable.
+  // enforceStockLevelsMode borra las filas base de stock_levels en cuanto el
+  // producto tiene variantes (invariante base XOR variante), pero
+  // getOrCreateStockLevel la vuelve a crear al recibir — y syncProductStock
+  // filtra `product_variant_id: { not: null }` cuando hay variantes, así que
+  // esas unidades quedan en una fila que NINGÚN agregado lee: no aparecen en
+  // products.stock_quantity, no se pueden vender, y el dinero ya se gastó.
+  // Se rechaza aguas arriba en vez de recibir stock invisible.
+  PO_VARIANT_001: {
+    code: 'PO_VARIANT_001',
+    httpStatus: 400,
+    devMessage:
+      'Un producto con variantes debe comprarse por variante, no contra su línea base',
+  },
+
   // Inventory
   INV_FIND_001: {
     code: 'INV_FIND_001',

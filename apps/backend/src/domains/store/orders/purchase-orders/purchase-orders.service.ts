@@ -17,6 +17,8 @@ import {
   invoice_type_enum,
 } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
@@ -244,6 +246,91 @@ export class PurchaseOrdersService {
     };
   }
 
+  /**
+   * QUI-486 — Un producto con variantes SOLO se compra por variante.
+   *
+   * El daño no es un error visible sino stock que se evapora:
+   *
+   * 1. `enforceStockLevelsMode` borra las filas base de `stock_levels`
+   *    (`product_variant_id IS NULL`) en cuanto el producto tiene variantes,
+   *    para sostener el invariante "base XOR variante".
+   * 2. Al recibir, `getOrCreateStockLevel` vuelve a crear esa fila base — la
+   *    recepción NO falla, persiste el movimiento y descuenta el dinero.
+   * 3. Pero `syncProductStock` filtra `product_variant_id: { not: null }`
+   *    cuando el producto tiene variantes, así que esas unidades quedan en una
+   *    fila que ningún agregado lee: no suben `products.stock_quantity`, no
+   *    aparecen en el catálogo y no se pueden vender.
+   *
+   * Resultado: se paga mercancía que el sistema nunca mostrará, y la fila
+   * huérfana queda esperando a que el próximo `enforceStockLevelsMode` la
+   * borre junto con el stock que representa. Por eso se rechaza aquí.
+   *
+   * Es la misma regla que `vendix-product-variants` ya impone en ecommerce,
+   * POS, carrito y checkout, extendida al flujo de compra.
+   *
+   * Una sola consulta agrupada por `product_id` — nada de N+1 dentro de la
+   * transacción. Las líneas sin `product_id` (producto nuevo creado por el
+   * propio POP) se ignoran: un producto que aún no existe no tiene variantes.
+   */
+  private async assertNoBaseLineOnVariantProduct(
+    tx: any,
+    lines: Array<{
+      product_id?: number | null;
+      product_variant_id?: number | null;
+    }>,
+    context: { stage: 'create' | 'receive'; orderId?: number },
+  ): Promise<void> {
+    const baseLineProductIds = Array.from(
+      new Set(
+        lines
+          .filter((line) => !line.product_variant_id && Number(line.product_id) > 0)
+          .map((line) => Number(line.product_id)),
+      ),
+    );
+
+    if (baseLineProductIds.length === 0) return;
+
+    const withVariants = await tx.product_variants.findMany({
+      where: { product_id: { in: baseLineProductIds } },
+      select: { product_id: true },
+      distinct: ['product_id'],
+    });
+
+    if (withVariants.length === 0) return;
+
+    const offendingIds = withVariants.map((v: any) => v.product_id);
+    const offendingProducts = await tx.products.findMany({
+      where: { id: { in: offendingIds } },
+      select: { id: true, name: true },
+    });
+    const names = offendingProducts
+      .map((p: any) => `«${p.name}»`)
+      .join(', ');
+
+    let detail: string;
+    if (context.stage === 'create') {
+      detail = `No se puede comprar ${names} sin variante: el producto tiene variantes y debes seleccionar cuál estás comprando.`;
+    } else {
+      // Solo en el camino de error pagamos la consulta del número de orden:
+      // recibir es la ruta caliente y no vale un query extra por recepción.
+      const order = context.orderId
+        ? await tx.purchase_orders.findUnique({
+            where: { id: context.orderId },
+            select: { order_number: true },
+          })
+        : null;
+      const label = order?.order_number
+        ? `la orden ${order.order_number}`
+        : 'esta orden';
+      detail = `No se puede recibir ${label} porque ${names} se compró sin variante. Anula la orden y vuelve a crearla seleccionando la variante.`;
+    }
+
+    throw new VendixHttpException(ErrorCodes.PO_VARIANT_001, detail, {
+      stage: context.stage,
+      product_ids: offendingIds,
+    });
+  }
+
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Process items to handle new product creation
@@ -253,6 +340,14 @@ export class PurchaseOrdersService {
       if (!organization_id) {
         throw new BadRequestException('Organization ID not found in context');
       }
+
+      // QUI-486: rechazo temprano — la OC inválida no llega a nacer, así el
+      // operador no queda con una orden `approved` que nunca podrá recibir.
+      await this.assertNoBaseLineOnVariantProduct(
+        tx,
+        createPurchaseOrderDto.items,
+        { stage: 'create' },
+      );
 
       // Fase 2: read order_type up-front so the new-product creation block
       // (below) can inherit ingredient flags. Defaults to `retail` for
@@ -1443,11 +1538,25 @@ export class PurchaseOrdersService {
       // rolls back the whole transaction (no partial reception is persisted).
       const poLines = await tx.purchase_order_items.findMany({
         where: { purchase_order_id: id },
-        select: { id: true, quantity_ordered: true, quantity_received: true },
+        select: {
+          id: true,
+          quantity_ordered: true,
+          quantity_received: true,
+          // QUI-486: necesarios para el guard de línea base con variantes.
+          // Se piden en esta misma consulta para no añadir un round-trip.
+          product_id: true,
+          product_variant_id: true,
+        },
       });
       const poLineById = new Map<
         number,
-        { id: number; quantity_ordered: number; quantity_received: number }
+        {
+          id: number;
+          quantity_ordered: number;
+          quantity_received: number;
+          product_id: number | null;
+          product_variant_id: number | null;
+        }
       >(poLines.map((l) => [l.id, l]));
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
@@ -1464,6 +1573,19 @@ export class PurchaseOrdersService {
           );
         }
       }
+
+      // QUI-486 — red de seguridad para las OCs legacy que ya se crearon con
+      // línea base antes de que `create()` tuviera el guard. Se valida ANTES
+      // de crear la recepción para que el throw revierta la transacción sin
+      // dejar recepciones parciales, igual que el guard de sobre-recepción.
+      await this.assertNoBaseLineOnVariantProduct(
+        tx,
+        dto.items
+          .filter((item) => item.quantity_received > 0)
+          .map((item) => poLineById.get(item.id))
+          .filter((line): line is NonNullable<typeof line> => !!line),
+        { stage: 'receive', orderId: id },
+      );
 
       const reception = await tx.purchase_order_receptions.create({
         data: {
