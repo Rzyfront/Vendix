@@ -106,13 +106,8 @@ export class TablesService {
     return this.http
       .patch<ApiResponse<Table>>(`${this.apiUrl}/store/tables/${id}`, dto)
       .pipe(
-        // `catchError` va ANTES del `map` a propósito: el unwrap de abajo
-        // lanza el mensaje de negocio como string y no debe ser reescrito
-        // por `handleError` (que espera un HttpErrorResponse). Para los
-        // errores HTTP reales el comportamiento es idéntico — `map` se
-        // salta en una notificación de error.
+        map((res) => res.data),
         catchError(this.handleError),
-        map((res) => this.unwrapEnvelope(res, 'No se pudo actualizar la mesa')),
       );
   }
 
@@ -436,36 +431,16 @@ export class TablesService {
     }
   }
 
-  // ─── Envelope / error mapping ──────────────────────────────────────
+  // ─── Error mapping ─────────────────────────────────────────────────
 
   /**
-   * Desempaqueta un sobre `ApiResponse` que puede venir con `success:false`
-   * en un HTTP 200.
-   *
-   * `TablesController` atrapa sus propias excepciones y responde
-   * `200 { success:false, message }` en vez de propagar el status de error
-   * (`tables.controller.ts` → `responseService.error`). Verificado con curl
-   * contra dev: `PATCH /store/tables/1 {status:'available'}` sobre una mesa
-   * con cuenta abierta devuelve **HTTP 200** con
-   * `message:"La mesa tiene una cuenta abierta; no puede marcarse como
-   * available"`. Sin este desempaquetado `catchError` nunca se dispara, el
-   * `next` del suscriptor recibe un `data` vacío y la UI canta éxito sobre
-   * una operación que el backend rechazó.
-   *
-   * Lanza el `message` del backend como string, que es exactamente la forma
-   * que ya emite `handleError` — los suscriptores existentes
-   * (`typeof err === 'string' ? err : fallback`) no necesitan cambios.
+   * `TablesController` ya propaga el status HTTP real (QUI-571): un rechazo
+   * por cuenta abierta llega como `409` y no como `200 { success:false }`,
+   * así que el error viaja por el canal de error de RxJS y este handler es
+   * la única traducción necesaria. Aquí vivía un `unwrapEnvelope` que leía
+   * `success:false` de una respuesta 200 — quitarlo es parte del arreglo,
+   * no una regresión.
    */
-  private unwrapEnvelope<T>(res: ApiResponse<T>, fallback: string): T {
-    if (res?.success === false) {
-      const apiMessage = res.message;
-      throw typeof apiMessage === 'string' && apiMessage.length > 0
-        ? apiMessage
-        : fallback;
-    }
-    return res.data;
-  }
-
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console
     console.error('TablesService Error:', error);

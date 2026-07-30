@@ -42,6 +42,16 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  * The `floor-map` endpoint is intentionally placed BEFORE the `:id`
  * route in declaration order — NestJS resolves routes top-down and the
  * `:id` would otherwise capture "floor-map" as an id.
+ *
+ * NO hay `try/catch` en ningún handler, y no debe volver a haberlo (QUI-571).
+ * `TablesService` lanza excepciones tipadas (`VendixHttpException`,
+ * `BadRequestException`) y el `AllExceptionsFilter` global
+ * (`apps/backend/src/main.ts:55`) las convierte en el status HTTP real más
+ * `error_code`. Atrapar el error y **devolverlo** con
+ * `responseService.error(...)` hacía que Nest respondiera HTTP 200 con el
+ * status verdadero escondido en el cuerpo (`{"success":false,…,"statusCode":409}`),
+ * y cualquier cliente que mire el status leía un éxito donde hubo un rechazo.
+ * `table-sessions.controller.ts` siempre siguió este patrón.
  */
 @Controller('store/tables')
 @UseGuards(PermissionsGuard)
@@ -54,98 +64,45 @@ export class TablesController {
   @Post()
   @Permissions('store:tables:create')
   async create(@Body() dto: CreateTableDto) {
-    try {
-      const result = await this.tablesService.create(dto);
-      return this.responseService.created(
-        result,
-        'Mesa creada exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al crear la mesa',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const result = await this.tablesService.create(dto);
+    return this.responseService.created(result, 'Mesa creada exitosamente');
   }
 
   @Get('floor-map')
   @Permissions('store:tables:read')
   async floorMap() {
-    try {
-      const data = await this.tablesService.floorMap();
-      return this.responseService.success(
-        data,
-        'Mapa de mesas obtenido',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener el mapa de mesas',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const data = await this.tablesService.floorMap();
+    return this.responseService.success(data, 'Mapa de mesas obtenido');
   }
 
   @Get()
   @Permissions('store:tables:read')
   async findAll(@Query() query: TableQueryDto) {
-    try {
-      const result = await this.tablesService.findAll(query);
-      return this.responseService.paginated(
-        result.data,
-        result.meta.total,
-        result.meta.page,
-        result.meta.limit,
-        'Mesas obtenidas exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las mesas',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.tablesService.findAll(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Mesas obtenidas exitosamente',
+    );
   }
 
   @Get(':id')
   @Permissions('store:tables:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.tablesService.findOne(id);
-      return this.responseService.success(
-        result,
-        'Mesa obtenida exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al obtener la mesa',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const result = await this.tablesService.findOne(id);
+    return this.responseService.success(result, 'Mesa obtenida exitosamente');
   }
 
   @Get(':id/qr')
   @Permissions('store:tables:read')
   async getQr(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.tablesService.getQr(id);
-      return this.responseService.success(
-        result,
-        'QR de mesa generado exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al generar el QR de la mesa',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const result = await this.tablesService.getQr(id);
+    return this.responseService.success(
+      result,
+      'QR de mesa generado exitosamente',
+    );
   }
 
   @Patch(':id')
@@ -154,35 +111,14 @@ export class TablesController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTableDto,
   ) {
-    try {
-      const result = await this.tablesService.update(id, dto);
-      return this.responseService.updated(
-        result,
-        'Mesa actualizada exitosamente',
-      );
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la mesa',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    const result = await this.tablesService.update(id, dto);
+    return this.responseService.updated(result, 'Mesa actualizada exitosamente');
   }
 
   @Delete(':id')
   @Permissions('store:tables:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      await this.tablesService.remove(id);
-      return this.responseService.deleted('Mesa eliminada exitosamente');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la mesa',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    await this.tablesService.remove(id);
+    return this.responseService.deleted('Mesa eliminada exitosamente');
   }
 }
