@@ -117,6 +117,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Choosing Playwright MCP for frontend E2E verification in a plan step | `how-to-plan` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Choosing test credentials from seeds or asking the user | `how-to-test` |
+| Choosing the toSignal initialValue for a fiscal predicate | `vendix-fiscal-scope` |
 | Closing a Linear ticket to Done after QA verifies it in production | `verify-ticket-prod` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
@@ -218,6 +219,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Fixing report dates, timezone, formatting or wrong/incomplete data | `vendix-report-xlsx` |
 | Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
 | Formatting chart axis labels with dates | `vendix-date-timezone` |
+| Gating a printed or displayed fiscal figure (POS ticket, receipt, invoice copy) by fiscal state | `vendix-fiscal-scope` |
 | General Development | `how-to-dev` |
 | Generating an XLSX file from a backend service | `vendix-report-xlsx` |
 | Generating or editing the PILA flat file (Resolución 2388/2016) | `vendix-pila-flatfile` |
@@ -285,6 +287,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
 | Returning a failed ticket to Todo with the Devuelto label and raised priority | `verify-ticket-prod` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
+| Reusing a fiscal predicate that also governs write enforcement | `vendix-fiscal-scope` |
 | Reusing app-address-form-fields shared component | `vendix-address-geocoding` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running a controlled E2E verification of a shipped ticket on www.vendix.online | `verify-ticket-prod` |

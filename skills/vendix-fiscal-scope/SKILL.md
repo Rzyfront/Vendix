@@ -3,11 +3,11 @@ name: vendix-fiscal-scope
 description: >
   Organization fiscal scope for Vendix: STORE vs ORGANIZATION legal/tax entity behavior,
   DIAN configuration ownership, fiscal accounting entities, fiscal reports, and intercompany transfers.
-  Trigger: When working with organizations.fiscal_scope, fiscal accounting entities, DIAN NIT ownership, fiscal reports by NIT, fiscal scope migrations, or intercompany stock-transfer entries.
+  Trigger: When working with organizations.fiscal_scope, fiscal accounting entities, DIAN NIT ownership, fiscal reports by NIT, fiscal scope migrations, intercompany stock-transfer entries, or gating a printed/displayed fiscal figure by fiscal state.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Working with organizations.fiscal_scope"
@@ -17,6 +17,9 @@ metadata:
     - "Working with fiscal reports by NIT"
     - "Working with fiscal scope migrations"
     - "Working with intercompany stock-transfer entries"
+    - "Gating a printed or displayed fiscal figure (POS ticket, receipt, invoice copy) by fiscal state"
+    - "Reusing a fiscal predicate that also governs write enforcement"
+    - "Choosing the toSignal initialValue for a fiscal predicate"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
@@ -63,6 +66,21 @@ Fiscal scope is independent from operating scope. Operating scope controls opera
   - Scope strictly by `accounting_entity_id: <resolved_id>`; when no entity resolves, use `accounting_entity_id: { in: [] }` to return a guaranteed-empty set.
 - When adding a model to `fiscal_entity_scoped_models`, check the nullability of its `accounting_entity_id` column and register it in `fiscal_entity_required_models` if NOT NULL.
 
+## Predicate Default Rules (write/display asymmetry)
+
+A fiscal predicate derived from `fiscal_data` needs the **opposite** default depending on what it governs. Reusing one predicate for both purposes is a recurring bug source.
+
+| Governs | Indeterminate (`fiscal_data` absent/incomplete) | Rationale | Example |
+| --- | --- | --- | --- |
+| **Write enforcement** (block/allow an operation) | Permissive — do not block | Blocking a merchant that never loaded fiscal data is a regression | `isVatResponsible` / `assertCanChargeVat` returns `true` |
+| **Display / print** (state a fiscal figure) | Strict — do not show | Paper leaves with the buyer and cannot be retracted; never assert what the merchant cannot back | `selectPrintsVatBreakdown` returns `false` |
+
+- Never flip the default of a shared predicate to fix a display bug. `resolveIsVatResponsible` also feeds `assertCanChargeVat` (backend) and `selectIsExplicitlyNotVatResponsible` → `isVatBlocked` → `FiscalGateService`; inverting it opens the VAT paywall for every merchant with no fiscal data. **Derive a new predicate instead.**
+- `fiscal_status.<area>.state` (`ACTIVE|LOCKED`) is the reliable "this merchant did the fiscal work" signal. `fiscal_data` can be partially populated, so it is not a substitute. Reuse `selectActiveFiscalAreas` rather than re-comparing states.
+- The `toSignal` `initialValue` must follow the default of the **use**, not of the source selector: `isVatResponsible` → `true` (blocking gate), `printsVatBreakdown` → `false` (printing gate).
+- Smell to catch in review: a `!== false` (or `?? true`) at a call-site of a fiscal predicate. It is an attempt to compensate a wrong default downstream, and it fails whenever the upstream branch already resolved the indeterminate case to `true`.
+- When a fiscal figure is hidden, re-check the document's arithmetic. Totals usually arrive as independent backend fields (e.g. `subtotal` = tax-free base, `total_amount` = taxed), so removing one row can leave an orphaned difference. Hide the dependent rows too, or print the final amount only.
+
 ## Reporting Rules
 
 - Fiscal reports by NIT should filter by `accounting_entries.accounting_entity_id`.
@@ -86,3 +104,5 @@ Fiscal scope is independent from operating scope. Operating scope controls opera
 - `vendix-accounting-rules`
 - `vendix-prisma-migrations`
 - `vendix-validation`
+- `vendix-tax-typing` - typed `tax_type` contract carried by the figures these predicates gate
+- `vendix-zoneless-signals` - `toSignal` / `initialValue` rules for the frontend side of a fiscal predicate
