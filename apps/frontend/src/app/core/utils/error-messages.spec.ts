@@ -56,6 +56,74 @@ describe('ERROR_MESSAGES — SUBSCRIPTION_011 (plan retired from catalog)', () =
   });
 });
 
+/**
+ * QUI-560 — el código tipado tiene que sobrevivir a la capa de servicio.
+ *
+ * `store-settings.service.ts` aplanaba el `HttpErrorResponse` a
+ * `new Error(message)` en su `catchError`, y con eso `parseApiError` perdía el
+ * `error_code` y devolvía SIEMPRE el mensaje genérico: el backend respondía
+ * `409 CASH_REGISTER_DISABLE_001`, la copy existía en `ERROR_MESSAGES`, y el
+ * usuario igual veía "ocurrió un error inesperado". El fix preserva los campos
+ * tipados como propiedades del Error; estos tests fijan las dos mitades del
+ * contrato para que un refactor no lo desarme en silencio.
+ */
+describe('ERROR_MESSAGES — CASH_REGISTER_DISABLE_001 (caja con sesiones abiertas)', () => {
+  it('resuelve a su propia copy y no al DEFAULT_ERROR_MESSAGE', () => {
+    const copy = ERROR_MESSAGES['CASH_REGISTER_DISABLE_001'];
+
+    expect(copy).toBeDefined();
+    expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+    // Debe decir qué hacer, no sólo que falló.
+    expect((copy ?? '').toLowerCase()).toContain('caja registradora');
+  });
+
+  it('parseApiError lo mapea desde el cuerpo JSON del 409', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'CASH_REGISTER_DISABLE_001',
+        message:
+          'No se puede deshabilitar la caja registradora: la tienda tiene 1 sesión abierta en "Caja Principal".',
+        details: { open_sessions: 1, registers: [{ id: 19, name: 'Caja Principal' }] },
+      },
+    });
+
+    expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
+    expect(parsed.details).toEqual({
+      open_sessions: 1,
+      registers: [{ id: 19, name: 'Caja Principal' }],
+    });
+  });
+
+  it('lo mapea también cuando un servicio aplanó el error a un Error con los campos tipados', () => {
+    // Forma exacta que produce `store-settings.service.ts#handleError`: un Error
+    // con `.message` intacto y el código colgado como propiedad. `parseApiError`
+    // hace `body = error?.error ?? error`, así que cae en el Error mismo.
+    const flattened = Object.assign(
+      new Error('No se puede deshabilitar la caja registradora: ...'),
+      {
+        error_code: 'CASH_REGISTER_DISABLE_001',
+        details: { open_sessions: 2 },
+        status: 409,
+      },
+    );
+
+    const parsed = parseApiError(flattened);
+
+    expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+  });
+
+  it('un Error aplanado SIN los campos tipados cae al genérico (el bug original)', () => {
+    const parsed = parseApiError(new Error('cualquier cosa'));
+
+    expect(parsed.errorCode).toBeNull();
+    expect(parsed.userMessage).toBe(DEFAULT_ERROR_MESSAGE);
+  });
+});
+
 describe('ERROR_MESSAGES — real unpaid-balance codes stay untouched', () => {
   it('SUBSCRIPTION_008 keeps its unpaid-balance copy', () => {
     expect(ERROR_MESSAGES['SUBSCRIPTION_008']).toBe(

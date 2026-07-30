@@ -312,6 +312,23 @@ export class StoreSettingsService {
     }
 
     console.error('StoreSettingsService error:', error);
-    return throwError(() => new Error(error_message));
+
+    // QUI-560: aplanar el HttpErrorResponse a `new Error(message)` perdía el
+    // `error_code`, así que `parseApiError` caía siempre al mensaje genérico y
+    // el catálogo de `error-messages.ts` nunca se activaba para este servicio.
+    // Se preservan los campos tipados COMO PROPIEDADES del Error en vez de
+    // re-lanzar el HttpErrorResponse crudo: `.message` sigue siendo idéntico
+    // para los consumidores que ya lo leen, y `parseApiError` ahora resuelve el
+    // código porque su `body = error?.error ?? error` cae en el Error mismo.
+    const flattened = new Error(error_message) as Error & {
+      error_code?: string;
+      details?: unknown;
+      status?: number;
+    };
+    flattened.error_code = error?.error?.error_code;
+    flattened.details = error?.error?.details;
+    flattened.status = error?.status;
+
+    return throwError(() => flattened);
   }
 }
