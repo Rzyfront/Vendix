@@ -2788,6 +2788,98 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * QUI-535 — resolve the `table_sessions.id` a POS payment must be
+   * applied to, given only the `tables.id` the cashier picked.
+   *
+   * Runs INSIDE the payment transaction and is the seam that moves the
+   * "abrir mesa" write from the checkout wizard (where a back-navigation,
+   * a switch to takeaway or a closed tab left the mesa `occupied` with a
+   * $0 draft order forever) to the charge itself.
+   *
+   * Behavior:
+   *  1. The table must exist and belong to the request store — checked
+   *     BEFORE any write, mirroring `applyPosPaymentToTableSession`.
+   *  2. If the mesa already has an open check (opened from the tables
+   *     module or by a diner scanning the QR), that session is REUSED.
+   *     Idempotent on purpose — same contract as
+   *     `TableSessionsService.openTableSessionPublic`; it must never fail
+   *     with `TABLE_SESSION_ALREADY_OPEN`, and it must never create a
+   *     second check for one mesa.
+   *  3. Otherwise the mesa is opened via
+   *     `TableSessionsService.createOpenSessionInTx` on THIS transaction,
+   *     so the draft order + session + `tables.status='occupied'` commit
+   *     (or roll back) together with the payment.
+   *
+   * Why the lookup uses `tx` instead of `TablesService.getActiveSession`:
+   * the read must see this transaction's own snapshot (the caller may
+   * retry, and the very next statements write the session we are about to
+   * create), and `TablesService` queries the non-transactional client, so
+   * it cannot honor read-your-writes here. `PaymentsService` also does not
+   * depend on `TablesService`, and wiring it in would mean touching
+   * `payments.module.ts`, outside this change. The `store_id` filter is
+   * therefore written explicitly — the scope-safe `findFirst` shape from
+   * `vendix-prisma-scopes`, never `findUnique`.
+   *
+   * NOTE: `session_opened` is deliberately NOT emitted for a mesa opened
+   * here. In the normal POS flow (cash/card/transfer) the session is
+   * opened and closed in this same transaction, and the post-commit
+   * `session_closed` emission already carries the observable transition.
+   */
+  private async resolvePosTableSessionId(
+    tx: any,
+    tableId: number,
+    dtoStoreId: number,
+    dto: CreatePosPaymentDto,
+    user: any,
+  ): Promise<number> {
+    const table = await tx.tables.findFirst({ where: { id: tableId } });
+    if (!table) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Mesa no encontrada',
+      );
+    }
+    if (table.store_id !== dtoStoreId) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_CONTEXT_001,
+        'La mesa pertenece a otra tienda',
+      );
+    }
+
+    const activeSession = await tx.table_sessions.findFirst({
+      where: {
+        table_id: tableId,
+        store_id: dtoStoreId,
+        closed_at: null,
+      },
+      orderBy: { opened_at: 'desc' },
+      select: { id: true },
+    });
+    if (activeSession) {
+      return activeSession.id;
+    }
+
+    const opened = await this.tableSessionsService.createOpenSessionInTx(tx, {
+      tableId,
+      storeId: dtoStoreId,
+      openedBy: user?.id ?? null,
+      customerId: dto.customer_id ?? null,
+      channel: 'pos',
+      deliveryType: 'direct_delivery',
+      // The POS charge does not capture the party size; the mesa can be
+      // annotated later via `setGuestCount` exactly like a QR open.
+      guestCount: null,
+      internalNotes: 'Mesa abierta al cobrar desde POS',
+      // Already resolved by `processPosPayment` before opening the
+      // transaction — passing it avoids a settings read while the tx is
+      // held open.
+      currency: dto.currency,
+    });
+
+    return opened.id;
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -2811,6 +2903,38 @@ export class PaymentsService {
       return await this.applyPosPaymentToTableSession(
         tx,
         dto,
+        user,
+        dtoStoreId,
+      );
+    }
+
+    // QUI-535: the restaurant POS now sends `table_id` instead of a
+    // session id — picking a mesa in the checkout wizard is a pure
+    // selection that writes nothing. The mesa is materialized HERE, in
+    // the payment transaction: an existing open check is reused, a new
+    // one is opened atomically, and either way we fall through to the
+    // SAME close-out path the tables module and the QR flow already use
+    // (totals, KDS fire, session close, `tables.status='cleaning'`,
+    // journal entries). A mesa therefore can never be `occupied` without
+    // a charged sale behind it.
+    //
+    // `table_session_id` takes precedence when both arrive (it is the
+    // more specific reference), which is why this branch is guarded on
+    // its absence and sits after it.
+    if (dto.table_id != null) {
+      const resolvedSessionId = await this.resolvePosTableSessionId(
+        tx,
+        dto.table_id,
+        dtoStoreId,
+        dto,
+        user,
+      );
+      // Shallow clone instead of mutating the caller's DTO: the rest of
+      // `processPosPayment` must keep seeing the request exactly as it
+      // arrived, while the close-out helper reads a resolved session id.
+      return await this.applyPosPaymentToTableSession(
+        tx,
+        { ...dto, table_session_id: resolvedSessionId },
         user,
         dtoStoreId,
       );

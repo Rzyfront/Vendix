@@ -52,13 +52,13 @@
       <div class="checkout-main">
         <!-- Paso · Consumo (restaurante ∧ intent ≠ delivery). Se mantiene
              MONTADO mientras 'consumo' esté en stepKeys para que el shell lea
-             fulfillment()/pickedTableId()/pickedSessionId()/needsTable(). -->
+             fulfillment()/checkoutTableId()/needsTable(). Elegir mesa aquí NO
+             escribe nada: la mesa se materializa en el cobro (QUI-535). -->
         @if (stepKeys().includes('consumo')) {
           <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'consumo'">
             <app-pos-consumo-step
               [cartState]="cartState()"
               [tableId]="tableId()"
-              (tableSessionOpened)="onTableSessionOpened($event)"
               (advanceRequested)="attemptNextStep()"
             ></app-pos-consumo-step>
           </div>
@@ -73,9 +73,9 @@
               [cartState]="cartState()"
               [checkoutIntent]="checkoutIntent()"
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
-              [tableId]="consumoStep()?.pickedTableId() ?? tableId()"
+              [tableId]="checkoutTableId()"
               [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
-              [sessionId]="consumoStep()?.pickedSessionId() ?? null"
+              [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"

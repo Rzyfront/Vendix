@@ -83,6 +83,12 @@ export class PosPaymentStepComponent implements OnInit {
   readonly checkoutIntent = input<CheckoutIntent>('pickup');
   /** Restaurant stores that have at least one `prepared` line in the cart. */
   readonly isRestaurantWithPrepared = input<boolean>(false);
+  /**
+   * Mesa que este cobro debe materializar (QUI-535). La resuelve el shell con la
+   * precedencia única "elección del operador primero"; viaja al backend como
+   * `table_id` cuando NO hay {@link sessionId}, y el backend abre (o reusa), cobra
+   * y cierra la sesión de esa mesa dentro de la transacción del pago.
+   */
   readonly tableId = input<number | null>(null);
   /**
    * Fulfillment type — now OWNED by the Consumo step and passed in by the shell.
@@ -90,8 +96,9 @@ export class PosPaymentStepComponent implements OnInit {
    */
   readonly fulfillment = input<FulfillmentType>('entrega');
   /**
-   * Opened table_session id — OWNED by the Consumo step and passed in by the
-   * shell. Forwarded to `processSaleWithPayment` so the sale binds to the table.
+   * Sesión de mesa PREEXISTENTE (módulo de mesas o QR del comensal) resuelta por
+   * el shell. Cuando viene, se cobra contra ESA cuenta y {@link tableId} no se
+   * envía — nunca se crea una segunda cuenta para la misma mesa.
    */
   readonly sessionId = input<number | null>(null);
   /** Anonymous-sale flag owned by the shell (drives collector requireCustomer). */
@@ -506,6 +513,7 @@ export class PosPaymentStepComponent implements OnInit {
         payment_request,
         'current_user',
         this.sessionId() ?? null,
+        this.tableId() ?? null,
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

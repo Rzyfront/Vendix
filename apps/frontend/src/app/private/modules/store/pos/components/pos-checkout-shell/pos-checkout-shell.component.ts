@@ -176,6 +176,35 @@ export class PosCheckoutShellComponent {
   );
 
   /**
+   * QUI-535 — mesa que el cobro debe materializar. Fuente ÚNICA de la mesa del
+   * checkout: cuando el paso Consumo está montado manda él (respeta la elección
+   * del operador y devuelve null en "Para llevar"); si no está montado, cae a la
+   * mesa residual del padre. El backend abre/reusa y cierra la sesión de esa mesa
+   * dentro de la transacción del pago (`table_id`).
+   */
+  readonly checkoutTableId = computed<number | null>(() => {
+    if (this.showConsumoStep()) {
+      return this.consumoStep()?.checkoutTableId() ?? null;
+    }
+    return this.tableId();
+  });
+
+  /**
+   * Sesión de mesa PREEXISTENTE contra la cual cobrar (abierta desde el módulo
+   * de mesas o por el QR del comensal). Solo se envía cuando la sesión cacheada
+   * pertenece a la mesa que se está cobrando: así nunca se cobra la cuenta de una
+   * mesa distinta a la que ve el operador. Cuando es null y hay
+   * {@link checkoutTableId}, el backend abre la sesión él mismo.
+   */
+  readonly checkoutSessionId = computed<number | null>(() => {
+    const tableId = this.checkoutTableId();
+    if (tableId == null) return null;
+    const session = this.integration.currentTableSession();
+    if (!session || session.table_id !== tableId) return null;
+    return session.id ?? null;
+  });
+
+  /**
    * Dynamic steps by intent:
    *  - pickup (no restaurante)   → [Cobro, Cliente]
    *  - pickup (restaurante)      → [Consumo, Cobro, Cliente]
@@ -861,6 +890,17 @@ export class PosCheckoutShellComponent {
       return;
     }
 
+    // QUI-535: el picker ya no abre la mesa al elegirla, así que un borrador
+    // sobre una mesa elegida debe abrir su cuenta AQUÍ. Guardar el borrador de
+    // una mesa ES abrir su cuenta: es una acción explícita del operador, no
+    // navegación del wizard, y sin esto los platos quedarían en una orden de
+    // mostrador desligada de la mesa.
+    const pickedTableId = this.checkoutTableId();
+    if (isRestaurant && pickedTableId != null) {
+      this.openPickedTableThenAppend(pickedTableId, state);
+      return;
+    }
+
     if (isRestaurant && hasPrepared && !session) {
       this.createCounterAndFire(state);
       return;
@@ -889,6 +929,38 @@ export class PosCheckoutShellComponent {
         error: (err) => {
           this.submittingDraft.set(false);
           this.toastService.error(this.toastError(err, 'No se pudo crear la orden'));
+        },
+      });
+  }
+
+  /**
+   * Abre la cuenta de la mesa elegida en el picker y encadena el borrador sobre
+   * su orden draft. Solo se llama desde "Guardar borrador" — el cobro NO pasa por
+   * aquí (el backend abre y cierra la sesión dentro de su transacción).
+   */
+  private openPickedTableThenAppend(tableId: number, state: CartState): void {
+    const customerId = this.resolveCustomerId(state.customer);
+    this.integration
+      .openTableSession({
+        table_id: tableId,
+        ...(customerId > 0 ? { customer_id: customerId } : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          const session: any = (result as any)?.session ?? result;
+          if (!session?.id || !session?.order_id) {
+            this.submittingDraft.set(false);
+            this.toastService.error('No se pudo abrir la mesa');
+            return;
+          }
+          // Mantiene al POS al día con la sesión recién abierta.
+          this.onTableSessionOpened(result);
+          this.appendToTableAndFire(state, session);
+        },
+        error: (err) => {
+          this.submittingDraft.set(false);
+          this.toastService.error(this.toastError(err, 'No se pudo abrir la mesa'));
         },
       });
   }
@@ -992,10 +1064,12 @@ export class PosCheckoutShellComponent {
     const fulfillment: FulfillmentType | null = this.showConsumoStep()
       ? (this.consumoStep()?.fulfillment() ?? null)
       : null;
+    // La sesión realmente abierta es la verdad de dónde quedó el borrador; si no
+    // hay ninguna, la mesa que eligió el operador.
     const tableId =
       this.integration.currentTableSession()?.table_id ??
+      this.consumoStep()?.effectiveTableId() ??
       this.tableId() ??
-      this.consumoStep()?.pickedTableId?.() ??
       null;
 
     this.draftSaved.emit({ order, fulfillment, tableId, firedToKitchen });

@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
   Table,
@@ -106,8 +106,13 @@ export class TablesService {
     return this.http
       .patch<ApiResponse<Table>>(`${this.apiUrl}/store/tables/${id}`, dto)
       .pipe(
-        map((res) => res.data),
+        // `catchError` va ANTES del `map` a propósito: el unwrap de abajo
+        // lanza el mensaje de negocio como string y no debe ser reescrito
+        // por `handleError` (que espera un HttpErrorResponse). Para los
+        // errores HTTP reales el comportamiento es idéntico — `map` se
+        // salta en una notificación de error.
         catchError(this.handleError),
+        map((res) => this.unwrapEnvelope(res, 'No se pudo actualizar la mesa')),
       );
   }
 
@@ -115,6 +120,40 @@ export class TablesService {
     return this.http
       .delete<void>(`${this.apiUrl}/store/tables/${id}`)
       .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * Libera una mesa bloqueada (QUI-535 · paso 7).
+   *
+   * Devuelve la mesa a `available` cerrando ANTES su cuenta abierta si la
+   * arrastra. No hay endpoint nuevo: compone los dos que ya existen, en el
+   * único orden válido.
+   *
+   *   1. `POST /store/table-sessions/:sessionId/close` — solo cuando la
+   *      mesa trae `active_session`. Es idempotente en el backend
+   *      (`table-sessions.service.ts:781` corta en seco si `closed_at` ya
+   *      estaba puesto) y deja la mesa en `cleaning`.
+   *   2. `PATCH /store/tables/:id { status: 'available' }`.
+   *
+   * El orden NO es negociable: `TablesService.update` del backend
+   * (`tables.service.ts:429`) rechaza pasar a `available` una mesa con
+   * `table_sessions.closed_at IS NULL` con `TABLE_INVALID_STATUS`. Esa
+   * validación preexistente es justamente la que garantiza la regla de
+   * negocio — jamás se libera una mesa dejando su cuenta abierta —, así
+   * que este helper la respeta en vez de esquivarla.
+   *
+   * Permisos ya existentes: `store:table_sessions:update` para el cierre y
+   * `store:tables:update` para el PATCH.
+   */
+  releaseTable(
+    tableId: number,
+    activeSessionId?: number | null,
+  ): Observable<Table> {
+    const markAvailable = () => this.update(tableId, { status: 'available' });
+    if (activeSessionId == null) return markAvailable();
+    return this.closeSession(activeSessionId).pipe(
+      switchMap(() => markAvailable()),
+    );
   }
 
   /**
@@ -397,7 +436,35 @@ export class TablesService {
     }
   }
 
-  // ─── Error mapping ─────────────────────────────────────────────────
+  // ─── Envelope / error mapping ──────────────────────────────────────
+
+  /**
+   * Desempaqueta un sobre `ApiResponse` que puede venir con `success:false`
+   * en un HTTP 200.
+   *
+   * `TablesController` atrapa sus propias excepciones y responde
+   * `200 { success:false, message }` en vez de propagar el status de error
+   * (`tables.controller.ts` → `responseService.error`). Verificado con curl
+   * contra dev: `PATCH /store/tables/1 {status:'available'}` sobre una mesa
+   * con cuenta abierta devuelve **HTTP 200** con
+   * `message:"La mesa tiene una cuenta abierta; no puede marcarse como
+   * available"`. Sin este desempaquetado `catchError` nunca se dispara, el
+   * `next` del suscriptor recibe un `data` vacío y la UI canta éxito sobre
+   * una operación que el backend rechazó.
+   *
+   * Lanza el `message` del backend como string, que es exactamente la forma
+   * que ya emite `handleError` — los suscriptores existentes
+   * (`typeof err === 'string' ? err : fallback`) no necesitan cambios.
+   */
+  private unwrapEnvelope<T>(res: ApiResponse<T>, fallback: string): T {
+    if (res?.success === false) {
+      const apiMessage = res.message;
+      throw typeof apiMessage === 'string' && apiMessage.length > 0
+        ? apiMessage
+        : fallback;
+    }
+    return res.data;
+  }
 
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console

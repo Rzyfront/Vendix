@@ -80,6 +80,35 @@ export interface TableSessionView {
 }
 
 /**
+ * QUI-535 — arguments of the atomic "abrir mesa" block. Shared by the
+ * self-contained entry point (`createOpenSession`) and the
+ * transaction-participating one (`createOpenSessionInTx`), so both can
+ * never drift apart.
+ */
+export interface CreateOpenSessionArgs {
+  tableId: number;
+  storeId: number;
+  openedBy: number | null;
+  customerId: number | null;
+  channel: 'pos' | 'ecommerce';
+  deliveryType: 'direct_delivery' | 'dine_in';
+  guestCount: number | null;
+  internalNotes: string;
+}
+
+/**
+ * QUI-535 — compact result of the atomic "abrir mesa" block. Exactly the
+ * fields `emitSessionOpened` needs plus the ids the callers chain on.
+ */
+export interface CreatedOpenSession {
+  id: number;
+  order_id: number;
+  table_id: number;
+  opened_at: Date;
+  opened_by: number | null;
+}
+
+/**
  * TableSessionsService
  *
  * Restaurant Suite — Fase E. Owns the "open check" lifecycle:
@@ -174,76 +203,27 @@ export class TableSessionsService {
    *   - `customerId`   null for anonymous, userId fallback for POS.
    *   - `channel`      'pos' for POS, 'ecommerce' for QR.
    *   - `deliveryType` 'direct_delivery' for POS, 'dine_in' for QR.
+   *
+   * QUI-535: the DB work now lives in `createOpenSessionInTx` so a
+   * caller that already owns a transaction (the POS payment, which opens
+   * and closes the mesa in the SAME `$transaction`) can participate in
+   * the same atomic block. This wrapper owns the two things that must
+   * NOT happen inside somebody else's transaction: opening the
+   * transaction itself, and emitting `session_opened` — which is always
+   * post-commit, never inside the tx (see the SSE anti-pattern in
+   * `vendix-restaurant-ops`).
    */
-  private async createOpenSession(args: {
-    tableId: number;
-    storeId: number;
-    openedBy: number | null;
-    customerId: number | null;
-    channel: 'pos' | 'ecommerce';
-    deliveryType: 'direct_delivery' | 'dine_in';
-    guestCount: number | null;
-    internalNotes: string;
-  }): Promise<{
-    id: number;
-    order_id: number;
-    table_id: number;
-    opened_at: Date;
-    opened_by: number | null;
-  }> {
+  private async createOpenSession(
+    args: CreateOpenSessionArgs,
+  ): Promise<CreatedOpenSession> {
+    // Resolved BEFORE opening the transaction (as it always was): the
+    // currency read hits the non-transactional client, so keeping it out
+    // here avoids holding a second pool connection while the tx is open.
     const currency = await this.settingsService.getStoreCurrency();
-    const safeCurrency = currency || 'COP';
 
-    const orderNumber = `T-${Date.now()}-${Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, '0')}`;
-
-    const created = await this.prisma.$transaction(async (tx) => {
-      const order = await tx.orders.create({
-        data: {
-          store_id: args.storeId,
-          customer_id: args.customerId,
-          order_number: orderNumber,
-          state: 'draft',
-          channel: args.channel,
-          delivery_type: args.deliveryType,
-          currency: safeCurrency,
-          subtotal_amount: 0,
-          tax_amount: 0,
-          shipping_cost: 0,
-          discount_amount: 0,
-          grand_total: 0,
-          total_paid: 0,
-          remaining_balance: 0,
-          internal_notes: args.internalNotes,
-          updated_at: new Date(),
-        },
-      });
-
-      const newSession = await tx.table_sessions.create({
-        data: {
-          store_id: args.storeId,
-          table_id: args.tableId,
-          order_id: order.id,
-          opened_by: args.openedBy,
-          guest_count: args.guestCount,
-          updated_at: new Date(),
-        },
-      });
-
-      await tx.tables.update({
-        where: { id: args.tableId },
-        data: { status: 'occupied', updated_at: new Date() },
-      });
-
-      return {
-        id: newSession.id,
-        order_id: newSession.order_id,
-        table_id: newSession.table_id,
-        opened_at: newSession.opened_at,
-        opened_by: newSession.opened_by,
-      };
-    });
+    const created = await this.prisma.$transaction((tx) =>
+      this.createOpenSessionInTx(tx, { ...args, currency }),
+    );
 
     // Post-commit: notify the comensal stream + staff dashboard that a
     // new session was opened on this table. SINGLE emit point covering
@@ -255,6 +235,92 @@ export class TableSessionsService {
     this.emitSessionOpened(args.storeId, created);
 
     return created;
+  }
+
+  /**
+   * QUI-535 — the atomic block of "abrir una mesa", running on a
+   * CALLER-SUPPLIED transaction client:
+   *
+   *   1. `orders` draft row (empty, totals at 0)
+   *   2. `table_sessions` row bound to that order
+   *   3. `tables.status = 'occupied'`
+   *
+   * These three writes are one indivisible business fact — a mesa is
+   * never occupied without a check behind it — so they live in exactly
+   * one place and can be enlisted into a wider transaction.
+   *
+   * Two hard rules for this helper:
+   *   - It NEVER opens a transaction. The caller owns the boundary.
+   *   - It NEVER emits SSE/events. `session_opened` is emitted by the
+   *     caller AFTER its commit (`emitSessionOpened`), otherwise
+   *     listeners could observe a session that was rolled back.
+   *
+   * Public (not private) because `PaymentsService` calls it from inside
+   * the POS payment transaction so the mesa is opened, charged and
+   * closed atomically — the fix for the orphan-`occupied` tables of
+   * QUI-535. Same rationale as the already-public `emitSessionOpened` /
+   * `emitSessionClosed`.
+   *
+   * `currency` is optional: callers that already resolved the store
+   * currency (both in-repo callers do) pass it in so no extra read
+   * happens while the transaction is open; otherwise it is resolved
+   * here as a fallback.
+   */
+  async createOpenSessionInTx(
+    tx: any,
+    args: CreateOpenSessionArgs & { currency?: string },
+  ): Promise<CreatedOpenSession> {
+    const safeCurrency =
+      args.currency || (await this.settingsService.getStoreCurrency()) || 'COP';
+
+    const orderNumber = `T-${Date.now()}-${Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, '0')}`;
+
+    const order = await tx.orders.create({
+      data: {
+        store_id: args.storeId,
+        customer_id: args.customerId,
+        order_number: orderNumber,
+        state: 'draft',
+        channel: args.channel,
+        delivery_type: args.deliveryType,
+        currency: safeCurrency,
+        subtotal_amount: 0,
+        tax_amount: 0,
+        shipping_cost: 0,
+        discount_amount: 0,
+        grand_total: 0,
+        total_paid: 0,
+        remaining_balance: 0,
+        internal_notes: args.internalNotes,
+        updated_at: new Date(),
+      },
+    });
+
+    const newSession = await tx.table_sessions.create({
+      data: {
+        store_id: args.storeId,
+        table_id: args.tableId,
+        order_id: order.id,
+        opened_by: args.openedBy,
+        guest_count: args.guestCount,
+        updated_at: new Date(),
+      },
+    });
+
+    await tx.tables.update({
+      where: { id: args.tableId },
+      data: { status: 'occupied', updated_at: new Date() },
+    });
+
+    return {
+      id: newSession.id,
+      order_id: newSession.order_id,
+      table_id: newSession.table_id,
+      opened_at: newSession.opened_at,
+      opened_by: newSession.opened_by,
+    };
   }
 
   // ---------------------------------------------------------------- open

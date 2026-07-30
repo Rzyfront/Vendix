@@ -271,6 +271,7 @@ export class PosPaymentService {
     paymentRequest: PaymentRequest,
     createdBy: string,
     tableSessionId?: number | null,
+    tableId?: number | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -342,6 +343,12 @@ export class PosPaymentService {
       // of creating a brand-new one. The backend re-derives totals
       // from the items already on the order.
       ...(tableSessionId != null ? { table_session_id: tableSessionId } : {}),
+      // QUI-535: cuando el operador eligió la mesa en el POS y todavía no hay
+      // sesión abierta, el cobro viaja con `table_id` y el backend abre (o reusa),
+      // cobra y cierra la sesión de esa mesa dentro de la misma transacción. Es el
+      // único momento en que el POS ocupa una mesa. Mutuamente excluyente con
+      // `table_session_id`, que sigue siendo el camino del módulo de mesas y del QR.
+      ...(tableId != null && tableSessionId == null ? { table_id: tableId } : {}),
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name
