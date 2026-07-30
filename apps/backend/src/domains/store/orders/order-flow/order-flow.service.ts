@@ -147,6 +147,53 @@ export class OrderFlowService {
     }
   }
 
+  /**
+   * Fusiona un parche dentro de `internal_notes._flow_metadata` SIN tocar
+   * `orders.state` — ese sigue siendo territorio exclusivo de
+   * {@link updateOrderState}.
+   *
+   * `orders` no tiene columnas para la traza del flujo, así que la metadata
+   * vive como JSON en `internal_notes` con la forma
+   * `{ _flow_metadata, notes }` que escribe `updateOrderState`. Este helper
+   * respeta ese contrato en los tres casos: JSON con metadata previa (fusiona),
+   * JSON sin ella (arranca la metadata y preserva `notes`) y texto plano de un
+   * operador (lo mueve a `notes` en vez de perderlo).
+   */
+  private async appendFlowMetadata(
+    orderId: number,
+    patch: Record<string, any>,
+  ): Promise<void> {
+    const current = await this.prisma.orders.findUnique({
+      where: { id: orderId },
+      select: { internal_notes: true },
+    });
+
+    let flow: Record<string, any> = {};
+    let notes = '';
+
+    if (current?.internal_notes) {
+      try {
+        const parsed = JSON.parse(current.internal_notes);
+        flow = parsed?._flow_metadata ?? {};
+        notes = parsed?.notes ?? '';
+      } catch {
+        // Nota en texto plano escrita a mano: se conserva como nota.
+        notes = current.internal_notes;
+      }
+    }
+
+    await this.prisma.orders.update({
+      where: { id: orderId },
+      data: {
+        internal_notes: JSON.stringify({
+          _flow_metadata: { ...flow, ...patch },
+          notes,
+        }),
+        updated_at: new Date(),
+      },
+    });
+  }
+
   private async updateOrderState(
     orderId: number,
     newState: OrderState,
@@ -423,6 +470,11 @@ export class OrderFlowService {
           tx,
           undefined, // expires_at
           skip, // skip_reservation: already consumed at fire
+          undefined, // stock_units_consumed
+          // QUI-557: cobrar nunca se bloquea por stock, así que este flujo
+          // autoriza el disponible negativo de forma explícita. El piso duro
+          // de `reserveStock` sigue protegiendo a los demás callers.
+          true,
         );
       }
     });
@@ -836,17 +888,26 @@ export class OrderFlowService {
 
   /**
    * Ship an order (processing -> shipped)
+   *
+   * `force` (ver {@link forceOrderState}) saltea las TRES precondiciones de
+   * este método — el estado `processing`, la exigencia de método de envío y la
+   * arista de la máquina de estados — y NADA más. El motivo por el que existe
+   * el "modo manual" de la UI es justamente la segunda: una orden de retiro en
+   * tienda sin `shipping_method_id` no puede marcarse enviada por el camino
+   * estricto. Todo lo posterior (timestamps, `order.shipped`, logging) corre
+   * idéntico, porque es este mismo código.
    */
-  async shipOrder(orderId: number, dto: ShipOrderDto) {
+  async shipOrder(orderId: number, dto: ShipOrderDto, force = false) {
     const order = await this.getOrder(orderId);
 
-    if (order.state !== 'processing') {
+    if (!force && order.state !== 'processing') {
       throw new BadRequestException(
         `Cannot ship order in state '${order.state}'. Order must be in 'processing' state.`,
       );
     }
 
     if (
+      !force &&
       order.delivery_type !== 'direct_delivery' &&
       !order.shipping_method_id &&
       !dto.shipping_method_id
@@ -887,7 +948,9 @@ export class OrderFlowService {
       });
     }
 
-    this.validateTransition(order.state as OrderState, 'shipped');
+    if (!force) {
+      this.validateTransition(order.state as OrderState, 'shipped');
+    }
     const updatedOrder = await this.updateOrderState(orderId, 'shipped', {
       shipped_at: new Date(),
       tracking_number: dto.tracking_number,
@@ -1063,17 +1126,24 @@ export class OrderFlowService {
 
   /**
    * Deliver an order (shipped -> delivered)
+   *
+   * `force` (ver {@link forceOrderState}) saltea la precondición de estado
+   * `shipped` y la arista de la máquina de estados. La escritura sigue pasando
+   * por {@link updateOrderState}, que es lo que garantiza el timestamp, el
+   * evento `order.status_changed` y la guarda de cocina.
    */
-  async deliverOrder(orderId: number, dto: DeliverOrderDto) {
+  async deliverOrder(orderId: number, dto: DeliverOrderDto, force = false) {
     const order = await this.getOrder(orderId);
 
-    if (order.state !== 'shipped') {
+    if (!force && order.state !== 'shipped') {
       throw new BadRequestException(
         `Cannot deliver order in state '${order.state}'. Order must be in 'shipped' state.`,
       );
     }
 
-    this.validateTransition(order.state as OrderState, 'delivered');
+    if (!force) {
+      this.validateTransition(order.state as OrderState, 'delivered');
+    }
     const updatedOrder = await this.updateOrderState(orderId, 'delivered', {
       delivered_at: new Date(),
       delivery_notes: dto.delivery_notes,
@@ -1573,8 +1643,17 @@ export class OrderFlowService {
    * $transaction (pattern of reactivateOrder) so they commit atomically; the
    * order.status_changed event is emitted only AFTER commit with the REAL
    * previous state.
+   *
+   * `force` (ver {@link forceOrderState}) saltea las dos precondiciones de
+   * estado — `CANCELABLE_STATES` y la arista de la máquina de estados — para
+   * permitir cancelar desde estados avanzados (p. ej. una orden `delivered` que
+   * el operador necesita anular). NO relaja la atomicidad: el claim conserva su
+   * WHERE condicional, solo que anclado al estado leído en vez de a la lista
+   * canónica, así que dos cancelaciones concurrentes siguen resolviéndose con
+   * un único ganador y la cadena de efectos (cancelar pagos, liberar reservas,
+   * emitir `order.status_changed`) sigue corriendo exactamente una vez.
    */
-  async cancelOrder(orderId: number, dto: CancelOrderDto) {
+  async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
     const order = await this.getOrder(orderId);
     const previousState = order.state as OrderState;
 
@@ -1584,15 +1663,24 @@ export class OrderFlowService {
           `Cancellation is only allowed from: [${CANCELABLE_STATES.join(', ')}]`,
       );
 
+    // Estados que el claim atómico acepta. Forzando es exactamente el estado
+    // que acabamos de leer: sigue siendo un WHERE condicional (el perdedor de
+    // una carrera encuentra 'cancelled' y no coincide), no un UPDATE ciego.
+    const claimableStates: OrderState[] = force
+      ? [previousState]
+      : CANCELABLE_STATES;
+
     // Fast-path guard — clean error for the common (non-race) case without
     // opening a transaction. The authoritative guard is the atomic claim below.
-    if (!CANCELABLE_STATES.includes(previousState)) {
+    if (!force && !CANCELABLE_STATES.includes(previousState)) {
       throw notCancelableError();
     }
 
     // State-machine edge check (cancelled is a valid target from every
     // CANCELABLE_STATE) — preserved from the original flow.
-    this.validateTransition(previousState, 'cancelled');
+    if (!force) {
+      this.validateTransition(previousState, 'cancelled');
+    }
 
     // Build cancel metadata exactly as updateOrderState would: `orders` has no
     // cancelled_at/cancellation_reason columns, so these + previous_state live
@@ -1630,7 +1718,7 @@ export class OrderFlowService {
       // (state is now 'cancelled' ∉ CANCELABLE_STATES) and matches 0 rows →
       // aborts here WITHOUT running the effects below.
       const claim = await tx.orders.updateMany({
-        where: { id: orderId, state: { in: CANCELABLE_STATES } },
+        where: { id: orderId, state: { in: claimableStates } },
         data: { state: 'cancelled', updated_at: new Date() },
       });
       if (claim.count === 0) {
@@ -2292,6 +2380,103 @@ export class OrderFlowService {
   async getValidTransitions(orderId: number): Promise<OrderState[]> {
     const order = await this.getOrder(orderId);
     return VALID_TRANSITIONS[order.state as OrderState] || [];
+  }
+
+  /**
+   * Carril FORZADO de la máquina de estados — único punto de entrada para los
+   * botones "manuales" de la UI (`PATCH /store/orders/:id {"state":...}`).
+   *
+   * Contexto: `UpdateOrderDto extends PartialType(CreateOrderDto)` reexpone
+   * `state`, así que ese PATCH podía escribir `orders.state` con un
+   * `prisma.orders.update` crudo — sin efectos, sin eventos y sin liberar
+   * reservas. Ese fue el vector que hizo reaparecer QUI-557 por la vía de
+   * `cancelled`, y el mismo que dejaba reservas eternamente `active` al marcar
+   * Enviado a mano: sin `order.shipped`, el OrderAutoFulfillmentListener nunca
+   * consume la reserva original de una orden de alcance ORGANIZATION.
+   *
+   * La regla que fija este método: **forzar significa saltear precondiciones,
+   * NUNCA efectos**. Se despacha a los mismos métodos canónicos con
+   * `force = true`, así que la cadena de efectos no es una copia que haya que
+   * mantener sincronizada — es literalmente el mismo código:
+   *
+   *   - `cancelled` → {@link cancelOrder}: cancela pagos, libera reservas
+   *     (`releaseReservationsByReference`) y emite `order.status_changed`.
+   *   - `shipped`   → {@link shipOrder}: sella `shipped_at` y emite
+   *     `order.shipped`, que es lo que consume la reserva en alcance ORG.
+   *   - `delivered` → {@link deliverOrder}: sella `delivered_at`.
+   *   - `finished`  → {@link updateOrderState}, que es exactamente lo que hace
+   *     {@link finishOrder} menos la validación, y que además ejecuta el commit
+   *     de inventario vía OrderStockCommitService y la guarda de cocina.
+   *   - resto (`draft`, `created`, `pending_payment`, `processing`, `refunded`)
+   *     → {@link updateOrderState}, el único escritor de `orders.state`.
+   *
+   * Los endpoints `/flow/*` NO exponen el forzado: ese carril sigue estricto.
+   *
+   * Toda forzada queda auditada en `internal_notes._flow_metadata.forced_transition`
+   * con estado origen, destino, motivo y usuario. `forced` distingue una
+   * transición que la máquina de estados no permitía de una que sí, porque el
+   * PATCH genérico también recibe transiciones legales.
+   */
+  async forceOrderState(
+    orderId: number,
+    target: OrderState,
+    opts: { reason: string },
+  ) {
+    const order = await this.getOrder(orderId);
+    const from = order.state as OrderState;
+
+    // Idempotente: el botón manual se puede pulsar dos veces (o llegar un
+    // reintento del cliente) y la segunda no debe re-ejecutar los efectos ni
+    // registrar una forzada que no ocurrió.
+    if (from === target) {
+      return order;
+    }
+
+    const forced = !(VALID_TRANSITIONS[from] ?? []).includes(target);
+
+    let updatedOrder: any;
+    switch (target) {
+      case 'cancelled':
+        updatedOrder = await this.cancelOrder(
+          orderId,
+          { reason: opts.reason },
+          true,
+        );
+        break;
+      case 'shipped':
+        updatedOrder = await this.shipOrder(orderId, {}, true);
+        break;
+      case 'delivered':
+        updatedOrder = await this.deliverOrder(orderId, {}, true);
+        break;
+      case 'finished':
+        updatedOrder = await this.updateOrderState(orderId, 'finished', {
+          finished_at: new Date(),
+        });
+        break;
+      default:
+        updatedOrder = await this.updateOrderState(orderId, target);
+    }
+
+    // Se escribe DESPUÉS del método canónico para no pisar la metadata que él
+    // mismo persiste (`cancelled_at`, `previous_state`, `shipped_at`…).
+    await this.appendFlowMetadata(orderId, {
+      forced_transition: {
+        from,
+        to: target,
+        forced,
+        reason: opts.reason,
+        user_id: RequestContextService.getUserId() ?? null,
+        at: new Date(),
+      },
+    });
+
+    this.logger.warn(
+      `Order #${orderId} state ${from} -> ${target} via forced lane` +
+        `${forced ? ' (transición NO permitida por la máquina de estados)' : ''}: ${opts.reason}`,
+    );
+
+    return updatedOrder;
   }
 
   /**

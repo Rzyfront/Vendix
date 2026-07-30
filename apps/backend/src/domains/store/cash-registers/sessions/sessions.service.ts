@@ -15,6 +15,16 @@ import { CloseSessionDto } from '../dto/close-session.dto';
 import { QuerySessionDto } from '../dto/query-session.dto';
 import { MovementsService } from '../movements/movements.service';
 
+/**
+ * Resumen de sesiones de caja abiertas en una tienda. `registers` está
+ * deduplicado por caja para que el mensaje al usuario nombre cada caja una sola
+ * vez aunque tenga más de una sesión abierta.
+ */
+export interface OpenSessionsSummary {
+  count: number;
+  registers: { id: number; name: string }[];
+}
+
 @Injectable()
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
@@ -45,6 +55,48 @@ export class SessionsService {
         },
       },
     });
+  }
+
+  /**
+   * QUI-560 — sesiones abiertas a nivel de TIENDA, no de usuario.
+   *
+   * `getActiveSession` filtra por `opened_by`, así que devuelve `null` cuando la
+   * sesión viva pertenece a otro operador. Ese predicado no sirve para decidir
+   * si la caja de la tienda está en uso: la caja es un recurso de tienda y una
+   * sola sesión abierta de cualquier usuario debe bloquear el apagado del
+   * módulo. Devuelve además los nombres de caja para que el mensaje de error
+   * le diga al usuario exactamente qué tiene que cerrar.
+   */
+  async countOpenSessions(store_id?: number): Promise<OpenSessionsSummary> {
+    const context = RequestContextService.getContext();
+    const target_store_id = store_id ?? context?.store_id;
+
+    if (!target_store_id) {
+      return { count: 0, registers: [] };
+    }
+
+    const open_sessions = await this.prisma.cash_register_sessions.findMany({
+      where: { store_id: target_store_id, status: 'open' },
+      select: {
+        id: true,
+        cash_register_id: true,
+        register: { select: { id: true, name: true } },
+      },
+    });
+
+    const registers = new Map<number, string>();
+    for (const session of open_sessions) {
+      const register_id = session.register?.id ?? session.cash_register_id;
+      registers.set(
+        register_id,
+        session.register?.name ?? `Caja #${register_id}`,
+      );
+    }
+
+    return {
+      count: open_sessions.length,
+      registers: [...registers.entries()].map(([id, name]) => ({ id, name })),
+    };
   }
 
   async openSession(dto: OpenSessionDto) {

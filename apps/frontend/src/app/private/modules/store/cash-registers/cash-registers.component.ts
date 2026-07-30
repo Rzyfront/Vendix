@@ -35,6 +35,7 @@ import {
   CashRegisterSession,
 } from '../pos/services/pos-cash-register.service';
 import { PosSessionDetailModalComponent } from '../pos/components/pos-session-detail-modal.component';
+import { PosSessionCloseModalComponent } from '../pos/components/pos-session-close-modal.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { LocationsService } from '../inventory/services/locations.service';
 import { InventoryLocation } from '../inventory/interfaces';
@@ -57,6 +58,7 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
     InputComponent,
     SelectorComponent,
     PosSessionDetailModalComponent,
+    PosSessionCloseModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -384,6 +386,18 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
         [session]="selected_session"
         (isOpenChange)="show_detail_modal.set($event)"
       ></app-pos-session-detail-modal>
+
+      <!--
+        QUI-560 — cierre de sesión desde admin. Se reutiliza el modal del POS
+        (con su conteo y su resumen de movimientos) en vez de un cierre sin
+        conteo: cerrar una caja siempre exige declarar el efectivo contado.
+      -->
+      <app-pos-session-close-modal
+        [isOpen]="show_close_modal()"
+        [session]="session_to_close()"
+        (isOpenChange)="show_close_modal.set($event)"
+        (sessionClosed)="onSessionClosed()"
+      ></app-pos-session-close-modal>
     </div>
   `,
   styles: [
@@ -506,6 +520,13 @@ export class CashRegistersComponent {
 
   // Session detail
   selected_session: CashRegisterSession | null = null;
+
+  // QUI-560 — cierre de sesión abierta desde admin.
+  // `session_to_close` es signal (no campo plano como `selected_session`)
+  // porque se pasa a un `input()` del modal, que solo re-lee si la fuente es
+  // reactiva.
+  readonly show_close_modal = signal(false);
+  readonly session_to_close = signal<CashRegisterSession | null>(null);
 
   // Register form
   register_form: FormGroup;
@@ -745,6 +766,18 @@ export class CashRegistersComponent {
       variant: 'secondary',
       action: (row: CashRegisterSession) => this.onViewDetail(row),
     },
+    {
+      // QUI-560 — sin esta acción, una sesión abierta por otro operador no se
+      // podía cerrar desde ninguna parte: el POS solo muestra la del usuario
+      // actual. Bloquear el apagado de la caja sin ofrecer esta salida
+      // convertiría el bug silencioso en un callejón sin salida.
+      label: 'Cerrar',
+      icon: 'lock',
+      variant: 'warning',
+      tooltip: 'Cerrar la sesión de caja con conteo',
+      show: (row: CashRegisterSession) => row.status === 'open',
+      action: (row: CashRegisterSession) => this.onCloseSession(row),
+    },
   ];
 
   constructor() {
@@ -945,6 +978,23 @@ export class CashRegistersComponent {
   onViewDetail(session: CashRegisterSession): void {
     this.selected_session = session;
     this.show_detail_modal.set(true);
+  }
+
+  // ========== SESSION CLOSE (QUI-560) ==========
+
+  onCloseSession(session: CashRegisterSession): void {
+    this.session_to_close.set(session);
+    this.show_close_modal.set(true);
+  }
+
+  /**
+   * El modal ya cerró la sesión en backend y mostró su propio toast; aquí solo
+   * se resincroniza la tabla para que `open_sessions_count` y el estado de la
+   * fila reflejen la realidad.
+   */
+  onSessionClosed(): void {
+    this.session_to_close.set(null);
+    this.loadSessions();
   }
 
   // ========== HELPERS ==========

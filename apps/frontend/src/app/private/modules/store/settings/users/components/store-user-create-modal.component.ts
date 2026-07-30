@@ -1,11 +1,11 @@
 import {Component,
-  input,
   output,
   model,
-  signal,
   inject,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
 
 import {
   ReactiveFormsModule,
@@ -15,9 +15,9 @@ import {
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent,
-  ToastService} from '../../../../../../shared/components/index';
-import { StoreUsersManagementService } from '../services/store-users-management.service';
+  ModalComponent} from '../../../../../../shared/components/index';
+import * as StoreUsersActions from '../state/actions/store-users.actions';
+import { selectUserSaving } from '../state/selectors/store-users.selectors';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
 
 
@@ -33,7 +33,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
   template: `
     <app-modal
       [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
+      (isOpenChange)="isOpen.set($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nuevo Usuario"
@@ -117,16 +117,35 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
       }
     `,
   ]})
+/**
+ * QUI-554 — Este modal NO llama HTTP. Despacha `createUser` y espera el
+ * resultado en el stream de acciones:
+ *
+ *   createUser → createUser$ (POST + toast) → createUserSuccess
+ *              → mutationSuccess$ → loadUsers + loadStats
+ *
+ * Antes llamaba `StoreUsersManagementService.createUser()` directo, así que la
+ * acción nunca se despachaba, `createUserSuccess` nunca se emitía y el effect
+ * `mutationSuccess$` —que ya existía— jamás recargaba la lista ni las stats.
+ *
+ * Se cierra sólo con `createUserSuccess`: cerrar antes de conocer el resultado
+ * destruiría el formulario ante un 400 (email duplicado, validación).
+ */
 export class StoreUserCreateModalComponent {
   private destroyRef = inject(DestroyRef);
+  /**
+   * `model()` ya publica el output implícito `isOpenChange`; declarar además un
+   * `output<boolean>()` homónimo crearía dos canales para un solo dato y dejaría
+   * este `model` desincronizado. El cierre se hace con `isOpen.set(false)`.
+   */
   readonly isOpen = model<boolean>(false);
-  readonly isOpenChange = output<boolean>();
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
-  isCreating = signal(false);
-  private storeUsersService = inject(StoreUsersManagementService);
-  private toastService = inject(ToastService);
+  private store = inject(Store);
+  private actions$ = inject(Actions);
+  /** Progreso real de la mutación, tomado del state (no un flag local). */
+  readonly isCreating = this.store.selectSignal(selectUserSaving);
 
   constructor(private fb: FormBuilder) {
     this.userForm = this.fb.group({
@@ -154,8 +173,26 @@ export class StoreUserCreateModalComponent {
           ),
         ],
       ]});
+
+    // Éxito: limpiar, cerrar y avisar al padre. El toast y la recarga de lista
+    // + stats los hacen `createUser$` y `mutationSuccess$` respectivamente.
+    this.actions$
+      .pipe(
+        ofType(StoreUsersActions.createUserSuccess),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => {
+        this.resetForm();
+        this.isOpen.set(false);
+        this.onUserCreated.emit();
+      });
+
+    // Fallo: deliberadamente NO se escucha. El modal debe quedarse abierto con
+    // lo tecleado intacto, el toast de error lo emite `createUser$` y el botón
+    // se reactiva solo porque el reducer devuelve `user_saving` a false.
   }
-onSubmit(): void {
+
+  onSubmit(): void {
     if (this.userForm.invalid || this.isCreating()) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
@@ -163,40 +200,18 @@ onSubmit(): void {
       return;
     }
 
-    this.isCreating.set(true);
-    const userData: CreateStoreUserDto = this.userForm.value;
+    const userData: CreateStoreUserDto = { ...this.userForm.value };
 
     // Remove username if empty
     if (!userData.username) {
       delete userData.username;
     }
 
-    this.storeUsersService
-      .createUser(userData)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.isCreating.set(false);
-          this.toastService.success('Usuario creado exitosamente');
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          this.onUserCreated.emit();
-          this.isOpenChange.emit(false);
-          this.resetForm();
-        },
-        error: (error: any) => {
-          this.isCreating.set(false);
-          console.error('Error creating store user:', error);
-          const message = error?.error?.message || 'Error al crear el usuario';
-          this.toastService.error(message);
-        }});
+    this.store.dispatch(StoreUsersActions.createUser({ user: userData }));
   }
 
   onCancel(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.resetForm();
   }
 

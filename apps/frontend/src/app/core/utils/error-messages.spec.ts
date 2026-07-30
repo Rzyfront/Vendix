@@ -1,3 +1,5 @@
+import { HttpErrorResponse } from '@angular/common/http';
+
 import { DEFAULT_ERROR_MESSAGE, ERROR_MESSAGES } from './error-messages';
 import { parseApiError } from './parse-api-error';
 
@@ -53,6 +55,83 @@ describe('ERROR_MESSAGES — SUBSCRIPTION_011 (plan retired from catalog)', () =
     for (const word of DEBT_WORDS) {
       expect(copy).not.toContain(word);
     }
+  });
+});
+
+/**
+ * QUI-560 — el código tipado tiene que sobrevivir a la capa de servicio.
+ *
+ * `store-settings.service.ts` aplanaba el `HttpErrorResponse` a
+ * `new Error(message)` en su `catchError`, y con eso `parseApiError` perdía el
+ * `error_code` y devolvía SIEMPRE el mensaje genérico: el backend respondía
+ * `409 CASH_REGISTER_DISABLE_001`, la copy existía en `ERROR_MESSAGES`, y el
+ * usuario igual veía "ocurrió un error inesperado".
+ *
+ * El servicio ahora re-lanza el error CRUDO, así que el test que importa es el
+ * del `HttpErrorResponse` real: es la forma exacta que reciben los consumidores.
+ * El último caso fija el bug original — un Error aplanado NO resuelve código —
+ * para que reintroducir el `new Error(message)` rompa la suite en vez de
+ * degradar el mensaje en silencio.
+ */
+describe('ERROR_MESSAGES — CASH_REGISTER_DISABLE_001 (caja con sesiones abiertas)', () => {
+  it('resuelve a su propia copy y no al DEFAULT_ERROR_MESSAGE', () => {
+    const copy = ERROR_MESSAGES['CASH_REGISTER_DISABLE_001'];
+
+    expect(copy).toBeDefined();
+    expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+    // Debe decir qué hacer, no sólo que falló.
+    expect((copy ?? '').toLowerCase()).toContain('caja registradora');
+  });
+
+  it('parseApiError lo mapea desde el cuerpo JSON del 409', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 409,
+        error_code: 'CASH_REGISTER_DISABLE_001',
+        message:
+          'No se puede deshabilitar la caja registradora: la tienda tiene 1 sesión abierta en "Caja Principal".',
+        details: { open_sessions: 1, registers: [{ id: 19, name: 'Caja Principal' }] },
+      },
+    });
+
+    expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
+    expect(parsed.details).toEqual({
+      open_sessions: 1,
+      registers: [{ id: 19, name: 'Caja Principal' }],
+    });
+  });
+
+  it('lo mapea desde un HttpErrorResponse real, que es lo que re-lanza el servicio', () => {
+    const raw = new HttpErrorResponse({
+      status: 409,
+      statusText: 'Conflict',
+      url: 'https://api.vendix.com/api/store/settings',
+      error: {
+        statusCode: 409,
+        error_code: 'CASH_REGISTER_DISABLE_001',
+        message: 'Cannot disable the cash register module while ...',
+        details: { open_sessions: 2 },
+      },
+    });
+
+    const parsed = parseApiError(raw);
+
+    expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
+    // `raw.message` es el texto técnico de Angular ("Http failure response
+    // for ..."): nunca debe convertirse en el mensaje del usuario.
+    expect(parsed.userMessage).not.toContain('Http failure');
+    expect(parsed.details).toEqual({ open_sessions: 2 });
+  });
+
+  it('un Error aplanado cae al genérico — así se veía el bug original', () => {
+    // Regresión: si alguien vuelve a poner `new Error(message)` en un
+    // `catchError`, este es el resultado, y la suite lo deja documentado.
+    const parsed = parseApiError(new Error('cualquier cosa'));
+
+    expect(parsed.errorCode).toBeNull();
+    expect(parsed.userMessage).toBe(DEFAULT_ERROR_MESSAGE);
   });
 });
 

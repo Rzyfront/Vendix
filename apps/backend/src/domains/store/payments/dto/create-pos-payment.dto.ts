@@ -527,6 +527,33 @@ export class CreatePosPaymentDto {
   @Min(1)
   @Type(() => Number)
   table_session_id?: number;
+
+  /**
+   * QUI-535 — optional table id for the restaurant POS.
+   *
+   * Mutually exclusive with `table_session_id`, and they encode two
+   * different origins of the same sale:
+   *
+   *  - `table_session_id`: the check ALREADY exists (opened from the
+   *    tables module or by a diner scanning the mesa QR). The POS is
+   *    closing out that specific session — unchanged behavior.
+   *  - `table_id`: the POS is the one materializing the mesa. Choosing a
+   *    table in the checkout wizard writes NOTHING; the session is opened
+   *    inside the very same `$transaction` that charges the sale and then
+   *    closes it. This is what removes the orphan `occupied` tables with
+   *    $0 draft orders that the old "open on pick" flow left behind
+   *    whenever the cashier went back, switched to takeaway, or closed
+   *    the tab.
+   *
+   * If the table already has an open session, that session is REUSED
+   * (never a second check for the same table). When both fields arrive,
+   * `table_session_id` wins — it is the more specific reference.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  table_id?: number;
 }
 
 // DTO para actualizar una orden existente con pago

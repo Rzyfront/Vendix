@@ -9,7 +9,8 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import {
   ButtonComponent,
   CardComponent,
@@ -98,6 +99,13 @@ export class TablesManagePageComponent implements OnInit {
   readonly qrTable = signal<Table | null>(null);
   readonly isPrintingAllQr = signal(false);
 
+  /**
+   * Id de la mesa que se está liberando ahora mismo (QUI-535 · paso 7).
+   * Deshabilita su acción "Liberar" mientras las dos llamadas HTTP vuelan,
+   * para que un doble clic no dispare dos secuencias cierre+PATCH.
+   */
+  readonly releasingTableId = signal<number | null>(null);
+
   readonly floorMapKey = signal(0);
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
@@ -156,6 +164,21 @@ export class TablesManagePageComponent implements OnInit {
       action: (item: Table) => this.openQr(item),
     },
     {
+      label: 'Liberar',
+      icon: 'door-open',
+      variant: 'warning',
+      tooltip: (item: Table) =>
+        item.active_session
+          ? 'Cerrar la cuenta abierta y devolver la mesa a Disponible'
+          : 'Devolver la mesa a Disponible',
+      // Solo tiene sentido en una mesa que NO está libre. `effective_status`
+      // llega del floor-map (ver `load`), así que también aparece cuando la
+      // fila persiste `available` pero arrastra una sesión abierta.
+      show: (item: Table) => this.effectiveStatus(item) !== 'available',
+      disabled: (item: Table) => this.releasingTableId() === item.id,
+      action: (item: Table) => this.confirmRelease(item),
+    },
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
@@ -187,12 +210,37 @@ export class TablesManagePageComponent implements OnInit {
 
   load(): void {
     this.isLoading.set(true);
-    this.tablesService
-      .listPaginated({ page: 1, limit: 200 })
+    // La lista paginada (`GET /store/tables`) devuelve la fila cruda: no
+    // trae `active_session` ni `effective_status`. El floor-map sí
+    // (`tables.service.ts:FloorMapTable`), y es el mismo permiso de lectura,
+    // así que se cruzan por id para que la acción "Liberar mesa" sepa si la
+    // mesa arrastra una cuenta abierta. Si el floor-map falla, la página
+    // sigue cargando con la lista cruda (la acción se apoya entonces en
+    // `status`).
+    forkJoin({
+      page: this.tablesService.listPaginated({ page: 1, limit: 200 }),
+      floor: this.tablesService
+        .getFloorMap()
+        .pipe(catchError(() => of([] as Table[]))),
+    })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => {
-          this.tables.set(res.data ?? []);
+        next: ({ page, floor }) => {
+          const live = new Map(
+            (Array.isArray(floor) ? floor : []).map((t) => [t.id, t]),
+          );
+          this.tables.set(
+            (page.data ?? []).map((t) => {
+              const l = live.get(t.id);
+              return l
+                ? {
+                    ...t,
+                    active_session: l.active_session ?? null,
+                    effective_status: l.effective_status ?? t.status,
+                  }
+                : t;
+            }),
+          );
           this.isLoading.set(false);
           this.floorMapKey.update((k) => k + 1);
         },
@@ -339,6 +387,74 @@ export class TablesManagePageComponent implements OnInit {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Estado real de la mesa: el `effective_status` del floor-map cuando lo
+   * tenemos, y si no la columna persistida.
+   */
+  effectiveStatus(t: Table): TableStatus {
+    return t.effective_status ?? t.status;
+  }
+
+  /**
+   * "Liberar mesa" (QUI-535 · paso 7).
+   *
+   * Decisión de negocio: el desfase entre `tables.status` y las sesiones
+   * reales se resuelve con una acción EXPLÍCITA del operador — el backend no
+   * auto-reconcilia nada en silencio. Por eso pide confirmación antes de
+   * actuar y por eso el mensaje dice exactamente qué se va a cerrar.
+   *
+   * Nunca se libera una mesa dejando su cuenta abierta: si hay
+   * `active_session`, `TablesService.releaseTable` cierra la sesión primero
+   * y solo después manda la mesa a `available`.
+   */
+  private confirmRelease(t: Table): void {
+    const sessionId = t.active_session?.id ?? null;
+    const statusText = this.statusLabel(this.effectiveStatus(t));
+    const message =
+      sessionId != null
+        ? `La mesa "${t.name}" tiene una cuenta abierta (sesión #${sessionId}). ` +
+          'Al liberarla se cerrará esa cuenta y la mesa volverá a Disponible. ' +
+          'El pedido no se elimina: queda registrado para cobrarlo o anularlo desde Pedidos.'
+        : `La mesa "${t.name}" está en "${statusText}" sin cuenta abierta. Se devolverá a Disponible.`;
+
+    this.dialogService
+      .confirm({
+        title: 'Liberar mesa',
+        message,
+        confirmText: 'Liberar mesa',
+        cancelText: 'Cancelar',
+        confirmVariant: sessionId != null ? 'danger' : 'primary',
+      })
+      .then((ok: boolean) => {
+        if (!ok) return;
+        this.releasingTableId.set(t.id);
+        this.tablesService
+          .releaseTable(t.id, sessionId)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: () => {
+              this.releasingTableId.set(null);
+              this.toastService.success(
+                // `t.name` ya suele venir con el prefijo ("Mesa 3"), así que
+                // no se le añade otro: "Mesa Mesa 3 liberada" era el bug.
+                sessionId != null
+                  ? `${t.name} liberada — cuenta cerrada`
+                  : `${t.name} liberada`,
+              );
+              this.load();
+            },
+            error: (err: unknown) => {
+              this.releasingTableId.set(null);
+              this.toastService.error(
+                typeof err === 'string'
+                  ? err
+                  : 'No se pudo liberar la mesa. Revisa si tiene una cuenta abierta.',
+              );
+            },
+          });
+      });
   }
 
   private confirmDelete(t: Table): void {

@@ -3348,6 +3348,17 @@ export const ErrorCodes = {
     devMessage:
       'El producto pertenece a una carta con horario y no está disponible en este momento',
   },
+
+  // Caja registradora — transiciones de configuración (QUI-560).
+  // 409 y no 403: el usuario SÍ tiene permiso para configurar su tienda; lo que
+  // falta es que el sistema esté en un estado que admita la acción. No es "no
+  // puedes", es "no ahora".
+  CASH_REGISTER_DISABLE_001: {
+    code: 'CASH_REGISTER_DISABLE_001',
+    httpStatus: 409,
+    devMessage:
+      'Cannot disable the cash register module while the store has open cash register sessions',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

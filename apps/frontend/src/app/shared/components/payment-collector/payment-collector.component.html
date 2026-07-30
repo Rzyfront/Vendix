@@ -77,7 +77,10 @@
           @if (subStep() === modoOffset()) {
             <!-- Cobro · Método de pago (frame a7mp1): título con icono + grid 2×2
                  de MethodCards + banner informativo según método seleccionado. -->
-            <div class="pc-method-step">
+            <div
+              class="pc-method-step"
+              [class.pc-flash-target]="flashSection() === 'method'"
+            >
               <div class="pc-section-title">
                 <app-icon name="wallet" [size]="20" class="pc-section-icon" />
                 <h3 class="pc-section-label">Método de pago</h3>
@@ -160,7 +163,11 @@
             @if (isCashSelected()) {
               <div class="pc-cash-block">
                 <label class="pc-cash-label" for="pc-cash-received">Efectivo recibido</label>
-                <div class="pc-cash-field" [class.error]="isCashInsufficient()">
+                <div
+                  class="pc-cash-field"
+                  [class.error]="isCashInsufficient()"
+                  [class.pc-flash-target]="flashSection() === 'cash'"
+                >
                   <span class="pc-cash-prefix" aria-hidden="true">$</span>
                   <input
                     id="pc-cash-received"
@@ -219,7 +226,10 @@
 
             <!-- Reference -->
             @if (needsReference()) {
-              <section class="pc-card">
+              <section
+                class="pc-card"
+                [class.pc-flash-target]="flashSection() === 'reference'"
+              >
                 <div class="section-header">
                   <div class="section-indicator"></div>
                   <h3 class="section-title">{{ referenceLabel() }}</h3>
@@ -267,7 +277,10 @@
         } @else {
           <!-- Panel: Plan de crédito -->
           @if (subStep() >= modoOffset()) {
-            <section class="pc-card">
+            <section
+              class="pc-card"
+              [class.pc-flash-target]="flashSection() === 'credit'"
+            >
               <div class="section-header">
                 <div class="section-indicator"></div>
                 <h3 class="section-title">Plan de crédito</h3>
@@ -286,6 +299,17 @@
               />
             </section>
           }
+        }
+
+        <!-- Feedback de validación: nombra el dato que falta, justo debajo del
+             sub-paso activo (visible sin scroll). El nodo se MONTA con @if, así
+             que el keyframe de atención corre una sola vez incluso con la CD
+             continua del polling Wompi (reference_transition_all_continuous_cd). -->
+        @if (flashMessage()) {
+          <div class="pc-warn pc-flash-banner" role="alert">
+            <app-icon name="alert-triangle" [size]="18" />
+            <span>{{ flashMessage() }}</span>
+          </div>
         }
       </div>
 
@@ -556,6 +580,15 @@
           [currencyDecimals]="currencyDecimals()"
         />
       </section>
+    }
+
+    <!-- Mismo feedback de validación en la rama flat: queda al pie del stack,
+         donde el padre monta su botón de cobro. -->
+    @if (flashMessage()) {
+      <div class="pc-warn pc-flash-banner" role="alert">
+        <app-icon name="alert-triangle" [size]="18" />
+        <span>{{ flashMessage() }}</span>
+      </div>
     }
   }
 </div>

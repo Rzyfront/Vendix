@@ -27,6 +27,7 @@ import {
   assertCanChargeVat,
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
+import { OrderFlowService } from './order-flow/order-flow.service';
 
 @Injectable()
 export class OrdersService {
@@ -97,6 +98,7 @@ export class OrdersService {
     private scheduleValidationService: ScheduleValidationService,
     private stockLevelManager: StockLevelManager,
     private shippingCalculatorService: ShippingCalculatorService,
+    private orderFlowService: OrderFlowService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -296,6 +298,11 @@ export class OrdersService {
               undefined,
               false,
               stockUnitsConsumed,
+              // QUI-557: el POS sobrevende a propósito, así que aquí SÍ se
+              // autoriza el disponible negativo. Es la única forma de que el
+              // piso duro de `reserveStock` proteja al resto de flujos sin
+              // romper esta decisión de producto.
+              true,
             );
           } catch (error) {
             this.logger.warn(
@@ -641,6 +648,51 @@ export class OrdersService {
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
 
+    /**
+     * QUI-557 — NINGÚN estado puede escribirse en crudo sobre `orders.state`.
+     *
+     * `UpdateOrderDto extends PartialType(CreateOrderDto)`, y `CreateOrderDto`
+     * declara `state`, así que `PartialType` lo reexpone y el `whitelist` del
+     * ValidationPipe no puede filtrarlo — el propio JSDoc del DTO dice que las
+     * transiciones van por `OrderFlowService`, pero la clase base derrota esa
+     * regla. Un `PATCH /store/orders/:id {"state":"cancelled"}` marcaba la
+     * orden cancelada sin liberar sus `stock_reservations`, y esas reservas
+     * huérfanas siguen restando de `quantity_available`: el siguiente intento
+     * de remisión reporta "sin stock" con las existencias intactas. Con
+     * `{"state":"shipped"}` el daño era el simétrico: nunca se emitía
+     * `order.shipped`, así que el OrderAutoFulfillmentListener jamás consumía
+     * la reserva original de una orden de alcance ORGANIZATION y las unidades
+     * quedaban apartadas para siempre pese a haber salido físicamente.
+     *
+     * No se rechaza el campo con 400 porque hay cuatro acciones de UI vivas
+     * que pegan a este endpoint (cancelar desde la lista, marcar enviado,
+     * marcar entregado y la transición manual de "listo para recoger");
+     * devolver 400 trasladaría el problema a la UI en vez de resolverlo.
+     *
+     * Se delega TODO cambio de estado en `forceOrderState`, el carril forzado
+     * del seam: mantiene la capacidad de saltarse la máquina de estados —que es
+     * la razón de existir de estos botones, p. ej. marcar enviada una orden de
+     * retiro en tienda sin `shipping_method_id`— pero ejecuta la cadena de
+     * efectos completa (liberar o consumir reservas, emitir eventos) y deja la
+     * forzada auditada en `internal_notes._flow_metadata.forced_transition`.
+     */
+    const targetState = updateOrderDto.state;
+
+    // Se quita siempre, incluso cuando coincide con el estado actual: el
+    // `prisma.orders.update` de abajo no debe recibir `state` bajo ninguna
+    // circunstancia, o el seam deja de ser el único escritor.
+    delete updateOrderDto.state;
+
+    const mustForceState = !!targetState && targetState !== order.state;
+    if (Object.keys(updateOrderDto).length === 0) {
+      if (mustForceState) {
+        await this.orderFlowService.forceOrderState(id, targetState!, {
+          reason: 'Transición manual desde la gestión de órdenes',
+        });
+      }
+      return this.findOne(id);
+    }
+
     // Derive delivery_type from shipping method if not explicitly provided
     if (updateOrderDto.shipping_method_id && !updateOrderDto.delivery_type) {
       const method = await this.prisma.shipping_methods.findUnique({
@@ -666,7 +718,7 @@ export class OrdersService {
         subtotal + tax - discount + shipping;
     }
 
-    return this.prisma.orders.update({
+    const updatedOrder = await this.prisma.orders.update({
       where: { id },
       data: { ...updateOrderDto, updated_at: new Date() },
       include: {
@@ -717,6 +769,30 @@ export class OrdersService {
         },
       },
     });
+
+    /**
+     * El estado va DESPUÉS de la metadata, y el orden NO es cosmético.
+     *
+     * `forceOrderState` persiste su traza (`forced_transition`, `delivered_at`,
+     * `cancelled_at`, `previous_state`) dentro de `internal_notes` como JSON,
+     * porque `orders` no tiene columnas para eso. Si el PATCH trae `state` E
+     * `internal_notes` a la vez y se fuerza primero, el update de arriba
+     * sobrescribe ese JSON con el texto plano del operador y la traza se pierde
+     * —incluido el `previous_state` que `reactivateOrder` necesita para
+     * restaurar una orden cancelada—.
+     *
+     * Aplicando la nota primero, `appendFlowMetadata` la encuentra como texto
+     * plano y la conserva en el campo `notes` del sobre. Sobreviven las dos.
+     */
+    if (mustForceState) {
+      await this.orderFlowService.forceOrderState(id, targetState!, {
+        reason: 'Transición manual desde la gestión de órdenes',
+      });
+      // El row devuelto arriba quedó obsoleto: se leyó antes de la transición.
+      return this.findOne(id);
+    }
+
+    return updatedOrder;
   }
 
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
@@ -908,6 +984,7 @@ export class OrdersService {
               undefined,
               false,
               stockUnitsConsumed,
+              true, // QUI-557: oversell deliberado, disponible negativo autorizado.
             );
           } catch (error) {
             this.logger.warn(

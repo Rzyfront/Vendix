@@ -5,6 +5,7 @@ import { RouterModule } from '@angular/router';
 
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { FiscalActivationWizardService } from '../../../core/services/fiscal-activation-wizard.service';
+import { parseApiError } from '../../../core/utils/parse-api-error';
 import {
   FISCAL_AREAS,
   FISCAL_AREA_LABELS,
@@ -427,8 +428,18 @@ export class FiscalManagementPanelComponent implements OnInit {
           this.fiscalIdentitySaving.set(false);
         },
         error: (error) => {
+          // QUI-560: `error.message` es el devMessage del backend (o el texto
+          // técnico de Angular con el error crudo); el contrato de
+          // `error-messages.ts` es que eso nunca llega al usuario.
+          const parsed = parseApiError(error);
+          console.error(
+            `[fiscal-identity] guardar falló [${parsed.errorCode ?? 'sin código'}]:`,
+            parsed.devMessage ?? error,
+          );
           this.fiscalIdentityError.set(
-            error?.message || 'No fue posible guardar la identidad legal.',
+            parsed.errorCode
+              ? parsed.userMessage
+              : 'No fue posible guardar la identidad legal.',
           );
           this.fiscalIdentitySaving.set(false);
         },
@@ -498,8 +509,15 @@ export class FiscalManagementPanelComponent implements OnInit {
         },
         error: (error) => {
           this.fiscalData.set(null);
+          const parsed = parseApiError(error);
+          console.error(
+            `[fiscal-identity] cargar falló [${parsed.errorCode ?? 'sin código'}]:`,
+            parsed.devMessage ?? error,
+          );
           this.fiscalIdentityError.set(
-            error?.message || 'No fue posible cargar la identidad legal.',
+            parsed.errorCode
+              ? parsed.userMessage
+              : 'No fue posible cargar la identidad legal.',
           );
           this.fiscalIdentityLoading.set(false);
         },

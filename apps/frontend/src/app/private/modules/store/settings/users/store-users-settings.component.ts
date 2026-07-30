@@ -323,6 +323,19 @@ export class StoreUsersSettingsComponent implements OnInit {
     this.showCreateModal = true;
   }
 
+  /**
+   * QUI-554 — Estos handlers SÓLO cierran el modal.
+   *
+   * La recarga de lista + stats tras cualquier mutación vive en un único sitio:
+   * el effect `mutationSuccess$` (`state/effects/store-users.effects.ts`), que
+   * escucha `createUserSuccess | updateUserSuccess | deactivateUserSuccess |
+   * reactivateUserSuccess`. No despachar `loadUsers`/`loadStats` desde aquí.
+   *
+   * `onUserUpdated` sí despachaba la recarga, pero era código inalcanzable: el
+   * edit modal declara el output `onUserUpdated` y nunca lo emite. Ese dispatch
+   * muerto es lo que hizo creer que el padre cubría el refresh y ocultó que el
+   * create nunca lo disparaba.
+   */
   onUserCreated() {
     this.showCreateModal = false;
   }
@@ -335,8 +348,6 @@ export class StoreUsersSettingsComponent implements OnInit {
   onUserUpdated() {
     this.showEditModal = false;
     this.editingUser.set(null);
-    this.store.dispatch(StoreUsersActions.loadUsers());
-    this.store.dispatch(StoreUsersActions.loadStats());
   }
 
   toggleUserStatus(user: StoreUser) {

@@ -211,7 +211,11 @@ export class StockValidatorService {
 
   /**
    * Check stock levels at a specific location or across all locations.
-   * Uses StockLevelManager internally.
+   *
+   * Delegates to `StockLevelManager.getStockLevels`, which is variant-exact
+   * (QUI-557): `variantId` ausente significa la línea BASE, no "cualquier fila
+   * del producto". Por eso agregar sin `locationId` suma únicamente filas de la
+   * misma identidad de inventario y ya no mezcla base con variantes.
    */
   private async checkStockAtLocation(
     productId: number,
@@ -234,7 +238,12 @@ export class StockValidatorService {
 
   /**
    * Get stock level at a specific location.
-   * Uses StockLevelManager internally.
+   *
+   * Agrega por `location_id` en vez de quedarse con la primera coincidencia
+   * (QUI-557). El `@@unique(product_id, product_variant_id, location_id)`
+   * garantiza una sola fila por identidad y bodega, así que la suma equivale a
+   * esa fila; la diferencia está en que un resultado inesperado con varias
+   * filas ya no se resuelve de forma no determinista con "gana la primera".
    */
   private async getStockLevelAtLocation(
     productId: number,
@@ -246,7 +255,18 @@ export class StockValidatorService {
       variantId,
     );
 
-    return stockLevels.find((sl) => sl.location_id === locationId) ?? null;
+    const atLocation = stockLevels.filter(
+      (sl) => sl.location_id === locationId,
+    );
+    if (atLocation.length === 0) return null;
+
+    return {
+      location_id: locationId,
+      quantity_available: atLocation.reduce(
+        (sum, sl) => sum + Number(sl.quantity_available ?? 0),
+        0,
+      ),
+    };
   }
 
   /**

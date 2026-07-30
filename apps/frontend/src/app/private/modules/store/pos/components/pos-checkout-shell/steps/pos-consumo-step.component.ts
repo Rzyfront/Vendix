@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  inject,
   input,
   output,
   signal,
@@ -10,8 +11,9 @@ import {
 import { IconComponent } from '../../../../../../../shared/components';
 import { FulfillmentType } from '../../pos-fulfillment-selector.component';
 import { PosOpenTableModalComponent } from '../../pos-open-table-modal.component';
-import { OpenTableSessionResult } from '../../../services/pos-restaurant-integration.service';
+import { PosRestaurantIntegrationService } from '../../../services/pos-restaurant-integration.service';
 import { CartState } from '../../../models/cart.model';
+import type { Table } from '../../../../restaurant-ops/tables/interfaces';
 
 /**
  * Paso · Consumo — `app-pos-consumo-step`.
@@ -24,8 +26,13 @@ import { CartState } from '../../../models/cart.model';
  * componente ya NO gatea por `isRestaurantWithPrepared`: el shell decide si se
  * muestra o no.
  *
- * El shell lee `fulfillment()`, `pickedTableId()`, `pickedSessionId()` y
- * `needsTable()` para consolidar el payload de cobro y el gate del footer.
+ * El shell lee `fulfillment()`, `checkoutTableId()` y `needsTable()` para
+ * consolidar el payload de cobro y el gate del footer.
+ *
+ * QUI-535: el picker se usa en modo **selección pura** (`[selectOnly]="true"`),
+ * así que aquí NO se abre ninguna sesión de mesa — la mesa se materializa recién
+ * en el cobro. La mesa elegida se guarda completa (`pickedTable`) porque el
+ * operador identifica la mesa por su NOMBRE, nunca por el `id` de la fila.
  */
 @Component({
   selector: 'app-pos-consumo-step',
@@ -36,6 +43,8 @@ import { CartState } from '../../../models/cart.model';
   styleUrl: './pos-consumo-step.component.scss',
 })
 export class PosConsumoStepComponent {
+  private readonly integration = inject(PosRestaurantIntegrationService);
+
   // ── Inputs (from shell) ──────────────────────────────────────────────────
   /** Cart state — used to pass the current customer to the open-table modal. */
   readonly cartState = input<CartState | null>(null);
@@ -44,30 +53,80 @@ export class PosConsumoStepComponent {
 
   // ── Fulfillment / table state (owned here) ───────────────────────────────
   readonly fulfillment = signal<FulfillmentType>('entrega');
-  /** Local mirror of the picked table id so the shell can unblock cobro even
-   *  before the parent persists a currentTableSession. */
-  readonly pickedTableId = signal<number | null>(null);
-  /** Mirror of the opened table_session id forwarded to the backend payload. */
-  readonly pickedSessionId = signal<number | null>(null);
+  /**
+   * Mesa elegida por el operador en el picker, COMPLETA (id + name + zone).
+   * Fuente única de la mesa del checkout; el `tableId` del padre es solo el
+   * fallback residual de una sesión ya abierta fuera del POS.
+   */
+  readonly pickedTable = signal<Table | null>(null);
   /** Toggles the inline PosOpenTableModalComponent. */
   readonly openTablePicker = signal(false);
 
+  // ── Precedencia única: la elección del operador SIEMPRE gana ─────────────
+  /**
+   * Mesa efectiva del paso: la elegida por el operador primero, y solo si no
+   * eligió ninguna, la mesa residual que trae el padre. Pill y payload leen esta
+   * misma precedencia (antes la pill hacía `tableId() ?? pickedTableId()` y el
+   * shell `pickedTableId() ?? tableId()`: mostraba una mesa y cobraba otra).
+   */
+  readonly effectiveTableId = computed<number | null>(
+    () => this.pickedTable()?.id ?? this.tableId(),
+  );
+
+  /**
+   * Mesa que el cobro debe materializar. Null cuando el servicio no es consumo
+   * en mesa: "Para llevar" nunca debe ocupar una mesa, ni siquiera si el padre
+   * arrastra una sesión residual.
+   */
+  readonly checkoutTableId = computed<number | null>(() =>
+    this.fulfillment() === 'consumo' ? this.effectiveTableId() : null,
+  );
+
+  /** True cuando hay mesa que mostrar en la pill. */
+  readonly hasSelectedTable = computed<boolean>(
+    () => this.effectiveTableId() != null,
+  );
+
+  /**
+   * Etiqueta de la mesa ante el operador: `"Mesa 2"` o `"Mesa 2 · Terraza"`.
+   * Cadena vacía cuando la mesa viene solo del padre (un id sin nombre) y la
+   * sesión cacheada no permite resolver el nombre. El `id` de la fila NUNCA se
+   * imprime — no es información de usuario.
+   */
+  readonly selectedTableLabel = computed<string>(() => {
+    const picked = this.pickedTable();
+    if (picked?.name) {
+      return `${picked.name}${picked.zone ? ' · ' + picked.zone : ''}`;
+    }
+    const externalId = this.tableId();
+    if (externalId == null) return '';
+    // El contrato de TableSession ya trae `table: {id,name,zone,status}`.
+    const table = this.integration.currentTableSession()?.table;
+    if (table?.name && table.id === externalId) {
+      return `${table.name}${table.zone ? ' · ' + table.zone : ''}`;
+    }
+    return '';
+  });
+
+  /** Texto de la pill. Sin nombre resoluble cae a un neutro, jamás a `Mesa #id`. */
+  readonly tablePillText = computed<string>(() => {
+    const label = this.selectedTableLabel();
+    return label ? `${label} seleccionada` : 'Mesa seleccionada';
+  });
+
   // ── Public gate read by the shell footer ─────────────────────────────────
-  /** 'consumo' still requires an open table before the order can be confirmed. */
+  /** 'consumo' still requires a table before the order can be confirmed. */
   readonly needsTable = computed<boolean>(
-    () =>
-      this.fulfillment() === 'consumo' &&
-      (this.tableId() ?? this.pickedTableId()) == null,
+    () => this.fulfillment() === 'consumo' && this.effectiveTableId() == null,
   );
 
   // ── Outputs ──────────────────────────────────────────────────────────────
   readonly fulfillmentChange = output<FulfillmentType>();
-  readonly tableSessionOpened = output<OpenTableSessionResult>();
   /**
    * Asks the shell to advance to the next top-level step. Fired when:
    *  - the operator re-clicks the already-selected fulfillment and no further
    *    input is pending (entrega, or consumo with a table already picked), or
-   *  - a table session was just opened (consumo → mesa selected).
+   *  - a table was just selected in the picker (consumo → mesa elegida).
    */
   readonly advanceRequested = output<void>();
 
@@ -90,7 +149,7 @@ export class PosConsumoStepComponent {
   onFulfillmentChange(next: FulfillmentType): void {
     this.fulfillment.set(next);
     if (next !== 'consumo') {
-      this.pickedTableId.set(null);
+      this.pickedTable.set(null);
     }
     this.fulfillmentChange.emit(next);
   }
@@ -100,7 +159,7 @@ export class PosConsumoStepComponent {
    *  - entrega (para llevar) → nothing else is required, advance.
    *  - consumo → advance only when a table is already picked; otherwise open the
    *    table picker so the operator can pick one (which then advances via
-   *    {@link onTableSessionPicked}).
+   *    {@link onTableSelected}).
    */
   onFulfillmentReselected(type: FulfillmentType): void {
     if (type === 'entrega') {
@@ -115,15 +174,14 @@ export class PosConsumoStepComponent {
     this.advanceRequested.emit();
   }
 
-  onTableSessionPicked(result: OpenTableSessionResult): void {
+  /**
+   * Mesa elegida en el picker (modo selección pura: NO hubo `POST`). Guardamos
+   * la fila completa para poder mostrar el nombre y avanzamos el wizard.
+   */
+  onTableSelected(table: Table): void {
     this.openTablePicker.set(false);
-    const session = result?.session ?? result;
-    const tableId = (session as any)?.table_id ?? null;
-    const sessionId = (session as any)?.id ?? null;
-    this.pickedTableId.set(tableId);
-    this.pickedSessionId.set(sessionId);
-    this.tableSessionOpened.emit(result);
-    // A table was opened (backend marks it occupied) → advance to the next step.
-    if (tableId != null) this.advanceRequested.emit();
+    if (!table) return;
+    this.pickedTable.set(table);
+    this.advanceRequested.emit();
   }
 }

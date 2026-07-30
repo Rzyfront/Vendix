@@ -5,7 +5,10 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { StockLevelManager } from './stock-level-manager.service';
-import { StockValidatorService } from './stock-validator.service';
+import {
+  SellableStockAllocator,
+  StockAllocationSlice,
+} from './sellable-stock-allocator.service';
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
 
@@ -89,11 +92,14 @@ interface CommitLine {
  *   1. skip lines that don't track inventory / are services
  *   2. skip idempotently (inventory_consumed_at_fire || inventory_committed)
  *   3. skip restaurant prepared items pending kitchen fire
- *   4. consume the line's active reservation (reserved-=q, available+=q)
- *   5. validate availability at the resolved location (never throws by itself)
- *      - blockOnInsufficient → INV_STOCK_002 ; otherwise deduct with floor 0
- *   6. optionally consume serials
- *   7. updateStock (movement_type per opts) → the single net deduction
+ *   4. consume EVERY active reservation of the line (reserved-=q, available+=q)
+ *   5. allocate the quantity across the store's SELLABLE locations
+ *      (`SellableStockAllocator`), preferring the reserved ones
+ *      - blockOnInsufficient → INV_STOCK_002 only when the TOTAL sellable
+ *        availability falls short; never because the total is split
+ *      - otherwise the uncovered remainder is deducted with floor 0
+ *   6. optionally consume serials (per allocation slice on auto-FIFO)
+ *   7. updateStock per slice (movement_type per opts) → the net deduction
  *   8. mark order_items.inventory_committed
  *
  * Then a defensive `releaseReservationsByReference('order', refId, 'consumed',
@@ -107,7 +113,7 @@ export class OrderStockCommitService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
-    private readonly stockValidator: StockValidatorService,
+    private readonly allocator: SellableStockAllocator,
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
   ) {}
@@ -167,7 +173,14 @@ export class OrderStockCommitService {
         posSelection: opts.consumeSerials ? posMatcher(item) : undefined,
       };
 
-      const res = await this.processLine(line, opts, orderId, isRestaurant, tx);
+      const res = await this.processLine(
+        line,
+        opts,
+        orderId,
+        isRestaurant,
+        (order as any).store_id,
+        tx,
+      );
       totalCost += res.cost;
       if (res.committed) committedItemCount++;
     }
@@ -292,6 +305,7 @@ export class OrderStockCommitService {
         opts,
         reservationRefId,
         isRestaurant,
+        dispatchNote.store_id,
         tx,
       );
       totalCost += res.cost;
@@ -317,6 +331,7 @@ export class OrderStockCommitService {
     opts: CommitOpts,
     reservationRefId: number,
     isRestaurant: boolean,
+    storeId: number,
     tx?: Prisma.TransactionClient,
   ): Promise<{ cost: number; committed: boolean }> {
     const db: any = tx ?? this.prisma;
@@ -371,11 +386,15 @@ export class OrderStockCommitService {
       }
     }
 
-    // Find the active reservation for this order/SO reference. Read WITHOUT
+    // Find EVERY active reservation for this order/SO reference. Read WITHOUT
     // store scope (mirrors order-flow) so a cross-store reservation is still
     // found; tx (request context) already carries the right scope.
+    //
+    // QUI-559: a line may hold more than one reservation when its quantity was
+    // reserved across several locations. Reading only the first one made the
+    // commit believe the line lived in a single location and refuse the sale.
     const reservationReader: any = tx ?? this.prisma.withoutScope();
-    const reservation = await reservationReader.stock_reservations.findFirst({
+    const reservations = await reservationReader.stock_reservations.findMany({
       where: {
         product_id: line.product_id,
         product_variant_id: variant ?? null,
@@ -386,57 +405,78 @@ export class OrderStockCommitService {
       select: { location_id: true },
     });
 
-    const locationId: number =
-      reservation?.location_id ??
-      line.location_id_override ??
-      (await this.stockLevelManager.getDefaultLocationForProduct(
-        line.product_id,
-        variant,
-      ));
+    const reservedLocationIds: number[] = Array.from(
+      new Set(reservations.map((r: any) => r.location_id as number)),
+    );
 
-    // Consume the reservation first (reserved-=q, available+=q, on_hand intact)
-    // so availability is restored before validation / deduction.
-    if (reservation) {
+    // Consume the reservations first (reserved-=q, available+=q, on_hand
+    // intact) so availability is restored before allocation / deduction.
+    for (const locId of reservedLocationIds) {
       await this.stockLevelManager.releaseReservation(
         line.product_id,
         variant,
-        locationId,
+        locId,
         'order',
         reservationRefId,
         tx,
       );
     }
 
-    // Read-only availability check (never throws).
-    const avail = await this.stockValidator.validateAvailability(
+    // Locations the caller is already committed to, honoured before any other:
+    // the released reservations, then the line's own dispatch location.
+    const preferredLocationIds = [
+      ...reservedLocationIds,
+      ...(line.location_id_override != null
+        ? [line.location_id_override]
+        : []),
+    ];
+
+    // Spread the line across the store's sellable locations. Blocking is now
+    // driven by the TOTAL sellable availability, never by how that total
+    // happens to be distributed between warehouses.
+    const allocation = await this.allocator.allocateForLine(
+      storeId,
       line.product_id,
       variant,
       qty,
-      locationId,
+      preferredLocationIds,
+      tx,
     );
 
-    if (!avail.isAvailable) {
+    let slices: StockAllocationSlice[] = allocation.slices;
+
+    if (allocation.shortfall > 0) {
       if (opts.blockOnInsufficient) {
         throw new VendixHttpException(
           ErrorCodes.INV_STOCK_002,
-          `No se puede entregar: stock insuficiente para el producto (disponible ${avail.available}, requerido ${qty})`,
+          `No se puede entregar: stock insuficiente para el producto (disponible ${allocation.available}, requerido ${qty})`,
           {
             product_id: line.product_id,
             product_variant_id: variant ?? null,
             requested: qty,
-            available: avail.available,
-            location_id: locationId,
+            available: allocation.available,
+            location_id: slices[0]?.location_id ?? null,
             order_reference: reservationRefId,
           },
         );
       }
-      // Dispatch delivery: goods already left physically — deduct with floor 0
-      // and raise an alert instead of blocking.
+      // Dispatch delivery: goods already left physically — deduct the
+      // remainder from the intended location (floor 0) and raise an alert
+      // instead of blocking.
+      const fallbackLocationId =
+        line.location_id_override ??
+        reservedLocationIds[0] ??
+        slices[0]?.location_id ??
+        (await this.stockLevelManager.getDefaultLocationForProduct(
+          line.product_id,
+          variant,
+        ));
       this.logger.warn(
         `[commit] Stock insuficiente al entregar (no bloqueante) — product ${line.product_id}` +
-          `${variant ? ` variant ${variant}` : ''} disponible ${avail.available} requerido ${qty} ` +
-          `loc ${locationId} ref ${reservationRefId}; se deduce con piso 0.`,
+          `${variant ? ` variant ${variant}` : ''} disponible ${allocation.available} requerido ${qty} ` +
+          `loc ${fallbackLocationId} ref ${reservationRefId}; se deduce con piso 0.`,
       );
+      slices = this.allocator.absorbShortfall(allocation, fallbackLocationId);
     }
 
     if (opts.consumeSerials) {
@@ -445,32 +485,39 @@ export class OrderStockCommitService {
         variant,
         qty,
         line.order_item_id ?? null,
-        locationId,
+        slices,
         line.posSelection,
         tx,
       );
     }
 
-    const stockUpdate = await this.stockLevelManager.updateStock(
-      {
-        product_id: line.product_id,
-        variant_id: variant,
-        location_id: locationId,
-        quantity_change: -qty,
-        movement_type: opts.movementType,
-        validate_availability: opts.blockOnInsufficient,
-        reason: opts.reason,
-        user_id: opts.userId ?? RequestContextService.getUserId() ?? undefined,
-        order_item_id: line.order_item_id ?? undefined,
-        create_movement: true,
-      },
-      tx,
-    );
+    // One `updateStock` per slice: the primitive (and therefore costing,
+    // movement rows and denormalized sync) is untouched — only the number of
+    // calls changes with the number of locations the line draws from.
+    let cost = 0;
+    for (const slice of slices) {
+      const stockUpdate = await this.stockLevelManager.updateStock(
+        {
+          product_id: line.product_id,
+          variant_id: variant,
+          location_id: slice.location_id,
+          quantity_change: -slice.quantity,
+          movement_type: opts.movementType,
+          validate_availability: opts.blockOnInsufficient,
+          reason: opts.reason,
+          user_id: opts.userId ?? RequestContextService.getUserId() ?? undefined,
+          order_item_id: line.order_item_id ?? undefined,
+          create_movement: true,
+        },
+        tx,
+      );
+      cost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
+    }
 
     // inventory_committed was already set by the atomic claim above; no final
     // write needed here.
     return {
-      cost: Number(stockUpdate.cost_snapshot?.total_cost || 0),
+      cost,
       committed: true,
     };
   }
@@ -491,7 +538,7 @@ export class OrderStockCommitService {
     variant_id: number | undefined,
     quantity: number,
     order_item_id: number | null,
-    location_id: number,
+    slices: StockAllocationSlice[],
     posSelection: PosSelection | undefined,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
@@ -499,16 +546,20 @@ export class OrderStockCommitService {
       return;
     }
 
+    const primaryLocationId = slices[0]?.location_id;
     let serialIds: number[] = [];
     const hasManual =
       (posSelection?.serial_ids?.length ?? 0) > 0 ||
       (posSelection?.serial_numbers?.length ?? 0) > 0;
 
     if (hasManual) {
+      // Manual selection identifies the exact serials for the WHOLE line, so
+      // it is resolved once — the operator's choice already carries its own
+      // location. Free-text creation lands on the primary slice.
       const fromFreeText =
         await this.serialEnforcement.resolveOrCreateFromFreeText(
           product_id,
-          location_id,
+          primaryLocationId,
           posSelection?.serial_numbers ?? [],
           tx,
           variant_id,
@@ -523,26 +574,37 @@ export class OrderStockCommitService {
         tx,
       );
     } else {
-      const available = await this.serialNumbers.listAvailable(
-        product_id,
-        location_id,
-        variant_id,
-        tx,
-      );
-      if (available.length < quantity) {
+      // Auto FIFO: draw from each slice's own pool, so a serialized line whose
+      // stock is split across locations consumes the serials that actually sit
+      // in each of them (QUI-559) instead of demanding all of them from one.
+      const picked: number[] = [];
+      let availableTotal = 0;
+      for (const slice of slices) {
+        const available = await this.serialNumbers.listAvailable(
+          product_id,
+          slice.location_id,
+          variant_id,
+          tx,
+        );
+        availableTotal += available.length;
+        picked.push(
+          ...available.slice(0, slice.quantity).map((s: any) => s.id),
+        );
+      }
+      if (picked.length < quantity) {
         throw new VendixHttpException(
           ErrorCodes.SERIAL_REQUIRED_001,
-          `No hay suficientes seriales disponibles (${available.length}/${quantity}) para el producto serializado`,
+          `No hay suficientes seriales disponibles (${availableTotal}/${quantity}) para el producto serializado`,
           {
             product_id,
             product_variant_id: variant_id ?? null,
-            location_id,
+            location_id: primaryLocationId ?? null,
             requested_qty: quantity,
-            available_serials: available.length,
+            available_serials: availableTotal,
           },
         );
       }
-      serialIds = available.slice(0, quantity).map((s: any) => s.id);
+      serialIds = picked.slice(0, quantity);
     }
 
     const soldSerialNumbers: string[] = [];

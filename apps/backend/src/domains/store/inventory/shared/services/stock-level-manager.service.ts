@@ -14,6 +14,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
+import { sellableLocationsWhere } from '../helpers/pos-stock-scope.helper';
 import { CostingService } from './costing.service';
 import {
   CostingMethodResolverService,
@@ -561,30 +562,44 @@ export class StockLevelManager {
   /**
    * Resolves the best location_id for a product when no explicit location is provided.
    * Used by POS and e-commerce where items don't carry location context.
-   * Priority: location with highest available stock → first org location as fallback.
+   * Priority: sellable location with highest available stock → first sellable
+   * location of the SAME store as fallback.
+   *
+   * QUI-559: both queries used to be unscoped — the first ranked every
+   * `stock_levels` row in the database by availability, so it could resolve a
+   * central warehouse, an inactive location, a quarantine bin, or even another
+   * store's location; the fallback then took any location of the organization.
+   * A sale deducted from wherever it landed, which is how stock ended up
+   * consumed from places the POS never displays. Both now share the canonical
+   * sellable predicate, and no sellable location is an explicit `INV_LOC_001`
+   * instead of an arbitrary pick.
    */
   async getDefaultLocationForProduct(
     product_id: number,
     variant_id?: number,
   ): Promise<number> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
+    }
+    const sellable = sellableLocationsWhere(context.store_id);
+
     const stockLevel = await this.prisma.stock_levels.findFirst({
       where: {
         product_id,
         product_variant_id: variant_id || null,
         quantity_available: { gt: 0 },
+        inventory_locations: sellable,
       },
-      orderBy: { quantity_available: 'desc' },
+      orderBy: [{ quantity_available: 'desc' }, { location_id: 'asc' }],
       select: { location_id: true },
     });
     if (stockLevel) return stockLevel.location_id;
 
-    const context = RequestContextService.getContext();
-    if (!context?.organization_id) {
-      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
-    }
     const location = await this.prisma.inventory_locations.findFirst({
-      where: { organization_id: context.organization_id },
+      where: sellable,
       orderBy: { id: 'asc' },
+      select: { id: true },
     });
     if (!location) throw new VendixHttpException(ErrorCodes.INV_LOC_001);
     return location.id;
@@ -618,6 +633,25 @@ export class StockLevelManager {
    *
    *   El caller que pase `true` es responsable de garantizar que existe una
    *   reserva upstream que cubre la misma cantidad.
+   *
+   * @param allow_negative_available (QUI-557) Permite que la reserva deje
+   *   `quantity_available` por debajo de cero. Por defecto `false`: la reserva
+   *   falla con `INV_STOCK_001` antes de escribir un disponible negativo.
+   *
+   *   Existe porque `validate_availability = false` se usa hoy con DOS
+   *   intenciones distintas que el flag no distingue:
+   *
+   *     a) "ya validé arriba" — checkout, payments, `reactivateOrder` y el
+   *        listener de remisiones. Ahí un disponible negativo significa que la
+   *        validación previa era incorrecta o perdió una carrera, y el sistema
+   *        debe fallar fuerte en vez de corromper la fila.
+   *     b) "vender igual" — POS y el pago de una orden, donde sobrevender es
+   *        comportamiento de producto deliberado ("non-restrictive UX").
+   *
+   *   Antes de este parámetro ambas caían en el paso 4, que resta sin mirar, y
+   *   el caso (a) escribía disponibles negativos en silencio. Ese negativo
+   *   contamina toda lectura posterior de la bodega. Solo el caso (b) pasa
+   *   `true`, y lo hace de forma explícita y nombrada.
    */
   async reserveStock(
     product_id: number,
@@ -632,6 +666,7 @@ export class StockLevelManager {
     expires_at?: Date | null,
     skip_reservation = false,
     stock_units_consumed?: number,
+    allow_negative_available = false,
   ): Promise<void> {
     // P3.4: cuando una reserva upstream ya cubre el stock, evitar doble
     // decremento manteniendo este método como no-op.
@@ -671,6 +706,25 @@ export class StockLevelManager {
         );
       }
 
+      // 2b. QUI-557 — Piso duro: ninguna reserva escribe un disponible
+      // negativo salvo que el caller lo autorice explícitamente. El paso 4
+      // resta sin mirar, así que con `validate_availability = false` una
+      // reserva sobre una identidad sin existencias dejaba la fila en
+      // `quantity_available = -N`. Ese negativo no se queda quieto: toda
+      // lectura posterior de esa bodega — incluido el gate de la remisión —
+      // hereda el faltante y reporta "sin stock" a órdenes que no tienen nada
+      // que ver. Fallar aquí deja el error donde se origina.
+      const resulting_available =
+        stock_level.quantity_available - effectiveQuantity;
+      if (!allow_negative_available && resulting_available < 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          `La reserva de ${effectiveQuantity} unidad(es) dejaría el disponible en ${resulting_available} (producto ${product_id}${
+            variant_id ? `, variante ${variant_id}` : ''
+          }, bodega ${location_id}).`,
+        );
+      }
+
       // 3. Crear reserva
       await prisma.stock_reservations.create({
         data: {
@@ -696,8 +750,7 @@ export class StockLevelManager {
         where: { id: stock_level.id },
         data: {
           quantity_reserved: stock_level.quantity_reserved + effectiveQuantity,
-          quantity_available:
-            stock_level.quantity_available - effectiveQuantity,
+          quantity_available: resulting_available,
           last_updated: new Date(),
           updated_at: new Date(),
         },
@@ -1494,7 +1547,29 @@ export class StockLevelManager {
   }
 
   /**
-   * Obtiene stock levels por producto
+   * Obtiene los stock levels de UNA identidad de inventario concreta.
+   *
+   * LECTURA CANÓNICA (QUI-557). La identidad de una fila de `stock_levels` es
+   * la tripleta `(product_id, product_variant_id, location_id)` — así lo
+   * declara el `@@unique` del modelo. Por lo tanto `product_variant_id` SIEMPRE
+   * se filtra de forma explícita, incluido el caso `null`:
+   *
+   *   - `variant_id` presente  → filas de esa variante.
+   *   - `variant_id` ausente   → filas de la LÍNEA BASE (`product_variant_id IS NULL`).
+   *
+   * Antes el filtro se omitía cuando `variant_id` era `undefined`
+   * (`...(variant_id && {...})`), de modo que una línea base recibía además las
+   * filas de todas sus variantes. Combinado con el `.find()` de
+   * `StockValidatorService.getStockLevelAtLocation` eso seleccionaba una fila
+   * ARBITRARIA (el orden lo decidía el heap de Postgres): la remisión reportaba
+   * "sin stock" con existencias intactas, y carrito/checkout —que agregan sin
+   * `location_id`— sumaban base + variantes habilitando oversell.
+   *
+   * El `orderBy` fija además un orden determinista: dos lecturas idénticas
+   * devuelven las filas en la misma secuencia.
+   *
+   * Una variante NO es despachable como producto base ni viceversa, así que
+   * mezclar ambas identidades nunca es la lectura correcta.
    */
   async getStockLevels(
     product_id: number,
@@ -1503,8 +1578,9 @@ export class StockLevelManager {
     return await this.prisma.stock_levels.findMany({
       where: {
         product_id: product_id,
-        ...(variant_id && { product_variant_id: variant_id }),
+        product_variant_id: variant_id ?? null,
       },
+      orderBy: { location_id: 'asc' },
       include: {
         inventory_locations: {
           select: {

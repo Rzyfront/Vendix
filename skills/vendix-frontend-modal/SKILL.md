@@ -70,8 +70,46 @@ Slots/content areas:
 - `app-modal` owns only generic modal chrome/visibility behavior.
 - Keep create/edit flows on the same screen when that matches the surrounding module pattern; do not force route-based CRUD when the existing UX is modal-first.
 
+## Never Duplicate The `model()` Channel
+
+A wrapper's visibility is `isOpen = model<boolean>(false)`. That **already**
+publishes the output `isOpenChange` — Angular generates it. Declaring
+`isOpenChange = output<boolean>()` alongside it creates **two** outputs with one
+name for one piece of state: the hand-written one shadows the implicit one, so
+emitting it notifies the parent while leaving the wrapper's own `model`
+untouched. `[(isOpen)]` in the parent then appears to work only because the
+parent writes back into the child — the child's internal reads are stale.
+
+```ts
+// ✅ close from inside the wrapper
+readonly isOpen = model<boolean>(false);
+onCancel(): void { this.isOpen.set(false); }
+
+// ❌ never
+readonly isOpen = model<boolean>(false);
+readonly isOpenChange = output<boolean>();   // duplicate channel
+onCancel(): void { this.isOpenChange.emit(false); }  // model stays true
+```
+
+Same rule for the inner `app-modal`: forward its `(isOpenChange)` into the
+wrapper's own model — `(isOpenChange)="isOpen.set($event)"` — instead of adding
+a parallel output. This pattern was found in **20 of 64** wrappers during
+QUI-554; fix them opportunistically when you touch one.
+
+Related trap: an `output()` that is **declared and never emitted** looks like
+the parent covers a concern it never receives. `onUserUpdated` did exactly that
+and hid QUI-554. Emit it or delete it.
+
+## Mutations Inside A Modal
+
+If the module owns NgRx state, the modal **dispatches an action** — it never
+calls the HTTP service directly, and it never closes before the outcome
+arrives. Full contract, spec + CI guard in `vendix-frontend-state`
+§ "Mutations From Modals In NgRx-Backed Modules".
+
 ## Related Skills
 
 - `vendix-zoneless-signals`
 - `vendix-frontend-component`
 - `vendix-angular-forms`
+- `vendix-frontend-state`

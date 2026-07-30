@@ -59,10 +59,39 @@ export class TaxesService {
   /**
    * Calculates taxes for a product based on its assignments.
    * Logic: Sums all tax rates from assigned categories.
+   *
+   * `options.client` permite pasar el cliente de una transacción en curso. Sin
+   * él, la consulta sale por `this.prisma`, o sea por OTRA conexión del pool:
+   * llamado desde dentro de un `$transaction` eso toma una segunda conexión
+   * mientras la primera sostiene locks, y con suficientes cobros concurrentes el
+   * pool (`new Pool(...)` sin `max` ⇒ 10 conexiones) se queda sin ninguna libre y
+   * nadie avanza. Los llamadores que ya están en una transacción deben pasar su
+   * `tx`. Es opcional para no romper a quienes llaman fuera de transacción.
+   *
+   * `options.store_id` es OBLIGATORIO en la práctica cuando se pasa `client`:
+   * `$transaction` sale del `baseClient` (`base-prisma.service.ts:43-45`), no del
+   * `scoped_client`, así que el `tx` NO lleva el scoping de la extensión y el
+   * filtro de tenant que `product_tax_assignments` tenía automáticamente
+   * (`store-prisma.service.ts:436` → `{ products: { store_id } }`) hay que
+   * reponerlo a mano. Sin `client`, el scoping automático sigue aplicando y el
+   * filtro extra es redundante pero inocuo.
    */
-  async calculateProductTaxes(productId: number, basePrice: number) {
-    const assignments = await this.prisma.product_tax_assignments.findMany({
-      where: { product_id: productId },
+  async calculateProductTaxes(
+    productId: number,
+    basePrice: number,
+    options?: {
+      client?: { product_tax_assignments: { findMany: (args: any) => any } };
+      store_id?: number;
+    },
+  ) {
+    const db = options?.client ?? this.prisma;
+    const assignments = await db.product_tax_assignments.findMany({
+      where: {
+        product_id: productId,
+        ...(options?.store_id != null
+          ? { products: { store_id: options.store_id } }
+          : {}),
+      },
       include: {
         tax_categories: {
           include: {
