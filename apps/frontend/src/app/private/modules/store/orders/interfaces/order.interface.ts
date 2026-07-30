@@ -452,42 +452,6 @@ export interface TableActions {
 }
 
 // Order Types
-export interface SalesOrder extends Order {
-  orderType: 'sales';
-  customer: {
-    id: string;
-    name: string;
-    email?: string;
-    phone?: string;
-    address?: {
-      street: string;
-      city: string;
-      state: string;
-      zipCode: string;
-      country: string;
-    };
-  };
-  shippingAddress?: {
-    street: string;
-    city: string;
-    state: string;
-    zipCode: string;
-    country: string;
-  };
-  billingAddress?: {
-    street: string;
-    city: string;
-    state: string;
-    zipCode: string;
-    country: string;
-  };
-  salesRep?: {
-    id: string;
-    name: string;
-  };
-  commission?: number;
-}
-
 export interface PurchaseOrder extends Order {
   orderType: 'purchase';
   supplier: {
@@ -534,29 +498,6 @@ export interface StockTransfer extends Order {
 }
 
 // Create Request DTOs
-export interface CreateSalesOrderRequest {
-  customerId: string;
-  items: CreateOrderItemDto[];
-  shippingAddress?: {
-    street: string;
-    city: string;
-    state: string;
-    zipCode: string;
-    country: string;
-  };
-  billingAddress?: {
-    street: string;
-    city: string;
-    state: string;
-    zipCode: string;
-    country: string;
-  };
-  notes?: string;
-  paymentMethod?: string;
-  salesRepId?: string;
-  commission?: number;
-}
-
 export interface CreatePurchaseOrderRequest {
   supplierId: string;
   items: CreateOrderItemDto[];

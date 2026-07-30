@@ -13,7 +13,6 @@ import { environment } from '../../../../../environments/environment';
 import {
   OrderListItem,
   OrderStats,
-  OrderStatus,
   PaymentStatus,
   OrderType,
 } from './interfaces/order.interface';
@@ -35,7 +34,6 @@ import {
 
 import { OrderStatsComponent } from './components/order-stats.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
-import { OrderCreateModalComponent } from './components/order-create-modal.component';
 import { OrganizationOrdersService } from './services/organization-orders.service';
 
 import './orders-list.component.css';
@@ -47,7 +45,6 @@ import './orders-list.component.css';
     InputsearchComponent,
     ButtonComponent,
     OrderStatsComponent,
-    OrderCreateModalComponent,
     IconComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -134,8 +131,10 @@ export class OrdersListComponent implements OnInit {
     { key: 'date_to', label: 'To', type: 'date' },
   ];
 
+  // Sin acción de crear: el panel de organización no tiene endpoint de escritura
+  // para SALE/RETURN, y la única ruta viable (PURCHASE) la cubre el módulo de
+  // compras. Ver QUI-574.
   dropdownActions: DropdownAction[] = [
-    { label: 'Create Order', icon: 'plus', action: 'create', variant: 'primary' },
     { label: 'Refresh', icon: 'refresh-cw', action: 'refresh' },
     { label: 'Export', icon: 'file-check', action: 'export' },
   ];
@@ -237,9 +236,6 @@ export class OrdersListComponent implements OnInit {
 
   availableStores: Array<{ id: string; name: string }> = [];
 
-  showCreateOrderModal = false;
-  storeOptionsForModal: Array<{ label: string; value: string }> = [];
-
   filterForm!: FormGroup;
 
   constructor() {
@@ -324,7 +320,6 @@ export class OrdersListComponent implements OnInit {
 
   loadAvailableStores(): void {
     this.availableStores = [];
-    this.storeOptionsForModal = [];
     this.updateStoreFilterOptions();
   }
 
@@ -485,9 +480,6 @@ export class OrdersListComponent implements OnInit {
 
   onActionClick(action: string): void {
     switch (action) {
-      case 'create':
-        this.createOrder();
-        break;
       case 'refresh':
         this.refreshOrders();
         break;
@@ -618,41 +610,4 @@ export class OrdersListComponent implements OnInit {
     return 'Orders will appear here when customers make purchases';
   }
 
-  createOrder(): void {
-    this.showCreateOrderModal = true;
-  }
-
-  openCreateOrderModal(): void {
-    this.showCreateOrderModal = true;
-  }
-
-  onCreateOrderModalChange(isOpen: boolean): void {
-    this.showCreateOrderModal = isOpen;
-  }
-
-  onOrderCreated(orderData: any): void {
-    const newOrder: OrderListItem = {
-      id: orderData.id?.toString() || `order_${Date.now()}`,
-      order_number: orderData.order_number || `ORD-${String(this.orders().length + 1).padStart(5, '0')}`,
-      customer: orderData.customer || { id: '1', first_name: 'Guest', last_name: '', email: '' },
-      store: orderData.store || { id: '1', name: 'Store', slug: 'store' },
-      order_type: orderData.order_type || OrderType.SALE,
-      status: orderData.status || OrderStatus.PENDING,
-      payment_status: orderData.payment_status || PaymentStatus.PENDING,
-      total_amount: parseFloat(orderData.total_amount) || 0,
-      subtotal: parseFloat(orderData.subtotal) || 0,
-      tax_amount: parseFloat(orderData.tax_amount) || 0,
-      shipping_amount: parseFloat(orderData.shipping_amount) || 0,
-      discount_amount: parseFloat(orderData.discount_amount) || 0,
-      currency: orderData.currency || this.currencyService.currencyCode() || 'COP',
-      order_date: orderData.created_at || new Date().toISOString(),
-      items_count: orderData.items?.length || 1,
-      notes: orderData.notes || '',
-      created_at: orderData.created_at || new Date().toISOString(),
-      updated_at: orderData.updated_at || new Date().toISOString(),
-    };
-
-    this.orders.update((list) => [newOrder, ...list]);
-    this.loadStats();
-  }
 }
