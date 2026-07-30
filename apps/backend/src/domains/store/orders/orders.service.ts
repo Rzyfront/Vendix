@@ -649,7 +649,7 @@ export class OrdersService {
     const order = await this.findOne(id);
 
     /**
-     * QUI-557 — Cancelar NO puede escribirse en crudo sobre `orders.state`.
+     * QUI-557 — NINGÚN estado puede escribirse en crudo sobre `orders.state`.
      *
      * `UpdateOrderDto extends PartialType(CreateOrderDto)`, y `CreateOrderDto`
      * declara `state`, así que `PartialType` lo reexpone y el `whitelist` del
@@ -658,35 +658,36 @@ export class OrdersService {
      * regla. Un `PATCH /store/orders/:id {"state":"cancelled"}` marcaba la
      * orden cancelada sin liberar sus `stock_reservations`, y esas reservas
      * huérfanas siguen restando de `quantity_available`: el siguiente intento
-     * de remisión reporta "sin stock" con las existencias intactas. Ese es el
-     * vector de corrupción que hace reaparecer QUI-557 aunque la lectura de
-     * stock ya sea correcta.
+     * de remisión reporta "sin stock" con las existencias intactas. Con
+     * `{"state":"shipped"}` el daño era el simétrico: nunca se emitía
+     * `order.shipped`, así que el OrderAutoFulfillmentListener jamás consumía
+     * la reserva original de una orden de alcance ORGANIZATION y las unidades
+     * quedaban apartadas para siempre pese a haber salido físicamente.
      *
      * No se rechaza el campo con 400 porque hay cuatro acciones de UI vivas
      * que pegan a este endpoint (cancelar desde la lista, marcar enviado,
      * marcar entregado y la transición manual de "listo para recoger");
-     * devolver 400 trasladaría el problema a la UI en vez de resolverlo. Se
-     * delega en el seam canónico, que valida la transición, libera reservas y
-     * emite los eventos, sea cual sea el cliente que llame.
+     * devolver 400 trasladaría el problema a la UI en vez de resolverlo.
      *
-     * Solo se intercepta `cancelled`: es el estado que deja reservas activas.
-     * `shipped`/`delivered` siguen el camino crudo a propósito — el modo
-     * manual de la página de detalle los usa justamente para saltarse la
-     * validación de transición, y cambiarlo es una decisión de producto
-     * fuera del alcance de este ticket.
+     * Se delega TODO cambio de estado en `forceOrderState`, el carril forzado
+     * del seam: mantiene la capacidad de saltarse la máquina de estados —que es
+     * la razón de existir de estos botones, p. ej. marcar enviada una orden de
+     * retiro en tienda sin `shipping_method_id`— pero ejecuta la cadena de
+     * efectos completa (liberar o consumir reservas, emitir eventos) y deja la
+     * forzada auditada en `internal_notes._flow_metadata.forced_transition`.
      */
-    if (
-      updateOrderDto.state === order_state_enum.cancelled &&
-      order.state !== order_state_enum.cancelled
-    ) {
-      await this.orderFlowService.cancelOrder(id, {
-        reason: 'Cancelada desde la gestión de órdenes',
+    if (updateOrderDto.state && updateOrderDto.state !== order.state) {
+      await this.orderFlowService.forceOrderState(id, updateOrderDto.state, {
+        reason: 'Transición manual desde la gestión de órdenes',
       });
+    }
 
-      delete updateOrderDto.state;
-      if (Object.keys(updateOrderDto).length === 0) {
-        return this.findOne(id);
-      }
+    // Se quita siempre, incluso cuando coincide con el estado actual: el
+    // `prisma.orders.update` de abajo no debe recibir `state` bajo ninguna
+    // circunstancia, o el seam deja de ser el único escritor.
+    delete updateOrderDto.state;
+    if (Object.keys(updateOrderDto).length === 0) {
+      return this.findOne(id);
     }
 
     // Derive delivery_type from shipping method if not explicitly provided

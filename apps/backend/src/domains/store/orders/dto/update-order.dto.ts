@@ -24,10 +24,20 @@ import { order_delivery_type_enum } from '@prisma/client';
  * `PartialType(CreateOrderDto)` reexpone `state` y `payment_status`, y el
  * `whitelist` del ValidationPipe no puede filtrar un campo que el DTO declara.
  * No se quitan aquí porque cuatro acciones de UI vivas dependen de este
- * endpoint; en su lugar `OrdersService.update` delega `state: 'cancelled'` en
- * `OrderFlowService.cancelOrder` para que la cancelación siempre libere sus
- * reservas. Antes de exponer un estado nuevo por esta vía, verificar que su
- * transición también pase por el seam.
+ * endpoint (cancelar desde la lista, marcar enviado, marcar entregado y la
+ * transición manual de "listo para recoger sin pago").
+ *
+ * En su lugar, `OrdersService.update` extrae `state` del payload y lo delega
+ * SIEMPRE en `OrderFlowService.forceOrderState`, el carril forzado del seam:
+ * conserva la capacidad de saltarse la máquina de estados —que es la razón de
+ * existir de esos botones— pero ejecuta la cadena de efectos completa (liberar
+ * o consumir reservas, emitir eventos) y audita la forzada. `state` nunca llega
+ * al `prisma.orders.update` de ese método, así que agregar un estado nuevo al
+ * enum no reabre el agujero: pasa por el seam automáticamente.
+ *
+ * `payment_status` sigue escribiéndose en crudo por esta vía y NO tiene un seam
+ * equivalente. Antes de usarlo para conducir un flujo de cobro, revisar si
+ * necesita el mismo tratamiento.
  */
 export class UpdateOrderDto extends PartialType(CreateOrderDto) {
   @IsOptional()
