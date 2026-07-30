@@ -15,6 +15,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  HttpException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -75,14 +76,16 @@ export class PurchaseOrdersController {
         'Orden de compra creada exitosamente',
       );
     } catch (error) {
-      // QUI-486 — los errores de negocio tipados DEBEN salir como HTTP 4xx.
+      // QUI-486 — los errores de negocio DEBEN salir como HTTP 4xx.
       // Este catch devuelve un cuerpo de error pero deja el status en 201
       // (default de @Post), así que el cliente lo lee como éxito: es
-      // exactamente el "falso éxito" que reporta el ticket. Se re-lanza solo
-      // VendixHttpException para que el AllExceptionsFilter global lo formatee
-      // con su status y `error_code`, sin alterar el resto de rutas de error
-      // que hoy dependen de este envoltorio.
-      if (error instanceof VendixHttpException) throw error;
+      // exactamente el "falso éxito" que reporta el ticket. Se re-lanza toda
+      // HttpException (VendixHttpException tipada y las de Nest —
+      // BadRequestException, NotFoundException, ForbiddenException) para que el
+      // AllExceptionsFilter global la formatee con su status real y su
+      // `error_code`. Los errores NO-HTTP (fallo de Prisma, bug inesperado)
+      // siguen cayendo en el envoltorio de abajo, sin cambio de contrato.
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al crear la orden de compra',
         error.response?.message || error.message,
@@ -564,10 +567,13 @@ export class PurchaseOrdersController {
       );
     } catch (error) {
       // QUI-486 — mismo motivo que en create(): sin este re-lanzado la
-      // recepción fallida vuelve como HTTP 200 con `success:false` y el
-      // frontend la celebra. Ese es el origen real de la "recepción
-      // silenciosa" del ticket.
-      if (error instanceof VendixHttpException) throw error;
+      // recepción fallida vuelve como HTTP 200 con `success:false` y
+      // `po-receive-modal` la celebra con "Mercancia recibida correctamente"
+      // sin que haya entrado una sola unidad. Ese es el origen real de la
+      // "recepción silenciosa" del ticket, y afecta por igual al guard de
+      // sobre-recepción (BadRequestException) y al de variantes
+      // (VendixHttpException) — de ahí que se re-lance toda HttpException.
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al recibir la orden de compra',
         error.response?.message || error.message,
