@@ -16,4 +16,8 @@ CREATE TYPE "promotion_quantity_grouping_enum" AS ENUM (
 
 -- 2) New column on promotions with default 'cart_total' (preserves legacy)
 ALTER TABLE "promotions"
+<<<<<<< HEAD
   ADD COLUMN "quantity_grouping" "promotion_quantity_grouping_enum" NOT NULL DEFAULT 'cart_total';
+=======
+  ADD COLUMN "quantity_grouping" "promotion_quantity_grouping_enum" NOT NULL DEFAULT 'cart_total';
+>>>>>>> origin/dev

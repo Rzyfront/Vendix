@@ -89,13 +89,8 @@ export class PosTicketService {
    *
    * The POS ticket is not the fiscal document when the sale already produced an
    * electronic invoice — repeating the breakdown on an informative copy invites
-   * the buyer to treat the ticket as the invoice.
-   *
-   * Beyond that, `printsVatBreakdown` requires the merchant to have ACTIVATED
-   * the `invoicing` fiscal area and not be a non-VAT-responsible merchant. The
-   * previous condition only tested VAT responsibility, and its indeterminate
-   * branch resolves to `true`, so a merchant that never started the fiscal
-   * wizard (no `fiscal_data` at all) still printed a breakdown it cannot back.
+   * the buyer to treat the ticket as the invoice. And a merchant that is not
+   * VAT-responsible has no tax to break down at all.
    *
    * It is NOT dropped unconditionally: the electronic POS equivalent document
    * (Res. 000165/2023) does grant the buyer IVA descontable when it identifies
@@ -103,7 +98,7 @@ export class PosTicketService {
    */
   private shouldShowTaxes(ticketData: TicketData): boolean {
     if (ticketData.electronicInvoice) return false;
-    return this.authFacade.printsVatBreakdown();
+    return this.authFacade.isVatResponsible() !== false;
   }
 
   /**
@@ -212,11 +207,6 @@ export class PosTicketService {
   ): Promise<string> {
     const printer = this.currentPrinterConfig(formatOverride);
     const showTaxes = this.shouldShowTaxes(ticketData);
-    // Without the breakdown, a `Subtotal` row that does not add up to `TOTAL`
-    // leaves the difference orphaned on paper: `subtotal` arrives from the
-    // backend as the tax-free base and `total` as the taxed amount. A merchant
-    // that does not itemise VAT prints the final price, not a broken sum.
-    const showSubtotal = showTaxes || !(ticketData.tax > 0);
     let store = ticketData.store || this.storeConfig;
     let organization = ticketData.organization;
 
@@ -369,26 +359,18 @@ export class PosTicketService {
     `;
 
     // Taxes breakdown — omitted on informative copies of an electronic invoice
-    // and for merchants with no active fiscal invoicing (see shouldShowTaxes).
+    // and for merchants that are not VAT-responsible (see shouldShowTaxes).
     if (showTaxes) {
-      // Only the tax the sale actually persisted. The old fallback derived it
-      // from `totalPrice - unitPrice * quantity`, which is not a tax at all but
-      // the line's leftover: with a line discount it goes negative, and with no
-      // tax it printed a bogus `Imp: 0.00%` row per item. An item with no tax
-      // now produces no line.
-      const taxedItems = ticketData.items.filter((item) => (item.tax ?? 0) > 0);
-
-      taxedItems.forEach((item, index) => {
-        const taxAmount = item.tax ?? 0;
-        const taxPercent = item.totalPrice
+      ticketData.items.forEach((item, index) => {
+        const calculatedTax = item.totalPrice - item.unitPrice * item.quantity;
+        const taxAmount = item.tax || calculatedTax;
+        const taxPercent = taxAmount
           ? ((taxAmount / item.totalPrice) * 100).toFixed(2)
           : '0.00';
         html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${item.name} - Imp: ${taxPercent}% - ${this.currencyService.format(taxAmount)}</p>`;
       });
 
-      if (taxedItems.length) {
-        html += `<hr style="border: 1px dashed #000; margin: 10px 0;">`;
-      }
+      html += `<hr style="border: 1px dashed #000; margin: 10px 0;">`;
     }
 
     html += `
