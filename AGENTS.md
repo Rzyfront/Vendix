@@ -36,6 +36,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-customer-auth` |
 | -- | `vendix-date-timezone` |
 | -- | `vendix-engram` |
+| -- | `vendix-error-handling` |
 | -- | `vendix-frontend` |
 | -- | `vendix-frontend-routing` |
 | -- | `vendix-inventory-stock` |
@@ -167,6 +168,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
+| Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
@@ -281,6 +283,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Releasing to prod by merging dev into main and moving tickets to In Review | `git-workflow` |
+| Removing a frontend envelope unwrapper that reads success === false | `vendix-error-handling` |
 | Reporting QA results with charts and a critical/urgent section | `qa-report` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
@@ -408,6 +411,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
 | Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend) | `vendix-report-xlsx` |
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
+| Wrapping a controller handler in try/catch or calling responseService.error | `vendix-error-handling` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
 | Writing the Aprobado / Requiere cambios / Devuelto workflow labels on an issue | `linear-issues` |
