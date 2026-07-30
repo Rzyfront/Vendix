@@ -63,50 +63,53 @@ export const storeUsersReducer = createReducer(
   })),
 
   // ── Create User ─────────────────────────────────────────────────
+  // QUI-554 — Las mutaciones mueven `user_saving`, NO `users_loading`: éste
+  // último gobierna el spinner que reemplaza la tabla y pertenece sólo a
+  // `loadUsers`. El refresh post-mutación lo dispara `mutationSuccess$`.
   on(StoreUsersActions.createUser, (state) => ({
     ...state,
-    users_loading: true,
+    user_saving: true,
     error: null,
   })),
   on(StoreUsersActions.createUserSuccess, (state) => ({
     ...state,
-    users_loading: false,
+    user_saving: false,
   })),
   on(StoreUsersActions.createUserFailure, (state, { error }) => ({
     ...state,
-    users_loading: false,
+    user_saving: false,
     error,
   })),
 
   // ── Update User ─────────────────────────────────────────────────
   on(StoreUsersActions.updateUser, (state) => ({
     ...state,
-    users_loading: true,
+    user_saving: true,
     error: null,
   })),
   on(StoreUsersActions.updateUserSuccess, (state) => ({
     ...state,
-    users_loading: false,
+    user_saving: false,
   })),
   on(StoreUsersActions.updateUserFailure, (state, { error }) => ({
     ...state,
-    users_loading: false,
+    user_saving: false,
     error,
   })),
 
   // ── Deactivate / Reactivate ─────────────────────────────────────
   on(StoreUsersActions.deactivateUser, StoreUsersActions.reactivateUser, (state) => ({
     ...state,
-    users_loading: true,
+    user_saving: true,
     error: null,
   })),
   on(StoreUsersActions.deactivateUserSuccess, StoreUsersActions.reactivateUserSuccess, (state) => ({
     ...state,
-    users_loading: false,
+    user_saving: false,
   })),
   on(StoreUsersActions.deactivateUserFailure, StoreUsersActions.reactivateUserFailure, (state, { error }) => ({
     ...state,
-    users_loading: false,
+    user_saving: false,
     error,
   })),
 

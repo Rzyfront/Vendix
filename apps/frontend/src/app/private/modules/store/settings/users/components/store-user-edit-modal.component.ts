@@ -1271,6 +1271,11 @@ export class StoreUserEditModalComponent implements OnChanges {
   onCancel(): void {
     this.isOpen.set(false);
     this.store.dispatch(StoreUsersActions.clearUserDetail());
+    // QUI-554 — `onUserUpdated` estaba declarado y nunca se emitía, así que el
+    // padre jamás limpiaba `editingUser` y su handler quedaba inalcanzable. Un
+    // output declarado sin emisor es exactamente lo que ocultó este bug: hacía
+    // creer que el padre cubría el refresh. Se emite o no se declara.
+    this.onUserUpdated.emit();
   }
 
   getStateLabel(state: string): string {
