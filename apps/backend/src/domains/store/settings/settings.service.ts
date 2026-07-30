@@ -29,6 +29,12 @@ import {
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import {
+  SETTINGS_TRANSITION_GUARDS,
+  readSettingsPath,
+  type SettingsTransitionGuardDeps,
+} from './guards/settings-transition-guards';
 
 /**
  * Top-level keys retained when sanitizing an incoming settings payload.
@@ -72,7 +78,57 @@ export class SettingsService {
     private auditService: AuditService,
     private migrator: SettingsMigratorService,
     private fiscalScope: FiscalScopeService,
+    private sessionsService: SessionsService,
   ) {}
+
+  /**
+   * Dependencias que los guards de transición pueden consultar (QUI-560).
+   * Se arman por llamada para que cada guard vea el `RequestContext` vigente.
+   */
+  private transitionGuardDeps(): SettingsTransitionGuardDeps {
+    return {
+      countOpenCashSessions: () => this.sessionsService.countOpenSessions(),
+    };
+  }
+
+  /**
+   * Puerta única de transición de settings (QUI-560).
+   *
+   * Se invoca desde los TRES caminos que persisten `store_settings`
+   * (`updateSettings`, `resetToDefault`, `applyTemplate`) con el estado actual y
+   * el estado que está a punto de escribirse. Validar solo el primero dejaría
+   * los otros dos como puertas traseras capaces de producir exactamente el mismo
+   * estado corrupto.
+   *
+   * Los guards se evalúan en serie y el primero que bloquea aborta la escritura:
+   * cada uno hace una consulta a DB, y encadenarlas todas cuando ya sabemos que
+   * la operación se rechaza no aporta nada.
+   */
+  private async assertSettingsTransitionAllowed(
+    current: unknown,
+    next: unknown,
+  ): Promise<void> {
+    for (const guard of SETTINGS_TRANSITION_GUARDS) {
+      const before = readSettingsPath(current, guard.path);
+      const after = readSettingsPath(next, guard.path);
+
+      if (before !== guard.from || after !== guard.to) continue;
+
+      const result = await guard.check(this.transitionGuardDeps());
+      if (!result.blocked) continue;
+
+      this.logger.warn(
+        `[Settings] transición bloqueada path=${guard.path} ` +
+          `${String(guard.from)}->${String(guard.to)} code=${guard.errorCode.code}`,
+      );
+
+      throw new VendixHttpException(
+        guard.errorCode,
+        result.detail,
+        result.metadata,
+      );
+    }
+  }
 
   /**
    * Idempotently ensures a `store_settings` row exists for the given store
@@ -471,6 +527,11 @@ export class SettingsService {
     // App will be built from branding in getSettings()
     delete (updatedSettings as any).app;
 
+    // QUI-560 — última puerta antes de persistir: el payload ya está saneado y
+    // mergeado, así que aquí se compara el estado real de salida contra el de
+    // entrada, no el fragmento que mandó el cliente.
+    await this.assertSettingsTransitionAllowed(currentSettings, updatedSettings);
+
     const result = await this.prisma.store_settings.upsert({
       where: { store_id },
       update: {
@@ -528,6 +589,18 @@ export class SettingsService {
     }
 
     const defaults = getPersistableDefaultStoreSettings();
+
+    // QUI-560 — restablecer a defaults apaga `pos.cash_register.enabled`, así
+    // que es una transición tan destructiva como el PATCH y pasa por la misma
+    // puerta.
+    const existing = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+    });
+    await this.assertSettingsTransitionAllowed(
+      mergeStoreSettingsWithDefaults(existing?.settings),
+      defaults,
+    );
+
     await this.prisma.store_settings.upsert({
       where: { store_id },
       update: {
@@ -584,6 +657,15 @@ export class SettingsService {
     }
 
     const settings = mergeStoreSettingsWithDefaults(template.template_data);
+
+    // QUI-560 — una plantilla puede traer la caja apagada; misma puerta.
+    const existing = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+    });
+    await this.assertSettingsTransitionAllowed(
+      mergeStoreSettingsWithDefaults(existing?.settings),
+      settings,
+    );
 
     await this.prisma.store_settings.upsert({
       where: { store_id },
