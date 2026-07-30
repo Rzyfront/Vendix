@@ -75,6 +75,14 @@ export class PurchaseOrdersController {
         'Orden de compra creada exitosamente',
       );
     } catch (error) {
+      // QUI-486 — los errores de negocio tipados DEBEN salir como HTTP 4xx.
+      // Este catch devuelve un cuerpo de error pero deja el status en 201
+      // (default de @Post), así que el cliente lo lee como éxito: es
+      // exactamente el "falso éxito" que reporta el ticket. Se re-lanza solo
+      // VendixHttpException para que el AllExceptionsFilter global lo formatee
+      // con su status y `error_code`, sin alterar el resto de rutas de error
+      // que hoy dependen de este envoltorio.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al crear la orden de compra',
         error.response?.message || error.message,
@@ -555,6 +563,11 @@ export class PurchaseOrdersController {
         'Orden de compra recibida exitosamente',
       );
     } catch (error) {
+      // QUI-486 — mismo motivo que en create(): sin este re-lanzado la
+      // recepción fallida vuelve como HTTP 200 con `success:false` y el
+      // frontend la celebra. Ese es el origen real de la "recepción
+      // silenciosa" del ticket.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al recibir la orden de compra',
         error.response?.message || error.message,
