@@ -41,6 +41,31 @@ describe('extractApiError', () => {
     expect(result.code).toBeUndefined();
   });
 
+  it('descarta el TypeError del navegador que withFetch() deja en err.error', () => {
+    // Reproducido en navegador: al reiniciarse el backend, el POST del POS
+    // falla en preflight y el toast mostraba "Failed to fetch".
+    const result = extractApiError({
+      status: 0,
+      message: 'Http failure response for https://api.vendix.com/api/store/payments/pos: 0 Unknown Error',
+      error: new TypeError('Failed to fetch'),
+    });
+
+    expect(result.message).toBeUndefined();
+    expect(result.code).toBeUndefined();
+    expect(result.status).toBe(0);
+  });
+
+  it('filtra la jerga de transporte de cada navegador aunque no venga status 0', () => {
+    for (const jerga of [
+      'Failed to fetch',
+      'NetworkError when attempting to fetch resource.',
+      'Load failed',
+      'Http failure during parsing for /api/x',
+    ]) {
+      expect(extractApiError({ error: { message: jerga } }).message).toBeUndefined();
+    }
+  });
+
   it('une los mensajes cuando class-validator devuelve un arreglo', () => {
     const result = extractApiError({
       status: 400,

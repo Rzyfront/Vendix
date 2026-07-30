@@ -19,6 +19,9 @@
  * `"Stock insuficiente para X: requiere 10, disponible 8."`. Cuando no hay
  * mensaje de negocio, `message` queda `undefined` a propósito para que el
  * consumidor aplique SU fallback de dominio (`message || 'No se pudo …'`).
+ * Esto cubre también el fallo de red (`status === 0`): con `withFetch()` el
+ * `TypeError: Failed to fetch` del navegador llega dentro de `err.error` y
+ * pasaría por envelope del backend si solo se mirara `.message`.
  *
  * Se prefiere este helper sobre `extractApiErrorMessage`
  * (`core/utils/api-error-handler.ts`) cuando el mensaje del backend es
@@ -31,8 +34,20 @@
  * `undefined` — comportamiento esperado, el consumidor usa su fallback.
  */
 
-/** Prefijo con el que Angular arma el texto de transporte de `HttpErrorResponse`. */
-const TRANSPORT_MESSAGE_PREFIX = 'Http failure response';
+/**
+ * Textos que describen CÓMO falló la comunicación, nunca por qué el negocio
+ * rechazó la operación. Angular arma los dos primeros; el resto los produce el
+ * navegador cuando la petición ni siquiera obtiene respuesta (`withFetch()`
+ * deja el `TypeError` nativo en `err.error`, y cada motor lo redacta distinto).
+ */
+const TRANSPORT_MESSAGE_PREFIXES = [
+  'Http failure response', // Angular
+  'Http failure during parsing', // Angular
+  'Failed to fetch', // Chromium
+  'NetworkError when attempting to fetch resource', // Firefox
+  'Load failed', // Safari
+  'The user aborted a request', // abort()
+];
 
 /** Forma del envelope de error del backend (`VendixHttpException`). */
 interface VendixErrorBody {
@@ -61,20 +76,42 @@ export function extractApiError(err: unknown): ApiErrorInfo {
     | null
     | undefined;
 
+  const status = typeof e?.status === 'number' ? e.status : undefined;
   const raw = e?.error;
-  const body = (raw && typeof raw === 'object' ? raw : {}) as VendixErrorBody;
+
+  // `status === 0` significa que la petición nunca obtuvo respuesta: red caída,
+  // backend reiniciándose, preflight CORS rechazado. No existe mensaje de
+  // negocio posible — lo único disponible es la jerga del navegador, que jamás
+  // debe llegar al cajero.
+  if (status === 0) {
+    return { status };
+  }
+
+  const body = businessBody(raw);
 
   return {
     code: typeof body.error_code === 'string' ? body.error_code : undefined,
     message:
-      businessMessage(body) ??
+      humanText(businessMessage(body)) ??
       // Algunas capas serializan el body antes de re-lanzar.
       humanText(typeof raw === 'string' ? raw : undefined) ??
       // Un `Error` lanzado por una guarda del frontend ya es user-facing; el
       // `message` de un `HttpErrorResponse` no lo es y `humanText` lo descarta.
       humanText(e?.message),
-    status: typeof e?.status === 'number' ? e.status : undefined,
+    status,
   };
+}
+
+/**
+ * El envelope del backend solo puede venir en un objeto plano. Un `Error`
+ * (p.ej. el `TypeError: Failed to fetch` que `withFetch()` coloca en
+ * `err.error`) tiene `.message`, pero es transporte disfrazado de body.
+ */
+function businessBody(raw: unknown): VendixErrorBody {
+  if (!raw || typeof raw !== 'object' || raw instanceof Error) {
+    return {};
+  }
+  return raw as VendixErrorBody;
 }
 
 /** Mensaje de negocio del envelope, resolviendo array y `errors[]` anidado. */
@@ -95,8 +132,11 @@ function businessMessage(body: VendixErrorBody): string | undefined {
 
 /** El texto solo si es legible por un humano — nunca la descripción de transporte. */
 function humanText(value: string | undefined): string | undefined {
-  if (!value?.trim() || value.startsWith(TRANSPORT_MESSAGE_PREFIX)) {
+  if (!value?.trim()) {
     return undefined;
   }
-  return value;
+  const text = value.trim();
+  return TRANSPORT_MESSAGE_PREFIXES.some((prefix) => text.startsWith(prefix))
+    ? undefined
+    : value;
 }
