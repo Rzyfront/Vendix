@@ -68,7 +68,10 @@ export default function CreatePurchaseOrderScreen() {
       // `number` (DTO usa @IsInt). Validamos antes para no mandarle string.
       const supplierIdNum = Number(supplierId);
       const locationIdNum = Number(locationId);
-      if (!Number.isFinite(supplierIdNum) || !Number.isFinite(locationIdNum)) {
+      if (
+        !Number.isFinite(supplierIdNum) || supplierIdNum <= 0 ||
+        !Number.isFinite(locationIdNum) || locationIdNum <= 0
+      ) {
         throw new Error('IDs de proveedor o ubicación inválidos.');
       }
       return OrgPurchaseOrdersService.create({

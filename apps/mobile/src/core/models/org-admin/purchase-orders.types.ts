@@ -1,8 +1,7 @@
 import type { ISODateString, MoneyAmount } from './common.types';
 
-// NOTE: status values are persisted in lowercase by the backend enum
-// (`purchase_order_status_enum`). The mobile type mirrors what the org-side
-// service emits; consumers normalize both casings defensively.
+// Status values are normalized to UPPERCASE at the service choke-point
+// (`OrgPurchaseOrdersService`) — consumers always see the literals below.
 export type PurchaseOrderStatus =
   | 'DRAFT'
   | 'PENDING'

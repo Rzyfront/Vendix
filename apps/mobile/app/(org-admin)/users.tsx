@@ -1269,209 +1269,6 @@ const editStyles = StyleSheet.create({
   },
 });
 
-// ─── Modal Form Component (Combined Invite / Edit) ───────────────────────────
-function UserFormModal({
-  visible,
-  onClose,
-  onSubmit,
-  user,
-  rolesList,
-  storesList,
-  loading,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSubmit: (data: InviteUserInput | UpdateUserInput) => void;
-  user?: OrgUser | null;
-  rolesList: Option[];
-  storesList: Option[];
-  loading: boolean;
-}) {
-  const isEdit = !!user;
-  const [firstName, setFirstName] = useState(user?.first_name || '');
-  const [lastName, setLastName] = useState(user?.last_name || '');
-  const [email, setEmail] = useState(user?.email || '');
-  const [phone, setPhone] = useState(user?.phone || '');
-  const [selectedRole, setSelectedRole] = useState(user?.roles?.[0] || '');
-  const [selectedStore, setSelectedStore] = useState(user?.default_store_id || '');
-  const [selectedState, setSelectedState] = useState(user?.state || 'INVITED');
-
-  const [pickerOpen, setPickerOpen] = useState<'role' | 'store' | 'state' | null>(null);
-
-  const { data: config } = useQuery({
-    queryKey: ['user-config', user?.id],
-    queryFn: () => OrgUsersService.getConfiguration(user!.id),
-    enabled: !!user?.id,
-  });
-
-  // Sync state if user or configuration changes — useEffect: side effect.
-  useEffect(() => {
-    setFirstName(user?.first_name || '');
-    setLastName(user?.last_name || '');
-    setEmail(user?.email || '');
-    setPhone(user?.phone || '');
-    if (user) {
-      setSelectedState(user.state || 'ACTIVE');
-      if (config) {
-        setSelectedRole(config.roles?.[0] ? String(config.roles[0]) : '');
-        setSelectedStore(config.store_ids?.[0] ? String(config.store_ids[0]) : '');
-      } else {
-        setSelectedRole('');
-        setSelectedStore('');
-      }
-    } else {
-      setSelectedRole('');
-      setSelectedStore('');
-      setSelectedState('INVITED');
-    }
-  }, [user, config]);
-
-  const handleSave = () => {
-    if (!firstName.trim() || !lastName.trim() || !email.trim() || !selectedRole) {
-      toastError('Por favor completa los campos obligatorios (*).');
-      return;
-    }
-
-    if (isEdit) {
-      const updateData: UpdateUserInput = {
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        phone: phone.trim() || undefined,
-        roles: [selectedRole],
-        default_store_id: selectedStore || null,
-        state: selectedState as UserState,
-      };
-      onSubmit(updateData);
-    } else {
-      const inviteData: InviteUserInput = {
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim() || undefined,
-        roles: [selectedRole],
-        default_store_id: selectedStore || undefined,
-      };
-      onSubmit(inviteData);
-    }
-  };
-
-  const selectedStoreLabel = storesList.find((s) => s.value === selectedStore)?.label || 'Ninguna (Organización)';
-  const selectedRoleLabel = rolesList.find((r) => r.value === selectedRole)?.label || 'Seleccionar Rol *';
-  const selectedStateLabel = USER_STATE_LABELS[selectedState] || selectedState;
-
-  return (
-    <Modal
-      visible={visible}
-      onClose={onClose}
-      title={isEdit ? 'Editar Usuario' : 'Invitar Usuario'}
-      showFooter
-      footer={
-        <View style={formStyles.footerContainer}>
-          <Button title="Cancelar" variant="secondary" onPress={onClose} disabled={loading} style={formStyles.footerBtn} />
-          <Button
-            title={isEdit ? 'Guardar Cambios' : 'Enviar Invitación'}
-            variant="primary"
-            onPress={handleSave}
-            loading={loading}
-            disabled={loading || !firstName.trim() || !lastName.trim() || !email.trim() || !selectedRole}
-            style={formStyles.footerBtn}
-          />
-        </View>
-      }
-    >
-      <View style={formStyles.container}>
-        <Input
-          label="Nombre *"
-          value={firstName}
-          onChangeText={setFirstName}
-          placeholder="Ej: Juan"
-          autoFocus={!isEdit}
-        />
-        <Input
-          label="Apellido *"
-          value={lastName}
-          onChangeText={setLastName}
-          placeholder="Ej: Pérez"
-        />
-        <Input
-          label="Email *"
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Ej: juan@ejemplo.com"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          editable={!isEdit}
-          helperText={isEdit ? 'El email de registro no es editable.' : undefined}
-        />
-        <Input
-          label="Teléfono"
-          value={phone}
-          onChangeText={setPhone}
-          placeholder="Ej: +57 300 123 4567"
-          keyboardType="phone-pad"
-        />
-
-        {/* Roles Select Trigger */}
-        <View style={formStyles.selectWrapper}>
-          <Text style={formStyles.selectLabel}>ROL DE ACCESO *</Text>
-          <Pressable style={formStyles.selectTrigger} onPress={() => setPickerOpen('role')}>
-            <Text style={[formStyles.selectText, !selectedRole && { color: colors.text.muted }]}>
-              {selectedRoleLabel}
-            </Text>
-            <Icon name="chevron-down" size={16} color={colorScales.gray[400]} />
-          </Pressable>
-        </View>
-
-        {/* Stores Select Trigger */}
-        <View style={formStyles.selectWrapper}>
-          <Text style={formStyles.selectLabel}>TIENDA PRINCIPAL</Text>
-          <Pressable style={formStyles.selectTrigger} onPress={() => setPickerOpen('store')}>
-            <Text style={formStyles.selectText}>{selectedStoreLabel}</Text>
-            <Icon name="chevron-down" size={16} color={colorScales.gray[400]} />
-          </Pressable>
-        </View>
-
-        {/* Status Select Trigger (Edit Mode Only) */}
-        {isEdit && (
-          <View style={formStyles.selectWrapper}>
-            <Text style={formStyles.selectLabel}>ESTADO DE LA CUENTA</Text>
-            <Pressable style={formStyles.selectTrigger} onPress={() => setPickerOpen('state')}>
-              <Text style={formStyles.selectText}>{selectedStateLabel}</Text>
-              <Icon name="chevron-down" size={16} color={colorScales.gray[400]} />
-            </Pressable>
-          </View>
-        )}
-      </View>
-
-      {/* Option Pickers */}
-      <OptionPickerModal
-        visible={pickerOpen === 'role'}
-        title="Seleccionar Rol"
-        options={rolesList}
-        selected={selectedRole}
-        onSelect={setSelectedRole}
-        onClose={() => setPickerOpen(null)}
-      />
-      <OptionPickerModal
-        visible={pickerOpen === 'store'}
-        title="Seleccionar Tienda Principal"
-        options={[{ value: '', label: 'Ninguna (Organización)' }, ...storesList]}
-        selected={selectedStore}
-        onSelect={setSelectedStore}
-        onClose={() => setPickerOpen(null)}
-      />
-      <OptionPickerModal
-        visible={pickerOpen === 'state'}
-        title="Seleccionar Estado"
-        options={FORM_STATE_OPTIONS}
-        selected={selectedState}
-        onSelect={(val) => setSelectedState(val as UserState)}
-        onClose={() => setPickerOpen(null)}
-      />
-    </Modal>
-  );
-}
-
 const formStyles = StyleSheet.create({
   container: {
     padding: spacing[4],
@@ -1713,40 +1510,56 @@ export default function UsersList() {
 
       // Después de invitar, configuramos con roles/tiendas según el app elegido:
       //   - ORG_ADMIN        → sin tienda, rol por defecto org_admin
-      //   - STORE_ADMIN      → tienda principal requerida, rol store_admin
+      //   - STORE_ADMIN      → tienda principal REQUERIDA por A3 — no
+      //                         intentamos aquí (no hay picker en este
+      //                         modal). El operador la asigna desde el
+      //                         editor del usuario.
       //   - STORE_ECOMMERCE  → sin tienda, rol ecommerce
       //
-      // Si no encontramos un rol que matchee, NO debemos fingir éxito
-      // silencioso: la invitación se envió pero el usuario quedó sin
-      // configuración. Marcamos `roleAssigned=false` para que el toast
-      // advierta al operador.
+      // Tres outcomes posibles para que el toast sea honesto:
+      //   1. Usuario creado + rol asignado (success total)
+      //   2. Usuario creado + rol no encontrado (warning — config manual)
+      //   3. Usuario creado + rol asignado parcial (updateConfiguration
+      //      500/timeout — la invitación se envió, el rol queda OK pero
+      //      no propagamos panel_ui/store_ids extra)
       const userId = String(inviteRes.user_id);
       const defaultRoleByApp: Record<string, { code: string; roleName: string }> = {
         ORG_ADMIN: { code: 'org_admin', roleName: 'Org Admin' },
-        STORE_ADMIN: { code: 'store_admin', roleName: 'Store Admin' },
         STORE_ECOMMERCE: { code: 'customer', roleName: 'Customer' },
       };
       const appConfig = defaultRoleByApp[body.app];
       let roleAssigned = false;
+      let configError: unknown = null;
       if (appConfig) {
         const matchedRole = (rolesResponse || []).find(
           (r: any) => r.code === appConfig.code || r.name?.toLowerCase().includes(appConfig.roleName.toLowerCase().split(' ')[0]),
         );
         if (matchedRole) {
-          await OrgUsersService.updateConfiguration(userId, {
-            app: body.app,
-            roles: [Number(matchedRole.id)],
-            store_ids: [],
-            panel_ui: {},
-          });
-          roleAssigned = true;
+          try {
+            await OrgUsersService.updateConfiguration(userId, {
+              app: body.app,
+              roles: [Number(matchedRole.id)],
+              store_ids: [],
+              panel_ui: {},
+            });
+            roleAssigned = true;
+          } catch (err) {
+            // El usuario ya fue creado + email enviado. Capturamos
+            // para no propagar el error a `onError` (que mentiría
+            // diciendo "Error al enviar la invitación").
+            configError = err;
+          }
         }
       }
 
-      return { invite: inviteRes, roleAssigned };
+      return { invite: inviteRes, roleAssigned, configError };
     },
-    onSuccess: ({ roleAssigned }) => {
-      if (roleAssigned) {
+    onSuccess: ({ roleAssigned, configError }) => {
+      if (configError) {
+        toastError(
+          'Invitación enviada, pero falló la asignación de configuración adicional. Edítalo desde el editor del usuario.',
+        );
+      } else if (roleAssigned) {
         toastSuccess('Invitación enviada y rol por defecto asignado.');
       } else {
         // El usuario existe pero su rol/app quedó sin asignar. No es un

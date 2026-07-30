@@ -63,6 +63,11 @@ export class CreateStoreDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(50)
   timezone?: string;
 
@@ -139,6 +144,11 @@ export class UpdateStoreDto {
   @IsString()
   @MaxLength(255)
   domain?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
 
   @IsOptional()
   @IsString()

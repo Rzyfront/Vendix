@@ -1,6 +1,6 @@
 import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 
@@ -11,7 +11,7 @@ interface MarketingTile {
   icon: string;
   iconColor: string;
   iconBg: string;
-  href: string;
+  href: Href;
 }
 
 const MARKETING_TILES: MarketingTile[] = [
@@ -28,7 +28,7 @@ const MARKETING_TILES: MarketingTile[] = [
     key: 'coupons',
     title: 'Cupones',
     description: 'Códigos de descuento y campañas de cupones para clientes.',
-    icon: 'ticket-percent',
+    icon: 'tag',
     iconColor: colorScales.purple[600],
     iconBg: colorScales.purple[100],
     href: '/(store-admin)/marketing/coupons',

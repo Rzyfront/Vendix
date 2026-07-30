@@ -26,8 +26,13 @@ import { formatCurrency } from '@/shared/utils/currency';
  */
 export default function PurchaseOrderDetail() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id: string }>();
-  const id = typeof params.id === 'string' ? params.id : '';
+  const params = useLocalSearchParams<{ id: string | string[] }>();
+  const rawId = params.id;
+  const id = typeof rawId === 'string'
+    ? rawId
+    : Array.isArray(rawId)
+      ? rawId[0] ?? ''
+      : '';
   const [refreshing, setRefreshing] = useState(false);
 
   const detailQuery = useQuery({

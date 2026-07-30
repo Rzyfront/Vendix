@@ -6,6 +6,7 @@ import ReanimatedAnimated, {
   withTiming,
   withDelay,
   withSpring,
+  runOnJS,
 } from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +19,7 @@ import type { StoreListItem } from '@/core/models/org-admin/store.types';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastError, toastInfo } from '@/shared/components/toast/toast.store';
 import { performStoreSwitch } from '@/core/auth/store-switcher';
+import { getModulesHiddenByIndustries } from '@/shared/constants/industry-modules.constant';
 
 interface MenuItem {
   label: string;
@@ -300,10 +302,9 @@ function CollapsibleSubmenu({ isExpanded, childrenCount, children }: Collapsible
 /**
  * runOnJS helper seguro para ejecutar setState al final de un withTiming.
  * Evita importar `runOnJS` directamente en sitios donde queremos ser concisos.
+ * Capturado por el closure del worklet (no `require()` dentro del worklet).
  */
 function runOnJSSafe(fn: () => void) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const { runOnJS } = require('react-native-reanimated');
   runOnJS(fn)();
 }
 
@@ -507,6 +508,27 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     return {};
   }, [store_settings, appType]);
 
+  // Industry ceiling — paridad con web `MenuFilterService` + `INDUSTRY_HIDDEN_MODULES`.
+  // Si la industria del store oculta este módulo (p.ej. `restaurant_ops` para
+  // retail), el item desaparece del drawer aunque `panel_ui[key]===true`.
+  // Fallback: `['retail']` cuando la metadata carga falla (defensa en
+  // profundidad — retail es el default seguro que oculta restaurant_ops,
+  // memberships, orders_reservations).
+  const storeIndustries = useMemo<string[]>(() => {
+    const fromStore = (store_settings as any)?.general?.industries;
+    const fromUser = (user_settings as any)?.general?.industries;
+    const list = Array.isArray(fromStore) && fromStore.length > 0
+      ? fromStore
+      : Array.isArray(fromUser) && fromUser.length > 0
+        ? fromUser
+        : ['retail'];
+    return list as string[];
+  }, [store_settings, user_settings]);
+  const hiddenByIndustries = useMemo(
+    () => getModulesHiddenByIndustries(storeIndustries),
+    [storeIndustries],
+  );
+
   const isModuleKeyVisible = (
     moduleKey: string | string[],
     panelUi: Record<string, boolean>,
@@ -514,6 +536,9 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     const keys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
     return keys.some((key) => {
       if (storePanelUi[key] === false) {
+        return false;
+      }
+      if (hiddenByIndustries.includes(key)) {
         return false;
       }
       return panelUi[key] === true;

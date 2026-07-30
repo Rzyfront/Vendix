@@ -8,6 +8,7 @@ import { StoreType } from '@/features/org/types/store.types';
 import { Button } from '@/shared/components/button/button';
 import { Card } from '@/shared/components/card/card';
 import { Input } from '@/shared/components/input/input';
+import { generateSlug } from '@/shared/utils/slug';;
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
@@ -65,15 +66,6 @@ const TIMEZONE_OPTIONS = [
   { value: 'Europe/Madrid', label: 'Madrid (UTC+1)' },
 ];
 
-function generateSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
 interface StoreUpsertFormProps {
   mode: StoreMode;
   storeId?: number;
@@ -90,7 +82,7 @@ export function StoreUpsertForm({ mode, storeId }: StoreUpsertFormProps) {
 
   const { data: existingStore, isLoading: loadingStore } = useQuery({
     queryKey: ['org-store', storeId],
-    queryFn: () => OrgStoreService.getById(storeId!),
+    queryFn: () => OrgStoreService.get(storeId!),
     enabled: isEdit && !!storeId,
   });
 

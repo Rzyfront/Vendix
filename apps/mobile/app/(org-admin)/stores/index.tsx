@@ -30,6 +30,8 @@ import {
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius, interFonts } from '@/shared/theme';
+import { generateSlug } from '@/shared/utils/slug';
+import { formatCurrency as formatCurrencyShared } from '@/shared/utils/currency';
 
 // ─── Store type labels & colors (aligned with web stores.component.ts) ────────
 const storeTypeLabel: Record<string, string> = {
@@ -83,15 +85,7 @@ function formatCompactNumber(num: number): string | number {
 
 function formatCurrency(amount: number): string {
   if (!amount) return '$ 0';
-  try {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `$ ${amount.toLocaleString()}`;
-  }
+  return formatCurrencyShared(amount, 'COP');
 }
 
 // ─── Store Edit/Create Modal (web `app-store-edit-modal` parity) ────────────
@@ -112,15 +106,7 @@ const STORE_TYPE_OPTIONS = [
   { value: 'kiosko', label: 'Kiosko' },
 ] as const;
 
-// Auto-genera slug desde nombre (mismo patrón que `store-upsert-form.tsx`)
-function generateSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
+// Auto-genera slug importado desde `@/shared/utils/slug`
 
 function StoreEditModal({
   visible,
@@ -146,11 +132,15 @@ function StoreEditModal({
 }) {
   // El picker UI usa valores lowercase (`'physical'`, `'online'`, etc.).
   // El DTO espera `StoreType` uppercase (`'PHYSICAL'`, `'ONLINE'`, ...).
-  // Esta tabla es la única fuente de verdad para la traducción.
+  // Esta tabla es la única fuente de verdad para la traducción — debe
+  // cubrir todos los valores soportados por el enum backend
+  // (`store_type_enum`): physical, online, hybrid, popup, kiosko.
   const STORE_TYPE_TO_DTO: Record<string, StoreType> = {
     physical: 'PHYSICAL',
     online: 'ONLINE',
     hybrid: 'HYBRID',
+    popup: 'POPUP',
+    kiosko: 'KIOSKO',
   };
   const toStoreType = (ui: string): StoreType =>
     STORE_TYPE_TO_DTO[ui] ?? 'PHYSICAL';
