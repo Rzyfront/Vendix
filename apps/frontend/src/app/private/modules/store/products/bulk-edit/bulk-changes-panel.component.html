@@ -112,4 +112,54 @@
       </p>
     </div>
   }
+
+  <!-- ═══ Zona peligrosa ══════════════════════════════════════════════════
+       Al FINAL del panel y con tratamiento de peligro: hay que hacer scroll para
+       llegar, así que no se pulsa por inercia camino de "Aplicar cambios".
+
+       Los colores usan la escala `red-*`, que en este proyecto NO es rojo
+       hardcodeado: `tailwind.config.js:99-111` la remapea a los tokens
+       `--color-error-*`, así que sigue el tema (incluido dark) sin `::ng-deep` ni
+       hex sueltos. Se usan shades (`bg-red-50`, `border-red-200`) y no opacidad
+       (`bg-error/10`), porque las clases con `/α` sobre tokens de este repo no
+       componen de forma fiable.
+  ══════════════════════════════════════════════════════════════════════════ -->
+  @if (canArchive()) {
+    <section class="mt-1 rounded-xl border border-red-200 bg-red-50 p-3">
+      <header class="mb-1 flex items-center gap-2">
+        <app-icon name="shield-alert" [size]="15" class="text-red-600" />
+        <h3 class="text-xs font-bold uppercase tracking-wide text-red-700">
+          Zona peligrosa
+        </h3>
+      </header>
+
+      <p class="mb-2.5 text-[10px] leading-tight text-red-700">
+        Eliminar archiva los productos y
+        <strong>no se puede deshacer</strong> desde la aplicación. Antes de
+        confirmar verás cuáles se eliminan, cuáles no y por qué.
+      </p>
+
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-[11px] font-semibold text-red-700">
+          @if (archiveDisabled()) {
+            Selecciona productos para poder eliminarlos
+          } @else {
+            {{ selectionCount() }}
+            {{ selectionCount() === 1 ? 'producto' : 'productos' }} en la
+            selección
+          }
+        </p>
+
+        <app-button
+          variant="danger"
+          size="xsm"
+          [disabled]="archiveDisabled()"
+          (clicked)="archiveRequested.emit()"
+        >
+          <app-icon slot="icon" name="trash-2" [size]="13" />
+          Eliminar seleccionados
+        </app-button>
+      </div>
+    </section>
+  }
 </div>

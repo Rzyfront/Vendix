@@ -78,6 +78,7 @@ import {
 } from '../../../../../shared/components/index';
 import { UomService } from '../../inventory/services/uom.service';
 import { ProductState, type Product, type ProductQueryDto } from '../interfaces';
+import { BulkArchiveConfirmModalComponent } from './bulk-archive-confirm-modal.component';
 import { BulkChangesPanelComponent } from './bulk-changes-panel.component';
 import { BulkConfirmModalComponent } from './bulk-confirm-modal.component';
 import {
@@ -98,6 +99,7 @@ import {
   resolveEffectiveStoreIndustries,
 } from './bulk-editable-fields.constant';
 import type {
+  BulkArchiveResult,
   BulkEditFieldContext,
   BulkEditProductTypeValue,
   BulkEditResult,
@@ -128,6 +130,7 @@ const PAGE_SIZE = 20;
     BulkSelectedStackComponent,
     BulkChangesPanelComponent,
     BulkConfirmModalComponent,
+    BulkArchiveConfirmModalComponent,
   ],
   templateUrl: './products-bulk-edit-page.component.html',
   styleUrl: './products-bulk-edit-page.component.scss',
@@ -351,6 +354,26 @@ export class ProductsBulkEditPageComponent {
 
   readonly modalOpen = signal<boolean>(false);
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // Zona peligrosa (archivado masivo)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  readonly archiveModalOpen = signal<boolean>(false);
+
+  /**
+   * `store:products:admin_delete` — el MISMO permiso que el archivado individual
+   * (`DELETE /store/products/:id`), no el `bulk_update` de esta vista. Archivar 100
+   * productos no puede pedir menos permiso que archivar uno.
+   *
+   * Misma mecánica que `canBulkEditProducts` en `products.component.ts:168-170`:
+   * `AuthFacade.hasPermission` lee el signal `userPermissions`, así que el
+   * `computed` es reactivo. Es afordancia de UI; la autorización real la impone el
+   * backend y además la refuerza por nombre en el controller.
+   */
+  readonly canArchiveProducts = computed<boolean>(() =>
+    this.authFacade.hasPermission('store:products:admin_delete'),
+  );
+
   /** Resuelve nombres para los lotes que el backend no alcanza a devolver. */
   readonly nameResolver = computed<(id: number) => string | undefined>(() => {
     const cache = this.productCache();
@@ -382,10 +405,14 @@ export class ProductsBulkEditPageComponent {
     return '';
   });
 
-  readonly headerMetadata = computed<string>(
-    () =>
-      `${this.selectedCount()} seleccionados · ${this.changedFieldKeys().length} configuraciones`,
-  );
+  readonly headerMetadata = computed<string>(() => {
+    const selected = this.selectedCount();
+    const changed = this.changedFieldKeys().length;
+    return [
+      `${selected} ${selected === 1 ? 'seleccionado' : 'seleccionados'}`,
+      `${changed} ${changed === 1 ? 'configuración' : 'configuraciones'}`,
+    ].join(' · ');
+  });
 
   constructor() {
     // Hidratación del stack. Se dispara SOLO cuando cambia la selección: la
@@ -626,6 +653,73 @@ export class ProductsBulkEditPageComponent {
     } else {
       this.toastService.warning(
         `${result.successful} editados y ${result.failed} con error`,
+      );
+    }
+
+    this.fetchPage();
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Zona peligrosa
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * El panel pidió eliminar. Abre el modal de confirmación reforzada, que es la
+   * ÚNICA puerta a `POST /bulk-edit/archive`: la página nunca llama al archivado
+   * directamente.
+   */
+  onArchiveRequested(): void {
+    if (this.selectedCount() === 0) {
+      this.toastService.warning('Selecciona al menos un producto para eliminar');
+      return;
+    }
+    this.archiveModalOpen.set(true);
+  }
+
+  /**
+   * El archivado terminó. Los ids archivados con éxito SALEN de la selección: ya
+   * no existen como productos editables y dejarlos en el stack los volvería a
+   * enviar en la siguiente operación, donde el backend los rechazaría con
+   * `PROD_FIND_001` ("ya está archivado") y el operador vería fallos que no
+   * entiende.
+   *
+   * Los fallidos SÍ se quedan seleccionados: siguen vivos, su motivo es accionable
+   * (liberar reservas, cerrar pedidos) y quitarlos obligaría a volver a buscarlos.
+   */
+  onArchived(result: BulkArchiveResult): void {
+    const removed = result.results
+      .filter((row) => row.status === 'ok')
+      .map((row) => row.id);
+
+    if (removed.length > 0) {
+      const nextSelection = new Set(this.selectedIds());
+      // El `Set` guarda `string | number`; los ids del backend llegan numéricos.
+      // Se borran ambas formas para no dejar una entrada huérfana si la selección
+      // vino de una fuente que los materializó como string.
+      removed.forEach((id) => {
+        nextSelection.delete(id);
+        nextSelection.delete(String(id));
+      });
+      this.selectedIds.set(nextSelection);
+
+      // Y fuera de la caché: sus fichas ya no reflejan la realidad.
+      this.productCache.update((prev) => {
+        const next = new Map(prev);
+        removed.forEach((id) => {
+          next.delete(id);
+          this.requestedIds.delete(id);
+        });
+        return next;
+      });
+    }
+
+    if (result.failed === 0) {
+      this.toastService.success(
+        `${result.successful} productos eliminados correctamente`,
+      );
+    } else {
+      this.toastService.warning(
+        `${result.successful} eliminados y ${result.failed} sin eliminar`,
       );
     }
 

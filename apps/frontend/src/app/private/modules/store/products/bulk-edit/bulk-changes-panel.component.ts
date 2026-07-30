@@ -37,6 +37,32 @@
  * distintos: validar "el producto completo" es literalmente imposible. Las
  * reglas cruzadas las evalúa el backend producto a producto y el preview las
  * devuelve como `warning`/`error` ANTES de escribir nada.
+ *
+ * ## Zona peligrosa (QUI-567 paso 13)
+ *
+ * Al final del panel, visualmente separada del resto, vive la acción de ELIMINAR
+ * los productos seleccionados. Está aquí y no en el `app-sticky-header` por dos
+ * razones:
+ *
+ *  1. **Distancia física del camino habitual.** La acción de guardar vive arriba,
+ *     en el header, y se pulsa muchas veces al día. Poner al lado un botón que
+ *     elimina 100 productos de forma irreversible es un accidente esperando su
+ *     turno. Al final del panel hay que hacer scroll para llegar.
+ *  2. **Es una acción del conjunto seleccionado, igual que los cambios.** Habita
+ *     el mismo contexto: "esto es lo que le voy a hacer a estos N productos".
+ *
+ * El bloque NO llama al servicio: emite `archiveRequested` y la PÁGINA abre el
+ * modal de confirmación. Es el mismo reparto que el resto del módulo (la página
+ * orquesta, los paneles presentan), y aquí importa más que en ningún otro sitio:
+ * la escritura tiene que pasar por la confirmación reforzada, y un componente de
+ * presentación que pudiera invocar el archivado por su cuenta sería una segunda
+ * puerta sin candado.
+ *
+ * El permiso llega como input (`canArchive`) resuelto por la página, igual que
+ * `products.component.ts` resuelve `canBulkEditProducts` y lo baja a
+ * `product-list` como `[canBulkEdit]`. Es afordancia de UI: el permiso real lo
+ * impone el backend (`store:products:admin_delete`, reforzado por nombre en
+ * `products-bulk-edit.controller.ts`).
  */
 
 import {
@@ -96,6 +122,11 @@ export class BulkChangesPanelComponent {
   readonly templateOptions = input<readonly SelectorOption[]>([]);
   /** Cuántos productos hay en el stack, para el aviso de alcance. */
   readonly selectionCount = input<number>(0);
+  /**
+   * `store:products:admin_delete` resuelto por la página. Sin él la zona
+   * peligrosa no se pinta: quien no puede eliminar no debería ni verlo ofrecido.
+   */
+  readonly canArchive = input<boolean>(false);
 
   /** Campos que el usuario activó explícitamente. */
   readonly activeFields = model<ReadonlySet<BulkEditableFieldKey>>(
@@ -104,6 +135,14 @@ export class BulkChangesPanelComponent {
 
   /** El usuario pidió limpiar todos los cambios pendientes. */
   readonly resetRequested = output<void>();
+  /**
+   * El usuario pidió eliminar la selección. La página abre el modal de
+   * confirmación reforzada; este componente no escribe nada.
+   */
+  readonly archiveRequested = output<void>();
+
+  /** Sin productos seleccionados no hay nada que eliminar. */
+  readonly archiveDisabled = computed<boolean>(() => this.selectionCount() === 0);
 
   readonly typeFieldKey = TYPE_FIELD_KEY;
 

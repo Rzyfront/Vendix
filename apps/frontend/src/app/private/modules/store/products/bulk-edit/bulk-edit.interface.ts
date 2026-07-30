@@ -188,6 +188,76 @@ export interface BulkEditResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Archivado masivo (soft-delete) — QUI-567 paso 13
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cuerpo de `POST /store/products/bulk-edit/archive` y de su `/preview`.
+ * Espejo de `BulkArchiveProductsDto` (`bulk-edit-products.dto.ts:333-340`).
+ *
+ * Solo ids: no hay campos que elegir. Archivar es una ACCIÓN, no un cambio de
+ * configuración, y por eso lleva su propia superficie con permiso
+ * (`store:products:admin_delete`), preview y confirmación propios.
+ */
+export interface BulkArchiveProductsRequest {
+  ids: number[];
+}
+
+/**
+ * Espejo de `BulkArchivePreviewItemDto` (`bulk-edit-products.dto.ts:361-368`).
+ *
+ * NO lleva array de diffs, a diferencia de `BulkEditPreviewItem`: no hay campos
+ * `actual → nuevo` porque no hay campos. Lo que el usuario necesita ver es el
+ * MOTIVO, así que la fila lleva `code` + `message`.
+ *
+ * Semántica del `status` (fijada por el backend en
+ * `products-bulk-edit.service.ts:506-560`):
+ * - `error`: el archivado se BLOQUEA. Reservas de stock activas
+ *   (`INV_STOCK_001`), producto en pedidos abiertos —borradores incluidos—
+ *   (`PROD_VALIDATE_001`), o producto inexistente / ya archivado
+ *   (`PROD_FIND_001`).
+ * - `warning`: el archivado SÍ ocurre, con una consecuencia que el usuario debe
+ *   conocer: el producto es insumo de una receta activa, o está en una promoción
+ *   vigente. Los warnings NO llevan `code` (el backend no inventa códigos
+ *   nuevos para reutilizarlos con otra semántica), solo `message`.
+ * - `ok`: sin observaciones.
+ */
+export interface BulkArchivePreviewItem {
+  id: number;
+  name: string;
+  sku: string | null;
+  status: BulkEditItemStatus;
+  code?: string;
+  message?: string;
+}
+
+/** Espejo de `BulkArchivePreviewResultDto`. */
+export interface BulkArchivePreviewResult {
+  total: number;
+  ok: number;
+  warnings: number;
+  errors: number;
+  items: BulkArchivePreviewItem[];
+}
+
+/** Espejo de `BulkArchiveResultItemDto` — tras archivar no hay `warning`. */
+export interface BulkArchiveResultItem {
+  id: number;
+  name: string;
+  status: Exclude<BulkEditItemStatus, 'warning'>;
+  code?: string;
+  message?: string;
+}
+
+/** Espejo de `BulkArchiveResultDto`. */
+export interface BulkArchiveResult {
+  total: number;
+  successful: number;
+  failed: number;
+  results: BulkArchiveResultItem[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Registro declarativo de campos editables
 // ─────────────────────────────────────────────────────────────────────────────
 

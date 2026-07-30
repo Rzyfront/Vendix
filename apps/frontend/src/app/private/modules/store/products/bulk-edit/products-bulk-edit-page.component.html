@@ -67,8 +67,10 @@
       [uomOptions]="uomOptions()"
       [templateOptions]="templateOptions()"
       [selectionCount]="selectedCount()"
+      [canArchive]="canArchiveProducts()"
       [(activeFields)]="activeFields"
       (resetRequested)="onResetChanges()"
+      (archiveRequested)="onArchiveRequested()"
     />
   </div>
 
@@ -84,4 +86,19 @@
     [resolveName]="nameResolver()"
     (applied)="onApplied($event)"
   />
+
+  <!--
+    Modal del archivado. Solo se monta si el usuario puede archivar: sin permiso no
+    hay ni zona peligrosa que lo abra, así que montarlo sería estado muerto.
+    Su efecto interno dispara el preview al abrirse y borra TODO al cerrarse —
+    incluida la casilla de "no se puede deshacer", que nunca queda pre-marcada.
+  -->
+  @if (canArchiveProducts()) {
+    <app-bulk-archive-confirm-modal
+      [(modalOpen)]="archiveModalOpen"
+      [ids]="selectedIdList()"
+      [resolveName]="nameResolver()"
+      (archived)="onArchived($event)"
+    />
+  }
 </div>

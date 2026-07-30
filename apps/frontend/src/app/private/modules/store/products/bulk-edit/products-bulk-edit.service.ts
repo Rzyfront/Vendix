@@ -38,6 +38,10 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import type { Product, ProductQueryDto } from '../interfaces';
 import {
   MAX_BULK_EDIT_IDS,
+  type BulkArchivePreviewItem,
+  type BulkArchivePreviewResult,
+  type BulkArchiveResult,
+  type BulkArchiveResultItem,
   type BulkEditPreviewItem,
   type BulkEditPreviewResult,
   type BulkEditResult,
@@ -76,8 +80,21 @@ export interface ProductIdsResult {
   capped: boolean;
 }
 
-/** Fase del troceado, para que la UI sepa qué está midiendo la barra. */
-export type BulkEditProgressPhase = 'idle' | 'preview' | 'apply';
+/**
+ * Fase del troceado, para que la UI sepa qué está midiendo la barra.
+ *
+ * `archive-preview` / `archive` son el flujo de la zona peligrosa. Comparten la
+ * MISMA señal de progreso que la edición a propósito: los dos modales son
+ * mutuamente excluyentes (uno se abre desde el header, el otro desde el panel de
+ * cambios) y nunca hay dos troceados vivos a la vez, así que duplicar la señal
+ * solo añadiría estado que sincronizar.
+ */
+export type BulkEditProgressPhase =
+  | 'idle'
+  | 'preview'
+  | 'apply'
+  | 'archive-preview'
+  | 'archive';
 
 export interface BulkEditProgress {
   phase: BulkEditProgressPhase;
@@ -295,6 +312,86 @@ export class ProductsBulkEditService {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
+  // Archivado masivo (zona peligrosa) — troceado idéntico
+  // ───────────────────────────────────────────────────────────────────────────
+  //
+  // Mismo contrato de troceado que la edición y por el mismo motivo:
+  // `BulkArchiveProductsDto` reutiliza `MAX_BULK_EDIT_IDS` (`@ArrayMaxSize(100)`),
+  // así que el tope es del backend y el troceado del cliente. Lotes EN SERIE
+  // (`concatMap`) y `catchError` DENTRO del `concatMap`, para que un lote caído
+  // degrade a "sus ids fallaron" sin abortar los siguientes.
+  //
+  // Aquí eso importa más todavía que en la edición: el archivado es
+  // IRREVERSIBLE. Si el lote 2 de 5 se cae y la cadena abortara, el operador se
+  // quedaría sin saber qué productos quedaron archivados y qué no, sobre una
+  // operación que no puede revertir desde la aplicación.
+
+  /**
+   * Dry-run del archivado. Devuelve UN informe agregado de todos los lotes.
+   * No escribe nada: es la antesala obligatoria de la confirmación reforzada.
+   */
+  previewArchiveInBatches(
+    ids: readonly number[],
+    resolveName?: ProductNameResolver,
+  ): Observable<BulkArchivePreviewResult> {
+    const batches = this.startPhase('archive-preview', ids);
+    if (batches.length === 0) {
+      return of({ total: 0, ok: 0, warnings: 0, errors: 0, items: [] });
+    }
+
+    return from(batches).pipe(
+      concatMap((batch) =>
+        this.http
+          .post<
+            ApiEnvelope<BulkArchivePreviewResult>
+          >(`${this.apiUrl}/store/products/bulk-edit/archive/preview`, { ids: batch })
+          .pipe(
+            map((res) => res.data),
+            catchError((err: unknown) =>
+              of(this.archivePreviewFallback(batch, err, resolveName)),
+            ),
+            tap(() => this.advance(batch.length)),
+          ),
+      ),
+      toArray(),
+      map((parts) => mergeArchivePreviewResults(parts)),
+    );
+  }
+
+  /**
+   * Archivado troceado (soft-delete: `state = 'archived'`). Un lote que falla NO
+   * detiene los siguientes y sus ids aparecen como fallidos en el informe final,
+   * nunca desaparecen.
+   */
+  archiveInBatches(
+    ids: readonly number[],
+    resolveName?: ProductNameResolver,
+  ): Observable<BulkArchiveResult> {
+    const batches = this.startPhase('archive', ids);
+    if (batches.length === 0) {
+      return of({ total: 0, successful: 0, failed: 0, results: [] });
+    }
+
+    return from(batches).pipe(
+      concatMap((batch) =>
+        this.http
+          .post<
+            ApiEnvelope<BulkArchiveResult>
+          >(`${this.apiUrl}/store/products/bulk-edit/archive`, { ids: batch })
+          .pipe(
+            map((res) => res.data),
+            catchError((err: unknown) =>
+              of(this.archiveFallback(batch, err, resolveName)),
+            ),
+            tap(() => this.advance(batch.length)),
+          ),
+      ),
+      toArray(),
+      map((parts) => mergeArchiveResults(parts)),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Internos
   // ───────────────────────────────────────────────────────────────────────────
 
@@ -354,6 +451,59 @@ export class ProductsBulkEditService {
   ): BulkEditResult {
     const { errorCode, userMessage } = parseApiError(err);
     const results: BulkEditResultItem[] = batch.map((id) => ({
+      id,
+      name: resolveName?.(id) ?? `Producto #${id}`,
+      status: 'error',
+      code: errorCode ?? undefined,
+      message: userMessage,
+    }));
+    return {
+      total: batch.length,
+      successful: 0,
+      failed: batch.length,
+      results,
+    };
+  }
+
+  /**
+   * Lote de preview de archivado caído → todos sus ids en `error` con el motivo.
+   *
+   * Degradar a `error` y no a `ok` es deliberado: un preview que no se pudo
+   * calcular NO autoriza a archivar. Con todas las filas en `error` el modal deja
+   * el conteo de archivables en 0 y el botón de confirmar inhabilitado, que es el
+   * comportamiento seguro para una operación irreversible.
+   */
+  private archivePreviewFallback(
+    batch: readonly number[],
+    err: unknown,
+    resolveName?: ProductNameResolver,
+  ): BulkArchivePreviewResult {
+    const { errorCode, userMessage } = parseApiError(err);
+    const items: BulkArchivePreviewItem[] = batch.map((id) => ({
+      id,
+      name: resolveName?.(id) ?? `Producto #${id}`,
+      sku: null,
+      status: 'error',
+      code: errorCode ?? undefined,
+      message: userMessage,
+    }));
+    return {
+      total: batch.length,
+      ok: 0,
+      warnings: 0,
+      errors: batch.length,
+      items,
+    };
+  }
+
+  /** Lote de archivado caído → todos sus ids como fallidos, nunca perdidos. */
+  private archiveFallback(
+    batch: readonly number[],
+    err: unknown,
+    resolveName?: ProductNameResolver,
+  ): BulkArchiveResult {
+    const { errorCode, userMessage } = parseApiError(err);
+    const results: BulkArchiveResultItem[] = batch.map((id) => ({
       id,
       name: resolveName?.(id) ?? `Producto #${id}`,
       status: 'error',
@@ -429,6 +579,45 @@ export function mergeApplyResults(
   parts: readonly BulkEditResult[],
 ): BulkEditResult {
   return parts.reduce<BulkEditResult>(
+    (acc, part) => ({
+      total: acc.total + (part?.total ?? 0),
+      successful: acc.successful + (part?.successful ?? 0),
+      failed: acc.failed + (part?.failed ?? 0),
+      results: [...acc.results, ...(part?.results ?? [])],
+    }),
+    { total: 0, successful: 0, failed: 0, results: [] },
+  );
+}
+
+/**
+ * Suma los previews de archivado de todos los lotes en uno solo.
+ *
+ * Funciones propias y no genéricas compartidas con las de edición: los shapes se
+ * PARECEN pero son contratos distintos (`BulkEditPreviewItem` lleva `changes[]`,
+ * `BulkArchivePreviewItem` no). Generalizarlas obligaría a un tipo común que
+ * ninguno de los dos DTO del backend declara, y ese tipo inventado sería el
+ * primer sitio donde el espejo se desincronizaría.
+ */
+export function mergeArchivePreviewResults(
+  parts: readonly BulkArchivePreviewResult[],
+): BulkArchivePreviewResult {
+  return parts.reduce<BulkArchivePreviewResult>(
+    (acc, part) => ({
+      total: acc.total + (part?.total ?? 0),
+      ok: acc.ok + (part?.ok ?? 0),
+      warnings: acc.warnings + (part?.warnings ?? 0),
+      errors: acc.errors + (part?.errors ?? 0),
+      items: [...acc.items, ...(part?.items ?? [])],
+    }),
+    { total: 0, ok: 0, warnings: 0, errors: 0, items: [] },
+  );
+}
+
+/** Suma los informes de archivado de todos los lotes en uno solo. */
+export function mergeArchiveResults(
+  parts: readonly BulkArchiveResult[],
+): BulkArchiveResult {
+  return parts.reduce<BulkArchiveResult>(
     (acc, part) => ({
       total: acc.total + (part?.total ?? 0),
       successful: acc.successful + (part?.successful ?? 0),

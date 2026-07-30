@@ -95,11 +95,36 @@ export function resolveEffectiveStoreIndustries(
 // Opciones estáticas — copiadas del formulario individual
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** `product-create-page.component.ts:826-830` (`stateOptions`, en español). */
+/**
+ * `product-create-page.component.ts:826-830` (`stateOptions`, en español), MENOS
+ * `ARCHIVED`.
+ *
+ * ## Por qué `Archivado` NO está aquí (QUI-567 paso 13)
+ *
+ * `state = 'archived'` ES el soft-delete de la aplicación
+ * (`products.service.ts:2779-2800`). Dejarlo como una opción más de este
+ * `input-buttons` abría DOS caminos de severidad distinta al MISMO efecto:
+ *
+ * | camino                       | permiso                        | preview            | confirmación |
+ * | ---------------------------- | ------------------------------ | ------------------ | ------------ |
+ * | `{state:'archived'}` en lote | `store:products:bulk_update`   | diff de campos     | botón        |
+ * | zona peligrosa               | `store:products:admin_delete`  | bloqueos + avisos  | casilla + botón |
+ *
+ * Por la vía del selector, eliminar 100 productos compartía permiso con
+ * `is_featured`, no avisaba de reservas de stock ni de pedidos abiertos, y se
+ * confirmaba con un clic — para una operación que NO SE PUEDE DESHACER desde la
+ * app (no existe ruta que saque un producto de `archived`: `update()` y
+ * `deactivate()` filtran `state != archived` en `products.service.ts:1903-1907`
+ * y `:2761-2765`, y no hay `activate`/`restore`).
+ *
+ * Retirar la opción cierra ese camino y deja el archivado con una sola puerta: la
+ * zona peligrosa del panel de cambios. `ProductState.ARCHIVED` sigue existiendo
+ * en el enum y el backend sigue aceptándolo en `BulkEditableChangesDto` (el
+ * contrato no cambia); lo que desaparece es la AFORDANCIA de UI.
+ */
 const STATE_OPTIONS: readonly BulkEditFieldOption[] = [
   { value: ProductState.ACTIVE, label: 'Activo' },
   { value: ProductState.INACTIVE, label: 'Inactivo' },
-  { value: ProductState.ARCHIVED, label: 'Archivado' },
 ];
 
 /** `product-create-page.component.ts:832-835` (`pricingTypeOptions`). */

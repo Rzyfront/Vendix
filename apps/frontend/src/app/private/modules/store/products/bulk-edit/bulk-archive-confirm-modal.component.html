@@ -1,0 +1,361 @@
+<app-modal
+  [(isOpen)]="modalOpen"
+  size="lg"
+  title="Eliminar productos"
+  subtitle="Revisa qué se elimina y qué no antes de confirmar"
+  [closeOnBackdrop]="false"
+>
+  <!-- ═══════════════ Calculando el dry-run ═══════════════════════════════ -->
+  @if (stage() === 'previewing') {
+    <div class="flex flex-col items-center gap-2 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-primary" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Comprobando si se pueden eliminar {{ ids().length }}
+        {{ ids().length === 1 ? 'producto' : 'productos' }}…
+      </p>
+      <p class="text-[11px] text-text-secondary">
+        Es una simulación: todavía no se ha eliminado nada.
+      </p>
+
+      @if (progress().totalBatches > 1) {
+        <p class="text-[11px] text-text-secondary">
+          Lote {{ progress().doneBatches }} de {{ progress().totalBatches }}
+        </p>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ El preview entero se cayó ═══════════════════════════ -->
+  @if (stage() === 'preview-failed') {
+    <div class="flex flex-col gap-3 py-2">
+      <app-alert-banner variant="danger" icon="alert-triangle">
+        No pudimos comprobar el impacto, así que no se eliminó ningún producto.
+      </app-alert-banner>
+
+      <ul class="flex flex-col gap-2">
+        @for (row of requestRequirements(); track row.id) {
+          <li class="rounded-lg border border-border bg-surface px-3 py-2">
+            <p class="text-xs font-semibold text-text-primary">{{ row.label }}</p>
+            <p class="mt-0.5 text-[11px] leading-tight text-text-secondary">
+              {{ row.reason }}
+            </p>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  <!-- ═══════════════ Preview listo: consentimiento reforzado ═════════════ -->
+  @if (stage() === 'ready' && previewResult()) {
+    <div class="flex flex-col gap-3">
+      <!--
+        El aviso de irreversibilidad va PRIMERO, antes de cualquier conteo: es el
+        hecho que condiciona todo lo demás. No existe ruta de API que desarchive
+        un producto (ver el docblock del componente).
+      -->
+      <app-alert-banner variant="danger" icon="shield-alert">
+        Esta acción <strong>no se puede deshacer</strong> desde la aplicación. Los
+        productos eliminados quedan archivados y no hay forma de recuperarlos ni
+        de volver a activarlos desde Vendix.
+      </app-alert-banner>
+
+      <!-- Conteo y desglose -->
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">
+            Seleccionados
+          </p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ previewResult()!.total }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-red-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-red-700">
+            Se eliminarán
+          </p>
+          <p class="text-lg font-bold text-red-700">
+            {{ previewResult()!.ok }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-amber-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-amber-700">
+            Con avisos
+          </p>
+          <p class="text-lg font-bold text-amber-700">
+            {{ previewResult()!.warnings }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-gray-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">
+            Bloqueados
+          </p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ blockedCount() }}
+          </p>
+        </div>
+      </div>
+
+      @if (archivableCount() === 0) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          Ninguno de los productos seleccionados se puede eliminar. Resuelve los
+          motivos de abajo o cambia la selección.
+        </app-alert-banner>
+      } @else if (blockedCount() > 0) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          {{ blockedCount() }} de {{ previewResult()!.total }} productos no se
+          pueden eliminar. Al confirmar, los otros {{ archivableCount() }} sí se
+          eliminan: la operación es parcial a propósito.
+        </app-alert-banner>
+      }
+
+      @if (progress().totalBatches > 1) {
+        <p class="text-[11px] text-text-secondary">
+          Se enviará en {{ progress().totalBatches }} lotes de 100 productos.
+        </p>
+      }
+
+      <!--
+        Lista de productos con su motivo. SIN diffs `campo: actual → nuevo`: no se
+        cambia ningún campo, se elimina el producto.
+      -->
+      <div class="max-h-[40vh] overflow-y-auto rounded-xl border border-border">
+        <ul class="divide-y divide-border">
+          @for (item of previewItems(); track item.id) {
+            <li class="px-3 py-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
+                <p
+                  class="min-w-0 truncate text-xs font-semibold text-text-primary"
+                >
+                  {{ item.name || 'Producto #' + item.id }}
+                  @if (item.sku) {
+                    <span class="font-normal text-text-secondary">
+                      · {{ item.sku }}
+                    </span>
+                  }
+                </p>
+
+                <span
+                  class="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  [class.bg-red-100]="item.status === 'ok'"
+                  [class.text-red-700]="item.status === 'ok'"
+                  [class.bg-amber-100]="item.status === 'warning'"
+                  [class.text-amber-700]="item.status === 'warning'"
+                  [class.bg-gray-100]="item.status === 'error'"
+                  [class.text-text-secondary]="item.status === 'error'"
+                >
+                  <app-icon
+                    [name]="
+                      item.status === 'ok'
+                        ? 'trash-2'
+                        : item.status === 'warning'
+                          ? 'alert-triangle'
+                          : 'circle-x'
+                    "
+                    [size]="11"
+                  />
+                  {{ statusLabel(item.status) }}
+                </span>
+              </div>
+
+              @if (item.status !== 'ok') {
+                <p
+                  class="mt-1 flex items-start gap-1 text-[11px] leading-tight"
+                  [class.text-text-secondary]="item.status === 'error'"
+                  [class.text-amber-700]="item.status === 'warning'"
+                >
+                  <app-icon name="info" [size]="12" class="mt-px shrink-0" />
+                  {{ describeReason(item.code, item.message) }}
+                </p>
+              }
+            </li>
+          }
+        </ul>
+      </div>
+
+      <!-- ═══ El gesto deliberado ═══════════════════════════════════════════ -->
+      @if (archivableCount() > 0) {
+        <label
+          class="flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors"
+          [class.border-border]="!acknowledged()"
+          [class.bg-surface]="!acknowledged()"
+          [class.border-red-300]="acknowledged()"
+          [class.bg-red-50]="acknowledged()"
+        >
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-red-600"
+            [checked]="acknowledged()"
+            (change)="onAcknowledgeChange($event)"
+          />
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-semibold text-text-primary">
+              Entiendo que esta acción no se puede deshacer
+            </span>
+            <span
+              class="mt-0.5 block text-[10px] leading-tight text-text-secondary"
+            >
+              @if (archivableCount() === 1) {
+                Se eliminará 1 producto y no podré recuperarlo desde la
+                aplicación.
+              } @else {
+                Se eliminarán {{ archivableCount() }} productos y no podré
+                recuperarlos desde la aplicación.
+              }
+            </span>
+          </span>
+        </label>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ Eliminando: progreso por lotes ══════════════════════ -->
+  @if (stage() === 'archiving') {
+    <div class="flex flex-col items-center gap-3 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-red-600" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Eliminando… {{ progress().doneIds }} de {{ progress().totalIds }}
+      </p>
+
+      <div class="h-2 w-full max-w-sm overflow-hidden rounded-full bg-gray-200">
+        <div
+          class="h-full rounded-full bg-red-600"
+          [style.width.%]="progressPercent()"
+        ></div>
+      </div>
+
+      <p class="text-[11px] text-text-secondary">
+        Lote {{ progress().doneBatches }} de {{ progress().totalBatches }} · no
+        cierres esta ventana.
+      </p>
+    </div>
+  }
+
+  <!-- ═══════════════ Informe final ═══════════════════════════════════════ -->
+  @if (stage() === 'done') {
+    <div class="flex flex-col gap-3">
+      @if (archiveResult()) {
+        <div class="grid grid-cols-3 gap-2">
+          <div class="rounded-xl border border-border bg-surface px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-text-secondary">
+              Enviados
+            </p>
+            <p class="text-lg font-bold text-text-primary">
+              {{ archiveResult()!.total }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-red-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-red-700">
+              Eliminados
+            </p>
+            <p class="text-lg font-bold text-red-700">
+              {{ archiveResult()!.successful }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-gray-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-text-secondary">
+              No eliminados
+            </p>
+            <p class="text-lg font-bold text-text-primary">
+              {{ archiveResult()!.failed }}
+            </p>
+          </div>
+        </div>
+
+        @if (archiveResult()!.failed === 0) {
+          <app-alert-banner variant="success" icon="circle-check">
+            @if (archiveResult()!.successful === 1) {
+              El producto quedó eliminado.
+            } @else {
+              Los {{ archiveResult()!.successful }} productos quedaron
+              eliminados.
+            }
+          </app-alert-banner>
+        } @else {
+          <app-alert-banner variant="warning" icon="alert-triangle">
+            {{ archiveResult()!.successful }} productos se eliminaron y
+            {{ archiveResult()!.failed }} no. Los que no se eliminaron siguen
+            exactamente como estaban.
+          </app-alert-banner>
+
+          <div
+            class="max-h-[35vh] overflow-y-auto rounded-xl border border-border"
+          >
+            <ul class="divide-y divide-border">
+              @for (row of failedResults(); track row.id) {
+                <li class="px-3 py-2">
+                  <p class="text-xs font-semibold text-text-primary">
+                    {{ row.name || 'Producto #' + row.id }}
+                  </p>
+                  <p class="mt-0.5 text-[11px] leading-tight text-text-secondary">
+                    {{ describeReason(row.code, row.message) }}
+                  </p>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+      }
+
+      @if (requestRequirements().length > 0) {
+        <ul class="flex flex-col gap-2">
+          @for (row of requestRequirements(); track row.id) {
+            <li class="rounded-lg border border-border bg-surface px-3 py-2">
+              <p class="text-xs font-semibold text-text-primary">
+                {{ row.label }}
+              </p>
+              <p class="mt-0.5 text-[11px] leading-tight text-text-secondary">
+                {{ row.reason }}
+              </p>
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ Pie ═════════════════════════════════════════════════ -->
+  <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
+    @if (stage() === 'ready') {
+      <app-button variant="outline" size="sm" (clicked)="onClose()">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="danger"
+        size="sm"
+        [disabled]="!canConfirm()"
+        (clicked)="onConfirm()"
+      >
+        <app-icon slot="icon" name="trash-2" [size]="14" />
+        Eliminar {{ archivableCount() }}
+        {{ archivableCount() === 1 ? 'producto' : 'productos' }}
+      </app-button>
+    }
+
+    @if (stage() === 'preview-failed') {
+      <app-button variant="outline" size="sm" (clicked)="onClose()">
+        Cerrar
+      </app-button>
+      <app-button variant="primary" size="sm" (clicked)="onRetryPreview()">
+        <app-icon slot="icon" name="refresh-cw" [size]="14" />
+        Reintentar
+      </app-button>
+    }
+
+    @if (stage() === 'previewing' || stage() === 'archiving') {
+      <app-button
+        variant="outline"
+        size="sm"
+        [disabled]="stage() === 'archiving'"
+        (clicked)="onClose()"
+      >
+        Cancelar
+      </app-button>
+    }
+
+    @if (stage() === 'done') {
+      <app-button variant="primary" size="sm" (clicked)="onClose()">
+        Listo
+      </app-button>
+    }
+  </div>
+</app-modal>
