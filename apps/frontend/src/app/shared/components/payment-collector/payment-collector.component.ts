@@ -42,6 +42,21 @@ import {
 } from './payment-collector.model';
 
 /**
+ * Sub-bloque del cobro que la validación resalta cuando le falta un dato.
+ * `null` = el mensaje se muestra solo en el banner (el faltante no vive en un
+ * bloque destacable, p. ej. el saldo de la wallet).
+ */
+export type PaymentFlashSection = 'method' | 'cash' | 'reference' | 'customer' | 'credit';
+
+/** Resultado de la resolución del primer dato faltante del cobro. */
+interface PaymentValidationError {
+  section: PaymentFlashSection | null;
+  message: string;
+  /** Pide el cliente al padre: el collector no puede capturarlo por sí mismo. */
+  requestCustomer?: boolean;
+}
+
+/**
  * `app-payment-collector` — HEADLESS, capability-driven charge widget.
  *
  * Renders a payment-method grid plus the details each method needs (cash +
@@ -161,6 +176,16 @@ export class PaymentCollectorComponent implements OnInit {
   readonly manuallyEditedCash = signal<boolean>(false);
   /** Guards programmatic cash writes so they don't flip {@link manuallyEditedCash}. */
   private readonly suppressCashEdit = signal<boolean>(false);
+
+  // ── Validation flash ────────────────────────────────────────────────────
+  /**
+   * Dato faltante que se está señalando ahora mismo (destello de 3s). El CTA del
+   * cobro NUNCA se deshabilita: se pulsa, y si falta algo el collector lo nombra
+   * — un botón habilitado que no responde es un defecto propio (QUI-561).
+   */
+  readonly flashSection = signal<PaymentFlashSection | null>(null);
+  readonly flashMessage = signal<string>('');
+  private flashTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // ── Reactive bridges (never read FormControl.value inside computeds) ────
   readonly cashReceived = toSignal(this.cashReceivedControl.valueChanges, { initialValue: 0 });
@@ -309,7 +334,31 @@ export class PaymentCollectorComponent implements OnInit {
   });
 
   // ── The single submit gate ───────────────────────────────────────────────
-  readonly canSubmit = computed<boolean>(() => {
+  /**
+   * Gate del COBRO real: única puerta de {@link triggerSubmit}. Exige todo lo de
+   * {@link canConfirmAmount} MÁS el cliente cuando `config().requireCustomer`.
+   */
+  readonly canSubmit = computed<boolean>(() => this.evaluateGate(true));
+
+  /**
+   * Gate de la CONFIRMACIÓN DE MONTO (sub-paso "Monto" del layout stepped).
+   * Idéntico a {@link canSubmit} salvo que NO aplica `config().requireCustomer`:
+   * el cliente obligatorio se exige al cobrar, no al confirmar el monto, porque
+   * el orden de pasos del POS puede capturarlo después (QUI-561).
+   *
+   * Wallet y crédito son la excepción y sí siguen exigiendo cliente aquí: su
+   * monto se DERIVA del cliente (saldo disponible / plan de cuotas), así que sin
+   * cliente no hay monto que confirmar.
+   */
+  readonly canConfirmAmount = computed<boolean>(() => this.evaluateGate(false));
+
+  /**
+   * Cuerpo compartido por ambos gates — misma validación, una sola fuente.
+   * `requireCustomerCheck` gobierna SOLO la guarda genérica
+   * `config().requireCustomer`; las guardas de cliente propias de wallet y
+   * crédito son incondicionales.
+   */
+  private evaluateGate(requireCustomerCheck: boolean): boolean {
     if (this.isProcessing()) return false;
     const cfg = this.config();
 
@@ -329,7 +378,7 @@ export class PaymentCollectorComponent implements OnInit {
       return this.walletSufficient();
     }
 
-    if (cfg.requireCustomer && !this.customer()) return false;
+    if (requireCustomerCheck && cfg.requireCustomer && !this.customer()) return false;
 
     if (type === PaymentMethodType.WOMPI) {
       return this.wompiSlice() != null;
@@ -350,7 +399,7 @@ export class PaymentCollectorComponent implements OnInit {
     }
 
     return true;
-  });
+  }
 
   constructor() {
     // Single reset effect. Tracks ONLY context(); all writes happen inside
@@ -386,6 +435,10 @@ export class PaymentCollectorComponent implements OnInit {
         }
       });
     });
+
+    this.destroyRef.onDestroy(() => {
+      if (this.flashTimeout) clearTimeout(this.flashTimeout);
+    });
   }
 
   ngOnInit(): void {
@@ -407,6 +460,28 @@ export class PaymentCollectorComponent implements OnInit {
     this.closed.emit();
   }
 
+  /**
+   * Nombra el primer dato faltante del cobro y lo destella 3s bajo el sub-paso
+   * activo. La invoca el padre cuando un CTA habilitado no pudo avanzar, para que
+   * el POS diga QUÉ falta en vez de quedarse mudo (QUI-561). No-op si no falta
+   * nada o si el cobro está en curso.
+   */
+  flashValidation(): void {
+    const error = this.getFirstValidationError();
+    if (!error) return;
+    this.flashSection.set(error.section);
+    this.flashMessage.set(error.message);
+    // Wallet/crédito sin cliente: el collector no captura clientes, así que se lo
+    // pide al padre por el mismo escape que ya usan setMode('credito') y
+    // selectMethod(WALLET).
+    if (error.requestCustomer) this.requestCustomer.emit();
+    if (this.flashTimeout) clearTimeout(this.flashTimeout);
+    this.flashTimeout = setTimeout(() => {
+      this.flashSection.set(null);
+      this.flashMessage.set('');
+    }, 3000);
+  }
+
   // ── Interaction handlers ─────────────────────────────────────────────────
   setMode(mode: PaymentMode): void {
     this.amountCollapsed.set(false);
@@ -426,13 +501,14 @@ export class PaymentCollectorComponent implements OnInit {
   }
 
   /**
-   * Stepped layout: confirm the Monto sub-step. Guarded by the single submit
-   * gate (canSubmit) so a not-yet-valid amount cannot be confirmed. Collapses
-   * the Total/detail cards (shared green one-shot fill) and emits
-   * {@link amountConfirmed} so the shell advances/finalizes after the animation.
+   * Stepped layout: confirm the Monto sub-step. Guarded por
+   * {@link canConfirmAmount} — NO por `canSubmit` — porque el cliente obligatorio
+   * se exige al cobrar, no al confirmar el monto. Collapses the Total/detail cards
+   * (shared green one-shot fill) and emits {@link amountConfirmed} so the shell
+   * advances/finalizes after the animation.
    */
   confirmAmount(): void {
-    if (!this.canSubmit()) return;
+    if (!this.canConfirmAmount()) return;
     this.amountCollapsed.set(true);
     this.amountConfirmed.emit();
   }
@@ -531,6 +607,83 @@ export class PaymentCollectorComponent implements OnInit {
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
+  /**
+   * Resuelve el PRIMER dato faltante del cobro, en orden de prioridad, para que
+   * el operador sepa qué corregir. Espeja las guardas de {@link evaluateGate}: si
+   * el gate está cerrado, alguna rama de aquí debe nombrar el motivo.
+   */
+  private getFirstValidationError(): PaymentValidationError | null {
+    // Cobro en curso: el gate está cerrado a propósito, no falta ningún dato.
+    if (this.isProcessing()) return null;
+
+    if (this.mode() === 'credito') {
+      // Crédito no elige método; el plan se DERIVA del cliente, así que el
+      // cliente es el primer faltante posible.
+      if (!this.customer()) {
+        return {
+          section: 'customer',
+          message: 'Selecciona un cliente para este método',
+          requestCustomer: true,
+        };
+      }
+      if (this.effectiveBase() <= 0) {
+        return { section: null, message: 'El monto a financiar debe ser mayor a cero' };
+      }
+      if (this.creditTerms() == null) {
+        return { section: 'credit', message: 'Completa el plan de crédito' };
+      }
+      return this.unnamedGateError();
+    }
+
+    if (!this.selectedMethod()) {
+      return { section: 'method', message: 'Elige un método de pago' };
+    }
+
+    if (this.isCashInsufficient()) {
+      return { section: 'cash', message: 'El efectivo recibido no cubre el total' };
+    }
+
+    if (this.needsReference() && this.referenceValue().trim().length < 1) {
+      return { section: 'reference', message: 'Ingresa la referencia del pago' };
+    }
+
+    if (this.isWalletSelected()) {
+      if (!this.customer()) {
+        return {
+          section: 'customer',
+          message: 'Selecciona un cliente para este método',
+          requestCustomer: true,
+        };
+      }
+      if (!this.walletSufficient()) {
+        return { section: null, message: 'El saldo de la wallet no cubre el total' };
+      }
+    }
+
+    if (this.isWompiSelected() && this.wompiSlice() == null) {
+      return { section: null, message: 'Completa los datos del pago con Wompi' };
+    }
+
+    // Cliente exigido por configuración (ventas anónimas deshabilitadas). Se
+    // nombra el dato pero NO se emite requestCustomer: aquí el dueño de la
+    // captura es el paso Cliente del flujo, y forzar el modal desde el collector
+    // competiría con esa navegación.
+    if (this.config().requireCustomer && !this.customer()) {
+      return { section: 'customer', message: 'Selecciona un cliente para completar la venta' };
+    }
+
+    return this.unnamedGateError();
+  }
+
+  /**
+   * Red de seguridad: el gate sigue cerrado por un motivo que ninguna rama
+   * anterior nombró. Se dice algo genérico antes que dejar el CTA mudo.
+   */
+  private unnamedGateError(): PaymentValidationError | null {
+    if (this.canSubmit()) return null;
+    return { section: null, message: 'Revisa los datos del pago para continuar' };
+  }
+
   /** Write the cash control programmatically without flagging a manual edit. */
   private setCashProgrammatic(value: number): void {
     this.suppressCashEdit.set(true);
@@ -539,6 +692,10 @@ export class PaymentCollectorComponent implements OnInit {
   }
 
   private resetState(): void {
+    // Un cambio de contexto invalida el destello: nunca debe sobrevivir al reset.
+    if (this.flashTimeout) clearTimeout(this.flashTimeout);
+    this.flashSection.set(null);
+    this.flashMessage.set('');
     this.selectedMethod.set(null);
     this.subStep.set(0);
     this.amountCollapsed.set(false);

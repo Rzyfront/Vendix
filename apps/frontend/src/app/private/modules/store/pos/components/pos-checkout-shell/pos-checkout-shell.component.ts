@@ -51,7 +51,8 @@ export type CheckoutIntent = 'pickup' | 'delivery';
  *
  * SHELL con stepper que unifica el checkout POS. En B1 cubre el flujo
  * NO-delivery (pago sin envío) con dos pasos: **Cobro** (hospeda el
- * `app-pos-payment-step`) y **Cliente** (toggle anónimo/cliente + selector).
+ * `app-pos-payment-step`) y **Cliente** (toggle anónimo/cliente + selector), cuyo
+ * ORDEN es dinámico según la matriz documentada en {@link PosCheckoutShellComponent.steps}.
  * El Resumen es un rail fijo. El shell es dueño del flag `isAnonymousSale` y lo
  * comparte con el paso Cobro; la verdad del cliente/carrito la posee el padre
  * (POS) vía `customerSelected` → `onPaymentCustomerSelected`.
@@ -140,6 +141,46 @@ export class PosCheckoutShellComponent {
   );
 
   /**
+   * QUI-561 — "toda venta lleva cliente": la tienda apagó
+   * `pos.allow_anonymous_sales`, así que ninguna venta puede cerrarse sin un
+   * cliente adjunto.
+   *
+   * **Se deriva del SETTING, nunca de {@link isAnonymousSale}.** De este predicado
+   * depende el ORDEN de {@link steps} / {@link stepKeys}, y {@link currentStep} es
+   * un ÍNDICE numérico: si el arreglo de pasos se reordenara a mitad del checkout
+   * (el operador togglea "Venta Anónima" con el modal abierto), el índice pasaría
+   * a apuntar a OTRO paso y la UI quedaría desalineada. El setting es estable
+   * durante toda la venta; el flag es mutable por el operador. Ésa es la trampa.
+   *
+   * Lazy-eval: `allowAnonymousSales` se declara más abajo, pero este computed solo
+   * corre al leerse (ya inicializado).
+   */
+  readonly customerRequired = computed<boolean>(
+    () => !this.allowAnonymousSales(),
+  );
+
+  /**
+   * El paso Cliente no se puede abandonar sin cliente, por cualquiera de sus dos
+   * razones: hay envío (la dirección lo exige) o la tienda prohíbe ventas
+   * anónimas ({@link customerRequired}). Alimenta el badge "Obligatorio" y el
+   * aviso inline del panel Cliente.
+   */
+  readonly customerMandatory = computed<boolean>(
+    () => this.requiresAddress() || this.customerRequired(),
+  );
+
+  /**
+   * Copy del aviso inline cuando falta el cliente. Existe para que el template
+   * tenga UN solo bloque de mensaje para las dos razones de obligatoriedad: el
+   * texto cambia, el markup no.
+   */
+  readonly customerErrorMessage = computed<string>(() =>
+    this.requiresAddress()
+      ? 'Selecciona un cliente para continuar con el envío.'
+      : 'Selecciona o crea un cliente para continuar.',
+  );
+
+  /**
    * Seeds `app-address-form-fields` from the current customer's primary saved
    * address (defensive mapping to `AddressPayload`). Null when the customer has
    * no address on file.
@@ -205,10 +246,31 @@ export class PosCheckoutShellComponent {
   });
 
   /**
-   * Dynamic steps by intent:
-   *  - pickup (no restaurante)   → [Cobro, Cliente]
-   *  - pickup (restaurante)      → [Consumo, Cobro, Cliente]
-   *  - delivery                  → [Cliente, Envío, Cobro]  (Cobro SIEMPRE al final)
+   * Orden dinámico de pasos. `delivery` es fijo — [Cliente, Envío, Cobro], Cobro
+   * SIEMPRE al final. Los flujos no-delivery se cruzan con {@link customerRequired}
+   * y {@link showConsumoStep}:
+   *
+   * | customerRequired | showConsumoStep | orden                     |
+   * | ---------------- | --------------- | ------------------------- |
+   * | false            | false           | [Cobro, Cliente]          |
+   * | false            | true            | [Consumo, Cobro, Cliente] |
+   * | true             | false           | [Cliente, Cobro]          |
+   * | true             | true            | [Consumo, Cliente, Cobro] |
+   *
+   * QUI-561 — por qué se adelanta Cliente: el paso Cobro exige cliente cuando la
+   * venta no es anónima (`[requireCustomer]="!isAnonymous()"` → el collector deja
+   * `canSubmit()` en false), y con `allow_anonymous_sales=false` ese cliente no lo
+   * había capturado NADIE todavía en pickup, porque Cliente iba DESPUÉS. Resultado:
+   * "Siguiente" no hacía nada y no mostraba error (el atasco reportado). Con el
+   * cliente obligatorio el paso Cliente va antes, exactamente como delivery.
+   *
+   * **El orden depende del SETTING ({@link customerRequired}), NO del flag mutable
+   * {@link isAnonymousSale}**: {@link currentStep} es un índice numérico y
+   * reordenar el arreglo a mitad del checkout lo dejaría apuntando a otro paso.
+   *
+   * Consecuencia deseada de la matriz: con cliente obligatorio Cobro pasa a ser el
+   * ÚLTIMO paso, así que confirmar el monto FINALIZA la venta — el mismo
+   * comportamiento que delivery ya tiene hoy.
    *
    * "Contra entrega" ya no es un eje aparte: es el método de pago
    * `cash_on_delivery` (processing_mode ON_DELIVERY) que el paso Cobro ofrece
@@ -218,20 +280,32 @@ export class PosCheckoutShellComponent {
     if (this.checkoutIntent() === 'delivery') {
       return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
     }
-    return this.showConsumoStep()
-      ? [{ label: 'Consumo' }, { label: 'Cobro' }, { label: 'Cliente' }]
+    const cobroLast = this.customerRequired();
+    if (this.showConsumoStep()) {
+      return cobroLast
+        ? [{ label: 'Consumo' }, { label: 'Cliente' }, { label: 'Cobro' }]
+        : [{ label: 'Consumo' }, { label: 'Cobro' }, { label: 'Cliente' }];
+    }
+    return cobroLast
+      ? [{ label: 'Cliente' }, { label: 'Cobro' }]
       : [{ label: 'Cobro' }, { label: 'Cliente' }];
   });
 
   /** Parallel key array (same order/length as {@link steps}) used to render the
-   *  active body and gate which step components mount. */
+   *  active body and gate which step components mount. Debe espejar EXACTAMENTE
+   *  la matriz documentada en {@link steps}: ambos comparten {@link currentStep}
+   *  como índice, así que una discrepancia desalinea la UI del cuerpo activo. */
   readonly stepKeys = computed<string[]>(() => {
     if (this.checkoutIntent() === 'delivery') {
       return ['cliente', 'envio', 'cobro'];
     }
-    return this.showConsumoStep()
-      ? ['consumo', 'cobro', 'cliente']
-      : ['cobro', 'cliente'];
+    const cobroLast = this.customerRequired();
+    if (this.showConsumoStep()) {
+      return cobroLast
+        ? ['consumo', 'cliente', 'cobro']
+        : ['consumo', 'cobro', 'cliente'];
+    }
+    return cobroLast ? ['cliente', 'cobro'] : ['cobro', 'cliente'];
   });
 
   readonly currentStepKey = computed<string>(
@@ -395,7 +469,10 @@ export class PosCheckoutShellComponent {
       return !pay.canSubmit();
     }
 
-    // pickup (B1): idéntico al collector + gate de mesa del paso Consumo.
+    // pickup (B1): idéntico al collector + gate de mesa del paso Consumo. Vale
+    // para las dos posiciones de Cobro (intermedio → el CTA terminal vive en
+    // Cliente; último con cliente obligatorio → vive en Cobro): lo que decide en
+    // ambos casos es canSubmit() del collector, no el índice del paso.
     const step = this.paymentStep();
     if (!step) return true;
     return !step.canSubmit() || (this.consumoStep()?.needsTable() ?? false);
@@ -417,9 +494,10 @@ export class PosCheckoutShellComponent {
    * True while the major step is 'cobro' AND the Cobro sub-wizard still has
    * sub-steps pending before Monto. Lets the footer keep showing "Siguiente"
    * (driving Forma de pago → Método → Monto via {@link attemptNextStep}) instead
-   * of the terminal CTA — even in delivery, where Cobro is the LAST major step
-   * and {@link isLastStep} would otherwise force "Finalizar venta" from the very
-   * first sub-step, leaving the payment sub-wizard un-navigable (the bug).
+   * of the terminal CTA — imprescindible en TODO flujo donde Cobro es el último
+   * paso mayor (delivery, y pickup con {@link customerRequired}), porque
+   * {@link isLastStep} forzaría el CTA terminal desde el primer sub-paso y dejaría
+   * el sub-wizard de pago sin navegación (el bug).
    */
   readonly cobroNeedsAdvance = computed<boolean>(
     () =>
@@ -577,8 +655,9 @@ export class PosCheckoutShellComponent {
    * step advances while incomplete, flashing in the UI what is missing instead
    * of jumping ahead:
    *  - Cliente (con-cliente): Tipo → Cliente → (delivery) Dirección. A customer
-   *    is required for delivery before the Dirección sub-step; a valid address
-   *    (with phone) is required before leaving Dirección.
+   *    is required for delivery before the Dirección sub-step, and también para
+   *    salir del sub-paso Cliente cuando {@link customerRequired} (QUI-561); a
+   *    valid address (with phone) is required before leaving Dirección.
    *  - Envío: a shipping method + address/cost must satisfy `canConfirm()`
    *    before reaching Cobro.
    * Every other step advances normally.
@@ -598,13 +677,22 @@ export class PosCheckoutShellComponent {
       if (sub === 1) {
         if (this.requiresAddress()) {
           if (!this.cartState()?.customer) {
-            this.showCustomerError.set(true);
+            this.flagMissingCustomer();
             return;
           }
           this.goToClienteSubStep(2);
           return;
         }
-        // Pickup con-cliente: Cliente es terminal; el collector valida el resto.
+        // Pickup con-cliente: Cliente es el sub-paso terminal.
+        // QUI-561: con cliente OBLIGATORIO salir de aquí sin uno dejaría al
+        // collector bloqueado en silencio (requireCustomer ⇒ canSubmit()=false),
+        // que es justo el atasco que se está corrigiendo. Avisamos en vez de
+        // avanzar. Con ventas anónimas permitidas el paso sigue libre y el
+        // collector valida el resto.
+        if (this.customerRequired() && !this.cartState()?.customer) {
+          this.flagMissingCustomer();
+          return;
+        }
         this.nextStep();
         return;
       }
@@ -633,10 +721,14 @@ export class PosCheckoutShellComponent {
     }
 
     // ── Cobro: conduce el sub-wizard del collector (Forma → Método → Monto)
-    // antes de saltar al siguiente paso mayor. En pickup, Cobro NO es el último
-    // paso (Consumo → Cobro → Cliente); sin esto, "Siguiente" saltaba directo a
-    // Cliente omitiendo Método y Monto (frames a7mp1 / G0dg6). El paso confirma
-    // el monto en el último sub-paso, cuyo amountConfirmed avanza el paso mayor.
+    // antes de saltar al siguiente paso mayor. Cuando Cobro es intermedio
+    // (Consumo → Cobro → Cliente, ventas anónimas permitidas) sin esto
+    // "Siguiente" saltaba directo a Cliente omitiendo Método y Monto (frames
+    // a7mp1 / G0dg6). Cuando Cobro es el último paso (delivery o pickup con
+    // cliente obligatorio) el footer solo llega aquí mientras
+    // cobroNeedsAdvance(), y el nextStep() final es un no-op inofensivo. El paso
+    // confirma el monto en el último sub-paso, cuyo amountConfirmed finaliza
+    // (Cobro último) o avanza el paso mayor.
     if (key === 'cobro') {
       if (this.paymentStep()?.advanceSubStepOrConfirm()) return;
       this.nextStep();
@@ -644,6 +736,18 @@ export class PosCheckoutShellComponent {
     }
 
     this.nextStep();
+  }
+
+  /**
+   * Falta el cliente en el sub-paso Cliente: enciende el aviso inline y lleva el
+   * foco/viewport al primer campo inválido (útil cuando el operador dejó el
+   * formulario de creación a medias). Único punto de aviso para las dos razones
+   * de obligatoriedad — envío y {@link customerRequired} — porque un CTA que no
+   * avanza sin decir por qué no cuenta como aviso.
+   */
+  private flagMissingCustomer(): void {
+    this.showCustomerError.set(true);
+    focusFirstInvalid(this.host);
   }
 
   /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
@@ -692,7 +796,11 @@ export class PosCheckoutShellComponent {
     // the store_payment_method_id); the backend processor returns 'pending'.
     const pay = this.paymentStep();
     if (!pay?.canSubmit()) {
+      // QUI-561: simétrico al gate de envío de arriba. Volver al paso Cobro sin
+      // decir qué falta deja al cajero adivinando; el collector ya sabe nombrar
+      // el faltante, solo hay que pedírselo.
       this.goToStepKey('cobro');
+      pay?.flashValidation();
       return;
     }
     pay.triggerSubmit();
@@ -707,7 +815,10 @@ export class PosCheckoutShellComponent {
    * Bubbled from the Cobro step when the operator confirms the Monto via the
    * collector's in-panel "Aceptar". The collector already collapsed the amount
    * cards with the green one-shot fill (~420ms). We wait for that animation to
-   * finish, then finalize (Cobro is the last step) or advance to the next step.
+   * finish, then finalize (Cobro es el último paso: delivery, o pickup con
+   * {@link customerRequired}) o avanza al siguiente paso mayor (Cobro intermedio).
+   * La decisión se toma por {@link isLastStep}, así que sigue siendo correcta en
+   * las cuatro variantes de orden documentadas en {@link steps}.
    * setTimeout is zoneless-safe: the signal writes inside onConfirm/attemptNextStep
    * schedule change detection through the signal graph.
    */

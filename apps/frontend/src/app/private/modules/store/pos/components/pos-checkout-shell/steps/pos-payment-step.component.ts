@@ -276,17 +276,39 @@ export class PosPaymentStepComponent implements OnInit {
   );
   /**
    * Whether the CURRENT sub-step can advance from the footer "Siguiente":
-   * Forma de pago (`subStep < modoOffset`) always advances; Método
-   * (`subStep === modoOffset`) requires a chosen method; at/after Monto it no
-   * longer advances (it confirms). Mirrors {@link advanceSubStepOrConfirm}'s
-   * per-sub-step gate so the footer's disabled state matches the driver.
+   * Forma de pago (`subStep < modoOffset`) y Método (`subStep === modoOffset`)
+   * siempre habilitan el botón; en/después de Monto ya no avanza (se confirma).
+   * Mirrors {@link advanceSubStepOrConfirm}'s per-sub-step gate so the footer's
+   * disabled state matches the driver.
+   *
+   * QUI-561: Método ya NO exige método elegido para habilitar el botón. Antes
+   * devolvía `false` y el footer quedaba deshabilitado, así que el clic nunca
+   * llegaba al driver y el cajero no recibía explicación alguna. Ahora el
+   * driver siempre hace algo en ese sub-paso —avanza si hay método, avisa
+   * "Elige un método de pago" si no—, y un CTA que explica es mejor que un CTA
+   * muerto.
    */
   readonly canAdvanceSubStep = computed<boolean>(() => {
     const cur = this.subStep();
-    if (cur < this.modoOffset()) return true; // Forma de pago → siempre avanza
-    if (cur === this.modoOffset()) return this.collector()?.selectedMethod() != null; // Método → requiere selección
+    if (cur <= this.modoOffset()) return true; // Forma de pago / Método → el driver responde siempre
     return false; // en/paso Monto ya no avanza; se confirma
   });
+
+  /**
+   * True desde que este driver confirma el monto hasta que el shell consume el
+   * avance de paso mayor que esa confirmación dispara (el shell espera a que
+   * termine el colapso del sub-wizard, ~420 ms, antes de navegar).
+   *
+   * QUI-561 (segundo defecto): `amountCollapsed()` por sí solo no distingue
+   * "acabo de confirmar, el avance ya viene en camino" de "el monto quedó
+   * confirmado de antes porque el operador volvió a Cobro". El driver trataba
+   * ambos casos como el primero y devolvía `true`, así que al volver atrás
+   * "Siguiente" quedaba mudo de forma permanente: ni cancelar y reabrir el
+   * checkout liberaba (el cierre a mitad preserva estado a propósito), solo
+   * recargar la página. Esta señal marca la ventana real del avance en vuelo.
+   */
+  private readonly advancePending = signal<boolean>(false);
+  private advancePendingTimeout: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Footer "Siguiente" driver for the stepped Cobro sub-wizard (pickup flows,
@@ -298,8 +320,14 @@ export class PosPaymentStepComponent implements OnInit {
    *              shell must NOT advance the major step now.
    *  - `false` → the collector is done for this footer press (credito plan,
    *              which finalizes at a later step); the shell may advance.
-   * On the last contado sub-step it confirms the amount (guarded by canSubmit),
-   * which bubbles `amountConfirmed` so the shell advances after the collapse.
+   * On the last contado sub-step it confirms the amount (guarded by
+   * `canConfirmAmount`), which bubbles `amountConfirmed` so the shell advances
+   * after the collapse.
+   *
+   * QUI-561: ninguna salida de este driver puede devolver `true` sin haber
+   * hecho algo observable. Un `true` silencioso deja "Siguiente" mudo —el clic
+   * se consume, el paso no avanza y el cajero no recibe explicación—, que es
+   * exactamente el bug que este ticket cierra.
    */
   advanceSubStepOrConfirm(): boolean {
     const c = this.collector();
@@ -310,24 +338,71 @@ export class PosPaymentStepComponent implements OnInit {
       if (cur < c.modoOffset()) {
         c.goToSubStep(c.modoOffset()); // Forma de pago → Método / Plan
       } else if (!c.selectedMethod()) {
-        return true; // Método sub-step, no method chosen → stay on the grid
+        c.flashValidation(); // Método sin elegir → decir qué falta, no ignorar el clic
+        return true;
       } else {
         c.goToSubStep(c.montoIndex()); // Método → Monto
       }
       return true;
     }
     // Last sub-step:
-    if (c.amountCollapsed()) return true; // already confirmed; advance is pending
+    if (c.amountCollapsed()) {
+      // Monto ya confirmado. Solo absorbemos el clic mientras el avance que
+      // disparó esa confirmación sigue en vuelo; si no hay ninguno pendiente,
+      // el operador volvió a Cobro y el paso mayor debe avanzar.
+      return this.advancePending();
+    }
     if (c.mode() === 'credito') return false; // credit finalizes at a later step
-    if (!c.canSubmit()) return true; // amount still invalid → stay put
+    if (!c.canConfirmAmount()) {
+      // El cliente obligatorio NO bloquea aquí (lo exige el cobro, no el
+      // monto); lo que falte —método, efectivo, referencia— se nombra.
+      c.flashValidation();
+      return true;
+    }
+    this.markAdvancePending();
     c.confirmAmount(); // → amountConfirmed → shell advances after the collapse
     return true;
+  }
+
+  /**
+   * Abre la ventana de "avance en vuelo" que {@link advanceSubStepOrConfirm}
+   * consulta al volver a Cobro con el monto ya confirmado. Se cierra sola algo
+   * después del colapso que espera el shell (~420 ms) para no depender de que
+   * el shell nos avise: pasada esa ventana, un nuevo "Siguiente" navega.
+   */
+  private markAdvancePending(): void {
+    this.advancePending.set(true);
+    if (this.advancePendingTimeout) clearTimeout(this.advancePendingTimeout);
+    this.advancePendingTimeout = setTimeout(() => {
+      this.advancePending.set(false);
+      this.advancePendingTimeout = null;
+    }, 450);
+  }
+
+  /**
+   * Proxy del feedback de validación del collector para el shell y para este
+   * step. Nombra el primer dato que falta en el sub-paso activo en vez de
+   * dejar el clic sin respuesta.
+   */
+  flashValidation(): void {
+    this.collector()?.flashValidation();
+  }
+
+  /**
+   * El collector confirmó el monto por su propia vía (tap en el teclado, no el
+   * footer): marcamos el avance en vuelo igual que si lo hubiéramos disparado
+   * nosotros y reemitimos al shell, que navega tras el colapso.
+   */
+  onCollectorAmountConfirmed(): void {
+    this.markAdvancePending();
+    this.amountConfirmed.emit();
   }
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
       this.wompiPollingSubscription?.unsubscribe();
       this.stopWompiConfirmPolling();
+      if (this.advancePendingTimeout) clearTimeout(this.advancePendingTimeout);
     });
     // Credit sales cannot be anonymous — that flag is owned by the shell; the
     // step only reads `isAnonymous` as an input, so no local effect is needed.

@@ -183,7 +183,9 @@
                     <div class="section-header">
                       <app-icon name="user" [size]="16" class="section-icon"></app-icon>
                       <h2 class="section-title">Cliente</h2>
-                      @if (requiresAddress() && !cartState()?.customer) {
+                      <!-- Obligatorio por envío O porque la tienda prohíbe ventas
+                           anónimas (QUI-561): un solo predicado, un solo badge. -->
+                      @if (customerMandatory() && !cartState()?.customer) {
                         <span
                           class="addr-required-badge"
                           [class.addr-required-badge--error]="showCustomerError()"
@@ -198,10 +200,13 @@
                       (customerSelected)="onSelectCustomerAndAdvance($event)"
                       (customerCleared)="onCustomerCleared()"
                     ></app-pos-customer-selector>
+                    <!-- Aviso inline ÚNICO para las dos razones de obligatoriedad
+                         (envío / cliente obligatorio). El markup es el mismo; solo
+                         cambia el copy, que lo resuelve customerErrorMessage(). -->
                     @if (showCustomerError() && !cartState()?.customer) {
                       <p class="sale-type-hint sale-type-hint--error">
                         <app-icon name="info" [size]="14"></app-icon>
-                        <span>Selecciona un cliente para continuar con el envío.</span>
+                        <span>{{ customerErrorMessage() }}</span>
                       </p>
                     }
                   </section>
