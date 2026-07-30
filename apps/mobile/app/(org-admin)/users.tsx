@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -556,8 +556,10 @@ function InviteUserModal({
   const [email, setEmail] = useState('');
   const [app, setApp] = useState<string>('ORG_ADMIN');
 
-  // Reset al reabrir
-  useMemo(() => {
+  // Reset al reabrir — useEffect: este setState es un side effect, no un
+  // cómputo. useMemo causaría doble invocación en StrictMode y dispararía
+  // renders extra sin necesidad.
+  useEffect(() => {
     if (visible) {
       setFirstName('');
       setLastName('');
@@ -847,8 +849,9 @@ function EditUserModal({
     enabled: !!user?.id && visible,
   });
 
-  // Sincronizar form cuando cambia el user o la config
-  useMemo(() => {
+  // Sincronizar form cuando cambia el user o la config — useEffect:
+  // sincronizar state derivado es un side effect, no un cómputo cacheable.
+  useEffect(() => {
     if (user) {
       setFirstName(user.first_name || '');
       setLastName(user.last_name || '');
@@ -1301,8 +1304,8 @@ function UserFormModal({
     enabled: !!user?.id,
   });
 
-  // Sync state if user or configuration changes
-  useMemo(() => {
+  // Sync state if user or configuration changes — useEffect: side effect.
+  useEffect(() => {
     setFirstName(user?.first_name || '');
     setLastName(user?.last_name || '');
     setEmail(user?.email || '');
@@ -1528,7 +1531,7 @@ function UserResetPasswordModal({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordMismatch, setPasswordMismatch] = useState(false);
 
-  useMemo(() => {
+  useEffect(() => {
     setNewPassword('');
     setConfirmPassword('');
     setPasswordMismatch(false);
@@ -1712,6 +1715,11 @@ export default function UsersList() {
       //   - ORG_ADMIN        → sin tienda, rol por defecto org_admin
       //   - STORE_ADMIN      → tienda principal requerida, rol store_admin
       //   - STORE_ECOMMERCE  → sin tienda, rol ecommerce
+      //
+      // Si no encontramos un rol que matchee, NO debemos fingir éxito
+      // silencioso: la invitación se envió pero el usuario quedó sin
+      // configuración. Marcamos `roleAssigned=false` para que el toast
+      // advierta al operador.
       const userId = String(inviteRes.user_id);
       const defaultRoleByApp: Record<string, { code: string; roleName: string }> = {
         ORG_ADMIN: { code: 'org_admin', roleName: 'Org Admin' },
@@ -1719,6 +1727,7 @@ export default function UsersList() {
         STORE_ECOMMERCE: { code: 'customer', roleName: 'Customer' },
       };
       const appConfig = defaultRoleByApp[body.app];
+      let roleAssigned = false;
       if (appConfig) {
         const matchedRole = (rolesResponse || []).find(
           (r: any) => r.code === appConfig.code || r.name?.toLowerCase().includes(appConfig.roleName.toLowerCase().split(' ')[0]),
@@ -1730,13 +1739,22 @@ export default function UsersList() {
             store_ids: [],
             panel_ui: {},
           });
+          roleAssigned = true;
         }
       }
 
-      return inviteRes;
+      return { invite: inviteRes, roleAssigned };
     },
-    onSuccess: () => {
-      toastSuccess('Invitación enviada exitosamente.');
+    onSuccess: ({ roleAssigned }) => {
+      if (roleAssigned) {
+        toastSuccess('Invitación enviada y rol por defecto asignado.');
+      } else {
+        // El usuario existe pero su rol/app quedó sin asignar. No es un
+        // error bloqueante, pero el operador debe configurarlo manualmente.
+        toastSuccess(
+          'Invitación enviada. No se encontró un rol por defecto: configúralo desde el editor del usuario.',
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ['org-users-list'] });
       queryClient.invalidateQueries({ queryKey: ['org-users-stats'] });
       setInviteModalOpen(false);

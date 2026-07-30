@@ -31,6 +31,8 @@ export interface StoreDetail extends StoreListItem {
   description?: string;
   tax_id?: string;
   settings?: Record<string, unknown>;
+  /** Incluido en detalles por el backend (`organizations?: { name?: string }`). */
+  organizations?: { name?: string };
 }
 
 export interface CreateStoreInput {

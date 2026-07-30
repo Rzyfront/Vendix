@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/core/store/auth.store';
 import { performStoreSwitch } from '@/core/auth/store-switcher';
 import { OrgStoreService } from '@/features/org/services/org-store.service';
-import type { StoreListItem } from '@/core/models/org-admin/store.types';
+import type { StoreListItem, StoreDetail, StoreType } from '@/core/models/org-admin/store.types';
+import type { CreateStoreInput, UpdateStoreInput } from '@/core/models/org-admin/store.types';
 
 import {
   SearchBar,
@@ -137,23 +138,37 @@ function StoreEditModal({
     phone?: string;
     description?: string;
     is_active: boolean;
-    store_type: string;
+    store_type: StoreType;
   }) => void;
-  store: StoreListItem | null;
+  store: StoreDetail | null;
   loading: boolean;
   mode?: 'create' | 'edit';
 }) {
+  // El picker UI usa valores lowercase (`'physical'`, `'online'`, etc.).
+  // El DTO espera `StoreType` uppercase (`'PHYSICAL'`, `'ONLINE'`, ...).
+  // Esta tabla es la única fuente de verdad para la traducción.
+  const STORE_TYPE_TO_DTO: Record<string, StoreType> = {
+    physical: 'PHYSICAL',
+    online: 'ONLINE',
+    hybrid: 'HYBRID',
+  };
+  const toStoreType = (ui: string): StoreType =>
+    STORE_TYPE_TO_DTO[ui] ?? 'PHYSICAL';
   const isCreate = mode === 'create';
   const [name, setName] = useState(store?.name || '');
-  const [email, setEmail] = useState((store as any)?.email || '');
-  const [phone, setPhone] = useState((store as any)?.phone || '');
-  const [description, setDescription] = useState((store as any)?.description || '');
-  const [storeType, setStoreType] = useState(store?.store_type || 'physical');
+  const [email, setEmail] = useState(store?.email || '');
+  const [phone, setPhone] = useState(store?.phone || '');
+  const [description, setDescription] = useState(store?.description || '');
+  // UI usa lowercase; el DTO espera uppercase. La conversión se hace en el
+  // submit vía `toStoreType()`.
+  const [storeType, setStoreType] = useState<string>(
+    store?.store_type ? store.store_type.toLowerCase() : 'physical',
+  );
   const [isActive, setIsActive] = useState<boolean>(store?.is_active ?? true);
 
   const [pickerOpen, setPickerOpen] = useState<null | 'type' | 'status'>(null);
 
-  useMemo(() => {
+  useEffect(() => {
     if (isCreate) {
       // Reset a vacío cada vez que se abre el modal de creación
       setName('');
@@ -164,10 +179,10 @@ function StoreEditModal({
       setIsActive(true);
     } else if (store) {
       setName(store.name || '');
-      setEmail((store as any).email || '');
-      setPhone((store as any).phone || '');
-      setDescription((store as any).description || '');
-      setStoreType(store.store_type || 'physical');
+      setEmail(store.email || '');
+      setPhone(store.phone || '');
+      setDescription(store.description || '');
+      setStoreType(store.store_type ? store.store_type.toLowerCase() : 'physical');
       setIsActive(store.is_active ?? true);
     }
   }, [store, isCreate, visible]);
@@ -183,7 +198,7 @@ function StoreEditModal({
       phone: phone.trim() || undefined,
       description: description.trim() || undefined,
       is_active: isActive,
-      store_type: storeType,
+      store_type: toStoreType(storeType),
     });
   };
 
@@ -346,7 +361,7 @@ function StoreEditModal({
                 <View style={editStyles.infoItem}>
                   <Text style={editStyles.infoLabel}>Organización</Text>
                   <Text style={editStyles.infoValue}>
-                    {(store as any).organizations?.name || 'N/A'}
+                    {store.organizations?.name || 'N/A'}
                   </Text>
                 </View>
                 <View style={editStyles.infoItem}>
@@ -356,7 +371,7 @@ function StoreEditModal({
                 <View style={editStyles.infoItem}>
                   <Text style={editStyles.infoLabel}>Usuarios</Text>
                   <Text style={editStyles.infoValue}>
-                    {(store as any)._count?.store_users ?? 0}
+                    {store._count?.store_users ?? 0}
                   </Text>
                 </View>
               </View>
@@ -469,7 +484,7 @@ function StoreSettingsModal({
   const [lowStockThreshold, setLowStockThreshold] = useState('10');
   const [tzPickerOpen, setTzPickerOpen] = useState(false);
 
-  useMemo(() => {
+  useEffect(() => {
     if (settings) {
       setTimezone(settings.timezone || 'America/Bogota');
       setCurrency(settings.currency || 'COP');
@@ -673,8 +688,8 @@ function StoreCard({
   const isActive = store.is_active;
 
   const primaryAddress =
-    (store as any).addresses?.find((a: any) => a.is_primary) ||
-    (store as any).addresses?.[0];
+    store.addresses?.find((a) => a.is_primary) ||
+    store.addresses?.[0];
   const addressText = primaryAddress
     ? `${primaryAddress.city || ''}, ${
         primaryAddress.state_province || primaryAddress.state || ''
@@ -683,7 +698,7 @@ function StoreCard({
 
   const typeColor = storeTypeColor[store.store_type] || colorScales.gray[400];
   const typeLabel = storeTypeLabel[store.store_type] || store.store_type;
-  const userCount = (store as any)._count?.store_users ?? 0;
+  const userCount = store._count?.store_users ?? 0;
 
   return (
     <Pressable
@@ -1044,14 +1059,24 @@ export default function StoresList() {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['org-stores-list', queryParams],
-    queryFn: () => OrgStoreService.list(queryParams as any),
+    queryFn: () => OrgStoreService.list(queryParams),
   });
 
   const { data: statsRaw } = useQuery({
     queryKey: ['org-stores-stats'],
     queryFn: () => OrgStoreService.stats(),
   });
-  const statsData: any = (statsRaw as any)?.data || (statsRaw as any) || {};
+  // El endpoint /organization/stores/stats devuelve un envelope con
+  // `data: { total, active, inactive, ... }`. Normalizamos a un objeto
+  // plano sin propagar `any` más allá de esta línea.
+  const statsData: Record<string, unknown> = (() => {
+    if (!statsRaw || typeof statsRaw !== 'object') return {};
+    const envelope = statsRaw as { data?: unknown };
+    if (envelope.data && typeof envelope.data === 'object') {
+      return envelope.data as Record<string, unknown>;
+    }
+    return statsRaw as Record<string, unknown>;
+  })();
 
   const stores: StoreListItem[] = data?.data ?? [];
 
@@ -1113,7 +1138,7 @@ export default function StoresList() {
   // ── Activate / deactivate ──────────────────────────────────────────────
   const toggleMutation = useMutation({
     mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      OrgStoreService.update(id, { is_active } as any),
+      OrgStoreService.update(id, { is_active }),
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['org-stores-list'] });
       queryClient.invalidateQueries({ queryKey: ['org-stores-stats'] });
@@ -1131,21 +1156,37 @@ export default function StoresList() {
   });
 
   // ── Edit store modal (espejo web `app-store-edit-modal`) ─────────────
-  const [editingStore, setEditingStore] = useState<StoreListItem | null>(null);
+  // Usamos `StoreDetail` (no `StoreListItem`) porque el modal muestra
+  // email/phone/description que sólo viven en `StoreDetail`. Al abrir
+  // el modal hacemos un fetch del detalle para poblar esos campos.
+  const [editingStore, setEditingStore] = useState<StoreDetail | null>(null);
   const [creatingStore, setCreatingStore] = useState(false);
 
+  // Fetch del detalle antes de abrir el modal de edición. Sin este paso
+  // los campos email/phone/description arrancarían vacíos.
+  const handleEditStore = async (s: StoreListItem) => {
+    try {
+      const detail = await OrgStoreService.get(s.id);
+      setEditingStore(detail);
+    } catch (err) {
+      toastError('No se pudo cargar la tienda para editar.');
+    }
+  };
+
+  // Tipo intermedio que el formulario entrega al mutation. Mapea directo
+  // a `UpdateStoreInput` y `CreateStoreInput` del backend.
+  type StoreFormPayload = {
+    name: string;
+    email: string;
+    phone?: string;
+    description?: string;
+    is_active: boolean;
+    store_type: StoreType;
+  };
+
   const updateStoreMutation = useMutation({
-    mutationFn: (vars: {
-      id: string;
-      data: {
-        name: string;
-        email: string;
-        phone?: string;
-        description?: string;
-        is_active: boolean;
-        store_type: string;
-      };
-    }) => OrgStoreService.update(vars.id, vars.data as any),
+    mutationFn: (vars: { id: string; data: StoreFormPayload }) =>
+      OrgStoreService.update(vars.id, vars.data satisfies UpdateStoreInput),
     onSuccess: () => {
       toastSuccess('Tienda actualizada exitosamente.');
       queryClient.invalidateQueries({ queryKey: ['org-stores-list'] });
@@ -1158,21 +1199,14 @@ export default function StoresList() {
   });
 
   const createStoreMutation = useMutation({
-    mutationFn: (data: {
-      name: string;
-      email: string;
-      phone?: string;
-      description?: string;
-      is_active: boolean;
-      store_type: string;
-    }) => OrgStoreService.create({
+    mutationFn: (data: StoreFormPayload) => OrgStoreService.create({
       name: data.name,
       slug: generateSlug(data.name),
       store_code: generateSlug(data.name).toUpperCase().replace(/-/g, '_'),
-      store_type: data.store_type as any,
+      store_type: data.store_type,
       email: data.email,
       phone: data.phone,
-    } as any),
+    } satisfies CreateStoreInput),
     onSuccess: () => {
       toastSuccess('Tienda creada exitosamente.');
       queryClient.invalidateQueries({ queryKey: ['org-stores-list'] });
@@ -1207,10 +1241,14 @@ export default function StoresList() {
   });
 
   // ── Stats ────────────────────────────────────────────────────────────────
-  const totalStores = statsData.total_stores ?? stores.length;
-  const activeStores = statsData.active_stores ?? stores.filter((s) => s.is_active).length;
-  const totalOrders = statsData.total_orders ?? 0;
-  const totalRevenue = statsData.total_revenue ?? 0;
+  // `statsData` viene normalizado a `Record<string, unknown>`; casteamos
+  // estrecho a `number` con un fallback razonable. Los nombres reflejan
+  // los campos que el backend expone en `OrganizationStoresController.stats`.
+  const totalStores = (statsData.total_stores as number | undefined) ?? stores.length;
+  const activeStores =
+    (statsData.active_stores as number | undefined) ?? stores.filter((s) => s.is_active).length;
+  const totalOrders = (statsData.total_orders as number | undefined) ?? 0;
+  const totalRevenue = (statsData.total_revenue as number | undefined) ?? 0;
 
   const statCards = [
     {
@@ -1365,7 +1403,7 @@ export default function StoresList() {
                 key={s.id}
                 store={s}
                 onTap={() => setStoreToSwitch(s)}
-                onEdit={() => setEditingStore(s)}
+                onEdit={() => handleEditStore(s)}
                 onSettings={() => setSettingsStore(s)}
                 onDelete={() => setStoreToDelete(s)}
               />

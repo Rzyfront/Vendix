@@ -66,4 +66,8 @@ export interface Address {
   state?: string;
   country?: string;
   postalCode?: string;
+  /** Marcador de dirección principal devuelto por el backend en algunos endpoints. */
+  is_primary?: boolean;
+  /** El backend proyecta `state_province` además del alias `state`. */
+  state_province?: string;
 }

@@ -81,6 +81,19 @@ const DEFAULT_FILTERS = {
 };
 type LocalFilters = typeof DEFAULT_FILTERS;
 
+/**
+ * Extrae un mensaje legible de un error de React Query. Evita repetir el
+ * `as any` cascade en cada EmptyState — narrowing sin perder tipado.
+ */
+function describeApiError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const e = error as { response?: { data?: { message?: string } }; message?: string };
+    return e.response?.data?.message || e.message || 'Error desconocido.';
+  }
+  if (typeof error === 'string') return error;
+  return 'Hubo un problema al consultar el servidor. Reintenta en unos segundos.';
+}
+
 function auditStatsItems(stats: AuditStats | null | undefined) {
   const combined = stats?.logs_by_action_and_resource ?? {};
   const byAction = stats?.logs_by_action ?? {};
@@ -163,7 +176,6 @@ interface ListHeaderProps {
   filterValues: FilterValues;
   onFilterChange: (values: FilterValues) => void;
   onClearAllFilters: () => void;
-  activeFilterCount: boolean;
 }
 
 function ListHeader({
@@ -176,7 +188,6 @@ function ListHeader({
   filterValues,
   onFilterChange,
   onClearAllFilters,
-  activeFilterCount,
 }: ListHeaderProps) {
   return (
     <View>
@@ -262,7 +273,7 @@ export default function AuditLogsScreen() {
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['org-audit-logs', queryParams],
-    queryFn: () => OrgAuditService.listLogs(queryParams as any),
+    queryFn: () => OrgAuditService.listLogs(queryParams),
   });
 
   const {
@@ -300,7 +311,8 @@ export default function AuditLogsScreen() {
 
   const hasFilters =
     !!search || !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
-  const activeFilterCount = !!(filters.resource || filters.action || filters.from || filters.to);
+  // El shared `OptionsDropdown` pinta el badge de filtros activos sola;
+  // mantener un counter local era dead-code tras eliminar la prop.
 
   // ───── Filter configs (espejo del `filterConfigs` web) ─────────────────
   const filterConfigs = useMemo<FilterConfig[]>(
@@ -449,7 +461,6 @@ export default function AuditLogsScreen() {
             filterValues={filterValues}
             onFilterChange={handleFilterChange}
             onClearAllFilters={handleClearAllFilters}
-            activeFilterCount={activeFilterCount}
           />
         }
         ListEmptyComponent={
@@ -463,11 +474,7 @@ export default function AuditLogsScreen() {
             <EmptyState
               icon="alert-triangle"
               title="No se pudieron cargar los registros"
-              description={
-                (error as any)?.response?.data?.message ||
-                (error as any)?.message ||
-                'Hubo un problema al consultar el servidor. Reintenta en unos segundos.'
-              }
+              description={describeApiError(error)}
               actionLabel="Reintentar"
               onAction={() => {
                 refetch();

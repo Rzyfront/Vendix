@@ -14,11 +14,19 @@ import { toastError, toastSuccess } from '@/shared/components/toast/toast.store'
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * Form de creación de OC org-native.
+ *
+ * El destino es UNA sola ubicación de inventario (`destination_location_id`),
+ * no una tienda. Plan §6.4.1 — el destino se fija a nivel cabecera y los
+ * items heredan. Las ubicaciones pueden ser WAREHOUSE, STORE, CENTRAL o
+ * TRANSIT; el backend valida pertenencia yOperatingScope.
+ */
 export default function CreatePurchaseOrderScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [supplierId, setSupplierId] = useState('');
-  const [storeId, setStoreId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [dateTouched, setDateTouched] = useState(false);
@@ -33,29 +41,44 @@ export default function CreatePurchaseOrderScreen() {
     queryFn: () => OrgInventoryService.listSuppliers({ pageSize: 50 }),
   });
 
-  const storesQuery = useQuery({
-    queryKey: ['org-stores-purchase-create'],
-    queryFn: () => import('@/features/org/services/org-store.service').then(m => m.OrgStoreService.list({ pageSize: 50 })),
+  // Plan §6.4.1 — el destino es una ubicación de inventario, no una tienda.
+  // Traemos solo las activas para no permitir seleccionar bodegas en baja.
+  const locationsQuery = useQuery({
+    queryKey: ['org-inventory-locations-purchase-create'],
+    queryFn: () =>
+      OrgInventoryService.listLocations({
+        pageSize: 100,
+        is_active: true,
+      } as Parameters<typeof OrgInventoryService.listLocations>[0]),
   });
 
   // H2: rama de error dedicada — antes un 500/403 caía en
-  // "No hay proveedores/tiendas registradas" y el usuario no sabía que falló.
+  // "No hay proveedores/ubicaciones registradas" y el usuario no sabía que
+  // falló la carga.
   const suppliersLoadError = suppliersQuery.isError
     ? suppliersQuery.error?.message || 'No se pudieron cargar los proveedores.'
     : null;
-  const storesLoadError = storesQuery.isError
-    ? storesQuery.error?.message || 'No se pudieron cargar las tiendas.'
+  const locationsLoadError = locationsQuery.isError
+    ? locationsQuery.error?.message || 'No se pudieron cargar las ubicaciones.'
     : null;
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      OrgPurchaseOrdersService.create({
-        supplier_id: supplierId,
-        store_id: storeId,
+    mutationFn: () => {
+      // El backend exige `supplier_id` y `destination_location_id` como
+      // `number` (DTO usa @IsInt). Validamos antes para no mandarle string.
+      const supplierIdNum = Number(supplierId);
+      const locationIdNum = Number(locationId);
+      if (!Number.isFinite(supplierIdNum) || !Number.isFinite(locationIdNum)) {
+        throw new Error('IDs de proveedor o ubicación inválidos.');
+      }
+      return OrgPurchaseOrdersService.create({
+        supplier_id: supplierIdNum,
+        destination_location_id: locationIdNum,
         expected_date: expectedDate || undefined,
         notes: notes || undefined,
         items: [],
-      }),
+      });
+    },
     onSuccess: () => {
       // H3: invalidar la lista para que al volver a la pantalla no muestre el
       // status viejo ni tenga que tirar pull-to-refresh.
@@ -76,16 +99,19 @@ export default function CreatePurchaseOrderScreen() {
       toastError('La fecha esperada debe tener el formato YYYY-MM-DD.');
       return;
     }
-    if (!supplierId || !storeId) {
-      toastError('Selecciona proveedor y tienda antes de continuar.');
+    if (!supplierId || !locationId) {
+      toastError('Selecciona proveedor y ubicación antes de continuar.');
       return;
     }
     createMutation.mutate();
   };
 
-  const stores = storesQuery.data?.data ?? [];
+  const locations = locationsQuery.data ?? [];
   const suppliers = suppliersQuery.data ?? [];
-  const isLoadingLists = suppliersQuery.isLoading || storesQuery.isLoading;
+  const isLoadingLists = suppliersQuery.isLoading || locationsQuery.isLoading;
+
+  const locationLabel = (loc: { name: string; code?: string; type: string }) =>
+    loc.code ? `${loc.name} (${loc.code}) · ${loc.type}` : `${loc.name} · ${loc.type}`;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -95,7 +121,7 @@ export default function CreatePurchaseOrderScreen() {
         {isLoadingLists ? (
           <View style={styles.loadingRow}>
             <Spinner size="sm" />
-            <Text style={styles.loadingText}>Cargando proveedores y tiendas…</Text>
+            <Text style={styles.loadingText}>Cargando proveedores y ubicaciones…</Text>
           </View>
         ) : null}
 
@@ -121,10 +147,12 @@ export default function CreatePurchaseOrderScreen() {
               {suppliers.map((s) => (
                 <Pressable
                   key={s.id}
-                  style={[styles.chip, supplierId === s.id && styles.chipActive]}
-                  onPress={() => setSupplierId(s.id)}
+                  style={[styles.chip, supplierId === String(s.id) && styles.chipActive]}
+                  onPress={() => setSupplierId(String(s.id))}
                 >
-                  <Text style={[styles.chipText, supplierId === s.id && styles.chipTextActive]}>
+                  <Text
+                    style={[styles.chipText, supplierId === String(s.id) && styles.chipTextActive]}
+                  >
                     {s.name}
                   </Text>
                 </Pressable>
@@ -135,29 +163,35 @@ export default function CreatePurchaseOrderScreen() {
 
         <View style={styles.section}>
           <Text style={styles.label}>
-            Tienda destino <Text style={styles.required}>*</Text>
+            Ubicación destino <Text style={styles.required}>*</Text>
           </Text>
-          {storesLoadError ? (
+          <Text style={styles.helper}>
+            Bodega, tienda o centro de distribución donde entra el stock al recibir.
+          </Text>
+          {locationsLoadError ? (
             <View>
-              <Text style={styles.errorText}>{storesLoadError}</Text>
+              <Text style={styles.errorText}>{locationsLoadError}</Text>
               <Text style={styles.helper}>
                 Reintenta o revisa tu conexión antes de continuar.
               </Text>
             </View>
-          ) : stores.length === 0 && !storesQuery.isLoading ? (
+          ) : locations.length === 0 && !locationsQuery.isLoading ? (
             <Text style={styles.helper}>
-              No hay tiendas disponibles para la organización.
+              No hay ubicaciones activas. Crea una desde Inventario › Ubicaciones.
             </Text>
           ) : (
             <View style={styles.chipsRow}>
-              {stores.map((s) => (
+              {locations.map((loc) => (
                 <Pressable
-                  key={s.id}
-                  style={[styles.chip, storeId === s.id && styles.chipActive]}
-                  onPress={() => setStoreId(s.id)}
+                  key={loc.id}
+                  style={[styles.chip, locationId === String(loc.id) && styles.chipActive]}
+                  onPress={() => setLocationId(String(loc.id))}
                 >
-                  <Text style={[styles.chipText, storeId === s.id && styles.chipTextActive]}>
-                    {s.name}
+                  <Text
+                    style={[styles.chipText, locationId === String(loc.id) && styles.chipTextActive]}
+                    numberOfLines={1}
+                  >
+                    {locationLabel(loc)}
                   </Text>
                 </Pressable>
               ))}
@@ -192,7 +226,7 @@ export default function CreatePurchaseOrderScreen() {
           <Button
             title={createMutation.isPending ? 'Creando…' : 'Crear orden'}
             onPress={handleSubmit}
-            disabled={!supplierId || !storeId || createMutation.isPending}
+            disabled={!supplierId || !locationId || createMutation.isPending}
             loading={createMutation.isPending}
             fullWidth
           />
@@ -225,6 +259,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[2],
     backgroundColor: colorScales.gray[100],
     borderRadius: borderRadius.full,
+    maxWidth: '100%',
   },
   chipActive: { backgroundColor: colors.primary },
   chipText: { fontSize: typography.fontSize.sm, color: colorScales.gray[700] },

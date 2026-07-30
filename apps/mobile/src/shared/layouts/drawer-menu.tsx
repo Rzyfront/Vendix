@@ -26,8 +26,6 @@ interface MenuItem {
   alwaysVisible?: boolean;
   requiredOperatingScope?: 'STORE' | 'ORGANIZATION';
   showLocked?: boolean;
-  requiredFiscalScope?: 'STORE' | 'ORGANIZATION';
-  requiresFiscalArea?: 'invoicing' | 'accounting' | 'payroll' | 'any';
   lockedTooltip?: string;
   _locked?: boolean;
   children?: MenuItem[];
@@ -203,8 +201,6 @@ const storeMenuItems: MenuItem[] = [
   { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing' },
   { label: 'Analíticas', icon: 'chart-line', href: '/(store-admin)/analytics' },
   { label: 'Gastos', icon: 'wallet', href: '/(store-admin)/expenses' },
-  { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'invoicing' },
-  { label: 'Contabilidad', icon: 'book-open', href: '/(store-admin)/accounting', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'accounting' },
   { label: 'Ayuda', icon: 'help-circle', href: '/(store-admin)/help' },
   { label: 'Configuración', icon: 'settings', href: '/(store-admin)/settings' },
 ];
@@ -249,11 +245,6 @@ const moduleKeyMap: Record<string, string | string[]> = {
   Reportes: 'reports',
   Ayuda: 'help',
   Configuración: 'settings',
-
-  // Fiscal sub-items
-  Facturación: 'invoicing',
-  Contabilidad: 'accounting',
-  Nómina: 'payroll',
 };
 
 interface CollapsibleSubmenuProps {
@@ -499,20 +490,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   // Contextos y scopes de organización
   const activeOrg = variant === 'org' ? user?.organizations : user?.store?.organizations;
   const operatingScope = activeOrg?.operating_scope || 'STORE';
-  const fiscalScope = activeOrg?.fiscal_scope || operatingScope;
-
-  const orgSettings = activeOrg?.organization_settings?.settings || null;
-  const fiscalStatus = fiscalScope === 'ORGANIZATION'
-    ? orgSettings?.fiscal_status
-    : store_settings?.fiscal_status;
-
-  const activeFiscalAreas = useMemo(() => {
-    const areas = ['invoicing', 'accounting', 'payroll'] as const;
-    return areas.filter((area) => {
-      const state = fiscalStatus?.[area]?.state;
-      return state === 'ACTIVE' || state === 'LOCKED';
-    });
-  }, [fiscalStatus]);
 
   const panelUiConfig = user_settings?.config?.panel_ui || default_panel_ui || {};
   const appType = variant === 'org' ? 'ORG_ADMIN' : 'STORE_ADMIN';
@@ -522,44 +499,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     }
     return (panelUiConfig || {}) as unknown as Record<string, boolean>;
   }, [panelUiConfig, appType]);
-
-  const disabledKeys = useMemo(() => {
-    const disabled = new Set<string>();
-    const areas = ['invoicing', 'accounting', 'payroll'] as const;
-    const map = {
-      accounting: [
-        'accounting',
-        'accounting_chart_of_accounts',
-        'accounting_journal_entries',
-        'accounting_fiscal_periods',
-        'accounting_account_mappings',
-        'accounting_flows_dashboard',
-        'accounting_withholding_tax',
-        'accounting_exogenous',
-      ],
-      payroll: [
-        'payroll',
-        'payroll_employees',
-        'payroll_runs',
-        'payroll_settlements',
-        'payroll_advances',
-        'payroll_settings',
-      ],
-      invoicing: [
-        'invoicing',
-        'invoicing_invoices',
-        'invoicing_resolutions',
-        'invoicing_dian_config',
-      ],
-    };
-    for (const area of areas) {
-      const state = fiscalStatus?.[area]?.state;
-      if (state !== 'ACTIVE' && state !== 'LOCKED') {
-        map[area].forEach((key) => disabled.add(key));
-      }
-    }
-    return disabled;
-  }, [fiscalStatus]);
 
   const storePanelUi = useMemo<Record<string, boolean>>(() => {
     if (appType === 'STORE_ADMIN' && store_settings?.panel_ui?.STORE_ADMIN) {
@@ -571,19 +510,18 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   const isModuleKeyVisible = (
     moduleKey: string | string[],
     panelUi: Record<string, boolean>,
-    disabled: Set<string>
   ): boolean => {
     const keys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
     return keys.some((key) => {
       if (storePanelUi[key] === false) {
         return false;
       }
-      return panelUi[key] === true && !disabled.has(key);
+      return panelUi[key] === true;
     });
   };
 
   // Cargar tiendas dinámicas solo para variant=org
-  const { data: storesRaw, error: storesError } = useQuery({
+  const { data: storesRaw } = useQuery({
     queryKey: ['org-stores-drawer'],
     queryFn: async () => {
       const { apiGet } = await import('@/core/api/http');
@@ -635,20 +573,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
 
     const filterRecursive = (menuItems: MenuItem[]): MenuItem[] => {
       return menuItems.reduce((acc: MenuItem[], item) => {
-        // Fiscal scope guard
-        if (item.requiredFiscalScope && item.requiredFiscalScope !== fiscalScope) {
-          return acc;
-        }
-
-        // Fiscal area guard
-        if (item.requiresFiscalArea) {
-          if (item.requiresFiscalArea === 'any') {
-            if (activeFiscalAreas.length === 0) return acc;
-          } else {
-            if (!activeFiscalAreas.includes(item.requiresFiscalArea as any)) return acc;
-          }
-        }
-
         // Operating scope guard
         let locked = false;
         if (item.requiredOperatingScope && item.requiredOperatingScope !== operatingScope) {
@@ -666,7 +590,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
         } else {
           const moduleKey = moduleKeyMap[item.label];
           if (moduleKey) {
-            isVisible = isModuleKeyVisible(moduleKey, currentAppPanelUi, disabledKeys);
+            isVisible = isModuleKeyVisible(moduleKey, currentAppPanelUi);
           } else if (item.children && item.children.length > 0) {
             isVisible = true;
           } else {
@@ -692,7 +616,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     };
 
     return filterRecursive(items);
-  }, [items, variant, fiscalScope, operatingScope, activeFiscalAreas, currentAppPanelUi, disabledKeys]);
+  }, [items, variant, operatingScope, currentAppPanelUi]);
 
   const handleOpenVlink = () => {
     if (vlinkUrl === '#') return;

@@ -1,5 +1,5 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import { OrgPageContainer } from '@/shared/components/org-page-container';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
@@ -11,7 +11,7 @@ interface SettingTile {
   icon: string;
   iconColor: string;
   iconBg: string;
-  href: string;
+  href: Href;
   badge?: string;
   badgeVariant?: 'primary' | 'warning' | 'muted';
 }
@@ -50,8 +50,8 @@ const SETTINGS_TILES: SettingTile[] = [
 export default function SettingsHubScreen() {
   const router = useRouter();
 
-  const onPress = (href: string) => {
-    router.push(href as never);
+  const onPress = (href: Href) => {
+    router.push(href);
   };
 
   return (
