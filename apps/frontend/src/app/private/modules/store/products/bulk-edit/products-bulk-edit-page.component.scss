@@ -1,0 +1,31 @@
+/**
+ * Estilos de la vista de edición masiva (QUI-567).
+ *
+ * Casi todo el layout es Tailwind en la plantilla. Aquí viven solo las dos cosas
+ * que Tailwind no resuelve bien:
+ *
+ * 1. El scroll del stack y del panel de resultados, que en escritorio deben
+ *    quedarse pegados mientras el usuario recorre la lista larga.
+ * 2. Las reglas móviles, que van AL FINAL del archivo a propósito: un `@media`
+ *    declarado antes de la regla base pierde la cascada y el override no aplica.
+ */
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+/**
+ * En escritorio, el stack de seleccionados se queda a la vista mientras el
+ * usuario pagina y busca en el panel izquierdo. El `top` deja hueco al
+ * `app-sticky-header`, que es el único elemento pegado por encima.
+ *
+ * El scroll del admin ocurre en el `<main overflow-y-auto>` del layout, no en
+ * `window`, así que `position: sticky` se resuelve contra ese contenedor.
+ */
+@media (min-width: 1024px) {
+  .bulk-stack-column {
+    position: sticky;
+    top: 5.5rem;
+  }
+}

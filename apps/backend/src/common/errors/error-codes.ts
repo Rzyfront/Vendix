@@ -783,6 +783,55 @@ export const ErrorCodes = {
     devMessage: 'Shipping rate does not belong to the selected method',
   },
 
+  // Purchase Orders
+  // QUI-486: comprar/recibir contra la línea base (product_variant_id = NULL)
+  // de un producto que TIENE variantes recibe mercancía a un limbo contable.
+  // enforceStockLevelsMode borra las filas base de stock_levels en cuanto el
+  // producto tiene variantes (invariante base XOR variante), pero
+  // getOrCreateStockLevel la vuelve a crear al recibir — y syncProductStock
+  // filtra `product_variant_id: { not: null }` cuando hay variantes, así que
+  // esas unidades quedan en una fila que NINGÚN agregado lee: no aparecen en
+  // products.stock_quantity, no se pueden vender, y el dinero ya se gastó.
+  // Se rechaza aguas arriba en vez de recibir stock invisible.
+  PO_VARIANT_001: {
+    code: 'PO_VARIANT_001',
+    httpStatus: 400,
+    devMessage:
+      'Un producto con variantes debe comprarse por variante, no contra su línea base',
+  },
+
+  // Ciclo de vida de la orden de compra.
+  // El estado vive en `PurchaseOrdersService.VALID_TRANSITIONS`; estos códigos
+  // son la cara HTTP de esa única fuente de la verdad. Son 409 y no 400 porque
+  // la petición está bien formada: choca con el estado real del recurso.
+  PO_STATUS_001: {
+    code: 'PO_STATUS_001',
+    httpStatus: 409,
+    devMessage:
+      'Transición de estado no permitida para esta orden de compra',
+  },
+  PO_STATUS_002: {
+    code: 'PO_STATUS_002',
+    httpStatus: 409,
+    devMessage:
+      'Solo una orden de compra en borrador puede editarse o eliminarse',
+  },
+  // Cancelar una OC con mercancía ya ingresada exigiría deshacer capas de costeo
+  // FIFO, asientos automáticos e IVA descontable ya reconocido. Ese trabajo es
+  // del módulo de devoluciones (`return_order_type_enum.purchase_return`), así
+  // que aquí se bloquea y se nombra el camino correcto.
+  PO_CANCEL_RECEIVED_001: {
+    code: 'PO_CANCEL_RECEIVED_001',
+    httpStatus: 409,
+    devMessage:
+      'Una orden con mercancía recibida se revierte con una devolución a proveedor, no cancelándola',
+  },
+  PO_FIND_001: {
+    code: 'PO_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Orden de compra no encontrada',
+  },
+
   // Inventory
   INV_FIND_001: {
     code: 'INV_FIND_001',
@@ -2645,6 +2694,11 @@ export const ErrorCodes = {
     code: 'SUBSCRIPTION_010',
     httpStatus: 409,
     devMessage: 'Invalid subscription state transition',
+  },
+  SUBSCRIPTION_011: {
+    code: 'SUBSCRIPTION_011',
+    httpStatus: 402,
+    devMessage: 'Plan retired — choose an active plan to continue',
   },
   SUBSCRIPTION_INTERNAL_ERROR: {
     code: 'SUBSCRIPTION_INTERNAL_ERROR',

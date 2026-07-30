@@ -1,0 +1,332 @@
+/**
+ * Modal de confirmación del ARCHIVADO masivo (QUI-567 paso 13).
+ *
+ * ## Por qué es un modal aparte y no una variante de `bulk-confirm-modal`
+ *
+ * Comparte la forma (preview → desglose → confirmar → informe) pero no el
+ * contenido ni la severidad:
+ *
+ * | | `bulk-confirm-modal` | este |
+ * | --- | --- | --- |
+ * | endpoint | `/bulk-edit/preview` + `/bulk-edit` | `/bulk-edit/archive/preview` + `/bulk-edit/archive` |
+ * | permiso | `store:products:bulk_update` | `store:products:admin_delete` |
+ * | cuerpo | diff `campo: actual → nuevo` | lista de productos + motivos |
+ * | reversible | sí (basta volver a editar) | **NO** |
+ * | gesto | botón | casilla + botón |
+ *
+ * Meterlo dentro del otro modal habría obligado a ramificar cada bloque de su
+ * plantilla por un flag `mode`, sobre un flujo ya verificado y de menor
+ * severidad. Se entrega como hermano.
+ *
+ * ## Sin diffs: no hay campos
+ *
+ * El preview de archivado NO devuelve `changes[]` (`BulkArchivePreviewItemDto` no
+ * lo declara). No hay nada que diffear: no se cambia un campo, se elimina el
+ * producto. Lo que el modal muestra es CUÁNTOS, CUÁLES, y por cada `error` /
+ * `warning` su MOTIVO.
+ *
+ * ## Confirmación reforzada — requisito duro, no adorno
+ *
+ * El archivado es IRREVERSIBLE DESDE LA APLICACIÓN. Se verificó que la API no
+ * expone ninguna ruta que saque un producto de `archived`: `update()` y
+ * `deactivate()` filtran `state != archived`
+ * (`apps/backend/src/domains/store/products/products.service.ts:1903-1907` y
+ * `:2761-2765`) y no existe `activate` / `restore`. Revertir exige acceso directo
+ * a la base de datos.
+ *
+ * De ahí las dos condiciones del botón de confirmar, ambas necesarias:
+ *
+ *  1. **Hay algo archivable** (`ok + warning > 0`). Si no, confirmar solo
+ *     produciría fallos.
+ *  2. **La casilla está marcada.** Un botón se pulsa por inercia; marcar una
+ *     casilla que dice "no se puede deshacer" es un gesto deliberado. La casilla
+ *     se desmarca sola al cerrar el modal, así que no queda "armada" para la
+ *     próxima vez.
+ */
+
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  input,
+  model,
+  output,
+  signal,
+  untracked,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+import {
+  AlertBannerComponent,
+  ButtonComponent,
+  IconComponent,
+  ModalComponent,
+  type SaveRequirement,
+} from '../../../../../shared/components/index';
+import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
+import {
+  PRODUCT_SAVE_ERROR_MAP,
+  mapBackendErrorToRequirements,
+} from '../utils/product-save-requirements';
+import type {
+  BulkArchivePreviewItem,
+  BulkArchivePreviewResult,
+  BulkArchiveResult,
+  BulkEditItemStatus,
+} from './bulk-edit.interface';
+import {
+  ProductsBulkEditService,
+  type ProductNameResolver,
+} from './products-bulk-edit.service';
+
+/** Etapa del flujo del modal. */
+export type BulkArchiveStage =
+  | 'previewing'
+  | 'ready'
+  | 'preview-failed'
+  | 'archiving'
+  | 'done';
+
+@Component({
+  selector: 'app-bulk-archive-confirm-modal',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    AlertBannerComponent,
+  ],
+  templateUrl: './bulk-archive-confirm-modal.component.html',
+})
+export class BulkArchiveConfirmModalComponent {
+  private readonly bulkEditService = inject(ProductsBulkEditService);
+  private readonly destroyRef = inject(DestroyRef);
+
+  /** Visibilidad. Two-way con la página. */
+  readonly modalOpen = model<boolean>(false);
+  /** Ids seleccionados, en el orden del stack. */
+  readonly ids = input<number[]>([]);
+  /** Resuelve nombres cuando un lote cae y el backend no devuelve fichas. */
+  readonly resolveName = input<ProductNameResolver | undefined>(undefined);
+
+  /** El archivado terminó (con o sin fallos). La página limpia la selección. */
+  readonly archived = output<BulkArchiveResult>();
+
+  readonly stage = signal<BulkArchiveStage>('previewing');
+  readonly previewResult = signal<BulkArchivePreviewResult | null>(null);
+  readonly archiveResult = signal<BulkArchiveResult | null>(null);
+  /** Filas de requisitos cuando la petición entera se cae. */
+  readonly requestRequirements = signal<SaveRequirement[]>([]);
+
+  /**
+   * El gesto deliberado. Arranca en `false` en cada apertura y sin él el botón de
+   * confirmar no se habilita jamás.
+   */
+  readonly acknowledged = signal<boolean>(false);
+
+  /** Progreso del troceado, publicado por el servicio. */
+  readonly progress = this.bulkEditService.progress;
+
+  readonly progressPercent = computed<number>(() => {
+    const progress = this.progress();
+    if (progress.totalIds === 0) {
+      return 0;
+    }
+    return Math.round((progress.doneIds / progress.totalIds) * 100);
+  });
+
+  /**
+   * Productos que el backend SÍ va a archivar. Los `warning` cuentan: el aviso no
+   * bloquea el archivado, solo informa de una consecuencia (insumo de receta
+   * activa, promoción vigente).
+   */
+  readonly archivableCount = computed<number>(() => {
+    const preview = this.previewResult();
+    if (!preview) {
+      return 0;
+    }
+    return preview.ok + preview.warnings;
+  });
+
+  readonly blockedCount = computed<number>(
+    () => this.previewResult()?.errors ?? 0,
+  );
+
+  /**
+   * Las DOS condiciones del gesto deliberado. Si falta cualquiera, no se archiva.
+   */
+  readonly canConfirm = computed<boolean>(
+    () =>
+      this.stage() === 'ready' &&
+      this.archivableCount() > 0 &&
+      this.acknowledged(),
+  );
+
+  /** Items ordenados: primero los bloqueados, para que no pasen desapercibidos. */
+  readonly previewItems = computed<BulkArchivePreviewItem[]>(() => {
+    const preview = this.previewResult();
+    if (!preview) {
+      return [];
+    }
+    const rank: Record<BulkEditItemStatus, number> = {
+      error: 0,
+      warning: 1,
+      ok: 2,
+    };
+    return [...preview.items].sort((a, b) => rank[a.status] - rank[b.status]);
+  });
+
+  readonly failedResults = computed(() =>
+    (this.archiveResult()?.results ?? []).filter(
+      (row) => row.status === 'error',
+    ),
+  );
+
+  constructor() {
+    // Al abrirse, dispara el dry-run. Al cerrarse, borra TODO — incluida la
+    // casilla. `app-modal` proyecta su contenido con `<ng-content>` y NO lo
+    // destruye al cerrar, así que sin este reset el modal reabriría con el
+    // preview de la selección anterior y, peor, con la casilla ya marcada: el
+    // gesto deliberado se habría convertido en un botón de un solo clic.
+    effect(() => {
+      if (!this.modalOpen()) {
+        untracked(() => this.reset());
+        return;
+      }
+      untracked(() => this.runPreview());
+    });
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Acciones
+  // ───────────────────────────────────────────────────────────────────────────
+
+  onRetryPreview(): void {
+    this.runPreview();
+  }
+
+  onAcknowledgeChange(event: Event): void {
+    const target = event.target as HTMLInputElement | null;
+    this.acknowledged.set(Boolean(target?.checked));
+  }
+
+  onConfirm(): void {
+    // Re-comprobación en el handler y no solo en el `[disabled]` del botón: un
+    // atributo deshabilitado es afordancia, no control de acceso.
+    if (!this.canConfirm()) {
+      return;
+    }
+    const ids = this.ids();
+
+    this.stage.set('archiving');
+    this.requestRequirements.set([]);
+
+    this.bulkEditService
+      .archiveInBatches(ids, this.resolveName())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.archiveResult.set(result);
+          this.stage.set('done');
+          this.archived.emit(result);
+        },
+        error: (err: unknown) => {
+          // `archiveInBatches` degrada los lotes caídos internamente, así que
+          // llegar aquí es excepcional (fallo de composición, no de red).
+          this.requestRequirements.set(mapBackendErrorToRequirements(err));
+          this.stage.set('done');
+        },
+      });
+  }
+
+  onClose(): void {
+    this.modalOpen.set(false);
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Presentación
+  // ───────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Motivo de un bloqueo o de un aviso.
+   *
+   * Cascada INVERSA a la de `bulk-confirm-modal.describeFailure()`, y es
+   * deliberado: aquí el `message` del backend va PRIMERO.
+   *
+   * Motivo: el preview de archivado redacta mensajes específicos de ESTA acción
+   * ("El producto está en pedidos abiertos. Finaliza o cancela esos pedidos antes
+   * de archivarlo.") reutilizando códigos genéricos, porque el contrato prohíbe
+   * inventar códigos nuevos. `PROD_VALIDATE_001` en `PRODUCT_SAVE_ERROR_MAP`
+   * habla de variantes y manejo de inventario — cierto para una edición, falso
+   * para un archivado. Preferir el catálogo curado mostraría un motivo
+   * equivocado. Los catálogos siguen como respaldo para los códigos que llegan
+   * sin mensaje (p. ej. los degradados de un lote caído).
+   */
+  describeReason(code?: string, message?: string): string {
+    const backendMessage = message?.trim();
+    if (backendMessage) {
+      return backendMessage;
+    }
+    if (code && PRODUCT_SAVE_ERROR_MAP[code]) {
+      return PRODUCT_SAVE_ERROR_MAP[code].reason;
+    }
+    if (code && ERROR_MESSAGES[code]) {
+      return ERROR_MESSAGES[code];
+    }
+    return 'No se pudo determinar el motivo.';
+  }
+
+  statusLabel(status: BulkEditItemStatus): string {
+    switch (status) {
+      case 'ok':
+        return 'Se archivará';
+      case 'warning':
+        return 'Se archivará con avisos';
+      default:
+        return 'No se archivará';
+    }
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Internos
+  // ───────────────────────────────────────────────────────────────────────────
+
+  private runPreview(): void {
+    const ids = this.ids();
+
+    this.stage.set('previewing');
+    this.previewResult.set(null);
+    this.archiveResult.set(null);
+    this.requestRequirements.set([]);
+    // Reintentar el preview también re-arma el gesto: el impacto que el usuario
+    // aceptó pudo haber cambiado entre el primer cálculo y este.
+    this.acknowledged.set(false);
+
+    this.bulkEditService
+      .previewArchiveInBatches(ids, this.resolveName())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.previewResult.set(result);
+          this.stage.set('ready');
+        },
+        error: (err: unknown) => {
+          this.requestRequirements.set(mapBackendErrorToRequirements(err));
+          this.stage.set('preview-failed');
+        },
+      });
+  }
+
+  private reset(): void {
+    this.stage.set('previewing');
+    this.previewResult.set(null);
+    this.archiveResult.set(null);
+    this.requestRequirements.set([]);
+    this.acknowledged.set(false);
+    this.bulkEditService.resetProgress();
+  }
+}

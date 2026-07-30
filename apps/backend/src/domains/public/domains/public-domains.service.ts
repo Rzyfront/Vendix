@@ -30,11 +30,7 @@ export class PublicDomainsService {
    * - branding viene de store_settings (no de domain.config)
    * - ecommerce settings vienen de store_settings
    */
-  async resolveDomain(
-    hostname: string,
-    subdomain?: string,
-    forwardedHost?: string,
-  ) {
+  async resolveDomain(hostname: string, subdomain?: string) {
     hostname = hostname.trim().toLowerCase();
     this.logger.log(`🔍 Resolving domain: ${hostname}`);
 

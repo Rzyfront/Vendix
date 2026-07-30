@@ -8,6 +8,7 @@ import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { PublicSeoService } from './domains/public/seo/public-seo.service';
 import { PublicPwaService } from './domains/public/pwa/public-pwa.service';
 import { isPwaIconVariant } from '@common/config/image-presets';
+import { resolveTenantHostname } from '@common/utils/tenant-hostname.util';
 import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import { json, urlencoded } from 'express';
 import * as v8 from 'v8';
@@ -195,7 +196,7 @@ async function bootstrap() {
 
   httpAdapter.get('/sitemap.xml', async (req, res) => {
     try {
-      const hostname = req.headers['x-forwarded-host'] || req.headers['host'];
+      const hostname = resolveTenantHostname(req);
       const xml = await seoService.generateSitemap(hostname);
       res.setHeader('Content-Type', 'application/xml');
       res.setHeader('Cache-Control', 'public, max-age=3600');
@@ -209,7 +210,7 @@ async function bootstrap() {
 
   httpAdapter.get('/robots.txt', async (req, res) => {
     try {
-      const hostname = req.headers['x-forwarded-host'] || req.headers['host'];
+      const hostname = resolveTenantHostname(req);
       const txt = await seoService.generateRobotsTxt(hostname);
       res.setHeader('Content-Type', 'text/plain');
       res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -222,24 +223,6 @@ async function bootstrap() {
   // PWA routes (must be registered before the global prefix, and must stay
   // OUTSIDE /api/ so the no-store middleware above does not kill their cache).
   const pwaService = app.get(PublicPwaService);
-
-  // Hostnames of the API itself. In production the CloudFront origin injects a
-  // FIXED custom header `X-Forwarded-Host: vendix.online`, so trusting it would
-  // hand every tenant the platform manifest. The viewer `Host` wins; we only
-  // fall back to `x-forwarded-host` when `Host` is the API's own hostname,
-  // which is the signature of a proxy that did not forward the real Host.
-  const API_HOSTS = new Set(['api.vendix.com', 'api.vendix.online']);
-  const resolveTenantHostname = (req: any): string => {
-    const hostHeader = (req.headers['host'] ?? '').toString().split(':')[0];
-    const forwarded = (req.headers['x-forwarded-host'] ?? '')
-      .toString()
-      .split(',')[0]
-      .trim()
-      .split(':')[0];
-    return hostHeader && !API_HOSTS.has(hostHeader)
-      ? hostHeader
-      : forwarded || hostHeader;
-  };
 
   httpAdapter.get('/manifest.webmanifest', async (req, res) => {
     try {

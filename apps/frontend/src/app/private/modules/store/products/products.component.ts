@@ -100,6 +100,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [brands]="brands()"
         [paginationData]="pagination()"
         [canCreate]="canCreateProduct()"
+        [canBulkEdit]="canBulkEditProducts()"
         (refresh)="loadProducts()"
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
@@ -109,6 +110,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (toggleState)="onToggleProductState($event)"
         (bulkUpload)="openBulkUploadModal()"
         (bulkImageUpload)="openBulkImageUploadModal()"
+        (bulkEdit)="navigateToBulkEditPage()"
         (downloadCurrentProducts)="onDownloadCurrentProducts()"
         (pageChange)="changePage($event)"
       ></app-product-list>
@@ -158,6 +160,13 @@ export class ProductsComponent {
   // FIX QUI-503: granular permissions derived from AuthFacade
   readonly canCreateProduct = computed(() =>
     this.authFacade.hasPermission('store:products:create'),
+  );
+
+  // QUI-567: gate de la acción "Edición masiva" del listado. Misma mecánica que
+  // `canCreateProduct` (AuthFacade lee el signal `userPermissions`, así que el
+  // computed es reactivo). Es afordancia de UI: el backend impone el permiso.
+  readonly canBulkEditProducts = computed(() =>
+    this.authFacade.hasPermission('store:products:bulk_update'),
   );
 
   // Stats
@@ -316,6 +325,11 @@ export class ProductsComponent {
     this.router.navigate(['/admin/products/edit', product.id], {
       queryParams: { fromPage: this.pagination().page }
     });
+  }
+
+  /** QUI-567: único punto de entrada a la vista dedicada de edición masiva. */
+  navigateToBulkEditPage(): void {
+    this.router.navigate(['/admin/products/bulk-edit']);
   }
 
   onModalClose(): void {

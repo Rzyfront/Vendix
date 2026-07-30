@@ -93,9 +93,92 @@ export interface TransitionOptions {
   triggeredByUserId?: number;
   triggeredByJob?: string;
   payload?: Record<string, unknown>;
+  /**
+   * Value persisted to `store_subscriptions.lock_reason` — the column the
+   * access gate reads to tell the customer WHY its store is degraded.
+   *
+   * `reason` above is audit payload only (it lands in
+   * `subscription_events.payload.reason`); passing the motive there and not
+   * here leaves the column untouched and the customer gets the generic
+   * "payment" story. Both are needed.
+   */
   lockReason?: string;
   graceSoftUntil?: Date;
   graceHardUntil?: Date;
+}
+
+/**
+ * `store_subscriptions.lock_reason` written when the plan a store sits on was
+ * retired from the catalog and therefore could not be re-billed at renewal.
+ * The store does NOT owe money — the plan simply stopped existing.
+ *
+ * Consumer: `SubscriptionAccessService.stateToMode()` matches exactly this
+ * value to answer `SUBSCRIPTION_011` ("Plan retired — choose an active plan")
+ * instead of the past-due codes. It keeps a private copy of the literal on the
+ * read side; the two must stay in sync.
+ */
+export const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+/**
+ * `lock_reason` for the ordinary dunning path: the store crossed its payment
+ * deadlines and really does owe money.
+ */
+export const LOCK_REASON_PAST_DUE = 'past_due';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Contractual cycle length in days, per `subscription_billing_cycle_enum`.
+ *
+ * KNOWLEDGE GAP (duplication): the same table already exists as
+ * `SubscriptionProrationService.billingCycleMs` and
+ * `SubscriptionPaymentService.billingCycleDays`, both `private`. Neither is
+ * reachable, and `SubscriptionProrationService` already injects THIS service
+ * (see its constructor), so injecting it back would close a DI cycle. The
+ * table is therefore re-stated here instead of reached into. Extracting it to
+ * a shared `billing-cycle.util.ts` is the right follow-up.
+ */
+const BILLING_CYCLE_DAYS: Record<string, number> = {
+  monthly: 30,
+  quarterly: 90,
+  semiannual: 180,
+  annual: 365,
+  lifetime: 100 * 365,
+};
+const DEFAULT_CYCLE_DAYS = BILLING_CYCLE_DAYS.monthly;
+
+/**
+ * Input for `ensureOperational` / `ensureOperationalInTx`.
+ */
+export interface EnsureOperationalContext {
+  /** Audit reason written to every `subscription_events` row of the path. */
+  reason: string;
+  /**
+   * Base `current_period_end` the caller wants. When omitted it is derived as
+   * `now + plan cycle length`. Either way the grace discount is applied on
+   * top of it.
+   */
+  periodEnd?: Date;
+  /**
+   * Plan whose `billing_cycle` governs the derived period length. Purely a
+   * READ: `ensureOperational` never mutates `plan_id` / `paid_plan_id` —
+   * that stays owned by the payment-confirmation path (ADR-7).
+   */
+  planId?: number;
+  payload?: Record<string, unknown>;
+  triggeredByUserId?: number;
+  triggeredByJob?: string;
+}
+
+export interface EnsureOperationalResult {
+  /** State the subscription is in once the seam returns successfully. */
+  finalState: State;
+  /**
+   * States actually walked, in order. Empty when the subscription was
+   * already operational (idempotent no-op). `['pending_payment','active']`
+   * for the terminal states that must be walked, not jumped.
+   */
+  path: State[];
 }
 
 /**
@@ -261,10 +344,20 @@ export class SubscriptionStateService {
     // Auto-set lock_reason for suspended/blocked transitions; explicitly
     // clear it on recovery to active/trial so a stale 'past_due' /
     // 'admin_manual' label does not linger and keep the store looking locked.
-    // `undefined` leaves the column intact (e.g. transitions to grace_*).
+    // `undefined` leaves the column intact.
+    //
+    // The grace_* branch exists because DEGRADATION STARTS AT GRACE, not at
+    // suspension: a store whose plan was retired at renewal lands in
+    // `grace_soft`, and if the truthful motive is not stamped right there the
+    // consumer (`stateToMode` → SUBSCRIPTION_011) has nothing to read and the
+    // customer is told it failed to pay a bill it never owed. Callers with no
+    // truthful motive pass none and the column is left intact, so this only
+    // ever ADDS information.
     let lockReason: string | null | undefined;
     if (toState === 'suspended' || toState === 'blocked') {
       lockReason = opts.lockReason ?? 'admin_manual';
+    } else if (toState === 'grace_soft' || toState === 'grace_hard') {
+      lockReason = opts.lockReason ?? undefined;
     } else if (toState === 'active' || toState === 'trial') {
       lockReason = null;
     } else {
@@ -314,6 +407,434 @@ export class SubscriptionStateService {
 
   isLegalTransition(from: State, to: State): boolean {
     return TRANSITIONS[from]?.includes(to) ?? false;
+  }
+
+  // ------------------------------------------------------------------
+  // ensureOperational — the single reactivation seam
+  // ------------------------------------------------------------------
+
+  /**
+   * Bring a store back to an OPERATIONAL subscription state after a
+   * successful activation (payment confirmed, manual payment posted, admin
+   * unblock, free-plan grant...).
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * Six call-sites used to hand-roll "now go active", each with its own idea
+   * of which intermediate hops were legal and which stale scheduling columns
+   * to clear. Any state whose TRANSITIONS row lacked `'active'` (i.e.
+   * `cancelled` / `expired`) made those call-sites either throw
+   * `SUBSCRIPTION_010` or — worse — swallow the error and return HTTP 200
+   * while the store stayed blocked. A 200 with a blocked store is the worst
+   * failure mode available: the customer discovers it while operating.
+   *
+   * This seam centralises the policy:
+   *
+   *  1. Already `active` / `trial` → idempotent NO-OP. Nothing is written, no
+   *     event is emitted, the period is NOT extended (no free time).
+   *  2. State whose TRANSITIONS row contains `'active'` (`grace_soft`,
+   *     `grace_hard`, `suspended`, `blocked`, `draft`, `no_plan`,
+   *     `pending_payment`) → one direct hop.
+   *  3. State whose row does NOT contain `'active'` but does contain
+   *     `'pending_payment'` (`cancelled`, `expired`) → TWO hops,
+   *     `pending_payment` then `active`.
+   *
+   * Rule 3 is the core of the design. The terminality of `cancelled` /
+   * `expired` is preserved by WALKING the legal path, never by adding
+   * `'active'` to their TRANSITIONS row — that shortcut would let any code
+   * path activate a terminated subscription with no evidence of collection,
+   * and is explicitly rejected. `pending_payment` is the parking state that
+   * says "an invoice exists and is being settled", so passing through it
+   * keeps the audit trail honest: `subscription_events` gets one row per hop.
+   *
+   * EXIT GUARD
+   * ----------
+   * After the path completes, the state is RE-READ from the database. If it
+   * is not `active` / `trial` the call throws instead of reporting success,
+   * and (for `ensureOperational`) the whole path rolls back. A reported
+   * success must imply an operational store.
+   *
+   * PERIOD WINDOW
+   * -------------
+   * When the previous `current_period_end` had already lapsed, the customer
+   * was operating on grace time they did not pay for. The new period end
+   * therefore DISCOUNTS the whole days consumed between the lapsed period end
+   * and `now`: an annual plan reactivated 5 days past due gets
+   * `now + 360d`, not `now + 365d`. When the period had NOT lapsed and the
+   * caller passed no explicit `periodEnd`, the paid window is left untouched
+   * (reactivating a mid-period `blocked` store must not gift a fresh cycle).
+   *
+   * Concurrency: same model as `transition()` — one Serializable transaction
+   * holding a `FOR UPDATE` row lock for the whole path, so a competing
+   * webhook/cron writer either waits or finds the store already operational
+   * and no-ops.
+   */
+  async ensureOperational(
+    storeId: number,
+    ctx: EnsureOperationalContext,
+  ): Promise<EnsureOperationalResult> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+    }
+
+    const result = await this.prisma.$transaction(
+      async (tx: any) => this.ensureOperationalInTxInternal(tx, storeId, ctx),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    // Idempotent no-op: nothing changed, so nothing to invalidate or emit.
+    if (!result.path.length) {
+      return { finalState: result.finalState, path: [] };
+    }
+
+    // Post-commit side effects. Failures must NOT roll back the reactivation
+    // (it already committed). Log + best-effort only.
+    try {
+      await this.accessService.invalidateCache(storeId);
+    } catch (err) {
+      this.logger.warn(
+        `Post-ensureOperational cache invalidation failed for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
+
+    // One event for the whole recovery. The intermediate `pending_payment`
+    // hop is a mechanical waypoint, not a state the store ever really
+    // occupied, so listeners see `degraded -> active` plus the full path.
+    this.eventEmitter.emit('subscription.state.changed', {
+      storeId,
+      fromState: result.fromState,
+      toState: result.finalState,
+      reason: ctx.reason,
+      triggeredByUserId: ctx.triggeredByUserId,
+      triggeredByJob: ctx.triggeredByJob,
+      path: result.path,
+    });
+
+    return { finalState: result.finalState, path: result.path };
+  }
+
+  /**
+   * `ensureOperational` for callers that are ALREADY inside a transaction
+   * (e.g. the payment-confirmation path, which must promote the state
+   * atomically with the payment/invoice rows).
+   *
+   * Like `transitionInTx`, it does NOT invalidate the access cache nor emit
+   * `subscription.state.changed`; the caller owns firing those AFTER its own
+   * transaction commits, so side effects never run on a rolled-back change.
+   *
+   * The exit guard still applies: on a degraded outcome this throws, which
+   * aborts the caller's transaction — exactly the desired behaviour, since a
+   * payment confirmation that leaves the store blocked must not commit.
+   */
+  async ensureOperationalInTx(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    ctx: EnsureOperationalContext,
+  ): Promise<EnsureOperationalResult> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+    }
+    const result = await this.ensureOperationalInTxInternal(
+      tx as any,
+      storeId,
+      ctx,
+    );
+    return { finalState: result.finalState, path: result.path };
+  }
+
+  /**
+   * Legal walk from `from` to `active`.
+   *
+   * - `[]`   → already operational, nothing to do.
+   * - `null` → no legal path exists (caller throws `SUBSCRIPTION_010`).
+   *
+   * With the current TRANSITIONS table every state reaches `active` either
+   * directly or via `pending_payment`, so `null` is defensive: it exists so
+   * that a future edit which strands a state fails loudly here instead of
+   * silently leaving stores degraded.
+   */
+  private resolveOperationalRoute(from: State): State[] | null {
+    if (from === 'active' || from === 'trial') {
+      return [];
+    }
+    if (this.isLegalTransition(from, 'active')) {
+      return ['active'];
+    }
+    if (
+      this.isLegalTransition(from, 'pending_payment') &&
+      this.isLegalTransition('pending_payment', 'active')
+    ) {
+      return ['pending_payment', 'active'];
+    }
+    return null;
+  }
+
+  private async ensureOperationalInTxInternal(
+    tx: any,
+    storeId: number,
+    ctx: EnsureOperationalContext,
+  ): Promise<EnsureOperationalResult & { fromState: State }> {
+    // Same FOR UPDATE lock `transition()` takes, but it also reads the
+    // columns the period recalculation needs, so the whole seam works off one
+    // consistent snapshot. Re-locking inside each hop is a no-op: this tx
+    // already holds the row lock.
+    const locked = (await tx.$queryRaw(
+      Prisma.sql`SELECT id, state, plan_id, current_period_end, scheduled_cancel_at FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`,
+    )) as Array<{
+      id: number;
+      state: State;
+      plan_id: number | null;
+      current_period_end: Date | string | null;
+      scheduled_cancel_at: Date | string | null;
+    }>;
+
+    if (!locked.length) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const current = locked[0];
+    const fromState = current.state;
+    const route = this.resolveOperationalRoute(fromState);
+
+    if (route === null) {
+      this.logger.error(
+        `ENSURE_OPERATIONAL_NO_PATH store=${storeId} from=${fromState} reason=${ctx.reason}`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        `No legal path from ${fromState} to active`,
+      );
+    }
+
+    if (!route.length) {
+      this.logger.log(
+        `ENSURE_OPERATIONAL_NOOP store=${storeId} state=${fromState} reason=${ctx.reason}`,
+      );
+      return { finalState: fromState, path: [], fromState };
+    }
+
+    const now = new Date();
+    const walked: State[] = [];
+
+    for (let hop = 0; hop < route.length; hop++) {
+      const step = route[hop];
+      await this.transitionInTx(tx, storeId, step, {
+        reason: ctx.reason,
+        triggeredByUserId: ctx.triggeredByUserId,
+        triggeredByJob: ctx.triggeredByJob,
+        payload: {
+          ...(ctx.payload ?? {}),
+          ensure_operational: true,
+          ensure_operational_from: fromState,
+          ensure_operational_route: route,
+          ensure_operational_hop: hop + 1,
+        },
+      });
+      walked.push(step);
+    }
+
+    await this.applyReactivationWindow(tx, {
+      subscriptionId: current.id,
+      storeId,
+      now,
+      originalPeriodEnd: this.asDate(current.current_period_end),
+      scheduledCancelAt: this.asDate(current.scheduled_cancel_at),
+      planId: ctx.planId ?? current.plan_id,
+      ctx,
+    });
+
+    // EXIT GUARD — re-read from the database instead of trusting the writes
+    // above. `findFirst` (not `findUnique`) per vendix-prisma-scopes: it stays
+    // valid if this ever runs through a scoped client.
+    const finalRow = (await tx.store_subscriptions.findFirst({
+      where: { store_id: storeId },
+      select: {
+        state: true,
+        current_period_end: true,
+        scheduled_cancel_at: true,
+      },
+    })) as {
+      state: State;
+      current_period_end: Date | null;
+      scheduled_cancel_at: Date | null;
+    } | null;
+
+    const finalState = finalRow?.state ?? null;
+
+    if (finalState !== 'active' && finalState !== 'trial') {
+      this.logger.error(
+        `ENSURE_OPERATIONAL_FAILED store=${storeId} from=${fromState} ` +
+          `route=[${route.join('->')}] walked=[${walked.join('->')}] ` +
+          `final=${finalState ?? 'missing'} reason=${ctx.reason}`,
+      );
+      // Deliberately SUBSCRIPTION_INTERNAL_ERROR (500) and not
+      // SUBSCRIPTION_010 (409): the client did nothing wrong and the path was
+      // legal — a server invariant broke. A 5xx is what stops the caller from
+      // reporting a success the store cannot honour.
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+        `Reactivation did not leave store ${storeId} operational ` +
+          `(from=${fromState}, walked=[${walked.join('->')}], final=${finalState ?? 'missing'})`,
+      );
+    }
+
+    this.logger.log(
+      `ENSURE_OPERATIONAL_OK store=${storeId} from=${fromState} ` +
+        `walked=[${walked.join('->')}] final=${finalState} reason=${ctx.reason}`,
+    );
+
+    return { finalState, path: walked, fromState };
+  }
+
+  /**
+   * Reset the billing window and wipe every column that could re-degrade the
+   * store right after it was reactivated.
+   *
+   * `scheduled_cancel_at` is the important one: a reactivation VOIDS any
+   * end-of-cycle cancellation, otherwise a cron would cancel exactly what the
+   * customer just paid for. `suspend_at` / `cancel_at` are stale dunning
+   * deadlines computed off the lapsed period and must not survive either.
+   * `grace_soft_until` / `grace_hard_until` / `lock_reason` are already
+   * cleared by `transition()` on the way into `active`.
+   */
+  private async applyReactivationWindow(
+    tx: any,
+    args: {
+      subscriptionId: number;
+      storeId: number;
+      now: Date;
+      originalPeriodEnd: Date | null;
+      scheduledCancelAt: Date | null;
+      planId: number | null;
+      ctx: EnsureOperationalContext;
+    },
+  ): Promise<void> {
+    const { subscriptionId, storeId, now, originalPeriodEnd, planId, ctx } =
+      args;
+
+    const data: Prisma.store_subscriptionsUncheckedUpdateInput = {
+      scheduled_cancel_at: null,
+      auto_renew: true,
+      suspend_at: null,
+      cancel_at: null,
+      updated_at: now,
+    };
+
+    // Only rebuild the window when the paid one actually lapsed (or the
+    // caller pinned one, or there never was one). A mid-period `blocked`
+    // store recovering must keep the window it already paid for.
+    const lapsed =
+      originalPeriodEnd === null || originalPeriodEnd.getTime() <= now.getTime();
+
+    if (ctx.periodEnd || lapsed) {
+      const cycleDays = ctx.periodEnd
+        ? DEFAULT_CYCLE_DAYS // unused: an explicit periodEnd is the base
+        : await this.resolveCycleDays(tx, planId);
+
+      const window = this.computeReactivationWindow({
+        now,
+        originalPeriodEnd,
+        cycleDays,
+        requestedPeriodEnd: ctx.periodEnd,
+      });
+
+      data.current_period_start = now;
+      data.current_period_end = window.periodEnd;
+      data.next_billing_at = window.periodEnd;
+
+      this.logger.log(
+        `ENSURE_OPERATIONAL_WINDOW store=${storeId} ` +
+          `original_period_end=${originalPeriodEnd?.toISOString() ?? 'null'} ` +
+          `cycle_days=${ctx.periodEnd ? 'explicit' : cycleDays} ` +
+          `grace_days_consumed=${window.graceDaysConsumed} ` +
+          `discount_days=${window.discountDays}${window.clamped ? ' (clamped)' : ''} ` +
+          `new_period_end=${window.periodEnd.toISOString()}`,
+      );
+
+      if (window.clamped) {
+        this.logger.warn(
+          `ENSURE_OPERATIONAL_WINDOW_CLAMPED store=${storeId}: consumed grace ` +
+            `(${window.graceDaysConsumed}d) exceeded the cycle; discount capped ` +
+            `at ${window.discountDays}d to keep the new period in the future`,
+        );
+      }
+    }
+
+    await tx.store_subscriptions.update({
+      where: { id: subscriptionId },
+      data,
+    });
+  }
+
+  /**
+   * New period end, discounting the whole days the customer already consumed
+   * operating past the lapsed period end.
+   *
+   * Whole days only — a partial day of grace is not deducted, which rounds in
+   * the customer's favour and keeps the arithmetic reproducible.
+   *
+   * All arithmetic is on absolute UTC instants (`getTime()` deltas), never on
+   * local calendar components, so it is DST- and timezone-independent:
+   * `current_period_end` / `next_billing_at` are billing instants, not
+   * date-only business fields, so the store-timezone bucketing rules from
+   * `vendix-date-timezone` do not apply here.
+   */
+  private computeReactivationWindow(params: {
+    now: Date;
+    originalPeriodEnd: Date | null;
+    cycleDays: number;
+    requestedPeriodEnd?: Date;
+  }): {
+    periodEnd: Date;
+    graceDaysConsumed: number;
+    discountDays: number;
+    clamped: boolean;
+  } {
+    const nowMs = params.now.getTime();
+    const baseMs = params.requestedPeriodEnd
+      ? params.requestedPeriodEnd.getTime()
+      : nowMs + params.cycleDays * DAY_MS;
+
+    const overdueMs = params.originalPeriodEnd
+      ? nowMs - params.originalPeriodEnd.getTime()
+      : 0;
+    const graceDaysConsumed =
+      overdueMs > 0 ? Math.floor(overdueMs / DAY_MS) : 0;
+
+    // Never hand back a window that is already over: that would drop the
+    // store straight back into dunning, i.e. the exact degradation this seam
+    // exists to prevent. Keep at least one day of runway.
+    const maxDiscountMs = Math.max(0, baseMs - nowMs - DAY_MS);
+    const wantedDiscountMs = graceDaysConsumed * DAY_MS;
+    const discountMs = Math.min(wantedDiscountMs, maxDiscountMs);
+
+    return {
+      periodEnd: new Date(baseMs - discountMs),
+      graceDaysConsumed,
+      discountDays: Math.floor(discountMs / DAY_MS),
+      clamped: discountMs < wantedDiscountMs,
+    };
+  }
+
+  private async resolveCycleDays(
+    tx: any,
+    planId: number | null,
+  ): Promise<number> {
+    if (!planId) {
+      return DEFAULT_CYCLE_DAYS;
+    }
+    const plan = (await tx.subscription_plans.findUnique({
+      where: { id: planId },
+      select: { billing_cycle: true },
+    })) as { billing_cycle: string | null } | null;
+    const cycle = plan?.billing_cycle ?? undefined;
+    return (cycle ? BILLING_CYCLE_DAYS[cycle] : undefined) ?? DEFAULT_CYCLE_DAYS;
+  }
+
+  /** Raw-query columns can arrive as strings depending on the driver path. */
+  private asDate(value: Date | string | null | undefined): Date | null {
+    if (!value) return null;
+    return value instanceof Date ? value : new Date(value);
   }
 
   /**
@@ -629,12 +1150,32 @@ export class SubscriptionStateService {
       }
 
       if (targetState && targetState !== currentState) {
+        // BUSINESS RULE — the real motive of a lock is stamped WHERE IT
+        // ORIGINATES and SURVIVES the escalation grace_soft → grace_hard →
+        // suspended.
+        //
+        // This used to write 'past_due' unconditionally on the suspension rung,
+        // which overwrote the true motive: a store whose plan was retired was
+        // then told it owed money. It owes nothing, and a debt that does not
+        // exist cannot be collected — that is false information billed to the
+        // customer. So an existing non-null `lock_reason` always wins, and
+        // 'past_due' is stamped only when there is no prior motive (the
+        // ordinary impago path, whose behaviour is unchanged).
+        const existingLockReason = sub.lock_reason ?? null;
+        const originLockReason =
+          existingLockReason ??
+          (planUnavailable ? LOCK_REASON_PLAN_RETIRED : null);
+        const dunningLockReason =
+          targetState === 'suspended'
+            ? (originLockReason ?? LOCK_REASON_PAST_DUE)
+            : (originLockReason ?? undefined);
+
         await this.transition(sub.store_id, targetState, {
           reason,
           triggeredByJob: 'subscription-state-engine',
-          // Dunning-driven suspension: stamp a truthful lock_reason instead of
-          // letting transition() fall back to the 'admin_manual' default.
-          lockReason: targetState === 'suspended' ? 'past_due' : undefined,
+          // transition() persists this only for grace_soft / grace_hard /
+          // suspended / blocked; on the cancellation rung it is ignored.
+          lockReason: dunningLockReason,
           graceSoftUntil: softDeadline,
           graceHardUntil: hardDeadline,
           payload: {
@@ -646,6 +1187,10 @@ export class SubscriptionStateService {
             plan_unavailable: planUnavailable,
             plan_state: plan?.state ?? null,
             plan_archived_at: plan?.archived_at?.toISOString() ?? null,
+            // Auditable trace of the motive decision: what the row carried
+            // before the rung and what this rung persisted (null = intact).
+            previous_lock_reason: existingLockReason,
+            lock_reason: dunningLockReason ?? null,
           },
         });
       }

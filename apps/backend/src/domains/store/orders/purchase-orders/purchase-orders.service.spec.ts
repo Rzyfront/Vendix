@@ -63,7 +63,10 @@ describe('PurchaseOrdersService.receive()', () => {
     id: PO_ID,
     organization_id: ORG_ID,
     location_id: LOCATION_ID,
-    status: 'pending',
+    // `pending` no existe en purchase_order_status_enum (draft | approved |
+    // partial | received | cancelled). Se recibe desde `approved`.
+    status: 'approved',
+    order_number: 'PO-TEST-0001',
     total_amount: 20000,
     location: { id: LOCATION_ID, store_id: STORE_ID },
     purchase_order_items: [mockOrderItem],
@@ -88,8 +91,20 @@ describe('PurchaseOrdersService.receive()', () => {
         // guard validates each line belongs to this order and stays within the
         // (ordered - already_received) envelope.
         findMany: jest.fn().mockResolvedValue([
-          { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+          {
+            id: mockOrderItem.id,
+            quantity_ordered: mockOrderItem.quantity_ordered,
+            quantity_received: 0,
+            // QUI-486 — el guard de línea base los lee de esta misma consulta.
+            product_id: PRODUCT_ID,
+            product_variant_id: null,
+          },
         ]),
+      },
+      // QUI-486 — producto de control SIN variantes: el guard consulta y no
+      // encuentra ninguna, así que la recepción base sigue siendo válida.
+      product_variants: {
+        findMany: jest.fn().mockResolvedValue([]),
       },
       // Pre-existing dependencies this spec never mocked:
       // - findFirst: Fase 2 UoM conversion (resolveUoMConversion).
@@ -319,6 +334,332 @@ describe('PurchaseOrdersService.receive()', () => {
   });
 
   /**
+   * QUI-486 — un producto con variantes solo se compra por variante.
+   *
+   * Sin el guard la recepción NO falla — es peor: `getOrCreateStockLevel`
+   * recrea la fila base que `enforceStockLevelsMode` había borrado, y
+   * `syncProductStock` la excluye del agregado (`product_variant_id: { not:
+   * null }` cuando hay variantes). Las unidades se pagan y quedan en una fila
+   * que nadie lee: invisibles en catálogo e invendibles.
+   *
+   * El control de no-regresión vive en los 4 tests de arriba: `mockOrderItem`
+   * usa `product_variant_id: null` sobre un producto SIN variantes y debe
+   * seguir recibiendo exactamente igual.
+   */
+  describe('QUI-486: línea base sobre producto con variantes', () => {
+    const VARIANT_PRODUCT_NAME = 'Smart TV LG 50" NanoCell';
+
+    /**
+     * Reemplaza el `$transaction` del arnés por uno cuyo `product_variants`
+     * SÍ devuelve variantes para `PRODUCT_ID`. Solo se mockean los modelos que
+     * el guard toca: revienta antes de llegar al resto del flujo.
+     */
+    const mockTxWithVariantProduct = () => {
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) =>
+          callback({
+            purchase_order_items: {
+              findMany: jest.fn().mockResolvedValue([
+                {
+                  id: PO_ITEM_ID,
+                  quantity_ordered: 10,
+                  quantity_received: 0,
+                  product_id: PRODUCT_ID,
+                  product_variant_id: null,
+                },
+              ]),
+            },
+            product_variants: {
+              findMany: jest
+                .fn()
+                .mockResolvedValue([{ product_id: PRODUCT_ID }]),
+            },
+            products: {
+              findMany: jest
+                .fn()
+                .mockResolvedValue([
+                  { id: PRODUCT_ID, name: VARIANT_PRODUCT_NAME },
+                ]),
+            },
+            purchase_orders: {
+              // `status` es obligatorio: receive() valida la transición de
+              // estado antes de mirar las líneas, así que sin él la orden se
+              // rechazaría por PO_STATUS_001 y nunca llegaría al guard de
+              // variantes que este bloque ejercita.
+              findUnique: jest.fn().mockResolvedValue({
+                id: PO_ID,
+                status: 'approved',
+                order_number: 'PO-20260706-216',
+              }),
+            },
+            purchase_order_receptions: { create: jest.fn() },
+            purchase_order_reception_items: { create: jest.fn() },
+          }),
+      );
+    };
+
+    it('receive() rechaza con PO_VARIANT_001 y no crea la recepción', async () => {
+      mockTxWithVariantProduct();
+
+      await expect(service.receive(PO_ID, baseDto)).rejects.toMatchObject({
+        errorCode: 'PO_VARIANT_001',
+      });
+
+      // Nada se movió: ni stock, ni costeo, ni recepción.
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(costingService.calculateCostOnReceipt).not.toHaveBeenCalled();
+    });
+
+    it('receive() nombra la orden y la salida en el mensaje de error', async () => {
+      mockTxWithVariantProduct();
+
+      await expect(service.receive(PO_ID, baseDto)).rejects.toMatchObject({
+        response: {
+          error_code: 'PO_VARIANT_001',
+          message: expect.stringContaining('PO-20260706-216'),
+        },
+      });
+    });
+
+    it('create() rechaza la línea base antes de persistir la orden', async () => {
+      const createTx = {
+        product_variants: {
+          findMany: jest.fn().mockResolvedValue([{ product_id: PRODUCT_ID }]),
+        },
+        products: {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ id: PRODUCT_ID, name: VARIANT_PRODUCT_NAME }]),
+        },
+        purchase_orders: { create: jest.fn() },
+      };
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) => callback(createTx),
+      );
+
+      await expect(
+        service.create({
+          location_id: LOCATION_ID,
+          items: [{ product_id: PRODUCT_ID, quantity: 6, unit_cost: 230000 }],
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'PO_VARIANT_001' });
+
+      expect(createTx.purchase_orders.create).not.toHaveBeenCalled();
+    });
+
+    it('create() deja pasar la línea base cuando el producto NO tiene variantes', async () => {
+      const productVariantsFindMany = jest.fn().mockResolvedValue([]);
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) => {
+          // El guard consulta y no encuentra variantes; el flujo continúa y
+          // falla más adelante por mocks ausentes — eso basta para probar que
+          // el guard NO fue el que cortó.
+          await callback({
+            product_variants: { findMany: productVariantsFindMany },
+          }).catch(() => undefined);
+        },
+      );
+
+      await service
+        .create({
+          location_id: LOCATION_ID,
+          items: [{ product_id: PRODUCT_ID, quantity: 6, unit_cost: 230000 }],
+        } as any)
+        .catch(() => undefined);
+
+      expect(productVariantsFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { product_id: { in: [PRODUCT_ID] } },
+        }),
+      );
+    });
+  });
+
+  /**
+   * Ciclo de vida de la orden de compra.
+   *
+   * `approve()` y `cancel()` eran `prisma.update()` ciegos que jamás leían el
+   * estado actual: se podía aprobar una orden ya recibida, o cancelarla dejando
+   * la mercancía dentro y la recepción viva. `remove()` borraba físicamente una
+   * orden recibida. Cada transición ilegal declarada en `VALID_TRANSITIONS`
+   * tiene aquí una prueba que la bloquea.
+   */
+  describe('ciclo de vida: VALID_TRANSITIONS es la fuente de la verdad', () => {
+    /** Monta una transacción cuyo findUnique devuelve la orden en `status`. */
+    const mockOrderInStatus = (status: string) => {
+      const tx = {
+        purchase_orders: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: PO_ID,
+            status,
+            order_number: 'PO-TEST-LIFECYCLE',
+          }),
+          update: jest.fn().mockResolvedValue({ id: PO_ID, status }),
+          delete: jest.fn().mockResolvedValue({ id: PO_ID }),
+        },
+        purchase_order_items: {
+          findMany: jest.fn().mockResolvedValue([]),
+          deleteMany: jest.fn(),
+          create: jest.fn(),
+        },
+        product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) => callback(tx),
+      );
+      return tx;
+    };
+
+    it('cancel() sobre una orden RECIBIDA responde PO_CANCEL_RECEIVED_001 y no la toca', async () => {
+      const tx = mockOrderInStatus('received');
+
+      await expect(service.cancel(PO_ID)).rejects.toMatchObject({
+        errorCode: 'PO_CANCEL_RECEIVED_001',
+      });
+
+      expect(tx.purchase_orders.update).not.toHaveBeenCalled();
+    });
+
+    it('cancel() sobre una orden PARCIAL también se bloquea: ya hay mercancía dentro', async () => {
+      const tx = mockOrderInStatus('partial');
+
+      await expect(service.cancel(PO_ID)).rejects.toMatchObject({
+        errorCode: 'PO_CANCEL_RECEIVED_001',
+      });
+
+      expect(tx.purchase_orders.update).not.toHaveBeenCalled();
+    });
+
+    it('el mensaje de cancelación bloqueada nombra la devolución a proveedor', async () => {
+      mockOrderInStatus('received');
+
+      await expect(service.cancel(PO_ID)).rejects.toMatchObject({
+        response: {
+          message: expect.stringContaining('devolución a proveedor'),
+        },
+      });
+    });
+
+    it('cancel() sobre un BORRADOR sí procede', async () => {
+      const tx = mockOrderInStatus('draft');
+
+      await service.cancel(PO_ID);
+
+      expect(tx.purchase_orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'cancelled' }),
+        }),
+      );
+    });
+
+    it('approve() sobre una orden ya RECIBIDA responde PO_STATUS_001', async () => {
+      const tx = mockOrderInStatus('received');
+
+      await expect(service.approve(PO_ID)).rejects.toMatchObject({
+        errorCode: 'PO_STATUS_001',
+      });
+
+      expect(tx.purchase_orders.update).not.toHaveBeenCalled();
+    });
+
+    it('approve() sobre una orden CANCELADA responde PO_STATUS_001', async () => {
+      const tx = mockOrderInStatus('cancelled');
+
+      await expect(service.approve(PO_ID)).rejects.toMatchObject({
+        errorCode: 'PO_STATUS_001',
+      });
+
+      expect(tx.purchase_orders.update).not.toHaveBeenCalled();
+    });
+
+    it('approve() sobre un BORRADOR sí procede', async () => {
+      const tx = mockOrderInStatus('draft');
+
+      await service.approve(PO_ID);
+
+      expect(tx.purchase_orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'approved' }),
+        }),
+      );
+    });
+
+    it('update() sobre una orden APROBADA responde PO_STATUS_002 y no reescribe líneas', async () => {
+      const tx = mockOrderInStatus('approved');
+
+      await expect(
+        service.update(PO_ID, { notes: 'nuevo' } as any),
+      ).rejects.toMatchObject({ errorCode: 'PO_STATUS_002' });
+
+      expect(tx.purchase_orders.update).not.toHaveBeenCalled();
+      expect(tx.purchase_order_items.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('update() de un BORRADOR persiste las líneas de verdad', async () => {
+      const tx = mockOrderInStatus('draft');
+
+      await service.update(PO_ID, {
+        items: [{ product_id: PRODUCT_ID, quantity: 12, unit_price: 2000 }],
+      } as any);
+
+      // El bug original: `items` viajaba dentro de `data` y Prisma abortaba con
+      // "Unknown argument `items`" en TODA llamada a update().
+      expect(tx.purchase_order_items.deleteMany).toHaveBeenCalledWith({
+        where: { purchase_order_id: PO_ID },
+      });
+      expect(tx.purchase_order_items.create).toHaveBeenCalledTimes(1);
+      const dataArg = (tx.purchase_orders.update as jest.Mock).mock.calls[0][0]
+        .data;
+      expect(dataArg).not.toHaveProperty('items');
+      expect(dataArg.subtotal_amount).toBe(24000);
+    });
+
+    it('remove() sobre una orden RECIBIDA responde PO_STATUS_002 y no borra nada', async () => {
+      const tx = mockOrderInStatus('received');
+
+      await expect(service.remove(PO_ID)).rejects.toMatchObject({
+        errorCode: 'PO_STATUS_002',
+      });
+
+      expect(tx.purchase_orders.delete).not.toHaveBeenCalled();
+    });
+
+    it('remove() sobre un BORRADOR sí borra', async () => {
+      const tx = mockOrderInStatus('draft');
+
+      await service.remove(PO_ID);
+
+      expect(tx.purchase_orders.delete).toHaveBeenCalledWith({
+        where: { id: PO_ID },
+      });
+    });
+
+    it('receive() sobre una orden CANCELADA responde PO_STATUS_001', async () => {
+      const tx = mockOrderInStatus('cancelled');
+
+      await expect(service.receive(PO_ID, baseDto)).rejects.toMatchObject({
+        errorCode: 'PO_STATUS_001',
+      });
+
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('receive() sobre una orden inexistente responde PO_FIND_001, no un error de líneas', async () => {
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (callback: any) =>
+          callback({
+            purchase_orders: { findUnique: jest.fn().mockResolvedValue(null) },
+            purchase_order_items: { findMany: jest.fn() },
+          }),
+      );
+
+      await expect(service.receive(999999, baseDto)).rejects.toMatchObject({
+        errorCode: 'PO_FIND_001',
+      });
+    });
+  });
+
+  /**
    * D2 — partial receptions must post proportional accounting entries with
    * a distinct `reception_id` as `source_id` each time (see
    * vendix-auto-entries skill: "Purchase order receptions are the special
@@ -385,7 +726,8 @@ describe('PurchaseOrdersService.receive()', () => {
         id: PO_ID,
         organization_id: ORG_ID,
         location_id: LOCATION_ID,
-        status: quantityReceivedBefore > 0 ? 'partial' : 'pending',
+        status: quantityReceivedBefore > 0 ? 'partial' : 'approved',
+        order_number: 'PO-TEST-0002',
         total_amount: PARTIAL_PO_TOTAL,
         location: { id: LOCATION_ID, store_id: STORE_ID },
         purchase_order_items: [
@@ -404,8 +746,18 @@ describe('PurchaseOrdersService.receive()', () => {
           update: jest.fn().mockResolvedValue({}),
           // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
           findMany: jest.fn().mockResolvedValue([
-            { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+            {
+              id: mockOrderItem.id,
+              quantity_ordered: mockOrderItem.quantity_ordered,
+              quantity_received: 0,
+              product_id: PRODUCT_ID,
+              product_variant_id: null,
+            },
           ]),
+        },
+        // QUI-486 — producto de control SIN variantes.
+        product_variants: {
+          findMany: jest.fn().mockResolvedValue([]),
         },
         products: {
           findFirst: jest.fn().mockResolvedValue({
@@ -651,7 +1003,8 @@ describe('PurchaseOrdersService.receive()', () => {
           id: PO_ID,
           organization_id: ORG_ID,
           location_id: LOCATION_ID,
-          status: quantityReceivedBefore > 0 ? 'partial' : 'pending',
+          status: quantityReceivedBefore > 0 ? 'partial' : 'approved',
+          order_number: 'PO-TEST-0003',
           total_amount: ROUNDING_PO_TOTAL,
           location: { id: LOCATION_ID, store_id: STORE_ID },
           purchase_order_items: [
@@ -670,8 +1023,18 @@ describe('PurchaseOrdersService.receive()', () => {
             update: jest.fn().mockResolvedValue({}),
             // FASE 0/FASE 2 — over-receipt guard (receive() :1420).
             findMany: jest.fn().mockResolvedValue([
-              { id: mockOrderItem.id, quantity_ordered: mockOrderItem.quantity_ordered, quantity_received: 0 },
+              {
+                id: mockOrderItem.id,
+                quantity_ordered: mockOrderItem.quantity_ordered,
+                quantity_received: 0,
+                product_id: PRODUCT_ID,
+                product_variant_id: null,
+              },
             ]),
+          },
+          // QUI-486 — producto de control SIN variantes.
+          product_variants: {
+            findMany: jest.fn().mockResolvedValue([]),
           },
           products: {
             findFirst: jest.fn().mockResolvedValue({

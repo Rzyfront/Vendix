@@ -1355,11 +1355,9 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error saving draft:', error);
-        const errorMsg =
-          error.error?.message ||
-          error.message ||
-          'Error al guardar el borrador';
-        this.toastService.error(errorMsg);
+        this.toastService.error(
+          this._errorMessage(error, 'Error al guardar el borrador'),
+        );
       },
     });
   }
@@ -1566,9 +1564,9 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error submitting order:', error);
-        const errorMsg =
-          error.error?.message || error.message || 'Error al enviar la orden';
-        this.toastService.error(errorMsg);
+        this.toastService.error(
+          this._errorMessage(error, 'Error al enviar la orden'),
+        );
       },
     });
   }
@@ -1651,9 +1649,9 @@ export class PopComponent implements OnInit, OnDestroy {
           const stage = err?.stage;
           if (stage === 'create' || !createdOrder) {
             // La OC no se creó → no limpiamos el carrito (permite reintentar).
-            const msg =
-              err?.error?.message || err?.message || 'Error al crear la orden';
-            this.toastService.error(msg);
+            this.toastService.error(
+              this._errorMessage(err, 'Error al crear la orden'),
+            );
             return;
           }
           if (stage === 'receive') {
@@ -1673,6 +1671,25 @@ export class PopComponent implements OnInit, OnDestroy {
           this._finalizeAfterOrder();
         },
       });
+  }
+
+  /**
+   * QUI-486 — Normaliza el error de `PurchaseOrdersService` a un mensaje legible.
+   *
+   * `PurchaseOrdersService.handleError` ya extrae `error.error.message` y
+   * re-lanza un **string plano**, no el `HttpErrorResponse`. Sobre un string,
+   * `err.error?.message` y `err.message` son `undefined`, así que la cadena
+   * `err?.error?.message || err?.message || fallback` caía SIEMPRE al fallback
+   * genérico y sepultaba el motivo real del backend (p. ej. `PO_VARIANT_001`:
+   * "el producto tiene variantes y debes seleccionar cuál estás comprando").
+   *
+   * Se contemplan ambas formas porque no todos los errores del flujo pasan por
+   * el servicio: los de etapa (`{ stage: 'receive' }`) se lanzan dentro del pipe.
+   */
+  private _errorMessage(err: unknown, fallback: string): string {
+    if (typeof err === 'string' && err.trim()) return err;
+    const e = err as { error?: { message?: string }; message?: string } | null;
+    return e?.error?.message || e?.message || fallback;
   }
 
   /** Mensaje de progreso (toast info) según los efectos elegidos. */

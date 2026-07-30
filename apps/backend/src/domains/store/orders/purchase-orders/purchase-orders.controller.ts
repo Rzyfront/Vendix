@@ -15,6 +15,7 @@ import {
   HttpCode,
   HttpStatus,
   BadRequestException,
+  HttpException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -75,6 +76,16 @@ export class PurchaseOrdersController {
         'Orden de compra creada exitosamente',
       );
     } catch (error) {
+      // QUI-486 — los errores de negocio DEBEN salir como HTTP 4xx.
+      // Este catch devuelve un cuerpo de error pero deja el status en 201
+      // (default de @Post), así que el cliente lo lee como éxito: es
+      // exactamente el "falso éxito" que reporta el ticket. Se re-lanza toda
+      // HttpException (VendixHttpException tipada y las de Nest —
+      // BadRequestException, NotFoundException, ForbiddenException) para que el
+      // AllExceptionsFilter global la formatee con su status real y su
+      // `error_code`. Los errores NO-HTTP (fallo de Prisma, bug inesperado)
+      // siguen cayendo en el envoltorio de abajo, sin cambio de contrato.
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al crear la orden de compra',
         error.response?.message || error.message,
@@ -102,6 +113,8 @@ export class PurchaseOrdersController {
         'Órdenes de compra obtenidas exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener las órdenes de compra',
         error.response?.message || error.message,
@@ -123,6 +136,8 @@ export class PurchaseOrdersController {
         'Borradores de órdenes de compra obtenidos exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener los borradores de órdenes de compra',
         error.response?.message || error.message,
@@ -144,6 +159,8 @@ export class PurchaseOrdersController {
         'Órdenes de compra aprobadas obtenidas exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener las órdenes de compra aprobadas',
         error.response?.message || error.message,
@@ -162,6 +179,8 @@ export class PurchaseOrdersController {
         'Órdenes de compra pendientes obtenidas exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener las órdenes de compra pendientes',
         error.response?.message || error.message,
@@ -186,6 +205,8 @@ export class PurchaseOrdersController {
         'Órdenes de compra del proveedor obtenidas exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener las órdenes de compra del proveedor',
         error.response?.message || error.message,
@@ -288,6 +309,8 @@ export class PurchaseOrdersController {
       const result = await this.purchaseOrdersService.getCostPreview(dto);
       return this.responseService.success(result, 'Preview de costos obtenido');
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener preview de costos',
         error.response?.message || error.message,
@@ -308,6 +331,8 @@ export class PurchaseOrdersController {
         'Recepciones obtenidas exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener las recepciones',
         error.response?.message || error.message,
@@ -326,6 +351,8 @@ export class PurchaseOrdersController {
         'Resumen de costos obtenido exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener el resumen de costos',
         error.response?.message || error.message,
@@ -344,6 +371,8 @@ export class PurchaseOrdersController {
         'Timeline obtenido exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener el timeline',
         error.response?.message || error.message,
@@ -378,6 +407,8 @@ export class PurchaseOrdersController {
         'Archivo adjunto agregado exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al agregar el archivo adjunto',
         error.response?.message || error.message,
@@ -396,6 +427,8 @@ export class PurchaseOrdersController {
         'Archivos adjuntos obtenidos exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener los archivos adjuntos',
         error.response?.message || error.message,
@@ -418,6 +451,8 @@ export class PurchaseOrdersController {
         'Archivo adjunto eliminado exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al eliminar el archivo adjunto',
         error.response?.message || error.message,
@@ -439,6 +474,8 @@ export class PurchaseOrdersController {
         'Pago registrado exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al registrar el pago',
         error.response?.message || error.message,
@@ -457,6 +494,8 @@ export class PurchaseOrdersController {
         'Pagos obtenidos exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener los pagos',
         error.response?.message || error.message,
@@ -477,6 +516,8 @@ export class PurchaseOrdersController {
         'Orden de compra obtenida exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener la orden de compra',
         error.response?.message || error.message,
@@ -501,6 +542,8 @@ export class PurchaseOrdersController {
         'Orden de compra actualizada exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden de compra',
         error.response?.message || error.message,
@@ -519,6 +562,8 @@ export class PurchaseOrdersController {
         'Orden de compra aprobada exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al aprobar la orden de compra',
         error.response?.message || error.message,
@@ -537,6 +582,8 @@ export class PurchaseOrdersController {
         'Orden de compra cancelada exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al cancelar la orden de compra',
         error.response?.message || error.message,
@@ -555,6 +602,14 @@ export class PurchaseOrdersController {
         'Orden de compra recibida exitosamente',
       );
     } catch (error) {
+      // QUI-486 — mismo motivo que en create(): sin este re-lanzado la
+      // recepción fallida vuelve como HTTP 200 con `success:false` y
+      // `po-receive-modal` la celebra con "Mercancia recibida correctamente"
+      // sin que haya entrado una sola unidad. Ese es el origen real de la
+      // "recepción silenciosa" del ticket, y afecta por igual al guard de
+      // sobre-recepción (BadRequestException) y al de variantes
+      // (VendixHttpException) — de ahí que se re-lance toda HttpException.
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al recibir la orden de compra',
         error.response?.message || error.message,
@@ -572,6 +627,8 @@ export class PurchaseOrdersController {
         'Orden de compra eliminada exitosamente',
       );
     } catch (error) {
+      // Un cuerpo de error nunca viaja con status 2xx (ver create()).
+      if (error instanceof HttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al eliminar la orden de compra',
         error.response?.message || error.message,

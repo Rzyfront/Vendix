@@ -16,16 +16,41 @@ import { SubscriptionWebhookService } from './subscription-webhook.service';
 describe('SubscriptionWebhookService', () => {
   let service: SubscriptionWebhookService;
   let prismaMock: any;
+  let paymentsFindFirst: jest.Mock;
+  let subsFindUnique: jest.Mock;
+  let executeRaw: jest.Mock;
   let paymentServiceMock: any;
   let fraudServiceMock: any;
   let stateServiceMock: any;
   let eventEmitterMock: any;
 
   beforeEach(() => {
+    // The service reaches Prisma exclusively through `withoutScope()` and does
+    // all writes inside `$transaction`. The transaction client shares the SAME
+    // jest.fn instances as the top-level mock so assertions can be written
+    // against either surface.
+    paymentsFindFirst = jest.fn();
+    subsFindUnique = jest.fn();
+    // `$executeRaw` returns the affected-row count of the dedup
+    // `INSERT ... ON CONFLICT DO NOTHING`: 1 = first delivery, 0 = duplicate.
+    executeRaw = jest.fn().mockResolvedValue(1);
+
+    const txMock = {
+      $executeRaw: executeRaw,
+      subscription_payments: { findFirst: paymentsFindFirst },
+      store_subscriptions: { findUnique: subsFindUnique },
+    };
+
+    const unscopedMock = {
+      $transaction: jest.fn(async (cb: any) => cb(txMock)),
+      subscription_payments: { findFirst: paymentsFindFirst },
+      store_subscriptions: { findUnique: subsFindUnique },
+    };
+
     prismaMock = {
-      subscription_payments: {
-        findFirst: jest.fn(),
-      },
+      withoutScope: () => unscopedMock,
+      subscription_payments: { findFirst: paymentsFindFirst },
+      store_subscriptions: { findUnique: subsFindUnique },
     };
     paymentServiceMock = {
       markPaymentSucceededFromWebhook: jest.fn(),
@@ -205,6 +230,102 @@ describe('SubscriptionWebhookService', () => {
     expect(
       paymentServiceMock.markPaymentFailedFromWebhook,
     ).not.toHaveBeenCalled();
+  });
+
+  describe('chargeback → lock_reason', () => {
+    function chargebackBody(overrides: any = {}) {
+      return {
+        event: 'nu.dispute.created',
+        id: 'evt_dispute_1',
+        data: {
+          transaction: {
+            id: 'wompi_txn_1',
+            status: 'REFUNDED',
+            status_message: 'chargeback recibido',
+            amount_in_cents: 500000,
+            ...overrides,
+          },
+        },
+      };
+    }
+
+    beforeEach(() => {
+      subsFindUnique.mockResolvedValue({
+        id: 42,
+        store_id: 10,
+        state: 'active',
+        store: { organization_id: 5 },
+      });
+    });
+
+    it("suspends with lockReason='chargeback' so the column is not left at the 'admin_manual' default", async () => {
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: chargebackBody(),
+      });
+
+      expect(stateServiceMock.transition).toHaveBeenCalledTimes(1);
+      const [storeId, toState, opts] =
+        stateServiceMock.transition.mock.calls[0];
+      expect(storeId).toBe(10);
+      expect(toState).toBe('suspended');
+
+      // `lockReason` is the value persisted to `store_subscriptions.lock_reason`.
+      // SubscriptionStateService applies `opts.lockReason ?? 'admin_manual'` for
+      // suspended/blocked, so omitting it silently mislabels a real chargeback
+      // as a manual admin action. Passing `reason` alone is NOT enough — it only
+      // lands in `subscription_events.payload.reason`.
+      expect(opts.lockReason).toBe('chargeback');
+      expect(opts.lockReason).not.toBe('admin_manual');
+      expect(opts.reason).toBe('chargeback');
+    });
+
+    it('still bumps the org chargeback counter after suspending', async () => {
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: chargebackBody(),
+      });
+
+      expect(fraudServiceMock.handleChargeback).toHaveBeenCalledTimes(1);
+      const [orgId, args] = fraudServiceMock.handleChargeback.mock.calls[0];
+      expect(orgId).toBe(5);
+      expect(args.storeId).toBe(10);
+      expect(args.invoiceId).toBe(99);
+    });
+
+    it('does not re-transition a subscription already suspended', async () => {
+      subsFindUnique.mockResolvedValue({
+        id: 42,
+        store_id: 10,
+        state: 'suspended',
+        store: { organization_id: 5 },
+      });
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: chargebackBody(),
+      });
+
+      expect(stateServiceMock.transition).not.toHaveBeenCalled();
+      // bookkeeping must still run
+      expect(fraudServiceMock.handleChargeback).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips entirely on a duplicate chargeback delivery', async () => {
+      executeRaw.mockResolvedValue(0); // dedup row already present
+
+      await service.handleWompiEvent({
+        subscriptionId: 42,
+        invoiceId: 99,
+        body: chargebackBody(),
+      });
+
+      expect(stateServiceMock.transition).not.toHaveBeenCalled();
+      expect(fraudServiceMock.handleChargeback).not.toHaveBeenCalled();
+    });
   });
 
   it('treats PENDING transaction as a no-op (no state transition)', async () => {

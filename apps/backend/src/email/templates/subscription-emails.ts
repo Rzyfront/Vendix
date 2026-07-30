@@ -155,6 +155,22 @@ export interface RetentionOfferData {
   acceptUrl?: string;
 }
 
+/**
+ * `subscription.archived-plan-ending.email` payload.
+ *
+ * Bucket-aware exactly like {@link TrialEndingData}: the notifier walks the
+ * same 3d/1d/today ladder. `planName` is the RETIRED plan (the one no longer
+ * offered), not the plan the store should move to.
+ */
+export interface ArchivedPlanEndingData {
+  storeName: string;
+  organizationName?: string;
+  planName: string;
+  bucket: 'today' | '1d' | '3d';
+  periodEndsAt?: string; // formatted date
+  choosePlanUrl?: string;
+}
+
 export const SubscriptionEmailTemplates = {
   /** subscription.welcome.email */
   welcome(data: WelcomeData) {
@@ -524,6 +540,86 @@ export const SubscriptionEmailTemplates = {
     `;
     const text = `${subject}\n\nPlan: ${data.planName} — Tienda: ${data.storeName}\n${data.offerDescription ? `\n${data.offerDescription}\n` : ''}${data.acceptUrl ? `\nAceptar: ${data.acceptUrl}\n` : ''}\nSoporte: ${SUPPORT_EMAIL}`;
     return { subject, html: wrapHtml('Oferta especial', body), text };
+  },
+
+  /**
+   * `subscription.archived-plan-ending.email` — bucket-aware: 3d/1d/today.
+   *
+   * Fired by `SubscriptionArchivedPlanNotifierJob` when a store's period is
+   * about to end while sitting on a plan that was retired from the catalog
+   * (`subscription_plans.state='archived'`). At period end the renewal cron
+   * cannot re-bill an unavailable plan and pushes the store into `grace_soft`,
+   * so this is the pre-expiry heads-up.
+   *
+   * COPY CONTRACT — these stores owe NOTHING. The copy must never mention
+   * deuda, mora, cobro fallido or refunds; the only ask is "elige un plan del
+   * catálogo vigente". The NO_REFUND notice is deliberately omitted for the
+   * same reason. Layout intentionally mirrors `trialEnding` (same urgency
+   * ladder, same CTA shape).
+   */
+  archivedPlanEnding(data: ArchivedPlanEndingData) {
+    let subject: string;
+    let title: string;
+    let urgencyMessage: string;
+    switch (data.bucket) {
+      case 'today':
+        subject = '⚠️ Tu plan ya no está disponible: elige uno hoy';
+        title = 'Elige un plan hoy';
+        urgencyMessage = `<p style="background:#FEE2E2;border-left:4px solid #EF4444;padding:14px 18px;margin:20px 0;border-radius:8px;color:#7F1D1D;">
+          <strong>Última oportunidad:</strong> tu periodo actual termina hoy y el
+          plan <strong>${data.planName}</strong> ya fue retirado de nuestro catálogo,
+          por lo que no puede renovarse. Elige hoy un plan del catálogo vigente
+          para que tu tienda siga operando sin interrupciones.
+        </p>`;
+        break;
+      case '1d':
+        subject = 'Tu plan fue retirado: elige uno nuevo antes de mañana';
+        title = 'Tu plan fue retirado del catálogo';
+        urgencyMessage = `<p style="background:#FEF3C7;border-left:4px solid #F59E0B;padding:14px 18px;margin:20px 0;border-radius:8px;color:#78350F;">
+          Tu periodo actual termina en menos de 24 horas y el plan
+          <strong>${data.planName}</strong> ya fue retirado de nuestro catálogo,
+          así que no puede renovarse automáticamente. Elige un plan del catálogo
+          vigente para mantener el acceso.
+        </p>`;
+        break;
+      case '3d':
+      default:
+        subject = 'Tu plan fue retirado del catálogo: elige uno nuevo';
+        title = 'Tu plan fue retirado del catálogo';
+        urgencyMessage = `<p>El plan <strong>${data.planName}</strong> ya no forma parte
+          del catálogo de ${COMPANY_NAME}, por lo que tu periodo actual no podrá
+          renovarse sobre ese plan. Tienes unos días para elegir el plan del
+          catálogo vigente que mejor se ajuste a tu negocio.</p>`;
+    }
+    const chooseBtn = data.choosePlanUrl
+      ? `<p style="margin:24px 0;text-align:center;">
+           <a href="${data.choosePlanUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">Ver planes disponibles</a>
+         </p>`
+      : '';
+    const body = `
+      <p style="font-size:18px;font-weight:600;margin-top:0;">Hola${data.organizationName ? ' ' + data.organizationName : ''},</p>
+      ${urgencyMessage}
+      <p>Tienda: <strong>${data.storeName}</strong></p>
+      <p>Plan retirado: <strong>${data.planName}</strong></p>
+      ${data.periodEndsAt ? `<p>Tu periodo actual termina el <strong>${data.periodEndsAt}</strong>.</p>` : ''}
+      ${chooseBtn}
+      <p style="color:#6B7280;font-size:13px;">No hay ningún pago pendiente de tu parte: este aviso es solo para que puedas cambiar de plan con tiempo. Si el periodo termina sin un plan vigente, la tienda entrará en un margen de gracia corto y luego quedará limitada hasta que actives una suscripción.</p>
+    `;
+    const text =
+      `${subject}\n\n` +
+      `Tienda: ${data.storeName}\n` +
+      `Plan retirado: ${data.planName}\n` +
+      (data.periodEndsAt
+        ? `Fin del periodo actual: ${data.periodEndsAt}\n`
+        : '') +
+      `\nEl plan ${data.planName} ya no forma parte del catálogo de ${COMPANY_NAME} y no puede renovarse. ` +
+      `Elige un plan del catálogo vigente para que tu tienda siga operando.\n` +
+      (data.choosePlanUrl
+        ? `\nVer planes disponibles: ${data.choosePlanUrl}\n`
+        : '') +
+      `\nNo tienes ningún pago pendiente: este aviso es solo para que cambies de plan con tiempo.\n` +
+      `\nSoporte: ${SUPPORT_EMAIL}`;
+    return { subject, html: wrapHtml(title, body), text };
   },
 };
 

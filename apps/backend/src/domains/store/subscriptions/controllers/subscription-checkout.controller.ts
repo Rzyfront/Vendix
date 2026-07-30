@@ -703,9 +703,21 @@ export class SubscriptionCheckoutController {
           where: { id: reactivated.id },
           data: { paid_plan_id: dto.planId },
         });
-        await this.stateService.transition(storeId, 'active', {
+        // Single reactivation seam: it resolves the legal route to `active`
+        // from wherever the row actually sits (step 1 above parked it in
+        // pending_payment, but a concurrent writer may have moved it), no-ops
+        // if something already activated it, voids stale dunning/cancellation
+        // columns, and throws rather than let this endpoint answer 200 on a
+        // store that stayed degraded.
+        await this.stateService.ensureOperational(storeId, {
           reason: 're_subscribe_free_plan',
           triggeredByUserId: context?.user_id ?? undefined,
+          planId: dto.planId,
+          payload: {
+            previous_state: sub.state,
+            to_plan_id: dto.planId,
+            mode: 're_subscribe',
+          },
         });
         await this.resolver.invalidate(storeId);
         if (couponCode) {
@@ -1003,24 +1015,23 @@ export class SubscriptionCheckoutController {
         },
       });
       // A free plan committed on a degraded store must unblock it.
-      // proration.apply() swaps the plan but never touches `state`. The
-      // coupon path already reactivates via applyCoupon() ->
-      // PromotionalApplyService.apply(), so only the no-coupon case needs an
-      // explicit transition here. cancelled/expired/no_plan never reach this
-      // branch — Path D handled them above.
-      if (
-        !couponCode &&
-        (previousState === 'grace_soft' ||
-          previousState === 'grace_hard' ||
-          previousState === 'suspended' ||
-          previousState === 'blocked')
-      ) {
-        await this.stateService.transition(storeId, 'active', {
-          reason: 'free_plan_reactivation',
-          triggeredByUserId: context?.user_id ?? undefined,
-          payload: { previous_state: previousState, plan_id: dto.planId },
-        });
-      }
+      // proration.apply() swaps the plan but never touches `state`, so the
+      // reactivation is this branch's job.
+      //
+      // Called UNCONDITIONALLY on purpose. The old guard listed the degraded
+      // states by hand and skipped the call whenever a coupon was present,
+      // delegating the unblock to safeApplyCoupon() — which swallows its
+      // errors. A coupon that failed to apply therefore returned HTTP 200 on
+      // a store that was still suspended: exactly the failure mode this seam
+      // exists to remove. `ensureOperational` is idempotent for active/trial
+      // and knows every route, so no state test belongs here; the coupon path
+      // reaching it again is a no-op.
+      await this.stateService.ensureOperational(storeId, {
+        reason: 'free_plan_reactivation',
+        triggeredByUserId: context?.user_id ?? undefined,
+        planId: dto.planId,
+        payload: { previous_state: previousState, plan_id: dto.planId },
+      });
       if (couponCode) {
         await this.safeApplyCoupon(
           storeId,

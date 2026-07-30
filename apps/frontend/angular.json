@@ -92,6 +92,14 @@
               "optimization": false,
               "extractLicenses": false,
               "sourceMap": true
+            },
+            "buildcheck": {
+              "outputPath": "dist/buildcheck",
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": false,
+              "outputHashing": "none",
+              "progress": false
             }
           },
           "defaultConfiguration": "production"

@@ -332,6 +332,16 @@ export async function seedPermissionsAndRoles(
     },
 
     // Productos
+    //
+    // OJO con este `path` raíz: `PermissionsGuard` resuelve con OR entre el
+    // match por nombre y el match por ruta, y el match por ruta es
+    // `currentPath.startsWith(permission.path)` (`permissions.guard.ts:48-57`).
+    // Es decir, `store:products:create` (path raíz + POST) franquea CUALQUIER
+    // ruta POST anidada bajo productos — `/bulk-edit`, `/bulk-edit/archive`, lo
+    // que se añada mañana— y deja su `@Permissions(...)` en decorativo. Quien
+    // exponga un POST anidado que deba exigir más que crear un producto tiene
+    // que reforzar el permiso por nombre en el handler (ver
+    // `products-bulk-edit.controller.ts: assertNamedPermission`).
     {
       name: 'store:products:create',
       description: 'Crear producto',
@@ -427,6 +437,19 @@ export async function seedPermissionsAndRoles(
       description:
         'Aplicar tarifa de precios (multi-tarifa) en POS/órdenes/cotizaciones',
       path: '/api/store/products/apply-pricing-tier',
+      method: 'POST',
+    },
+    // QUI-567. Permiso PROPIO, deliberadamente NO se reutiliza
+    // `store:products:update`: editar 100 productos de un tajo tiene otro
+    // impacto operativo que editar uno. Un cajero/empleado puede corregir un
+    // producto suelto sin poder reconfigurar el catálogo entero.
+    //
+    // La ruta declarada cubre también `/bulk-edit/preview` porque
+    // `PermissionsGuard` hace `currentPath.startsWith(permission.path)`.
+    {
+      name: 'store:products:bulk_update',
+      description: 'Edición masiva de productos (preview y aplicación)',
+      path: '/api/store/products/bulk-edit',
       method: 'POST',
     },
 
@@ -4206,6 +4229,10 @@ export async function seedPermissionsAndRoles(
     (p) =>
       (p.name.startsWith('organization:') ||
         p.name.startsWith('store:') ||
+        // QUI-567: edición masiva de catálogo. Ya lo recoge el
+        // `startsWith('store:')` de arriba; se lista explícito para que la
+        // asignación sobreviva cualquier futuro estrechamiento de ese filtro.
+        p.name === 'store:products:bulk_update' ||
         p.name.startsWith('audit.') ||
         p.name.startsWith('email.') ||
         p.name.startsWith('domains.') ||
@@ -4291,6 +4318,11 @@ export async function seedPermissionsAndRoles(
       !p.name.startsWith('superadmin:roles:') &&
       !p.name.startsWith('superadmin:users:') &&
       (p.name.startsWith('store:') ||
+        // QUI-567: STORE_ADMIN es el consumidor principal del módulo de
+        // edición masiva. Ya lo recoge el `startsWith('store:')` de arriba; se
+        // lista explícito para documentar la decisión de negocio y para que la
+        // asignación sobreviva cualquier futuro estrechamiento de ese filtro.
+        p.name === 'store:products:bulk_update' ||
         p.name.startsWith('exogenous:') ||
         p.name.startsWith('payroll:') ||
         p.name.startsWith('taxes:') ||

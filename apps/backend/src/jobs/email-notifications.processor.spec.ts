@@ -270,10 +270,180 @@ describe('EmailNotificationsProcessor', () => {
     });
 
     it('returns success:false for stub job names (templates exist, no handler)', async () => {
-      const job = makeJob('dunning.soft.email' as any, { storeId: 10 });
+      // NOTE: dunning.soft/hard/suspended are NO LONGER stubs — see the
+      // "dunning ladder" describe below. `payment-failed` is still unwired.
+      const job = makeJob('subscription.payment-failed.email' as any, {
+        storeId: 10,
+      });
       const result = await processor.process(job);
       expect(result).toEqual({ success: false });
       expect(sendEmail).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Dunning ladder — enqueued by SubscriptionStateEngineJob.notifyEscalation()
+  // ---------------------------------------------------------------------------
+  describe('dunning ladder', () => {
+    /** Payload shape produced by `notifyEscalation()`. */
+    function dunningJob(name: string, overrides: any = {}) {
+      return makeJob(name, {
+        subscriptionId: 100,
+        storeId: 10,
+        fromState: 'active',
+        toState: 'grace_soft',
+        lockReason: 'past_due',
+        planId: 3,
+        planName: 'Plan Pro',
+        periodEndsAt: '2026-08-15T00:00:00.000Z',
+        daysOverdue: 4,
+        ...overrides,
+      });
+    }
+
+    it('dunning.soft.email sends the soft reminder', async () => {
+      const result = await processor.process(
+        dunningJob('dunning.soft.email', { toState: 'grace_soft' }),
+      );
+
+      expect(result).toEqual({ success: true, sentTo: 'org@example.com' });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [to, subject, html, text] = sendEmail.mock.calls[0];
+      expect(to).toBe('org@example.com');
+      expect(subject).toContain('Recordatorio de pago');
+      expect(html).toContain('Plan Pro');
+      expect(html).toContain('Tienda Demo');
+      expect(text).toContain('Plan Pro');
+    });
+
+    it('dunning.hard.email sends the hard warning and forwards daysOverdue', async () => {
+      const result = await processor.process(
+        dunningJob('dunning.hard.email', {
+          toState: 'grace_hard',
+          daysOverdue: 12,
+        }),
+      );
+
+      expect(result).toEqual({ success: true, sentTo: 'org@example.com' });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [, subject, html] = sendEmail.mock.calls[0];
+      expect(subject).toContain('pago vencido');
+      expect(html).toContain('12 días');
+      expect(html).toContain('Plan Pro');
+    });
+
+    it('subscription.suspended.email sends the suspension notice', async () => {
+      const result = await processor.process(
+        dunningJob('subscription.suspended.email', {
+          toState: 'suspended',
+          lockReason: 'past_due',
+        }),
+      );
+
+      expect(result).toEqual({ success: true, sentTo: 'org@example.com' });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const [, subject, html] = sendEmail.mock.calls[0];
+      expect(subject).toContain('suspendida');
+      expect(html).toContain('Tienda Demo');
+    });
+
+    it('falls back to the subscription plan name when the payload omits it', async () => {
+      await processor.process(
+        dunningJob('dunning.soft.email', { planName: null }),
+      );
+
+      const [, , html] = sendEmail.mock.calls[0];
+      expect(html).toContain('Plan Pro'); // resolved from loadStoreContext
+    });
+
+    it('skips when the organization has no email', async () => {
+      storesFindUnique.mockResolvedValueOnce({
+        ...STORE,
+        organizations: { ...STORE.organizations, email: null },
+      });
+
+      const result = await processor.process(dunningJob('dunning.soft.email'));
+
+      expect(result).toEqual({ success: false });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    // -------------------------------------------------------------------------
+    // Truthfulness gate: a store whose plan was RETIRED owes nothing.
+    // -------------------------------------------------------------------------
+    describe("lockReason='current_plan_unavailable_at_renewal'", () => {
+      const PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+      it.each([
+        'dunning.soft.email',
+        'dunning.hard.email',
+        'subscription.suspended.email',
+      ])('%s sends nothing — the store owes no money', async (name) => {
+        const result = await processor.process(
+          dunningJob(name, { lockReason: PLAN_RETIRED }),
+        );
+
+        expect(result).toEqual({ success: false });
+        expect(sendEmail).not.toHaveBeenCalled();
+      });
+
+      // Tripwire justifying the suppression above: all three templates hardcode
+      // a debt story with no field able to carry the real motive. If someone
+      // makes them lockReason-aware (or adds a debt-free variant), this test
+      // fails and the suppression should be revisited in favour of adapted copy.
+      it('is required because the templates cannot express a debt-free motive', async () => {
+        await processor.process(dunningJob('dunning.soft.email'));
+        const [, , softHtml] = sendEmail.mock.calls[0];
+        expect(softHtml).toMatch(/pago|vencid|pendiente/i);
+
+        sendEmail.mockClear();
+        await processor.process(
+          dunningJob('subscription.suspended.email', { toState: 'suspended' }),
+        );
+        const [, , suspendedHtml] = sendEmail.mock.calls[0];
+        expect(suspendedHtml).toMatch(/falta de pago/i);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Period boundary is midnight UTC — must not slip a day (vendix-date-timezone)
+    // -------------------------------------------------------------------------
+    describe('periodEndsAt at the midnight-UTC boundary', () => {
+      it('renders the boundary date in UTC, not the previous day', () => {
+        const iso = '2026-08-15T00:00:00.000Z';
+
+        // The idiom the handlers use (copied from handleArchivedPlanEnding):
+        // pinned to UTC, so it is stable regardless of the host timezone.
+        const utcSafe = new Date(iso).toLocaleDateString('es-CO', {
+          timeZone: 'UTC',
+        });
+
+        // Assert on the calendar parts, not the exact string: zero-padding of
+        // `es-CO` day/month varies with the ICU build (15/8/2026 vs 15/08/2026).
+        // The load-bearing property is the DAY — it must be 15, never 14.
+        const [day, month, year] = utcSafe.split('/').map(Number);
+        expect(day).toBe(15);
+        expect(month).toBe(8);
+        expect(year).toBe(2026);
+
+        // Guard: in any negative-offset timezone (all of Colombia) the bare
+        // call would report 14/08/2026. Assert the two only agree when the host
+        // itself is at/above UTC, which is what makes the explicit option load-bearing.
+        const naive = new Date(iso).toLocaleDateString('es-CO');
+        const hostOffsetMin = new Date(iso).getTimezoneOffset();
+        if (hostOffsetMin > 0) {
+          expect(naive).not.toBe(utcSafe);
+        }
+      });
+
+      it('does not throw or block the send on a malformed periodEndsAt', async () => {
+        const result = await processor.process(
+          dunningJob('dunning.soft.email', { periodEndsAt: 'not-a-date' }),
+        );
+
+        expect(result).toEqual({ success: true, sentTo: 'org@example.com' });
+        expect(sendEmail).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });

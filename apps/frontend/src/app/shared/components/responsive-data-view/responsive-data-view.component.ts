@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import { Component, input, model, output, signal, computed } from '@angular/core';
 
 import { TableComponent } from '../table/table.component';
 import { ItemListComponent } from '../item-list/item-list.component';
@@ -9,6 +9,7 @@ import {
   TableSize,
   SortDirection,
   TableActionsDisplay,
+  RowSelectionState,
 } from '../table/table.component';
 import {
   ItemListCardConfig,
@@ -22,6 +23,7 @@ export type {
   TableSize,
   SortDirection,
   TableActionsDisplay,
+  RowSelectionState,
 };
 export type { ItemListCardConfig, ItemListSize };
 
@@ -74,6 +76,9 @@ export type { ItemListCardConfig, ItemListSize };
           [sortable]="sortable()"
           [actionsDisplay]="actionsDisplay()"
           [rowClass]="rowClass()"
+          [selectable]="selectable()"
+          [rowIdKey]="rowIdKey()"
+          [(selectedIds)]="selectedIds"
           (sort)="sort.emit($event)"
           (rowClick)="rowClick.emit($event)"
         ></app-table>
@@ -93,6 +98,9 @@ export type { ItemListCardConfig, ItemListSize };
           [size]="itemListSize()"
           [actionsDisplay]="actionsDisplay()"
           [rowClass]="rowClass()"
+          [selectable]="selectable()"
+          [rowIdKey]="rowIdKey()"
+          [(selectedIds)]="selectedIds"
           (itemClick)="rowClick.emit($event)"
           (actionClick)="actionClick.emit($event)"
         ></app-item-list>
@@ -134,6 +142,16 @@ export class ResponsiveDataViewComponent {
   private readonly internalLoading = signal(false);
   readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly emptyMessage = input('No hay datos disponibles');
+
+  // --- Multi-selection (opt-in, additive) ---
+  // Pure pass-through to BOTH children. `selectedIds` is bound two-way so the
+  // desktop table and the mobile card list share one selection, which therefore
+  // survives the desktop <-> mobile breakpoint switch. Default `false` keeps the
+  // rendered DOM of both children byte-identical to the pre-feature output.
+  readonly selectable = input<boolean>(false);
+  /** Key (dot notation supported) that identifies a row. */
+  readonly rowIdKey = input<string>('id');
+  readonly selectedIds = model<Set<string | number>>(new Set<string | number>());
 
   // Empty state enhanced inputs
   readonly emptyTitle = input<string>();

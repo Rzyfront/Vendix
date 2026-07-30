@@ -6,6 +6,36 @@ import { EmailService } from '../email/email.service';
 import { SubscriptionEmailTemplates } from '../email/templates/subscription-emails';
 
 /**
+ * `store_subscriptions.lock_reason` stamped when the plan a store sat on was
+ * retired from the catalog and therefore could not be re-billed at renewal.
+ * Such a store owes NOTHING — the plan simply stopped existing.
+ *
+ * Canonical definition: `LOCK_REASON_PLAN_RETIRED` in
+ * `domains/store/subscriptions/services/subscription-state.service.ts`. A local
+ * literal is kept here (same convention as `subscription-access.service.ts`) so
+ * this worker does not import a domain service — the two must stay in sync.
+ */
+const LOCK_REASON_PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+/**
+ * Payload enqueued by `SubscriptionStateEngineJob.notifyEscalation()` for the
+ * three dunning-ladder emails. `lockReason` is the truthful motive stamped on
+ * the subscription row and decides whether a debt-based email may be sent at
+ * all — see {@link EmailNotificationsProcessor.skipBecausePlanRetired}.
+ */
+interface DunningJobPayload {
+  storeId: number;
+  subscriptionId?: number | null;
+  fromState?: string;
+  toState?: string;
+  lockReason?: string | null;
+  planId?: number | null;
+  planName?: string | null;
+  periodEndsAt?: string | null;
+  daysOverdue?: number | null;
+}
+
+/**
  * G10 — Single dispatcher worker for the `email-notifications` BullMQ queue.
  *
  * Job names handled (canonical list):
@@ -14,15 +44,18 @@ import { SubscriptionEmailTemplates } from '../email/templates/subscription-emai
  *   - subscription.reactivation.email        (G3)
  *   - payment.confirmed.email                (post-payment listener)
  *   - trial.ending.email                     (G2 trial notifier — buckets 3d/1d/today)
+ *   - subscription.archived-plan-ending.email (archived-plan notifier — buckets 3d/1d/today)
+ *   - subscription.payment-method-expiring.email (G11 expiry notifier, 14d window)
+ *   - subscription.payment-method-expired.email  (S2.2 post-expiry pass)
+ *   - subscription.payment-method-invalidated-failures.email (S3.5 consecutive failures)
+ *   - dunning.soft.email                     (state engine → grace_soft)
+ *   - dunning.hard.email                     (state engine → grace_hard)
+ *   - subscription.suspended.email           (state engine → suspended)
  *
  * Future job names (templates exist as stubs, no caller yet — see
  * SubscriptionEmailTemplates):
- *   - dunning.soft.email
- *   - dunning.hard.email
- *   - subscription.suspended.email
  *   - subscription.payment-failed.email
  *   - subscription.cancellation-immediate.email
- *   - subscription.payment-method-expiring.email
  *   - subscription.retention-offer.email
  *
  * Architecture notes:
@@ -78,17 +111,22 @@ export class EmailNotificationsProcessor extends WorkerHost {
           return await this.handlePaymentConfirmed(job);
         case 'trial.ending.email':
           return await this.handleTrialEnding(job);
+        case 'subscription.archived-plan-ending.email':
+          return await this.handleArchivedPlanEnding(job);
         case 'subscription.payment-method-expiring.email':
           return await this.handlePaymentMethodExpiring(job);
         case 'subscription.payment-method-expired.email':
           return await this.handlePaymentMethodExpired(job);
         case 'subscription.payment-method-invalidated-failures.email':
           return await this.handlePaymentMethodInvalidatedFailures(job);
+        case 'dunning.soft.email':
+          return await this.handleDunningSoft(job);
+        case 'dunning.hard.email':
+          return await this.handleDunningHard(job);
+        case 'subscription.suspended.email':
+          return await this.handleSuspended(job);
         // Future: when the corresponding gaps land, switch the stubs to
         // real handlers backed by SubscriptionEmailTemplates.
-        case 'dunning.soft.email':
-        case 'dunning.hard.email':
-        case 'subscription.suspended.email':
         case 'subscription.payment-failed.email':
         case 'subscription.cancellation-immediate.email':
         case 'subscription.retention-offer.email':
@@ -259,6 +297,58 @@ export class EmailNotificationsProcessor extends WorkerHost {
   }
 
   /**
+   * `subscription.archived-plan-ending.email` handler.
+   *
+   * Triggered by `SubscriptionArchivedPlanNotifierJob` (daily 09:00 UTC) when
+   * an active/trial subscription's `current_period_end` falls inside the
+   * 3d/1d/today ladder AND its plan is `state='archived'`. Idempotency is
+   * enforced at the cron level (one `subscription_events` audit row per
+   * subscription+bucket+period), so we trust the payload here.
+   *
+   * These stores owe nothing — the template copy must stay debt-free.
+   */
+  private async handleArchivedPlanEnding(
+    job: Job<{
+      subscriptionId: number;
+      storeId: number;
+      bucket: 'today' | '1d' | '3d';
+      planName?: string | null;
+      periodEndsAt?: string;
+    }>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { subscriptionId, storeId, bucket, planName, periodEndsAt } =
+      job.data;
+
+    if (!['today', '1d', '3d'].includes(bucket)) {
+      this.logger.warn(
+        `EMAIL_SKIP name=subscription.archived-plan-ending.email jobId=${job.id} reason=invalid_bucket bucket=${bucket}`,
+      );
+      return { success: false };
+    }
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId);
+    if (!ctx) return { success: false };
+
+    const tpl = SubscriptionEmailTemplates.archivedPlanEnding({
+      storeName: ctx.storeName,
+      organizationName: ctx.organizationName,
+      planName: planName || ctx.planName,
+      bucket,
+      // `current_period_end` is a period BOUNDARY (usually midnight UTC), so it
+      // is rendered in UTC to avoid the off-by-one day documented in
+      // `vendix-date-timezone`.
+      periodEndsAt: periodEndsAt
+        ? new Date(periodEndsAt).toLocaleDateString('es-CO', {
+            timeZone: 'UTC',
+          })
+        : ctx.currentPeriodEnd,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      choosePlanUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
    * G11 — `subscription.payment-method-expiring.email` handler.
    *
    * Triggered by `PaymentMethodExpiryNotifierJob` (daily 10:00 UTC) when a
@@ -377,9 +467,172 @@ export class EmailNotificationsProcessor extends WorkerHost {
     return this.dispatch(ctx.recipient, tpl, job);
   }
 
+  /**
+   * `dunning.soft.email` handler — enqueued by `SubscriptionStateEngineJob`
+   * when a subscription escalates into `grace_soft`.
+   *
+   * Deliberately passes NO `amountDue`: the escalation payload carries no
+   * invoice total, and the template omits the amount line when it is absent.
+   * Inventing a figure here would be worse than omitting it.
+   */
+  private async handleDunningSoft(
+    job: Job<DunningJobPayload>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { storeId, subscriptionId, lockReason, planName, periodEndsAt } =
+      job.data;
+
+    if (this.skipBecausePlanRetired(job, lockReason)) return { success: false };
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId ?? null);
+    if (!ctx) return { success: false };
+
+    this.logDunningContext(job, periodEndsAt, job.data.daysOverdue);
+
+    const tpl = SubscriptionEmailTemplates.dunningSoft({
+      storeName: ctx.storeName,
+      planName: planName || ctx.planName,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      retryUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
+   * `dunning.hard.email` handler — enqueued when a subscription escalates into
+   * `grace_hard`. `daysOverdue` is computed by the enqueuer from
+   * `current_period_end`; it is forwarded verbatim so the template's "desde
+   * hace N días" matches the row that triggered the escalation.
+   */
+  private async handleDunningHard(
+    job: Job<DunningJobPayload>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const {
+      storeId,
+      subscriptionId,
+      lockReason,
+      planName,
+      periodEndsAt,
+      daysOverdue,
+    } = job.data;
+
+    if (this.skipBecausePlanRetired(job, lockReason)) return { success: false };
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId ?? null);
+    if (!ctx) return { success: false };
+
+    this.logDunningContext(job, periodEndsAt, daysOverdue);
+
+    const tpl = SubscriptionEmailTemplates.dunningHard({
+      storeName: ctx.storeName,
+      planName: planName || ctx.planName,
+      daysOverdue: typeof daysOverdue === 'number' ? daysOverdue : undefined,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      retryUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
+  /**
+   * `subscription.suspended.email` handler — enqueued when a subscription
+   * escalates into `suspended`.
+   */
+  private async handleSuspended(
+    job: Job<DunningJobPayload>,
+  ): Promise<{ success: boolean; sentTo?: string }> {
+    const { storeId, subscriptionId, lockReason, planName, periodEndsAt } =
+      job.data;
+
+    if (this.skipBecausePlanRetired(job, lockReason)) return { success: false };
+
+    const ctx = await this.loadStoreContext(storeId, subscriptionId ?? null);
+    if (!ctx) return { success: false };
+
+    this.logDunningContext(job, periodEndsAt, job.data.daysOverdue);
+
+    const tpl = SubscriptionEmailTemplates.suspended({
+      storeName: ctx.storeName,
+      planName: planName || ctx.planName,
+      // TODO(G10-email-adapter): real domain-aware URL helper.
+      reactivateUrl: undefined,
+    });
+    return this.dispatch(ctx.recipient, tpl, job);
+  }
+
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
+
+  /**
+   * Truthfulness gate for the dunning ladder.
+   *
+   * `dunningSoft`, `dunningHard` and `suspended` all hardcode a debt story
+   * ("no pudimos procesar tu pago", "pago vencido", "suspendida por falta de
+   * pago"). A store carrying `lock_reason='current_plan_unavailable_at_renewal'`
+   * owes NOTHING — its plan was retired from the catalog, so renewal had no
+   * price to charge. Sending it any of those three emails asserts a debt that
+   * does not exist.
+   *
+   * Those stores are already served by a dedicated, debt-free notification
+   * (`subscription.archived-plan-ending.email`, fired on the 3d/1d/today ladder
+   * before the period even ends), so suppressing here loses no coverage — it
+   * only removes a false claim. Returning instead of throwing keeps BullMQ from
+   * retrying a decision that will never change.
+   *
+   * KNOWLEDGE GAP: adapting the copy instead of suppressing would need a
+   * debt-free variant (or a `lockReason`-aware branch) inside
+   * `email/templates/subscription-emails.ts`; `DunningData`/`SuspendedData`
+   * expose no field that can carry the real motive today.
+   */
+  private skipBecausePlanRetired(
+    job: Job,
+    lockReason?: string | null,
+  ): boolean {
+    if (lockReason !== LOCK_REASON_PLAN_RETIRED) return false;
+
+    this.logger.warn(
+      `EMAIL_SKIP name=${job.name} jobId=${job.id} reason=plan_retired_no_debt ` +
+        `lock_reason=${lockReason} — store owes nothing (plan retired at renewal); ` +
+        `debt-based copy suppressed. Covered by subscription.archived-plan-ending.email`,
+    );
+    return true;
+  }
+
+  /**
+   * Structured observability line for the dunning ladder.
+   *
+   * `periodEndsAt` is a period BOUNDARY (usually midnight UTC), so it is
+   * rendered with `timeZone: 'UTC'` — the same idiom as
+   * `handleArchivedPlanEnding` — to avoid the off-by-one day documented in
+   * `vendix-date-timezone`. A bare `toLocaleDateString()` would report the
+   * previous day for every store in a negative UTC offset (all of Colombia).
+   *
+   * NOTE: this date does NOT reach the customer today. `DunningData` and
+   * `SuspendedData` have no period-end field, and adding one means editing
+   * `email/templates/subscription-emails.ts`. Logged here so support can still
+   * answer "until when did this store have?" without a DB round-trip.
+   */
+  private logDunningContext(
+    job: Job,
+    periodEndsAt?: string | null,
+    daysOverdue?: number | null,
+  ): void {
+    this.logger.log(
+      `EMAIL_DUNNING_CONTEXT name=${job.name} jobId=${job.id} ` +
+        `period_end=${this.formatPeriodBoundaryUTC(periodEndsAt) ?? 'none'} ` +
+        `days_overdue=${typeof daysOverdue === 'number' ? daysOverdue : 'none'}`,
+    );
+  }
+
+  /**
+   * Format a period-boundary ISO timestamp as an `es-CO` date, pinned to UTC.
+   * Returns `undefined` for missing/unparseable input so callers can omit it.
+   */
+  private formatPeriodBoundaryUTC(iso?: string | null): string | undefined {
+    if (!iso) return undefined;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return undefined;
+    return d.toLocaleDateString('es-CO', { timeZone: 'UTC' });
+  }
 
   /**
    * Resolve the store + org + plan + subscription bag in a single pass. Used

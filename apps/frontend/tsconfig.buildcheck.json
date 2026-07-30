@@ -1,0 +1,9 @@
+{
+  // Typecheck AOT sin emitir nada: mismo compilador y mismas reglas de
+  // strictTemplates que el build de producción, pero sin bundle, sin prerender
+  // y sin arrancar el servidor SSR. Lo usa scripts/buildcheck.sh.
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "noEmit": true
+  }
+}

@@ -10,7 +10,10 @@ import {
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionBillingService } from '../domains/store/subscriptions/services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../domains/store/subscriptions/services/subscription-payment.service';
-import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
+import {
+  SubscriptionStateService,
+  LOCK_REASON_PLAN_RETIRED,
+} from '../domains/store/subscriptions/services/subscription-state.service';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 
 describe('SubscriptionRenewalBillingJob', () => {
@@ -227,6 +230,11 @@ describe('SubscriptionRenewalBillingJob', () => {
       'grace_soft',
       expect.objectContaining({
         reason: 'current_plan_unavailable_at_renewal',
+        // The COLUMN, not just the audit payload: `store_subscriptions.
+        // lock_reason` is what `stateToMode()` reads to answer
+        // SUBSCRIPTION_011. Passing only `reason` left it null and the store
+        // was told it had not paid.
+        lockReason: 'current_plan_unavailable_at_renewal',
         triggeredByJob: 'subscription-renewal-billing',
         graceSoftUntil: expect.any(Date),
         graceHardUntil: expect.any(Date),
@@ -237,6 +245,26 @@ describe('SubscriptionRenewalBillingJob', () => {
         }),
       }),
     );
+  });
+
+  it('archived plan: the motive travels in lockReason, so the row lands with lock_reason set', async () => {
+    const periodEnd = new Date(Date.now() - 60 * 60 * 1000);
+    prisma.store_subscriptions.findMany.mockResolvedValue([
+      {
+        ...subRow,
+        current_period_end: periodEnd,
+        next_billing_at: periodEnd,
+        plan: { ...subRow.plan, state: 'archived' },
+      },
+    ]);
+
+    await job.handleRenewalBilling();
+
+    const [, toState, opts] = state.transition.mock.calls[0];
+    expect(toState).toBe('grace_soft');
+    // Without this the consumer added in cc7be051d (SUBSCRIPTION_011) is dead
+    // code: nothing in the system ever writes the value it matches on.
+    expect(opts.lockReason).toBe(LOCK_REASON_PLAN_RETIRED);
   });
 
   it('archived plan before period end: skips billing without transitioning early', async () => {

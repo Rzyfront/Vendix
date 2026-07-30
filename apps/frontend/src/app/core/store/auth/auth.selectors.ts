@@ -431,6 +431,29 @@ export const selectActiveFiscalAreas = createSelector(
     }),
 );
 
+/**
+ * Si el comercio puede imprimir un desglose de IVA (tiquete POS, pantalla de
+ * cobro). Exige DOS hechos independientes:
+ *   1. el área fiscal `invoicing` está activa (el desglose está respaldado por
+ *      configuración fiscal real, no por defaults);
+ *   2. el comercio no es explícitamente no responsable de IVA.
+ *
+ * La mitad estricta es el módulo activo. `selectIsVatResponsible` conserva su
+ * default permisivo (indeterminado ⇒ responsable) porque ese mismo predicado
+ * gobierna el enforcement de escritura (`assertCanChargeVat`) y el modal de
+ * `FiscalGateService` vía `selectIsExplicitlyNotVatResponsible`: invertirlo
+ * abriría el gate de IVA a todo comercio sin datos fiscales cargados.
+ *
+ * Un comercio que nunca inició el wizard fiscal tiene `invoicing` en INACTIVE,
+ * y es eso lo que mantiene el desglose fuera de su papel.
+ */
+export const selectPrintsVatBreakdown = createSelector(
+  selectActiveFiscalAreas,
+  selectIsVatResponsible,
+  (activeAreas: FiscalArea[], isVatResponsible: boolean) =>
+    activeAreas.includes('invoicing') && isVatResponsible,
+);
+
 export const selectPendingObligations = createSelector(
   selectFiscalStatus,
   (status) =>

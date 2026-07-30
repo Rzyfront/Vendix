@@ -2,6 +2,7 @@ import {
   Component,
   ChangeDetectionStrategy,
   input,
+  model,
   output,
   signal,
   computed,
@@ -11,6 +12,7 @@ import { IconComponent } from '../icon/icon.component';
 import {
   ItemListCardConfig,
   ItemListSize,
+  RowSelectionState,
   TableAction,
 } from './item-list.interfaces';
 
@@ -38,6 +40,19 @@ export class ItemListComponent {
   readonly rowClass = input<(item: any, index: number) => string | undefined | null>(
     () => undefined
   );
+
+  // --- Multi-selection (opt-in, additive) ---
+  // `selectable` defaults to false: while it stays false the template renders
+  // exactly the same DOM it rendered before this feature existed.
+  readonly selectable = input<boolean>(false);
+  /** Key (dot notation supported) that identifies a row. */
+  readonly rowIdKey = input<string>('id');
+  /**
+   * Two-way selection state owned by the PARENT, so it survives pagination and
+   * the desktop/mobile switch. Never mutated in place — a NEW Set is published
+   * on every change, otherwise signal change detection would not react.
+   */
+  readonly selectedIds = model<Set<string | number>>(new Set<string | number>());
 
   readonly itemClick = output<any>();
   readonly actionClick = output<{
@@ -257,6 +272,89 @@ export class ItemListComponent {
 
   onItemClick(item: any): void {
     this.itemClick.emit(item);
+  }
+
+  // ─── Multi-selection helpers (same names/semantics as TableComponent) ──
+  /** Resolve the selection key of a row (`null` when the row has no usable id). */
+  getRowId(item: any): string | number | null {
+    const id = this.getNestedValue(item, this.rowIdKey());
+    if (id === null || id === undefined || id === '') {
+      return null;
+    }
+    return id as string | number;
+  }
+
+  isRowSelected(item: any): boolean {
+    const id = this.getRowId(item);
+    return id === null ? false : this.selectedIds().has(id);
+  }
+
+  toggleRow(item: any): void {
+    const id = this.getRowId(item);
+    if (id === null) {
+      return;
+    }
+    // New Set on every mutation: mutating in place does not notify the signal.
+    const next = new Set(this.selectedIds());
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    this.selectedIds.set(next);
+  }
+
+  /** Ids of the cards currently rendered (the page slice given in `data`). */
+  readonly visibleRowIds = computed<(string | number)[]>(() => {
+    const ids: (string | number)[] = [];
+    for (const item of this.data()) {
+      const id = this.getRowId(item);
+      if (id !== null) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  });
+
+  /** Tri-state computed over the VISIBLE cards only, never the whole universe. */
+  readonly headerSelectionState = computed<RowSelectionState>(() => {
+    const ids = this.visibleRowIds();
+    if (ids.length === 0) {
+      return 'none';
+    }
+    const selected = this.selectedIds();
+    let hits = 0;
+    for (const id of ids) {
+      if (selected.has(id)) {
+        hits++;
+      }
+    }
+    if (hits === 0) {
+      return 'none';
+    }
+    return hits === ids.length ? 'all' : 'some';
+  });
+
+  /**
+   * Add/remove every VISIBLE id, preserving ids selected on other pages: the
+   * parent paginates, so an id outside `data()` must never be dropped here.
+   */
+  toggleAllVisible(): void {
+    const ids = this.visibleRowIds();
+    if (ids.length === 0) {
+      return;
+    }
+    const next = new Set(this.selectedIds());
+    if (this.headerSelectionState() === 'all') {
+      for (const id of ids) {
+        next.delete(id);
+      }
+    } else {
+      for (const id of ids) {
+        next.add(id);
+      }
+    }
+    this.selectedIds.set(next);
   }
 
   toggleMenu(index: number, event: Event): void {

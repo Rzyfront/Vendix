@@ -5,6 +5,8 @@ import { ProductsBulkController } from './products-bulk.controller';
 import { ProductsBulkService } from './products-bulk.service';
 import { ProductsBulkImageController } from './products-bulk-image.controller';
 import { ProductsBulkImageService } from './products-bulk-image.service';
+import { ProductsBulkEditController } from './products-bulk-edit.controller';
+import { ProductsBulkEditService } from './products-bulk-edit.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { PriceResolverService } from './services/price-resolver.service';
 import { ResponseModule } from '@common/responses/response.module';
@@ -30,11 +32,16 @@ import { SettingsModule } from '../settings/settings.module';
     ProductsController,
     ProductsBulkController,
     ProductsBulkImageController,
+    // QUI-567. Va después de ProductsController: sus rutas POST de 2 segmentos
+    // (`/bulk-edit`, `/bulk-edit/preview`) no colisionan con los `@Post(':id/...')`
+    // de aquel, y el `@Get(':id')` no aplica porque bulk-edit sólo expone POST.
+    ProductsBulkEditController,
   ],
   providers: [
     ProductsService,
     ProductsBulkService,
     ProductsBulkImageService,
+    ProductsBulkEditService,
     ProductVariantService,
     PriceResolverService,
     AccessValidationService,
@@ -44,6 +51,7 @@ import { SettingsModule } from '../settings/settings.module';
     ProductsService,
     ProductsBulkService,
     ProductsBulkImageService,
+    ProductsBulkEditService,
     ProductVariantService,
     PriceResolverService,
   ],

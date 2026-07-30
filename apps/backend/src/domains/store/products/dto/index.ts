@@ -22,42 +22,22 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
-export enum ProductState {
-  ACTIVE = 'active',
-  INACTIVE = 'inactive',
-  ARCHIVED = 'archived',
-}
+// Los 6 enums espejo del catálogo se declaran en `./product-enums` (módulo hoja).
+// Se importan aquí para que las clases de este archivo los usen en `@IsEnum(...)`,
+// y se re-exportan para no romper a los consumidores que ya hacen
+// `import { ProductType } from '../dto'`. El módulo hoja existe porque `export *`
+// de un DTO hermano se iza al inicio del módulo compilado (swc): si el hermano
+// importara los enums desde este index, recibiría `undefined`.
+import {
+  BookingMode,
+  PricingType,
+  ProductState,
+  ProductType,
+  ServiceModality,
+  ServicePricingType,
+} from './product-enums';
 
-export enum PricingType {
-  UNIT = 'unit',
-  WEIGHT = 'weight',
-}
-
-export enum ProductType {
-  PHYSICAL = 'physical',
-  SERVICE = 'service',
-  // Plato/preparación producida in-house (suite restaurante). Ya existe en el
-  // enum Prisma product_type_enum; el DTO debe aceptarlo para crear/editar platos.
-  PREPARED = 'prepared',
-}
-
-export enum ServiceModality {
-  IN_PERSON = 'in_person',
-  VIRTUAL = 'virtual',
-  HYBRID = 'hybrid',
-}
-
-export enum ServicePricingType {
-  PER_HOUR = 'per_hour',
-  PER_SESSION = 'per_session',
-  PACKAGE = 'package',
-  SUBSCRIPTION = 'subscription',
-}
-
-export enum BookingMode {
-  PROVIDER_REQUIRED = 'provider_required',
-  FREE_BOOKING = 'free_booking',
-}
+export * from './product-enums';
 
 // DTO para especificar stock por ubicación
 export class StockByLocationDto {
@@ -849,6 +829,22 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_batch_produced?: boolean;
+
+  // Hidrata una selección concreta de productos (los que el usuario marcó en el
+  // stack de edición masiva), aceptando `?ids=1&ids=2` o `?ids=1,2`.
+  @IsOptional()
+  @Transform(({ obj }) =>
+    obj?.ids === undefined || obj?.ids === null
+      ? undefined
+      : (Array.isArray(obj.ids) ? obj.ids : String(obj.ids).split(','))
+          .map((raw: unknown) => String(raw).trim())
+          .filter((raw: string) => raw !== '')
+          .map((raw: string) => Number(raw)),
+  )
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  ids?: number[];
 }
 
 // Product Variants DTOs
@@ -1677,3 +1673,4 @@ export * from './bulk-image-upload.dto';
 export * from './bulk-image-analysis.dto';
 export * from './update-product-promotions.dto';
 export * from './bulk-product-analysis.dto';
+export * from './bulk-edit-products.dto';

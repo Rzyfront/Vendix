@@ -23,7 +23,26 @@ const DUNNING_PAYWALL_CODES = new Set<string>([
   'STATE_SUSPENDED',
   'STATE_BLOCKED',
   'STATE_PENDING_PAYMENT',
+  // NOTE: `SUBSCRIPTION_011` (plan retired from the catalog) is deliberately
+  // NOT in this set. It is a hard block like 008/009, but it is not a dunning
+  // case: the store owes nothing, so the payment-oriented support shortcut
+  // (rejected gateway, stolen card, wrong accounting data) would frame it as a
+  // billing problem. Its recovery is self-service — pick an active plan.
 ]);
+
+/**
+ * Codes whose body copy MUST come from the local variant catalog, ignoring the
+ * backend `message`.
+ *
+ * The backend `message` is the `devMessage` from `error-codes.ts`. For
+ * `SUBSCRIPTION_011` that is English developer copy ("Plan retired — choose an
+ * active plan to continue"): rendering it would both leak dev text to the
+ * merchant and drop the Spanish explanation that tells them what actually
+ * happened and what to do. `<app-ai-paywall-modal>` gives `messageOverride`
+ * precedence over `variantConfig.description`, so the override is withheld
+ * here to let the truthful catalog copy win.
+ */
+const LOCALIZED_COPY_ONLY_CODES = new Set<string>(['SUBSCRIPTION_011']);
 
 /**
  * Global paywall outlet. Mounts a single `<app-ai-paywall-modal>` in each
@@ -63,7 +82,13 @@ export class PaywallOutletComponent {
   readonly state = this.access.paywallState;
 
   readonly variantConfig = computed(() => this.state()?.variant ?? null);
-  readonly message = computed(() => this.state()?.message ?? null);
+
+  readonly message = computed(() => {
+    const current = this.state();
+    if (!current) return null;
+    if (LOCALIZED_COPY_ONLY_CODES.has(current.code as string)) return null;
+    return current.message ?? null;
+  });
 
   // RNC-24 — Show the support shortcut whenever the paywall is in a dunning
   // mode (block=critical from suspended/blocked/past_due).

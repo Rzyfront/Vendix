@@ -611,19 +611,26 @@ export class StorePurchaseOrderDetailComponent {
     return Math.round((received / ordered) * 100);
   });
 
-  readonly canApprove = computed(() => {
-    const s = this.po()?.status;
-    return s === 'draft' || s === 'submitted';
-  });
+  // Espejo de `PurchaseOrdersService.VALID_TRANSITIONS`. El backend sigue siendo
+  // la autoridad; esto solo evita ofrecer una acción que va a ser rechazada.
+  //
+  // Los estados reales son los cinco de `purchase_order_status_enum`:
+  // draft | approved | partial | received | cancelled. Aquí se evaluaban además
+  // `submitted` y `ordered`, que no existen en el enum y por tanto nunca se
+  // cumplían — condiciones muertas que disfrazaban el gating real.
+  readonly canApprove = computed(() => this.po()?.status === 'draft');
 
   readonly canReceive = computed(() => {
     const s = this.po()?.status;
-    return s === 'approved' || s === 'ordered' || s === 'partial';
+    return s === 'approved' || s === 'partial';
   });
 
+  // `partial` y `received` quedan fuera a propósito: con mercancía ya ingresada
+  // la reversión es una devolución a proveedor, no una cancelación. El backend
+  // responde PO_CANCEL_RECEIVED_001 y ofrecer el botón solo llevaba al error.
   readonly canCancel = computed(() => {
     const s = this.po()?.status;
-    return !!s && ['draft', 'submitted', 'approved', 'ordered', 'partial'].includes(s);
+    return s === 'draft' || s === 'approved';
   });
 
   readonly canRegisterPayment = computed(() => {

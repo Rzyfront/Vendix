@@ -413,6 +413,229 @@ describe('SubscriptionAccessService', () => {
   });
 
   // ──────────────────────────────────────────────────────────────────
+  // lock_reason → truthful block reason
+  //
+  // A store whose plan was retired at renewal owes nothing, so it must NOT be
+  // told "suspendida por falta de pago". `lock_reason` already holds the real
+  // cause; these tests pin that it reaches the customer-facing reason code
+  // WITHOUT changing mode/severity for any state.
+  // ──────────────────────────────────────────────────────────────────
+
+  describe('lock_reason mapping (retired plan → SUBSCRIPTION_011)', () => {
+    const PLAN_RETIRED = 'current_plan_unavailable_at_renewal';
+
+    let findUniqueMock: jest.Mock;
+
+    function serviceWithLockReason(lockReason: string | null) {
+      findUniqueMock = jest.fn().mockResolvedValue({ lock_reason: lockReason });
+      return new SubscriptionAccessService(resolverMock as any, redisMock, {
+        store_subscriptions: { findUnique: findUniqueMock },
+      } as any);
+    }
+
+    // ── suspended ────────────────────────────────────────────────────
+
+    it('state=suspended + lock_reason=plan retired → block SUBSCRIPTION_011', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'suspended' }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      // mode/severity unchanged vs. the pre-change suspended mapping.
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('critical');
+      expect(r.allowed).toBe(false);
+    });
+
+    it('state=suspended + lock_reason=past_due → still SUBSCRIPTION_008', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'suspended' }) as any,
+      );
+      const svc = serviceWithLockReason('past_due');
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_008');
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('critical');
+    });
+
+    it('state=suspended + lock_reason=null → still SUBSCRIPTION_008', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'suspended' }) as any,
+      );
+      const svc = serviceWithLockReason(null);
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_008');
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('critical');
+    });
+
+    // ── blocked ──────────────────────────────────────────────────────
+
+    it('state=blocked + lock_reason=plan retired → block SUBSCRIPTION_011', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'blocked' }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      // blocked keeps severity 'blocker' exactly as before.
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('blocker');
+    });
+
+    it('state=blocked + lock_reason=chargeback → still SUBSCRIPTION_009', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'blocked' }) as any,
+      );
+      const svc = serviceWithLockReason('chargeback');
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_009');
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('blocker');
+    });
+
+    // ── grace_hard (block degradation) ────────────────────────────────
+
+    it('state=grace_hard + degradation=block + plan retired → SUBSCRIPTION_011', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({
+          state: 'grace_hard',
+          features: {
+            text_generation: {
+              enabled: true,
+              monthly_tokens_cap: 200000,
+              degradation: 'block',
+            },
+          },
+        }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('critical');
+    });
+
+    it('state=grace_hard + degradation=block + lock_reason=null → SUBSCRIPTION_009', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({
+          state: 'grace_hard',
+          features: {
+            text_generation: {
+              enabled: true,
+              monthly_tokens_cap: 200000,
+              degradation: 'block',
+            },
+          },
+        }) as any,
+      );
+      const svc = serviceWithLockReason(null);
+      const r = await svc.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_009');
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('critical');
+    });
+
+    // ── warn states via canUseModule (canUseAIFeature omits reason on allow) ──
+
+    it('state=grace_soft + plan retired → warn SUBSCRIPTION_011 (module gate)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'grace_soft' }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      // grace_soft still warns and still lets the store operate.
+      expect(r.mode).toBe('warn');
+      expect(r.severity).toBe('warning');
+      expect(r.allowed).toBe(true);
+    });
+
+    it('state=grace_soft + lock_reason=null → warn SUBSCRIPTION_007 (module gate)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'grace_soft' }) as any,
+      );
+      const svc = serviceWithLockReason(null);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.reason).toBe('SUBSCRIPTION_007');
+      expect(r.mode).toBe('warn');
+      expect(r.severity).toBe('warning');
+      expect(r.allowed).toBe(true);
+    });
+
+    it('state=grace_hard + plan retired → warn SUBSCRIPTION_011 (module gate)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'grace_hard' }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      // canUseModule keeps grace_hard writable (warn), severity unchanged.
+      expect(r.mode).toBe('warn');
+      expect(r.severity).toBe('critical');
+      expect(r.allowed).toBe(true);
+    });
+
+    it('state=suspended + plan retired → block SUBSCRIPTION_011 (module gate)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'suspended' }) as any,
+      );
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.reason).toBe('SUBSCRIPTION_011');
+      expect(r.mode).toBe('block');
+      expect(r.severity).toBe('critical');
+      expect(r.allowed).toBe(false);
+    });
+
+    // ── hot path + resilience ────────────────────────────────────────
+
+    it('state=active does NOT query lock_reason (hot path stays DB-free)', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(resolved() as any);
+      const svc = serviceWithLockReason(PLAN_RETIRED);
+      const r = await svc.canUseModule(1, 'orders');
+      expect(r.mode).toBe('allow');
+      expect(findUniqueMock).not.toHaveBeenCalled();
+    });
+
+    it('lock_reason lookup failure degrades to the state-based reason', async () => {
+      resolverMock.resolveSubscription.mockResolvedValue(
+        resolved({ state: 'suspended' }) as any,
+      );
+      const failing = new SubscriptionAccessService(
+        resolverMock as any,
+        redisMock,
+        {
+          store_subscriptions: {
+            findUnique: jest.fn().mockRejectedValue(new Error('db down')),
+          },
+        } as any,
+      );
+      const r = await failing.canUseAIFeature(1, 'text_generation');
+      expect(r.reason).toBe('SUBSCRIPTION_008');
+      expect(r.mode).toBe('block');
+    });
+
+    it('non-terminal reasons never leak SUBSCRIPTION_011 into cancelled/expired/no_plan', async () => {
+      for (const [state, expected] of [
+        ['cancelled', 'SUBSCRIPTION_003'],
+        ['expired', 'SUBSCRIPTION_003'],
+        ['no_plan', 'SUBSCRIPTION_004'],
+        ['draft', 'SUBSCRIPTION_002'],
+      ] as const) {
+        resolverMock.resolveSubscription.mockResolvedValue(
+          resolved({ state }) as any,
+        );
+        const svc = serviceWithLockReason(PLAN_RETIRED);
+        const r = await svc.canUseModule(1, 'orders');
+        expect(r.reason).toBe(expected);
+        expect(r.mode).toBe('block');
+      }
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
   // G6 — getDunningStateForCurrentStore
   // ──────────────────────────────────────────────────────────────────
 
