@@ -13,9 +13,9 @@
 .page-breadcrumb {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 0 0 12px 0;
-  font-size: 12px;
+  font-size: 9px;
   color: var(--color-text-secondary, #6b7280);
 }
 
@@ -61,7 +61,7 @@
 .page-title {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   color: var(--color-text-primary, #111827);
 
   app-icon {
@@ -77,14 +77,14 @@
 
 .page-hint {
   margin: 4px 0 0 0;
-  font-size: 13px;
+  font-size: 9px;
   color: var(--color-text-secondary, #6b7280);
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
 }
 
 .badge-count {
@@ -94,7 +94,7 @@
   border-radius: 999px;
   background: var(--color-primary, #6366f1);
   color: #fff;
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 700;
 }
 
@@ -107,7 +107,7 @@
   border: 1px solid var(--color-border, #e5e7eb);
   background: #fff;
   color: var(--color-text-primary, #111827);
-  font-size: 13px;
+  font-size: 9px;
   font-weight: 600;
   cursor: pointer;
   transition: background 120ms ease-out;
@@ -156,11 +156,11 @@
 
 .request-list {
   list-style: none;
-  padding: 0;
+  padding: 12px 20px;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 .request-item {
@@ -168,7 +168,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding: 16px;
+  padding: 8px 10px;
   border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 12px;
   background: var(--color-surface, #fff);
@@ -192,7 +192,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 15px;
+  font-size: 9px;
   color: var(--color-text-primary, #111827);
   flex-wrap: wrap;
 
@@ -213,7 +213,7 @@
   align-items: center;
   gap: 16px;
   margin-top: 6px;
-  font-size: 12px;
+  font-size: 9px;
   color: var(--color-text-secondary, #6b7280);
 
   .contact-item {
@@ -226,14 +226,14 @@
 .slot-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-top: 8px;
-  font-size: 13px;
+  font-size: 9px;
   flex-wrap: wrap;
 }
 
 .slot-label {
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--color-text-muted, #9ca3af);
@@ -256,21 +256,21 @@
   background: var(--color-background, #f9fafb);
   border-left: 3px solid var(--color-primary, #6366f1);
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 9px;
   color: var(--color-text-secondary, #4b5563);
   font-style: italic;
 }
 
 .meta {
   margin: 8px 0 0 0;
-  font-size: 11px;
+  font-size: 9px;
   color: var(--color-text-muted, #9ca3af);
 }
 
 .request-actions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
   min-width: 120px;
 
@@ -286,7 +286,7 @@
   justify-content: center;
   padding: 8px 16px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 9px;
   font-weight: 600;
   cursor: pointer;
   border: 1px solid transparent;
@@ -334,7 +334,7 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 16px;
+  padding: 8px 10px;
 }
 
 .modal {
@@ -348,13 +348,13 @@
 }
 
 .modal-header {
-  padding: 16px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--color-border, #e5e7eb);
   h4 { margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text-primary, #111827); }
 }
 
 .modal-body {
-  padding: 16px;
+  padding: 8px 10px;
 }
 
 .modal-context {
@@ -362,13 +362,13 @@
   padding: 10px 12px;
   background: var(--color-background, #f9fafb);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 9px;
   color: var(--color-text-secondary, #4b5563);
 }
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 600;
   color: var(--color-text-secondary, #4b5563);
   margin-bottom: 4px;
@@ -381,7 +381,7 @@ textarea {
   border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 6px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 9px;
   resize: vertical;
   &:focus {
     outline: none;
@@ -394,7 +394,345 @@ textarea {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   padding: 12px 16px;
   border-top: 1px solid var(--color-border, #e5e7eb);
+}
+/* Appointment redesign phase 2 — stats cards row.
+   Same design tokens as Disponibilidad / Reservas. */
+.rr-stats {
+  margin-top: 20px;
+}
+
+/* Status tab filter — All / Pendientes / Aprobadas / Rechazadas / Canceladas */
+.status-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 20px 0 16px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  overflow-x: auto;
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+
+.status-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 120ms ease-out, border-color 120ms ease-out;
+
+  app-icon {
+    transition: color 120ms ease-out;
+  }
+
+  &:hover {
+    color: var(--color-text-primary, #111827);
+  }
+  &.active {
+    color: var(--color-primary, #6366f1);
+    border-bottom-color: var(--color-primary, #6366f1);
+    app-icon {
+      color: var(--color-primary, #6366f1);
+    }
+  }
+}
+
+/* Status pill on each row — color codes pending vs decided */
+.status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+
+  &--pending {
+    background: rgba(245, 158, 11, 0.12);
+    color: #d97706;
+  }
+  &--approved {
+    background: rgba(16, 185, 129, 0.12);
+    color: #059669;
+  }
+  &--rejected {
+    background: rgba(244, 63, 94, 0.12);
+    color: #e11d48;
+  }
+  &--cancelled {
+    background: rgba(107, 114, 128, 0.12);
+    color: #6b7280;
+  }
+}
+
+/* Visual state on the row based on the request status */
+.request-item--approved {
+  opacity: 0.85;
+  border-left: 3px solid #10b981;
+}
+.request-item--rejected {
+  opacity: 0.85;
+  border-left: 3px solid #f43f5e;
+}
+.request-item--cancelled {
+  opacity: 0.7;
+  border-left: 3px solid #9ca3af;
+}
+
+.reason--decision {
+  font-style: normal;
+  border-left-color: #f43f5e;
+  color: #b91c1c;
+}
+
+/* Custom data table — matches Vendix's data-table aesthetic so it
+   blends with the rest of the admin chrome. The "Acciones" column is
+   per-row (only PENDING rows show the action buttons) which is why we
+   don't use app-responsive-data-view here. */
+.rr-table-wrapper {
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  overflow-x: auto;
+  margin-top: 8px;
+}
+
+.rr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+
+  thead th {
+    text-align: left;
+    padding: 12px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted, #9ca3af);
+    background: var(--color-background, #f9fafb);
+    border-bottom: 1px solid var(--color-border, #e5e7eb);
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 14px;
+    border-bottom: 1px solid var(--color-border, #f5f5f5);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  tbody tr:hover td {
+    background: rgba(99, 102, 241, 0.02);
+  }
+
+  // Per-status row accent — matches the status pill colors
+  tr.row--approved { border-left: 3px solid #10b981; }
+  tr.row--rejected { border-left: 3px solid #ef4444; }
+  tr.row--cancelled { border-left: 3px solid #9ca3af; }
+}
+
+.col-status { width: 110px; }
+.col-customer { min-width: 220px; max-width: 280px; }
+.col-slot { min-width: 260px; }
+.col-booking { width: 130px; }
+.col-decision { min-width: 200px; max-width: 240px; }
+.col-date { width: 120px; }
+.col-actions { width: 200px; text-align: right; white-space: nowrap; }
+
+.customer-cell strong {
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+  display: block;
+}
+
+.customer-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--color-text-muted, #9ca3af);
+  .contact-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+.slot-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 9px;
+
+  > div:first-child {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+}
+
+.slot-current {
+  color: var(--color-text-secondary, #6b7280);
+  text-decoration: line-through;
+}
+
+.slot-requested {
+  color: var(--color-primary, #6366f1);
+  font-weight: 700;
+}
+
+.reason {
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--color-text-secondary, #4b5563);
+  font-style: italic;
+}
+
+.decision-text {
+  font-size: 9px;
+  color: var(--color-text-primary, #111827);
+}
+
+.decision-meta {
+  font-size: 9px;
+  color: var(--color-text-muted, #9ca3af);
+  margin-top: 2px;
+}
+
+.muted {
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 9px;
+}
+
+code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 9px;
+  color: var(--color-text-secondary, #6b7280);
+  background: var(--color-background, #f9fafb);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.row-actions {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease-out;
+  min-height: 30px;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.action-btn--approve {
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  &:hover:not(:disabled) { background: #4f46e5; }
+}
+
+.action-btn--reject {
+  background: transparent;
+  color: var(--color-error, #dc2626);
+  border-color: var(--color-error, #dc2626);
+  &:hover:not(:disabled) {
+    background: var(--color-error, #dc2626);
+    color: #fff;
+  }
+}
+
+/* Toolbar inside the white card — same pattern as Productos
+   (title + count on the left, search + refresh on the right). */
+.rr-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  flex-wrap: wrap;
+
+  @media (max-width: 640px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.rr-toolbar__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+
+  .rr-toolbar__count {
+    font-weight: 500;
+    color: var(--color-text-muted, #9ca3af);
+    margin-left: 4px;
+  }
+}
+
+.rr-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: flex-end;
+  max-width: 480px;
+
+  @media (max-width: 640px) {
+    max-width: none;
+  }
+}
+
+.rr-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  background: #fff;
+  color: var(--color-text-primary, #111827);
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease-out;
+
+  &:hover:not(:disabled) {
+    background: var(--color-background, #f9fafb);
+  }
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }

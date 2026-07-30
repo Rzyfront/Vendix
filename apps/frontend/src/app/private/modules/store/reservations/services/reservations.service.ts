@@ -290,6 +290,23 @@ export class ReservationsService {
     );
   }
 
+  /**
+   * Stats cards for the reschedule-requests page header. Returns counts
+   * by status, today/week buckets, and average response time.
+   */
+  getRescheduleRequestsStats(): Observable<{
+    by_status: { pending: number; approved: number; rejected: number; cancelled: number; total: number };
+    approved_last_24h: number;
+    rejected_last_24h: number;
+    approved_this_week: number;
+    avg_response_minutes: number | null;
+    pending_over_1h: number;
+  }> {
+    return this.http.get<any>(`${this.apiUrl}/reschedule-requests/stats`).pipe(
+      map((response) => response.data),
+    );
+  }
+
   approveRescheduleRequest(reqId: number, dto: DecideRescheduleRequestDto): Observable<Booking> {
     return this.http
       .patch<any>(`${this.apiUrl}/reschedule-requests/${reqId}/approve`, dto)

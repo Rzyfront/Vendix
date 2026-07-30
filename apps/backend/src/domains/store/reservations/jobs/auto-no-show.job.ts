@@ -143,7 +143,12 @@ export class AutoNoShowJob {
       if (new Date() <= graceEnd) continue; // todavía dentro del grace
 
       try {
-        await this.reservationsService['transition'](b.id, 'no_show');
+        // `archiveToNoShow` es la versión silenciosa de `noShow` — no
+        // emite `booking.no_show` (que dispara una notificación al
+        // operador). Para un job de background que puede archivar
+        // decenas de bookings por tick, emitir N notificaciones sería
+        // peor que el problema de stats que estamos arreglando.
+        await this.reservationsService.archiveToNoShow(b.id);
         archived += 1;
       } catch (err: any) {
         // Si la transición falla (p.ej. booking ya no está pending), lo

@@ -807,6 +807,22 @@ export class ReservationsService {
   }
 
   /**
+   * Versión "silenciosa" de `noShow` para uso de background jobs.
+   * Misma transición de estado (`pending|confirmed → no_show`) pero SIN
+   * emitir `booking.no_show` — el cron AutoNoShowJob no debería mandar
+   * notificación al operador por cada booking auto-archivada (el flood
+   * de notificaciones sería peor que el problema original de stats).
+   *
+   * Si en el futuro se quiere notificar al operador cuando el cron
+   * archiva N bookings, exponer un evento separado tipo
+   * `booking.auto_archived` con `count` + `ids[]` y dejar que el
+   * listener agrupe las notificaciones.
+   */
+  async archiveToNoShow(id: number): Promise<void> {
+    await this.transition(id, 'no_show');
+  }
+
+  /**
    * Reprograma una reserva a un nuevo horario.
    *
    * Appointment redesign phase 2 — el método respeta

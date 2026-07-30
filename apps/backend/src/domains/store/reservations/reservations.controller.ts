@@ -152,8 +152,9 @@ export class ReservationsController {
   // `booking_reschedule_requests` hasta que un admin apruebe o rechace.
 
   /**
-   * Lista las solicitudes pendientes (la cola que ve el admin).
-   * Opcional: filtra por `status` (pending/approved/rejected/cancelled).
+   * Lista las solicitudes de reagenda del store. Opcional: filtra por
+   * `status` (pending / approved / rejected / cancelled). Sin filtro
+   * devuelve todos los status (para la tabla con filtros del frontend).
    */
   @Get('reschedule-requests')
   @Permissions('store:reservations:read')
@@ -166,11 +167,12 @@ export class ReservationsController {
         'No se pudo determinar la tienda del contexto de la solicitud',
       );
     }
+    const where: any = { store_id: storeId };
+    if (status && status !== 'all') {
+      where.status = status;
+    }
     const rows = await this.prisma.booking_reschedule_requests.findMany({
-      where: {
-        store_id: storeId,
-        ...(status ? { status: status as any } : {}),
-      },
+      where,
       orderBy: { requested_at: 'desc' },
       take: 200,
       include: {
@@ -193,6 +195,122 @@ export class ReservationsController {
       },
     });
     return this.responseService.success(rows, 'Solicitudes de reagendamiento obtenidas');
+  }
+
+  /**
+   * Stats cards para el header de la página /reschedule-requests:
+   * cuenta por status + métricas de tiempo de respuesta.
+   */
+  @Get('reschedule-requests/stats')
+  @Permissions('store:reservations:read')
+  async getRescheduleRequestsStats() {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo determinar la tienda del contexto de la solicitud',
+      );
+    }
+    // Range presets — keep the contract stable so the frontend can
+    // add custom date pickers later without backend changes.
+    // "Hoy" = last 24 hours rolling window (not calendar day) so the
+    // card stays meaningful late in the day when the calendar-day
+    // count would already be at 0.
+    const now = new Date();
+    const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const last7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay()); // Sun-based
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const baseWhere = { store_id: storeId };
+
+    const [counts, approved24h, rejected24h, approvedThisWeek, decidedWithTime, pendingOld] =
+      await Promise.all([
+        // 1) Counts by status — for the 4 KPI cards.
+        this.prisma.booking_reschedule_requests.groupBy({
+          by: ['status'],
+          where: baseWhere,
+          _count: { _all: true },
+        }),
+        // 2) Approved in the last 24h
+        this.prisma.booking_reschedule_requests.count({
+          where: {
+            ...baseWhere,
+            status: 'approved',
+            decided_at: { gte: last24h },
+          },
+        }),
+        // 3) Rejected in the last 24h
+        this.prisma.booking_reschedule_requests.count({
+          where: {
+            ...baseWhere,
+            status: 'rejected',
+            decided_at: { gte: last24h },
+          },
+        }),
+        // 4) Approved this week (Sunday → today)
+        this.prisma.booking_reschedule_requests.count({
+          where: {
+            ...baseWhere,
+            status: 'approved',
+            decided_at: { gte: startOfWeek },
+          },
+        }),
+        // 5) Avg response time (ms) — only for decided requests in
+        // the last 7 days, so the metric doesn't get diluted by ancient
+        // requests before the feature shipped.
+        this.prisma.booking_reschedule_requests.findMany({
+          where: {
+            ...baseWhere,
+            status: { in: ['approved', 'rejected'] },
+            decided_at: { gte: last7d },
+          },
+          select: { requested_at: true, decided_at: true },
+        }),
+        // 6) Pending requests older than 1 hour — the "needs attention"
+        // KPI. Anything older than that is a backlog.
+        this.prisma.booking_reschedule_requests.count({
+          where: {
+            ...baseWhere,
+            status: 'pending',
+            requested_at: { lt: new Date(Date.now() - 60 * 60 * 1000) },
+          },
+        }),
+      ]);
+
+    // Average response time in hours
+    let avgResponseMinutes: number | null = null;
+    if (decidedWithTime.length > 0) {
+      const totalMs = decidedWithTime.reduce((acc, r) => {
+        const reqTime = new Date(r.requested_at).getTime();
+        const decTime = new Date(r.decided_at!).getTime();
+        return acc + (decTime - reqTime);
+      }, 0);
+      avgResponseMinutes = Math.round(totalMs / decidedWithTime.length / 60000);
+    }
+
+    const byStatus: Record<string, number> = {};
+    for (const row of counts) {
+      byStatus[row.status] = row._count._all;
+    }
+
+    return this.responseService.success(
+      {
+        by_status: {
+          pending: byStatus['pending'] ?? 0,
+          approved: byStatus['approved'] ?? 0,
+          rejected: byStatus['rejected'] ?? 0,
+          cancelled: byStatus['cancelled'] ?? 0,
+          total: counts.reduce((acc, r) => acc + r._count._all, 0),
+        },
+        approved_last_24h: approved24h,
+        rejected_last_24h: rejected24h,
+        approved_this_week: approvedThisWeek,
+        avg_response_minutes: avgResponseMinutes,
+        pending_over_1h: pendingOld,
+      },
+      'Estadísticas de solicitudes de reagenda',
+    );
   }
 
   /**
