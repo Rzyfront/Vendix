@@ -676,17 +676,20 @@ export class OrdersService {
      * efectos completa (liberar o consumir reservas, emitir eventos) y deja la
      * forzada auditada en `internal_notes._flow_metadata.forced_transition`.
      */
-    if (updateOrderDto.state && updateOrderDto.state !== order.state) {
-      await this.orderFlowService.forceOrderState(id, updateOrderDto.state, {
-        reason: 'Transición manual desde la gestión de órdenes',
-      });
-    }
+    const targetState = updateOrderDto.state;
 
     // Se quita siempre, incluso cuando coincide con el estado actual: el
     // `prisma.orders.update` de abajo no debe recibir `state` bajo ninguna
     // circunstancia, o el seam deja de ser el único escritor.
     delete updateOrderDto.state;
+
+    const mustForceState = !!targetState && targetState !== order.state;
     if (Object.keys(updateOrderDto).length === 0) {
+      if (mustForceState) {
+        await this.orderFlowService.forceOrderState(id, targetState!, {
+          reason: 'Transición manual desde la gestión de órdenes',
+        });
+      }
       return this.findOne(id);
     }
 
@@ -715,7 +718,7 @@ export class OrdersService {
         subtotal + tax - discount + shipping;
     }
 
-    return this.prisma.orders.update({
+    const updatedOrder = await this.prisma.orders.update({
       where: { id },
       data: { ...updateOrderDto, updated_at: new Date() },
       include: {
@@ -766,6 +769,30 @@ export class OrdersService {
         },
       },
     });
+
+    /**
+     * El estado va DESPUÉS de la metadata, y el orden NO es cosmético.
+     *
+     * `forceOrderState` persiste su traza (`forced_transition`, `delivered_at`,
+     * `cancelled_at`, `previous_state`) dentro de `internal_notes` como JSON,
+     * porque `orders` no tiene columnas para eso. Si el PATCH trae `state` E
+     * `internal_notes` a la vez y se fuerza primero, el update de arriba
+     * sobrescribe ese JSON con el texto plano del operador y la traza se pierde
+     * —incluido el `previous_state` que `reactivateOrder` necesita para
+     * restaurar una orden cancelada—.
+     *
+     * Aplicando la nota primero, `appendFlowMetadata` la encuentra como texto
+     * plano y la conserva en el campo `notes` del sobre. Sobreviven las dos.
+     */
+    if (mustForceState) {
+      await this.orderFlowService.forceOrderState(id, targetState!, {
+        reason: 'Transición manual desde la gestión de órdenes',
+      });
+      // El row devuelto arriba quedó obsoleto: se leyó antes de la transición.
+      return this.findOne(id);
+    }
+
+    return updatedOrder;
   }
 
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {

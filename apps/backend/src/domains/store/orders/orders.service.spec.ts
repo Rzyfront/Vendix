@@ -306,6 +306,53 @@ describe('OrdersService', () => {
       expect(writtenData.state).toBeUndefined();
     });
 
+    it('escribe la metadata ANTES de forzar el estado, o la traza se pierde', async () => {
+      /**
+       * Regresión encontrada en la verificación E2E. `forceOrderState` persiste
+       * su traza (`forced_transition`, `delivered_at`, `previous_state`) como
+       * JSON dentro de `internal_notes`. Si el PATCH trae `state` E
+       * `internal_notes` y se forzaba primero, el update genérico sobrescribía
+       * ese JSON con el texto plano del operador y la traza desaparecía —con
+       * ella el `previous_state` que `reactivateOrder` necesita—.
+       *
+       * Invirtiendo el orden, `appendFlowMetadata` encuentra la nota como texto
+       * plano y la conserva en el campo `notes` del sobre.
+       */
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+
+      const callOrder: string[] = [];
+      mockPrismaService.orders.update.mockImplementation(async () => {
+        callOrder.push('prisma.update');
+        return processingOrder;
+      });
+      mockOrderFlowService.forceOrderState.mockImplementation(async () => {
+        callOrder.push('forceOrderState');
+        return processingOrder;
+      });
+
+      await service.update(590, {
+        state: 'delivered',
+        internal_notes: 'entregada en mostrador',
+      } as any);
+
+      expect(callOrder).toEqual(['prisma.update', 'forceOrderState']);
+    });
+
+    it('sin state no fuerza nada y devuelve el row del update, no un findOne extra', async () => {
+      // El PATCH de solo metadata es el caso mayoritario: no debe pagar una
+      // lectura extra ni cambiar la forma del payload que ya consume la UI.
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+      const updated = { ...processingOrder, internal_notes: 'nota' };
+      mockPrismaService.orders.update.mockResolvedValue(updated);
+
+      const result = await service.update(590, {
+        internal_notes: 'nota',
+      } as any);
+
+      expect(mockOrderFlowService.forceOrderState).not.toHaveBeenCalled();
+      expect(result).toBe(updated);
+    });
+
     it('nunca escribe state en crudo, ni para un estado que la UI no usa hoy', async () => {
       // Blindaje contra el reingreso del bug: si mañana alguien manda
       // `refunded` por esta vía, tampoco debe llegar al update crudo.
