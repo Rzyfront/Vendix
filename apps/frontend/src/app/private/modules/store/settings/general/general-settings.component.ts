@@ -328,6 +328,18 @@ export class GeneralSettingsComponent implements OnInit {
     });
   }
 
+  /**
+   * The Recibos section edits `pos.auto_print_receipt`, which belongs to the POS
+   * block. Routed here instead of copying the flag into `receipts` so the setting
+   * keeps a single home.
+   */
+  onPosAutoPrintChange(value: boolean): void {
+    this.onSectionChange('pos', {
+      ...(this.settings().pos ?? {}),
+      auto_print_receipt: value,
+    });
+  }
+
   onPendingAppLogo(event: { file: File; preview: string } | null): void {
     this.pendingAppLogo.set(event);
     this.hasUnsavedChanges.set(true);
