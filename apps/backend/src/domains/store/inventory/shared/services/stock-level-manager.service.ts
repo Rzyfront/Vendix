@@ -14,6 +14,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
+import { sellableLocationsWhere } from '../helpers/pos-stock-scope.helper';
 import { CostingService } from './costing.service';
 import {
   CostingMethodResolverService,
@@ -561,30 +562,44 @@ export class StockLevelManager {
   /**
    * Resolves the best location_id for a product when no explicit location is provided.
    * Used by POS and e-commerce where items don't carry location context.
-   * Priority: location with highest available stock → first org location as fallback.
+   * Priority: sellable location with highest available stock → first sellable
+   * location of the SAME store as fallback.
+   *
+   * QUI-559: both queries used to be unscoped — the first ranked every
+   * `stock_levels` row in the database by availability, so it could resolve a
+   * central warehouse, an inactive location, a quarantine bin, or even another
+   * store's location; the fallback then took any location of the organization.
+   * A sale deducted from wherever it landed, which is how stock ended up
+   * consumed from places the POS never displays. Both now share the canonical
+   * sellable predicate, and no sellable location is an explicit `INV_LOC_001`
+   * instead of an arbitrary pick.
    */
   async getDefaultLocationForProduct(
     product_id: number,
     variant_id?: number,
   ): Promise<number> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
+    }
+    const sellable = sellableLocationsWhere(context.store_id);
+
     const stockLevel = await this.prisma.stock_levels.findFirst({
       where: {
         product_id,
         product_variant_id: variant_id || null,
         quantity_available: { gt: 0 },
+        inventory_locations: sellable,
       },
-      orderBy: { quantity_available: 'desc' },
+      orderBy: [{ quantity_available: 'desc' }, { location_id: 'asc' }],
       select: { location_id: true },
     });
     if (stockLevel) return stockLevel.location_id;
 
-    const context = RequestContextService.getContext();
-    if (!context?.organization_id) {
-      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
-    }
     const location = await this.prisma.inventory_locations.findFirst({
-      where: { organization_id: context.organization_id },
+      where: sellable,
       orderBy: { id: 'asc' },
+      select: { id: true },
     });
     if (!location) throw new VendixHttpException(ErrorCodes.INV_LOC_001);
     return location.id;

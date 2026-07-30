@@ -4,6 +4,7 @@ import { InventoryTransactionsModule } from '../transactions/inventory-transacti
 import { InventorySerialNumbersModule } from '../serial-numbers/inventory-serial-numbers.module';
 import { StockLevelManager } from './services/stock-level-manager.service';
 import { StockValidatorService } from './services/stock-validator.service';
+import { SellableStockAllocator } from './services/sellable-stock-allocator.service';
 import { OrderStockCommitService } from './services/order-stock-commit.service';
 
 /**
@@ -30,7 +31,8 @@ import { OrderStockCommitService } from './services/order-stock-commit.service';
     OrderStockCommitService,
     StockLevelManager,
     StockValidatorService,
+    SellableStockAllocator,
   ],
-  exports: [OrderStockCommitService],
+  exports: [OrderStockCommitService, SellableStockAllocator],
 })
 export class OrderStockCommitModule {}

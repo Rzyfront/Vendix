@@ -890,8 +890,11 @@ describe('StockLevelManager', () => {
       const result = await service.getStockLevels(1);
 
       expect(result).toEqual(mockStockLevels);
+      // QUI-557: la lectura fija explícitamente `product_variant_id: null`
+      // (una línea base no puede absorber las filas de sus variantes) y ordena
+      // por `location_id` para no devolver una fila arbitraria.
       expect(prismaService.stock_levels.findMany).toHaveBeenCalledWith({
-        where: { product_id: 1 },
+        where: { product_id: 1, product_variant_id: null },
         include: {
           inventory_locations: {
             select: {
@@ -901,6 +904,7 @@ describe('StockLevelManager', () => {
             },
           },
         },
+        orderBy: { location_id: 'asc' },
       });
     });
 
@@ -920,6 +924,7 @@ describe('StockLevelManager', () => {
             },
           },
         },
+        orderBy: { location_id: 'asc' },
       });
     });
   });
@@ -1188,6 +1193,88 @@ describe('StockLevelManager', () => {
         }),
         expect.any(Object),
       );
+    });
+  });
+
+  /**
+   * QUI-559 — la resolución de ubicación por defecto era la puerta trasera del
+   * bug: ambas consultas estaban sin scope, así que podían devolver una bodega
+   * central, una ubicación inactiva, una de cuarentena o incluso la de otra
+   * tienda. Una venta descontaba de donde cayera.
+   */
+  describe('getDefaultLocationForProduct — solo ubicaciones vendibles de la tienda', () => {
+    beforeEach(() => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ ...mockContext, store_id: 7 } as any);
+    });
+
+    it('filtra stock_levels por el conjunto vendible de la tienda del contexto', async () => {
+      prismaService.stock_levels.findFirst.mockResolvedValue({
+        location_id: 5,
+      } as any);
+
+      const result = await service.getDefaultLocationForProduct(100);
+
+      expect(result).toBe(5);
+      expect(prismaService.stock_levels.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            product_id: 100,
+            product_variant_id: null,
+            quantity_available: { gt: 0 },
+            inventory_locations: {
+              store_id: 7,
+              is_active: true,
+              is_central_warehouse: false,
+              type: { notIn: ['quarantine', 'damaged_goods'] },
+            },
+          }),
+        }),
+      );
+    });
+
+    it('el fallback también se acota a ubicaciones vendibles de la MISMA tienda', async () => {
+      prismaService.stock_levels.findFirst.mockResolvedValue(null as any);
+      prismaService.inventory_locations.findFirst.mockResolvedValue({
+        id: 9,
+      } as any);
+
+      const result = await service.getDefaultLocationForProduct(100);
+
+      expect(result).toBe(9);
+      expect(prismaService.inventory_locations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            store_id: 7,
+            is_active: true,
+            is_central_warehouse: false,
+            type: { notIn: ['quarantine', 'damaged_goods'] },
+          },
+        }),
+      );
+    });
+
+    it('sin ubicación vendible lanza INV_LOC_001 en vez de elegir una cualquiera', async () => {
+      prismaService.stock_levels.findFirst.mockResolvedValue(null as any);
+      prismaService.inventory_locations.findFirst.mockResolvedValue(
+        null as any,
+      );
+
+      await expect(
+        service.getDefaultLocationForProduct(100),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('sin store_id en el contexto no adivina: lanza INV_CONTEXT_001', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ ...mockContext, store_id: undefined } as any);
+
+      await expect(
+        service.getDefaultLocationForProduct(100),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      expect(prismaService.stock_levels.findFirst).not.toHaveBeenCalled();
     });
   });
 });

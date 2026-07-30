@@ -15,6 +15,8 @@ import {
 } from '../inventory/shared/services/order-stock-commit.service';
 import { TaxesService } from '../taxes/taxes.service';
 import { LocationsService } from '../inventory/locations/locations.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { sellableStockLevelsWhere } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -88,6 +90,10 @@ export class PaymentsService {
     // Canonical, uniform delivery-commit (skips + reservation consume +
     // availability BLOCK + serial consume + updateStock + inventory_committed).
     private readonly orderStockCommit: OrderStockCommitService,
+    // QUI-559: spreads a POS line's reservation across the store's sellable
+    // locations, so a quantity covered only by summing warehouses is reserved
+    // (and later deducted) instead of being refused.
+    private readonly sellableStockAllocator: SellableStockAllocator,
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
@@ -786,16 +792,16 @@ export class PaymentsService {
           // Aggregate across store-local, sellable locations only.
           // POS canal MUST exclude central warehouse and non-sellable types
           // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
+          //
+          // QUI-559: the predicate is no longer written inline here — it comes
+          // from `sellableStockLevelsWhere`, the same helper that drives what
+          // the POS grid displays and what the delivery commit may deduct.
+          // Three copies of this filter is how they drifted apart.
           const stockAggregate = await tx.stock_levels.aggregate({
             where: {
               product_id: item.product_id,
               product_variant_id: item.product_variant_id ?? null,
-              inventory_locations: {
-                store_id: order.store_id,
-                is_central_warehouse: false,
-                is_active: true,
-                type: { notIn: ['quarantine', 'damaged_goods'] },
-              },
+              ...sellableStockLevelsWhere(order.store_id),
             },
             _sum: {
               quantity_available: true,
@@ -826,20 +832,11 @@ export class PaymentsService {
           }
         }
 
-        // Resolve default location inside tx to avoid scoping mismatch with getDefaultLocationForProduct()
-        // POS canal MUST exclude central warehouse and non-sellable types
-        // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-        const defaultLocation = await tx.inventory_locations.findFirst({
-          where: {
-            store_id: order.store_id,
-            is_active: true,
-            is_central_warehouse: false,
-            type: { notIn: ['quarantine', 'damaged_goods'] },
-          },
-          orderBy: { id: 'asc' },
-          select: { id: true },
-        });
-
+        // QUI-559: no "default location" fallback here any more. Picking an
+        // arbitrary location when the product had no row there is what let a
+        // reservation land somewhere the commit would not draw from. The
+        // allocator resolves the real sellable locations; if none covers the
+        // line, that is a stock error, not a location-resolution problem.
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
@@ -854,36 +851,6 @@ export class PaymentsService {
             // catch and rollback just the failed operation while keeping the transaction alive.
             await tx.$executeRawUnsafe('SAVEPOINT stock_reserve_sp');
 
-            // Use stock_level with highest available for this product, falling back to store default location.
-            // POS canal MUST exclude central warehouse and non-sellable types
-            // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-            const stockLevel = await tx.stock_levels.findFirst({
-              where: {
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id || null,
-                quantity_available: { gt: 0 },
-                inventory_locations: {
-                  store_id: order.store_id,
-                  is_central_warehouse: false,
-                  is_active: true,
-                  type: { notIn: ['quarantine', 'damaged_goods'] },
-                },
-              },
-              orderBy: { quantity_available: 'desc' },
-              select: { location_id: true },
-            });
-            const location_id = stockLevel?.location_id || defaultLocation?.id;
-
-            if (!location_id) {
-              await tx.$executeRawUnsafe(
-                'ROLLBACK TO SAVEPOINT stock_reserve_sp',
-              );
-              this.logger.warn(
-                `No location found for stock reservation of product ${item.product_id} in order #${order.id}`,
-              );
-              continue;
-            }
-
             // Multi-tarifa (Fase 5.5): si el item persistió stock_units_consumed
             // (>0), pasarlo como override al reservador para descontar la
             // cantidad real de unidades de stock (empaque por tarifa, cuando el
@@ -893,20 +860,62 @@ export class PaymentsService {
               item.stock_units_consumed > 0
                 ? item.stock_units_consumed
                 : undefined;
-            await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
-              'order',
-              order.id,
-              user?.id,
-              false, // Already validated above against stock_levels source of truth.
-              tx,
-              undefined, // expires_at
-              false, // skip_reservation
-              stockUnitsConsumed,
-            );
+            const unitsToReserve = stockUnitsConsumed ?? item.quantity;
+
+            // QUI-559: reserve ACROSS the store's sellable locations instead of
+            // picking the single one with the highest availability. The
+            // validation above approved an aggregate total; reserving from one
+            // location could only ever cover part of it, and the delivery
+            // commit then refused the sale with INV_STOCK_002 ("disponible 8,
+            // requerido 10") even though the 10 units existed and were
+            // sellable — merely split between two warehouses.
+            const allocation =
+              await this.sellableStockAllocator.allocateForLine(
+                order.store_id,
+                item.product_id,
+                item.product_variant_id || undefined,
+                unitsToReserve,
+                [],
+                tx,
+              );
+
+            if (allocation.shortfall > 0) {
+              // §1.5 already proved the sellable set covers this line, so a gap
+              // here means another sale took the units in between. That is a
+              // real, user-facing condition — not an infrastructure hiccup — so
+              // it aborts the payment instead of leaving the order partially
+              // reserved and failing later at the delivery commit.
+              throw new VendixHttpException(
+                ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+                `Stock insuficiente al reservar el producto ${item.product_id}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+              );
+            }
+
+            if (!allocation.slices.length) {
+              // Nothing to reserve (a zero-unit line). Nothing to roll back
+              // either — release the savepoint and move on.
+              await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
+              continue;
+            }
+
+            for (const slice of allocation.slices) {
+              await this.stockLevelManager.reserveStock(
+                item.product_id,
+                item.product_variant_id || undefined,
+                slice.location_id,
+                slice.quantity,
+                'order',
+                order.id,
+                user?.id,
+                false, // Already validated above against stock_levels source of truth.
+                tx,
+                undefined, // expires_at
+                false, // skip_reservation
+                // The slice quantity IS the real stock-unit count: the pack
+                // multiplier was already applied when computing unitsToReserve.
+                slice.quantity,
+              );
+            }
 
             await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
           } catch (error) {
@@ -916,6 +925,17 @@ export class PaymentsService {
                 'ROLLBACK TO SAVEPOINT stock_reserve_sp',
               );
             } catch {}
+
+            // QUI-559: a stock error is a business answer, not an incident.
+            // Swallowing it here let the payment succeed with the line
+            // unreserved, and the delivery commit then rejected the whole sale
+            // with an opaque INV_STOCK_002. Re-throw so the cashier gets the
+            // real reason and the transaction rolls back cleanly; genuine
+            // infrastructure hiccups keep the previous tolerant behaviour.
+            if (error instanceof VendixHttpException) {
+              throw error;
+            }
+
             this.logger.warn(
               `Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`,
             );
