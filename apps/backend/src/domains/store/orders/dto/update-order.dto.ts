@@ -35,9 +35,18 @@ import { order_delivery_type_enum } from '@prisma/client';
  * al `prisma.orders.update` de ese método, así que agregar un estado nuevo al
  * enum no reabre el agujero: pasa por el seam automáticamente.
  *
- * `payment_status` sigue escribiéndose en crudo por esta vía y NO tiene un seam
- * equivalente. Antes de usarlo para conducir un flujo de cobro, revisar si
- * necesita el mismo tratamiento.
+ * `payment_status` es distinto y peor: `orders` NO TIENE esa columna (solo
+ * `purchase_orders` la tiene; aquí el pago se refleja en `total_paid` /
+ * `remaining_balance` y en la tabla `payments`). `CreateOrderDto` la declara de
+ * todas formas, así que `PartialType` la reexpone, el `whitelist` no la filtra
+ * y llega hasta Prisma, que la rechaza. El resultado observado es un
+ * `PATCH {"payment_status":"succeeded"}` que responde **HTTP 200** con
+ * `success:false` y el 400 real enterrado en el cuerpo, y cuyo mensaje filtra
+ * la ruta absoluta del contenedor y el esquema Prisma completo del modelo.
+ *
+ * No se arregla aquí porque quitar el campo del DTO base toca `CreateOrderDto`
+ * y su superficie de callers; queda como ticket aparte. Para reflejar un pago,
+ * usar el dominio de payments, nunca este endpoint.
  */
 export class UpdateOrderDto extends PartialType(CreateOrderDto) {
   @IsOptional()
