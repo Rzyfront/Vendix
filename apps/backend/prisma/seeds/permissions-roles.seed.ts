@@ -332,6 +332,16 @@ export async function seedPermissionsAndRoles(
     },
 
     // Productos
+    //
+    // OJO con este `path` raíz: `PermissionsGuard` resuelve con OR entre el
+    // match por nombre y el match por ruta, y el match por ruta es
+    // `currentPath.startsWith(permission.path)` (`permissions.guard.ts:48-57`).
+    // Es decir, `store:products:create` (path raíz + POST) franquea CUALQUIER
+    // ruta POST anidada bajo productos — `/bulk-edit`, `/bulk-edit/archive`, lo
+    // que se añada mañana— y deja su `@Permissions(...)` en decorativo. Quien
+    // exponga un POST anidado que deba exigir más que crear un producto tiene
+    // que reforzar el permiso por nombre en el handler (ver
+    // `products-bulk-edit.controller.ts: assertNamedPermission`).
     {
       name: 'store:products:create',
       description: 'Crear producto',
