@@ -59,9 +59,22 @@ export class TaxesService {
   /**
    * Calculates taxes for a product based on its assignments.
    * Logic: Sums all tax rates from assigned categories.
+   *
+   * `client` permite pasar el cliente de una transacción en curso. Sin él, la
+   * consulta sale por `this.prisma`, o sea por OTRA conexión del pool: llamado
+   * desde dentro de un `$transaction` eso toma una segunda conexión mientras la
+   * primera sostiene locks, y con suficientes cobros concurrentes el pool
+   * (`new Pool(...)` sin `max` ⇒ 10 conexiones) se queda sin ninguna libre y
+   * nadie avanza. Los llamadores que ya están en una transacción deben pasar su
+   * `tx`. Es opcional para no romper a quienes llaman fuera de transacción.
    */
-  async calculateProductTaxes(productId: number, basePrice: number) {
-    const assignments = await this.prisma.product_tax_assignments.findMany({
+  async calculateProductTaxes(
+    productId: number,
+    basePrice: number,
+    client?: { product_tax_assignments: { findMany: (args: any) => any } },
+  ) {
+    const db = client ?? this.prisma;
+    const assignments = await db.product_tax_assignments.findMany({
       where: { product_id: productId },
       include: {
         tax_categories: {

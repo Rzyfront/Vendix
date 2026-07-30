@@ -30,7 +30,6 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
-import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
@@ -775,16 +774,42 @@ export class PaymentsService {
         // Oversell is intentionally not controlled by the public POS payload.
         const allowOversell = false;
 
+        // `track_inventory` es el mismo valor para los dos bucles de stock y
+        // para toda la transacción, así que consultarlo por ítem —dos veces por
+        // ítem, una en cada bucle— no aportaba aislamiento, solo latencia
+        // dentro de la ventana transaccional (causa medida del P2028). Un
+        // prefetch único, siguiendo el patrón batch de
+        // `resolveTierSnapshotsForItems`.
+        // `track_inventory` es `Boolean @default(true)` no nulable en el schema.
+        type StockProductRow = {
+          id: number;
+          track_inventory: boolean;
+          name: string;
+        };
+        const stockProductIds = Array.from(
+          new Set(
+            (order.order_items as Array<{ product_id?: number | null }>)
+              .map((orderItem) => orderItem.product_id)
+              .filter((id): id is number => !!id),
+          ),
+        );
+        const stockProductById = new Map<number, StockProductRow>(
+          (stockProductIds.length
+            ? await tx.products.findMany({
+                where: { id: { in: stockProductIds } },
+                select: { id: true, track_inventory: true, name: true },
+              })
+            : []
+          ).map((row: StockProductRow): [number, StockProductRow] => [
+            row.id,
+            row,
+          ]),
+        );
+
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
-          const product = await tx.products.findUnique({
-            where: { id: item.product_id },
-            select: {
-              track_inventory: true,
-              name: true,
-            },
-          });
+          const product = stockProductById.get(item.product_id);
 
           if (!product?.track_inventory) continue;
 
@@ -840,10 +865,7 @@ export class PaymentsService {
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
-          const product = await tx.products.findUnique({
-            where: { id: item.product_id },
-            select: { track_inventory: true },
-          });
+          const product = stockProductById.get(item.product_id);
           if (!product?.track_inventory) continue;
           try {
             // Use savepoint to isolate stock reservation errors from the main transaction.
@@ -1423,7 +1445,14 @@ export class PaymentsService {
           nextAction: payment?.nextAction,
           _digitalPaymentPending: isDigitalPayment || false,
         };
-      });
+        // Red de seguridad para la contención real de varias cajas cobrando a
+        // la vez, NO el arreglo del P2028: ese vino de quitar las lecturas
+        // redundantes de arriba. El default implícito de Prisma es 5000 ms y el
+        // repo ya fija opciones donde la transacción es larga
+        // (`order-flow.service.ts` usa 20 s). Si un cobro necesita más que
+        // esto para pasar, el problema es la transacción — subir el número la
+        // deja sosteniendo locks más tiempo y empeora la contención.
+      }, { timeout: 20_000, maxWait: 5_000 });
 
       // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction
       // commits, emit the kitchen.fired event + push the KDS SSE
@@ -2211,6 +2240,10 @@ export class PaymentsService {
         sale_price: true,
         product_type: true,
         allow_pos_price_override: true,
+        // `cost_price` viaja con el producto que esta función ya carga: pedirlo
+        // aquí evita el round-trip extra que hacía `resolveCostPrice` dentro de
+        // la transacción del cobro (causa del P2028).
+        cost_price: true,
       },
     });
 
@@ -2230,6 +2263,9 @@ export class PaymentsService {
             price_override: true,
             is_on_sale: true,
             sale_price: true,
+            // Idem: el costo de la variante sale de la misma lectura que ya
+            // valida su pertenencia al producto.
+            cost_price: true,
           },
         })
       : null;
@@ -2290,9 +2326,13 @@ export class PaymentsService {
         }).unitPrice
       : this.resolveCatalogUnitBasePrice(product, variant);
     const catalogUnitPrice = this.roundMoney(tierBaseUnitPrice);
+    // `tx` explícito: sin él esta consulta saldría por otra conexión del pool
+    // mientras la transacción del cobro sostiene locks, y con suficientes cajas
+    // cobrando a la vez el pool se agota y nadie avanza.
     const catalogTaxInfo = await this.taxes_service.calculateProductTaxes(
       product.id,
       catalogUnitPrice,
+      tx,
     );
     const catalogFinalPrice = this.roundMoney(
       catalogUnitPrice + catalogTaxInfo.total_tax_amount,
@@ -2318,15 +2358,18 @@ export class PaymentsService {
       catalogTaxInfo.total_rate > 0
         ? finalUnitPrice / (1 + catalogTaxInfo.total_rate)
         : finalUnitPrice;
-    const taxInfo = await this.taxes_service.calculateProductTaxes(
-      product.id,
-      unitBasePrice,
-    );
-    const costPrice = await resolveCostPrice(
-      tx,
-      product.id,
-      item.product_variant_id,
-    );
+    // Misma tasa, otra base gravable: se reescala en memoria en vez de volver a
+    // consultar el mismo `product_id` (ver `rescaleTaxInfo`).
+    const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, unitBasePrice);
+    // Snapshot de costo de venta (variante > producto > null). Sale de las
+    // filas que esta función ya cargó, y que además validaron la pertenencia
+    // variante→producto que `resolveCostPrice` no verifica.
+    const costPrice =
+      variant?.cost_price != null
+        ? Number(variant.cost_price)
+        : product.cost_price != null
+          ? Number(product.cost_price)
+          : null;
 
     return this.buildOrderItemSnapshot({
       item,
@@ -2351,6 +2394,35 @@ export class PaymentsService {
       productVariantId: item.product_variant_id,
       tierSnap: tierSnap ?? null,
     });
+  }
+
+  /**
+   * Reescala un desglose de impuestos ya resuelto sobre otra base gravable.
+   *
+   * `TaxesService.calculateProductTaxes` lee la tasa de la DB (un `findMany`
+   * con `include` anidado de dos niveles sobre `product_tax_assignments` →
+   * `tax_categories` → `tax_rates`) y después solo multiplica: `total_rate` no
+   * depende del `basePrice`, y cada `amount` es `basePrice * rate`. Pedir el
+   * mismo `product_id` otra vez para una base distinta era, por eso, una
+   * consulta redundante — y una que sale por `this.prisma` (otra conexión del
+   * pool) mientras la transacción del cobro sostiene locks. Dos de esas por
+   * ítem fue una de las causas medidas del P2028.
+   *
+   * El tipo se deriva del propio servicio: si su contrato cambia, esto falla en
+   * compilación en vez de divergir en silencio.
+   */
+  private rescaleTaxInfo(
+    source: Awaited<ReturnType<TaxesService['calculateProductTaxes']>>,
+    basePrice: number,
+  ): Awaited<ReturnType<TaxesService['calculateProductTaxes']>> {
+    return {
+      total_rate: source.total_rate,
+      total_tax_amount: basePrice * source.total_rate,
+      taxes: source.taxes.map((tax) => ({
+        ...tax,
+        amount: basePrice * tax.rate,
+      })),
+    };
   }
 
   private buildOrderItemSnapshot(params: {
