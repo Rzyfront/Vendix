@@ -1,7 +1,5 @@
 -- Migration: backfill recipe_items.quantity and add positive CHECK constraint
 --
-<<<<<<< HEAD
-=======
 -- DATA IMPACT:
 --   Tabla mutada:  recipe_items (solo la columna `quantity`)
 --   Sentencia:     UPDATE ... WHERE quantity IS NULL OR quantity <= 0
@@ -17,7 +15,6 @@
 --   que las FK entrantes a recipe_items no se ven afectadas.
 --   Requiere aprobación explícita + snapshot de prod antes del deploy.
 --
->>>>>>> origin/dev
 -- Cierra el bug "Recetas admiten sub-componentes con CANTIDAD vacia"
 -- (Combo Marinero de la tienda demo Miramor tenia 2 sub-componentes con
 -- quantity NULL/vacia, persistidos como 0 al renderizar el form).
@@ -43,8 +40,4 @@ ALTER TABLE recipe_items
 
 -- Valida el constraint para los rows existentes (los recien backfilled
 -- pasan; cualquier row que no cumpla sera reportado aqui).
-<<<<<<< HEAD
 ALTER TABLE recipe_items VALIDATE CONSTRAINT recipe_items_quantity_positive;
-=======
-ALTER TABLE recipe_items VALIDATE CONSTRAINT recipe_items_quantity_positive;
->>>>>>> origin/dev
