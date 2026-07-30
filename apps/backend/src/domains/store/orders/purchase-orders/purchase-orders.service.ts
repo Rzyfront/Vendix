@@ -50,6 +50,29 @@ const VAT_RESPONSIBLE_CODE = 'O-48';
 export class PurchaseOrdersService {
   private readonly logger = new Logger(PurchaseOrdersService.name);
 
+  /**
+   * Fuente de la verdad del ciclo de vida de una orden de compra.
+   *
+   * Antes de esto `approve()` y `cancel()` eran `prisma.update()` ciegos que
+   * jamás leían el estado actual, así que se podía aprobar una orden ya
+   * recibida o cancelarla dejando la mercancía dentro y la recepción viva.
+   * Ningún método puede escribir `status` sin pasar por `assertTransition()`.
+   *
+   * - `received` y `cancelled` son terminales.
+   * - `partial` NO admite cancelación: ya hay unidades en bodega, y sacarlas es
+   *   trabajo de una devolución a proveedor, no de una cancelación.
+   *
+   * Sigue la forma de `ReservationsService.VALID_TRANSITIONS`, que es el patrón
+   * de máquina de estados ya establecido en el repo.
+   */
+  private readonly VALID_TRANSITIONS: Record<string, string[]> = {
+    draft: ['approved', 'cancelled'],
+    approved: ['partial', 'received', 'cancelled'],
+    partial: ['partial', 'received'],
+    received: [],
+    cancelled: [],
+  };
+
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
@@ -272,6 +295,83 @@ export class PurchaseOrdersService {
    * transacción. Las líneas sin `product_id` (producto nuevo creado por el
    * propio POP) se ignoran: un producto que aún no existe no tiene variantes.
    */
+  /**
+   * Lee la orden dentro de la transacción o falla con 404.
+   *
+   * Debe invocarse ANTES de cualquier validación de líneas: `receive()` validaba
+   * primero las líneas, así que recibir contra una orden inexistente respondía
+   * "La línea N no pertenece a esta orden de compra" en vez de decir que la
+   * orden no existe.
+   */
+  private async loadOrderOrFail(
+    tx: any,
+    id: number,
+  ): Promise<{ id: number; status: string; order_number: string }> {
+    const order = await tx.purchase_orders.findUnique({
+      where: { id },
+      select: { id: true, status: true, order_number: true },
+    });
+    if (!order) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_FIND_001,
+        `La orden de compra ${id} no existe.`,
+        { purchase_order_id: id },
+      );
+    }
+    return order;
+  }
+
+  /**
+   * Única puerta de escritura del campo `status`.
+   *
+   * `cancelled` sobre una orden con mercancía ingresada (`partial` / `received`)
+   * recibe su propio código: no es un "no se puede", es un "se hace por otro
+   * camino", y el mensaje tiene que nombrarlo o el operador queda sin salida.
+   */
+  private assertTransition(
+    order: { status: string; order_number: string },
+    target: string,
+  ): void {
+    const allowed = this.VALID_TRANSITIONS[order.status] ?? [];
+    if (allowed.includes(target)) return;
+
+    if (
+      target === 'cancelled' &&
+      (order.status === 'received' || order.status === 'partial')
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.PO_CANCEL_RECEIVED_001,
+        `La orden ${order.order_number} ya tiene mercancía recibida y no puede cancelarse. ` +
+          `Para revertirla registra una devolución a proveedor, que descuenta el stock y reversa la contabilidad.`,
+        { current_status: order.status, target_status: target },
+      );
+    }
+
+    throw new VendixHttpException(
+      ErrorCodes.PO_STATUS_001,
+      `La orden ${order.order_number} está en estado «${order.status}» y no puede pasar a «${target}».`,
+      { current_status: order.status, target_status: target, allowed },
+    );
+  }
+
+  /**
+   * Puerta de las operaciones que no cambian de estado pero sí alteran el
+   * contenido de la orden (`update`, `remove`). Solo un borrador es maleable:
+   * una orden aprobada ya es un compromiso con el proveedor, y una recibida
+   * respalda movimientos de inventario y asientos contables.
+   */
+  private assertMutable(
+    order: { status: string; order_number: string },
+    operation: 'editar' | 'eliminar',
+  ): void {
+    if (order.status === 'draft') return;
+    throw new VendixHttpException(
+      ErrorCodes.PO_STATUS_002,
+      `No se puede ${operation} la orden ${order.order_number}: está en estado «${order.status}» y solo un borrador es modificable.`,
+      { current_status: order.status, operation },
+    );
+  }
+
   private async assertNoBaseLineOnVariantProduct(
     tx: any,
     lines: Array<{
@@ -922,12 +1022,7 @@ export class PurchaseOrdersService {
       // validates the wire format; Prisma DateTime columns require Date or a
       // full ISO-8601 DateTime, so `YYYY-MM-DD` from <input type="date">
       // would otherwise blow up here.
-      const toDate = (v: unknown): Date | undefined => {
-        if (v == null || v === '') return undefined;
-        if (v instanceof Date) return v;
-        const d = new Date(String(v));
-        return Number.isNaN(d.getTime()) ? undefined : d;
-      };
+      const toDate = PurchaseOrdersService.toDateOrUndefined;
       const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
 
       // Fase 2: `orderType` was resolved at the top of the transaction so the
@@ -1136,18 +1231,79 @@ export class PurchaseOrdersService {
     });
   }
 
+  /**
+   * Campos escalares que un borrador acepta. Es una allowlist y no un spread del
+   * DTO porque `UpdatePurchaseOrderDto` es `PartialType(CreatePurchaseOrderDto)`
+   * y arrastra claves que NO son columnas de `purchase_orders` — entre ellas
+   * `items`. Pasarlo crudo a `data` hacía que Prisma abortara con
+   * "Unknown argument `items`" en TODA llamada a update(); el catch del
+   * controller devolvía ese fallo como HTTP 200, así que editar una orden nunca
+   * funcionó y además lo aparentaba. `status` queda deliberadamente fuera: solo
+   * se escribe vía assertTransition().
+   */
+  /**
+   * Normaliza una fecha entrante a `Date` o `undefined`. Era una closure dentro
+   * de `create()`; se eleva a la clase porque `update()` persiste los mismos
+   * campos de lote y debe interpretarlos igual.
+   */
+  private static toDateOrUndefined(v: unknown): Date | undefined {
+    if (v == null || v === '') return undefined;
+    if (v instanceof Date) return v;
+    const d = new Date(String(v));
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  }
+
+  private static readonly UPDATABLE_ORDER_FIELDS = [
+    'supplier_id',
+    'location_id',
+    'expected_date',
+    'notes',
+    'internal_notes',
+    'discount_amount',
+    'shipping_cost',
+    'shipping_method',
+    'payment_terms',
+    'payment_due_date',
+    'order_type',
+    'prices_include_tax',
+    'supplier_invoice_number',
+    'supplier_invoice_date',
+  ] as const;
+
   async update(id: number, updatePurchaseOrderDto: UpdatePurchaseOrderDto) {
     return this.prisma.$transaction(async (tx) => {
+      const order = await this.loadOrderOrFail(tx, id);
+      // Solo un borrador es editable: una orden aprobada ya comprometió al
+      // proveedor y una recibida respalda inventario y asientos contables.
+      this.assertMutable(order, 'editar');
+
+      const { items, ...rest } = updatePurchaseOrderDto as UpdatePurchaseOrderDto & {
+        items?: any[];
+      };
+
+      const data: Record<string, unknown> = {};
+      for (const field of PurchaseOrdersService.UPDATABLE_ORDER_FIELDS) {
+        if (rest[field as keyof typeof rest] !== undefined) {
+          data[field] = rest[field as keyof typeof rest];
+        }
+      }
+
       // If items are being updated, recalculate totals.
       // FASE 4 — misma derivación bruta consistente que create(): neto por línea
       // vía deriveLineTax → subtotal_amount = Σ neto, total_amount = neto + IVA −
       // descuento + flete (BRUTO). Corrige además la columna: antes escribía
       // `.subtotal` (inexistente; la columna real es `subtotal_amount`, ver :838).
-      if (updatePurchaseOrderDto.items) {
+      if (items) {
+        // QUI-486 — `update()` era un bypass del guard de variantes: se podía
+        // crear la orden por variante y luego reescribir la línea a la base.
+        await this.assertNoBaseLineOnVariantProduct(tx, items, {
+          stage: 'create',
+        });
+
         const round2 = (n: number) => Math.round(n * 100) / 100;
         let netSubtotal = 0;
         let lineTax = 0;
-        for (const item of updatePurchaseOrderDto.items) {
+        for (const item of items) {
           const d = this.deriveLineTax(item, updatePurchaseOrderDto);
           netSubtotal += d.unit_price_net * Number(item.quantity ?? 0);
           lineTax += d.tax_amount;
@@ -1160,13 +1316,46 @@ export class PurchaseOrdersService {
             (updatePurchaseOrderDto.shipping_cost || 0),
         );
 
-        (updatePurchaseOrderDto as any).subtotal_amount = subtotal;
-        (updatePurchaseOrderDto as any).total_amount = totalAmount;
+        data.subtotal_amount = subtotal;
+        data.tax_amount = round2(lineTax);
+        data.total_amount = totalAmount;
+
+        // Reemplazo completo de las líneas. Es seguro porque assertMutable ya
+        // garantizó `draft`: sin recepciones, `quantity_received` es 0 en todas
+        // y ninguna capa de costeo las referencia.
+        await tx.purchase_order_items.deleteMany({
+          where: { purchase_order_id: id },
+        });
+        for (const item of items) {
+          const derived = this.deriveLineTax(item, updatePurchaseOrderDto);
+          await tx.purchase_order_items.create({
+            data: {
+              purchase_order_id: id,
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id ?? null,
+              quantity_ordered: item.quantity,
+              unit_cost: derived.unit_price_net,
+              unit_price_net: derived.unit_price_net,
+              tax_rate: item.tax_rate ?? null,
+              tax_type:
+                (item.tax_type as tax_type_enum | undefined) ??
+                tax_type_enum.iva,
+              prices_include_tax: item.prices_include_tax ?? null,
+              tax_amount: derived.tax_amount,
+              notes: item.notes,
+              batch_number: item.batch_number,
+              manufacturing_date:
+                PurchaseOrdersService.toDateOrUndefined(item.manufacturing_date),
+              expiration_date:
+                PurchaseOrdersService.toDateOrUndefined(item.expiration_date),
+            },
+          });
+        }
       }
 
       return tx.purchase_orders.update({
         where: { id },
-        data: updatePurchaseOrderDto,
+        data,
         include: {
           suppliers: true,
           location: true,
@@ -1185,22 +1374,28 @@ export class PurchaseOrdersService {
     // Schema only carries `approved_by_user_id` (FK) — there is no
     // `approved_date` column. Audit timestamp is recorded via auditService.
     const approver_id = RequestContextService.getUserId() ?? null;
-    const result = await this.prisma.purchase_orders.update({
-      where: { id },
-      data: {
-        status: purchase_order_status_enum.approved,
-        approved_by_user_id: approver_id,
-      },
-      include: {
-        suppliers: true,
-        location: true,
-        purchase_order_items: {
-          include: {
-            products: true,
-            product_variants: true,
+    // La lectura y la validación van en la misma transacción que la escritura:
+    // fuera de ella dos aprobaciones concurrentes podrían pasar ambas el guard.
+    const result = await this.prisma.$transaction(async (tx) => {
+      const order = await this.loadOrderOrFail(tx, id);
+      this.assertTransition(order, purchase_order_status_enum.approved);
+      return tx.purchase_orders.update({
+        where: { id },
+        data: {
+          status: purchase_order_status_enum.approved,
+          approved_by_user_id: approver_id,
+        },
+        include: {
+          suppliers: true,
+          location: true,
+          purchase_order_items: {
+            include: {
+              products: true,
+              product_variants: true,
+            },
           },
         },
-      },
+      });
     });
 
     // Audit log
@@ -1225,21 +1420,28 @@ export class PurchaseOrdersService {
   async cancel(id: number) {
     // Schema has no `cancelled_date` column — cancellation timestamp is
     // captured by the audit log entry below.
-    const result = await this.prisma.purchase_orders.update({
-      where: { id },
-      data: {
-        status: purchase_order_status_enum.cancelled,
-      },
-      include: {
-        suppliers: true,
-        location: true,
-        purchase_order_items: {
-          include: {
-            products: true,
-            product_variants: true,
+    // El guard rechaza `partial` y `received` con PO_CANCEL_RECEIVED_001: esa
+    // mercancía ya entró a bodega y sacarla es una devolución a proveedor, no
+    // una cancelación. Antes se marcaba `cancelled` dejando el stock dentro.
+    const result = await this.prisma.$transaction(async (tx) => {
+      const order = await this.loadOrderOrFail(tx, id);
+      this.assertTransition(order, purchase_order_status_enum.cancelled);
+      return tx.purchase_orders.update({
+        where: { id },
+        data: {
+          status: purchase_order_status_enum.cancelled,
+        },
+        include: {
+          suppliers: true,
+          location: true,
+          purchase_order_items: {
+            include: {
+              products: true,
+              product_variants: true,
+            },
           },
         },
-      },
+      });
     });
 
     // Audit log
@@ -1529,6 +1731,17 @@ export class PurchaseOrdersService {
     const result = await this.prisma.$transaction(async (tx) => {
       // Create reception record
       const user_id = RequestContextService.getUserId();
+
+      // La orden se resuelve ANTES que las líneas: al revés, recibir contra una
+      // orden inexistente respondía "La línea N no pertenece a esta orden de
+      // compra", que describe un problema que no es el que ocurrió.
+      const orderHeader = await this.loadOrderOrFail(tx, id);
+      // Solo `approved` y `partial` admiten mercancía. Recibir sobre un borrador
+      // saltaría la aprobación, y sobre `cancelled` o `received` ingresaría
+      // stock que ningún compromiso vigente respalda. El destino se afina más
+      // abajo (partial vs received) según lo que quede pendiente; aquí basta
+      // con validar que el estado actual admita recibir algo.
+      this.assertTransition(orderHeader, purchase_order_status_enum.partial);
 
       // Guard: every incoming line must belong to THIS purchase order and must
       // not exceed its pending quantity (ordered − already received). Without
@@ -3182,9 +3395,18 @@ export class PurchaseOrdersService {
     return { costing_method: toPublicCostingMethod(costingMethod), items };
   }
 
-  remove(id: number) {
-    return this.prisma.purchase_orders.delete({
-      where: { id },
+  /**
+   * Borrado físico, reservado a borradores. Antes era un `delete()` desnudo:
+   * se podía eliminar una orden recibida y con ella sus líneas, dejando el
+   * stock ingresado sin documento que lo respaldara.
+   */
+  async remove(id: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.loadOrderOrFail(tx, id);
+      this.assertMutable(order, 'eliminar');
+      return tx.purchase_orders.delete({
+        where: { id },
+      });
     });
   }
 

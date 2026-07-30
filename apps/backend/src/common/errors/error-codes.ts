@@ -800,6 +800,38 @@ export const ErrorCodes = {
       'Un producto con variantes debe comprarse por variante, no contra su línea base',
   },
 
+  // Ciclo de vida de la orden de compra.
+  // El estado vive en `PurchaseOrdersService.VALID_TRANSITIONS`; estos códigos
+  // son la cara HTTP de esa única fuente de la verdad. Son 409 y no 400 porque
+  // la petición está bien formada: choca con el estado real del recurso.
+  PO_STATUS_001: {
+    code: 'PO_STATUS_001',
+    httpStatus: 409,
+    devMessage:
+      'Transición de estado no permitida para esta orden de compra',
+  },
+  PO_STATUS_002: {
+    code: 'PO_STATUS_002',
+    httpStatus: 409,
+    devMessage:
+      'Solo una orden de compra en borrador puede editarse o eliminarse',
+  },
+  // Cancelar una OC con mercancía ya ingresada exigiría deshacer capas de costeo
+  // FIFO, asientos automáticos e IVA descontable ya reconocido. Ese trabajo es
+  // del módulo de devoluciones (`return_order_type_enum.purchase_return`), así
+  // que aquí se bloquea y se nombra el camino correcto.
+  PO_CANCEL_RECEIVED_001: {
+    code: 'PO_CANCEL_RECEIVED_001',
+    httpStatus: 409,
+    devMessage:
+      'Una orden con mercancía recibida se revierte con una devolución a proveedor, no cancelándola',
+  },
+  PO_FIND_001: {
+    code: 'PO_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Orden de compra no encontrada',
+  },
+
   // Inventory
   INV_FIND_001: {
     code: 'INV_FIND_001',
