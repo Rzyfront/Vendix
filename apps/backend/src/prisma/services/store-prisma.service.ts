@@ -45,6 +45,12 @@ export class StorePrismaService extends BasePrismaService {
     'layaway_plans',
     'exogenous_reports',
     'bookings',
+    // Tiene columna `store_id` propia. Sin este registro el getter
+    // `booking_reschedule_requests` devolvía un delegate SIN scoping, y
+    // `cancelRescheduleRequest` hacía `update({ where: { id } })` antes de
+    // cualquier `findOne` scopeado: un admin de la tienda A podía cancelar
+    // la solicitud pendiente de la tienda B.
+    'booking_reschedule_requests',
     'service_providers',
     'reviews',
     'ai_conversations',

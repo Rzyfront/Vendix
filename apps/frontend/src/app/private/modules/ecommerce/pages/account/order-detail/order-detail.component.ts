@@ -7,7 +7,7 @@ import {Component,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { RouterModule, ActivatedRoute } from '@angular/router';
+import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 
 
 import { AccountService, OrderDetail } from '../../../services/account.service';
@@ -15,12 +15,19 @@ import { EcommerceBookingService } from '../../../services/ecommerce-booking.ser
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { RescheduleModalComponent } from '../../../../store/reservations/components/reschedule-modal/reschedule-modal.component';
 import { parseVariantAttributes } from '../../../../../../shared/utils';
 
 @Component({
   selector: 'app-order-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe],
+  imports: [
+    CommonModule,
+    RouterModule,
+    IconComponent,
+    CurrencyPipe,
+    RescheduleModalComponent,
+  ],
   templateUrl: './order-detail.component.html',
   styleUrls: ['./order-detail.component.scss'] })
 export class OrderDetailComponent implements OnInit, OnDestroy {
@@ -31,6 +38,12 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
   // Wompi callback state
   readonly verifyingWompiPayment = signal(false);
+  /**
+   * Appointment redesign phase 2 — drives `<app-reschedule-modal>`. Opened by
+   * `openRescheduleModal()` only AFTER the pending-request check resolves, so
+   * a customer with a request already awaiting approval never sees the form.
+   */
+  readonly showRescheduleModal = signal(false);
   wompiPaymentVerified = false;
 
   readonly totalItems = computed(() => {
@@ -115,6 +128,55 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     };
   });
 
+  /**
+   * Appointment redesign phase 2 — where the booked service happens.
+   *
+   * `shippingBlock` above returns null for a service-only order (it is gated
+   * on `hasPhysicalItems()`), so without this the customer loses the address
+   * once the order is placed. `delivery_type === 'pickup'` means the customer
+   * goes to the store ("En el local"); anything else means the technician
+   * travels to the address captured at checkout ("A domicilio").
+   *
+   * The shop address is not part of the order payload — it lives in
+   * `store_settings.services.local_address` — so the 'shop' branch shows only
+   * the label and defers the street to the confirmation email.
+   */
+  readonly serviceLocationBlock = computed(() => {
+    const o = this.order();
+    if (!o || !this.hasServiceItems()) return null;
+
+    if (o.delivery_type === 'pickup') {
+      return {
+        type: 'shop' as const,
+        title: 'En el local',
+        addressLine1: 'El servicio se realiza en la tienda.',
+        addressLine2: null as string | null,
+      };
+    }
+
+    // The backend exposes the snapshot under `shipping_address` (it falls back
+    // to the live address row when no snapshot was taken).
+    const addr = o.shipping_address as
+      | {
+          address_line1?: string | null;
+          address_line2?: string | null;
+          city?: string | null;
+          state_province?: string | null;
+        }
+      | null
+      | undefined;
+    if (!addr?.address_line1) return null;
+
+    const locality = [addr.city, addr.state_province].filter(Boolean).join(', ');
+    return {
+      type: 'home' as const,
+      title: 'A domicilio',
+      addressLine1: addr.address_line1,
+      addressLine2:
+        [addr.address_line2, locality].filter(Boolean).join(' · ') || null,
+    };
+  });
+
   // ── Discount snapshots (read-only from order; never recalculated) ──
   readonly appliedPromotions = computed(() =>
     (this.order()?.applied_promotions ?? []).map((p) => ({
@@ -172,6 +234,7 @@ private toast = inject(ToastService);
     private account_service: AccountService,
     private booking_service: EcommerceBookingService,
     private route: ActivatedRoute,
+    private router: Router,
   ) {}
 
   ngOnInit(): void {
@@ -330,7 +393,10 @@ if (this.wompiPollTimer) {
     );
     if (!firstServiceItem) return null;
 
-    const addr = (o as any).shipping_address_snapshot as
+    // The backend maps the snapshot (or the live address row) onto
+    // `shipping_address`; there is no `shipping_address_snapshot` key in the
+    // response payload.
+    const addr = (o as any).shipping_address as
       | {
           address_line1: string;
           address_line2: string | null;

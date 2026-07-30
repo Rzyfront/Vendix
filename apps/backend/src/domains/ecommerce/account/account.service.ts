@@ -280,12 +280,19 @@ export class AccountService {
       created_at: order.created_at,
       placed_at: order.placed_at,
       completed_at: order.completed_at,
+      // Drives the "home vs shop" reading of a service order on the detail
+      // page: `pickup` means the customer goes to the store.
+      delivery_type: order.delivery_type,
       shipping_address:
         order.shipping_address_snapshot ||
         order.addresses_orders_shipping_address_idToaddresses,
       items: await Promise.all(
         order.order_items.map(async (item) => ({
           id: item.id,
+          // The order-detail page needs the product behind the line to send
+          // the customer back to it (e.g. re-creating a service reservation
+          // that was never persisted as a `bookings` row).
+          product_id: item.product_id,
           product_name: item.product_name,
           variant_sku: item.variant_sku,
           variant_attributes: item.variant_attributes,
@@ -300,6 +307,11 @@ export class AccountService {
           variant_image_url: item.variant_image_url
             ? await this.s3Service.signUrl(item.variant_image_url)
             : null,
+          // Tells the detail page whether the line is a bookable service.
+          // Without it the page treats every order as physical: it renders
+          // the shipping stepper for a service-only order and never surfaces
+          // the reservation block or the "Reagendar" action.
+          product_type: item.products?.product_type ?? null,
         })),
       ),
       payments: order.payments.map((p) => ({

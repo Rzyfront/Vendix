@@ -56,7 +56,7 @@
         }
         <div class="info-row muted">
           <app-icon name="calendar" [size]="14"></app-icon>
-          <span>Actual: {{ booking()!.date }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
+          <span>Actual: {{ formatDate(booking()!.date) }} {{ formatTime(booking()!.start_time) }} - {{ formatTime(booking()!.end_time) }}</span>
         </div>
       </div>
 

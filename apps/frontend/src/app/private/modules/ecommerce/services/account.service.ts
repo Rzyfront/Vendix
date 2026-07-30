@@ -83,8 +83,16 @@ export interface OrderDetail extends Order {
   shipping_cost: number;
   shipping_address: any;
   invoice_url: string | null;
+  /**
+   * How the order reaches the customer. `pickup` means the customer comes to
+   * the store — the order-detail page reads it to decide whether a service was
+   * booked "en el local" or "a domicilio".
+   */
+  delivery_type?: string;
   items: {
     id: number;
+    /** Nullable: `order_items.product_id` is optional on deleted products. */
+    product_id: number | null;
     product_name: string;
     variant_sku: string | null;
     variant_attributes: any;
@@ -93,7 +101,8 @@ export interface OrderDetail extends Order {
     total_price: number;
     image_url: string | null;
     variant_image_url?: string | null;
-    product_type?: 'physical' | 'service';
+    /** Mirrors `product_type_enum`; null when the product row was removed. */
+    product_type?: 'physical' | 'service' | 'prepared' | null;
   }[];
   payments: {
     id: number;

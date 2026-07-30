@@ -30,6 +30,7 @@ export class NotificationsEventsListener {
     private readonly email_service: EmailService,
     private readonly s3_service: S3Service,
     private readonly appointment_queue_service: AppointmentQueueService,
+    private readonly event_emitter: EventEmitter2,
   ) {}
 
   /**
@@ -67,7 +68,7 @@ export class NotificationsEventsListener {
           main_store_id: store_id,
           state: 'active',
           user_roles: {
-            some: { role: { name: { in: ['owner', 'ORG_ADMIN'] } } },
+            some: { roles: { name: { in: ['owner', 'ORG_ADMIN'] } } },
           },
         },
         orderBy: { id: 'asc' },
@@ -87,7 +88,7 @@ export class NotificationsEventsListener {
           where: {
             organization_id: org.organization_id,
             state: 'active',
-            user_roles: { some: { role: { name: 'ORG_ADMIN' } } },
+            user_roles: { some: { roles: { name: 'ORG_ADMIN' } } },
           },
           orderBy: { id: 'asc' },
           select: { first_name: true, last_name: true, email: true },
@@ -1050,7 +1051,10 @@ export class NotificationsEventsListener {
             select: { name: true },
           });
           const storeName = store?.name || 'la tienda';
-          const fromOverride = await this.resolveStoreOwnerFrom(event.store_id);
+          const fromOverride = await this.resolveFromForAction(
+            undefined,
+            event.store_id,
+          );
 
           await this.email_service.sendEmail(
             customer.email,

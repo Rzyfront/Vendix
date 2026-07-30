@@ -57,7 +57,7 @@ export class AutoNoShowJob {
     this.isRunning = true;
     try {
       const stores = await this.prisma.stores.findMany({
-        where: { deleted_at: null },
+        where: { is_active: true },
         select: { id: true },
       });
 

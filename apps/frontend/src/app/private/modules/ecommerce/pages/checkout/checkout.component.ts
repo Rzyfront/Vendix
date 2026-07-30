@@ -1523,9 +1523,9 @@ export class CheckoutComponent implements OnInit {
           }
         : {}),
       // Include booking data if there are bookable services
-      ...(this.cartHasBookableServices && this.bookingSelections.size > 0
+      ...(this.cartHasBookableServices && this.bookingSelections().size > 0
         ? {
-            bookings: Array.from(this.bookingSelections.values()),
+            bookings: Array.from(this.bookingSelections().values()),
           }
         : {}),
       // Always send cart items as fallback (in case backend cart is empty/not synced)

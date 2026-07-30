@@ -380,7 +380,11 @@ export class RescheduleModalComponent {
   }
 
   formatDate(dateStr: string): string {
-    const d = new Date(dateStr + 'T12:00:00');
+    // `bookings.date` es `@db.Date` y el backend lo serializa como ISO completo
+    // (`2026-08-07T00:00:00.000Z`), mientras que los slots llegan como
+    // `YYYY-MM-DD`. Recortar a 10 chars normaliza ambos; el ancla a las 12:00
+    // locales evita el off-by-one de interpretar la medianoche UTC en UTC-5.
+    const d = new Date(dateStr.slice(0, 10) + 'T12:00:00');
     const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     return `${days[d.getDay()]} ${d.getDate()}`;
   }
