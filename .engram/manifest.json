@@ -944,6 +944,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "9295abd0",
+      "created_by": "rzy",
+      "created_at": "2026-07-30T15:15:40Z",
+      "sessions": 1,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }
