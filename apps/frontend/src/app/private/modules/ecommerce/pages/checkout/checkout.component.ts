@@ -617,7 +617,10 @@ export class CheckoutComponent implements OnInit {
         filter(() => !this.cartHasOnlyServices && this.address_form.valid),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(() => this.loadShippingOptions());
+      // `notify: false` — esto corre mientras el comprador todavía está
+      // eligiendo la ciudad. Actualiza el estado de cobertura en silencio; el
+      // aviso explícito se da al intentar avanzar, no mientras tipea.
+      .subscribe(() => this.loadShippingOptions(false));
 
     // Forward-geocode what the customer TYPES so the map re-centers on it. The
     // reverse-geocode fill uses `emitEvent: false`, so only genuine typing
@@ -1010,75 +1013,194 @@ export class CheckoutComponent implements OnInit {
   selected_shipping_option_id: number | null = null;
   selected_shipping_method_type: string | null = null;
   shipping_cost = 0;
+
+  /**
+   * Qué tipo de cobertura devolvió el calculador para la dirección actual.
+   *
+   * - `unknown`: todavía no se consultó (o está en vuelo).
+   * - `zone`: hay una zona de envío que cubre la dirección.
+   * - `pickup_only`: NO hay despacho a la dirección; la tienda opera en esa
+   *   ciudad y lo único posible es retirar en el local.
+   * - `none`: no hay ninguna forma de entregar el pedido a esa dirección.
+   *
+   * Es una señal (no una propiedad plana) porque el template ramifica sobre
+   * ella y bajo zoneless una propiedad no dispara render.
+   */
+  readonly shipping_coverage = signal<
+    'unknown' | 'zone' | 'pickup_only' | 'none'
+  >('unknown');
+
+  /** True mientras se están recalculando las opciones de envío. */
+  readonly loading_shipping = signal(false);
+
+  /** True cuando la única forma de entrega es retirar en tienda. */
+  readonly isPickupOnlyCoverage = computed(
+    () => this.shipping_coverage() === 'pickup_only',
+  );
+
+  /**
+   * True cuando ya se consultó al calculador y no hay ninguna opción. Se usa
+   * para mostrar el estado vacío accionable en vez de un cartel sin salida.
+   */
+  readonly hasNoShippingCoverage = computed(
+    () => this.shipping_coverage() === 'none',
+  );
   loading_payment_methods = false;
 
   // ... (existing methods)
 
   // Modified logic: call this when address is finalized (e.g. Next from Address step)
-  loadShippingOptions(): void {
+  /**
+   * Recalcula las opciones de envío para la dirección activa.
+   *
+   * Devuelve una promesa que resuelve cuando la respuesta llegó, para que el
+   * avance de paso pueda esperarla en vez de dejar al comprador aterrizando en
+   * el paso de Pago con la lista todavía vacía y creyendo que no hay cobertura.
+   */
+  loadShippingOptions(notify = true): Promise<void> {
     if (this.use_new_address() && this.address_form.valid) {
-      // Convert form to address object
       const address = this.mapFormToCalcAddress(this.address_form.value);
-      this.fetchShipping(address);
-    } else if (this.selected_address_id()) {
+      if (!address) {
+        this.shipping_options.set([]);
+        this.shipping_coverage.set('none');
+        if (notify) {
+          this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+        }
+        return Promise.resolve();
+      }
+      return this.fetchShipping(address, notify);
+    }
+
+    if (this.selected_address_id()) {
       const address = this.addresses().find(
         (a) => a.id === this.selected_address_id(),
       );
       if (address) {
-        this.fetchShipping(this.mapAddressToCalc(address));
+        return this.fetchShipping(this.mapAddressToCalc(address), notify);
       }
     }
+
+    return Promise.resolve();
   }
 
-  private mapFormToCalcAddress(formValue: any): any {
-    const address = { ...formValue };
+  /**
+   * Traduce los IDs del catálogo de api-colombia a NOMBRES de departamento y
+   * ciudad, que es lo único que el backend sabe comparar contra las zonas de
+   * envío.
+   *
+   * Fallar acá en silencio es caro: si el catálogo todavía no cargó (cambio de
+   * departamento que resetea la lista, o `api-colombia` caído devolviendo `[]`),
+   * la conversión no ocurre y se termina mandando el ID crudo como si fuera el
+   * nombre de la ciudad. Eso ya pasó: hay direcciones guardadas con
+   * `city = "694"` y `state_province = "19"`. Ninguna zona matchea nunca contra
+   * eso, y el comprador ve un checkout roto sin explicación.
+   *
+   * Por eso devolvemos también qué campos NO se pudieron resolver, para que
+   * quien llame decida si aborta o avisa.
+   */
+  private resolveGeoNames(source: any): { value: any; unresolved: string[] } {
+    const value = { ...source };
+    const unresolved: string[] = [];
 
-    // For Colombia, convert department and city IDs to names
-    if (address.country_code === 'CO') {
-      // Convert department ID to name
-      if (address.state_province) {
-        const depId = Number(address.state_province);
+    // Sólo Colombia usa selectores por ID; el resto de los países captura
+    // departamento y ciudad como texto libre y llega ya resuelto.
+    if (value.country_code !== 'CO') return { value, unresolved };
+
+    if (value.state_province) {
+      const depId = Number(value.state_province);
+      if (Number.isFinite(depId)) {
         const department = this.departments().find((d) => d.id === depId);
-        if (department) {
-          address.state_province = department.name;
-        }
-      }
-
-      // Convert city ID to name
-      if (address.city) {
-        const cityId = Number(address.city);
-        const city = this.cities().find((c) => c.id === cityId);
-        if (city) {
-          address.city = city.name;
-        }
+        if (department) value.state_province = department.name;
+        else unresolved.push('state_province');
       }
     }
-    return address;
+
+    if (value.city) {
+      const cityId = Number(value.city);
+      if (Number.isFinite(cityId)) {
+        const city = this.cities().find((c) => c.id === cityId);
+        if (city) value.city = city.name;
+        else unresolved.push('city');
+      }
+    }
+
+    return { value, unresolved };
   }
 
-  fetchShipping(address: any) {
+  private mapFormToCalcAddress(formValue: any): any | null {
+    const { value, unresolved } = this.resolveGeoNames(formValue);
+    if (unresolved.length > 0) {
+      console.warn(
+        '[checkout] No se pudo resolver el nombre de',
+        unresolved.join(', '),
+        '— no se consulta el envío con un ID crudo.',
+      );
+      return null;
+    }
+    return value;
+  }
+
+  fetchShipping(address: any, notify = true): Promise<void> {
     this.is_loading.set(true);
-    this.cart_service.getShippingEstimates(address).subscribe({
-      next: (options) => {
-        this.shipping_options.set(options);
-        if (options.length > 0) {
-          // Default select first or cheapest?
-          // Select first
-          this.selectShippingMethod(options[0], options[0].cost);
-        } else {
-          this.selected_shipping_method_id = null;
-          this.selected_shipping_option_id = null;
-          this.shipping_cost = 0;
-        }
-        this.is_loading.set(false);
-      },
-      error: () => {
-        this.is_loading.set(false);
-        this.toast.error(
-          'No pudimos cargar las opciones de envío. Intenta de nuevo.',
-          'Error de envío',
-        );
-      },
+    this.loading_shipping.set(true);
+
+    return new Promise<void>((resolve) => {
+      this.cart_service.getShippingEstimates(address).subscribe({
+        next: (options) => {
+          this.shipping_options.set(options);
+
+          if (options.length > 0) {
+            // El backend marca `is_fallback` cuando la dirección NO tiene
+            // cobertura de despacho y lo único ofrecido es retirar en tienda.
+            const isFallbackOnly = options.every((o: any) => o.is_fallback);
+            this.shipping_coverage.set(isFallbackOnly ? 'pickup_only' : 'zone');
+
+            // No auto-seleccionar a ciegas la primera opción: si esa opción es
+            // de tipo `pickup`, el backend filtra los métodos de pago y el
+            // comprador pierde contra-entrega sin haber elegido retirar. Se
+            // prefiere la primera opción de despacho, y sólo se cae a `pickup`
+            // cuando es lo único que hay.
+            const preferred =
+              options.find((o: any) => o.method_type !== 'pickup') ??
+              options[0];
+            this.selectShippingMethod(preferred, preferred.cost);
+
+            if (isFallbackOnly) {
+              this.error_message.set('');
+            }
+          } else {
+            this.selected_shipping_method_id = null;
+            this.selected_shipping_option_id = null;
+            this.selected_shipping_method_type = null;
+            this.shipping_cost = 0;
+            this.shipping_coverage.set('none');
+
+            // Antes esto era silencioso: la lista quedaba vacía, el botón se
+            // deshabilitaba y el comprador no sabía por qué.
+            if (notify) {
+              this.error_message.set(ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001']);
+              this.toast.error(
+                ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
+                'Sin cobertura de envío',
+              );
+            }
+          }
+
+          this.is_loading.set(false);
+          this.loading_shipping.set(false);
+          resolve();
+        },
+        error: () => {
+          this.is_loading.set(false);
+          this.loading_shipping.set(false);
+          this.shipping_coverage.set('unknown');
+          this.toast.error(
+            'No pudimos cargar las opciones de envío. Intenta de nuevo.',
+            'Error de envío',
+          );
+          resolve();
+        },
+      });
     });
   }
 
@@ -1185,7 +1307,7 @@ export class CheckoutComponent implements OnInit {
   }
 
   // Override nextStep to load shipping if moving from Step 1
-  nextStep(): void {
+  async nextStep(): Promise<void> {
     // Address step (only for carts with physical items)
     if (this.step() === 1 && !this.cartHasOnlyServices) {
       if (this.use_new_address() && !this.address_form.valid) {
@@ -1210,9 +1332,12 @@ export class CheckoutComponent implements OnInit {
         return;
       }
 
-      // Load shipping before moving
-      this.loadShippingOptions();
+      // Esperar la respuesta del calculador ANTES de avanzar. Cuando esto era
+      // fire-and-forget el comprador aterrizaba en el paso de Pago con
+      // `shipping_options()` todavía vacío, así que veía el cartel de "sin
+      // cobertura" aunque su ciudad sí estuviera cubierta.
       this.error_message.set('');
+      await this.loadShippingOptions();
       this.step.set(this.step() + 1);
       return;
     }
@@ -1345,13 +1470,17 @@ export class CheckoutComponent implements OnInit {
    * Saves the new address to the customer's account, then continues to the next step
    */
   private saveNewAddressAndContinue(): void {
-    this.is_loading.set(true);
-
     // Prepare address payload with converted names
     const addressPayload = this.prepareAddressPayload();
 
+    // Ciudad o departamento sin resolver: `prepareAddressPayload` ya avisó.
+    // No guardamos una dirección que nunca podrá cotizar envío.
+    if (!addressPayload) return;
+
+    this.is_loading.set(true);
+
     this.account_service.createAddress(addressPayload).subscribe({
-      next: (response) => {
+      next: async (response) => {
         if (response.success) {
           // Add the new address to the list and select it
           this.addresses.update((addresses) => [...addresses, response.data]);
@@ -1363,20 +1492,20 @@ export class CheckoutComponent implements OnInit {
           );
         }
         // Continue with shipping options
-        this.loadShippingOptions();
         this.error_message.set('');
+        await this.loadShippingOptions();
         this.step.set(this.step() + 1);
         this.is_loading.set(false);
       },
-      error: (err) => {
+      error: async () => {
         this.is_loading.set(false);
         // Still continue even if save fails, but notify user
         this.toast.warning(
           'La dirección no pudo guardarse, pero puedes continuar con tu compra',
           'Aviso',
         );
-        this.loadShippingOptions();
         this.error_message.set('');
+        await this.loadShippingOptions();
         this.step.set(this.step() + 1);
       },
     });
@@ -1385,31 +1514,20 @@ export class CheckoutComponent implements OnInit {
   /**
    * Prepares the address payload with converted department/city names for Colombia
    */
-  private prepareAddressPayload(): any {
-    let addressValue = { ...this.address_form.value };
+  private prepareAddressPayload(): any | null {
+    const { value, unresolved } = this.resolveGeoNames(this.address_form.value);
 
-    // For Colombia, convert department and city IDs to names
-    if (addressValue.country_code === 'CO') {
-      if (addressValue.state_province) {
-        const depId = Number(addressValue.state_province);
-        const department = this.departments().find((d) => d.id === depId);
-        if (department) {
-          addressValue.state_province = department.name;
-        }
-      }
-
-      if (addressValue.city) {
-        const cityId = Number(addressValue.city);
-        const city = this.cities().find((c) => c.id === cityId);
-        if (city) {
-          addressValue.city = city.name;
-        }
-      }
+    // Guardar la dirección con el ID del catálogo en el campo `city` la deja
+    // permanentemente inservible para calcular envíos. Preferimos no guardarla.
+    if (unresolved.length > 0) {
+      this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+      return null;
     }
 
     // Add required fields for the API
     return {
-      ...addressValue,
+      ...value,
       type: 'shipping',
       is_primary: this.addresses().length === 0, // Make it primary if it's the first address
     };
@@ -1417,6 +1535,17 @@ export class CheckoutComponent implements OnInit {
 
   prevStep(): void {
     this.step.set(this.step() - 1);
+  }
+
+  /**
+   * Vuelve al paso de dirección desde el estado "sin cobertura de envío".
+   * Es la salida que antes no existía: el comprador quedaba con el botón
+   * deshabilitado y sin ninguna acción posible.
+   */
+  goToAddressStep(): void {
+    this.error_message.set('');
+    this.shipping_coverage.set('unknown');
+    this.step.set(1);
   }
 
   placeOrder(): void {
@@ -1542,27 +1671,17 @@ export class CheckoutComponent implements OnInit {
 
     if (!this.cartHasOnlyServices && this.use_new_address()) {
       // Convert IDs to names for backend compatibility
-      let addressValue = { ...this.address_form.value };
+      const { value: addressValue, unresolved } = this.resolveGeoNames(
+        this.address_form.value,
+      );
 
-      // For Colombia, convert department and city IDs to names
-      if (addressValue.country_code === 'CO') {
-        // Convert department ID to name
-        if (addressValue.state_province) {
-          const depId = Number(addressValue.state_province);
-          const department = this.departments().find((d) => d.id === depId);
-          if (department) {
-            addressValue.state_province = department.name;
-          }
-        }
-
-        // Convert city ID to name
-        if (addressValue.city) {
-          const cityId = Number(addressValue.city);
-          const city = this.cities().find((c) => c.id === cityId);
-          if (city) {
-            addressValue.city = city.name;
-          }
-        }
+      // Mandar el ID del catálogo como nombre de ciudad deja la orden con una
+      // dirección de envío inservible para despacho. Abortamos.
+      if (unresolved.length > 0) {
+        this.is_submitting.set(false);
+        this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+        this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+        return;
       }
 
       request.shipping_address = addressValue;

@@ -17,7 +17,6 @@ import {
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 import { resolveProductLowStockThreshold } from '../../inventory/shared/helpers/low-stock-threshold.helper';
@@ -76,10 +75,10 @@ interface SummaryProductRow {
 
 @Injectable()
 export class InventoryAnalyticsService {
-  constructor(
-    private readonly prisma: StorePrismaService,
-    private readonly operatingScopeService: OperatingScopeService,
-  ) {}
+  // QUI-553: OperatingScopeService is no longer injected here. This reader is
+  // store-scoped in every operating scope, so there is no scope decision left
+  // to resolve; org-wide consolidation belongs to the organization domain.
+  constructor(private readonly prisma: StorePrismaService) {}
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -97,13 +96,15 @@ export class InventoryAnalyticsService {
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
     const settings = await this.loadMergedSettings();
 
-    // DATA-SCOPE-1 fix: every KPI in this report shares ONE scope universe.
-    // The universe follows the organization's operating scope (see
-    // vendix-operating-scope): STORE -> the current store in isolation;
-    // ORGANIZATION -> every store consolidated under the organization. This is
-    // exactly the universe getInventoryValuation() resolves, so the
-    // product-derived counts below and the stock value/quantity below agree
-    // instead of mixing a store-level product loop with an org-level valuation.
+    // DATA-SCOPE-1: every KPI in this report shares ONE scope universe, and
+    // that universe is ALWAYS the current store — never the organization, not
+    // even when operating_scope = ORGANIZATION (QUI-553). A store panel that
+    // consolidated other stores' inventory reported stock the store does not
+    // own, and contradicted getLowStockAlerts()/getStockLevels(), which read
+    // the store-scoped client. Consolidated org-wide inventory lives in
+    // /organization/reports/inventory/* (see vendix-operating-scope).
+    // getInventoryValuation() resolves the same store universe, so the
+    // product-derived counts below and the stock value/quantity agree.
     const products = await this.loadScopedSummaryProducts();
 
     let totalSkuCount = 0;
@@ -150,24 +151,25 @@ export class InventoryAnalyticsService {
   }
 
   /**
-   * Loads the active, inventory-tracked product universe that matches the
-   * organization's operating scope, so the summary KPIs share ONE scope
-   * universe with getInventoryValuation():
-   *  - STORE        -> only the current store's products (scoped client).
-   *  - ORGANIZATION -> every store's products under the organization, via the
-   *    APPROVED withoutScope() + manual relational filter
-   *    (products.stores.organization_id) — the same cross-tenant read shape
-   *    getInventoryValuation() uses for stock_levels.
+   * Loads the active, inventory-tracked product universe of the CURRENT STORE,
+   * so the summary KPIs share ONE scope universe with getInventoryValuation().
+   *
+   * QUI-553: this used to widen the universe to every store of the organization
+   * when operating_scope = ORGANIZATION (withoutScope() + a manual
+   * products.stores.organization_id filter). A store panel must never report
+   * another store's stock, so the universe is now the store in every scope —
+   * the same isolation the scoped client already applies to
+   * getLowStockAlerts() and getStockLevels(). Org-wide consolidation is served
+   * by /organization/reports/inventory/* (see vendix-operating-scope).
    */
   private async loadScopedSummaryProducts(): Promise<SummaryProductRow[]> {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
-
-    const scope = await this.operatingScopeService.getOperatingScope(
-      context.organization_id,
-    );
+    if (!context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
 
     const select = {
       id: true,
@@ -176,24 +178,7 @@ export class InventoryAnalyticsService {
       reorder_point: true,
     } as const;
 
-    if (scope === 'ORGANIZATION') {
-      const baseClient = this.prisma.withoutScope() as any;
-      const rows = await baseClient.products.findMany({
-        where: {
-          state: 'active',
-          track_inventory: true,
-          stores: { organization_id: context.organization_id },
-        },
-        select,
-      });
-      return rows as SummaryProductRow[];
-    }
-
-    if (!context.store_id) {
-      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
-    }
-
-    // STORE scope: the scoped client already restricts to the current store.
+    // The scoped client already restricts products to the current store.
     return this.prisma.products.findMany({ where: { state: 'active', track_inventory: true }, select });
   }
 
@@ -535,27 +520,38 @@ export class InventoryAnalyticsService {
     }));
   }
 
+  /**
+   * Valuation of the CURRENT STORE's inventory: only locations whose
+   * `store_id` is the request store.
+   *
+   * QUI-553: when operating_scope = ORGANIZATION this used to drop the store
+   * filter entirely, so the store panel valued every store's stock plus the
+   * org-level central warehouse (`inventory_locations.store_id = NULL`). That
+   * contradicts `enforceLocationAccess({ allowCentral: false })`, which forbids
+   * a store-scoped caller from reaching the central warehouse. The store filter
+   * now applies in every scope; consolidated valuation lives in
+   * /organization/reports/inventory/*.
+   */
   async getInventoryValuation(query: InventoryAnalyticsQueryDto) {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
-
-    const scope = await this.operatingScopeService.getOperatingScope(
-      context.organization_id,
-    );
-    const baseClient = this.prisma.withoutScope() as any;
-    const asOf = (query as any).as_of ? new Date((query as any).as_of) : null;
-    const storeFilter = scope === 'STORE' ? { store_id: context.store_id } : {};
-
-    if (scope === 'STORE' && !context.store_id) {
+    if (!context.store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // withoutScope() is needed because this reader joins through
+    // inventory_locations and inventory_cost_layers; the store isolation is
+    // reinstated explicitly by storeFilter below.
+    const baseClient = this.prisma.withoutScope() as any;
+    const asOf = (query as any).as_of ? new Date((query as any).as_of) : null;
+    const storeFilter = { store_id: context.store_id };
 
     if (asOf) {
       return this.getHistoricalInventoryValuation(baseClient, {
         organizationId: context.organization_id,
-        storeId: scope === 'STORE' ? context.store_id : null,
+        storeId: context.store_id,
         locationId: query.location_id,
         asOf,
       });

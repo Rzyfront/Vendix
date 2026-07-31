@@ -1,7 +1,7 @@
 import { InventoryAnalyticsService } from './inventory-analytics.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { VendixHttpException } from 'src/common/errors';
 
 /**
  * Mock shape for StorePrismaService. Only the delegates touched by
@@ -14,10 +14,6 @@ type MockStorePrismaService = {
   inventory_movements: { findMany: jest.Mock };
   withoutScope: jest.Mock;
 } & Partial<StorePrismaService>;
-
-type MockOperatingScopeService = {
-  getOperatingScope: jest.Mock;
-} & Partial<OperatingScopeService>;
 
 /** Builds `count` product rows for the stock-levels reader. */
 function buildProducts(count: number) {
@@ -37,7 +33,6 @@ function buildProducts(count: number) {
 describe('InventoryAnalyticsService', () => {
   let service: InventoryAnalyticsService;
   let prisma: MockStorePrismaService;
-  let operatingScope: MockOperatingScopeService;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -51,10 +46,6 @@ describe('InventoryAnalyticsService', () => {
       withoutScope: jest.fn(),
     } as MockStorePrismaService;
 
-    operatingScope = {
-      getOperatingScope: jest.fn().mockResolvedValue('STORE'),
-    };
-
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 1,
       organization_id: 1,
@@ -62,10 +53,7 @@ describe('InventoryAnalyticsService', () => {
       is_owner: false,
     } as any);
 
-    service = new InventoryAnalyticsService(
-      prisma as any,
-      operatingScope as any,
-    );
+    service = new InventoryAnalyticsService(prisma as any);
   });
 
   afterEach(() => {
@@ -204,9 +192,7 @@ describe('InventoryAnalyticsService', () => {
   // ==================== DATA-SCOPE-1 ====================
 
   describe('getInventorySummary (DATA-SCOPE-1: one scope universe)', () => {
-    it('STORE scope: counts come from the scoped store products; value AND quantity come from the valuation (same universe), never the product loop', async () => {
-      operatingScope.getOperatingScope.mockResolvedValue('STORE');
-
+    it('counts come from the scoped store products; value AND quantity come from the valuation (same universe), never the product loop', async () => {
       // Scoped product universe: 3 SKUs -> 1 out_of_stock (0), 1 low (<=5), 1 in.
       prisma.products.findMany.mockResolvedValue([
         { id: 1, stock_quantity: 0, min_stock_level: 0, reorder_point: 5 },
@@ -239,18 +225,27 @@ describe('InventoryAnalyticsService', () => {
       expect(summary.total_stock_value).toBe(5000);
       expect(summary.total_quantity_on_hand).toBe(200);
 
-      // STORE scope reads the scoped client, never the org-wide withoutScope read.
+      // The counts read the scoped client, never an org-wide withoutScope read.
       expect(prisma.products.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.withoutScope).not.toHaveBeenCalled();
       expect(valuationSpy).toHaveBeenCalledTimes(1);
     });
 
-    it('ORGANIZATION scope: product universe is org-wide via withoutScope + stores.organization_id, matching the valuation universe', async () => {
-      operatingScope.getOperatingScope.mockResolvedValue('ORGANIZATION');
+    // ==================== QUI-553 ====================
 
+    it('QUI-553: the product universe stays the STORE even for an ORGANIZATION-scope org — never withoutScope + stores.organization_id', async () => {
+      // Store products of the CURRENT store only: 2 SKUs -> 1 agotado, 1 sano.
+      prisma.products.findMany.mockResolvedValue([
+        { id: 1, stock_quantity: 0, min_stock_level: 0, reorder_point: 5 },
+        { id: 2, stock_quantity: 100, min_stock_level: 0, reorder_point: 5 },
+      ]);
+
+      // Any org-wide read would have to come through withoutScope(); if the
+      // service ever widens the universe again, this spy catches it.
       const orgProductsFindMany = jest.fn().mockResolvedValue([
         { id: 1, stock_quantity: 0, min_stock_level: 0, reorder_point: 5 },
         { id: 2, stock_quantity: 100, min_stock_level: 0, reorder_point: 5 },
+        { id: 3, stock_quantity: 0, min_stock_level: 0, reorder_point: 5 },
       ]);
       prisma.withoutScope.mockReturnValue({
         products: { findMany: orgProductsFindMany },
@@ -263,33 +258,91 @@ describe('InventoryAnalyticsService', () => {
           total_quantity: 10,
           total_value: 100,
           average_cost: 10,
-          percentage_of_total: 20,
-        },
-        {
-          location_id: 2,
-          location_name: 'B',
-          total_quantity: 20,
-          total_value: 400,
-          average_cost: 20,
-          percentage_of_total: 80,
+          percentage_of_total: 100,
         },
       ] as any);
 
       const summary = await service.getInventorySummary({} as any);
 
-      // Universe for counts is the org-wide products read, NOT the scoped client.
-      expect(prisma.products.findMany).not.toHaveBeenCalled();
-      expect(orgProductsFindMany).toHaveBeenCalledTimes(1);
-      const whereArg = orgProductsFindMany.mock.calls[0][0].where;
-      expect(whereArg.stores).toEqual({ organization_id: 1 });
+      expect(orgProductsFindMany).not.toHaveBeenCalled();
+      expect(prisma.products.findMany).toHaveBeenCalledTimes(1);
+      const whereArg = prisma.products.findMany.mock.calls[0][0].where;
+      expect(whereArg.stores).toBeUndefined();
       expect(whereArg.state).toBe('active');
       expect(whereArg.track_inventory).toBe(true);
 
-      // Consolidated value + quantity summed across the org from the valuation.
+      // Counts describe the store universe (2 SKUs), not the org one (3).
       expect(summary.total_sku_count).toBe(2);
       expect(summary.out_of_stock_count).toBe(1);
-      expect(summary.total_stock_value).toBe(500);
-      expect(summary.total_quantity_on_hand).toBe(30);
+      expect(summary.total_stock_value).toBe(100);
+      expect(summary.total_quantity_on_hand).toBe(10);
+    });
+
+    it('QUI-553: rejects with a typed store-context error when there is no store in context, instead of consolidating the organization', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        organization_id: 1,
+        store_id: undefined,
+        is_super_admin: false,
+        is_owner: false,
+      } as any);
+
+      await expect(service.getInventorySummary({} as any)).rejects.toBeInstanceOf(
+        VendixHttpException,
+      );
+      expect(prisma.products.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getInventoryValuation (QUI-553: store-only locations)', () => {
+    /** Wires withoutScope() with the two readers the valuation walks. */
+    function mockValuationClient() {
+      const stockLevelsFindMany = jest.fn().mockResolvedValue([]);
+      const costLayersFindMany = jest.fn().mockResolvedValue([]);
+      prisma.withoutScope.mockReturnValue({
+        stock_levels: { findMany: stockLevelsFindMany },
+        inventory_cost_layers: { findMany: costLayersFindMany },
+      });
+      return { stockLevelsFindMany, costLayersFindMany };
+    }
+
+    it('restricts stock_levels AND cost layers to the current store, so org-level locations (store_id NULL) are excluded', async () => {
+      const { stockLevelsFindMany, costLayersFindMany } = mockValuationClient();
+
+      await service.getInventoryValuation({} as any);
+
+      expect(stockLevelsFindMany.mock.calls[0][0].where.inventory_locations).toEqual(
+        { organization_id: 1, store_id: 1 },
+      );
+      expect(costLayersFindMany.mock.calls[0][0].where.inventory_locations).toEqual(
+        { organization_id: 1, store_id: 1 },
+      );
+    });
+
+    it('carries the store filter into the historical (as_of) snapshot read', async () => {
+      const snapshotsFindMany = jest.fn().mockResolvedValue([]);
+      prisma.withoutScope.mockReturnValue({
+        inventory_valuation_snapshots: { findMany: snapshotsFindMany },
+      });
+
+      await service.getInventoryValuation({ as_of: '2026-07-01' } as any);
+
+      expect(snapshotsFindMany.mock.calls[0][0].where.store_id).toBe(1);
+      expect(snapshotsFindMany.mock.calls[0][0].where.organization_id).toBe(1);
+    });
+
+    it('rejects with a typed store-context error when there is no store in context', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        organization_id: 1,
+        store_id: undefined,
+        is_super_admin: false,
+        is_owner: false,
+      } as any);
+      mockValuationClient();
+
+      await expect(
+        service.getInventoryValuation({} as any),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      expect(prisma.withoutScope).not.toHaveBeenCalled();
     });
   });
 });

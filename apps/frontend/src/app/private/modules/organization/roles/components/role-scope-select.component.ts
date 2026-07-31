@@ -1,9 +1,11 @@
-import { Component, computed, input, model, output } from '@angular/core';
+import { Component, computed, inject, input, model, output } from '@angular/core';
 
 import { Role } from '../interfaces/role.interface';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   ROLE_SCOPE_LABELS,
   RoleScope,
+  canAssignRoleScope,
 } from '../../../../../shared/constants/role-scope.constant';
 
 /** Orden de los grupos: primero lo que el nivel organización sí administra. */
@@ -80,6 +82,9 @@ interface RoleScopeGroup {
   ],
 })
 export class RoleScopeSelectComponent {
+  /** QUI-581 — los roles del actor deciden qué opciones son asignables. */
+  private readonly authFacade = inject(AuthFacade);
+
   readonly roles = input<Role[]>([]);
   readonly label = input<string>('');
   readonly placeholder = input<string>('Seleccionar rol...');
@@ -88,9 +93,13 @@ export class RoleScopeSelectComponent {
   /** IDs ya usados (p. ej. roles que el usuario ya tiene en ese alcance). */
   readonly excludedRoleIds = input<number[]>([]);
   /**
-   * Deshabilita los roles de sistema. El backend los rechaza con
-   * `ROLE_ASSIGN_003` para cualquier actor que no sea superadmin, así que
-   * ofrecerlos aquí sólo produce un 403 evitable.
+   * Deshabilita los roles de sistema que el backend rechaza con `ROLE_ASSIGN_003`,
+   * para no ofrecer opciones que produzcan un 403 evitable.
+   *
+   * QUI-581 — dejó de ser un booleano ciego sobre `scope === 'system'`: ahora sólo
+   * activa la consulta a la matriz de asignación. Antes deshabilitaba TODO rol de
+   * sistema, y como los diez roles canónicos se siembran con `is_system_role: true`
+   * el selector quedaba inservible.
    */
   readonly blockSystemRoles = input<boolean>(true);
 
@@ -116,7 +125,10 @@ export class RoleScopeSelectComponent {
   });
 
   isOptionDisabled(role: Role): boolean {
-    return this.blockSystemRoles() && role.scope === 'system';
+    return (
+      this.blockSystemRoles() &&
+      !canAssignRoleScope(role, 'organization', this.authFacade.userRoles())
+    );
   }
 
   optionLabel(role: Role): string {

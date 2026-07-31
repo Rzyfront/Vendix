@@ -73,7 +73,8 @@ export const ErrorCodes = {
   ROLE_ASSIGN_003: {
     code: 'ROLE_ASSIGN_003',
     httpStatus: 403,
-    devMessage: 'Only a superadmin can assign or remove system roles',
+    devMessage:
+      'System role not assignable at this level (see ASSIGNABLE_SYSTEM_ROLES)',
   },
   ROLE_ASSIGN_004: {
     code: 'ROLE_ASSIGN_004',

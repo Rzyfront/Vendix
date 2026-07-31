@@ -70,6 +70,13 @@ export interface CreateStoreUserDto {
   email: string;
   password: string;
   username?: string;
+  /**
+   * QUI-581 — Rol operativo con el que nace el usuario. Opcional: el backend
+   * (`CreateStoreUserDto.role`) ya lo aceptaba y validaba contra
+   * `ASSIGNABLE_STORE_USER_ROLES`, pero el modal nunca lo enviaba, así que todo
+   * usuario nacía `employee` y sólo podía corregirse en el modal de edición.
+   */
+  role?: string;
 }
 
 export interface UpdateStoreUserDto {

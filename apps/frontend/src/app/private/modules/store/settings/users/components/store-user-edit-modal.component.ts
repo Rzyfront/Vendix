@@ -45,6 +45,8 @@ import {
   ROLE_SCOPE_COLOR_MAP,
   ROLE_SCOPE_ICONS,
   ROLE_SCOPE_LABELS,
+  canAssignRoleScope,
+  getRoleNotAssignableReason,
 } from '../../../../../../shared/constants/role-scope.constant';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
@@ -339,8 +341,11 @@ interface RoleScopeGroup {
                                     >Asignado</app-badge
                                   >
                                 }
+                                <!-- QUI-581 — el badge marca lo que el backend
+                                     realmente rechaza para ESTE actor, no todo
+                                     rol de sistema. -->
                                 @if (
-                                  role.scope === 'system' &&
+                                  !isRoleAssignable(role) &&
                                   !isRoleInherited(role)
                                 ) {
                                   <app-badge
@@ -985,13 +990,27 @@ export class StoreUserEditModalComponent implements OnChanges {
   }
 
   /**
+   * QUI-581 — ¿el backend aceptaría asignar este rol a este usuario?
+   *
+   * Antes se bloqueaba todo `role.scope === 'system'`, y como los diez roles
+   * canónicos se siembran con `is_system_role: true`, el catálogo COMPLETO salía
+   * "No asignable" y la gestión de personal quedaba muerta. Ahora consulta la
+   * matriz de asignación, que eleva al `owner` a nivel organización — necesario
+   * porque la mayoría de los tenants son de tienda única y no tienen panel
+   * ORG_ADMIN al que salir.
+   */
+  isRoleAssignable(role: Role): boolean {
+    return canAssignRoleScope(role, 'store', this.authFacade.userRoles());
+  }
+
+  /**
    * Motivos independientes de bloqueo:
    *  - heredado de la organización (la tienda no administra esa asignación);
-   *  - rol de SISTEMA (el backend responde 403 `ROLE_ASSIGN_003`: sólo el
-   *    administrador de la plataforma los asigna).
+   *  - no asignable por este actor según la matriz (el backend responde 403
+   *    `ROLE_ASSIGN_003` / `ROLE_ASSIGN_002`).
    */
   isRoleLocked(role: Role): boolean {
-    return this.isRoleInherited(role) || role.scope === 'system';
+    return this.isRoleInherited(role) || !this.isRoleAssignable(role);
   }
 
   isRoleChecked(role: Role): boolean {
@@ -1002,10 +1021,11 @@ export class StoreUserEditModalComponent implements OnChanges {
     if (this.isRoleInherited(role)) {
       return 'Rol heredado de la organizacion: se administra desde el panel de la organizacion.';
     }
-    if (role.scope === 'system') {
-      return 'Los roles de sistema solo los asigna el administrador de la plataforma.';
-    }
-    return null;
+    return getRoleNotAssignableReason(
+      role,
+      'store',
+      this.authFacade.userRoles(),
+    );
   }
 
   roleCardClass(role: Role): string {
@@ -1036,14 +1056,14 @@ export class StoreUserEditModalComponent implements OnChanges {
    * `role_ids` describe SÓLO las asignaciones de esta tienda:
    *  - se excluyen las heredadas (el backend las conserva; mandarlas crearía una
    *    fila duplicada store-scoped para el mismo rol);
-   *  - se intersecta con el catálogo visible, que ya excluye los roles núcleo
-   *    (`owner`, `super_admin`) y de sistema no asignables — enviarlos abortaría
-   *    el guardado completo con 403.
+   *  - se intersecta con lo que la matriz de asignación permite a ESTE actor
+   *    (QUI-581) — enviar un rol que el backend rechaza aborta el guardado
+   *    completo con 403, no sólo ese rol.
    */
   private buildRoleIdsPayload(): number[] {
     const assignable = new Set(
       this.availableRoles()
-        .filter((r) => r.scope !== 'system')
+        .filter((r) => this.isRoleAssignable(r))
         .map((r) => r.id),
     );
     const inherited = this.inheritedRoleIds();
