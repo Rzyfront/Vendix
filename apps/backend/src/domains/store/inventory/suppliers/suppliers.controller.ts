@@ -30,19 +30,13 @@ export class SuppliersController {
   @Post()
   @Permissions('store:inventory:suppliers:create')
   async create(@Body() createSupplierDto: CreateInventorySupplierDto) {
-    try {
-      const result = await this.suppliersService.create(createSupplierDto);
-      return this.responseService.created(
-        result,
-        'Proveedor creado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear el proveedor',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // Sin try/catch: `responseService.error()` consumía la excepción y Nest
+    // respondía 201 con `success:false` y el statusCode real enterrado en el
+    // body, además de filtrar al cliente el texto crudo de Prisma con rutas
+    // internas del servidor. Dejando que la excepción salga del handler,
+    // `AllExceptionsFilter` emite el status correcto y un `error_code`.
+    const result = await this.suppliersService.create(createSupplierDto);
+    return this.responseService.created(result, 'Proveedor creado exitosamente');
   }
 
   @Get()

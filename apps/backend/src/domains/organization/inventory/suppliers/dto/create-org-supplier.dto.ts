@@ -9,9 +9,19 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { supplier_category_enum, supplier_state_enum } from '@prisma/client';
+
+/**
+ * Convierte `null` en `undefined` para que Prisma omita el campo y aplique el
+ * default de la columna. Ver la nota extensa en el DTO de tienda
+ * (`store/inventory/suppliers/dto/create-supplier.dto.ts`): un `null` en una
+ * columna NOT NULL hace que Prisma responda `Argument 'organizations' is
+ * missing`, sin nombrar el campo culpable.
+ */
+const nullToUndefined = () =>
+  Transform(({ value }) => (value === null ? undefined : value));
 
 /**
  * Create payload for org-level supplier writes.
@@ -93,6 +103,7 @@ export class CreateOrgSupplierDto {
     default: false,
   })
   @IsOptional()
+  @nullToUndefined()
   @IsBoolean()
   is_self_withholder?: boolean;
 
@@ -140,6 +151,7 @@ export class CreateOrgSupplierDto {
     default: 'active',
   })
   @IsOptional()
+  @nullToUndefined()
   @IsEnum([supplier_state_enum.active, supplier_state_enum.inactive])
   state?: supplier_state_enum;
 
@@ -150,6 +162,7 @@ export class CreateOrgSupplierDto {
     default: 'goods',
   })
   @IsOptional()
+  @nullToUndefined()
   @IsEnum(supplier_category_enum)
   supplier_category?: supplier_category_enum;
 
