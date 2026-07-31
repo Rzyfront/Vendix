@@ -35,7 +35,8 @@ export interface PopSupplier {
   email?: string;
   phone?: string;
   tax_id?: string;
-  is_active?: boolean;
+  /** Espejo de `supplier_state_enum`; el picker solo carga `active`. */
+  state?: 'active' | 'inactive' | 'archived';
 }
 
 export interface PopLocation {

@@ -7,7 +7,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { InventoryService } from '@/features/store/services/inventory.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateSupplierDto, UpdateSupplierDto } from '@/features/store/services/inventory.service';
-import type { Supplier } from '@/features/store/types';
+import type { Supplier, SupplierState, SupplierAssignableState } from '@/features/store/types';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { getAppType } from '@/core/store/auth.store';
 import { Icon } from '@/shared/components/icon/icon';
@@ -22,13 +22,27 @@ import { CURRENCY_OPTIONS, SUPPLIER_STATS, TAX_REGIME_OPTIONS, PERSON_TYPE_OPTIO
 import SupplierCard from '@/features/store/components/supplier-card';
 import SupplierFormModal from '@/features/store/components/supplier-form-modal';
 
-const STATE_LABELS = {
-  true: 'Activo',
-  false: 'Inactivo',
-} as const;
+/** `all` no viaja al backend; los demás valores van tal cual como `?state=`. */
+type SupplierFilter = 'all' | SupplierState;
+
+/**
+ * Traduce el `details` del 409 `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS` a razones
+ * legibles. Si el backend no envió conteos, la lista queda vacía y el diálogo
+ * cae a un mensaje genérico en lugar de mostrar "0 documentos".
+ */
+function buildOpenDocumentReasons(details: any): string[] {
+  const reasons: string[] = [];
+  const po = Number(details?.open_purchase_orders ?? 0);
+  const payables = Number(details?.unpaid_payables ?? 0);
+  const dispatches = Number(details?.open_dispatch_notes ?? 0);
+  if (po > 0) reasons.push(`${po} ${po === 1 ? 'orden de compra abierta' : 'órdenes de compra abiertas'}`);
+  if (payables > 0) reasons.push(`${payables} ${payables === 1 ? 'cuenta por pagar con saldo' : 'cuentas por pagar con saldo'}`);
+  if (dispatches > 0) reasons.push(`${dispatches} ${dispatches === 1 ? 'remisión abierta' : 'remisiones abiertas'}`);
+  return reasons;
+}
 
 const emptyForm: CreateSupplierDto & {
-  is_active?: boolean;
+  state?: SupplierAssignableState;
   tax_regime?: string;
   person_type?: string;
   is_self_withholder?: boolean;
@@ -47,7 +61,7 @@ const emptyForm: CreateSupplierDto & {
   lead_time_days: null,
   notes: '',
   address: '',
-  is_active: true,
+  state: 'active',
   tax_regime: 'COMUN',
   person_type: 'JURIDICA',
   is_self_withholder: false,
@@ -59,7 +73,7 @@ export default function SuppliersScreen() {
   const appType = getAppType();
   const isStoreScope = appType === 'STORE_ADMIN';
   const { value: search, setValue: setSearch, debouncedValue: debouncedSearch } = useDebouncedSearch('', 300);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [activeFilter, setActiveFilter] = useState<SupplierFilter>('all');
   const [showActions, setShowActions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showFilterStateList, setShowFilterStateList] = useState(false);
@@ -73,14 +87,20 @@ export default function SuppliersScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
-  const [deleteTarget, setDeleteTarget] = useState<Supplier | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<Supplier | null>(null);
+  /**
+   * Proveedor que el backend rechazó archivar por tener documentos abiertos,
+   * junto al detalle devuelto en el 409, para ofrecer inactivar en su lugar.
+   */
+  const [deactivateOffer, setDeactivateOffer] = useState<{ supplier: Supplier; reasons: string[] } | null>(null);
   const [showTaxRegimeDropdown, setShowTaxRegimeDropdown] = useState(false);
   const [showPersonTypeDropdown, setShowPersonTypeDropdown] = useState(false);
 
-  const FILTER_OPTIONS: { label: string; value: 'all' | 'active' | 'inactive' }[] = [
+  const FILTER_OPTIONS: { label: string; value: SupplierFilter }[] = [
     { label: 'Todos los estados', value: 'all' },
     { label: 'Activos', value: 'active' },
     { label: 'Inactivos', value: 'inactive' },
+    { label: 'Archivados', value: 'archived' },
   ];
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({
@@ -90,6 +110,9 @@ export default function SuppliersScreen() {
         page: pageParam,
         limit: 20,
         search: debouncedSearch || undefined,
+        // El filtro va al backend, no al cliente: los archivados quedan fuera
+        // del payload por defecto, así que no hay forma de filtrarlos aquí.
+        state: activeFilter === 'all' ? undefined : activeFilter,
       }),
     getNextPageParam,
     initialPageParam: 1,
@@ -107,18 +130,23 @@ export default function SuppliersScreen() {
   });
   const pendingPOCount = pendingOrdersResponse?.data?.length ?? 0;
 
-  const allSuppliers: Supplier[] = data?.pages.flatMap((p) => p.data) ?? [];
+  const suppliers: Supplier[] = data?.pages.flatMap((p) => p.data) ?? [];
 
-  // Filtro client-side por estado (workaround si el backend no lo soporta directamente)
-  const suppliers = activeFilter === 'all'
-    ? allSuppliers
-    : allSuppliers.filter((s) => (s.is_active ? 'active' : 'inactive') === activeFilter);
-
-  // Totales
+  /**
+   * Consulta aparte para las stats: el listado ahora filtra en el backend, así
+   * que derivar los totales de él haría que las tarjetas cambiaran al mover el
+   * filtro. Sin `state` el backend excluye archivados, que es justo lo que las
+   * tarjetas cuentan.
+   */
+  const { data: supplierTotalsResponse } = useQuery({
+    queryKey: ['suppliers-totals'],
+    queryFn: () => InventoryService.getSuppliers({ page: 1, limit: 100 }),
+  });
+  const totalsSource: Supplier[] = supplierTotalsResponse?.data ?? [];
   const totals = {
-    total: allSuppliers.length,
-    active: allSuppliers.filter((s) => !!s.is_active).length,
-    inactive: allSuppliers.filter((s) => !s.is_active).length,
+    total: totalsSource.length,
+    active: totalsSource.filter((s) => s.state === 'active').length,
+    inactive: totalsSource.filter((s) => s.state === 'inactive').length,
   };
 
   const handleEndReached = useCallback(() => {
@@ -157,12 +185,13 @@ export default function SuppliersScreen() {
     },
   });
 
-  const toggleStateMutation = useMutation({
-    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      InventoryService.updateSupplier(id, { is_active }),
+  const setStateMutation = useMutation({
+    mutationFn: ({ id, state }: { id: string; state: SupplierAssignableState }) =>
+      InventoryService.setSupplierState(id, state),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
-      toastSuccess(vars.is_active ? 'Proveedor activado' : 'Proveedor desactivado');
+      queryClient.invalidateQueries({ queryKey: ['suppliers-totals'] });
+      toastSuccess(vars.state === 'active' ? 'Proveedor activado' : 'Proveedor inactivado');
     },
     onError: (error: any) => {
       const message = error?.response?.data?.message || error?.message || 'Error al cambiar el estado';
@@ -170,16 +199,28 @@ export default function SuppliersScreen() {
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => InventoryService.deleteSupplier(id),
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => InventoryService.archiveSupplier(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+      queryClient.invalidateQueries({ queryKey: ['suppliers-totals'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      toastSuccess('Proveedor desactivado');
+      toastSuccess('Proveedor archivado');
     },
-    onError: (error: any) => {
-      const message = error?.response?.data?.message || error?.message || 'Error al eliminar el proveedor';
-      toastError(typeof message === 'string' ? message : 'Error al eliminar el proveedor');
+    onError: (error: any, id) => {
+      const body = error?.response?.data;
+      // El backend rechaza el archivado cuando el ciclo documental sigue
+      // abierto. En vez de un toast ciego, se ofrece inactivar, que es la
+      // acción que el usuario realmente puede ejecutar en ese estado.
+      if (body?.error_code === 'SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS') {
+        const supplier = suppliers.find((s) => s.id === id);
+        if (supplier) {
+          setDeactivateOffer({ supplier, reasons: buildOpenDocumentReasons(body?.details) });
+          return;
+        }
+      }
+      const message = body?.message || error?.message || 'Error al archivar el proveedor';
+      toastError(typeof message === 'string' ? message : 'Error al archivar el proveedor');
     },
   });
 
@@ -208,7 +249,9 @@ export default function SuppliersScreen() {
       lead_time_days: supplier.lead_time_days ?? null,
       notes: supplier.notes,
       address: supplier.address,
-      is_active: !!supplier.is_active,
+      // Un archivado no trae estado asignable al formulario: se conserva su
+      // condición y `handleSubmit` omite `state` para no desarchivarlo sin querer.
+      state: supplier.state === 'archived' ? undefined : supplier.state,
       tax_regime: (supplier as any).tax_regime || 'COMUN',
       person_type: (supplier as any).person_type || 'JURIDICA',
       is_self_withholder: !!(supplier as any).is_self_withholder,
@@ -243,8 +286,10 @@ export default function SuppliersScreen() {
       lead_time_days: form.lead_time_days ?? null,
       notes: form.notes?.trim() || undefined,
       address: form.address?.trim() || undefined,
-      is_active: !!form.is_active,
     };
+    // Omitido a propósito cuando el proveedor está archivado: editarle el
+    // teléfono no debe devolverlo a circulación.
+    if (form.state) dto.state = form.state;
     if (editingId) {
       updateMutation.mutate({ id: editingId, dto });
     } else {
@@ -277,15 +322,21 @@ export default function SuppliersScreen() {
   }, [screenW]);
 
   const handleDelete = useCallback((item: Supplier) => {
-    setDeleteTarget(item);
+    setArchiveTarget(item);
   }, []);
 
-  const handleConfirmDelete = useCallback(() => {
-    if (!deleteTarget) return;
-    const id = deleteTarget.id;
-    setDeleteTarget(null);
-    deleteMutation.mutate(id);
-  }, [deleteTarget, deleteMutation]);
+  const handleConfirmArchive = useCallback(() => {
+    if (!archiveTarget) return;
+    const id = archiveTarget.id;
+    setArchiveTarget(null);
+    archiveMutation.mutate(id);
+  }, [archiveTarget, archiveMutation]);
+
+  const handleConfirmDeactivate = useCallback(() => {
+    const supplier = deactivateOffer?.supplier;
+    setDeactivateOffer(null);
+    if (supplier) setStateMutation.mutate({ id: supplier.id, state: 'inactive' });
+  }, [deactivateOffer, setStateMutation]);
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
   const isFormValid = !!(form.name.trim() && form.code?.trim());
@@ -737,19 +788,29 @@ export default function SuppliersScreen() {
                 />
               </View>
 
-              {/* Proveedor activo — toggle (estilo web) */}
-              <Pressable
-                style={styles.toggleRow}
-                onPress={() => setForm({ ...form, is_active: !form.is_active })}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.toggleLabel}>Proveedor activo</Text>
-                  <Text style={styles.toggleDesc}>Desactiva para ocultar este proveedor de las listas</Text>
+              {/* Estado — toggle activo/inactivo, o aviso si está archivado */}
+              {form.state ? (
+                <Pressable
+                  style={styles.toggleRow}
+                  onPress={() => setForm({ ...form, state: form.state === 'active' ? 'inactive' : 'active' })}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.toggleLabel}>Proveedor activo</Text>
+                    <Text style={styles.toggleDesc}>Inactívalo para que siga visible pero no seleccionable</Text>
+                  </View>
+                  <View style={[styles.toggleSwitch, form.state === 'active' && styles.toggleSwitchOn]}>
+                    <View style={[styles.toggleKnob, form.state === 'active' && styles.toggleKnobOn]} />
+                  </View>
+                </Pressable>
+              ) : (
+                <View style={styles.archivedNotice}>
+                  <Icon name="archive" size={16} color={colorScales.gray[500]} />
+                  <Text style={styles.archivedNoticeText}>
+                    Proveedor archivado: puedes corregir sus datos y consultar su historial con el
+                    filtro "Archivados", pero seguirá fuera de listados y selectores.
+                  </Text>
                 </View>
-                <View style={[styles.toggleSwitch, form.is_active && styles.toggleSwitchOn]}>
-                  <View style={[styles.toggleKnob, form.is_active && styles.toggleKnobOn]} />
-                </View>
-              </Pressable>
+              )}
             </ScrollView>
 
             <View style={styles.createFooter}>
@@ -773,21 +834,41 @@ export default function SuppliersScreen() {
         </View>
       </Modal>
 
-      {/* Confirm dialog de eliminación */}
+      {/* Confirm dialog de archivado (lo que la UI llama "Eliminar") */}
       <ConfirmDialog
-        visible={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={handleConfirmDelete}
+        visible={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={handleConfirmArchive}
         title="Eliminar proveedor"
         message={
-          deleteTarget
-            ? `¿Estás seguro de eliminar a "${deleteTarget.name}"? Esta acción no se puede deshacer.`
+          archiveTarget
+            ? `¿Eliminar "${archiveTarget.name}"? Dejará de aparecer en listados y selectores, pero su historial de compras, facturas y pagos se conserva y podrás consultarlo con el filtro "Archivados".`
             : ''
         }
         confirmLabel="Eliminar"
         cancelLabel="Cancelar"
         destructive
-        loading={deleteMutation.isPending}
+        loading={archiveMutation.isPending}
+      />
+
+      {/* Alternativa cuando el proveedor tiene documentos abiertos */}
+      <ConfirmDialog
+        visible={!!deactivateOffer}
+        onClose={() => setDeactivateOffer(null)}
+        onConfirm={handleConfirmDeactivate}
+        title="No se puede eliminar"
+        message={
+          deactivateOffer
+            ? `"${deactivateOffer.supplier.name}" tiene ${
+                deactivateOffer.reasons.length > 0
+                  ? deactivateOffer.reasons.join(', ')
+                  : 'documentos abiertos'
+              }. Puedes inactivarlo: seguirá visible en el listado pero no se podrá seleccionar en nuevas operaciones.`
+            : ''
+        }
+        confirmLabel="Inactivar"
+        cancelLabel="Cancelar"
+        loading={setStateMutation.isPending}
       />
     </View>
   );
@@ -905,6 +986,17 @@ const styles = StyleSheet.create({
   toggleSwitchOn: { backgroundColor: colors.primary },
   toggleKnob: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.background, ...shadows.sm, alignItems: 'center', justifyContent: 'center' },
   toggleKnobOn: { transform: [{ translateX: 18 }] },
+  archivedNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+    padding: spacing[3],
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[100],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  archivedNoticeText: { flex: 1, fontSize: 12, lineHeight: 17, color: colorScales.gray[600] },
 
   /* Filter popup (estilo web) */
   filterPopup: {

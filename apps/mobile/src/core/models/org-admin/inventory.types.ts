@@ -53,6 +53,12 @@ export interface InventoryMovement {
   created_by?: string;
 }
 
+/**
+ * Espejo de `supplier_state_enum` en Prisma. `archived` es lo que produce
+ * "Eliminar": la fila persiste, pero sale de listados y selectores.
+ */
+export type InventorySupplierState = 'active' | 'inactive' | 'archived';
+
 export interface InventorySupplier {
   id: string;
   name: string;
@@ -64,7 +70,7 @@ export interface InventorySupplier {
   city?: string;
   contact_name?: string;
   notes?: string;
-  is_active: boolean;
+  state: InventorySupplierState;
   organization_id: string;
   created_at: ISODateString;
   updated_at: ISODateString;

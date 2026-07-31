@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
 import { colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-import type { Supplier } from '@/features/store/types';
+import type { Supplier, SupplierState } from '@/features/store/types';
+import { SUPPLIER_STATE_LABELS } from '@/features/store/types';
 
 interface SupplierCardProps {
   item: Supplier;
@@ -11,13 +12,25 @@ interface SupplierCardProps {
 }
 
 /**
+ * Paleta del badge por estado. Ámbar para `inactive` porque es un estado
+ * reversible que el usuario debe notar; gris para `archived`, que es terminal
+ * y no compite por atención.
+ */
+const STATE_BADGE: Record<SupplierState, { bg: string; fg: string }> = {
+  active: { bg: colorScales.green[50], fg: colorScales.green[700] },
+  inactive: { bg: colorScales.amber[50], fg: colorScales.amber[700] },
+  archived: { bg: colorScales.gray[100], fg: colorScales.gray[500] },
+};
+
+/**
  * SupplierCard — card individual de la lista de Proveedores.
  * Misma estructura visual que la web:
  *  - Fila 1: Ícono + (nombre + contacto + email/código) + badge estado
- *  - Fila 2 (footer): TELÉFONO + 2 botones (editar azul, eliminar rojo)
+ *  - Fila 2 (footer): TELÉFONO + botón editar; eliminar solo si no está archivado
  */
 export default function SupplierCard({ item, onPress, onDelete }: SupplierCardProps) {
-  const isActive = !!item.is_active;
+  const isArchived = item.state === 'archived';
+  const badge = STATE_BADGE[item.state] ?? STATE_BADGE.inactive;
 
   return (
     <View style={styles.supplierCard}>
@@ -45,9 +58,9 @@ export default function SupplierCard({ item, onPress, onDelete }: SupplierCardPr
           </View>
         </View>
 
-        <View style={[styles.cardStatusBadge, { backgroundColor: isActive ? colorScales.green[50] : colorScales.gray[100] }]}>
-          <Text style={[styles.cardStatusBadgeText, { color: isActive ? colorScales.green[700] : colorScales.gray[500] }]}>
-            {isActive ? 'Activo' : 'Inactivo'}
+        <View style={[styles.cardStatusBadge, { backgroundColor: badge.bg }]}>
+          <Text style={[styles.cardStatusBadgeText, { color: badge.fg }]}>
+            {SUPPLIER_STATE_LABELS[item.state] ?? item.state}
           </Text>
         </View>
       </View>
@@ -64,9 +77,12 @@ export default function SupplierCard({ item, onPress, onDelete }: SupplierCardPr
           <Pressable onPress={onPress} hitSlop={6} style={styles.cardActionEdit}>
             <Icon name="edit" size={16} color={colorScales.blue[600]} />
           </Pressable>
-          <Pressable onPress={() => onDelete(item)} hitSlop={6} style={styles.cardActionDelete}>
-            <Icon name="trash-2" size={16} color={colorScales.red[600]} />
-          </Pressable>
+          {/* Un proveedor archivado ya salió de circulación: no hay nada que eliminar. */}
+          {!isArchived && (
+            <Pressable onPress={() => onDelete(item)} hitSlop={6} style={styles.cardActionDelete}>
+              <Icon name="trash-2" size={16} color={colorScales.red[600]} />
+            </Pressable>
+          )}
         </View>
       </View>
     </View>

@@ -20,6 +20,7 @@ import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors } from '@/shared/theme';
 import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
 import { DASHBOARD_STATS } from '@/features/store/constants/inventory-labels';
+import { SUPPLIER_STATE_LABELS } from '@/features/store/types';
 
 interface QuickAction {
   title: string;
@@ -191,8 +192,8 @@ export default function InventoryScreen() {
                       </Text>
                       <View style={styles.colStatus}>
                         <Badge
-                          label={s.is_active ? 'Activo' : 'Inactivo'}
-                          variant={s.is_active ? 'success' : 'default'}
+                          label={SUPPLIER_STATE_LABELS[s.state] ?? s.state}
+                          variant={s.state === 'active' ? 'success' : 'default'}
                           size="sm"
                         />
                       </View>
