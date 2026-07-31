@@ -45,6 +45,13 @@ export interface Promotion {
   promotion_products?: PromotionProduct[];
   promotion_categories?: PromotionCategory[];
   promotion_quantity_tiers?: PromotionQuantityTier[];
+  /**
+   * Phase 2d: cómo se cuentan las unidades para `quantity_tiered`.
+   *  - 'cart_total' (default): suma SKUs distintos de la promo.
+   *  - 'per_product': exige N unidades del mismo product_id.
+   * Backend default = 'cart_total' si no se envía.
+   */
+  quantity_grouping?: 'cart_total' | 'per_product';
   _count?: { order_promotions: number };
 }
 
