@@ -1,7 +1,8 @@
-import {Component, inject, input, output, signal, computed, effect, DestroyRef} from '@angular/core';
+import {Component, inject, input, output, signal, computed, effect, viewChild, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
+import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { FileUploadDropzoneComponent } from '../../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
@@ -39,6 +40,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     ButtonComponent,
     FileUploadDropzoneComponent,
     IconComponent,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -158,6 +160,21 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                 Los campos del formulario se pre-rellenaron. Revisalos y ajusta antes de guardar.
               </p>
             </div>
+
+            <!--
+              Verificación obligatoria. Vive DENTRO de este @if a propósito: si
+              no hubo escaneo, no hay datos de IA que verificar y un pago manual
+              no debe quedar bloqueado por una casilla que no aplica.
+            -->
+            <div class="mt-3">
+              <app-ai-review-ack
+                #ackBlock
+                [(acknowledged)]="aiAck"
+                variant="compact"
+                entityLabel="datos del comprobante"
+                [disabled]="saving()"
+              ></app-ai-review-ack>
+            </div>
           }
         </div>
       </div>
@@ -228,6 +245,15 @@ export class PoPaymentModalComponent {
   readonly paymentRegistered = output<void>();
 
   readonly saving = signal(false);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. Solo aplica
+   * cuando hubo un escaneo exitoso (`scanConfidence() !== null`): un pago
+   * cargado a mano no debe quedar bloqueado por una casilla sobre datos de IA
+   * que nunca se generaron.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   readonly isScanning = signal(false);
   readonly scanConfidence = signal<number | null>(null);
   /** Archivo pendiente de subir (con o sin OCR exitoso). */
@@ -261,6 +287,7 @@ export class PoPaymentModalComponent {
     this.paymentMethod = 'bank_transfer';
     this.reference = '';
     this.notes = '';
+    this.aiAck.set(false);
   }
 
   onModalClose(value: boolean): void {
@@ -317,6 +344,9 @@ export class PoPaymentModalComponent {
     this.scannedFile.set(null);
     this.scanConfidence.set(null);
     this.isScanning.set(false);
+    // Sin esto, un segundo escaneo mostraría el bloque con el check ya marcado
+    // y el guard quedaría anulado para los datos nuevos.
+    this.aiAck.set(false);
   }
 
   private applyScanResult(r: PaymentScanResult): void {
@@ -339,10 +369,19 @@ export class PoPaymentModalComponent {
   // ── Submit ────────────────────────────────────────────────────
 
   submit(): void {
+    // Guard de reentrada: un doble clic no debe registrar dos pagos.
+    if (this.saving()) return;
     if (!this.isValid()) return;
 
     const id = this.orderId();
     if (!id) return;
+
+    // Solo exigimos la verificación si la IA precargó campos. El botón sigue
+    // habilitado: el clic lleva a la casilla y la resalta en vez de no hacer nada.
+    if (this.scanConfidence() !== null && !this.aiAck()) {
+      this.ackBlock()?.requestAttention();
+      return;
+    }
 
     this.saving.set(true);
 

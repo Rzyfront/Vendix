@@ -86,6 +86,24 @@ export class DispatchNoteWizardService {
   readonly selectedOrder = signal<Order | null>(null);
   readonly customer = signal<WizardCustomer | null>(null);
   readonly items = signal<WizardItem[]>([]);
+
+  // ── Verificación humana de los ítems precargados por IA (paso 2) ──────────
+  // El bloque de verificación vive en el item-picker-step, pero el botón
+  // "Siguiente" vive en el componente wizard. El estado va acá porque es el
+  // único punto que ambos comparten.
+
+  /** True cuando el escaneo de recibo con IA precargó ítems. */
+  readonly aiPrefilled = signal(false);
+
+  /** Verificación humana de esos ítems. */
+  readonly aiAck = signal(false);
+
+  /**
+   * Contador que el paso observa para resaltar su bloque de verificación.
+   * Es un contador y no un booleano a propósito: cada pulsación de "Siguiente"
+   * debe volver a resaltar, y un booleano ya en `true` no emitiría cambio.
+   */
+  readonly aiAckAttention = signal(0);
   readonly details = signal<WizardDetails>({ currency: 'COP' });
 
   readonly routeMode = signal<WizardRouteMode>('none');
@@ -505,8 +523,25 @@ export class DispatchNoteWizardService {
     return this.routeMode() !== 'none' ? 'confirmed' : 'draft';
   }
 
+  /**
+   * True si el paso actual muestra datos precargados por IA que el usuario
+   * todavía no verificó. Deliberadamente NO forma parte de `canProceed()`: el
+   * botón debe seguir habilitado para que el clic pueda llevar al usuario a la
+   * casilla en vez de quedar inerte.
+   */
+  readonly needsAiAck = computed<boolean>(
+    () => this.currentStep() === 2 && this.aiPrefilled() && !this.aiAck(),
+  );
+
+  /** Pide al paso que resalte y enfoque su bloque de verificación. */
+  requestAiAckAttention(): void {
+    this.aiAckAttention.update((n) => n + 1);
+  }
+
   reset(): void {
     this.currentStep.set(0);
+    this.aiPrefilled.set(false);
+    this.aiAck.set(false);
     this.direction.set('outbound');
     this.subtype.set('customer_delivery');
     this.reason.set(null);

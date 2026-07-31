@@ -13,6 +13,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { of, switchMap, catchError } from 'rxjs';
 
+import { AiReviewAckComponent } from '../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
@@ -90,6 +91,7 @@ interface EditableStopDecision {
     InputComponent,
     StepsLineComponent,
     CurrencyPipe,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -449,6 +451,15 @@ interface EditableStopDecision {
               </span>
             </div>
           </div>
+
+          <!-- Verificación obligatoria de los datos precargados por la IA -->
+          <app-ai-review-ack
+            #ackBlock
+            [(acknowledged)]="aiAck"
+            [itemCount]="editableStops().length"
+            entityLabel="paradas"
+            [disabled]="isConfirming()"
+          ></app-ai-review-ack>
         </div>
       }
 
@@ -517,6 +528,14 @@ export class RouteSheetScannerModalComponent {
 
   // Wizard state
   readonly currentStep = signal<1 | 2 | 3>(1);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. El botón de
+   * confirmar sigue habilitado: si esto es false, `onConfirm` desvía el clic a
+   * `requestAttention()` en vez de liquidar la ruta.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   readonly selectedFile = signal<File | null>(null);
   readonly filePreviewUrl = signal<string | null>(null);
   readonly fileError = signal<string | null>(null);
@@ -846,9 +865,19 @@ export class RouteSheetScannerModalComponent {
   // ============================================================
 
   onConfirm(): void {
+    // Guard de reentrada: un doble clic no debe liquidar la ruta dos veces.
+    if (this.isConfirming()) return;
+
     const file = this.selectedFile();
     const scan = this.scanResult();
     if (!file) return;
+
+    // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
+    // lleva al usuario a la casilla de verificación y la resalta.
+    if (!this.aiAck()) {
+      this.ackBlock()?.requestAttention();
+      return;
+    }
 
     // Guard: never submit an under-collected delivery (no partial payments).
     if (this.hasUndercollectedDelivery()) {
@@ -1015,6 +1044,10 @@ export class RouteSheetScannerModalComponent {
     this.scanResult.set(null);
     this.matchResult.set(null);
     this.editableStops.set([]);
+    // Obligatorio: el contenido proyectado en app-modal no se destruye al
+    // cerrar, así que sin este reset la segunda apertura traería el check ya
+    // marcado y el guard quedaría anulado.
+    this.aiAck.set(false);
   }
 
   private closeAndReset(): void {

@@ -174,7 +174,7 @@ import {
           @if (wizardService.currentStep() < wizardService.lastStepIndex() && !isCreated()) {
             <app-button
               variant="primary"
-              (clicked)="wizardService.nextStep()"
+              (clicked)="onNext()"
               [disabled]="!wizardService.canProceed()"
             >
               Siguiente
@@ -255,7 +255,23 @@ export class DispatchNoteWizardComponent {
     }
   }
 
+  /**
+   * "Siguiente" con guard de verificación humana. El botón queda habilitado a
+   * propósito: si los ítems vienen precargados por IA y no están verificados,
+   * el clic resalta y enfoca la casilla del paso en vez de no hacer nada.
+   */
+  onNext(): void {
+    if (this.wizardService.needsAiAck()) {
+      this.wizardService.requestAiAckAttention();
+      return;
+    }
+    this.wizardService.nextStep();
+  }
+
   onCreate(): void {
+    // Guard de reentrada: un doble clic no debe crear dos remisiones.
+    if (this.isSubmitting()) return;
+
     this.isSubmitting.set(true);
 
     const sub = this.wizardService.subtype();
