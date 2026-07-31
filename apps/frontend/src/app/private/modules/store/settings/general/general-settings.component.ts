@@ -421,6 +421,17 @@ export class GeneralSettingsComponent implements OnInit {
             this.pendingAppLogo.set(null);
           }),
         );
+      } else if (this.settings().app?.logo_url == null) {
+        // QUI-289 — el logo de la app y el de la tienda son el mismo dato en dos
+        // lugares: `settings.branding.logo_url` y `stores.logo_url`. Al subir se
+        // espejan ambos (ver arriba), así que al borrar hay que espejar el null
+        // también. Si `general` conservara la URL firmada anterior, el bloque
+        // `general` del backend reescribiría `stores.logo_url` con la clave
+        // vieja y desharía el borrado dentro de la misma petición.
+        this.settings.update((s) => ({
+          ...s,
+          general: { ...s.general, logo_url: null },
+        }));
       }
 
       const pendingFavicon = this.pendingAppFavicon();

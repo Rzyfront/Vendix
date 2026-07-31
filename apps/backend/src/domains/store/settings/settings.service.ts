@@ -393,6 +393,20 @@ export class SettingsService {
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
 
+    /**
+     * Logo que trajo la sección `app`, ya normalizado. `undefined` = `app` no lo
+     * mandó.
+     *
+     * QUI-289 — `app` es la sección autoritativa del branding (por eso más abajo
+     * se borra de los settings persistidos: se reconstruye desde `branding`). El
+     * panel manda `app` y `general` juntas, y al borrar el logo sólo anulaba
+     * `app`: el bloque de `general`, que corre después, reescribía
+     * `stores.logo_url` con la URL firmada anterior y revivía el logo recién
+     * borrado en la MISMA petición. Con esto, un `logo_url` explícito en `app`
+     * gana sobre lo que venga en `general`.
+     */
+    let appLogoUrl: string | null | undefined;
+
     // Handle app section - update branding in store_settings.settings.branding
     if (dto.app) {
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
@@ -400,6 +414,7 @@ export class SettingsService {
       // `normalizeImageKey` conserva el `null` de un borrado explícito.
       if (dto.app.logo_url !== undefined) {
         dto.app.logo_url = this.normalizeImageKey(dto.app.logo_url);
+        appLogoUrl = dto.app.logo_url;
       }
       if (dto.app.favicon_url !== undefined) {
         dto.app.favicon_url = this.normalizeImageKey(dto.app.favicon_url);
@@ -490,7 +505,11 @@ export class SettingsService {
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
       // This prevents storing signed URLs that expire after 24 hours.
       // Un `null` explícito sobrevive para que el borrado llegue a la tabla.
-      if (logo_url !== undefined) {
+      if (appLogoUrl !== undefined) {
+        // `app` ya decidió el logo en esta misma petición: no lo contradigas.
+        logo_url = appLogoUrl;
+        dto.general.logo_url = logo_url;
+      } else if (logo_url !== undefined) {
         logo_url = this.normalizeImageKey(logo_url);
         dto.general.logo_url = logo_url; // Update DTO for consistency
       }

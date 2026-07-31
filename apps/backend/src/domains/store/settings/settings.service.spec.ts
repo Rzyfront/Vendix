@@ -259,5 +259,21 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
         data: { logo_url: null },
       });
     });
+
+    it('el null de app gana sobre la URL vieja que traiga general', async () => {
+      // El panel manda ambas secciones: al borrar sólo anula `app`, mientras
+      // `general` conserva la URL firmada anterior. El bloque de `general` corre
+      // después y revivía el logo dentro de la misma peticion.
+      await service.updateSettings({
+        app: { logo_url: null },
+        general: { logo_url: `https://s3.amazonaws.com/${EXISTING_LOGO}?X-Amz-Signature=abc` },
+      });
+
+      const updates = (prisma.stores.update as jest.Mock).mock.calls.map(
+        (c) => c[0].data.logo_url,
+      );
+      expect(updates.every((v) => v === null)).toBe(true);
+      expect(persisted().branding.logo_url).toBeNull();
+    });
   });
 });
