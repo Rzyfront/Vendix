@@ -28,7 +28,6 @@ export interface StoreDetail extends StoreListItem {
   email?: string;
   phone?: string;
   logo_url?: string;
-  description?: string;
   tax_id?: string;
   settings?: Record<string, unknown>;
   /** Incluido en detalles por el backend (`organizations?: { name?: string }`). */
@@ -41,9 +40,6 @@ export interface CreateStoreInput {
   store_code: string;
   store_type: StoreType;
   timezone?: string;
-  email?: string;
-  phone?: string;
-  description?: string;
   address?: Address;
   manager_user_id?: string;
 }
@@ -52,9 +48,6 @@ export interface UpdateStoreInput {
   name?: string;
   store_type?: StoreType;
   timezone?: string;
-  email?: string;
-  phone?: string;
-  description?: string;
   address?: Address;
   is_active?: boolean;
   manager_user_id?: string | null;

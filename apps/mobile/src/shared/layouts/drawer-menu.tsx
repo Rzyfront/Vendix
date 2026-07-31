@@ -241,7 +241,7 @@ const moduleKeyMap: Record<string, string | string[]> = {
   Productos: 'products',
   'Tienda en línea': 'ecommerce',
   Órdenes: 'orders',
-  Marketing: 'marketing',
+  Marketing: ['marketing', 'marketing_promotions', 'marketing_coupons', 'marketing_social_sales', 'marketing_anuncios'],
   Analíticas: 'analytics',
   Gastos: 'expenses',
   Reportes: 'reports',

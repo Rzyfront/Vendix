@@ -120,9 +120,6 @@ function StoreEditModal({
   onClose: () => void;
   onSubmit: (data: {
     name: string;
-    email: string;
-    phone?: string;
-    description?: string;
     is_active: boolean;
     store_type: StoreType;
   }) => void;
@@ -146,9 +143,6 @@ function StoreEditModal({
     STORE_TYPE_TO_DTO[ui] ?? 'PHYSICAL';
   const isCreate = mode === 'create';
   const [name, setName] = useState(store?.name || '');
-  const [email, setEmail] = useState(store?.email || '');
-  const [phone, setPhone] = useState(store?.phone || '');
-  const [description, setDescription] = useState(store?.description || '');
   // UI usa lowercase; el DTO espera uppercase. La conversión se hace en el
   // submit vía `toStoreType()`.
   const [storeType, setStoreType] = useState<string>(
@@ -162,31 +156,22 @@ function StoreEditModal({
     if (isCreate) {
       // Reset a vacío cada vez que se abre el modal de creación
       setName('');
-      setEmail('');
-      setPhone('');
-      setDescription('');
       setStoreType('physical');
       setIsActive(true);
     } else if (store) {
       setName(store.name || '');
-      setEmail(store.email || '');
-      setPhone(store.phone || '');
-      setDescription(store.description || '');
       setStoreType(store.store_type ? store.store_type.toLowerCase() : 'physical');
       setIsActive(store.is_active ?? true);
     }
   }, [store, isCreate, visible]);
 
   const handleSave = () => {
-    if (!name.trim() || !email.trim()) {
-      toastError('Por favor completa los campos obligatorios (*).');
+    if (!name.trim()) {
+      toastError('El nombre de la tienda es obligatorio.');
       return;
     }
     onSubmit({
       name: name.trim(),
-      email: email.trim(),
-      phone: phone.trim() || undefined,
-      description: description.trim() || undefined,
       is_active: isActive,
       store_type: toStoreType(storeType),
     });
@@ -215,11 +200,11 @@ function StoreEditModal({
           <Pressable
             style={({ pressed }) => [
               editStyles.submitBtn,
-              (loading || !name.trim() || !email.trim()) && editStyles.submitBtnDisabled,
+              (loading || !name.trim()) && editStyles.submitBtnDisabled,
               pressed && { opacity: 0.85 },
             ]}
             onPress={handleSave}
-            disabled={loading || !name.trim() || !email.trim()}
+            disabled={loading || !name.trim()}
           >
             {loading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
@@ -266,33 +251,6 @@ function StoreEditModal({
               </View>
 
               <View style={editStyles.gridItem}>
-                <Text style={editStyles.fieldLabel}>Email *</Text>
-                <TextInput
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="contacto@tienda.com"
-                  placeholderTextColor={colorScales.gray[400]}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  editable={!loading}
-                  style={editStyles.input}
-                />
-              </View>
-
-              <View style={editStyles.gridItem}>
-                <Text style={editStyles.fieldLabel}>Teléfono</Text>
-                <TextInput
-                  value={phone}
-                  onChangeText={setPhone}
-                  placeholder="+57 (1) 000-0000"
-                  placeholderTextColor={colorScales.gray[400]}
-                  keyboardType="phone-pad"
-                  editable={!loading}
-                  style={editStyles.input}
-                />
-              </View>
-
-              <View style={editStyles.gridItem}>
                 <Text style={editStyles.fieldLabel}>Estado</Text>
                 <Pressable
                   style={({ pressed }) => [editStyles.selectTrigger, pressed && { opacity: 0.85 }]}
@@ -320,21 +278,6 @@ function StoreEditModal({
                     ? 'Se genera automáticamente desde el nombre.'
                     : 'El slug no es editable (identificador interno).'}
                 </Text>
-              </View>
-
-              {/* Descripción full-width (espejo del `md:col-span-2` web) */}
-              <View style={[editStyles.gridItem, editStyles.gridItemFull]}>
-                <Text style={editStyles.fieldLabel}>Descripción</Text>
-                <TextInput
-                  value={description}
-                  onChangeText={setDescription}
-                  placeholder="Breve descripción de tu tienda"
-                  placeholderTextColor={colorScales.gray[400]}
-                  multiline
-                  numberOfLines={3}
-                  editable={!loading}
-                  style={[editStyles.input, editStyles.textarea]}
-                />
               </View>
             </View>
           </View>
@@ -1146,14 +1089,12 @@ export default function StoresList() {
   });
 
   // ── Edit store modal (espejo web `app-store-edit-modal`) ─────────────
-  // Usamos `StoreDetail` (no `StoreListItem`) porque el modal muestra
-  // email/phone/description que sólo viven en `StoreDetail`. Al abrir
-  // el modal hacemos un fetch del detalle para poblar esos campos.
+  // Usamos `StoreDetail` (no `StoreListItem`) para mantener el shape de
+  // `addresses`/`tax_id`/`settings` que devuelve el endpoint de detalle.
   const [editingStore, setEditingStore] = useState<StoreDetail | null>(null);
   const [creatingStore, setCreatingStore] = useState(false);
 
-  // Fetch del detalle antes de abrir el modal de edición. Sin este paso
-  // los campos email/phone/description arrancarían vacíos.
+  // Fetch del detalle antes de abrir el modal de edición.
   const handleEditStore = async (s: StoreListItem) => {
     try {
       const detail = await OrgStoreService.get(s.id);
@@ -1165,11 +1106,11 @@ export default function StoresList() {
 
   // Tipo intermedio que el formulario entrega al mutation. Mapea directo
   // a `UpdateStoreInput` y `CreateStoreInput` del backend.
+  // Email/phone/description se eliminaron: no están whitelisted en el DTO
+  // (`stores` no tiene columna description; email/phone viven en
+  // addresses/store_settings, no en stores).
   type StoreFormPayload = {
     name: string;
-    email: string;
-    phone?: string;
-    description?: string;
     is_active: boolean;
     store_type: StoreType;
   };
@@ -1194,8 +1135,6 @@ export default function StoresList() {
       slug: generateSlug(data.name),
       store_code: generateSlug(data.name).toUpperCase().replace(/-/g, '_'),
       store_type: data.store_type,
-      email: data.email,
-      phone: data.phone,
     } satisfies CreateStoreInput),
     onSuccess: () => {
       toastSuccess('Tienda creada exitosamente.');

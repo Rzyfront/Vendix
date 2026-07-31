@@ -541,11 +541,108 @@ const STORE_ADMIN_MODULES: AppModule[] = [
       ],
     },
 
+    // Facturaci\u00f3n (padre con hijos)
+    {
+      key: 'invoicing',
+      label: 'Facturaci\u00f3n',
+      description: 'Emisi\u00f3n y gesti\u00f3n de facturas electr\u00f3nicas',
+      isParent: true,
+      children: [
+        {
+          key: 'invoicing_invoices',
+          label: 'Facturas',
+          description: 'Listado y gesti\u00f3n de facturas electr\u00f3nicas',
+        },
+        {
+          key: 'invoicing_resolutions',
+          label: 'Resoluciones',
+          description: 'Resoluciones de facturaci\u00f3n DIAN',
+        },
+        {
+          key: 'invoicing_dian_config',
+          label: 'Configuraci\u00f3n DIAN',
+          description:
+            'Par\u00e1metros y credenciales para facturaci\u00f3n electr\u00f3nica DIAN',
+        },
+      ],
+    },
+
     // Reportes
     {
       key: 'reports',
       label: 'Reportes',
       description: 'Reportes y an\u00e1lisis de datos del negocio',
+    },
+
+    // Contabilidad (padre con hijos)
+    {
+      key: 'accounting',
+      label: 'Contabilidad',
+      description: 'Plan de cuentas y asientos contables',
+      isParent: true,
+      children: [
+        {
+          key: 'accounting_journal_entries',
+          label: 'Asientos Contables',
+          description: 'Registro de asientos contables',
+        },
+        {
+          key: 'accounting_chart_of_accounts',
+          label: 'Plan de Cuentas',
+          description: 'Estructura de cuentas contables',
+        },
+        {
+          key: 'accounting_fiscal_periods',
+          label: 'Periodos Fiscales',
+          description: 'Gesti\u00f3n de periodos fiscales',
+        },
+        {
+          key: 'accounting_account_mappings',
+          label: 'Mapeo de Cuentas',
+          description: 'Configuraci\u00f3n de cuentas contables por flujo',
+        },
+        {
+          key: 'accounting_flows_dashboard',
+          label: 'Flujos Contables',
+          description: 'Dashboard de flujos contables autom\u00e1ticos',
+        },
+        {
+          key: 'cartera_dashboard',
+          label: 'Cartera',
+          description: 'Dashboard de cartera con CxC y CxP',
+        },
+        {
+          key: 'cartera_receivables',
+          label: 'Cuentas por Cobrar',
+          description: 'Gesti\u00f3n de cuentas por cobrar',
+        },
+        {
+          key: 'cartera_payables',
+          label: 'Cuentas por Pagar',
+          description: 'Gesti\u00f3n de cuentas por pagar',
+        },
+        {
+          key: 'cartera_aging',
+          label: 'Cartera por Vencimiento',
+          description: 'Reporte de antig\u00fcedad de cartera',
+        },
+        {
+          key: 'accounting_withholding_tax',
+          label: 'Retenciones',
+          description:
+            'Gesti\u00f3n de retenciones en la fuente y autoretenciones',
+        },
+        {
+          key: 'accounting_exogenous',
+          label: 'Info Ex\u00f3gena',
+          description: 'Reportes de informaci\u00f3n ex\u00f3gena DIAN',
+        },
+        {
+          key: 'taxes_ica',
+          label: 'ICA Municipal',
+          description: 'Impuesto de industria y comercio municipal',
+        },
+      ],
     },
 
     // N\u00f3mina (padre con hijos)

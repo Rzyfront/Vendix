@@ -1,11 +1,15 @@
+import { useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, type Href } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
+import { useAuthStore } from '@/core/store/auth.store';
 
 interface MarketingTile {
   key: string;
+  /** Key en `panel_ui.STORE_ADMIN` que controla la visibilidad del tile. */
+  panelKey: string;
   title: string;
   description: string;
   icon: string;
@@ -17,6 +21,7 @@ interface MarketingTile {
 const MARKETING_TILES: MarketingTile[] = [
   {
     key: 'promotions',
+    panelKey: 'marketing_promotions',
     title: 'Promociones',
     description: 'Crea y administra descuentos por producto, categoría o tienda.',
     icon: 'tag',
@@ -26,6 +31,7 @@ const MARKETING_TILES: MarketingTile[] = [
   },
   {
     key: 'coupons',
+    panelKey: 'marketing_coupons',
     title: 'Cupones',
     description: 'Códigos de descuento y campañas de cupones para clientes.',
     icon: 'tag',
@@ -35,6 +41,7 @@ const MARKETING_TILES: MarketingTile[] = [
   },
   {
     key: 'social-sales',
+    panelKey: 'marketing_social_sales',
     title: 'Social Sales',
     description: 'Venta por redes sociales y enlaces compartibles.',
     icon: 'share-2',
@@ -44,6 +51,7 @@ const MARKETING_TILES: MarketingTile[] = [
   },
   {
     key: 'anuncios',
+    panelKey: 'marketing_anuncios',
     title: 'Anuncios',
     description: 'Anuncios clasificados y vitrina pública de la tienda.',
     icon: 'megaphone',
@@ -59,9 +67,23 @@ const MARKETING_TILES: MarketingTile[] = [
  * Lista las sub-secciones operativas disponibles a nivel de tienda:
  * promociones, cupones, social-sales y anuncios.
  * Las pantallas internas viven bajo app/(store-admin)/marketing/<sección>/.
+ *
+ * Filtra los tiles consultando `panel_ui.STORE_ADMIN[panelKey]` (mismo
+ * gating que `MenuFilterService` web). Si el panel_ui no está cargado,
+ * mostramos todos los tiles — el submenú quedó compactado en este hub
+ * así que el gating debe aplicarse aquí, no antes.
  */
 export default function MarketingHubScreen() {
   const router = useRouter();
+  const defaultPanelUi = useAuthStore((s) => s.default_panel_ui);
+
+  const visibleTiles = useMemo(() => {
+    const storeAdminPanelUi =
+      (defaultPanelUi?.STORE_ADMIN as Record<string, boolean> | undefined) ?? {};
+    // Si no hay panel_ui cargado, mostrar todos (defensa en profundidad).
+    if (!defaultPanelUi) return MARKETING_TILES;
+    return MARKETING_TILES.filter((tile) => storeAdminPanelUi[tile.panelKey] !== false);
+  }, [defaultPanelUi]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -73,7 +95,7 @@ export default function MarketingHubScreen() {
           </Text>
         </View>
 
-        {MARKETING_TILES.map((tile) => (
+        {visibleTiles.map((tile) => (
           <Pressable
             key={tile.key}
             style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
@@ -91,6 +113,14 @@ export default function MarketingHubScreen() {
             <Icon name="chevron-right" size={20} color={colorScales.gray[400]} />
           </Pressable>
         ))}
+
+        {visibleTiles.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>
+              No hay módulos de marketing habilitados para tu tienda.
+            </Text>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -139,5 +169,14 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[500],
     marginTop: 2,
+  },
+  emptyState: {
+    padding: spacing[6],
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    textAlign: 'center',
   },
 });

@@ -100,6 +100,30 @@ const APP_MODULES: Record<string, AppModule[]> = {
       ],
     },
     { key: 'expenses', label: 'Gastos', description: 'Registro de gastos' },
+    {
+      key: 'invoicing',
+      label: 'Facturación',
+      description: 'Facturación electrónica DIAN',
+      isParent: true,
+      children: [
+        { key: 'invoicing_all', label: 'Todas las Facturas' },
+        { key: 'invoicing_resolutions', label: 'Resoluciones' },
+        { key: 'invoicing_dian_config', label: 'Configuración DIAN' },
+      ],
+    },
+    {
+      key: 'accounting',
+      label: 'Contabilidad',
+      description: 'Plan de cuentas y asientos',
+      isParent: true,
+      children: [
+        { key: 'accounting_chart', label: 'Plan de Cuentas' },
+        { key: 'accounting_journal', label: 'Asientos Contables' },
+        { key: 'accounting_payables', label: 'Cuentas por Pagar' },
+        { key: 'accounting_receivables', label: 'Cuentas por Cobrar' },
+        { key: 'accounting_fiscal_periods', label: 'Períodos Fiscales' },
+      ],
+    },
     { key: 'ai_engine', label: 'Motor IA', description: 'Asistente de inteligencia artificial' },
     { key: 'notifications', label: 'Notificaciones', description: 'Centro de notificaciones' },
     {
