@@ -94,6 +94,9 @@ export class PurchasesAnalyticsService {
     const tz = await resolveStoreTimezone(this.prisma, storeId);
     const { startDate, endDate } = parseDateRange(query, tz);
 
+    // Sin filtro de `state` a propósito: excluir archivados aquí borraría del
+    // reporte compras que sí ocurrieron y descuadraría los totales del período
+    // contra contabilidad.
     const suppliers = await this.prisma.suppliers.findMany({
       where: {
         organization_id: organizationId,

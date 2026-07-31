@@ -173,7 +173,7 @@ export class PopSupplierQuickCreateComponent {
     // Clean data: remove empty strings and only send valid fields
     const formValues = this.supplierForm.value;
     const createDto: any = {
-      is_active: true,
+      state: 'active',
     };
 
     // Only add non-empty values to the DTO

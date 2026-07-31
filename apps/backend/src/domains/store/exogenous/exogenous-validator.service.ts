@@ -68,7 +68,10 @@ export class ExogenousValidatorService {
       });
     }
 
-    // Check suppliers without tax_id that have invoices or purchase orders
+    // Check suppliers without tax_id that have invoices or purchase orders.
+    // Sin filtro de `state` a propósito: si un proveedor sin NIT facturó en el
+    // año fiscal, la exógena lo va a reportar igual. Archivarlo no borra el
+    // hallazgo — lo esconde justo antes de radicar.
     const suppliers_without_nit = await (
       this.prisma as any
     ).withoutScope().suppliers.findMany({

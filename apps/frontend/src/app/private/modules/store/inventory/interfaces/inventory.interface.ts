@@ -7,6 +7,36 @@
 
 export type SupplierCategory = 'goods' | 'carrier' | 'service';
 
+/**
+ * Ciclo de vida del proveedor, espejo de `supplier_state_enum` en Prisma.
+ *
+ * - `active`: usable en flujos nuevos (OC, remisiones, rutas).
+ * - `inactive`: visible en el listado pero no seleccionable.
+ * - `archived`: lo que produce "Eliminar". Oculto de listados y selectores;
+ *   su historia contable queda intacta y consultable con el filtro explícito.
+ */
+export type SupplierState = 'active' | 'inactive' | 'archived';
+
+/** Estados asignables desde el formulario: archivar va por el flujo de eliminar. */
+export type SupplierAssignableState = Exclude<SupplierState, 'archived'>;
+
+/** Etiquetas visibles de cada estado. */
+export const SUPPLIER_STATE_LABELS: Record<SupplierState, string> = {
+  active: 'Activo',
+  inactive: 'Inactivo',
+  archived: 'Archivado',
+};
+
+/**
+ * Colores de badge por estado. Hex de 7 caracteres porque `colorMap` los pasa
+ * a `makeColorSoft()`, que no entiende clases de Tailwind.
+ */
+export const SUPPLIER_STATE_COLORS: Record<SupplierState, string> = {
+  active: '#16a34a',
+  inactive: '#d97706',
+  archived: '#6b7280',
+};
+
 export interface Supplier {
   id: number;
   organization_id?: number;
@@ -26,7 +56,7 @@ export interface Supplier {
   currency?: string;
   lead_time_days?: number;
   notes?: string;
-  is_active: boolean;
+  state: SupplierState;
   // Plan Despacho Economía — FASE 1 paso 7. `carrier` enables AP+withholding
   // on route close (paso 17). Bank columns are required when supplier_category
   // is `carrier` (ap-bank-export.service.ts ya las lee).
@@ -56,7 +86,8 @@ export interface CreateSupplierDto {
   currency?: string;
   lead_time_days?: number;
   notes?: string;
-  is_active?: boolean;
+  /** `archived` no se acepta aquí: archivar va por `archiveSupplier`. */
+  state?: SupplierAssignableState;
   supplier_category?: SupplierCategory;
   bank_name?: string;
   bank_account_number?: string;
@@ -67,7 +98,8 @@ export interface UpdateSupplierDto extends Partial<CreateSupplierDto> {}
 
 export interface SupplierQueryDto {
   search?: string;
-  is_active?: boolean;
+  /** Omitirlo excluye archivados; pasar `archived` los consulta. */
+  state?: SupplierState;
   page?: number;
   limit?: number;
 }

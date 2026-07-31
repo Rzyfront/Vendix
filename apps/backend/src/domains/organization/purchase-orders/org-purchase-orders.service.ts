@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { supplier_state_enum } from '@prisma/client';
 
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
@@ -352,9 +353,11 @@ export class OrgPurchaseOrdersService {
       { allowCentral: true },
     );
 
-    // Validación de proveedor: pertenencia a la org.
+    // Validación de proveedor: pertenencia a la org + estado usable. Se exige
+    // `active` porque emitir una OC contra un proveedor inactivo o archivado
+    // reintroduciría en circulación a alguien que la org retiró a propósito.
     const supplier = await this.orgPrisma.suppliers.findFirst({
-      where: { id: dto.supplier_id },
+      where: { id: dto.supplier_id, state: supplier_state_enum.active },
       select: { id: true },
     });
     if (!supplier) {

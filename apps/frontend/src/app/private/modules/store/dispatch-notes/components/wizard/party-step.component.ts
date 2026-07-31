@@ -512,7 +512,7 @@ export class PartyStepComponent {
       return;
     }
     this.suppliersService
-      .getSuppliers({ search: query.trim(), is_active: true, limit: 20 } as any)
+      .getSuppliers({ search: query.trim(), state: 'active', limit: 20 } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {

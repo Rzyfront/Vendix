@@ -1,4 +1,11 @@
-import { Component, input, output, effect, inject } from '@angular/core';
+import {
+  Component,
+  computed,
+  input,
+  output,
+  effect,
+  inject,
+} from '@angular/core';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
@@ -197,12 +204,22 @@ import { CurrencyService } from '../../../../../../services/currency.service';
             </div>
           }
 
-          <!-- Active Toggle -->
-          <app-setting-toggle
-            formControlName="is_active"
-            label="Proveedor activo"
-            description="Desactiva para ocultar este proveedor de las listas"
-          ></app-setting-toggle>
+          <!-- Estado: solo activo ↔ inactivo. Archivar va por "Eliminar". -->
+          @if (isArchived()) {
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p class="text-sm text-gray-700">
+                Este proveedor está <strong>archivado</strong>: no aparece en
+                listados ni selectores. Puedes corregir sus datos sin
+                desarchivarlo.
+              </p>
+            </div>
+          } @else {
+            <app-setting-toggle
+              formControlName="is_active"
+              label="Proveedor activo"
+              description="Al desactivarlo sigue visible en el listado, pero nadie podrá seleccionarlo en órdenes de compra, remisiones ni rutas"
+            ></app-setting-toggle>
+          }
         </div>
       </form>
 
@@ -231,6 +248,13 @@ export class SupplierFormModalComponent {
   private currencyHttpService = inject(CurrencyService);
   readonly isOpen = input(false);
   readonly supplier = input<Supplier | null>(null);
+
+  /**
+   * Un archivado se puede editar (corregir datos) pero su estado no se toca
+   * desde este formulario: desarchivar es una decisión explícita, no un efecto
+   * secundario de guardar.
+   */
+  readonly isArchived = computed(() => this.supplier()?.state === 'archived');
   readonly isSubmitting = input(false);
 
   readonly isOpenChange = output<boolean>();
@@ -341,7 +365,9 @@ export class SupplierFormModalComponent {
       bank_name: supplier.bank_name || '',
       bank_account_number: supplier.bank_account_number || '',
       bank_account_type: supplier.bank_account_type || '',
-      is_active: supplier.is_active,
+      // El toggle es booleano: on = active, off = inactive. Un archivado se
+      // muestra como inactivo pero el toggle queda oculto (ver template).
+      is_active: supplier.state === 'active',
     });
   }
 
@@ -360,8 +386,21 @@ export class SupplierFormModalComponent {
   }
 
   onSubmit(): void {
-    if (this.form.valid) {
-      this.save.emit(this.form.value);
+    if (!this.form.valid) return;
+
+    const { is_active, ...rest } = this.form.value as Record<string, any>;
+
+    // Un proveedor archivado se edita sin tocar su estado: el toggle está
+    // oculto y mandar `state` aquí lo desarchivaría en silencio. Reactivarlo
+    // es una decisión aparte, no un efecto secundario de corregir su teléfono.
+    if (this.isArchived()) {
+      this.save.emit(rest);
+      return;
     }
+
+    this.save.emit({
+      ...rest,
+      state: is_active ? 'active' : 'inactive',
+    });
   }
 }

@@ -281,6 +281,9 @@ export class WithholdingFlowService {
 
     // Scoped read; explicit organization_id keeps the query tenant-safe even if
     // the scope context is not fully populated.
+    // Sin filtro de `state` a propósito: la retención se calcula sobre la
+    // clasificación fiscal que el proveedor tenía al momento del documento, y
+    // ese documento sigue existiendo aunque hoy esté inactivo o archivado.
     const supplier = await (params.client ?? this.prisma).suppliers.findFirst({
       where: { id: params.supplier_id, organization_id: params.organization_id },
       select: {

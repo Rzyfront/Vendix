@@ -495,7 +495,9 @@ export class WithholdingTaxService {
         store_id: context.store_id ?? null,
       });
 
-    // Get supplier info
+    // Get supplier info. Sin filtro de `state` a propósito: un cálculo de
+    // retención sobre un documento histórico no puede fallar porque el
+    // proveedor haya sido inactivado o archivado después.
     const supplier = await this.prisma.suppliers.findFirst({
       where: { id: supplier_id },
     });
@@ -605,6 +607,8 @@ export class WithholdingTaxService {
       counterparty_name = `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim();
       counterparty_nit = customer.document_number || '';
     } else {
+      // Sin filtro de `state`: el certificado nombra a la contraparte de un
+      // documento ya emitido, no elige un proveedor para operar.
       const supplier = await this.prisma.suppliers.findFirst({
         where: { id: counterparty_id },
         select: { name: true, tax_id: true },

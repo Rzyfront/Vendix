@@ -106,6 +106,9 @@ export class DispatchSettlementListener implements OnModuleInit {
       // suppliers.service getSupplierScopeWhere); un filtro fijo `store_id:
       // ctx_store` nunca los encuentra. Guardamos por organization_id y
       // aceptamos tanto el supplier de esta tienda como el org-level.
+      // Sin filtro de `state`: este listener contabiliza un despacho que ya se
+      // liquidó. Si el transportador fue archivado entre el despacho y la
+      // liquidación, el asiento debe cuadrar igual.
       const supplier = await this.prisma.suppliers.findFirst({
         where: {
           id: data.transporter_supplier_id,

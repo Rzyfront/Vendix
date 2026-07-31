@@ -826,7 +826,7 @@ export class InvoiceScannerModalComponent {
           }
           this.supplierSearchLoading.set(true);
           return this.suppliersService
-            .getSuppliers({ is_active: true, limit: 20, search: q })
+            .getSuppliers({ state: 'active' as const, limit: 20, search: q })
             .pipe(catchError(() => of<any>({ data: [] })));
         }),
         takeUntilDestroyed(this.destroyRef),
@@ -1118,7 +1118,7 @@ export class InvoiceScannerModalComponent {
    *  `supplierSearch$` (ver constructor), sin el cap de 50 del pool inicial. */
   private loadSuppliers(): void {
     this.suppliersService
-      .getSuppliers({ is_active: true, limit: 50 })
+      .getSuppliers({ state: 'active' as const, limit: 50 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

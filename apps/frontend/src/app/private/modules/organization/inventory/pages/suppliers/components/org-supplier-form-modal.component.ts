@@ -1,4 +1,11 @@
-import { Component, effect, inject, input, output } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+} from '@angular/core';
 import {
   FormBuilder,
   FormGroup,
@@ -185,12 +192,22 @@ export interface OrgSupplierStoreOption {
             [control]="form.get('notes')"
           ></app-textarea>
 
-          <!-- Active Toggle -->
-          <app-setting-toggle
-            formControlName="is_active"
-            label="Proveedor activo"
-            description="Desactiva para ocultar este proveedor de las listas"
-          ></app-setting-toggle>
+          <!-- Estado: solo activo ↔ inactivo. Archivar va por "Eliminar". -->
+          @if (isArchived()) {
+            <div class="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p class="text-sm text-gray-700">
+                Este proveedor está <strong>archivado</strong>: no aparece en
+                listados ni selectores. Puedes corregir sus datos sin
+                desarchivarlo.
+              </p>
+            </div>
+          } @else {
+            <app-setting-toggle
+              formControlName="is_active"
+              label="Proveedor activo"
+              description="Al desactivarlo sigue visible en el listado, pero nadie podrá seleccionarlo en órdenes de compra, remisiones ni rutas"
+            ></app-setting-toggle>
+          }
         </div>
       </form>
 
@@ -223,6 +240,12 @@ export class OrgSupplierFormModalComponent {
 
   readonly isOpen = input(false);
   readonly supplier = input<OrgSupplierRow | null>(null);
+
+  /**
+   * Un archivado se puede editar (corregir datos) pero su estado no se toca
+   * desde este formulario: desarchivar es una decisión explícita.
+   */
+  readonly isArchived = computed(() => this.supplier()?.state === 'archived');
   readonly isSubmitting = input(false);
   readonly storeOptions = input<OrgSupplierStoreOption[]>([]);
 
@@ -339,7 +362,9 @@ export class OrgSupplierFormModalComponent {
           sup.currency || this.currencyFormatService.currencyCode() || 'COP',
         lead_time_days: sup.lead_time_days ?? null,
         notes: sup.notes ?? '',
-        is_active: sup.is_active ?? true,
+        // Toggle booleano: on = active, off = inactive. Un archivado se muestra
+        // como inactivo pero el toggle queda oculto (ver template).
+        is_active: sup.state === 'active',
       },
       { emitEvent: false },
     );
@@ -388,7 +413,11 @@ export class OrgSupplierFormModalComponent {
           ? undefined
           : Number(raw.lead_time_days),
       notes: raw.notes || undefined,
-      is_active: !!raw.is_active,
+      // Un archivado se edita sin tocar su estado: mandar `state` aquí lo
+      // desarchivaría en silencio. Reactivarlo es una decisión aparte.
+      ...(this.isArchived()
+        ? {}
+        : { state: raw.is_active ? 'active' : 'inactive' }),
     };
 
     this.save.emit(payload);
