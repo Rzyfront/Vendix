@@ -205,6 +205,32 @@ export class SettingsService {
     return dto;
   }
 
+  /**
+   * Normaliza un campo de imagen que admite tri-estado dentro de un PATCH
+   * parcial de settings:
+   *
+   * - `undefined` → la clave no vino en el payload: no se toca el valor vigente.
+   * - `null` (o cadena vacía) → el usuario borró la imagen: hay que persistir
+   *   el borrado.
+   * - `string` → clave S3 o URL firmada a sanear vía `extractS3KeyFromUrl`.
+   *
+   * QUI-289: el patrón anterior era `extractS3KeyFromUrl(x) ?? undefined`, que
+   * aplastaba el `null` explícito a `undefined`. Como las tres compuertas de
+   * escritura del logo (`stores.logo_url`, `updateStoreBranding` y la sync de
+   * la tabla `stores` desde `general`) filtran por `!== undefined`, borrar el
+   * logo respondía `success: true` sin borrar nada. Preservar el tri-estado es
+   * lo que hace que una respuesta afirmativa signifique lo que dice.
+   */
+  private normalizeImageKey(
+    value: string | null | undefined,
+  ): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    // `extractS3KeyFromUrl` ya devuelve null para cadenas vacías o en blanco,
+    // así que un "" del cliente también se interpreta como borrado.
+    return extractS3KeyFromUrl(value);
+  }
+
   async getSettings(): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -370,13 +396,13 @@ export class SettingsService {
     // Handle app section - update branding in store_settings.settings.branding
     if (dto.app) {
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
-      // This prevents storing signed URLs that expire after 24 hours
+      // This prevents storing signed URLs that expire after 24 hours.
+      // `normalizeImageKey` conserva el `null` de un borrado explícito.
       if (dto.app.logo_url !== undefined) {
-        dto.app.logo_url = extractS3KeyFromUrl(dto.app.logo_url) ?? undefined;
+        dto.app.logo_url = this.normalizeImageKey(dto.app.logo_url);
       }
       if (dto.app.favicon_url !== undefined) {
-        dto.app.favicon_url =
-          extractS3KeyFromUrl(dto.app.favicon_url) ?? undefined;
+        dto.app.favicon_url = this.normalizeImageKey(dto.app.favicon_url);
       }
 
       // Sincronizar logo_url simultáneamente en stores table
@@ -462,9 +488,10 @@ export class SettingsService {
       let { name, logo_url, store_type, timezone, industries } = dto.general;
 
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
-      // This prevents storing signed URLs that expire after 24 hours
+      // This prevents storing signed URLs that expire after 24 hours.
+      // Un `null` explícito sobrevive para que el borrado llegue a la tabla.
       if (logo_url !== undefined) {
-        logo_url = extractS3KeyFromUrl(logo_url) ?? undefined;
+        logo_url = this.normalizeImageKey(logo_url);
         dto.general.logo_url = logo_url; // Update DTO for consistency
       }
 
@@ -521,10 +548,13 @@ export class SettingsService {
       }
     }
 
-    // Safety net: sanitize any signed URLs that may have leaked into the settings object
-    if (updatedSettings.general?.logo_url) {
-      updatedSettings.general.logo_url =
-        extractS3KeyFromUrl(updatedSettings.general.logo_url) ?? undefined;
+    // Safety net: sanitize any signed URLs that may have leaked into the settings
+    // object. Se evalúa contra `undefined` y no por truthiness para que un
+    // borrado (`null`) no se salte la red y quede sin normalizar.
+    if (updatedSettings.general?.logo_url !== undefined) {
+      updatedSettings.general.logo_url = this.normalizeImageKey(
+        updatedSettings.general.logo_url,
+      );
     }
 
     // Remove app from settings - branding is the single source of truth

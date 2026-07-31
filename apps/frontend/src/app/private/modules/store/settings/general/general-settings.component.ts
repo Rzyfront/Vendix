@@ -285,6 +285,15 @@ export class GeneralSettingsComponent implements OnInit {
         this.isLoading.set(false);
         this.hasUnsavedChanges.set(false);
         this.settingsLoaded.set(true);
+
+        // QUI-289 — el sidebar (y el header móvil) pintan el logo desde
+        // `user.store.logo_url` del snapshot de auth, que sólo se hidrataba en
+        // login: guardar un logo nuevo persistía bien pero el panel seguía
+        // mostrando el viejo hasta re-loguear. Este GET es la fuente
+        // autoritativa — el backend firma la clave S3 aquí —, así que cada
+        // lectura canónica (montaje, post-guardado, post-reset) resincroniza el
+        // snapshot. `null` es válido: significa que la tienda quedó sin logo.
+        this.authFacade.updateStoreLogo(data.general?.logo_url ?? null);
       },
       error: (error) => {
         console.error('Error loading settings:', error);

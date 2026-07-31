@@ -55,10 +55,14 @@ export class GeneralSettingsDto {
   @IsString()
   name?: string;
 
+  // `null` es un valor de negocio, no ausencia: significa "borrá el logo".
+  // `@IsOptional()` de class-validator salta la validación tanto para
+  // `undefined` como para `null`, así que el borrado no rebota contra
+  // `@IsString()` (QUI-289).
   @ApiProperty({ example: 'https://example.com/logo.png', required: false })
   @IsOptional()
   @IsString()
-  logo_url?: string;
+  logo_url?: string | null;
 
   @ApiProperty({
     enum: ['physical', 'online', 'hybrid', 'popup', 'kiosko'],

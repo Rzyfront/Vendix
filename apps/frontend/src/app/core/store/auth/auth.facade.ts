@@ -566,6 +566,16 @@ export class AuthFacade {
     );
   }
 
+  /**
+   * QUI-289 — refresca el logo de la tienda en el snapshot de auth tras un
+   * guardado de Configuración, para que el sidebar y el header móvil lo
+   * reflejen sin re-login. Espera la URL **firmada** que devuelve
+   * `GET /store/settings`, no la clave S3 cruda del upload.
+   */
+  updateStoreLogo(logoUrl: string | null): void {
+    this.store.dispatch(AuthActions.updateStoreLogo({ logo_url: logoUrl }));
+  }
+
   patchFiscalStatus(fiscalStatus: any): void {
     const user = this.user();
     if (

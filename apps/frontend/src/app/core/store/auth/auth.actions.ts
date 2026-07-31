@@ -343,6 +343,20 @@ export const markPanelUiSeenFailure = createAction(
   props<{ error: NormalizedApiPayload | string }>(),
 );
 
+/**
+ * QUI-289 — el logo de la tienda que pinta el sidebar (y el header móvil) vive
+ * en `user.store.logo_url` del snapshot de auth, que sólo se hidrataba en login.
+ * Guardar Configuración persistía el logo en el backend pero el panel seguía
+ * mostrando el viejo hasta re-loguear. Esta acción parcha el snapshot con la
+ * URL firmada que devuelve `GET /store/settings` tras guardar.
+ *
+ * `logo_url: null` es válido y significa "la tienda se quedó sin logo".
+ */
+export const updateStoreLogo = createAction(
+  '[Auth] Update Store Logo',
+  props<{ logo_url: string | null }>(),
+);
+
 // Update Store Settings Actions
 export const updateStoreSettings = createAction(
   '[Auth] Update Store Settings',
