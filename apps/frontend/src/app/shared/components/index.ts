@@ -1,4 +1,5 @@
 // Components
+export { AiReviewAckComponent } from './ai-review-ack/ai-review-ack.component';
 export { AlertBannerComponent } from './alert-banner/alert-banner.component';
 export { ConfirmationModalComponent } from './confirmation-modal/confirmation-modal.component';
 export { PromptModalComponent } from './prompt-modal/prompt-modal.component';

@@ -1,9 +1,10 @@
-import {Component, input, output, signal, computed, effect, DestroyRef, inject} from '@angular/core';
+import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { switchMap, catchError, of, Subject } from 'rxjs';
 
+import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
@@ -46,6 +47,7 @@ import {
     StepsLineComponent,
     CurrencyPipe,
     PopSupplierQuickCreateComponent,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -576,6 +578,14 @@ import {
               }
             </div>
           </ng-template>
+
+          <!-- Verificación obligatoria de los datos precargados por la IA -->
+          <app-ai-review-ack
+            #ackBlock
+            [(acknowledged)]="aiAck"
+            [itemCount]="editableItems().length"
+            entityLabel="ítems de la factura"
+          ></app-ai-review-ack>
         </div>
       }
 
@@ -659,6 +669,14 @@ export class InvoiceScannerModalComponent {
 
   // Wizard state
   currentStep = signal<1 | 2 | 3>(1);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. El botón de
+   * confirmar sigue habilitado: si esto es false, `onConfirm` desvía el clic a
+   * `requestAttention()` en vez de emitir la orden de compra.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   selectedFile = signal<File | null>(null);
   filePreviewUrl = signal<string | null>(null);
   fileError = signal<string | null>(null);
@@ -1211,7 +1229,16 @@ export class InvoiceScannerModalComponent {
   onConfirm(): void {
     const match = this.matchResult();
     const scan = this.scanResult();
+    // Este early-return también actúa como guard de doble clic: `closeAndReset`
+    // limpia `matchResult`, así que un segundo clic no puede volver a emitir.
     if (!match || !scan) return;
+
+    // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
+    // lleva al usuario a la casilla de verificación y la resalta.
+    if (!this.aiAck()) {
+      this.ackBlock()?.requestAttention();
+      return;
+    }
 
     this.confirmed.emit({
       scanResult: scan,
@@ -1264,6 +1291,10 @@ export class InvoiceScannerModalComponent {
     this.productSearchIndex.set(null);
     this.productSearchResults.set([]);
     this.productSearchLoading.set(false);
+    // Obligatorio: el contenido proyectado en app-modal no se destruye al
+    // cerrar, así que sin este reset la segunda apertura traería el check ya
+    // marcado y el guard quedaría anulado.
+    this.aiAck.set(false);
   }
 
   private closeAndReset(): void {

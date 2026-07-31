@@ -6,6 +6,7 @@ import {
   output,
   signal,
   computed,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
@@ -24,6 +25,7 @@ import {
   SpinnerComponent,
   InputsearchComponent,
   ToastService,
+  AiReviewAckComponent,
 } from '../../../../../../shared/components';
 
 import { InventoryService, InventoryScannerService } from '../../services';
@@ -59,6 +61,7 @@ interface EditableCountRow extends MatchedCountProduct {
     BadgeComponent,
     SpinnerComponent,
     InputsearchComponent,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -504,6 +507,15 @@ interface EditableCountRow extends MatchedCountProduct {
               }
             </div>
           </ng-template>
+
+          <!-- Verificación obligatoria de los datos precargados por la IA -->
+          <app-ai-review-ack
+            #ackBlock
+            [(acknowledged)]="aiAck"
+            [itemCount]="editableItems().length"
+            entityLabel="productos"
+            [disabled]="submitting()"
+          ></app-ai-review-ack>
         </div>
       }
 
@@ -601,6 +613,14 @@ export class InventoryScannerModalComponent {
   readonly isScanning = signal(false);
   readonly isProcessingFile = signal(false);
   readonly submitting = signal(false);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. Los botones de
+   * guardar/aplicar siguen habilitados: si esto es false, `onSubmit` desvía el
+   * clic a `requestAttention()` en vez de ejecutar la carga.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
 
   readonly scanResponse = signal<InventoryCountScanResponse | null>(null);
   readonly editableItems = signal<EditableCountRow[]>([]);
@@ -993,6 +1013,9 @@ export class InventoryScannerModalComponent {
   // ============================================================
 
   onSubmit(mode: 'apply' | 'draft'): void {
+    // Guard de reentrada: un doble clic no debe crear dos lotes de ajustes.
+    if (this.submitting()) return;
+
     const locationId = this.selectedLocationId();
     if (!locationId) return;
 
@@ -1001,6 +1024,13 @@ export class InventoryScannerModalComponent {
     );
     if (validItems.length === 0) {
       this.toastService.error('Selecciona al menos un producto para continuar');
+      return;
+    }
+
+    // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
+    // lleva al usuario a la casilla de verificación y la resalta.
+    if (!this.aiAck()) {
+      this.ackBlock()?.requestAttention();
       return;
     }
 
@@ -1075,6 +1105,10 @@ export class InventoryScannerModalComponent {
     this.productSearchIndex.set(null);
     this.productSearchResults.set([]);
     this.productSearchLoading.set(false);
+    // Obligatorio: el contenido proyectado en app-modal no se destruye al
+    // cerrar, así que sin este reset la segunda apertura traería el check ya
+    // marcado y el guard quedaría anulado.
+    this.aiAck.set(false);
   }
 
   private closeAndReset(): void {

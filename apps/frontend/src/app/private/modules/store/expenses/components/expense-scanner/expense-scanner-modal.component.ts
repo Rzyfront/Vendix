@@ -1,4 +1,4 @@
-import {Component, inject, signal, computed, input, output, DestroyRef} from '@angular/core';
+import {Component, inject, signal, computed, input, output, viewChild, DestroyRef} from '@angular/core';
 import {takeUntilDestroyed, toSignal} from '@angular/core/rxjs-interop';
 import {FormsModule} from '@angular/forms';
 import {Store} from '@ngrx/store';
@@ -23,6 +23,7 @@ import {
   BadgeComponent,
   SpinnerComponent,
   ToastService,
+  AiReviewAckComponent,
 } from '../../../../../../shared/components';
 import {ExpenseCategoryQuickCreateComponent} from '../expense-category-quick-create.component';
 import {CurrencyPipe} from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -44,6 +45,7 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
     SpinnerComponent,
     ExpenseCategoryQuickCreateComponent,
     CurrencyPipe,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -462,6 +464,15 @@ import {toLocalDateString} from '../../../../../../shared/utils/date.util';
               </div>
             </label>
           }
+
+          <!-- Verificación obligatoria de los datos precargados por la IA -->
+          <app-ai-review-ack
+            #ackBlock
+            [(acknowledged)]="aiAck"
+            [itemCount]="editableItems().length"
+            entityLabel="conceptos"
+            [disabled]="submitting()"
+          ></app-ai-review-ack>
         </div>
       }
 
@@ -602,6 +613,14 @@ export class ExpenseScannerModalComponent {
   // Checkboxes
   readonly confirmApprove = signal(false);
   readonly confirmPay = signal(false);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. El botón de
+   * guardar permanece habilitado: si esto es false, `onSubmit` desvía el clic a
+   * `requestAttention()` en vez de ejecutar la carga.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   readonly showCategoryQuickCreate = signal(false);
 
   // Steps config
@@ -866,8 +885,18 @@ export class ExpenseScannerModalComponent {
   // ============================================================
 
   onSubmit(targetState: 'pending' | 'approved' | 'paid'): void {
+    // Guard de reentrada: un doble clic no debe disparar dos gastos.
+    if (this.submitting()) return;
+
     if (!this.editDescription() || this.editAmount() <= 0) {
       this.toastService.error('Completa la descripción y el monto');
+      return;
+    }
+
+    // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
+    // lleva al usuario a la casilla de verificación y la resalta.
+    if (!this.aiAck()) {
+      this.ackBlock()?.requestAttention();
       return;
     }
 
@@ -988,6 +1017,10 @@ export class ExpenseScannerModalComponent {
     this.editNotes.set('');
     this.confirmApprove.set(false);
     this.confirmPay.set(false);
+    // Obligatorio: el contenido proyectado en app-modal no se destruye al
+    // cerrar, así que sin este reset la segunda apertura traería el check ya
+    // marcado y el guard quedaría anulado.
+    this.aiAck.set(false);
     this.showCategoryQuickCreate.set(false);
     this.wizardSteps = [
       {label: 'Subir', completed: false},
