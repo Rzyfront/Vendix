@@ -9,6 +9,7 @@ import { Observable } from 'rxjs';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { OpenSessionDto } from '../dto/open-session.dto';
 import { CloseSessionDto } from '../dto/close-session.dto';
@@ -23,6 +24,31 @@ import { MovementsService } from '../movements/movements.service';
 export interface OpenSessionsSummary {
   count: number;
   registers: { id: number; name: string }[];
+}
+
+/**
+ * QUI-572 — desglose de caja autoritativo. Es el ÚNICO lugar donde vive la
+ * aritmética del efectivo esperado: antes se calculaba inline en `closeSession`
+ * y otra vez, por separado, en el modal de cierre del frontend. Dos fórmulas
+ * que podían divergir sin que nadie se enterara.
+ *
+ * Claves en snake_case porque este objeto viaja tal cual por la API
+ * (`GET store/cash-registers/sessions/:id/cash-summary`).
+ */
+export interface CashSummary {
+  opening: number;
+  /** Todas las ventas, sin importar el método de pago. */
+  sales_total: number;
+  sales_count: number;
+  /** Sin etiquetas legibles: traducir el `method` es tarea del frontend. */
+  sales_by_method: { method: string; count: number; total: number }[];
+  cash_sales: number;
+  cash_in: number;
+  cash_out: number;
+  cash_refunds: number;
+  /** El número que gobierna el arqueo. */
+  expected_cash_total: number;
+  non_cash_total: number;
 }
 
 @Injectable()
@@ -207,23 +233,25 @@ export class SessionsService {
       where: { session_id },
     });
 
-    let expected = Number(session.opening_amount);
-    for (const m of movements) {
-      const amount = Number(m.amount);
-      switch (m.type) {
-        case 'sale':
-          if (m.payment_method === 'cash') expected += amount;
-          break;
-        case 'cash_in':
-          expected += amount;
-          break;
-        case 'refund':
-          if (m.payment_method === 'cash') expected -= amount;
-          break;
-        case 'cash_out':
-          expected -= amount;
-          break;
-      }
+    const summary_breakdown = this.computeCashSummary(session, movements);
+    const expected = summary_breakdown.expected_cash_total;
+
+    // QUI-572 — candado de concurrencia optimista. El modal de cierre fotografía
+    // el esperado al abrirse; si entra una venta mientras el operario cuenta, el
+    // arqueo se hace contra una cifra vieja y el backend registraba un faltante
+    // inexistente en silencio. Va ANTES de la $transaction: rechazar es más
+    // barato que abrir una transacción para abortarla.
+    const seen = dto.expected_closing_amount_seen;
+    if (seen != null && Math.abs(Number(seen) - expected) > 0.01) {
+      throw new VendixHttpException(
+        ErrorCodes.CASH_SESSION_EXPECTED_STALE_001,
+        `El efectivo esperado cambió mientras contabas: la pantalla mostraba $${Number(seen).toLocaleString('es-CO')} y ahora son $${expected.toLocaleString('es-CO')}. Revisá el resumen actualizado antes de cerrar.`,
+        {
+          expected_now: expected,
+          expected_seen: Number(seen),
+          delta: expected - Number(seen),
+        },
+      );
     }
 
     const actual_closing_amount = Number(dto.actual_closing_amount);
@@ -436,6 +464,29 @@ export class SessionsService {
     };
   }
 
+  /**
+   * QUI-572 — desglose de caja fresco para una sesión, calculado por el backend.
+   *
+   * Existe para que el modal de cierre pueda REFRESCAR el efectivo esperado en
+   * vez de recalcularlo por su cuenta con una fórmula paralela. Funciona igual
+   * sobre sesiones abiertas y cerradas: sobre una sesión cerrada devuelve el
+   * mismo desglose que gobernó su arqueo.
+   */
+  async getCashSummary(session_id: number): Promise<CashSummary> {
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: { id: session_id },
+    });
+    if (!session) {
+      throw new NotFoundException('Sesión de caja no encontrada');
+    }
+
+    const movements = await this.prisma.cash_register_movements.findMany({
+      where: { session_id },
+    });
+
+    return this.computeCashSummary(session, movements);
+  }
+
   streamClosingSummary(sessionId: number): Observable<MessageEvent> {
     // Capture request context before entering the Observable async callback,
     // because AsyncLocalStorage is lost inside the Observable's IIFE.
@@ -575,6 +626,84 @@ export class SessionsService {
       summary_by_method: formatGrouped(summary.by_payment_method),
       summary_by_type: formatGrouped(summary.by_type),
       total_movements: String(summary.total_movements),
+    };
+  }
+
+  /**
+   * QUI-572 — fuente única de la aritmética de caja.
+   *
+   * `expected_cash_total` reproduce exactamente la fórmula que vivía inline en
+   * `closeSession`: parte de la apertura, suma ventas en efectivo y `cash_in`,
+   * resta devoluciones en efectivo y `cash_out`. Los movimientos
+   * `opening_balance` / `closing_balance` no participan — la apertura ya entra
+   * por `session.opening_amount` y contarla otra vez la duplicaría.
+   */
+  private computeCashSummary(session: any, movements: any[]): CashSummary {
+    const opening = Number(session.opening_amount);
+
+    let sales_total = 0;
+    let sales_count = 0;
+    let cash_sales = 0;
+    let cash_in = 0;
+    let cash_out = 0;
+    let cash_refunds = 0;
+
+    const by_method = new Map<string, { count: number; total: number }>();
+
+    for (const m of movements) {
+      const amount = Number(m.amount);
+      const is_cash = m.payment_method === 'cash';
+
+      switch (m.type) {
+        case 'sale': {
+          const method = m.payment_method || 'unknown';
+          const bucket = by_method.get(method) ?? { count: 0, total: 0 };
+          bucket.count++;
+          bucket.total += amount;
+          by_method.set(method, bucket);
+
+          sales_total += amount;
+          sales_count++;
+          if (is_cash) cash_sales += amount;
+          break;
+        }
+        case 'cash_in':
+          cash_in += amount;
+          break;
+        case 'refund':
+          if (is_cash) cash_refunds += amount;
+          break;
+        case 'cash_out':
+          cash_out += amount;
+          break;
+      }
+    }
+
+    // `cash` primero y el resto alfabético: la UI hace poll de este endpoint y
+    // un orden inestable haría saltar las filas entre refrescos.
+    const sales_by_method = [...by_method.entries()]
+      .map(([method, val]) => ({ method, count: val.count, total: val.total }))
+      .sort((a, b) => {
+        if (a.method === b.method) return 0;
+        if (a.method === 'cash') return -1;
+        if (b.method === 'cash') return 1;
+        return a.method.localeCompare(b.method);
+      });
+
+    const expected_cash_total =
+      opening + cash_sales + cash_in - cash_refunds - cash_out;
+
+    return {
+      opening,
+      sales_total,
+      sales_count,
+      sales_by_method,
+      cash_sales,
+      cash_in,
+      cash_out,
+      cash_refunds,
+      expected_cash_total,
+      non_cash_total: sales_total - cash_sales,
     };
   }
 

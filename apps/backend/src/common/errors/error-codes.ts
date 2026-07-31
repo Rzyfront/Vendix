@@ -3360,6 +3360,16 @@ export const ErrorCodes = {
     devMessage:
       'Cannot disable the cash register module while the store has open cash register sessions',
   },
+
+  // Caja registradora — cierre contra un esperado rancio (QUI-572).
+  // 409 y no 422: el payload es válido; lo que cambió es el estado del
+  // servidor entre que el operario leyó la cifra y pulsó cerrar.
+  CASH_SESSION_EXPECTED_STALE_001: {
+    code: 'CASH_SESSION_EXPECTED_STALE_001',
+    httpStatus: 409,
+    devMessage:
+      'The expected cash amount changed after the client read it; refresh the summary before closing',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
