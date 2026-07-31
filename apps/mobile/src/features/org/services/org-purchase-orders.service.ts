@@ -4,6 +4,8 @@ import type {
   PurchaseOrder,
   PurchaseOrderCreate,
   PurchaseOrderStatus,
+  PurchaseOrderStatusBackend,
+  PurchaseOrderUpdate,
 } from '@/core/models/org-admin/purchase-orders.types';
 
 /**
@@ -27,10 +29,31 @@ const PO_STATUS_MAP: Record<string, PurchaseOrderStatus> = {
   cancelled: 'CANCELLED',
 };
 
+const PO_STATUS_REVERSE_MAP: Record<PurchaseOrderStatus, PurchaseOrderStatusBackend> = {
+  DRAFT: 'draft',
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  IN_TRANSIT: 'in_transit',
+  PARTIAL: 'partial',
+  RECEIVED: 'received',
+  CANCELLED: 'cancelled',
+};
+
 function normalizePoStatus(raw: string | null | undefined): PurchaseOrderStatus {
   if (!raw) return 'DRAFT';
   const key = String(raw).toLowerCase();
   return PO_STATUS_MAP[key] ?? (key.toUpperCase() as PurchaseOrderStatus);
+}
+
+/**
+ * Convierte el status uppercase (mobile) a lowercase (backend) antes de
+ * enviar en un body de creación/actualización. Si el body no trae status,
+ * devuelve undefined y el backend aplica su default.
+ */
+export function toBackendStatus(
+  status: PurchaseOrderStatus | undefined,
+): PurchaseOrderStatusBackend | undefined {
+  return status ? PO_STATUS_REVERSE_MAP[status] : undefined;
 }
 
 /**
@@ -82,11 +105,13 @@ export const OrgPurchaseOrdersService = {
     );
     return normalizePurchaseOrder(raw);
   },
-  update: async (id: string, body: Partial<PurchaseOrder>) =>
-    apiPut<PurchaseOrder>(
+  update: async (id: string, body: PurchaseOrderUpdate) => {
+    const raw = await apiPut<BackendPurchaseOrder>(
       Endpoints.ORGANIZATION.PURCHASE_ORDERS.UPDATE.replace(':id', id),
       body,
-    ),
+    );
+    return normalizePurchaseOrder(raw);
+  },
   approve: async (id: string) =>
     apiPost(Endpoints.ORGANIZATION.PURCHASE_ORDERS.APPROVE.replace(':id', id)),
   cancel: async (id: string) =>

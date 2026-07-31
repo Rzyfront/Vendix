@@ -8,7 +8,7 @@ import { StoreType } from '@/features/org/types/store.types';
 import { Button } from '@/shared/components/button/button';
 import { Card } from '@/shared/components/card/card';
 import { Input } from '@/shared/components/input/input';
-import { generateSlug } from '@/shared/utils/slug';;
+import { generateSlug } from '@/shared/utils/slug';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';

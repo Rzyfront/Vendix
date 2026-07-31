@@ -529,11 +529,11 @@ const cardStyles = StyleSheet.create({
 //   - campos: Nombre, Apellido, Email, Aplicación (select)
 //   - footer: Cancelar + Enviar Invitación
 //
-// Diferencias intencionales vs el UserFormModal:
+// Diferencias intencionales vs el flujo de edición de usuario:
 //   - NO pide teléfono/rol/tienda aquí — la web tampoco. Esos se configuran
 //     después de que el usuario acepta la invitación (en la edición).
 //   - El campo Aplicación es explícito en la web (el usuario lo escoge),
-//     mientras el UserFormModal lo infiere del rol. Aquí respetamos la web.
+//     mientras la edición lo infiere del rol. Aquí respetamos la web.
 const APP_OPTIONS = [
   { value: 'ORG_ADMIN', label: 'ORG_ADMIN' },
   { value: 'STORE_ADMIN', label: 'STORE_ADMIN' },
@@ -716,7 +716,7 @@ const inviteStyles = StyleSheet.create({
   },
   // Espejo del `<app-input>` web moderno (var(--color-surface), 8px radius,
   // border, focus ring primary). En mobile usamos el patrón equivalente
-  // para inputs del `UserFormModal`.
+  // para inputs del formulario de invitación.
   input: {
     height: 44,
     paddingHorizontal: spacing[3],

@@ -541,6 +541,12 @@ const STORE_ADMIN_MODULES: AppModule[] = [
       ],
     },
 
+    // Reportes
+    {
+      key: 'reports',
+      label: 'Reportes',
+      description: 'Reportes y an\u00e1lisis de datos del negocio',
+    },
 
     // N\u00f3mina (padre con hijos)
     {

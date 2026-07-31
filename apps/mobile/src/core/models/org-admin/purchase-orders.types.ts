@@ -11,6 +11,21 @@ export type PurchaseOrderStatus =
   | 'RECEIVED'
   | 'CANCELLED';
 
+/**
+ * Lowercase status values accepted by the backend DTO
+ * (`purchase_order_status_enum` in Prisma). The mobile service
+ * (`OrgPurchaseOrdersService`) translates between this and the uppercase
+ * `PurchaseOrderStatus` used internally.
+ */
+export type PurchaseOrderStatusBackend =
+  | 'draft'
+  | 'pending'
+  | 'approved'
+  | 'in_transit'
+  | 'partial'
+  | 'received'
+  | 'cancelled';
+
 export interface PurchaseOrder {
   id: string;
   po_number: string;
@@ -61,7 +76,7 @@ export interface PurchaseOrderItem {
 export interface PurchaseOrderCreate {
   supplier_id: number;
   destination_location_id: number;
-  status?: PurchaseOrderStatus;
+  status?: PurchaseOrderStatusBackend;
   prices_include_tax?: boolean;
   order_date?: ISODateString;
   expected_date?: ISODateString;
@@ -73,6 +88,24 @@ export interface PurchaseOrderCreate {
   notes?: string;
   internal_notes?: string;
   items: PurchaseOrderItemCreate[];
+}
+
+/**
+ * Body que `OrgPurchaseOrdersService.update` envía al backend.
+ * Réplica del DTO backend `UpdateOrgPurchaseOrderDto` (cuando exista); usa
+ * `PurchaseOrderStatusBackend` (lowercase) porque el backend valida contra
+ * el enum de Prisma directamente.
+ */
+export interface PurchaseOrderUpdate {
+  status?: PurchaseOrderStatusBackend;
+  expected_date?: ISODateString;
+  payment_terms?: string;
+  shipping_method?: string;
+  shipping_cost?: number;
+  tax_amount?: number;
+  discount_amount?: number;
+  notes?: string;
+  internal_notes?: string;
 }
 
 export interface PurchaseOrderItemCreate {

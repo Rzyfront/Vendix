@@ -7,8 +7,8 @@
  *   - colapsa espacios y guiones repetidos
  *   - trim de guiones al inicio/fin
  *
- * Si el resultado es vacío (e.g. nombre solo con emojis), devuelve `null`
- * y el caller decide qué hacer (rechazar o autogenerar).
+ * Si el resultado es vacío (e.g. nombre solo con emojis), devuelve la
+ * cadena vacía `''`. El caller decide qué hacer (rechazar o autogenerar).
  */
 export function generateSlug(name: string): string {
   const slug = name
