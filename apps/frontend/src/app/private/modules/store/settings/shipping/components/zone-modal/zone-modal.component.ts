@@ -1,4 +1,4 @@
-import {Component, input, output, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import {Component, computed, input, output, OnInit, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -22,10 +22,11 @@ import {
   InputComponent,
   ToggleComponent,
   IconComponent,
-  SelectorComponent,
+  MultiSelectorComponent,
   ButtonComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { dedupeGeoNames } from '../../../../../../../core/utils/geo-name.util';
 
 @Component({
   selector: 'app-zone-modal',
@@ -36,7 +37,7 @@ import {
     InputComponent,
     ToggleComponent,
     IconComponent,
-    SelectorComponent,
+    MultiSelectorComponent,
     ButtonComponent,
   ],
   template: `
@@ -95,7 +96,7 @@ import {
           </div>
         </div>
 
-        <!-- Departamento -->
+        <!-- Departamentos (múltiples) -->
         <div>
           @if (loadingDepartments) {
             <div class="flex items-center gap-2 p-3 text-sm text-gray-400">
@@ -103,23 +104,23 @@ import {
               Cargando departamentos...
             </div>
           } @else {
-            <app-selector
-              label="Departamento (opcional)"
-              formControlName="department"
+            <app-multi-selector
+              label="Departamentos (opcional)"
+              formControlName="departments"
               [options]="departmentOptions"
               placeholder="Todo Colombia"
-              (valueChange)="onDepartmentChange($event)"
-            ></app-selector>
+              (valueChange)="onDepartmentsChange($event)"
+            ></app-multi-selector>
           }
           <p
             class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1"
           >
             <app-icon name="info" size="10"></app-icon>
-            Dejar vacío para cubrir todo el país.
+            Puedes elegir varios. Dejar vacío para cubrir todo el país.
           </p>
         </div>
 
-        <!-- Ciudad (cascading desde departamento) -->
+        <!-- Ciudades (cascada desde los departamentos elegidos) -->
         <div>
           @if (loadingCities) {
             <div class="flex items-center gap-2 p-3 text-sm text-gray-400">
@@ -127,20 +128,36 @@ import {
               Cargando ciudades...
             </div>
           } @else {
-            <app-selector
-              label="Ciudad específica (opcional)"
-              formControlName="city"
+            <app-multi-selector
+              label="Ciudades específicas (opcional)"
+              formControlName="cities"
               [options]="cityOptions"
-              [disabled]="!form.get('department')?.value"
-              placeholder="Todo el departamento"
-            ></app-selector>
+              [disabled]="selectedDepartments().length === 0"
+              placeholder="Todos los municipios de esos departamentos"
+              (valueChange)="onCitiesChange($event)"
+            ></app-multi-selector>
           }
           <p
             class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1"
           >
             <app-icon name="info" size="10"></app-icon>
-            Selecciona primero un departamento. Dejar vacío para todo el
-            departamento.
+            Selecciona primero uno o más departamentos. Dejar vacío para cubrir
+            todos sus municipios.
+          </p>
+        </div>
+
+        <!-- Alcance resultante: la cobertura es lo que más confunde al
+             configurar zonas, así que se dice en palabras. -->
+        <div
+          class="flex items-start gap-2 p-3 rounded-xl border border-[var(--color-border)] bg-gray-50/30"
+        >
+          <app-icon
+            name="map-pin"
+            size="14"
+            class="text-indigo-600 mt-0.5"
+          ></app-icon>
+          <p class="text-xs text-[var(--color-text-secondary)]">
+            {{ coverageSummary() }}
           </p>
         </div>
 
@@ -212,24 +229,65 @@ export class ZoneModalComponent implements OnInit {
   readonly isSubmitting = signal(false);
 
   departments: Department[] = [];
-  cities: City[] = [];
   loadingDepartments = false;
   loadingCities = false;
+
+  /**
+   * Ciudades por nombre de departamento. Una zona puede cubrir varios
+   * departamentos, así que hay que acumular sus municipios en vez de pisar la
+   * lista con cada cambio.
+   */
+  private readonly citiesByDepartment = signal<Record<string, City[]>>({});
+
+  /** Espejo reactivo de los departamentos elegidos (zoneless: el template lo lee). */
+  readonly selectedDepartments = signal<string[]>([]);
+  /** Espejo reactivo de las ciudades elegidas. */
+  readonly selectedCities = signal<string[]>([]);
 
   get departmentOptions(): { value: string; label: string }[] {
     return this.departments.map((d) => ({ value: d.name, label: d.name }));
   }
 
-  get cityOptions(): { value: string; label: string }[] {
-    return this.cities.map((c) => ({ value: c.name, label: c.name }));
+  /**
+   * Unión de los municipios de todos los departamentos seleccionados. El nombre
+   * del departamento va como `description` porque hay municipios homónimos en
+   * departamentos distintos.
+   */
+  get cityOptions(): {
+    value: string;
+    label: string;
+    description?: string;
+  }[] {
+    const byDepartment = this.citiesByDepartment();
+    return this.selectedDepartments().flatMap((depName) =>
+      (byDepartment[depName] ?? []).map((c) => ({
+        value: c.name,
+        label: c.name,
+        description: depName,
+      })),
+    );
   }
+
+  /** Explica en palabras qué va a cubrir la zona con la selección actual. */
+  readonly coverageSummary = computed(() => {
+    const deps = this.selectedDepartments();
+    const cities = this.selectedCities();
+
+    if (deps.length === 0) {
+      return 'Esta zona cubrirá todo Colombia. Sirve como cobertura de respaldo para las direcciones que ninguna otra zona alcance.';
+    }
+    if (cities.length === 0) {
+      return `Esta zona cubrirá todos los municipios de ${deps.length === 1 ? deps[0] : `${deps.length} departamentos`}.`;
+    }
+    return `Esta zona cubrirá ${cities.length === 1 ? cities[0] : `${cities.length} municipios`}. Las direcciones de otras ciudades no podrán finalizar la compra salvo que otra zona las cubra.`;
+  });
 
   constructor() {
     this.form = this.fb.group({
       name: ['', [Validators.required, Validators.maxLength(100)]],
+      departments: [[] as string[]],
       display_name: ['', Validators.maxLength(100)],
-      department: [''],
-      city: [''],
+      cities: [[] as string[]],
       zip_codes_text: [''],
       is_active: [true],
     });
@@ -257,51 +315,88 @@ export class ZoneModalComponent implements OnInit {
     }
   }
 
-  private async loadCities(depName: string): Promise<void> {
-    const dep = this.departments.find((d) => d.name === depName);
-    if (!dep) {
-      this.cities = [];
-      return;
-    }
+  /**
+   * Carga (y cachea) los municipios de los departamentos indicados que aún no
+   * se hayan traído. Nunca descarta lo ya cargado: la zona puede cubrir varios.
+   */
+  private async loadCitiesFor(depNames: string[]): Promise<void> {
+    const pending = depNames.filter(
+      (name) => !(name in this.citiesByDepartment()),
+    );
+    if (pending.length === 0) return;
 
     this.loadingCities = true;
     try {
-      this.cities = await this.countryService.getCitiesByDepartment(dep.id);
-    } catch {
-      this.cities = [];
+      const loaded = await Promise.all(
+        pending.map(async (name) => {
+          const dep = this.departments.find((d) => d.name === name);
+          if (!dep) return [name, [] as City[]] as const;
+          try {
+            return [
+              name,
+              await this.countryService.getCitiesByDepartment(dep.id),
+            ] as const;
+          } catch {
+            // El catálogo puede caerse; dejamos el departamento sin municipios
+            // en vez de romper el modal. La zona igual se puede guardar a nivel
+            // de departamento.
+            return [name, [] as City[]] as const;
+          }
+        }),
+      );
+
+      this.citiesByDepartment.update((current) => {
+        const next = { ...current };
+        for (const [name, cities] of loaded) next[name] = cities;
+        return next;
+      });
     } finally {
       this.loadingCities = false;
     }
   }
 
   private async populateForm(zone: ShippingZone): Promise<void> {
-    const depName = zone.regions?.[0] || '';
-    const cityName = zone.cities?.[0] || '';
+    const depNames = zone.regions ?? [];
+    const cityNames = zone.cities ?? [];
 
     this.form.patchValue({
       name: zone.name,
       display_name: zone.display_name || '',
-      department: depName,
-      city: '',
+      departments: depNames,
+      cities: [],
       zip_codes_text: zone.zip_codes?.join(', ') || '',
       is_active: zone.is_active,
     });
+    this.selectedDepartments.set(depNames);
 
-    if (depName) {
-      await this.loadCities(depName);
-      if (cityName) {
-        this.form.patchValue({ city: cityName }, { emitEvent: false });
+    if (depNames.length > 0) {
+      await this.loadCitiesFor(depNames);
+      if (cityNames.length > 0) {
+        // Antes esto leía sólo `zone.cities[0]`, así que editar una zona con
+        // varias ciudades perdía todas menos la primera al guardar.
+        this.form.patchValue({ cities: cityNames }, { emitEvent: false });
+        this.selectedCities.set(cityNames);
       }
     }
   }
 
-  async onDepartmentChange(depName: string | number | null): Promise<void> {
-    this.form.patchValue({ city: '' }, { emitEvent: false });
-    this.cities = [];
+  async onDepartmentsChange(value: (string | number)[]): Promise<void> {
+    const depNames = (value ?? []).map((v) => String(v));
+    this.selectedDepartments.set(depNames);
 
-    if (depName && typeof depName === 'string') {
-      await this.loadCities(depName);
-    }
+    await this.loadCitiesFor(depNames);
+
+    // Quitar las ciudades que ya no pertenecen a ningún departamento elegido.
+    const stillValid = new Set(this.cityOptions.map((o) => o.value));
+    const prunedCities = this.selectedCities().filter((c) =>
+      stillValid.has(c),
+    );
+    this.selectedCities.set(prunedCities);
+    this.form.patchValue({ cities: prunedCities }, { emitEvent: false });
+  }
+
+  onCitiesChange(value: (string | number)[]): void {
+    this.selectedCities.set((value ?? []).map((v) => String(v)));
   }
 
   onSubmit(): void {
@@ -321,13 +416,16 @@ export class ZoneModalComponent implements OnInit {
             .filter((s) => s.length > 0)
         : [];
 
+    // Se persiste el nombre legible del catálogo, pero se deduplica por forma
+    // normalizada: el backend resuelve las zonas comparando normalizado, así
+    // que "Bogotá" y "bogota" en la misma zona serían la misma entrada.
     const dto: CreateZoneDto = {
       name: values.name,
       display_name: values.display_name || undefined,
       countries: ['CO'],
-      regions: values.department ? [values.department] : [],
-      cities: values.city ? [values.city] : [],
-      zip_codes: parseList(values.zip_codes_text),
+      regions: dedupeGeoNames(values.departments ?? []),
+      cities: dedupeGeoNames(values.cities ?? []),
+      zip_codes: dedupeGeoNames(parseList(values.zip_codes_text)),
       is_active: values.is_active,
     };
 

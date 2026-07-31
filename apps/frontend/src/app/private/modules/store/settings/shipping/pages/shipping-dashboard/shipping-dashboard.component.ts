@@ -100,6 +100,45 @@ import {
         ></app-stats>
       </div>
 
+      <!-- Aviso de cobertura incompleta. El comerciante configura zonas por
+           ciudad sin darse cuenta de que cualquier comprador de otra ciudad
+           queda sin poder finalizar la compra: el checkout no tiene forma de
+           cotizarle el envío. Se lo decimos acá, que es donde puede arreglarlo. -->
+      @if (!is_loading() && hasRestrictedCoverageOnly()) {
+        <div
+          class="flex flex-wrap items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm"
+        >
+          <app-icon
+            name="alert-triangle"
+            size="18"
+            class="text-amber-600 shrink-0 mt-0.5"
+          ></app-icon>
+          <div class="flex-1 min-w-[14rem]">
+            @if (hasNoActiveZones()) {
+              <p class="font-semibold text-[var(--color-text-primary)]">
+                No tienes ninguna zona de envío activa
+              </p>
+              <p class="text-[var(--color-text-secondary)] mt-0.5">
+                Sin zonas no se puede calcular el envío de ningún pedido: los
+                compradores con productos físicos no podrán finalizar la compra.
+                Crea al menos una zona.
+              </p>
+            } @else {
+              <p class="font-semibold text-[var(--color-text-primary)]">
+                Tu cobertura de envío está limitada a
+                {{ coveredPlacesLabel() }}
+              </p>
+              <p class="text-[var(--color-text-secondary)] mt-0.5">
+                Los compradores de cualquier otra ciudad no podrán finalizar la
+                compra. Crea una zona sin departamento ni ciudad para cubrir el
+                resto del país, o agrega las ciudades que te faltan a una zona
+                existente.
+              </p>
+            }
+          </div>
+        </div>
+      }
+
       <!-- Content Card -->
       <app-card [responsive]="true" [padding]="false">
         <!-- Sticky search header -->
@@ -308,6 +347,49 @@ export class ShippingDashboardComponent implements OnInit {
         this.getTypeLabel(m.type).toLowerCase().includes(term) ||
         m.provider_name?.toLowerCase().includes(term),
     );
+  });
+
+  /**
+   * True cuando la tienda tiene zonas activas pero TODAS restringen por
+   * departamento o ciudad, o sea que no existe ninguna cobertura de respaldo.
+   *
+   * El backend resuelve la zona más específica que cubra la dirección; si
+   * ninguna la cubre, no hay tarifa que cotizar y el comprador no puede
+   * cerrar la compra. Una zona sin `regions` ni `cities` cubre todo el país y
+   * evita ese callejón.
+   */
+  readonly hasRestrictedCoverageOnly = computed(() => {
+    const zones = this.store_zones().filter((z) => z.is_active);
+    // Sin ninguna zona activa no hay NADA que cotizar: es el caso más grave y
+    // también el más frecuente (tienda recién creada que nunca configuró
+    // envíos). Se avisa igual, con otro texto.
+    if (zones.length === 0) return true;
+    return !zones.some(
+      (z) => (z.regions?.length ?? 0) === 0 && (z.cities?.length ?? 0) === 0,
+    );
+  });
+
+  /** True cuando no hay ninguna zona activa configurada. */
+  readonly hasNoActiveZones = computed(
+    () => this.store_zones().filter((z) => z.is_active).length === 0,
+  );
+
+  /** Lista legible de lo que la tienda sí cubre hoy, para el aviso. */
+  readonly coveredPlacesLabel = computed(() => {
+    const zones = this.store_zones().filter((z) => z.is_active);
+    const cities = [...new Set(zones.flatMap((z) => z.cities ?? []))];
+    if (cities.length > 0) {
+      return cities.length <= 3
+        ? cities.join(', ')
+        : `${cities.slice(0, 3).join(', ')} y ${cities.length - 3} ciudad(es) más`;
+    }
+    const regions = [...new Set(zones.flatMap((z) => z.regions ?? []))];
+    if (regions.length > 0) {
+      return regions.length <= 3
+        ? regions.join(', ')
+        : `${regions.slice(0, 3).join(', ')} y ${regions.length - 3} departamento(s) más`;
+    }
+    return 'las zonas configuradas';
   });
 
   // ===== LIFECYCLE =====

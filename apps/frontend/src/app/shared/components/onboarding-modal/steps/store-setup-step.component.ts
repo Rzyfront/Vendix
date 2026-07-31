@@ -818,11 +818,16 @@ export class StoreSetupStepComponent implements OnInit {
       }
     });
 
-    // Cargar ciudades al cambiar departamento
-    depControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((depId: any) => {
-      if (depId) {
-        const numericDepId = Number(depId);
-        this.loadCities(numericDepId);
+    // Cargar ciudades al cambiar departamento. El control guarda el NOMBRE del
+    // departamento (ver `departmentOptions`), no su id de catálogo.
+    depControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((depName: any) => {
+      if (depName) {
+        const dep = this.findDepartment(depName);
+        if (dep) {
+          this.loadCities(dep.id);
+        } else {
+          this.cities.set([]);
+        }
       } else {
         this.cities.set([]);
         cityControl.setValue(null);
@@ -839,24 +844,55 @@ export class StoreSetupStepComponent implements OnInit {
     cityControl: any,
   ): Promise<void> {
     const countryValue = countryControl.value;
-    const depValue = depControl.value ? Number(depControl.value) : null;
-    const cityValue = cityControl.value ? Number(cityControl.value) : null;
+    const depValue = depControl.value;
+    const cityValue = cityControl.value;
 
     // Si el país es Colombia, cargar departamentos
     if (countryValue === 'CO') {
       await this.loadDepartments();
 
-      // Si hay un departamento guardado, cargar sus ciudades
-      if (depValue) {
-        depControl.setValue(depValue, { emitEvent: false });
-        await this.loadCities(depValue);
+      // Si hay un departamento guardado, cargar sus ciudades. El valor puede
+      // venir como nombre (formato actual) o como id de catálogo (borradores
+      // y tiendas creadas antes de este cambio).
+      const dep = depValue ? this.findDepartment(depValue) : null;
+      if (dep) {
+        depControl.setValue(dep.name, { emitEvent: false });
+        await this.loadCities(dep.id);
 
-        // Si hay una ciudad guardada, establecerla
-        if (cityValue) {
-          cityControl.setValue(cityValue, { emitEvent: false });
+        // Si hay una ciudad guardada, establecerla — mismo criterio.
+        const city = cityValue ? this.findCity(cityValue) : null;
+        if (city) {
+          cityControl.setValue(city.name, { emitEvent: false });
         }
       }
     }
+  }
+
+  /**
+   * Resuelve un departamento aceptando su nombre o su id de catálogo.
+   *
+   * Los selectores exponen el NOMBRE como valor a propósito: ese es el dato que
+   * termina en `addresses.state_province` y contra el que el backend compara
+   * las zonas de envío. Cuando el valor era el id, se guardaban direcciones
+   * como `state_province = "19"` que ninguna zona podía matchear.
+   */
+  private findDepartment(value: string | number): Department | undefined {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber) && String(value).trim() !== '') {
+      const byId = this.departments().find((d) => d.id === asNumber);
+      if (byId) return byId;
+    }
+    return this.departments().find((d) => d.name === String(value));
+  }
+
+  /** Resuelve una ciudad aceptando su nombre o su id de catálogo. */
+  private findCity(value: string | number): City | undefined {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber) && String(value).trim() !== '') {
+      const byId = this.cities().find((c) => c.id === asNumber);
+      if (byId) return byId;
+    }
+    return this.cities().find((c) => c.name === String(value));
   }
 
   async loadDepartments(): Promise<void> {
@@ -939,11 +975,14 @@ export class StoreSetupStepComponent implements OnInit {
     return this.countries.map(c => ({ value: c.code, label: c.name }));
   }
 
+  // El VALOR de estos selectores es el nombre, no el id del catálogo: es lo
+  // que se persiste en `addresses` y lo único que el backend sabe comparar
+  // contra las zonas de envío.
   get departmentOptions() {
-    return this.departments().map(d => ({ value: d.id, label: d.name }));
+    return this.departments().map(d => ({ value: d.name, label: d.name }));
   }
 
   get cityOptions() {
-    return this.cities().map(c => ({ value: c.id, label: c.name }));
+    return this.cities().map(c => ({ value: c.name, label: c.name }));
   }
 }

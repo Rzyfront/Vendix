@@ -617,7 +617,10 @@ export class CheckoutComponent implements OnInit {
         filter(() => !this.cartHasOnlyServices && this.address_form.valid),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(() => this.loadShippingOptions());
+      // `notify: false` — esto corre mientras el comprador todavía está
+      // eligiendo la ciudad. Actualiza el estado de cobertura en silencio; el
+      // aviso explícito se da al intentar avanzar, no mientras tipea.
+      .subscribe(() => this.loadShippingOptions(false));
 
     // Forward-geocode what the customer TYPES so the map re-centers on it. The
     // reverse-geocode fill uses `emitEvent: false`, so only genuine typing
@@ -1054,18 +1057,18 @@ export class CheckoutComponent implements OnInit {
    * avance de paso pueda esperarla en vez de dejar al comprador aterrizando en
    * el paso de Pago con la lista todavía vacía y creyendo que no hay cobertura.
    */
-  loadShippingOptions(): Promise<void> {
+  loadShippingOptions(notify = true): Promise<void> {
     if (this.use_new_address() && this.address_form.valid) {
       const address = this.mapFormToCalcAddress(this.address_form.value);
       if (!address) {
         this.shipping_options.set([]);
         this.shipping_coverage.set('none');
-        this.error_message.set(
-          ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001'],
-        );
+        if (notify) {
+          this.error_message.set(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
+        }
         return Promise.resolve();
       }
-      return this.fetchShipping(address);
+      return this.fetchShipping(address, notify);
     }
 
     if (this.selected_address_id()) {
@@ -1073,7 +1076,7 @@ export class CheckoutComponent implements OnInit {
         (a) => a.id === this.selected_address_id(),
       );
       if (address) {
-        return this.fetchShipping(this.mapAddressToCalc(address));
+        return this.fetchShipping(this.mapAddressToCalc(address), notify);
       }
     }
 
@@ -1137,7 +1140,7 @@ export class CheckoutComponent implements OnInit {
     return value;
   }
 
-  fetchShipping(address: any): Promise<void> {
+  fetchShipping(address: any, notify = true): Promise<void> {
     this.is_loading.set(true);
     this.loading_shipping.set(true);
 
@@ -1174,11 +1177,13 @@ export class CheckoutComponent implements OnInit {
 
             // Antes esto era silencioso: la lista quedaba vacía, el botón se
             // deshabilitaba y el comprador no sabía por qué.
-            this.error_message.set(ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001']);
-            this.toast.error(
-              ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
-              'Sin cobertura de envío',
-            );
+            if (notify) {
+              this.error_message.set(ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001']);
+              this.toast.error(
+                ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
+                'Sin cobertura de envío',
+              );
+            }
           }
 
           this.is_loading.set(false);

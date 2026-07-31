@@ -211,31 +211,47 @@ export class AddressModalComponent {
             return;
         }
 
-        this.is_saving.set(true);
-        this.error_message.set('');
-
         let form_value = this.address_form.value;
 
-        // For Colombia, convert IDs to names for backend compatibility
+        // For Colombia, convert IDs to names for backend compatibility.
+        //
+        // Si la conversión no se puede hacer (el catálogo no cargó, o
+        // `api-colombia` respondió vacío) NO se guarda: dejar pasar el ID crudo
+        // persiste una dirección con `city = "694"`, que ninguna zona de envío
+        // puede matchear y deja al cliente sin poder comprar, sin explicación.
         if (form_value.country_code === 'CO') {
-            // Convert department ID to name
+            const unresolved: string[] = [];
+
             if (form_value.state_province) {
                 const depId = Number(form_value.state_province);
                 const department = this.departments().find((d) => d.id === depId);
                 if (department) {
                     form_value = { ...form_value, state_province: department.name };
+                } else if (Number.isFinite(depId)) {
+                    unresolved.push('departamento');
                 }
             }
 
-            // Convert city ID to name
             if (form_value.city) {
                 const cityId = Number(form_value.city);
                 const city = this.cities().find((c) => c.id === cityId);
                 if (city) {
                     form_value = { ...form_value, city: city.name };
+                } else if (Number.isFinite(cityId)) {
+                    unresolved.push('ciudad');
                 }
             }
+
+            if (unresolved.length > 0) {
+                this.error_message.set(
+                    `No pudimos identificar ${unresolved.join(' y ')}. Vuelve a seleccionarlos e intenta de nuevo.`,
+                );
+                return;
+            }
         }
+
+        this.is_saving.set(true);
+        this.error_message.set('');
 
         let operation: Observable<{ success: boolean; data: Address }>;
 
