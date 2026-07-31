@@ -15,11 +15,30 @@ import {
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent} from '../../../../../../shared/components/index';
+  ModalComponent,
+  SelectorComponent} from '../../../../../../shared/components/index';
+import type { SelectorOption } from '../../../../../../shared/components/index';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import { selectUserSaving } from '../state/selectors/store-users.selectors';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
 
+/**
+ * QUI-581 — Roles asignables al crear, espejo de `ASSIGNABLE_SYSTEM_ROLES.store`
+ * (backend: `ASSIGNABLE_STORE_USER_ROLES`, que es lo que valida el `@IsIn` del DTO).
+ *
+ * `employee` va primero porque es el valor por defecto: quien no toque el campo
+ * obtiene exactamente el comportamiento previo al ticket.
+ *
+ * `carrier` no duplica la derivación de `app_type`: el backend fuerza
+ * `STORE_DELIVERY` al detectar ese rol.
+ */
+const CREATE_USER_ROLE_OPTIONS: readonly SelectorOption[] = [
+  { value: 'employee', label: 'Empleado' },
+  { value: 'cashier', label: 'Cajero' },
+  { value: 'supervisor', label: 'Supervisor' },
+  { value: 'manager', label: 'Gerente' },
+  { value: 'carrier', label: 'Repartidor' },
+];
 
 @Component({
   selector: 'app-store-user-create-modal',
@@ -29,6 +48,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
     InputComponent,
     ButtonComponent,
     ModalComponent,
+    SelectorComponent,
   ],
   template: `
     <app-modal
@@ -88,6 +108,14 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
             [disabled]="isCreating()"
             helpText="Minimo 8 caracteres, debe incluir mayuscula, minuscula, numero y caracter especial"
           ></app-input>
+
+          <app-selector
+            formControlName="role"
+            label="Rol *"
+            [options]="roleOptions"
+            [disabled]="isCreating()"
+            helpText="Define que puede hacer el usuario. Se puede cambiar despues."
+          ></app-selector>
         </div>
       </form>
 
@@ -142,6 +170,8 @@ export class StoreUserCreateModalComponent {
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
+  /** Constante, no señal: la lista no depende del estado. */
+  readonly roleOptions = CREATE_USER_ROLE_OPTIONS as SelectorOption[];
   private store = inject(Store);
   private actions$ = inject(Actions);
   /** Progreso real de la mutación, tomado del state (no un flag local). */
@@ -172,7 +202,10 @@ export class StoreUserCreateModalComponent {
             /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
           ),
         ],
-      ]});
+      ],
+      // QUI-581 — `employee` por defecto: preserva el comportamiento anterior al
+      // ticket para quien no toque el campo.
+      role: ['employee', [Validators.required]]});
 
     // Éxito: limpiar, cerrar y avisar al padre. El toast y la recarga de lista
     // + stats los hacen `createUser$` y `mutationSuccess$` respectivamente.
@@ -221,6 +254,7 @@ export class StoreUserCreateModalComponent {
       last_name: '',
       username: '',
       email: '',
-      password: ''});
+      password: '',
+      role: 'employee'});
   }
 }
