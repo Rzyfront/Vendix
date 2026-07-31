@@ -387,7 +387,15 @@ describe('RolesService', () => {
       expect(mockUserRoleAssignment.assign).toHaveBeenCalledWith({
         user_id: 20,
         role_id: 5,
-        actor: { level: 'organization', organization_id: ORGANIZATION_ID },
+        // QUI-581 — el actor viaja con `actor_roles` (vacío aquí porque el mock de
+        // RequestContextService no publica roles). Es lo que permite a
+        // `canAssignRole` elevar a un `owner`; sin este campo el nivel tienda
+        // quedaría restringido y los tenants de tienda única, bloqueados.
+        actor: {
+          level: 'organization',
+          organization_id: ORGANIZATION_ID,
+          actor_roles: [],
+        },
         store_id: 3,
       });
       // Claves heredadas que el frontend actual ya consume.
@@ -409,6 +417,7 @@ describe('RolesService', () => {
       expect(mockUserRoleAssignment.listUserRoles).toHaveBeenCalledWith(20, {
         level: 'organization',
         organization_id: ORGANIZATION_ID,
+        actor_roles: [],
       });
       expect(result[0].store_id).toBeNull();
     });
