@@ -58,11 +58,27 @@ import {
                 class="shrink-0 text-primary"
               />
               <span>
-                Agrega
-                <span class="font-semibold">{{ tier.remaining_quantity }} und</span>
-                más y obtén
-                <span class="font-semibold">{{ tier.benefitLabel }}</span>
-                en '{{ tier.name }}'.
+                @if (tier.target_product_name) {
+                  Agrega
+                  <span class="font-semibold"
+                    >{{ tier.remaining_quantity }} und</span
+                  >
+                  más de
+                  <span class="font-semibold"
+                    >'{{ tier.target_product_name }}'</span
+                  >
+                  y obtén
+                  <span class="font-semibold">{{ tier.benefitLabel }}</span>
+                  en '{{ tier.name }}'.
+                } @else {
+                  Agrega
+                  <span class="font-semibold"
+                    >{{ tier.remaining_quantity }} und</span
+                  >
+                  más y obtén
+                  <span class="font-semibold">{{ tier.benefitLabel }}</span>
+                  en '{{ tier.name }}'.
+                }
               </span>
             </span>
           }
@@ -95,22 +111,28 @@ import {
 
             @for (promo of appliedPromotions(); track promo.promotion_id) {
               <div class="flex flex-col gap-0.5">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="flex min-w-0 flex-1 items-baseline gap-1.5 flex-wrap">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex min-w-0 items-center gap-1.5">
                     <span
-                      class="text-text-secondary"
+                      class="truncate text-text-secondary"
                       [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                      [title]="promo.name"
                       >{{ promo.name }}</span
                     >
-                    @if (promo.affectedLabel) {
-                      <span
-                        class="text-text-muted"
-                        [ngClass]="compact() ? 'text-[10px]' : 'text-xs'"
-                        [title]="'Aplicada a: ' + promo.affectedLabel"
-                        >({{ promo.affectedLabel }})</span
-                      >
-                    }
+                    <app-badge
+                      [variant]="promo.typeVariant"
+                      size="xs"
+                      badgeStyle="outline"
+                    >
+                      {{ promo.typeLabel }}
+                    </app-badge>
+                    <app-badge
+                      variant="success"
+                      size="xs"
+                      badgeStyle="solid"
+                      title="Esta es la promoción aplicada. El motor descartó las demás promos elegibles porque solo se permite una promoción por orden."
+                    >
+                      Aplicada
+                    </app-badge>
                   </div>
                   <span
                     class="shrink-0 font-semibold text-green-600"
@@ -118,23 +140,22 @@ import {
                     >-{{ promo.discount_amount | currency }}</span
                   >
                 </div>
-                <div class="flex items-center gap-1.5">
-                  <app-badge
-                    [variant]="promo.typeVariant"
-                    size="xs"
-                    badgeStyle="outline"
+                <!-- Phase 2d: cuando la promo es per_product el backend nos
+                     dice qué SKUs la activaron. Mostrar esta línea evita la
+                     confusión clásica del bug "tengo 3 productos distintos y
+                     solo uno califica" - el cliente ve exactamente a quién se
+                     le aplicó el descuento. -->
+                @if (promo.target_product_names.length > 0) {
+                  <span
+                    class="text-text-secondary/80"
+                    [ngClass]="compact() ? 'text-[10px]' : 'text-[11px]'"
                   >
-                    {{ promo.typeLabel }}
-                  </app-badge>
-                  <app-badge
-                    variant="success"
-                    size="xs"
-                    badgeStyle="solid"
-                    title="Esta es la promoción aplicada. El motor descartó las demás promos elegibles porque solo se permite una promoción por orden."
-                  >
-                    Aplicada
-                  </app-badge>
-                </div>
+                    en:
+                    <span class="font-medium text-text-primary">
+                      {{ formatTargetProductNames(promo.target_product_names) }}
+                    </span>
+                  </span>
+                }
               </div>
             }
           </div>
@@ -157,13 +178,27 @@ import {
                   class="mt-0.5 shrink-0 text-primary"
                 />
                 <span>
-                  Agrega
-                  <span class="font-semibold"
-                    >{{ tier.remaining_quantity }} und</span
-                  >
-                  más y obtén
-                  <span class="font-semibold">{{ tier.benefitLabel }}</span>
-                  en '{{ tier.name }}'.
+                  @if (tier.target_product_name) {
+                    Agrega
+                    <span class="font-semibold"
+                      >{{ tier.remaining_quantity }} und</span
+                    >
+                    más de
+                    <span class="font-semibold"
+                      >'{{ tier.target_product_name }}'</span
+                    >
+                    y obtén
+                    <span class="font-semibold">{{ tier.benefitLabel }}</span>
+                    en '{{ tier.name }}'.
+                  } @else {
+                    Agrega
+                    <span class="font-semibold"
+                      >{{ tier.remaining_quantity }} und</span
+                    >
+                    más y obtén
+                    <span class="font-semibold">{{ tier.benefitLabel }}</span>
+                    en '{{ tier.name }}'.
+                  }
                 </span>
               </div>
             }
@@ -212,10 +247,9 @@ export class CartPromotionsComponent {
    * from the cart page (`cart.component.ts`): percentage → Porcentaje/success,
    * fixed_amount → Monto fijo/primary, otherwise → Promoción/success.
    *
-   * `affectedLabel` (when present) renders the product(s) or category(ies) the
-   * discount was applied to, e.g. "(Guanabana, Mango)". Backend omits the
-   * field for `scope: 'order'` promos so the label is `''` and the template
-   * hides the parenthetical.
+   * Also resolves `target_product_ids` (set by the backend under
+   * `quantity_grouping='per_product'`) against `cart.items[]` so the UI can
+   * show "en: Kit de freno, Kit de arrastre" without an extra round-trip.
    */
   readonly appliedPromotions = computed<
     Array<{
@@ -224,7 +258,7 @@ export class CartPromotionsComponent {
       discount_amount: number;
       typeLabel: string;
       typeVariant: BadgeVariant;
-      affectedLabel: string;
+      target_product_names: string[];
     }>
   >(() =>
     (this.cart()?.applied_promotions ?? []).map((promo) => ({
@@ -238,7 +272,7 @@ export class CartPromotionsComponent {
             ? 'Monto fijo'
             : 'Promoción',
       typeVariant: promo.type === 'fixed_amount' ? 'primary' : 'success',
-      affectedLabel: this.formatAffectedLabel(promo.applicable_descriptions),
+      target_product_names: this.resolveProductNames(promo.target_product_ids),
     })),
   );
 
@@ -269,6 +303,11 @@ export class CartPromotionsComponent {
    * Next-tier nudge view. `benefitLabel` mirrors the POS `formatTierBenefit`:
    * percentage → `-<value>%`, fixed_amount → `-<currency>` via the tenant
    * `CurrencyFormatService`.
+   *
+   * Also resolves `target_product_id` (the SKU closest to qualifying under
+   * `quantity_grouping='per_product'`) against `cart.items[]` so the
+   * banner can say "Agrega 1 und más de 'Kit de freno NKD'" instead of a
+   * generic SKU-less nudge.
    */
   readonly tierProgress = computed<
     Array<{
@@ -276,6 +315,7 @@ export class CartPromotionsComponent {
       name: string;
       remaining_quantity: number;
       benefitLabel: string;
+      target_product_name: string | null;
     }>
   >(() =>
     (this.cart()?.tier_progress ?? []).map((tier) => ({
@@ -286,6 +326,60 @@ export class CartPromotionsComponent {
         tier.benefit_type === 'percentage'
           ? `-${tier.benefit_value}%`
           : `-${this.currencyFormat.format(tier.benefit_value)}`,
+      target_product_name: this.resolveProductName(tier.target_product_id),
     })),
   );
+
+  /**
+   * Look up a single `product_id` against the cart's items and return the
+   * product's display name (or null if absent / backend didn't supply an id).
+   * Kept as an instance method so the two computed signals above can share it
+   * without rebuilding the lookup Map on every recompute.
+   */
+  private resolveProductName(productId: number | null | undefined): string | null {
+    if (productId == null) return null;
+    const item = this.cart()?.items.find((i) => i.product_id === productId);
+    return item?.product?.name ?? null;
+  }
+
+  /**
+   * Bulk variant of `resolveProductName` for the applied-promotions list.
+   * Preserves the input order and drops ids that aren't in the cart (e.g.
+   * stale product_ids from a removed line) so the UI never renders "en: "
+   * followed by an empty string.
+   */
+  private resolveProductNames(productIds: number[] | undefined): string[] {
+    if (!productIds || productIds.length === 0) return [];
+    const items = this.cart()?.items ?? [];
+    const names: string[] = [];
+    for (const id of productIds) {
+      const item = items.find((i) => i.product_id === id);
+      if (item?.product?.name) names.push(item.product.name);
+    }
+    return names;
+  }
+
+  /**
+   * Format the list of product names that unlocked an applied promotion
+   * under `quantity_grouping='per_product'`. Receives 1..N names already
+   * resolved against `cart.items[]` and must return a single string the
+   * template inserts between `en: <strong>...</strong>`.
+   *
+   * Contract:
+   *   - Never return an empty string (caller already guards with
+   *     `@if (promo.target_product_names.length > 0)`).
+   *   - Preserve the order the backend returned (it reflects which products
+   *     actually received the discount, not arbitrary cart order).
+   *
+   * Current policy (conservative for QA): comma-join without truncation. The
+   * cart summary already lives inside a narrow column and Tailwind's
+   * `text-text-secondary/80` line breaks naturally when the string is long.
+   * Product owner / David can refine this (e.g. truncate to "+N más") in a
+   * follow-up UX pass once we see real cart shapes in production.
+   *
+   * @see cart-promotions.component.html (the `@if` block that calls this).
+   */
+  protected formatTargetProductNames(names: string[]): string {
+    return names.join(', ');
+  }
 }

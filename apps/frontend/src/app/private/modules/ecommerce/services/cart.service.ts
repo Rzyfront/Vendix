@@ -59,13 +59,16 @@ export interface AppliedPromotion {
    */
   priority?: number;
   /**
-   * Human-readable labels for the products or categories the discount was
-   * applied to. Empty for `scope: 'order'` (whole order). Rendered in the
-   * cart summary as "(Guanabana, Mango)" so the customer knows which line
-   * got the discount. Backend computes this from the engine's
-   * `applicable_item_ids`; absent on older backend versions.
+   * `product_id`s that actually unlocked the discount under
+   * `quantity_grouping='per_product'`. Empty array for `cart_total` (legacy)
+   * promos — the frontend uses this to render "en: Producto X, Producto Y"
+   * next to the applied promotion name and avoid mixing references when
+   * the cart has multiple SKUs sharing the same promo.
+   *
+   * Optional for back-compat with older backend versions that predate the
+   * Phase 2d per_product grouping rollout.
    */
-  applicable_descriptions?: Array<{ label: string; kind: 'product' | 'category' }>;
+  target_product_ids?: number[];
 }
 
 /**
@@ -80,6 +83,16 @@ export interface CartTierProgress {
   remaining_quantity: number;
   benefit_type: 'percentage' | 'fixed_amount';
   benefit_value: number;
+  /**
+   * `product_id` of the cart line(s) closest to qualifying for the next
+   * tier. Populated when the promotion uses `quantity_grouping='per_product'`
+   * (so the customer knows exactly which SKU needs more units); null for
+   * `cart_total` (the scope crosses products — the banner says "Agrega N
+   * und más" without naming a single SKU).
+   *
+   * Optional for back-compat with older backend versions.
+   */
+  target_product_id?: number | null;
 }
 
 /**

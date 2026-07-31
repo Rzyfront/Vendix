@@ -63,6 +63,14 @@ export interface PromotionQuoteApplied {
   /** Items the discount was prorated against (sorted by line index). */
   applicable_item_ids: Array<string | number | undefined>;
   /**
+   * Unique `product_id`s that contributed to this promotion's discount.
+   * Surfaced to the frontend so the cart UI can name the products/SKUs that
+   * actually unlocked the deal (e.g. "Super promo — en: Kit de freno, Kit de
+   * arrastre"). Empty when the discount crossed product boundaries (e.g.
+   * `scope='order'` with a percentage off the whole cart).
+   */
+  target_product_ids?: number[];
+  /**
    * Promotion priority that determined this promo as the winner. Surfaced to
    * the frontend for the cart audit trail — an order has at most ONE active
    * promotion (the highest priority wins, ties broken by lowest promotion_id).
@@ -114,6 +122,17 @@ export interface PromotionTierProgress {
   benefit_type: 'percentage' | 'fixed_amount';
   /** RAW tier value (percentage points or money amount). NOT formatted. */
   benefit_value: number;
+  /**
+   * `product_id` of the cart line(s) that are closest to qualifying for the
+   * next tier. Populated when `quantity_grouping === 'per_product'` (the
+   * engine reports which specific SKU needs more units); null otherwise (the
+   * scope crosses products, e.g. `cart_total` or `scope='order'`).
+   *
+   * The frontend resolves the product name locally by crossing this id with
+   * `cart.items[]` — the engine never resolves names to keep its contract
+   * numeric and side-effect-free.
+   */
+  target_product_id?: number | null;
 }
 
 export interface PromotionQuoteResult {

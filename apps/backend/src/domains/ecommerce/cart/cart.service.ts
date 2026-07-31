@@ -679,50 +679,24 @@ export class CartService {
       promotion_discount: quote.total_discount,
       promotional_subtotal: quote.promotional_subtotal,
       item_count: resolvedItems.reduce((sum, i) => sum + i.quantity, 0),
-      applied_promotions: quote.applied_promotions.map((p) => {
-        const base = {
-          promotion_id: p.promotion_id,
-          name: p.name,
-          type: p.type,
-          scope: p.scope,
-          discount_amount: p.discount_amount,
-          // Surfaced for the cart UI audit trail. With the winner-takes-all
-          // engine, an order has at most one entry here.
-          priority: p.priority,
-        };
-        // For 'order' scope, the discount applies to the whole cart — no
-        // per-line labels to surface.
-        if (p.scope === 'order') {
-          return { ...base, applicable_descriptions: [] };
-        }
-
-        // Map the engine's per-line IDs back to product/category labels.
-        const labels: Array<{ label: string; kind: 'product' | 'category' }> = [];
-        const seenLabel = new Set<string>();
-        for (const lineId of p.applicable_item_ids ?? []) {
-          const idx = typeof lineId === 'number' ? lineId : Number(lineId);
-          if (!Number.isFinite(idx)) continue;
-          const item = resolvedItems[idx];
-          if (!item) continue;
-
-          if (p.scope === 'product') {
-            const label = item.product_name;
-            if (label && !seenLabel.has(label)) {
-              seenLabel.add(label);
-              labels.push({ label, kind: 'product' });
-            }
-          } else if (p.scope === 'category') {
-            for (const categoryId of categoryMap.get(item.product_id) ?? []) {
-              const label = categoryLabelMap.get(categoryId);
-              if (label && !seenLabel.has(label)) {
-                seenLabel.add(label);
-                labels.push({ label, kind: 'category' });
-              }
-            }
-          }
-        }
-        return { ...base, applicable_descriptions: labels };
-      }),
+      applied_promotions: quote.applied_promotions.map((p) => ({
+        promotion_id: p.promotion_id,
+        name: p.name,
+        type: p.type,
+        scope: p.scope,
+        discount_amount: p.discount_amount,
+        // Surfaced for the cart UI audit trail. With the winner-takes-all
+        // engine, an order has at most one entry here.
+        priority: p.priority,
+        // product_ids that actually unlocked the discount under
+        // `per_product` grouping. Empty for `cart_total` promos — the
+        // frontend uses this to render "en: Producto X, Producto Y" next
+        // to the applied promotion name and resolve it locally against
+        // `cart.items[]`.
+        target_product_ids: p.target_product_ids ?? [],
+      })),
+      // Each entry may include `target_product_id` (populated by the engine
+      // for `per_product` promos) which the banner uses to name the SKU.
       tier_progress: quote.tier_progress,
     };
   }
