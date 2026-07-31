@@ -13,7 +13,9 @@ import {
   ModalComponent,
   IconComponent,
   ImageSourceModalComponent,
+  PasswordRequirementsComponent,
 } from '../../../../../shared/components/index';
+import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
 import { OrgRolesService } from '../../roles/services/org-roles.service';
@@ -35,6 +37,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     ModalComponent,
     IconComponent,
     ImageSourceModalComponent,
+    PasswordRequirementsComponent,
   ],
   template: `
     <app-modal
@@ -128,8 +131,11 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
             [required]="true"
             [control]="userForm.get('password')"
             [disabled]="isCreating()"
-            helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
           ></app-input>
+
+          <app-password-requirements
+            [control]="userForm.get('password')"
+          ></app-password-requirements>
 
           <div class="space-y-2">
             <label class="block text-sm font-medium text-[var(--color-text-primary)]">
@@ -336,16 +342,8 @@ export class UserCreateModalComponent implements OnInit {
       phone: ['', [Validators.maxLength(20)]],
       document_type: [''],
       document_number: ['', [Validators.maxLength(50)]],
-      password: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(8),
-          Validators.pattern(
-            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-          ),
-        ],
-      ],
+      // Política única: `core/utils/password-policy`.
+      password: ['', [Validators.required, passwordPolicyValidator]],
       state: [UserState.PENDING_VERIFICATION],
       role_id: [null, [Validators.required]],
       main_store_id: [null],

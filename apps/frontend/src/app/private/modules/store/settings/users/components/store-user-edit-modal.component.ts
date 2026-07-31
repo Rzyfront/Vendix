@@ -31,10 +31,12 @@ import {
   SettingToggleComponent,
   BadgeComponent,
   PanelUiModulesEditorComponent,
+  PasswordRequirementsComponent,
   SelectorComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
 import type { BadgeVariant, SelectorOption } from '../../../../../../shared/components/index';
+import { passwordPolicyValidator } from '../../../../../../core/utils/password-policy';
 import {
   ScrollableTabsComponent,
   ScrollableTab,
@@ -95,6 +97,7 @@ interface RoleScopeGroup {
     PanelUiModulesEditorComponent,
     BadgeComponent,
     SelectorComponent,
+    PasswordRequirementsComponent,
   ],
   template: `
     @if (isOpen()) {
@@ -539,10 +542,13 @@ interface RoleScopeGroup {
                       formControlName="new_password"
                       label="Nueva contrasena"
                       type="password"
-                      placeholder="Minimo 8 caracteres"
+                      placeholder="Nueva contraseña"
                       [required]="true"
                       [control]="passwordForm.get('new_password')"
                     />
+                    <app-password-requirements
+                      [control]="passwordForm.get('new_password')"
+                    ></app-password-requirements>
                     <app-input
                       formControlName="confirm_password"
                       label="Confirmar contrasena"
@@ -878,7 +884,7 @@ export class StoreUserEditModalComponent implements OnChanges {
 
     this.passwordForm = this.fb.group(
       {
-        new_password: ['', [Validators.required, Validators.minLength(8)]],
+        new_password: ['', [Validators.required, passwordPolicyValidator]],
         confirm_password: ['', [Validators.required]],
       },
       { validators: this.passwordMatchValidator },

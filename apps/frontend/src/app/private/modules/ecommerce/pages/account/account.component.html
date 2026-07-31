@@ -135,6 +135,7 @@
                                     <app-input label="Confirmar contraseña" type="password" formControlName="confirm_password" placeholder="Confirmar" [control]="password_form.get('confirm_password')"></app-input>
                                 </div>
                             </div>
+                            <app-password-requirements [control]="password_form.get('new_password')"></app-password-requirements>
                             <div class="form-actions">
                                 <app-button type="button" variant="ghost" (clicked)="show_password_form.set(false); password_form.reset()">
                                     Cancelar

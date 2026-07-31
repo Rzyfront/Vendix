@@ -1,11 +1,15 @@
-import { IsString, MinLength } from 'class-validator';
+import { IsString } from 'class-validator';
+import { IsStrongPassword } from '../../../../common/validators/password-policy';
 
 export class ResetPasswordStoreUserDto {
   @IsString()
-  @MinLength(8)
+  @IsStrongPassword()
   new_password: string;
 
+  /**
+   * Solo se compara contra `new_password` en el servicio: aplicarle la política
+   * duplicaría el mismo error en dos campos.
+   */
   @IsString()
-  @MinLength(8)
   confirm_password: string;
 }

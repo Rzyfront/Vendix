@@ -24,6 +24,8 @@ import { AuthService } from '../../../../../core/services/auth.service';
 import { StoreAvailabilityService } from '../../../../../core/services/store-availability.service';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { PasswordRequirementsComponent } from '../../../../../shared/components/password-requirements/password-requirements.component';
+import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { RateLimitLockModalComponent } from '../../../../../shared/components/rate-limit-lock-modal/rate-limit-lock-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -45,6 +47,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
     InputComponent,
     IconComponent,
     LegalPreviewModalComponent,
+    PasswordRequirementsComponent,
     RateLimitLockModalComponent,
   ],
   template: `
@@ -272,30 +275,13 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               </div>
             }
 
-            <!-- Password requirements (always visible in register mode) -->
+            <!-- Requisitos de contraseña (solo en registro): checklist único
+                 de core/utils/password-policy. -->
             @if (isRegister()) {
-            <div
-              class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100"
-            >
-              <app-icon
-                name="info"
-                [size]="16"
-                class="text-blue-500 mt-0.5 flex-shrink-0"
-              ></app-icon>
-              <div class="text-xs text-blue-700">
-                <p class="font-medium">Requisitos de contraseña:</p>
-                <ul class="mt-1 space-y-0.5">
-                  <li [class.text-green-600]="hasMinLength()">
-                    {{ hasMinLength() ? '✓' : '○' }} Mínimo 8 caracteres
-                  </li>
-                  <li [class.text-green-600]="hasSpecialChar()">
-                    {{ hasSpecialChar() ? '✓' : '○' }} Al menos un carácter
-                    especial
-                  </li>
-                </ul>
-              </div>
-            </div>
-          }
+              <app-password-requirements
+                [control]="authForm.get('password')"
+              ></app-password-requirements>
+            }
 
           <!-- Documentos Legales -->
           @if (isRegister() && pendingDocuments().length > 0) {
@@ -445,25 +431,14 @@ export class AuthModalComponent {
   readonly passwordResetEmailSent = this.authFacade.passwordResetEmailSent;
   authForm: FormGroup;
 
-  // Password validation — computed signals reacting to form value changes
-  private readonly passwordValue = signal('');
-  readonly hasMinLength = computed(() => this.passwordValue().length >= 8);
-  readonly hasSpecialChar = computed(() =>
-    /[^A-Za-z0-9]/.test(this.passwordValue()),
-  );
-
   constructor() {
     // Initialize form in constructor
     this.authForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      password: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(8),
-          Validators.pattern(/.*[^A-Za-z0-9].*/), // Al menos un carácter especial
-        ],
-      ],
+      // Los validadores reales los fija `updateValidators()` según el modo:
+      // en login solo `required` (una contraseña legacy debe poder intentar
+      // autenticarse), en registro la política completa.
+      password: ['', [Validators.required]],
       first_name: [''],
       last_name: [''],
     });
@@ -515,11 +490,10 @@ export class AuthModalComponent {
       }
     });
 
-    // Clear error when user starts typing + track password value for computed signals
+    // Clear error when user starts typing
     this.authForm.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((value) => {
-        this.passwordValue.set(value?.password ?? '');
+      .subscribe(() => {
         if (this.errorMessage()) {
           this.errorMessage.set(null);
         }
@@ -815,17 +789,17 @@ export class AuthModalComponent {
       firstNameControl?.clearValidators();
       lastNameControl?.clearValidators();
     } else {
-      // Login / Registro: contraseña requerida (min 8 + carácter especial).
-      passwordControl?.setValidators([
-        Validators.required,
-        Validators.minLength(8),
-        Validators.pattern(/.*[^A-Za-z0-9].*/),
-      ]);
-
       if (this.isLogin()) {
+        // Login: NO se valida fuerza. Exigirla aquí bloquearía el acceso de
+        // quien registró su contraseña bajo una política anterior.
+        passwordControl?.setValidators([Validators.required]);
         firstNameControl?.clearValidators();
         lastNameControl?.clearValidators();
       } else {
+        passwordControl?.setValidators([
+          Validators.required,
+          passwordPolicyValidator,
+        ]);
         firstNameControl?.setValidators([Validators.required]);
         lastNameControl?.setValidators([Validators.required]);
       }

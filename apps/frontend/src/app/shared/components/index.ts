@@ -8,6 +8,7 @@ export { StatsComponent } from './stats/stats.component';
 export { ChartComponent } from './chart';
 export { InputComponent } from './input/input.component';
 export { InputButtonsComponent } from './input-buttons/input-buttons.component';
+export { PasswordRequirementsComponent } from './password-requirements/password-requirements.component';
 export { SpinnerComponent } from './spinner/spinner.component';
 export { ModalComponent } from './modal/modal.component';
 export { ToggleComponent } from './toggle/toggle.component';

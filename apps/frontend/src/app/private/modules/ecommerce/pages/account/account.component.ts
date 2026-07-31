@@ -9,12 +9,24 @@ import { AddressModalComponent } from '../../components/address-modal/address-mo
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { PasswordRequirementsComponent } from '../../../../../shared/components/password-requirements/password-requirements.component';
+import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { SelectorComponent, SelectorOption } from '../../../../../shared/components/selector/selector.component';
 
 @Component({
   selector: 'app-account',
   standalone: true,
-  imports: [RouterModule, FormsModule, ReactiveFormsModule, AddressModalComponent, IconComponent, ButtonComponent, InputComponent, SelectorComponent],
+  imports: [
+    RouterModule,
+    FormsModule,
+    ReactiveFormsModule,
+    AddressModalComponent,
+    IconComponent,
+    ButtonComponent,
+    InputComponent,
+    PasswordRequirementsComponent,
+    SelectorComponent,
+  ],
   templateUrl: './account.component.html',
   styleUrls: ['./account.component.scss'],
 })
@@ -75,7 +87,7 @@ export class AccountComponent implements OnInit {
 
     this.password_form = this.fb.group({
       current_password: ['', Validators.required],
-      new_password: ['', [Validators.required, Validators.minLength(8)]],
+      new_password: ['', [Validators.required, passwordPolicyValidator]],
       confirm_password: ['', Validators.required],
     });
   }

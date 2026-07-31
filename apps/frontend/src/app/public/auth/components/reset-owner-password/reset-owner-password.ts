@@ -17,6 +17,15 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../shared/components/input/input.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
+import { PasswordRequirementsComponent } from '../../../../shared/components/password-requirements/password-requirements.component';
+import { passwordPolicyValidator } from '../../../../core/utils/password-policy';
+
+/**
+ * @deprecated Alias de compatibilidad. La política vive en
+ * `core/utils/password-policy`; este símbolo se mantiene solo para no romper
+ * imports antiguos.
+ */
+export const passwordStrengthValidator = passwordPolicyValidator;
 
 // Custom validator to check if passwords match
 export function passwordsMatchValidator(
@@ -31,39 +40,6 @@ export function passwordsMatchValidator(
     : null;
 }
 
-// Custom validator for password strength
-export function passwordStrengthValidator(
-  control: AbstractControl,
-): ValidationErrors | null {
-  const value = control.value;
-  if (!value) {
-    return null;
-  }
-
-  const hasUpperCase = /[A-Z]/.test(value);
-  const hasLowerCase = /[a-z]/.test(value);
-  const hasNumeric = /[0-9]/.test(value);
-  const hasSymbol = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(value);
-  const isValidLength = value.length >= 8;
-
-  const passwordValid =
-    hasUpperCase && hasLowerCase && hasNumeric && hasSymbol && isValidLength;
-
-  if (!passwordValid) {
-    return {
-      passwordStrength: {
-        hasUpperCase,
-        hasLowerCase,
-        hasNumeric,
-        hasSymbol,
-        isValidLength,
-      },
-    };
-  }
-
-  return null;
-}
-
 @Component({
   selector: 'app-reset-owner-password',
   standalone: true,
@@ -72,7 +48,8 @@ export function passwordStrengthValidator(
     ReactiveFormsModule,
     CardComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
+    PasswordRequirementsComponent
 ],
   template: `
     <div
@@ -142,7 +119,11 @@ export function passwordStrengthValidator(
                 size="md"
                 placeholder="••••••••"
               ></app-input>
-    
+
+              <app-password-requirements
+                [control]="resetPasswordForm.get('new_password')"
+              ></app-password-requirements>
+
               <app-input
                 label="Confirmar Nueva Contraseña"
                 formControlName="confirmPassword"
@@ -217,7 +198,7 @@ export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
   ) {
     this.resetPasswordForm = this.fb.group(
       {
-        new_password: ['', [Validators.required, passwordStrengthValidator]],
+        new_password: ['', [Validators.required, passwordPolicyValidator]],
         confirmPassword: ['', [Validators.required]],
       },
       { validators: passwordsMatchValidator },

@@ -16,8 +16,10 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
+  PasswordRequirementsComponent,
   SelectorComponent} from '../../../../../../shared/components/index';
 import type { SelectorOption } from '../../../../../../shared/components/index';
+import { passwordPolicyValidator } from '../../../../../../core/utils/password-policy';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import { selectUserSaving } from '../state/selectors/store-users.selectors';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
@@ -48,6 +50,7 @@ const CREATE_USER_ROLE_OPTIONS: readonly SelectorOption[] = [
     InputComponent,
     ButtonComponent,
     ModalComponent,
+    PasswordRequirementsComponent,
     SelectorComponent,
   ],
   template: `
@@ -100,14 +103,17 @@ const CREATE_USER_ROLE_OPTIONS: readonly SelectorOption[] = [
 
           <app-input
             formControlName="password"
-            label="Contrasena *"
+            label="Contraseña *"
             type="password"
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
             [disabled]="isCreating()"
-            helpText="Minimo 8 caracteres, debe incluir mayuscula, minuscula, numero y caracter especial"
           ></app-input>
+
+          <app-password-requirements
+            [control]="userForm.get('password')"
+          ></app-password-requirements>
 
           <app-selector
             formControlName="role"
@@ -193,16 +199,10 @@ export class StoreUserCreateModalComponent {
         '',
         [Validators.required, Validators.email, Validators.maxLength(255)],
       ],
-      password: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(8),
-          Validators.pattern(
-            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-          ),
-        ],
-      ],
+      // Política única: `core/utils/password-policy`. El regex anterior exigía
+      // uno de `@$!%*?&`, así que rechazaba símbolos legítimos como el punto y
+      // divergía del resto de la app.
+      password: ['', [Validators.required, passwordPolicyValidator]],
       // QUI-581 — `employee` por defecto: preserva el comportamiento anterior al
       // ticket para quien no toque el campo.
       role: ['employee', [Validators.required]]});

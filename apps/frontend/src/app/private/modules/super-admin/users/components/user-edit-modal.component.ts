@@ -18,7 +18,9 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
+  PasswordRequirementsComponent,
   ToastService} from '../../../../../shared/components/index';
+import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
 
@@ -31,7 +33,8 @@ import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
     IconComponent,
     InputComponent,
     ButtonComponent,
-    ModalComponent
+    ModalComponent,
+    PasswordRequirementsComponent
 ],
   template: `
     <app-modal
@@ -106,6 +109,10 @@ import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
             [control]="userForm.get('password')"
             [disabled]="isUpdating"
           ></app-input>
+
+          <app-password-requirements
+            [control]="userForm.get('password')"
+          ></app-password-requirements>
 
           <div class="space-y-2">
             <label
@@ -288,7 +295,7 @@ export class UserEditModalComponent implements OnInit, OnChanges {
       [Validators.required, Validators.email, Validators.maxLength(255)],
     ],
     organization_id: [null, [Validators.required]],
-    password: ['', [Validators.minLength(8)]],
+    password: ['', [passwordPolicyValidator]],
     state: [UserState.ACTIVE]});
 
   isUpdating: boolean = false;

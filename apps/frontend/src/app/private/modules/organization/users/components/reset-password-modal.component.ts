@@ -13,7 +13,9 @@ import {
   ButtonComponent,
   ModalComponent,
   InputComponent,
+  PasswordRequirementsComponent,
 } from '../../../../../shared/components/index';
+import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -22,7 +24,14 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 @Component({
   selector: 'app-reset-password-modal',
   standalone: true,
-  imports: [FormsModule, ReactiveFormsModule, ButtonComponent, ModalComponent, InputComponent],
+  imports: [
+    FormsModule,
+    ReactiveFormsModule,
+    ButtonComponent,
+    ModalComponent,
+    InputComponent,
+    PasswordRequirementsComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -46,8 +55,11 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
             placeholder="••••••••••"
             [required]="true"
             [control]="passwordForm.get('new_password')"
-            helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
           ></app-input>
+
+          <app-password-requirements
+            [control]="passwordForm.get('new_password')"
+          ></app-password-requirements>
 
           <app-input
             formControlName="confirm_password"
@@ -105,16 +117,8 @@ export class ResetPasswordModalComponent {
 
   constructor() {
     this.passwordForm = this.fb.group({
-      new_password: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(8),
-          Validators.pattern(
-            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-          ),
-        ],
-      ],
+      // Política única: `core/utils/password-policy`.
+      new_password: ['', [Validators.required, passwordPolicyValidator]],
       confirm_password: ['', [Validators.required]],
     });
 

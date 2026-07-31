@@ -618,7 +618,10 @@ export class ContextualLoginComponent {
     this.loginForm = this.fb.group({
       vlink: [''],
       email: ['', [Validators.required, Validators.email]],
-      password: ['', [Validators.required, Validators.minLength(6)]],
+      // Login NO valida la política de contraseñas: exigirla aquí impediría
+      // autenticarse a quien registró la suya bajo una política anterior. La
+      // fuerza se exige al crearla o cambiarla, no al usarla.
+      password: ['', [Validators.required]],
     });
 
     this.formStatus = toSignal(this.loginForm.statusChanges, {

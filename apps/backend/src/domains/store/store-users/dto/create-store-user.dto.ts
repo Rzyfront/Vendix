@@ -8,6 +8,7 @@ import {
   Matches,
 } from 'class-validator';
 import { ASSIGNABLE_SYSTEM_ROLES } from '@common/utils/role-scope.util';
+import { IsStrongPassword } from '../../../../common/validators/password-policy';
 
 /**
  * Roles operativos que un admin de tienda puede asignar al crear un usuario.
@@ -36,7 +37,7 @@ export class CreateStoreUserDto {
   email: string;
 
   @IsString()
-  @MinLength(8)
+  @IsStrongPassword()
   password: string;
 
   @IsOptional()

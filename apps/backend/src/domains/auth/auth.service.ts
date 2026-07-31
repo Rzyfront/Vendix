@@ -29,6 +29,10 @@ import { toTitleCase } from '@common/utils/format.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import {
+  isStrongPassword,
+  passwordPolicyMessage,
+} from '@common/validators/password-policy';
+import {
   TOKEN_DEFAULTS,
   getRefreshTokenHmacSecret,
   hmacSha256,
@@ -2888,9 +2892,7 @@ export class AuthService {
 
     // Validar fortaleza de la nueva contraseña
     if (!this.validatePasswordStrength(newPassword)) {
-      throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
-      );
+      throw new BadRequestException(passwordPolicyMessage(newPassword));
     }
 
     // Verificar que la nueva contraseña no sea igual a la actual
@@ -2986,9 +2988,7 @@ export class AuthService {
     }
 
     if (!this.validatePasswordStrength(newPassword)) {
-      throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
-      );
+      throw new BadRequestException(passwordPolicyMessage(newPassword));
     }
 
     const isSamePassword = await bcrypt.compare(
@@ -3245,15 +3245,13 @@ export class AuthService {
     };
   }
 
-  // Método auxiliar para validar fortaleza de contraseña
+  /**
+   * Delega en la política única (`common/validators/password-policy`). La
+   * versión anterior no exigía símbolo, así que aceptaba contraseñas que los
+   * DTOs de registro rechazaban: dos verdades distintas en el mismo backend.
+   */
   private validatePasswordStrength(password: string): boolean {
-    // Mínimo 8 caracteres, al menos una mayúscula, una minúscula, un número
-    const minLength = password.length >= 8;
-    const hasUpperCase = /[A-Z]/.test(password);
-    const hasLowerCase = /[a-z]/.test(password);
-    const hasNumbers = /\d/.test(password);
-
-    return minLength && hasUpperCase && hasLowerCase && hasNumbers;
+    return isStrongPassword(password);
   }
 
   // ===== FUNCIONES DE ORGANIZACIÓN DESPUÉS DEL REGISTRO =====

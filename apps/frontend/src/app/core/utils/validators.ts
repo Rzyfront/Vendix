@@ -1,27 +1,10 @@
-import { AbstractControl, ValidationErrors } from '@angular/forms';
+import { passwordPolicyValidator } from './password-policy';
 
-export function passwordValidator(
-  control: AbstractControl,
-): ValidationErrors | null {
-  const value = control.value;
-
-  if (!value) {
-    return null;
-  }
-
-  const errors: any = {};
-
-  if (value.length < 8) {
-    errors.minLength = { requiredLength: 8, actualLength: value.length };
-  }
-
-  if (!/[A-Z]/.test(value)) {
-    errors.uppercase = true;
-  }
-
-  if (!/[^A-Za-z0-9]/.test(value)) {
-    errors.specialChar = true;
-  }
-
-  return Object.keys(errors).length ? errors : null;
-}
+/**
+ * @deprecated Usar `passwordPolicyValidator` de `core/utils/password-policy`.
+ *
+ * Esta versión exigía mayúscula y símbolo pero NO minúscula ni número, así que
+ * aceptaba contraseñas que otros formularios rechazaban. Se conserva como alias
+ * para no romper imports antiguos; la política real es una sola.
+ */
+export const passwordValidator = passwordPolicyValidator;

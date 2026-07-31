@@ -9,6 +9,7 @@ import {
   IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsStrongPassword } from '../../../common/validators/password-policy';
 
 export class RegisterStaffDto {
   @ApiProperty({ example: 'Juan', description: 'Nombre del staff' })
@@ -35,12 +36,12 @@ export class RegisterStaffDto {
   email: string;
 
   @ApiProperty({
-    example: 'password123',
-    description: 'Contraseña del staff (mínimo 8 caracteres)',
+    example: 'Password123.',
+    description:
+      'Contraseña: mínimo 8 caracteres, con minúscula, mayúscula, número y símbolo',
   })
   @IsString()
-  @MinLength(8)
-  @MaxLength(255)
+  @IsStrongPassword()
   password: string;
 
   @ApiProperty({

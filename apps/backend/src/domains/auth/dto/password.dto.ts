@@ -2,12 +2,12 @@ import {
   IsEmail,
   IsString,
   IsNotEmpty,
-  MinLength,
   IsInt,
   IsPositive,
   IsOptional,
 } from 'class-validator';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
+import { IsStrongPassword } from '../../../common/validators/password-policy';
 
 export class ForgotPasswordDto {
   @ApiProperty({
@@ -56,12 +56,13 @@ export class ResetPasswordDto {
   token: string;
 
   @ApiProperty({
-    example: 'nuevaContraseña123',
-    description: 'Nueva contraseña (mínimo 8 caracteres)',
+    example: 'NuevaClave123.',
+    description:
+      'Nueva contraseña: mínimo 8 caracteres, con minúscula, mayúscula, número y símbolo',
   })
   @IsString()
   @IsNotEmpty()
-  @MinLength(8)
+  @IsStrongPassword()
   new_password: string;
 
   /**
@@ -91,12 +92,13 @@ export class AuthChangePasswordDto {
   current_password: string;
 
   @ApiProperty({
-    example: 'nuevaContraseña123',
-    description: 'Nueva contraseña (mínimo 8 caracteres)',
+    example: 'NuevaClave123.',
+    description:
+      'Nueva contraseña: mínimo 8 caracteres, con minúscula, mayúscula, número y símbolo',
   })
   @IsString()
   @IsNotEmpty()
-  @MinLength(8)
+  @IsStrongPassword()
   new_password: string;
 }
 
