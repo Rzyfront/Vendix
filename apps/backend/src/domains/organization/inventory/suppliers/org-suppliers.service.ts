@@ -316,7 +316,8 @@ export class OrgSuppliersService {
         client.dispatch_notes.count({
           where: {
             supplier_id: supplierId,
-            stores: { organization_id: organizationId },
+            // La relación se llama `store` (singular) en dispatch_notes.
+            store: { organization_id: organizationId },
             status: { notIn: [...TERMINAL_DISPATCH_NOTE_STATUS] },
           },
         }),
