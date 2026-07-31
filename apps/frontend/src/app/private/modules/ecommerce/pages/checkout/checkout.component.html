@@ -398,6 +398,28 @@
             @if (!cartHasOnlyServices) {
               <h2>Opciones de Envio</h2>
             }
+            <!-- La dirección no tiene despacho, pero la tienda opera en esa
+                 ciudad: lo único ofrecido es retiro. Hay que decirlo ANTES de
+                 que confirme, no después. -->
+            @if (!cartHasOnlyServices && isPickupOnlyCoverage()) {
+              <div class="shipping-coverage-fallback">
+                <app-icon
+                  name="alert-triangle"
+                  [size]="18"
+                  class="shipping-coverage-fallback__icon"
+                ></app-icon>
+                <div>
+                  <p class="shipping-coverage-fallback__title">
+                    No hay despacho a tu dirección
+                  </p>
+                  <p class="shipping-coverage-fallback__hint">
+                    Tu pedido queda para retirar en la tienda. Si prefieres que
+                    te lo envíen, prueba con otra dirección.
+                  </p>
+                </div>
+              </div>
+            }
+
             @if (!cartHasOnlyServices && shipping_options().length > 0) {
               <div class="payment-list" style="margin-bottom: 2rem">
                 @for (option of shipping_options(); track option.id) {
@@ -426,11 +448,41 @@
                   </div>
                 }
               </div>
+            } @else if (!cartHasOnlyServices && loading_shipping()) {
+              <div class="shipping-coverage-empty" style="margin-bottom: 2rem">
+                <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
+                <p class="shipping-coverage-empty__title">
+                  Calculando opciones de envío para tu dirección…
+                </p>
+              </div>
             } @else if (!cartHasOnlyServices) {
-              <div class="error-message" style="margin-bottom: 2rem">
-                <i class="pi pi-exclamation-triangle"></i>
-                No hay opciones de envio disponibles para esta ubicacion. Por
-                favor revisa tu direccion.
+              <!-- Sin cobertura: antes esto era un cartel sin salida. Ahora el
+                   comprador tiene una acción concreta (volver a la dirección)
+                   en vez de un botón deshabilitado sin explicación. -->
+              <div class="shipping-coverage-empty" style="margin-bottom: 2rem">
+                <app-icon
+                  name="alert-triangle"
+                  [size]="20"
+                  class="shipping-coverage-empty__icon"
+                ></app-icon>
+                <div class="shipping-coverage-empty__body">
+                  <p class="shipping-coverage-empty__title">
+                    No hay cobertura de envío para esta dirección
+                  </p>
+                  <p class="shipping-coverage-empty__hint">
+                    La tienda todavía no despacha a la ciudad que elegiste.
+                    Puedes probar con otra dirección o comunicarte con la
+                    tienda para coordinar la entrega.
+                  </p>
+                </div>
+                <app-button variant="outline" (clicked)="goToAddressStep()">
+                  <app-icon
+                    slot="icon"
+                    name="map-pin"
+                    [size]="16"
+                  ></app-icon>
+                  Cambiar dirección
+                </app-button>
               </div>
             }
 

@@ -235,6 +235,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La tarifa seleccionada no corresponde al método de envío.',
   ORD_SHIP_LOCKED_001:
     'No es posible cambiar el método: la orden ya fue enviada.',
+  ORD_SHIP_NO_ZONE_001:
+    'La tienda todavía no tiene cobertura de envío para esta dirección. Cambia la dirección o comunícate con la tienda.',
+  ORD_SHIP_PICKUP_ONLY_001:
+    'No hay despacho a esta dirección, pero puedes retirar tu pedido en la tienda.',
+  ORD_SHIP_CITY_UNRESOLVED_001:
+    'No pudimos identificar tu ciudad. Vuelve a seleccionar departamento y ciudad e intenta de nuevo.',
 
   // Quotations
   QUOTE_CONVERT_STATUS_001:
