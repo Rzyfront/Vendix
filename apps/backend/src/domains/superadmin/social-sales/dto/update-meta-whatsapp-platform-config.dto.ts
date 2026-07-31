@@ -37,4 +37,41 @@ export class UpdateMetaWhatsappPlatformConfigDto {
   @IsOptional()
   @IsBoolean()
   allow_dev_signup?: boolean;
+
+  /**
+   * Status of Vendix as a Meta Tech Partner (Access Verification).
+   * - not_started: enrollment never initiated
+   * - in_review: Access Verification form submitted, awaiting Meta
+   * - approved: Vendix is officially a Tech Partner
+   * - rejected: Meta rejected the enrollment
+   */
+  @IsOptional()
+  @IsIn(['not_started', 'in_review', 'approved', 'rejected'])
+  meta_tech_provider_status?:
+    | 'not_started'
+    | 'in_review'
+    | 'approved'
+    | 'rejected';
+
+  /**
+   * Status of Vendix business verification with Meta.
+   * Mirrors what is shown in business.facebook.com/settings/security.
+   */
+  @IsOptional()
+  @IsIn(['not_started', 'in_review', 'verified', 'rejected'])
+  meta_business_verification_status?:
+    | 'not_started'
+    | 'in_review'
+    | 'verified'
+    | 'rejected';
+
+  /**
+   * Webhook URL Vendix exposes for the production Meta App.
+   * Stored so the superadmin UI can show / copy it without
+   * relying on env vars at request time.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  production_webhook_url?: string;
 }

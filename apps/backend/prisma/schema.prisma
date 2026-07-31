@@ -850,6 +850,8 @@ model stores {
   messaging_channels          messaging_channels[]
   social_channels             social_channels[]
   social_webhook_events       social_webhook_events[]
+  social_conversations        social_conversations[]
+  social_messages             social_messages[]
 
   // SaaS Subscription (one per store)
   subscription                  store_subscriptions?
@@ -8082,6 +8084,7 @@ model social_channels {
 
   store          stores                  @relation(fields: [store_id], references: [id])
   webhook_events social_webhook_events[]
+  conversations  social_conversations[]
 
   @@unique([store_id, channel_type, provider])
   @@index([store_id, status])
@@ -8109,6 +8112,59 @@ model social_webhook_events {
   @@index([store_id, received_at])
   @@index([social_channel_id])
   @@index([event_type])
+  @@index([provider_message_id])
+}
+
+// ============================================
+// SOCIAL SALES HUB — INBOX / CONVERSATIONS
+// ============================================
+
+model social_conversations {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  social_channel_id Int
+  contact_phone     String    @db.VarChar(30)
+  contact_name      String?   @db.VarChar(120)
+  last_message_at   DateTime? @db.Timestamp(6)
+  unread_count      Int       @default(0)
+  status            String    @default("open") @db.VarChar(20)
+  ai_agent_active   Boolean   @default(false)
+  metadata          Json?
+  created_at        DateTime  @default(now()) @db.Timestamp(6)
+  updated_at        DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store    stores           @relation(fields: [store_id], references: [id])
+  channel  social_channels  @relation(fields: [social_channel_id], references: [id], onDelete: Cascade)
+  messages social_messages[]
+
+  @@unique([social_channel_id, contact_phone])
+  @@index([store_id, last_message_at])
+  @@index([store_id, status])
+  @@index([store_id, unread_count])
+}
+
+model social_messages {
+  id                     Int       @id @default(autoincrement())
+  store_id               Int
+  social_conversation_id Int
+  direction              String    @db.VarChar(10)
+  message_type           String    @default("text") @db.VarChar(20)
+  body                   String?   @db.Text
+  provider_message_id    String?   @db.VarChar(120)
+  provider_status        String?   @db.VarChar(30)
+  raw_payload            Json?
+  sent_at                DateTime? @db.Timestamp(6)
+  delivered_at           DateTime? @db.Timestamp(6)
+  read_at                DateTime? @db.Timestamp(6)
+  processed_at           DateTime? @db.Timestamp(6)
+  error                  String?   @db.Text
+  created_at             DateTime  @default(now()) @db.Timestamp(6)
+
+  store        stores                @relation(fields: [store_id], references: [id])
+  conversation social_conversations  @relation(fields: [social_conversation_id], references: [id], onDelete: Cascade)
+
+  @@index([social_conversation_id, created_at])
+  @@index([store_id, direction, created_at])
   @@index([provider_message_id])
 }
 

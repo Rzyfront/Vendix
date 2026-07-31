@@ -5,6 +5,13 @@ import { UpdateMetaWhatsappPlatformConfigDto } from './dto/update-meta-whatsapp-
 
 const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
 
+type MetaTechProviderStatus = 'not_started' | 'in_review' | 'approved' | 'rejected';
+type MetaBusinessVerificationStatus =
+  | 'not_started'
+  | 'in_review'
+  | 'verified'
+  | 'rejected';
+
 interface StoredMetaWhatsappConfig {
   app_id?: string | null;
   app_secret_encrypted?: string | null;
@@ -13,6 +20,9 @@ interface StoredMetaWhatsappConfig {
   graph_version?: string | null;
   app_review_status?: 'pending' | 'approved' | 'rejected';
   allow_dev_signup?: boolean;
+  meta_tech_provider_status?: MetaTechProviderStatus;
+  meta_business_verification_status?: MetaBusinessVerificationStatus;
+  production_webhook_url?: string | null;
   updated_by_user_id?: number | null;
   updated_at?: string;
 }
@@ -48,6 +58,16 @@ export class MetaWhatsappPlatformConfigService {
         dto.app_review_status ?? previous.app_review_status ?? 'pending',
       allow_dev_signup:
         dto.allow_dev_signup ?? previous.allow_dev_signup ?? false,
+      meta_tech_provider_status:
+        dto.meta_tech_provider_status ??
+        previous.meta_tech_provider_status ??
+        'not_started',
+      meta_business_verification_status:
+        dto.meta_business_verification_status ??
+        previous.meta_business_verification_status ??
+        (previous.meta_business_verification_status ?? 'not_started'),
+      production_webhook_url:
+        dto.production_webhook_url ?? previous.production_webhook_url ?? null,
       updated_by_user_id: userId,
       updated_at: now.toISOString(),
     };
@@ -120,6 +140,11 @@ export class MetaWhatsappPlatformConfigService {
       graph_version: value?.graph_version ?? null,
       app_review_status: value?.app_review_status ?? 'pending',
       allow_dev_signup: value?.allow_dev_signup ?? false,
+      meta_tech_provider_status:
+        value?.meta_tech_provider_status ?? 'not_started',
+      meta_business_verification_status:
+        value?.meta_business_verification_status ?? 'not_started',
+      production_webhook_url: value?.production_webhook_url ?? null,
       updated_by_user_id: value?.updated_by_user_id ?? null,
       updated_at: value?.updated_at ?? updatedAt?.toISOString() ?? null,
     };

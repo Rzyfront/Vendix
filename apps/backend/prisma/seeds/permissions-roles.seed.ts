@@ -1203,6 +1203,27 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/social-sales',
       method: 'POST',
     },
+    {
+      name: 'store:social_sales:inbox:read',
+      description:
+        'Leer conversaciones y mensajes del inbox de Social Sales (bandeja unificada)',
+      path: '/api/store/social-sales/inbox/*',
+      method: 'GET',
+    },
+    {
+      name: 'store:social_sales:inbox:send',
+      description:
+        'Enviar mensajes outbound desde el inbox de Social Sales (texto, plantilla, media)',
+      path: '/api/store/social-sales/inbox/*/messages',
+      method: 'POST',
+    },
+    {
+      name: 'store:social_sales:inbox:manage',
+      description:
+        'Gestionar conversaciones del inbox de Social Sales (marcar leído/no leído, cerrar, asignar AI)',
+      path: '/api/store/social-sales/inbox/*',
+      method: 'PATCH',
+    },
 
     // Reseñas
     {
