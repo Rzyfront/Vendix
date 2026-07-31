@@ -606,6 +606,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // Caja registradora — transiciones de configuración (QUI-560)
   CASH_REGISTER_DISABLE_001:
     'No se puede deshabilitar la caja registradora: hay sesiones de caja abiertas. Ciérralas desde Caja Registradora antes de continuar.',
+
+  // Caja registradora — cierre contra un esperado rancio (QUI-572)
+  CASH_SESSION_EXPECTED_STALE_001:
+    'El efectivo esperado cambió mientras contabas el arqueo. Revisá el resumen actualizado antes de cerrar la caja.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

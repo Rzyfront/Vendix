@@ -65,6 +65,33 @@ export interface CashRegisterMovement {
 }
 
 /**
+ * Resumen autoritativo de efectivo de una sesión de caja (QUI-572).
+ *
+ * El backend es el ÚNICO dueño de la fórmula del efectivo esperado
+ * (`expected_cash_total`); el cliente la consume, nunca la recalcula. Antes el
+ * modal de cierre replicaba la aritmética sobre `getMovements()`, así que
+ * cualquier divergencia entre las dos implementaciones se convertía en un
+ * faltante o sobrante fantasma en el arqueo.
+ *
+ * Los nombres son snake_case porque es el envelope crudo del backend.
+ */
+export interface CashSessionSummary {
+  opening: number;
+  /** Todas las ventas de la sesión, sin importar el método de pago. */
+  sales_total: number;
+  sales_count: number;
+  /** `cash` primero, el resto alfabético. Sin etiquetas: las pone el frontend. */
+  sales_by_method: { method: string; count: number; total: number }[];
+  cash_sales: number;
+  cash_in: number;
+  cash_out: number;
+  cash_refunds: number;
+  /** El número que gobierna el arqueo. */
+  expected_cash_total: number;
+  non_cash_total: number;
+}
+
+/**
  * Centralized service for cash register operations.
  * Replaces direct localStorage access for register_id when the feature is enabled.
  */
@@ -161,13 +188,32 @@ export class PosCashRegisterService {
    * `/admin/cash-registers`, así que el signal local solo se limpia cuando la
    * sesión cerrada es la que este servicio está rastreando. Limpiarlo siempre
    * borraría la sesión activa del POS del usuario actual al cerrar una ajena.
+   *
+   * QUI-572: `expected_closing_amount_seen` declara el efectivo esperado que el
+   * operario tenía EN PANTALLA cuando contó. Si el backend recalcula y ya no
+   * coincide, rechaza el cierre con 409 `CASH_SESSION_EXPECTED_STALE_001` en vez
+   * de registrar un faltante inexistente. Es opcional para no romper a los
+   * llamadores que no participan del arqueo asistido.
+   *
+   * El error viaja CRUDO a propósito: sin `catchError` que lo aplaste, para que
+   * el componente pueda ramificar por `error_code` con `extractApiError`.
    */
-  closeSession(session_id: number, actual_closing_amount: number, closing_notes?: string): Observable<CashRegisterSession> {
+  closeSession(
+    session_id: number,
+    actual_closing_amount: number,
+    closing_notes?: string,
+    expected_closing_amount_seen?: number,
+  ): Observable<CashRegisterSession> {
+    const body: Record<string, unknown> = {
+      actual_closing_amount,
+      closing_notes,
+    };
+    if (expected_closing_amount_seen != null) {
+      body['expected_closing_amount_seen'] = expected_closing_amount_seen;
+    }
+
     return this.http
-      .post<any>(`${this.baseUrl}/sessions/${session_id}/close`, {
-        actual_closing_amount,
-        closing_notes,
-      })
+      .post<any>(`${this.baseUrl}/sessions/${session_id}/close`, body)
       .pipe(
         map((res) => res.data),
         tap(() => {
@@ -176,6 +222,18 @@ export class PosCashRegisterService {
           }
         }),
       );
+  }
+
+  /**
+   * Resumen de efectivo autoritativo de la sesión (QUI-572).
+   *
+   * Fuente única del `expected_cash_total` que gobierna el arqueo. El error
+   * viaja crudo; quien haga polling decide si lo ignora.
+   */
+  getCashSummary(session_id: number): Observable<CashSessionSummary> {
+    return this.http
+      .get<any>(`${this.baseUrl}/sessions/${session_id}/cash-summary`)
+      .pipe(map((res) => res.data));
   }
 
   /** Suspend the active session */
