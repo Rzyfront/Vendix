@@ -55,7 +55,12 @@ export class UsersService {
     if (organization_id == null) {
       throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_002);
     }
-    return { level: 'organization', organization_id };
+    // QUI-581 — `actor_roles` alimenta la matriz de ASIGNACIÓN (`canAssignRole`).
+    return {
+      level: 'organization',
+      organization_id,
+      actor_roles: RequestContextService.getRoles(),
+    };
   }
 
   // ===== QUI-72: ASIGNACIÓN DE ROLES (dirección usuario → rol) =====

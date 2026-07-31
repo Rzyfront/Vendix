@@ -59,7 +59,15 @@ export class StoreUserManagementService {
       throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_003);
     }
 
-    return { level: 'store', organization_id, store_id };
+    // QUI-581 — `actor_roles` alimenta la matriz de ASIGNACIÓN (`canAssignRole`):
+    // es lo que permite al `owner` de un tenant de tienda única asignar `admin` y
+    // `fiscal_supervisor` sin tener panel ORG_ADMIN al que salir.
+    return {
+      level: 'store',
+      organization_id,
+      store_id,
+      actor_roles: RequestContextService.getRoles(),
+    };
   }
 
   async create(dto: CreateStoreUserDto) {

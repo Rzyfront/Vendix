@@ -7,20 +7,20 @@ import {
   MaxLength,
   Matches,
 } from 'class-validator';
+import { ASSIGNABLE_SYSTEM_ROLES } from '@common/utils/role-scope.util';
 
 /**
  * Roles operativos que un admin de tienda puede asignar al crear un usuario.
  * `carrier` (Vendix Repartos) fuerza app_type=STORE_DELIVERY en el servicio;
  * el resto opera bajo STORE_ADMIN. `owner`/`super_admin` son inmutables y no
  * se asignan por esta vía.
+ *
+ * QUI-581 — Deriva de `ASSIGNABLE_SYSTEM_ROLES.store`, la matriz canónica de
+ * asignación. Antes era una lista literal aparte: coincidía con la matriz por
+ * casualidad y habría divergido en el primer rol nuevo, dejando el DTO de alta y
+ * el guard de asignación con criterios distintos para la misma pregunta.
  */
-export const ASSIGNABLE_STORE_USER_ROLES = [
-  'manager',
-  'supervisor',
-  'employee',
-  'cashier',
-  'carrier',
-] as const;
+export const ASSIGNABLE_STORE_USER_ROLES = ASSIGNABLE_SYSTEM_ROLES.store;
 
 export class CreateStoreUserDto {
   @IsString()

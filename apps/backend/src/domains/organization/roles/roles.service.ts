@@ -59,7 +59,14 @@ export class RolesService {
     if (organization_id == null) {
       throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_002);
     }
-    return { level: 'organization', organization_id };
+    // QUI-581 — `actor_roles` alimenta la matriz de ASIGNACIÓN (`canAssignRole`),
+    // no la de edición. Ver `RoleActor.actor_roles` para el origen y por qué no es
+    // falsificable.
+    return {
+      level: 'organization',
+      organization_id,
+      actor_roles: RequestContextService.getRoles(),
+    };
   }
 
   /**

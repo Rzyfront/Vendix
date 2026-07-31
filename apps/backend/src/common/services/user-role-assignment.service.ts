@@ -6,8 +6,10 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import {
   HIDDEN_ROLE_NAMES,
   RoleActor,
+  canAssignRole,
   deriveRoleScope,
   isRoleVisible,
+  resolveAssignmentLevel,
 } from '@common/utils/role-scope.util';
 
 /**
@@ -393,13 +395,20 @@ export class UserRoleAssignmentService {
       throw new VendixHttpException(ErrorCodes.ROLE_ASSIGN_002);
     }
 
-    // 2. Roles de sistema: sólo superadmin. Cierra la escalada de privilegios
-    //    "me asigno a mí mismo un rol de sistema" desde tienda u organización.
-    if (
-      deriveRoleScope(role) === 'system' &&
-      input.actor.level !== 'superadmin'
-    ) {
-      throw new VendixHttpException(ErrorCodes.ROLE_ASSIGN_003);
+    // 2. Roles de sistema: sólo los que la matriz de ASIGNACIÓN abre para el nivel
+    //    efectivo del actor (QUI-581). Antes se rechazaba TODO `scope === 'system'`,
+    //    y como el seed crea los diez roles canónicos con `is_system_role: true,
+    //    organization_id: null`, eso bloqueaba el catálogo operativo completo y con
+    //    él la gestión de personal. La escalada de privilegios que preocupaba a
+    //    QUI-72 la cierra el paso 1 con `HIDDEN_ROLE_NAMES`, no este paso: `owner` y
+    //    `super_admin` siguen siendo inasignables para cualquier actor no-superadmin,
+    //    incluido un `owner`.
+    if (deriveRoleScope(role) === 'system' && !canAssignRole(role, input.actor)) {
+      throw new VendixHttpException(ErrorCodes.ROLE_ASSIGN_003, undefined, {
+        role: role.name,
+        actor_level: input.actor.level,
+        assignment_level: resolveAssignmentLevel(input.actor),
+      });
     }
 
     // 3. El usuario destino debe existir y pertenecer al tenant del actor.

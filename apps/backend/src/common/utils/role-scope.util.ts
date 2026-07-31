@@ -30,10 +30,114 @@ export interface RoleActor {
   level: RoleActorLevel;
   organization_id?: number | null;
   store_id?: number | null;
+  /**
+   * QUI-581 — Nombres de rol del actor autenticado, para la matriz de ASIGNACIÓN.
+   *
+   * Origen: `RequestContextService.getRoles()`, que el `RequestContextInterceptor`
+   * llena desde `req.user.roles`. Ese valor lo produce `JwtStrategy.validate()`
+   * leyendo `user_roles` de la base con `buildActiveUserRolesWhere(...)` — NO del
+   * payload del token, que sólo transporta `sub`/`organization_id`/`store_id`/
+   * `app_type`. Por eso no es falsificable ni por body ni por token, y viene ya
+   * scopeado a la tienda activa: un `owner` org-wide (`store_id` NULL) resuelve
+   * `owner` en cualquier tienda, y quien lo tenga sólo en la tienda A no se eleva
+   * en la B.
+   *
+   * Opcional a propósito: un constructor de actor que lo omita cae al allowlist
+   * de su propio nivel (fail-closed), nunca al elevado.
+   */
+  actor_roles?: readonly string[];
 }
 
 /** Roles núcleo que jamás se exponen ni se asignan desde UIs de tienda/organización. */
 export const HIDDEN_ROLE_NAMES: readonly string[] = ['owner', 'super_admin'];
+
+/**
+ * QUI-581 — Matriz de ASIGNACIÓN de roles de sistema, distinta de la de EDICIÓN.
+ *
+ * `canEditRole` responde "¿puede este actor cambiar QUÉ SIGNIFICA este rol?" y para
+ * un rol de sistema (`organization_id` NULL, compartido por TODOS los tenants) la
+ * respuesta correcta sigue siendo no: editarlo filtraría el cambio a cada
+ * organización de Vendix. `canAssignRole` responde algo completamente distinto:
+ * "¿puede este actor DARLE este rol a un usuario de su alcance?" — una operación
+ * local, cotidiana y necesaria para gestionar personal.
+ *
+ * QUI-72 colapsó ambas preguntas en `deriveRoleScope(role) === 'system'`. Como el
+ * seed crea los diez roles canónicos con `is_system_role: true, organization_id:
+ * null`, el catálogo operativo COMPLETO quedó no asignable y la gestión de personal
+ * se bloqueó de raíz (QUI-581). La escalada de privilegios real la cierra el paso 1
+ * de `validateAssignment` con `HIDDEN_ROLE_NAMES`, no esta matriz.
+ *
+ * `customer` no aparece en ninguna fila a propósito: el listado de staff excluye a
+ * quien lo tenga (`store-user-management.service.ts`), así que asignarlo desde esa
+ * pantalla haría desaparecer al usuario de la tabla desde la que se le asignó.
+ *
+ * Allowlist por INCLUSIÓN, nunca por exclusión: un rol de sistema nuevo nace no
+ * asignable y hace falta una decisión explícita para abrirlo.
+ */
+export const ASSIGNABLE_SYSTEM_ROLES: Record<
+  'organization' | 'store',
+  readonly string[]
+> = {
+  organization: [
+    'admin',
+    'fiscal_supervisor',
+    'manager',
+    'supervisor',
+    'employee',
+    'cashier',
+    'carrier',
+  ],
+  store: ['manager', 'supervisor', 'employee', 'cashier', 'carrier'],
+};
+
+/**
+ * Nivel EFECTIVO para la matriz de asignación (no para visibilidad ni edición).
+ *
+ * El `owner` asigna como si hablara por la organización, mire el panel que mire.
+ * Razón de negocio: la mayoría de los tenants son de tienda única
+ * (`account_type: SINGLE_STORE`, `operating_scope: STORE`) y NUNCA ven la app
+ * ORG_ADMIN, así que para ellos no existe ningún panel alternativo desde el cual
+ * asignar `admin` o `fiscal_supervisor`. Sin esta elevación el fix de QUI-581
+ * dejaría a la mayoría del padrón exactamente igual de bloqueada.
+ *
+ * Se eleva la IDENTIDAD (tener rol `owner`), no la topología del tenant: un `admin`
+ * de tienda comprometido no gana capacidad nueva, y el `owner` de una organización
+ * multi-tienda queda cubierto también cuando entra por el panel de tienda.
+ *
+ * Nunca eleva a `superadmin`: `owner` y `super_admin` siguen reservados al nivel de
+ * plataforma vía `HIDDEN_ROLE_NAMES`, así que un owner no puede crear otro owner.
+ */
+export function resolveAssignmentLevel(actor: RoleActor): RoleActorLevel {
+  if (actor.level === 'superadmin') return 'superadmin';
+  if (actor.actor_roles?.includes('owner')) return 'organization';
+  return actor.level;
+}
+
+/**
+ * ¿Puede `actor` asignar/quitar `role` a un usuario de su alcance?
+ *
+ * Sólo decide sobre el eje de ALCANCE del rol. La pertenencia del usuario destino
+ * al tenant, los roles núcleo y la resolución de la tienda de la asignación siguen
+ * siendo responsabilidad de `UserRoleAssignmentService.validateAssignment`.
+ */
+export function canAssignRole(
+  role: RoleScopeSource & { name: string },
+  actor: RoleActor,
+): boolean {
+  const level = resolveAssignmentLevel(actor);
+  if (level === 'superadmin') return true;
+
+  // Los roles núcleo nunca se asignan fuera de plataforma, ni siendo owner.
+  if (HIDDEN_ROLE_NAMES.includes(role.name.toLowerCase())) return false;
+
+  if (deriveRoleScope(role) !== 'system') {
+    // Roles de organización y de tienda ya los gobierna la visibilidad
+    // (`isRoleVisible`), que el servicio valida antes de llegar aquí.
+    return true;
+  }
+
+  return ASSIGNABLE_SYSTEM_ROLES[level].includes(role.name.toLowerCase());
+}
 
 /**
  * Deriva el alcance de un rol a partir de sus FKs.

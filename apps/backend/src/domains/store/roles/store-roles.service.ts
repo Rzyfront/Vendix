@@ -64,7 +64,14 @@ export class StoreRolesService {
       throw new VendixHttpException(ErrorCodes.ROLE_SCOPE_003);
     }
 
-    return { level: 'store', organization_id, store_id };
+    // QUI-581 — `actor_roles` alimenta la matriz de ASIGNACIÓN (`canAssignRole`),
+    // no la de edición: un `owner` sigue sin poder editar un rol de sistema.
+    return {
+      level: 'store',
+      organization_id,
+      store_id,
+      actor_roles: RequestContextService.getRoles(),
+    };
   }
 
   /**
