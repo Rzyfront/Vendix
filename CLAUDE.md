@@ -138,6 +138,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring the Vendix Linear API key | `linear-connect` |
 | Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
+| Converting a client price list or product catalog into an official import template | `product-catalog-normalizer` |
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
 | Creating API endpoints | `vendix-backend-api` |
@@ -219,6 +220,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Exposing a job-status poll endpoint that returns job.returnvalue | `vendix-ai-queue` |
+| Extracting products from a PDF, image, Word or Excel product catalog | `product-catalog-normalizer` |
+| Filling a product import template from a supplier or client file | `product-catalog-normalizer` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | Fixing bugs where variants are hidden or blocked because stock_quantity is zero | `vendix-product-variants` |
 | Fixing currency display issues or hardcoded $ symbols | `vendix-currency-formatting` |
@@ -270,11 +273,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the storefront's `?mesa=` deep-link, mesa token hydration, or localStorage mesaToken guard | `vendix-restaurant-table-qr` |
 | Moving a Linear issue to Code Review when opening a PR to dev | `git-workflow` |
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
+| Normalizing product names, volumes, prices, categories or brands for bulk upload | `product-catalog-normalizer` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
 | Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
+| Preparing a bulk product upload file for a Vendix store | `product-catalog-normalizer` |
 | Printing documents with date fields | `vendix-date-timezone` |
 | Producing a strategic gap map of what mobile has vs what it lacks relative to web | `mobile-parity-audit` |
 | Producing an animated flow view of a feature to share as a Claude Artifact | `user-story-flows` |
