@@ -88,6 +88,13 @@ export class SessionsController {
     return this.response_service.success(report);
   }
 
+  @Get(':id/cash-summary')
+  @Permissions('store:cash_registers:read')
+  async getCashSummary(@Param('id') id: string) {
+    const summary = await this.sessions_service.getCashSummary(+id);
+    return this.response_service.success(summary);
+  }
+
   @Post(':id/close')
   @Permissions('store:cash_registers:close_session')
   @HttpCode(HttpStatus.OK)

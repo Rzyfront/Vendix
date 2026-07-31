@@ -960,6 +960,22 @@
       "sessions": 12,
       "memories": 13,
       "prompts": 0
+    },
+    {
+      "id": "c07acb81",
+      "created_by": "rzy",
+      "created_at": "2026-07-31T15:43:36Z",
+      "sessions": 4,
+      "memories": 8,
+      "prompts": 0
+    },
+    {
+      "id": "4a893f7f",
+      "created_by": "rzy",
+      "created_at": "2026-07-31T18:03:02Z",
+      "sessions": 1,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

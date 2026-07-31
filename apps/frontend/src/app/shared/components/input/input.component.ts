@@ -462,6 +462,14 @@ export class InputComponent implements ControlValueAccessor {
     if (errors['minlength']) {
       return `Debe tener al menos ${errors['minlength'].requiredLength} caracteres.`;
     }
+    // Política única de contraseñas (core/utils/password-policy). El error trae
+    // ya redactado qué requisito falta; `pattern` solo permitía decir "formato
+    // inválido", dejando al usuario adivinar.
+    if (errors['passwordPolicy']) {
+      return (
+        errors['passwordPolicy'].message ?? 'La contraseña no cumple la política.'
+      );
+    }
     if (errors['minLength']) {
       return `La contraseña debe tener al menos ${errors['minLength'].requiredLength} caracteres.`;
     }

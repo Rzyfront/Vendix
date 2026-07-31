@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { user_state_enum } from '@prisma/client';
+import { IsStrongPassword } from '../../../../common/validators/password-policy';
 
 export class CreateUserDto {
   @ApiPropertyOptional({
@@ -52,11 +53,12 @@ export class CreateUserDto {
   email: string;
 
   @ApiProperty({
-    example: 'password123',
-    description: 'Contraseña del usuario (mínimo 8 caracteres)',
+    example: 'Password123.',
+    description:
+      'Contraseña: mínimo 8 caracteres, con minúscula, mayúscula, número y símbolo',
   })
   @IsString()
-  @MinLength(8)
+  @IsStrongPassword()
   password: string;
 
   @ApiPropertyOptional({

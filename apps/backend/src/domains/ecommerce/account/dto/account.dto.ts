@@ -9,6 +9,7 @@ import {
   Matches,
 } from 'class-validator';
 import { ApiSchema } from '@nestjs/swagger';
+import { IsStrongPassword } from '../../../../common/validators/password-policy';
 
 @ApiSchema({ name: 'EcommerceAccountUpdateProfileDto' })
 export class EcommerceAccountUpdateProfileDto {
@@ -52,7 +53,7 @@ export class EcommerceAccountChangePasswordDto {
   current_password: string;
 
   @IsString()
-  @MinLength(8)
+  @IsStrongPassword()
   new_password: string;
 }
 

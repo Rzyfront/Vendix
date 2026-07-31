@@ -1,11 +1,11 @@
 import {
   Component,
-  OnDestroy,
   effect,
   inject,
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 
 import {
@@ -35,7 +35,7 @@ import { LucideAngularModule } from 'lucide-angular';
   templateUrl: './app-settings-form.component.html',
   styleUrls: ['./app-settings-form.component.scss'],
 })
-export class AppSettingsForm implements OnDestroy {
+export class AppSettingsForm {
   readonly settings = input.required<AppSettings>();
   readonly settingsChange = output<AppSettings>();
   readonly pendingLogoUpload = output<{
@@ -47,10 +47,15 @@ export class AppSettingsForm implements OnDestroy {
     preview: string;
   } | null>();
 
-  logoPreview: string | null = null;
-  faviconPreview: string | null = null;
-  private logoBlobUrl: string | null = null;
-  private faviconBlobUrl: string | null = null;
+  /**
+   * Previews de marca. Eran campos planos: en zoneless el repintado se dispara
+   * con señales, así que un campo mutado desde un handler o un effect deja la
+   * plantilla dependiendo de que algo más marque sucio al componente. Ver el
+   * effect del constructor para la razón por la que el preview se restauraba
+   * solo (QUI-289).
+   */
+  readonly logoPreview = signal<string | null>(null);
+  readonly faviconPreview = signal<string | null>(null);
 
   readonly logoModalOpen = signal(false);
   readonly faviconModalOpen = signal(false);
@@ -105,18 +110,50 @@ export class AppSettingsForm implements OnDestroy {
   }
 
   constructor() {
+    // El preview sigue SIEMPRE al valor del control, que es la única fuente de
+    // verdad de este formulario. Antes había un guard `!this.logoBlobUrl` para
+    // que el effect no pisara un preview local, pero ese campo quedó en null
+    // permanente cuando el preview pasó de blob URL a data URL: elegir un logo
+    // escribía el preview y, en el mismo tick, `onFieldChange()` actualizaba el
+    // `settings` del padre, el effect volvía a correr y restauraba el valor
+    // persistido (null) — el usuario veía el placeholder y creía que la imagen
+    // no había cargado (QUI-289). Ahora `onLogoImages` escribe también el
+    // control, así que este effect converge al mismo data URL en vez de pisarlo.
     effect(() => {
       const currentSettings = this.settings();
       if (currentSettings) {
         this.form.patchValue(currentSettings, { emitEvent: false });
-        if (!this.logoBlobUrl) {
-          this.logoPreview = currentSettings.logo_url || null;
-        }
-        if (!this.faviconBlobUrl) {
-          this.faviconPreview = currentSettings.favicon_url || null;
-        }
+        this.logoPreview.set(
+          this.displayable(currentSettings.logo_url, untracked(this.logoPreview)),
+        );
+        this.faviconPreview.set(
+          this.displayable(
+            currentSettings.favicon_url,
+            untracked(this.faviconPreview),
+          ),
+        );
       }
     });
+  }
+
+  /**
+   * Un valor sólo sirve como `src` si el navegador puede resolverlo por sí
+   * mismo: un data URL propio o una URL absoluta ya firmada. Al guardar, el
+   * padre escribe la clave S3 cruda (`organizations/…/logo.webp`) en `settings`
+   * porque es lo que el PATCH debe mandar; si esa clave llegara al `src`, el
+   * navegador la resolvería contra el vhost y pediría
+   * `https://<tienda>.vendix.com/organizations/…` — 404 y logo roto a la vista
+   * hasta que el GET posterior devuelva la URL firmada. Mientras ese GET llega,
+   * conservamos el preview vigente (QUI-289).
+   *
+   * `null` sí se respeta: es el borrado explícito y debe limpiar el preview.
+   */
+  private displayable(
+    value: string | null | undefined,
+    current: string | null,
+  ): string | null {
+    if (!value) return null;
+    return /^(data:|https?:\/\/)/.test(value) ? value : current;
   }
 
   onFieldChange() {
@@ -149,22 +186,19 @@ export class AppSettingsForm implements OnDestroy {
       return;
     }
 
-    if (this.logoBlobUrl) {
-      URL.revokeObjectURL(this.logoBlobUrl);
-      this.logoBlobUrl = null;
-    }
-    // El data URL recortado es propio y persistente: úsalo como preview.
-    this.logoPreview = dataUrl;
+    // El data URL recortado es propio y persistente: úsalo como preview y como
+    // valor del control, para que el effect de arriba converja a lo mismo en vez
+    // de restaurar el logo persistido. Nunca llega al backend: el padre
+    // reemplaza `app.logo_url` por la clave S3 del upload antes de guardar, y si
+    // el upload falla no se manda ningún PATCH.
+    this.logoPreview.set(dataUrl);
+    this.logoUrlControl.setValue(dataUrl, { emitEvent: false });
     this.pendingLogoUpload.emit({ file, preview: dataUrl });
     this.onFieldChange();
   }
 
   removeLogo(): void {
-    if (this.logoBlobUrl) {
-      URL.revokeObjectURL(this.logoBlobUrl);
-      this.logoBlobUrl = null;
-    }
-    this.logoPreview = null;
+    this.logoPreview.set(null);
     this.logoUrlControl.setValue(null);
     this.pendingLogoUpload.emit(null);
     this.onFieldChange();
@@ -185,28 +219,16 @@ export class AppSettingsForm implements OnDestroy {
       return;
     }
 
-    if (this.faviconBlobUrl) {
-      URL.revokeObjectURL(this.faviconBlobUrl);
-      this.faviconBlobUrl = null;
-    }
-    this.faviconPreview = dataUrl;
+    this.faviconPreview.set(dataUrl);
+    this.faviconUrlControl.setValue(dataUrl, { emitEvent: false });
     this.pendingFaviconUpload.emit({ file, preview: dataUrl });
     this.onFieldChange();
   }
 
   removeFavicon(): void {
-    if (this.faviconBlobUrl) {
-      URL.revokeObjectURL(this.faviconBlobUrl);
-      this.faviconBlobUrl = null;
-    }
-    this.faviconPreview = null;
+    this.faviconPreview.set(null);
     this.faviconUrlControl.setValue(null);
     this.pendingFaviconUpload.emit(null);
     this.onFieldChange();
-  }
-
-  ngOnDestroy(): void {
-    if (this.logoBlobUrl) URL.revokeObjectURL(this.logoBlobUrl);
-    if (this.faviconBlobUrl) URL.revokeObjectURL(this.faviconBlobUrl);
   }
 }

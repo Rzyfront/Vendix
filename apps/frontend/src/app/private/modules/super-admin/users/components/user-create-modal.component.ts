@@ -16,7 +16,9 @@ import {
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent} from '../../../../../shared/components/index';
+  ModalComponent,
+  PasswordRequirementsComponent} from '../../../../../shared/components/index';
+import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
 
@@ -28,7 +30,8 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent
+    ModalComponent,
+    PasswordRequirementsComponent
 ],
   template: `
     <app-modal
@@ -95,6 +98,10 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             [control]="userForm.get('password')"
             [disabled]="isCreating()"
           ></app-input>
+
+          <app-password-requirements
+            [control]="userForm.get('password')"
+          ></app-password-requirements>
 
           <div class="space-y-2">
             <label
@@ -187,7 +194,7 @@ export class UserCreateModalComponent implements OnInit {
       [Validators.required, Validators.email, Validators.maxLength(255)],
     ],
     organization_id: [null, [Validators.required]],
-    password: ['', [Validators.required, Validators.minLength(8)]],
+    password: ['', [Validators.required, passwordPolicyValidator]],
     app: [''],
     state: [UserState.PENDING_VERIFICATION]});
 

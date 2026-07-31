@@ -24,11 +24,10 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../shared/components/input/input.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
-// Reuse the owner reset-password validators — do NOT redefine them.
-import {
-  passwordStrengthValidator,
-  passwordsMatchValidator,
-} from '../../../auth/components/reset-owner-password/reset-owner-password';
+import { PasswordRequirementsComponent } from '../../../../shared/components/password-requirements/password-requirements.component';
+// Política única de contraseñas — no redefinir reglas aquí.
+import { passwordPolicyValidator } from '../../../../core/utils/password-policy';
+import { passwordsMatchValidator } from '../../../auth/components/reset-owner-password/reset-owner-password';
 
 /**
  * Public reset-password page for STORE_ECOMMERCE customers.
@@ -51,6 +50,7 @@ import {
     CardComponent,
     InputComponent,
     ButtonComponent,
+    PasswordRequirementsComponent,
   ],
   template: `
     <div
@@ -120,6 +120,10 @@ import {
                 size="md"
                 placeholder="••••••••"
               ></app-input>
+
+              <app-password-requirements
+                [control]="newPasswordControl"
+              ></app-password-requirements>
 
               <app-input
                 label="Confirmar Nueva Contraseña"
@@ -206,7 +210,7 @@ export class ResetPasswordComponent implements OnInit, OnDestroy {
 
   readonly resetPasswordForm: FormGroup = this.fb.group(
     {
-      new_password: ['', [Validators.required, passwordStrengthValidator]],
+      new_password: ['', [Validators.required, passwordPolicyValidator]],
       confirmPassword: ['', [Validators.required]],
     },
     { validators: passwordsMatchValidator },

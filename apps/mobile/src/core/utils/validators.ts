@@ -1,25 +1,22 @@
+import { evaluatePassword } from './password-policy';
+
 export function isValidEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
 }
 
+/**
+ * Delega en la política única (`core/utils/password-policy`). La versión previa
+ * no exigía símbolo, así que aceptaba contraseñas que el backend rechazaba.
+ */
 export function isValidPassword(password: string): {
   isValid: boolean;
   errors: string[];
 } {
-  const errors: string[] = [];
-  if (password.length < 8) {
-    errors.push('La contraseña debe tener al menos 8 caracteres');
-  }
-  if (!/[A-Z]/.test(password)) {
-    errors.push('La contraseña debe tener al menos una mayúscula');
-  }
-  if (!/[a-z]/.test(password)) {
-    errors.push('La contraseña debe tener al menos una minúscula');
-  }
-  if (!/[0-9]/.test(password)) {
-    errors.push('La contraseña debe tener al menos un número');
-  }
+  const errors = evaluatePassword(password)
+    .filter((state) => !state.satisfied)
+    .map((state) => `La contraseña debe tener ${state.rule.missing}`);
+
   return { isValid: errors.length === 0, errors };
 }
 

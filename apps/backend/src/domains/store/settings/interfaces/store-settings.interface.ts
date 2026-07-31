@@ -51,8 +51,9 @@ export interface BrandingSettings {
   text_color: string;
   text_secondary_color: string;
   text_muted_color: string;
-  logo_url?: string;
-  favicon_url?: string;
+  // Tri-estado: `undefined` = sin tocar, `null` = borrado, string = clave S3.
+  logo_url?: string | null;
+  favicon_url?: string | null;
   custom_css?: string;
 }
 
@@ -373,7 +374,8 @@ export interface GeneralSettings {
   tax_included: boolean;
   // Campos de la tabla stores (sincronizados)
   name?: string;
-  logo_url?: string;
+  // `null` = borrado explícito del logo; `undefined` = no vino en el payload.
+  logo_url?: string | null;
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
   industries?: StoreIndustry[];
 }

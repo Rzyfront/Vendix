@@ -170,4 +170,110 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ------------------------------------------------- QUI-289: tri-estado del logo
+
+  /**
+   * QUI-289 — el borrado del logo respondía `success: true` sin borrar nada.
+   * `extractS3KeyFromUrl(x) ?? undefined` convertía el `null` explícito en
+   * `undefined`, y las tres compuertas de escritura filtran por `!== undefined`.
+   *
+   * Estos tres casos fijan el contrato tri-estado. Reintroducir el
+   * `?? undefined` debe romper el caso "borra".
+   */
+  describe('updateSettings — tri-estado de logo_url (QUI-289)', () => {
+    const EXISTING_LOGO = 'organizations/roku-6/stores/roku-10/logos/old.webp';
+    const NEW_LOGO = 'organizations/roku-6/stores/roku-10/logos/new.webp';
+
+    /** Fila `store_settings` simulada; el mock la lee y la escribe. */
+    let stored: any;
+
+    /** Estado persistido tras la última escritura. */
+    const persisted = () => stored;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+
+      stored = {
+        ...STORED_WITH_CASH_REGISTER_ON,
+        branding: { logo_url: EXISTING_LOGO, favicon_url: EXISTING_LOGO },
+      };
+
+      // Mock CON ESTADO: `updateSettings` escribe el branding vía
+      // `updateStoreBranding` y RE-LEE la fila antes del upsert final, justo
+      // para no pisar lo que acaba de escribir. Con un `findUnique` fijo esa
+      // relectura devolvería el estado viejo y el test mediría el mock en lugar
+      // del servicio.
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(async ({ update }: any) => {
+        stored = update?.settings ?? stored;
+        return { store_id: STORE_ID, settings: stored };
+      });
+
+      // `generateFaviconForStore` es fire-and-forget y sale temprano si la
+      // tienda no trae organización; así el test no depende de S3.
+      prisma.stores.findUnique.mockResolvedValue(null);
+    });
+
+    it('borra el logo cuando llega null explícito', async () => {
+      await service.updateSettings({ app: { logo_url: null } });
+
+      expect(prisma.stores.update).toHaveBeenCalledWith({
+        where: { id: STORE_ID },
+        data: { logo_url: null },
+      });
+      expect(persisted().branding.logo_url).toBeNull();
+    });
+
+    it('borra el favicon cuando llega null explícito', async () => {
+      await service.updateSettings({ app: { favicon_url: null } });
+
+      expect(persisted().branding.favicon_url).toBeNull();
+    });
+
+    it('fija la clave saneada cuando llega un string', async () => {
+      await service.updateSettings({ app: { logo_url: NEW_LOGO } });
+
+      expect(prisma.stores.update).toHaveBeenCalledWith({
+        where: { id: STORE_ID },
+        data: { logo_url: NEW_LOGO },
+      });
+      expect(persisted().branding.logo_url).toBe(NEW_LOGO);
+    });
+
+    it('no toca el logo vigente cuando la clave no viene en el payload', async () => {
+      await service.updateSettings({ app: { primary_color: '#123456' } });
+
+      expect(prisma.stores.update).not.toHaveBeenCalled();
+      expect(persisted().branding.logo_url).toBe(EXISTING_LOGO);
+    });
+
+    it('propaga el borrado a la tabla stores cuando llega por general', async () => {
+      await service.updateSettings({ general: { logo_url: null } });
+
+      expect(prisma.stores.update).toHaveBeenCalledWith({
+        where: { id: STORE_ID },
+        data: { logo_url: null },
+      });
+    });
+
+    it('el null de app gana sobre la URL vieja que traiga general', async () => {
+      // El panel manda ambas secciones: al borrar sólo anula `app`, mientras
+      // `general` conserva la URL firmada anterior. El bloque de `general` corre
+      // después y revivía el logo dentro de la misma peticion.
+      await service.updateSettings({
+        app: { logo_url: null },
+        general: { logo_url: `https://s3.amazonaws.com/${EXISTING_LOGO}?X-Amz-Signature=abc` },
+      });
+
+      const updates = (prisma.stores.update as jest.Mock).mock.calls.map(
+        (c) => c[0].data.logo_url,
+      );
+      expect(updates.every((v) => v === null)).toBe(true);
+      expect(persisted().branding.logo_url).toBeNull();
+    });
+  });
 });

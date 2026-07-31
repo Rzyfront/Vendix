@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { Component, computed, inject, input, output } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
 import { Observable } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -369,9 +369,41 @@ export class HeaderComponent {
   // --- Signal-based properties ---
   readonly breadcrumb = toSignal(this.breadcrumb$, { initialValue: null! });
 
-  // --- State signals ---
-  readonly storeLogo = signal<string | null>(null);
-  readonly storeName = signal<string | null>(null);
+  // --- Derived brand state ---
+  /**
+   * QUI-289 — antes eran `signal` planos seteados UNA vez en el constructor vía
+   * `loadStoreBranding()`. En zoneless eso captura el instante-cero (el
+   * `toSignal` de NgRx todavía en `initialValue: null`) y nunca recalcula, así
+   * que el header móvil se quedaba con el logo monocromo aunque la tienda
+   * tuviera el suyo — y no reflejaba un cambio de logo hasta recargar.
+   *
+   * La fuente de verdad es `authFacade.userStore()`, la misma que usa el
+   * sidebar desktop (`store-admin-layout.storeLogo`); el branding del tenant
+   * queda como respaldo cuando el snapshot aún no trae logo.
+   */
+  readonly storeLogo = computed<string | null>(() => {
+    const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
+    if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
+
+    const ownLogo =
+      this.authFacade.userStore()?.logo_url ||
+      this.globalFacade.brandingContext()?.logo?.url ||
+      null;
+    if (ownLogo) return ownLogo;
+
+    // Fallback monocromo sólo dentro de un app type de tienda; ORG_ADMIN y
+    // SUPER_ADMIN conservan su icono genérico.
+    const appType = this.authFacade.selectedAppType();
+    return appType === 'STORE_ADMIN' ||
+      appType === 'STORE_ECOMMERCE' ||
+      appType === 'STORE_LANDING'
+      ? 'vlogomono.png'
+      : null;
+  });
+
+  readonly storeName = computed<string | null>(
+    () => this.authFacade.userStoreName() ?? null,
+  );
 
   // --- Operating scope chip signals (ORG_ADMIN only) ---
   /**
@@ -411,39 +443,6 @@ export class HeaderComponent {
   readonly show_scope_chip = computed(
     () => this.authFacade.isAuthenticated() && this.is_org_admin(),
   );
-
-  constructor() {
-    this.loadStoreBranding();
-  }
-
-  private loadStoreBranding(): void {
-    const brandingContext = this.globalFacade.getBrandingContext();
-    if (brandingContext?.logo?.url) {
-      this.storeLogo.set(brandingContext.logo.url);
-    } else {
-      const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
-      if (domainConfig?.isMainVendixDomain) {
-        this.storeLogo.set('vlogo.png');
-      } else {
-        // Store-context fallback: brand the header with the mono logo only
-        // when inside a STORE app type and the store has no logo of its own.
-        // ORG_ADMIN / SUPER_ADMIN keep falling back to their generic icon.
-        const appType = this.authFacade.selectedAppType();
-        if (
-          appType === 'STORE_ADMIN' ||
-          appType === 'STORE_ECOMMERCE' ||
-          appType === 'STORE_LANDING'
-        ) {
-          this.storeLogo.set('vlogomono.png');
-        }
-      }
-    }
-
-    const userContext = this.globalFacade.getUserContext();
-    if (userContext?.store?.name) {
-      this.storeName.set(userContext.store.name);
-    }
-  }
 
   onDropdownClose(): void {
     // Lógica adicional cuando se cierra el dropdown si es necesario

@@ -13,6 +13,8 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { finalize } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
 import { InputComponent } from '../input/input.component';
+import { PasswordRequirementsComponent } from '../password-requirements/password-requirements.component';
+import { passwordPolicyValidator } from '../../../core/utils/password-policy';
 import {
   SelectorComponent,
   SelectorOption,
@@ -39,6 +41,7 @@ import { dataUrlToFile } from '../../utils/data-url.util';
     ModalComponent,
     ButtonComponent,
     InputComponent,
+    PasswordRequirementsComponent,
     SelectorComponent,
     IconComponent,
     ImageSourceModalComponent,
@@ -290,6 +293,9 @@ import { dataUrlToFile } from '../../utils/data-url.util';
                     placeholder="••••••"
                     [error]="getPasswordError('confirm_password')"
                   ></app-input>
+                  <app-password-requirements
+                    [control]="passwordForm.get('new_password')"
+                  ></app-password-requirements>
                   <div class="flex justify-end pt-1">
                     <app-button
                       variant="primary"
@@ -603,7 +609,7 @@ export class ProfileModalComponent {
     this.passwordForm = this.fb.group(
       {
         current_password: ['', Validators.required],
-        new_password: ['', [Validators.required, Validators.minLength(6)]],
+        new_password: ['', [Validators.required, passwordPolicyValidator]],
         confirm_password: ['', Validators.required],
       },
       { validators: this.passwordMatchValidator },
@@ -993,7 +999,9 @@ export class ProfileModalComponent {
     const control = this.passwordForm.get(controlName);
     if (control?.touched && control?.errors) {
       if (control.errors['required']) return 'Requerido';
-      if (control.errors['minlength']) return 'Mínimo 6 caracteres';
+      // Mensaje redactado por la política única (`core/utils/password-policy`).
+      if (control.errors['passwordPolicy'])
+        return control.errors['passwordPolicy'].message;
       if (control.errors['passwordMismatch'])
         return 'Las contraseñas no coinciden';
     }

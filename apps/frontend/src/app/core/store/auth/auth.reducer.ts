@@ -483,6 +483,28 @@ export const authReducer = createReducer(
 
   on(AuthActions.markPanelUiSeenFailure, (state) => state),
 
+  /**
+   * QUI-289 — parche puntual del logo dentro del snapshot de la tienda.
+   *
+   * Se persiste con `saveAuthState` porque al recargar la página el arranque
+   * rehidrata desde localStorage (`restoreAuthState`) y sin esto el logo viejo
+   * volvería. No-op si todavía no hay `user.store`: no inventamos el nodo.
+   */
+  on(AuthActions.updateStoreLogo, (state, { logo_url }) => {
+    const store = (state.user as any)?.store;
+    if (!store) return state;
+
+    const newState = {
+      ...state,
+      user: {
+        ...(state.user as any),
+        store: { ...store, logo_url },
+      },
+    };
+    saveAuthState(newState);
+    return newState;
+  }),
+
   // Update Store Settings
   on(AuthActions.updateStoreSettings, (state, { store_settings }) => {
     const newState = {

@@ -3,10 +3,10 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  MinLength,
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsStrongPassword } from '../../../common/validators/password-policy';
 
 export class RegisterDto {
   @ApiProperty({
@@ -18,16 +18,13 @@ export class RegisterDto {
   email: string;
 
   @ApiProperty({
-    example: 'Password@123',
+    example: 'Password123.',
     description:
-      'Contraseña del usuario (mínimo 8 caracteres, al menos un carácter especial)',
+      'Contraseña: mínimo 8 caracteres, con minúscula, mayúscula, número y símbolo',
   })
   @IsString({ message: 'La contraseña debe ser un string' })
   @IsNotEmpty({ message: 'La contraseña es requerida' })
-  @MinLength(8, { message: 'La contraseña debe tener al menos 8 caracteres' })
-  @Matches(/[^A-Za-z0-9]/, {
-    message: 'La contraseña debe contener al menos un carácter especial',
-  })
+  @IsStrongPassword()
   password: string;
 
   @ApiProperty({ example: 'Juan', description: 'Nombre del usuario' })

@@ -14,12 +14,13 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import * as AuthActions from '../../../../core/store/auth/auth.actions';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
-import { passwordValidator } from '../../../../core/utils/validators';
+import { passwordPolicyValidator } from '../../../../core/utils/password-policy';
 import {
   ButtonComponent,
   InputComponent,
   CardComponent,
   IconComponent,
+  PasswordRequirementsComponent,
 } from '../../../../shared/components';
 import { NavigationService } from '../../../../core/services/navigation.service';
 import { AppConfigService } from '../../../../core/services/app-config.service';
@@ -43,7 +44,8 @@ interface RegistrationError {
     InputComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent
+    IconComponent,
+    PasswordRequirementsComponent
 ],
   template: `
     <div
@@ -134,8 +136,11 @@ interface RegistrationError {
               [control]="registerForm.get('password')"
               type="password"
               placeholder="••••••••"
-              helperText="Mín. 8 caracteres, 1 mayúscula y 1 especial"
             ></app-input>
+
+            <app-password-requirements
+              [control]="registerForm.get('password')"
+            ></app-password-requirements>
 
             <!-- Error Display -->
             @if (hasError()) {
@@ -269,7 +274,7 @@ export class RegisterOwnerComponent implements OnInit {
         Validators.maxLength(15),
       ],
     ],
-    password: ['', [Validators.required, passwordValidator]],
+    password: ['', [Validators.required, passwordPolicyValidator]],
   });
 
   ngOnInit(): void {
