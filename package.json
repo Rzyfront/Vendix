@@ -28,6 +28,7 @@
     "format": "npm run format -ws",
     "zoneless:audit": "bash apps/frontend/scripts/zoneless-audit.sh",
     "tz:audit": "bash scripts/tz-audit.sh",
+    "state-refresh:audit": "bash scripts/state-refresh-audit.sh",
     "// ----- DATABASE (Backend) -----": "",
     "db:reset-seed": "npm run db:reset -w apps/backend && npm run db:seed -w apps/backend",
     "// ----- DOCKER -----": "",

@@ -111,6 +111,48 @@
   font-weight: 500;
 }
 
+/* Banner de validación — nombra el dato que falta para cobrar (QUI-561).
+   Reusa .pc-warn (mismo token de warning, mismo icono) y solo ajusta el flujo:
+   es el ÚLTIMO hijo del stack, así que no arrastra margen inferior. La entrada es
+   un @keyframes sobre el nodo recién montado por @if, no una transition: el paso
+   Cobro corre CD continua durante el polling Wompi y una transition se
+   reiniciaría en cada ciclo (reference_transition_all_continuous_cd). */
+.pc-flash-banner {
+  margin-bottom: 0;
+  animation: pcFlashBanner 260ms ease-out;
+}
+
+@keyframes pcFlashBanner {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Destello de atención sobre el bloque al que le falta el dato. Solo anima el
+   anillo (box-shadow) — nunca border-color — para no pisar el borde rojo de
+   .pc-cash-field.error ni el borde base de .pc-card. */
+.pc-flash-target {
+  animation: pcFlashWarning 1.2s ease-out;
+}
+
+@keyframes pcFlashWarning {
+  0%,
+  30%,
+  70%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--color-warning-rgb), 0);
+  }
+  15%,
+  55% {
+    box-shadow: 0 0 0 4px rgba(var(--color-warning-rgb), 0.4);
+  }
+}
+
 /* Tabs */
 .tab-headers {
   display: flex;
@@ -519,6 +561,12 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  /* El panel de métodos no tiene radio propio (no lleva borde ni fondo); se le
+     da uno solo mientras destella para que el anillo no salga cuadrado. */
+  .pc-method-step.pc-flash-target {
+    border-radius: 16px;
   }
 
   .payment-method-btn {

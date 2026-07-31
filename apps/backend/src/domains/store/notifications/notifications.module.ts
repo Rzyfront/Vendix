@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { NotificationsController } from './notifications.controller';
 import { NotificationSoundsCatalogController } from './notification-sounds-catalog.controller';
 import { NotificationsService } from './notifications.service';
@@ -10,9 +10,10 @@ import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { EmailModule } from '../../../email/email.module';
 import { S3Module } from '../../../common/services/s3.module';
+import { AppointmentQueueModule } from '../reservations/appointment-queue/appointment-queue.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, EmailModule, S3Module],
+  imports: [ResponseModule, PrismaModule, EmailModule, S3Module, forwardRef(() => AppointmentQueueModule)],
   controllers: [NotificationsController, NotificationSoundsCatalogController],
   providers: [
     NotificationsService,

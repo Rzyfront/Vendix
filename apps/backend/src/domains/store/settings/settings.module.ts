@@ -12,9 +12,13 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { AuditModule } from '../../../common/audit/audit.module';
 import { EmailModule } from '../../../email/email.module';
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
+import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 
 @Module({
-  imports: [PrismaModule, AuditModule, EmailModule],
+  // QUI-560 — `SettingsService` consulta las sesiones de caja abiertas para
+  // bloquear el apagado del módulo. `CashRegistersModule` solo importa
+  // `PrismaModule` y `ResponseModule`, así que no hay ciclo.
+  imports: [PrismaModule, AuditModule, EmailModule, CashRegistersModule],
   controllers: [
     SettingsController,
     FiscalStatusController,

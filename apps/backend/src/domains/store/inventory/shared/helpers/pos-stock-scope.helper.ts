@@ -71,6 +71,82 @@ export function resolveLowStockAlertsScope(
   return resolveScope(store, configured);
 }
 
+/**
+ * Location types whose stock can never be sold through a sales channel.
+ *
+ * `quarantine` holds goods pending inspection and `damaged_goods` holds goods
+ * withdrawn from sale: both are physically present but commercially
+ * unavailable, so they must not feed availability in any channel.
+ */
+export const NON_SELLABLE_LOCATION_TYPES = [
+  'quarantine',
+  'damaged_goods',
+] as const;
+
+/**
+ * CANONICAL definition of "a location the store can sell from" (QUI-559).
+ *
+ * A location is sellable when it belongs to the store, is active, is not the
+ * organization's central warehouse, and is not of a non-sellable type. This
+ * predicate used to be duplicated inline in every layer of the POS flow, which
+ * is exactly how they drifted apart:
+ *
+ *   - the POS product list summed EVERY `stock_levels` row (no location filter),
+ *   - the payment pre-validation summed only sellable locations,
+ *   - the reservation and the delivery commit worked on ONE location.
+ *
+ * The result was a POS showing units it could not charge: the cashier saw 12,
+ * the sale was blocked with `409` because only 2 sat in sellable locations (or
+ * because the 12 were split across locations and no single one covered the
+ * line). Every layer must now derive its filter from here so the three numbers
+ * cannot diverge again.
+ *
+ * @param storeId Store whose sellable locations are requested.
+ */
+export function sellableLocationsWhere(storeId: number) {
+  return {
+    store_id: storeId,
+    is_active: true,
+    is_central_warehouse: false,
+    type: { notIn: [...NON_SELLABLE_LOCATION_TYPES] },
+  };
+}
+
+/**
+ * `stock_levels` filter for the stock a channel may actually commit, i.e. the
+ * union of every sellable location of the store — independent of the display
+ * scope.
+ *
+ * This is the set the payment validation, the reservation and the delivery
+ * commit share.
+ */
+export function sellableStockLevelsWhere(storeId: number) {
+  return { inventory_locations: sellableLocationsWhere(storeId) };
+}
+
+/**
+ * `stock_levels` filter for what the POS may DISPLAY: the configured scope
+ * INTERSECTED with the sellable set.
+ *
+ * The intersection is the invariant that closes QUI-559: displayed stock is a
+ * subset of committable stock, so the POS can never show a unit the sale would
+ * later refuse. Under `all_locations` both sets are identical; under
+ * `main_location` the display narrows to the default location while the sale
+ * may still draw from any sellable location — never the other way around.
+ *
+ * @param storeId Store being displayed.
+ * @param scope   Result of {@link resolvePosStockScope}.
+ */
+export function displayableStockLevelsWhere(
+  storeId: number,
+  scope: ResolvedInventoryScope,
+) {
+  const sellable = sellableStockLevelsWhere(storeId);
+  return scope.scope === 'main_location'
+    ? { ...sellable, location_id: scope.mainLocationId }
+    : sellable;
+}
+
 function resolveScope(
   store: StoreScopeRef,
   configured: InventoryScope,

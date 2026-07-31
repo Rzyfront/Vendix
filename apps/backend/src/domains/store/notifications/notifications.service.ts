@@ -143,65 +143,62 @@ export class NotificationsService {
    * `data->>'target_user_id' = $userId` for the targeted branch) — no
    * in-memory filtering, no pagination regression.
    */
-  /**
-   * Shared bell target filter (anti-drift). Extracted so `findAll` and
-   * `getUnreadCount` share the SAME `OR` and can never diverge in a single
-   * site — this is what caused BUG-4, where one branch used a bare
-   * `{ data: null }`.
-   *
-   * The bell shows every notification that is EITHER a store-wide broadcast
-   * (the `data` column is SQL NULL, OR its `target_user_id` path is
-   * absent/JSON-null) OR directed at the caller (`data.target_user_id ===
-   * user_id`). The SQL-NULL branch MUST use `Prisma.DbNull`: Prisma 7 rejects
-   * a bare `{ data: null }` on a `Json?` column (throws
-   * PrismaClientValidationError → 500 on every layout load).
-   */
-  private buildBellTargetFilter(user_id: number) {
-    return {
-      OR: [
-        // Broadcast — `data` column is SQL NULL (createAndBroadcast passed
-        // no payload).
-        { data: { equals: Prisma.DbNull } },
-        // Broadcast — path `target_user_id` is absent OR explicitly JSON null.
-        { data: { path: ['target_user_id'], equals: null } },
-        // Targeted at the calling user.
-        { data: { path: ['target_user_id'], equals: user_id } },
-      ],
-    };
-  }
-
   async findAll(user_id: number, query_dto: NotificationQueryDto) {
     const { page = 1, limit = 20, type, is_read } = query_dto;
     const skip = (page - 1) * limit;
+    const store_id = RequestContextService.getStoreId();
 
-    const target_filter = this.buildBellTargetFilter(user_id);
+    // Prisma 7 Json path filter with `equals: null` is broken — use raw SQL.
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
 
-    const where: any = {
-      AND: [
-        {
-          ...(type && { type }),
-          ...(is_read !== undefined && { is_read }),
-        },
-        target_filter,
-      ],
-    };
+    if (store_id) {
+      conditions.push(`n.store_id = $${idx++}`);
+      params.push(store_id);
+    }
+    if (type) {
+      conditions.push(`n.type = $${idx++}`);
+      params.push(type);
+    }
+    if (is_read !== undefined) {
+      conditions.push(`n.is_read = $${idx++}`);
+      params.push(is_read);
+    }
 
-    const [data, total] = await Promise.all([
-      this.notificationsModel.findMany({
-        where,
-        orderBy: { created_at: 'desc' },
+    // Target-user bell filter: show broadcast OR self-targeted notifications.
+    conditions.push(`(
+      n.data IS NULL
+      OR n.data->>'target_user_id' IS NULL
+      OR (n.data->>'target_user_id')::int = $${idx++}
+    )`);
+    params.push(user_id);
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Unread count: same filter + is_read = false
+    const unreadConditions = [...conditions, `n.is_read = false`];
+    const unreadWhere = `WHERE ${unreadConditions.join(' AND ')}`;
+
+    const [data, totalResult, unreadResult] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any>(
+        `SELECT n.* FROM notifications n ${where} ORDER BY n.created_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
+        ...params,
+        limit,
         skip,
-        take: limit,
-      }),
-      this.notificationsModel.count({ where }),
+      ),
+      this.prisma.$queryRawUnsafe<any>(
+        `SELECT COUNT(*)::int as total FROM notifications n ${where}`,
+        ...params,
+      ),
+      this.prisma.$queryRawUnsafe<any>(
+        `SELECT COUNT(*)::int as total FROM notifications n ${unreadWhere}`,
+        ...params,
+      ),
     ]);
 
-    const unread_count = await this.notificationsModel.count({
-      where: {
-        is_read: false,
-        AND: [target_filter],
-      },
-    });
+    const total = totalResult?.[0]?.total ?? 0;
+    const unread_count = unreadResult?.[0]?.total ?? 0;
 
     return {
       data,
@@ -221,13 +218,31 @@ export class NotificationsService {
    * notifications targeted at other users.
    */
   async getUnreadCount(user_id: number) {
-    const count = await this.notificationsModel.count({
-      where: {
-        is_read: false,
-        AND: [this.buildBellTargetFilter(user_id)],
-      },
-    });
-    return { count };
+    const store_id = RequestContextService.getStoreId();
+    // Prisma 7 Json path filter with `equals: null` is broken — use raw SQL.
+    const conditions: string[] = ['n.is_read = false'];
+    const params: any[] = [];
+    let idx = 1;
+
+    if (store_id) {
+      conditions.push(`n.store_id = $${idx++}`);
+      params.push(store_id);
+    }
+
+    conditions.push(`(
+      n.data IS NULL
+      OR n.data->>'target_user_id' IS NULL
+      OR (n.data->>'target_user_id')::int = $${idx++}
+    )`);
+    params.push(user_id);
+
+    const where = `WHERE ${conditions.join(' AND ')}`;
+    const result = await this.prisma.$queryRawUnsafe<any>(
+      `SELECT COUNT(*)::int as total FROM notifications n ${where}`,
+      ...params,
+    );
+
+    return { count: result?.[0]?.total ?? 0 };
   }
 
   async markRead(id: number) {

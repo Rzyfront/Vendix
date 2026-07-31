@@ -598,6 +598,28 @@ export class BreadcrumbService {
       icon: 'home',
     },
 
+    // Reservations — appointment redesign phase 2.
+    // The reschedule-requests page is a dedicated view; the dashboard
+    // route is the calendar/list. Both feed the same breadcrumb chain.
+    {
+      path: '/admin/reservations',
+      title: 'Reservas',
+      parent: 'Tienda',
+      icon: 'calendar-check',
+    },
+    {
+      path: '/admin/reservations/reschedule-requests',
+      title: 'Solicitudes de reagenda',
+      parent: 'Reservas',
+      icon: 'inbox',
+    },
+    {
+      path: '/admin/reservations/availability',
+      title: 'Disponibilidad',
+      parent: 'Reservas',
+      icon: 'calendar-clock',
+    },
+
     // Products
     {
       path: '/admin/products',

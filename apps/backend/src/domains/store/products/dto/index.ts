@@ -270,6 +270,20 @@ export class CreateProductDto {
   @Type(() => Boolean)
   is_batch_produced?: boolean;
 
+  /**
+   * Appointment redesign phase 2 — whether this product/service is
+   * eligible for the customer's home (when
+   * `bookings.service_location_type = 'home'`). When false, the ecommerce
+   * booking flow forces `shop` and hides the "A domicilio" selector
+   * for this product only. Default false (legacy: "En el local del
+   * técnico" only). The frontend hides the toggle when
+   * `service_modality !== 'in_person'` (no tiene sentido para virtual).
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_eligible_for_home_service?: boolean;
+
   // ===== Control exacto de UoM (Fase UoM) =====
   // FKs al catálogo global units_of_measure. El factor de conversión
   // purchase→stock NO se confía del cliente: el backend lo deriva de
@@ -575,6 +589,20 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_batch_produced?: boolean;
+
+  /**
+   * Appointment redesign phase 2 — whether this product/service is
+   * eligible for the customer's home (when
+   * `bookings.service_location_type = 'home'`). When false, the ecommerce
+   * booking flow forces `shop` and hides the "A domicilio" selector
+   * for this product only. Default false (legacy: "En el local del
+   * técnico" only). The frontend hides the toggle when
+   * `service_modality !== 'in_person'` (no tiene sentido para virtual).
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_eligible_for_home_service?: boolean;
 
   // ===== Control exacto de UoM (Fase UoM) =====
   // FKs al catálogo global units_of_measure. El factor de conversión

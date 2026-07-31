@@ -1878,6 +1878,10 @@ export class PosComponent {
       this.selectedCustomer.set(null);
       this.paymentFulfillment.set(null);
       this.paymentTableId.set(null);
+      // QUI-535: el cobro ya cerró la sesión de mesa en el backend. Soltar la
+      // sesión cacheada evita que la venta siguiente arranque con la mesa de la
+      // anterior preseleccionada (y con needsTable() en false).
+      this.restaurantIntegration.clearTableSession();
     }
   }
 

@@ -49,6 +49,7 @@ jobs:
             frontend:
               - *shared
               - 'apps/frontend/**'
+              - 'scripts/state-refresh-audit.sh'
             mobile:
               - *shared
               - 'apps/mobile/**'
@@ -85,6 +86,26 @@ jobs:
       - run: npm ci
       - run: chmod +x scripts/zoneless-audit.sh
       - run: ./scripts/zoneless-audit.sh
+
+  state-refresh-audit:
+    name: State Refresh Audit
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    # QUI-554: un componente que muta por HTTP directo dentro de un módulo con
+    # NgRx se salta la cadena acción → effect → refresh, así que "guardé y no se
+    # ve" pasa el code review porque el POST sí funciona. Guard de puro grep
+    # sobre el árbol (sin build ni deps). Falla sólo por los archivos del PR; la
+    # deuda preexistente se reporta como warning.
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Historia completa: el script hace `git diff origin/<BASE_REF>...HEAD`.
+          fetch-depth: 0
+      - run: chmod +x scripts/state-refresh-audit.sh
+      - run: ./scripts/state-refresh-audit.sh
 
   tz-audit:
     name: TZ Audit

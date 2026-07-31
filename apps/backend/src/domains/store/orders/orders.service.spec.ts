@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
+import { OrderFlowService } from './order-flow/order-flow.service';
 import { VendixHttpException } from 'src/common/errors';
 
 describe('OrdersService', () => {
@@ -48,6 +49,10 @@ describe('OrdersService', () => {
     getDefaultLocationForProduct: jest.fn(async () => 1),
   };
   const mockShippingCalculator = { calculateRates: jest.fn() };
+  const mockOrderFlowService = {
+    cancelOrder: jest.fn(),
+    forceOrderState: jest.fn(),
+  };
 
   const mockRequestContextService = {
     getContext: jest.fn(),
@@ -68,6 +73,7 @@ describe('OrdersService', () => {
         { provide: ScheduleValidationService, useValue: mockScheduleValidation },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: ShippingCalculatorService, useValue: mockShippingCalculator },
+        { provide: OrderFlowService, useValue: mockOrderFlowService },
       ],
     }).compile();
 
@@ -228,6 +234,143 @@ describe('OrdersService', () => {
       await expect(service.findOne(404)).rejects.toBeInstanceOf(
         VendixHttpException,
       );
+    });
+  });
+
+  /**
+   * QUI-557 — El vector de corrupción que hacía reaparecer el ticket.
+   *
+   * `UpdateOrderDto extends PartialType(CreateOrderDto)` reexpone `state`, así
+   * que un `PATCH /store/orders/:id {"state":...}` escribía el estado en crudo:
+   * con `cancelled` la orden quedaba cancelada pero sus `stock_reservations`
+   * seguían activas restando de `quantity_available`, y la siguiente remisión
+   * reportaba "sin stock" con las existencias intactas. Con `shipped` el daño
+   * era el simétrico: sin emitir `order.shipped`, la reserva original de una
+   * orden de alcance ORGANIZATION nunca se consumía.
+   *
+   * `OrdersService.update` delega ahora TODO cambio de estado en
+   * `forceOrderState`. La invariante que fijan estos tests: `state` no llega
+   * jamás al `prisma.orders.update` de este método.
+   */
+  describe('update — todo cambio de estado pasa por el seam de OrderFlowService', () => {
+    const processingOrder = {
+      id: 590,
+      order_number: 'ORD590',
+      state: 'processing',
+      subtotal_amount: '1000.00',
+      tax_amount: '0.00',
+      discount_amount: '0.00',
+    };
+
+    /** Todos los estados que la UI manda hoy por el PATCH genérico. */
+    const UI_STATES = ['cancelled', 'shipped', 'delivered'] as const;
+
+    it.each(UI_STATES)(
+      'delega state=%s en forceOrderState y no escribe el estado en crudo',
+      async (state) => {
+        mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+
+        await service.update(590, { state } as any);
+
+        expect(mockOrderFlowService.forceOrderState).toHaveBeenCalledWith(
+          590,
+          state,
+          expect.objectContaining({ reason: expect.any(String) }),
+        );
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('no fuerza nada cuando el estado pedido es el actual', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+
+      await service.update(590, { state: 'processing' } as any);
+
+      expect(mockOrderFlowService.forceOrderState).not.toHaveBeenCalled();
+      // Y tampoco reescribe la fila: sin más campos, no hay nada que aplicar.
+      expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('aplica el resto de la metadata cuando el PATCH trae state y otros campos', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+      mockPrismaService.orders.update.mockResolvedValue(processingOrder);
+
+      await service.update(590, {
+        state: 'cancelled',
+        internal_notes: 'cliente desistió',
+      } as any);
+
+      expect(mockOrderFlowService.forceOrderState).toHaveBeenCalled();
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      expect(writtenData.internal_notes).toBe('cliente desistió');
+      expect(writtenData.state).toBeUndefined();
+    });
+
+    it('escribe la metadata ANTES de forzar el estado, o la traza se pierde', async () => {
+      /**
+       * Regresión encontrada en la verificación E2E. `forceOrderState` persiste
+       * su traza (`forced_transition`, `delivered_at`, `previous_state`) como
+       * JSON dentro de `internal_notes`. Si el PATCH trae `state` E
+       * `internal_notes` y se forzaba primero, el update genérico sobrescribía
+       * ese JSON con el texto plano del operador y la traza desaparecía —con
+       * ella el `previous_state` que `reactivateOrder` necesita—.
+       *
+       * Invirtiendo el orden, `appendFlowMetadata` encuentra la nota como texto
+       * plano y la conserva en el campo `notes` del sobre.
+       */
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+
+      const callOrder: string[] = [];
+      mockPrismaService.orders.update.mockImplementation(async () => {
+        callOrder.push('prisma.update');
+        return processingOrder;
+      });
+      mockOrderFlowService.forceOrderState.mockImplementation(async () => {
+        callOrder.push('forceOrderState');
+        return processingOrder;
+      });
+
+      await service.update(590, {
+        state: 'delivered',
+        internal_notes: 'entregada en mostrador',
+      } as any);
+
+      expect(callOrder).toEqual(['prisma.update', 'forceOrderState']);
+    });
+
+    it('sin state no fuerza nada y devuelve el row del update, no un findOne extra', async () => {
+      // El PATCH de solo metadata es el caso mayoritario: no debe pagar una
+      // lectura extra ni cambiar la forma del payload que ya consume la UI.
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+      const updated = { ...processingOrder, internal_notes: 'nota' };
+      mockPrismaService.orders.update.mockResolvedValue(updated);
+
+      const result = await service.update(590, {
+        internal_notes: 'nota',
+      } as any);
+
+      expect(mockOrderFlowService.forceOrderState).not.toHaveBeenCalled();
+      expect(result).toBe(updated);
+    });
+
+    it('nunca escribe state en crudo, ni para un estado que la UI no usa hoy', async () => {
+      // Blindaje contra el reingreso del bug: si mañana alguien manda
+      // `refunded` por esta vía, tampoco debe llegar al update crudo.
+      mockPrismaService.orders.findFirst.mockResolvedValue(processingOrder);
+      mockPrismaService.orders.update.mockResolvedValue(processingOrder);
+
+      await service.update(590, {
+        state: 'refunded',
+        internal_notes: 'nota',
+      } as any);
+
+      expect(mockOrderFlowService.forceOrderState).toHaveBeenCalledWith(
+        590,
+        'refunded',
+        expect.anything(),
+      );
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      expect(writtenData.state).toBeUndefined();
     });
   });
 });

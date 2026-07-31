@@ -2,11 +2,15 @@ import { Module } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
 import { AvailabilityService } from './availability.service';
 import { BookingConfirmationService } from './booking-confirmation.service';
+import { AppointmentQueueModule } from './appointment-queue/appointment-queue.module';
+import { BusinessHoursService } from './business-hours/business-hours.service';
+import { BusinessHoursController } from './business-hours/business-hours.controller';
 import { ReservationsController } from './reservations.controller';
 import { ProvidersService } from './providers/providers.service';
 import { ProvidersController } from './providers/providers.controller';
 import { ProviderScheduleService } from './providers/provider-schedule.service';
 import { ProviderAvailabilityService } from './providers/provider-availability.service';
+import { AutoNoShowJob } from './jobs/auto-no-show.job';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -15,20 +19,35 @@ import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, OrdersModule, S3Module, ProductsModule, TablesModule],
-  controllers: [ProvidersController, ReservationsController],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    OrdersModule,
+    S3Module,
+    ProductsModule,
+    TablesModule,
+    AppointmentQueueModule,
+  ],
+  controllers: [
+    ProvidersController,
+    ReservationsController,
+    BusinessHoursController,
+  ],
   providers: [
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
+    BusinessHoursService,
     ProvidersService,
     ProviderScheduleService,
     ProviderAvailabilityService,
+    AutoNoShowJob,
   ],
   exports: [
     ReservationsService,
     AvailabilityService,
     BookingConfirmationService,
+    BusinessHoursService,
     ProvidersService,
     ProviderAvailabilityService,
   ],

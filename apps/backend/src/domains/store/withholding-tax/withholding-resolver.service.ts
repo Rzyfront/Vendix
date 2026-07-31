@@ -33,6 +33,17 @@ export interface EvaluableConcept {
   account_code?: string | null;
 }
 
+/**
+ * Cliente Prisma mínimo que `resolve` necesita, para poder recibir el `tx` de una
+ * transacción en curso en vez de salir por otra conexión del pool. Se declara acá
+ * y no se importa de `withholding-flow.service` para no crear un ciclo: el flow ya
+ * importa `TenantFiscalProfile` de este archivo.
+ */
+export interface ResolverDbClient {
+  uvt_values: { findFirst: (args: any) => any };
+  withholding_concepts: { findMany: (args: any) => any };
+}
+
 /** Fiscal snapshot of the tenant (from store/org fiscal_data). */
 export interface TenantFiscalProfile {
   is_withholding_agent?: boolean | null;
@@ -252,6 +263,7 @@ export class WithholdingResolverService {
           appliesTo?: string | string[];
           tenant: TenantFiscalProfile;
           supplier: SupplierFiscalProfile;
+          client?: ResolverDbClient;
         }
       | {
           role: 'suffered';
@@ -263,6 +275,7 @@ export class WithholdingResolverService {
           appliesTo?: string | string[];
           tenant: TenantFiscalProfile;
           customer: CustomerFiscalProfile;
+          client?: ResolverDbClient;
         },
   ): Promise<WithholdingLine[]> {
     const year = context.year || new Date().getFullYear();
@@ -271,9 +284,15 @@ export class WithholdingResolverService {
     const uvtValue = await this.calculator.getUvtValue(
       context.organization_id,
       year,
+      context.client,
     );
 
-    const rows = await this.prisma.withholding_concepts.findMany({
+    // `context.client` = el `tx` del llamador, para no tomar una segunda conexión
+    // del pool. El `organization_id` explícito mantiene la lectura tenant-safe
+    // aunque el `tx` venga sin el scoping de la extensión.
+    const rows = await (
+      context.client ?? this.prisma
+    ).withholding_concepts.findMany({
       where: { organization_id: context.organization_id, is_active: true },
     });
 

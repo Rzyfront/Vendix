@@ -71,20 +71,24 @@
       <span>Elegir mesa</span>
     </button>
 
-    @if ((tableId() ?? pickedTableId()) != null) {
+    <!-- QUI-535: la mesa se identifica por su NOMBRE ("Mesa 2 · Terraza"),
+         nunca por el id de la fila. -->
+    @if (hasSelectedTable()) {
       <div class="table-pill">
         <app-icon name="check" [size]="14"></app-icon>
-        <span>Mesa #{{ tableId() ?? pickedTableId() }} seleccionada</span>
+        <span>{{ tablePillText() }}</span>
       </div>
     }
   }
 </div>
 
 <!-- Picker de mesa inline. Reutiliza el mismo PosOpenTableModalComponent del
-     flujo crear-orden. -->
+     flujo crear-orden, pero en modo SELECCIÓN PURA: elegir mesa no escribe nada
+     en el backend; la mesa se ocupa recién al cobrar. -->
 <app-pos-open-table-modal
   [isOpen]="openTablePicker()"
   (isOpenChange)="openTablePicker.set($event)"
   [customer]="cartState()?.customer ?? null"
-  (sessionOpened)="onTableSessionPicked($event)"
+  [selectOnly]="true"
+  (tableSelected)="onTableSelected($event)"
 ></app-pos-open-table-modal>

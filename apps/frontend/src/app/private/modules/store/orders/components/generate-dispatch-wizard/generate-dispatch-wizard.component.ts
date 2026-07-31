@@ -55,6 +55,28 @@ interface DispatchItemRow {
 type RouteMode = 'none' | 'existing' | 'new';
 
 /**
+ * Shape of one entry in `details.items[]` of DISPATCH_NOTE_INSUFFICIENT_STOCK
+ * (QUI-557). `reason` es lo que decide qué acción se le pide al operador.
+ */
+interface StockBlockerDetail {
+  product_id: number;
+  product_variant_id: number | null;
+  product_name: string | null;
+  location_id: number | null;
+  location_name: string | null;
+  requested: number;
+  on_hand: number;
+  reserved_for_this_order: number;
+  reserved_by_others: number;
+  available: number;
+  reason:
+    | 'no_stock'
+    | 'reserved_by_others'
+    | 'variant_required'
+    | 'location_unresolved';
+}
+
+/**
  * "Generar Remisión" wizard launched from the order details page.
  *
  * 3 steps (Items → Datos + estado → Ruta) collected into a SINGLE call to
@@ -629,8 +651,46 @@ export class GenerateDispatchWizardComponent {
         'No hay stock suficiente en la bodega seleccionada para uno o más ítems. Verifica las existencias o cambia la bodega de despacho.',
     };
 
+    // QUI-557: el backend detalla por ítem por qué está bloqueado. Un texto
+    // genérico obliga al operador a salir a investigar producto por producto,
+    // que es lo que volvió bloqueante este error. Cada causa pide una acción
+    // distinta, así que se nombran por separado.
+    if (code === 'DISPATCH_NOTE_INSUFFICIENT_STOCK') {
+      const detailed = this.describeStockBlockers(err);
+      if (detailed) return detailed;
+    }
+
     if (code && byCode[code]) return byCode[code];
     return backendMsg || 'Error al generar la remisión';
+  }
+
+  /**
+   * Render one line per blocked item out of `details.items[]`.
+   * Returns null when the payload does not carry the detail (older backend),
+   * so `mapError` can fall back to the generic message.
+   */
+  private describeStockBlockers(err: any): string | null {
+    const items: StockBlockerDetail[] | undefined =
+      err?.error?.details?.items ?? err?.details?.items;
+    if (!Array.isArray(items) || items.length === 0) return null;
+
+    const lines = items.map((item) => {
+      const name = item.product_name?.trim() || `Producto #${item.product_id}`;
+      const where = item.location_name ? ` en ${item.location_name}` : '';
+
+      switch (item.reason) {
+        case 'reserved_by_others':
+          return `${name}: pides ${item.requested}, disponibles ${item.available}${where} — hay ${item.on_hand} en bodega pero ${item.reserved_by_others} están reservadas para otras órdenes. Libera esas reservas o prioriza esta orden.`;
+        case 'variant_required':
+          return `${name}: la línea no tiene variante seleccionada y el inventario de este producto se lleva por variante. Corrige la línea en la orden.`;
+        case 'location_unresolved':
+          return `${name}: no se pudo determinar la bodega de despacho. Configura la bodega por defecto de la tienda.`;
+        default:
+          return `${name}: pides ${item.requested}, disponibles ${item.available}${where}. No hay existencias suficientes.`;
+      }
+    });
+
+    return lines.join('\n');
   }
 
   // Expose for template constant binding.

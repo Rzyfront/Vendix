@@ -25,6 +25,18 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { toLocalDateString } from '../../../../../shared/utils/date.util';
+
+import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
+import {
+  ProviderSelectorComponent,
+  BookingProvider,
+} from '../../components/booking/provider-selector/provider-selector.component';
+import { SlotGridComponent, BookingSlot } from '../../components/booking/slot-grid/slot-grid.component';
+import {
+  ServiceLocationSelectorComponent,
+  ServiceLocation,
+} from '../../components/booking/service-location-selector/service-location-selector.component';
 
 @Component({
   selector: 'app-booking',
@@ -36,7 +48,11 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
     StepsLineComponent,
     ButtonComponent,
     IconComponent,
+    ServiceLocationSelectorComponent,
     CurrencyPipe,
+    BookingCalendarComponent,
+    ProviderSelectorComponent,
+    SlotGridComponent,
   ],
   templateUrl: './booking.component.html',
   styleUrls: ['./booking.component.scss'],
@@ -73,18 +89,21 @@ export class BookingComponent implements OnInit {
     return this.variants().find((v) => v.id === id) ?? null;
   });
 
-  // Step 1 - Calendar
-  currentMonth = signal(new Date());
-  availableSlots = signal<AvailabilitySlot[]>([]);
-  loadingSlots = signal(false);
-
-  // Step 2 - Time selection
+  // Step 1 — Date
   selectedDate = signal<string | null>(null);
-  selectedSlot = signal<AvailabilitySlot | null>(null);
+
+  // Step 2 — Provider
+  selectedProvider = signal<BookingProvider | null>(null);
+  readonly providerId = computed(() => this.selectedProvider()?.id ?? null);
+
+  // Step 3 — Slot
+  selectedSlot = signal<BookingSlot | AvailabilitySlot | null>(null);
+
+  // Free-booking fallback (when product has no provider scheduling).
   isFreeBooking = signal(false);
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
-  freeBookingSlots = computed(() => {
+  readonly freeBookingSlots = computed(() => {
     const duration = this.product()?.service_duration_minutes || 60;
     const slots: { time: string; endTime: string }[] = [];
     for (let mins = 480; mins + duration <= 1080; mins += duration) {
@@ -100,7 +119,42 @@ export class BookingComponent implements OnInit {
     return slots;
   });
 
-  // Step 3 - Customer details
+  /**
+   * `freeBookingSlots` filtered to hide past start times when the
+   * selected day is today. Without this, the synthetic slot list
+   * (which starts at 08:00 and walks forward) would still let the
+   * customer pick 10:00 AM at 4 PM. We normalize `selectedDate` to
+   * YYYY-MM-DD because some call sites forward Prisma's ISO-timestamp
+   * shape, others a date-only string.
+   */
+  readonly visibleFreeBookingSlots = computed(() => {
+    const rawDate = this.selectedDate();
+    const date = rawDate ? rawDate.split('T')[0] : '';
+    const today = toLocalDateString(new Date());
+    if (date !== today) return this.freeBookingSlots();
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return this.freeBookingSlots().filter((s) => {
+      const [h, m] = s.time.split(':').map(Number);
+      return h * 60 + m > nowMinutes;
+    });
+  });
+
+  // Steps config — 4 steps when the service has providers, 3 when free_booking
+  // (skip the Profesional step because free_booking has no provider assignment).
+  readonly steps = computed(() => {
+    if (this.isFreeBooking()) {
+      return [{ label: 'Fecha' }, { label: 'Horario' }, { label: 'Confirmar' }];
+    }
+    return [
+      { label: 'Fecha' },
+      { label: 'Profesional' },
+      { label: 'Horario' },
+      { label: 'Confirmar' },
+    ];
+  });
+
+  // Step 3 — Customer details
   isLoggedIn = signal(false);
   currentUser = signal<any>(null);
   guestName = signal('');
@@ -108,122 +162,26 @@ export class BookingComponent implements OnInit {
   guestPhone = signal('');
   bookingNotes = signal('');
 
+  // Service location (where the technician will perform the work)
+  readonly serviceLocation = signal<ServiceLocation | null>(null);
+  readonly customerAddresses = signal<any[]>([]);
+  readonly storeAddress = signal<any | null>(null);
+  readonly selectedAddressId = signal<number | null>(null);
+  /**
+   * From the store's service config. When false, the ecommerce
+   * booking flow hides the 'A domicilio' option.
+   */
+  readonly offerHomeService = signal<boolean>(true);
+  /**
+   * Appointment redesign phase 2 — per-product home-service
+   * eligibility. When false, hides the 'A domicilio' option for THIS
+   * product only (e.g. "Tintura" no va a domicilio aunque la tienda
+   * sí ofrezca el servicio en otros productos).
+   */
+  readonly productEligibleForHomeService = signal<boolean>(true);
+
   // Confirmation
   bookingResult = signal<any>(null);
-
-  // Steps config
-  steps = [{ label: 'Fecha' }, { label: 'Horario' }, { label: 'Confirmar' }];
-
-  // Computed: calendar grid
-  calendarDays = computed(() => {
-    const month = this.currentMonth();
-    const year = month.getFullYear();
-    const m = month.getMonth();
-
-    const firstDay = new Date(year, m, 1);
-    const lastDay = new Date(year, m + 1, 0);
-
-    const startPad = firstDay.getDay(); // 0=Sun
-    const totalDays = lastDay.getDate();
-
-    const days: {
-      date: string;
-      day: number;
-      isCurrentMonth: boolean;
-      hasAvailability: boolean;
-    }[] = [];
-
-    // Previous month padding
-    const prevMonthLastDay = new Date(year, m, 0).getDate();
-    for (let i = startPad - 1; i >= 0; i--) {
-      const d = prevMonthLastDay - i;
-      const prevMonth = new Date(year, m - 1, d);
-      days.push({
-        date: this.formatDateISO(prevMonth),
-        day: d,
-        isCurrentMonth: false,
-        hasAvailability: false,
-      });
-    }
-
-    // Current month
-    for (let d = 1; d <= totalDays; d++) {
-      const dateObj = new Date(year, m, d);
-      const dateStr = this.formatDateISO(dateObj);
-      const isPast = dateObj < new Date(new Date().setHours(0, 0, 0, 0));
-      days.push({
-        date: dateStr,
-        day: d,
-        isCurrentMonth: true,
-        hasAvailability: !isPast && this.dateHasAvailability(dateStr),
-      });
-    }
-
-    // Next month padding to fill 6 rows
-    const remaining = 42 - days.length;
-    for (let d = 1; d <= remaining; d++) {
-      const nextMonth = new Date(year, m + 1, d);
-      days.push({
-        date: this.formatDateISO(nextMonth),
-        day: d,
-        isCurrentMonth: false,
-        hasAvailability: false,
-      });
-    }
-
-    return days;
-  });
-
-  // Computed: slots grouped by time of day
-  groupedSlots = computed(() => {
-    const date = this.selectedDate();
-    if (!date) return { morning: [], afternoon: [], evening: [] };
-
-    const slots = this.availableSlots().filter(
-      (s) => s.date === date && s.available > 0,
-    );
-
-    return {
-      morning: slots.filter((s) => {
-        const h = parseInt(s.start_time.split(':')[0], 10);
-        return h < 12;
-      }),
-      afternoon: slots.filter((s) => {
-        const h = parseInt(s.start_time.split(':')[0], 10);
-        return h >= 12 && h < 18;
-      }),
-      evening: slots.filter((s) => {
-        const h = parseInt(s.start_time.split(':')[0], 10);
-        return h >= 18;
-      }),
-    };
-  });
-
-  hasGroupedSlots = computed(() => {
-    const g = this.groupedSlots();
-    return (
-      g.morning.length > 0 || g.afternoon.length > 0 || g.evening.length > 0
-    );
-  });
-
-  monthLabel = computed(() => {
-    const m = this.currentMonth();
-    const months = [
-      'Enero',
-      'Febrero',
-      'Marzo',
-      'Abril',
-      'Mayo',
-      'Junio',
-      'Julio',
-      'Agosto',
-      'Septiembre',
-      'Octubre',
-      'Noviembre',
-      'Diciembre',
-    ];
-    return `${months[m.getMonth()]} ${m.getFullYear()}`;
-  });
 
   ngOnInit(): void {
     const idParam = this.route.snapshot.paramMap.get('productId');
@@ -258,7 +216,93 @@ export class BookingComponent implements OnInit {
     });
 
     this.loadProduct();
-    this.loadAvailabilityForMonth();
+    this.loadServiceLocation();
+  }
+
+  /**
+   * Preload the customer's saved addresses and the store's primary
+   * address so the "Dónde quieres que se preste el servicio?" selector
+   * in step 4 (Confirmar) has data ready.
+   */
+  private loadServiceLocation(): void {
+    this.bookingService.getCustomerAddresses().subscribe({
+      next: (list) => {
+        const safeList = list ?? [];
+        this.customerAddresses.set(safeList);
+        // Auto-pick the primary address when the user hasn't yet chosen
+        // one. The user might have just set a new address as Principal
+        // in Mi Cuenta → Mis Direcciones before opening this flow, and
+        // we want that selection to flow through without forcing them
+        // to click a radio button. Only acts when nothing is selected
+        // yet, so an in-progress booking isn't disturbed.
+        if (this.selectedAddressId() == null) {
+          const primary = safeList.find((a) => a?.is_primary);
+          if (primary?.id != null) {
+            this.selectedAddressId.set(primary.id);
+          }
+        }
+      },
+    });
+    this.bookingService.getStoreAddress().subscribe({
+      next: (addr) => this.storeAddress.set(addr ?? null),
+    });
+    this.bookingService.getStoreServices(this.productId()).subscribe({
+      next: (svc) => {
+        this.offerHomeService.set(svc.offer_home_service);
+        this.productEligibleForHomeService.set(
+          svc.offer_home_service_for_product ?? svc.offer_home_service,
+        );
+        // If the store doesn't offer home service OR the product is
+        // not eligible, force-pick 'shop' (the only legal value) and
+        // clear any previously-picked home address so the booking
+        // can't be saved against a disabled option.
+        const showHome = svc.offer_home_service &&
+          (svc.offer_home_service_for_product ?? true);
+        if (!showHome) {
+          this.serviceLocation.set('shop');
+          if (this.selectedAddressId() != null) {
+            this.selectedAddressId.set(null);
+          }
+        }
+      },
+    });
+  }
+
+  onServiceLocationChange(value: ServiceLocation): void {
+    this.serviceLocation.set(value);
+  }
+
+  onServiceAddressChange(id: number | null): void {
+    this.selectedAddressId.set(id);
+  }
+
+  /**
+   * Comprime una dirección del cliente a una etiqueta corta legible
+   * para mostrar en el resumen del checkout. El modelo real del
+   * ecommerce varía entre despliegues (street_line, address_line_1,
+   * complement, city, neighborhood), así que armamos el texto con los
+   * campos que estén poblados y caemos con gracia al `id` si no
+   * encontramos nada.
+   */
+  private formatAddressLabel(addr: any): string {
+    if (!addr || typeof addr !== 'object') return 'Dirección guardada';
+    const parts: string[] = [];
+    const tryKeys = [
+      ['street_line_1', 'street_line_2'],
+      ['address_line_1', 'address_line_2'],
+      ['street', 'complement'],
+    ];
+    for (const [a, b] of tryKeys) {
+      if (addr[a]) parts.push(String(addr[a]));
+      if (addr[b]) parts.push(String(addr[b]));
+      if (parts.length) break;
+    }
+    if (addr.city) parts.push(String(addr.city));
+    else if (addr.neighborhood) parts.push(String(addr.neighborhood));
+    if (parts.length) return parts.filter(Boolean).join(', ');
+    return addr.label
+      ? String(addr.label)
+      : `Dirección #${addr.id ?? ''}`.trim();
   }
 
   // --- Data loading ---
@@ -274,7 +318,6 @@ export class BookingComponent implements OnInit {
             this.variants.set(response.data.variants ?? []);
             if (!this.selectedVariantId() && response.data.variants?.length) {
               this.selectedVariantId.set(response.data.variants[0].id);
-              this.loadAvailabilityForMonth();
             }
             this.isFreeBooking.set(
               response.data.booking_mode === 'free_booking',
@@ -289,83 +332,62 @@ export class BookingComponent implements OnInit {
       });
   }
 
-  loadAvailabilityForMonth(): void {
-    this.loadingSlots.set(true);
-    const month = this.currentMonth();
-    const year = month.getFullYear();
-    const m = month.getMonth();
-
-    const dateFrom = this.formatDateISO(new Date(year, m, 1));
-    const dateTo = this.formatDateISO(new Date(year, m + 1, 0));
-
-    this.bookingService
-      .getAvailability(this.productId(), dateFrom, dateTo, this.selectedVariantId() ?? undefined)
-      .subscribe({
-        next: (response) => {
-          const rawSlots = response.data || response || [];
-          // Map total_available → available for compatibility
-          const slots = (rawSlots as any[]).map((s) => ({
-            ...s,
-            available: s.available ?? s.total_available ?? 0,
-          }));
-          this.availableSlots.set(slots as AvailabilitySlot[]);
-          this.loadingSlots.set(false);
-        },
-        error: () => {
-          this.loadingSlots.set(false);
-          this.toast.error('No se pudo cargar la disponibilidad', 'Error');
-        },
-      });
-  }
-
-  // --- Calendar navigation ---
-
-  prevMonth(): void {
-    const curr = this.currentMonth();
-    const prev = new Date(curr.getFullYear(), curr.getMonth() - 1, 1);
-    // Don't go before current month
-    const now = new Date();
-    if (
-      prev.getFullYear() < now.getFullYear() ||
-      (prev.getFullYear() === now.getFullYear() &&
-        prev.getMonth() < now.getMonth())
-    ) {
-      return;
-    }
-    this.currentMonth.set(prev);
-    this.loadAvailabilityForMonth();
-  }
-
-  nextMonth(): void {
-    const curr = this.currentMonth();
-    this.currentMonth.set(new Date(curr.getFullYear(), curr.getMonth() + 1, 1));
-    this.loadAvailabilityForMonth();
-  }
-
   // --- Variant selection ---
 
   onVariantSelected(variant: ProductVariantDetail): void {
     this.selectedVariantId.set(variant.id);
-    this.loadAvailabilityForMonth();
+    this.selectedDate.set(null);
+    this.selectedProvider.set(null);
+    this.selectedSlot.set(null);
+  }
+
+  // --- Step navigation ---
+
+  /**
+   * When the service is `free_booking`, the step indices shift: Fecha=0,
+   * Horario=1, Confirmar=2. When the service requires a provider, Fecha=0,
+   * Profesional=1, Horario=2, Confirmar=3.
+   */
+  get profesionalStep(): number {
+    return this.isFreeBooking() ? 1 : 1; // always 1 — Profesional is step 1
+    // When free_booking, the step indicator shows 3 steps and step 1 is
+    // Horario. We hide the Profesional section via @if (currentStep() === 1
+    // && !isFreeBooking()).
+  }
+
+  get horarioStep(): number {
+    return this.isFreeBooking() ? 1 : 2;
+  }
+
+  get confirmStep(): number {
+    return this.isFreeBooking() ? 2 : 3;
   }
 
   // --- Step 1: Date selection ---
 
-  selectDate(dateStr: string): void {
-    if (!this.isFreeBooking() && !this.dateHasAvailability(dateStr)) return;
-    if (this.isPastDate(dateStr)) return;
-    this.selectedDate.set(dateStr);
+  onDateSelected(date: string): void {
+    if (this.isPastDate(date)) return;
+    this.selectedDate.set(date);
     this.selectedSlot.set(null);
     this.freeBookingTime.set(null);
     this.freeBookingEndTime.set(null);
+    // Skip Profesional step when free_booking (no provider scheduling).
     this.currentStep.set(1);
   }
 
-  // --- Step 2: Slot selection ---
+  // --- Step 2: Provider selection ---
 
-  selectSlot(slot: AvailabilitySlot): void {
-    this.selectedSlot.set(slot);
+  onProviderSelected(provider: BookingProvider): void {
+    this.selectedProvider.set(provider);
+    this.selectedSlot.set(null);
     this.currentStep.set(2);
+  }
+
+  // --- Step 3: Slot selection ---
+
+  onSlotSelected(slot: BookingSlot): void {
+    this.selectedSlot.set(slot);
+    this.currentStep.set(3);
   }
 
   selectFreeBookingTime(slot: { time: string; endTime: string }): void {
@@ -374,11 +396,19 @@ export class BookingComponent implements OnInit {
     this.currentStep.set(2);
   }
 
-  // --- Step 3: Confirm ---
+  // --- Step 4: Confirm ---
 
   confirmBooking(): void {
     if (!this.isLoggedIn()) {
       this.errorMessage.set('Debes iniciar sesion para reservar');
+      return;
+    }
+
+    // The customer must pick where the service will be performed before
+    // we can persist the booking. This blocks the submit and surfaces a
+    // toast so the user knows what to do.
+    if (this.serviceLocation() == null) {
+      this.toast.error('Elige dónde quieres que se presente el servicio');
       return;
     }
 
@@ -409,7 +439,43 @@ export class BookingComponent implements OnInit {
     if (variantId) {
       bookingSelection['product_variant_id'] = variantId;
     }
-    sessionStorage.setItem('pending_booking', JSON.stringify(bookingSelection));
+    // Persistimos también el proveedor seleccionado (cuando aplica) para
+    // que el resumen del checkout pueda mostrarlo al lado de la fecha
+    // y el horario, sin obligar al cliente a re-picar.
+    const providerId = this.providerId();
+    if (providerId) {
+      bookingSelection['provider_id'] = providerId;
+    }
+    const provider = this.selectedProvider();
+    if (provider?.display_name) {
+      bookingSelection['provider_name'] = provider.display_name;
+    }
+    // Persist the service-location choice so the checkout (which calls
+    // /ecommerce/reservations/ POST) can forward it.
+    const svcLocation = this.serviceLocation();
+    if (svcLocation) {
+      bookingSelection['service_location_type'] = svcLocation;
+    }
+    if (svcLocation === 'home' && this.selectedAddressId() != null) {
+      bookingSelection['service_address_id'] = this.selectedAddressId();
+      // Componemos una etiqueta legible para mostrar en el resumen del
+      // checkout (sin obligar al cliente a recordar qué dirección tenía
+      // guardada). Probamos varios campos porque el modelo del
+      // ecommerce no es uniforme en todos los despliegues.
+      const address = this.customerAddresses().find(
+        (a: any) => a?.id === this.selectedAddressId(),
+      );
+      if (address) {
+        bookingSelection['service_address_label'] =
+          this.formatAddressLabel(address);
+      }
+    }
+    // Merge into `pending_bookings` keyed by product_id (and optionally
+    // product_variant_id) so múltiples servicios reservados en paralelo
+    // — uno confirmado y otro pendiente, o varios en el carrito — no se
+    // pisan entre sí. Antes era un único `pending_booking` que se
+    // sobreescribía al confirmar el segundo servicio.
+    this.savePendingBooking(bookingSelection);
 
     const product = this.product();
     const variant = this.selectedVariant();
@@ -432,6 +498,39 @@ export class BookingComponent implements OnInit {
       }
     } else {
       this.router.navigate(['/checkout']);
+    }
+  }
+
+  /**
+   * Persiste la selección de booking en sessionStorage como entrada
+   * de un Map keyed por `${product_id}:${variant_id}` para que
+   * múltiples reservas en paralelo no se pisen entre sí. El checkout
+   * (`checkout.component.ts → restorePendingBooking`) itera este Map
+   * y popula `bookingSelections` con cada entry.
+   *
+   * Si la entry existente para este product/variant está corrupta, la
+   * sobreescribimos sin romper las demás.
+   */
+  private savePendingBooking(bookingSelection: Record<string, any>): void {
+    try {
+      const raw = sessionStorage.getItem('pending_bookings');
+      const map: Record<string, Record<string, any>> = raw
+        ? JSON.parse(raw)
+        : {};
+      const key = `${bookingSelection['product_id']}:${
+        bookingSelection['product_variant_id'] ?? 'base'
+      }`;
+      map[key] = bookingSelection;
+      sessionStorage.setItem('pending_bookings', JSON.stringify(map));
+    } catch {
+      // Si el JSON está corrupto, sobreescribimos con un Map limpio.
+      const key = `${bookingSelection['product_id']}:${
+        bookingSelection['product_variant_id'] ?? 'base'
+      }`;
+      sessionStorage.setItem(
+        'pending_bookings',
+        JSON.stringify({ [key]: bookingSelection }),
+      );
     }
   }
 
@@ -460,13 +559,7 @@ export class BookingComponent implements OnInit {
 
   // --- Helpers ---
 
-  private dateHasAvailability(dateStr: string): boolean {
-    return this.availableSlots().some(
-      (s) => s.date === dateStr && s.available > 0,
-    );
-  }
-
-  private formatDateISO(date: Date): string {
+  formatDateISO(date: Date): string {
     const y = date.getFullYear();
     const m = String(date.getMonth() + 1).padStart(2, '0');
     const d = String(date.getDate()).padStart(2, '0');
@@ -507,10 +600,6 @@ export class BookingComponent implements OnInit {
       'Diciembre',
     ];
     return `${days[date.getDay()]} ${date.getDate()} de ${months[date.getMonth()]}`;
-  }
-
-  isToday(dateStr: string): boolean {
-    return dateStr === this.formatDateISO(new Date());
   }
 
   isPastDate(dateStr: string): boolean {

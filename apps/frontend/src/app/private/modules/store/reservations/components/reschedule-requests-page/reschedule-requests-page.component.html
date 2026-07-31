@@ -1,0 +1,234 @@
+<div class="reschedule-requests-page">
+  <!-- Mini breadcrumb -->
+  <nav class="page-breadcrumb" aria-label="Ubicación">
+    <a routerLink="/admin/reservations" class="crumb-link">
+      <app-icon name="calendar-check" [size]="12"></app-icon>
+      Reservas
+    </a>
+    <span class="crumb-sep">/</span>
+    <span class="crumb-current">Solicitudes de reagenda</span>
+  </nav>
+
+  <app-sticky-header
+    title="Solicitudes de reagenda"
+    subtitle="Aprueba o rechaza las reagendas que requieren tu confirmación."
+    iconName="inbox"
+    [badgeText]="badgeText()"
+    [badgeColor]="badgeColor()"
+    [actions]="headerActions"
+    [tabs]="headerTabs"
+    [activeTab]="statusFilter()"
+    [tabsAriaLabel]="'Filtrar solicitudes por estado'"
+    (actionClicked)="onHeaderAction($event)"
+    (tabChanged)="onTabChange($event)"
+  />
+
+  <!-- Stats cards — kept OUTSIDE the white card (per user feedback) -->
+  @if (stats(); as s) {
+    <div class="stats-container rr-stats">
+      <app-stats
+        title="Pendientes"
+        [value]="s.by_status.pending"
+        iconName="inbox"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+        smallText="En cola para decisión"
+      />
+      <app-stats
+        title="Aprobadas (24h)"
+        [value]="s.approved_last_24h"
+        iconName="check-circle-2"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+        smallText="Aprobadas esta semana: {{ s.approved_this_week }}"
+      />
+      <app-stats
+        title="Rechazadas (24h)"
+        [value]="s.rejected_last_24h"
+        iconName="x-circle"
+        iconBgColor="bg-rose-100"
+        iconColor="text-rose-600"
+        smallText="Total rechazadas: {{ s.by_status.rejected }}"
+      />
+      <app-stats
+        title="Tiempo de respuesta"
+        [value]="s.avg_response_minutes !== null ? s.avg_response_minutes + ' min' : '—'"
+        iconName="timer"
+        iconBgColor="bg-indigo-100"
+        iconColor="text-indigo-600"
+        [smallText]="s.pending_over_1h > 0
+          ? s.pending_over_1h + ' pendiente(s) +1h'
+          : 'Promedio últimas 30d'"
+      />
+    </div>
+  }
+
+  <app-card [responsive]="true" [padding]="false" overflow="visible" customClasses="rr-card">
+    <div class="rr-card-body">
+      <!-- Search + actions row (search + Acciones dropdown) -->
+      <div class="rr-toolbar">
+        <div class="rr-toolbar__title">
+          Solicitudes <span class="rr-toolbar__count">({{ requests().length }})</span>
+        </div>
+        <div class="rr-toolbar__actions">
+          <app-inputsearch
+            size="sm"
+            placeholder="Buscar por cliente, booking o email..."
+            [debounceTime]="400"
+            [ngModel]="searchTerm()"
+            (ngModelChange)="onSearchChange($event)">
+          </app-inputsearch>
+          <app-options-dropdown
+            [actions]="dropdownActions"
+            [isLoading]="loading()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
+        </div>
+      </div>
+
+      @if (loading() && requests().length === 0) {
+        <p class="empty">Cargando solicitudes...</p>
+      } @else if (requests().length === 0) {
+        <div class="empty-state">
+          <app-icon name="inbox" [size]="48"></app-icon>
+          <h3>No hay solicitudes {{ statusFilter() === 'all' ? '' : statusFilter() + 's' }}</h3>
+          <p>
+            Cuando un cliente pida reagendar con aprobación, aparecerá acá
+            para que decidas si aceptas o rechazas.
+          </p>
+        </div>
+      } @else {
+        <ul class="request-list">
+          @for (req of requests(); track req.id) {
+            <li class="request-item" [class.request-item--approved]="req.status === 'approved'" [class.request-item--rejected]="req.status === 'rejected'" [class.request-item--cancelled]="req.status === 'cancelled'">
+              <div class="request-main">
+                <div class="customer-line">
+                  <span class="status-pill" [class]="'status-pill--' + req.status">{{ statusLabel(req.status) }}</span>
+                  <strong>{{ fullName(req) }}</strong>
+                  <span class="muted">·</span>
+                  <span class="muted">{{ req.booking.product.name }}</span>
+                  @if (req.booking.provider) {
+                    <span class="muted">·</span>
+                    <span class="muted provider">{{ req.booking.provider.display_name }}</span>
+                  }
+                </div>
+
+                <div class="customer-contact">
+                  @if (req.booking.customer.email) {
+                    <span class="contact-item">
+                      <app-icon name="mail" [size]="12"></app-icon>
+                      {{ req.booking.customer.email }}
+                    </span>
+                  }
+                  @if (req.booking.customer.phone) {
+                    <span class="contact-item">
+                      <app-icon name="phone" [size]="12"></app-icon>
+                      {{ req.booking.customer.phone }}
+                    </span>
+                  }
+                </div>
+
+                <div class="slot-row">
+                  <span class="slot-label">Actual</span>
+                  <span class="slot-current">{{ formatOriginalSlot(req) }}</span>
+                  <app-icon name="arrow-right" [size]="12"></app-icon>
+                  <span class="slot-label">Solicitado</span>
+                  <span class="slot-requested">{{ formatRequestedSlot(req) }}</span>
+                </div>
+
+                @if (req.reason) {
+                  <p class="reason">"{{ req.reason }}"</p>
+                }
+                @if (req.decision_reason) {
+                  <p class="reason reason--decision">
+                    <app-icon name="info" [size]="12"></app-icon>
+                    <strong>Decisión:</strong> {{ req.decision_reason }}
+                  </p>
+                }
+                <p class="meta">
+                  Reserva #{{ req.booking.booking_number }} ·
+                  Solicitado {{ req.requested_at | date: 'short' }}
+                  @if (req.decided_at) {
+                    · {{ req.status === 'approved' ? 'Aprobado' : req.status === 'rejected' ? 'Rechazado' : 'Cancelado' }} el {{ req.decided_at | date: 'short' }}
+                  }
+                </p>
+              </div>
+
+              @if (req.status === 'pending') {
+                <div class="request-actions">
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    [disabled]="processing() === req.id"
+                    (click)="approve(req)">
+                    @if (processing() === req.id) {
+                      Aprobando...
+                    } @else {
+                      Aprobar
+                    }
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-danger"
+                    [disabled]="processing() === req.id"
+                    (click)="openRejectModal(req)">
+                    Rechazar
+                  </button>
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  </app-card>
+</div>
+
+<!-- Modal: rechazar con razón -->
+@if (rejectModal().open) {
+  <div class="modal-backdrop" (click)="closeRejectModal()">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <header class="modal-header">
+        <h4>Rechazar solicitud de reagenda</h4>
+      </header>
+      <div class="modal-body">
+        @if (rejectModal().request; as req) {
+          <p class="modal-context">
+            <strong>{{ fullName(req) }}</strong> ·
+            {{ formatOriginalSlot(req) }} → {{ formatRequestedSlot(req) }}
+          </p>
+        }
+        <label for="reject-reason" class="field-label">
+          Razón del rechazo <span class="req">*</span>
+        </label>
+        <textarea
+          id="reject-reason"
+          rows="3"
+          [ngModel]="rejectModal().reason"
+          (ngModelChange)="updateRejectReason($event)"
+          placeholder="Ej: Ese horario ya está ocupado, intenta otro..."
+          [disabled]="rejectModal().submitting"></textarea>
+      </div>
+      <footer class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-outline"
+          (click)="closeRejectModal()"
+          [disabled]="rejectModal().submitting">
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="btn btn-danger"
+          (click)="submitReject()"
+          [disabled]="rejectModal().submitting || rejectModal().reason.trim().length < 3">
+          @if (rejectModal().submitting) {
+            Rechazando...
+          } @else {
+            Confirmar rechazo
+          }
+        </button>
+      </footer>
+    </div>
+  </div>
+}

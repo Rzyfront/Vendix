@@ -9,6 +9,37 @@ import type { TenantFiscalProfile } from './withholding-resolver.service';
 import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
 
 /**
+ * Cliente Prisma mínimo que la cadena de retenciones necesita, para poder pasarle
+ * el `tx` de una transacción en curso.
+ *
+ * Por qué existe: sin él, cada método sale por `this.prisma`, o sea por OTRA
+ * conexión del pool. Llamado desde dentro de un `$transaction` eso toma una
+ * segunda conexión mientras la primera sostiene locks — con 10 conexiones
+ * (`base-prisma.service.ts:18` crea `new Pool(...)` sin `max`) y suficientes
+ * cobros concurrentes, el pool se agota y ninguna transacción avanza. Y peor:
+ * `persistWithholdingLines` ESCRIBÍA fuera de la transacción, así que un fallo
+ * posterior revertía la venta y dejaba las filas de `withholding_calculations`
+ * huérfanas.
+ *
+ * Seguridad multi-tenant: el `tx` sale del `baseClient`
+ * (`base-prisma.service.ts:43-45`), NO del `scoped_client`, así que no lleva el
+ * scoping de la extensión. No se pierde aislamiento porque las seis lecturas de
+ * esta cadena ya filtran explícitamente por `organization_id`/`store_id` — es
+ * intencional y está documentado en cada una.
+ */
+export interface WithholdingDbClient {
+  /** Lo consume `FiscalScopeService.requireFiscalScope`, al que se le reenvía. */
+  organizations: { findUnique: (args: any) => any };
+  users: { findFirst: (args: any) => any };
+  suppliers: { findFirst: (args: any) => any };
+  store_settings: { findFirst: (args: any) => any };
+  organization_settings: { findFirst: (args: any) => any };
+  uvt_values: { findFirst: (args: any) => any };
+  withholding_concepts: { findMany: (args: any) => any };
+  withholding_calculations: { createMany: (args: any) => any };
+}
+
+/**
  * Shape returned by both resolve* methods so the FLOW layer (invoice-flow /
  * payments) gets everything it needs to persist + emit the accounting event in
  * one pass: the resolved lines, the UVT used (for the calculation record), and
@@ -37,6 +68,13 @@ export interface PersistWithholdingContext {
   uvt_value_used: number;
   year?: number;
   lines: WithholdingLine[];
+  /**
+   * Cliente de la transacción en curso. Pasarlo cuando el llamador ya está dentro
+   * de un `$transaction`: las filas deben nacer y morir con la operación que las
+   * originó. Sin él la escritura queda fuera de la transacción y un rollback
+   * posterior deja retenciones sin venta.
+   */
+  client?: WithholdingDbClient;
 }
 
 /**
@@ -88,6 +126,7 @@ export class WithholdingFlowService {
   private async getTenantFiscalProfile(
     organization_id: number,
     store_id?: number | null,
+    client?: WithholdingDbClient,
   ): Promise<TenantFiscalProfile> {
     const empty: TenantFiscalProfile = {
       is_withholding_agent: false,
@@ -98,7 +137,12 @@ export class WithholdingFlowService {
     try {
       let fiscalScope: string | null = null;
       try {
-        fiscalScope = await this.fiscalScope.requireFiscalScope(organization_id);
+        // `requireFiscalScope` ya acepta el cliente de transacción; pasarlo evita
+        // que esta lectura salga por una segunda conexión del pool.
+        fiscalScope = await this.fiscalScope.requireFiscalScope(
+          organization_id,
+          client,
+        );
       } catch {
         // Org not resolvable / no fiscal scope → treat as STORE-style read.
         fiscalScope = null;
@@ -106,7 +150,7 @@ export class WithholdingFlowService {
 
       // Org-consolidated identity lives on organization_settings.
       if (fiscalScope === 'ORGANIZATION' || !store_id) {
-        const orgFiscal = await this.readOrgFiscalData(organization_id);
+        const orgFiscal = await this.readOrgFiscalData(organization_id, client);
         if (orgFiscal) return this.mapTenantProfile(orgFiscal);
         // No store_id and no org fiscal_data → empty profile.
         if (!store_id) return empty;
@@ -114,12 +158,12 @@ export class WithholdingFlowService {
 
       // Store-level identity lives on store_settings; fall back to org-level
       // fiscal_data when the store has not captured its own flags.
-      const storeFiscal = await this.readStoreFiscalData(store_id!);
+      const storeFiscal = await this.readStoreFiscalData(store_id!, client);
       if (storeFiscal && this.hasWithholdingFlags(storeFiscal)) {
         return this.mapTenantProfile(storeFiscal);
       }
 
-      const orgFiscal = await this.readOrgFiscalData(organization_id);
+      const orgFiscal = await this.readOrgFiscalData(organization_id, client);
       if (orgFiscal) return this.mapTenantProfile(orgFiscal);
 
       return storeFiscal ? this.mapTenantProfile(storeFiscal) : empty;
@@ -156,10 +200,13 @@ export class WithholdingFlowService {
   /** Scope-safe read of `store_settings.settings.fiscal_data`. */
   private async readStoreFiscalData(
     store_id: number,
+    client?: WithholdingDbClient,
   ): Promise<Record<string, unknown> | null> {
     // findFirst (not findUnique) so the scoped extension can merge the store_id
     // tenant filter without producing an invalid `{ AND: [...] }` WhereUnique.
-    const row = await this.prisma.store_settings.findFirst({
+    // El `store_id` explícito mantiene la lectura tenant-safe también cuando
+    // llega un `client` sin scoping (el `tx` de una transacción).
+    const row = await (client ?? this.prisma).store_settings.findFirst({
       where: { store_id },
       select: { settings: true },
     });
@@ -169,8 +216,9 @@ export class WithholdingFlowService {
   /** Scope-safe read of `organization_settings.settings.fiscal_data`. */
   private async readOrgFiscalData(
     organization_id: number,
+    client?: WithholdingDbClient,
   ): Promise<Record<string, unknown> | null> {
-    const row = await this.prisma.organization_settings.findFirst({
+    const row = await (client ?? this.prisma).organization_settings.findFirst({
       where: { organization_id },
       select: { settings: true },
     });
@@ -195,9 +243,10 @@ export class WithholdingFlowService {
   private async safeUvtValue(
     organization_id: number,
     year: number,
+    client?: WithholdingDbClient,
   ): Promise<number> {
     try {
-      return await this.calculator.getUvtValue(organization_id, year);
+      return await this.calculator.getUvtValue(organization_id, year, client);
     } catch {
       // No UVT configured for the year → withholding cannot be computed, but the
       // flow must not break. Resolver lines already came back []; uvt 0 is fine.
@@ -220,6 +269,8 @@ export class WithholdingFlowService {
     ivaAmount?: number;
     appliesTo?: string | string[];
     year?: number;
+    /** Cliente de la transacción en curso; ver {@link WithholdingDbClient}. */
+    client?: WithholdingDbClient;
   }): Promise<WithholdingResolution> {
     const year = params.year ?? new Date().getFullYear();
 
@@ -230,7 +281,7 @@ export class WithholdingFlowService {
 
     // Scoped read; explicit organization_id keeps the query tenant-safe even if
     // the scope context is not fully populated.
-    const supplier = await this.prisma.suppliers.findFirst({
+    const supplier = await (params.client ?? this.prisma).suppliers.findFirst({
       where: { id: params.supplier_id, organization_id: params.organization_id },
       select: {
         tax_regime: true,
@@ -246,6 +297,7 @@ export class WithholdingFlowService {
     const tenant = await this.getTenantFiscalProfile(
       params.organization_id,
       params.store_id ?? null,
+      params.client,
     );
 
     const counterparty_type = deriveCounterpartyType(
@@ -266,9 +318,14 @@ export class WithholdingFlowService {
         person_type: supplier.person_type,
         is_self_withholder: supplier.is_self_withholder,
       },
+      client: params.client,
     });
 
-    const uvt_value_used = await this.safeUvtValue(params.organization_id, year);
+    const uvt_value_used = await this.safeUvtValue(
+      params.organization_id,
+      year,
+      params.client,
+    );
 
     return { lines, uvt_value_used, counterparty_type };
   }
@@ -289,6 +346,8 @@ export class WithholdingFlowService {
     ivaAmount?: number;
     appliesTo?: string | string[];
     year?: number;
+    /** Cliente de la transacción en curso; ver {@link WithholdingDbClient}. */
+    client?: WithholdingDbClient;
   }): Promise<WithholdingResolution> {
     const year = params.year ?? new Date().getFullYear();
 
@@ -299,7 +358,7 @@ export class WithholdingFlowService {
 
     // `users` getter returns the unscoped base client, so filter explicitly by
     // organization to keep the lookup tenant-safe.
-    const customer = await this.prisma.users.findFirst({
+    const customer = await (params.client ?? this.prisma).users.findFirst({
       where: { id: params.customer_id, organization_id: params.organization_id },
       select: {
         is_withholding_agent: true,
@@ -315,6 +374,7 @@ export class WithholdingFlowService {
     const tenant = await this.getTenantFiscalProfile(
       params.organization_id,
       params.store_id ?? null,
+      params.client,
     );
 
     const counterparty_type = deriveCounterpartyType(
@@ -335,9 +395,14 @@ export class WithholdingFlowService {
         tax_regime: customer.tax_regime,
         person_type: customer.person_type,
       },
+      client: params.client,
     });
 
-    const uvt_value_used = await this.safeUvtValue(params.organization_id, year);
+    const uvt_value_used = await this.safeUvtValue(
+      params.organization_id,
+      year,
+      params.client,
+    );
 
     return { lines, uvt_value_used, counterparty_type };
   }
@@ -382,6 +447,11 @@ export class WithholdingFlowService {
       return;
     }
 
-    await this.prisma.withholding_calculations.createMany({ data: rows });
+    // `ctx.client` = escritura DENTRO de la transacción del llamador. Sin él las
+    // filas se confirman por su cuenta y un rollback posterior deja retenciones
+    // sin la venta que las originó.
+    await (ctx.client ?? this.prisma).withholding_calculations.createMany({
+      data: rows,
+    });
   }
 }

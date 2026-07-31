@@ -14,6 +14,16 @@ export const selectUsersLoading = createSelector(
   (state) => state.users_loading,
 );
 
+/**
+ * QUI-554 — Progreso de una mutación (crear/actualizar/desactivar/reactivar).
+ * Los modales lo consumen para su botón `[loading]`; la tabla NO lo mira, para
+ * que guardar no la reemplace por el spinner de carga de lista.
+ */
+export const selectUserSaving = createSelector(
+  selectStoreUsersState,
+  (state) => state.user_saving,
+);
+
 export const selectStats = createSelector(
   selectStoreUsersState,
   (state) => state.stats,

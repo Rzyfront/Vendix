@@ -333,6 +333,9 @@ export interface StoreSettings {
   // Fiscal data - legal/tax identity (NIT, regime, address, responsibilities)
   fiscal_data?: FiscalDataSettings;
 
+  // Services - where the service is performed (home vs shop) + shop address
+  services?: ServicesSettings;
+
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;
 
@@ -565,6 +568,51 @@ export interface ReservationsSettings {
   reminders: BookingReminderRule[];
   confirmation: BookingConfirmationSettings;
   check_in: BookingCheckInSettings;
+  /**
+   * When true (default), customers can reschedule a booking directly from
+   * the ecommerce portal in a single click — the booking moves to the new
+   * slot immediately and the admin gets an in-app broadcast.
+   *
+   * When false, the customer's reschedule becomes a PENDING REQUEST stored
+   * in `booking_reschedule_requests`. The booking's actual date/time stays
+   * unchanged until an admin approves it. The customer gets notified on
+   * approve/reject.
+   *
+   * Default: true (preserves the historical behavior where every reschedule
+   * was applied directly). Stores that want tighter control flip this off.
+   */
+  allow_direct_reschedule: boolean;
+}
+
+/**
+ * The technician's shop address — the "En el local" option of the booking
+ * flow. Mirrors `ServicesAddressDto` in `settings-schemas.dto.ts`.
+ */
+export interface ServicesLocalAddress {
+  address_line1: string;
+  address_line2: string;
+  city: string;
+  state_province: string;
+  country_code: string;
+  postal_code: string;
+}
+
+/**
+ * Phase 1 of the appointment redesign: where the service is performed.
+ *
+ * The ecommerce booking flow reads `offer_home_service` to decide whether the
+ * "A domicilio" option is shown, and `local_address` as the shop address for
+ * the "En el local" option. Captured in Configuración → General → Servicios.
+ */
+export interface ServicesSettings {
+  /**
+   * Whether the technician travels to the customer's address. When false the
+   * booking flow only offers "En el local". Default: true.
+   */
+  offer_home_service: boolean;
+
+  /** Shop address used by the "En el local" option. */
+  local_address: ServicesLocalAddress;
 }
 
 // ============================================================================

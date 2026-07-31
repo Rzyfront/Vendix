@@ -173,6 +173,7 @@
               type="date"
               [ngModel]="selectedDate()"
               (ngModelChange)="selectedDate.set($event)"
+              [min]="todayString"
               placeholder="Selecciona fecha"
               [required]="true"
             ></app-input>
@@ -312,9 +313,10 @@
             </div>
           } @else {
             <div class="availability-calendar-wrapper">
-              <app-calendar-week-view
-                [bookingsByDate]="bookingsByDate()"
-                [freeSlotsByDate]="freeSlotsByDate()"
+              <app-calendar-day-view
+                [bookings]="dayBookings()"
+                [freeSlots]="dayFreeSlots()"
+                [unavailableSlots]="unavailableSlots()"
                 [currentDate]="selectedDate() ? parseAsDate(selectedDate()) : today"
                 [slotMinutes]="selectedService()?.service_duration_minutes || 30"
                 (slotClicked)="onCalendarSlotPicked($event)"
@@ -322,20 +324,32 @@
             </div>
 
             @if (!loadingSlots() && freeSlotsCount() === 0) {
-              <!-- Empty state: no free slots in the visible week.
-                   Renders BELOW the calendar (which still shows
-                   day headers + hour grid for context) so the user
-                   keeps the visual context of "the week is here, just
-                   empty". -->
-              <div class="empty-slots-message">
+              <!-- Empty state: no free slots for the SELECTED day.
+                   Renders BELOW the day-view (which still shows the
+                   hour grid for context) so the user understands
+                   "this day is empty" rather than seeing a blank
+                   panel with no explanation. -->
+              <div class="empty-slots-message" data-testid="empty-day-slots">
+                <!-- TODO(human): empty-state copy + CTA
+                     Required: replace this placeholder with the final copy
+                     and CTA for "no hay horarios este día". Consider:
+                     - Primary message (1 line, scannable)
+                     - Helper text explaining why (provider sin horario /
+                       día de descanso / todo reservado)
+                     - Optional CTA button: "Cambiar fecha" that calls
+                       prevStep() twice to return to step 1 (Servicio),
+                       or `prevStep()` once to go to step 2 (Proveedor).
+                     Use `<app-button variant="outline" size="sm"
+                     (clicked)="prevStep()">…</app-button>` for the CTA.
+                     Match the existing tone (informal Argentinian "vos",
+                     "probá", "agendamiento") used elsewhere in this file. -->
                 <app-icon name="calendar-x" [size]="20" class="text-gray-400"></app-icon>
                 <p class="text-sm text-gray-700">
-                  No hay horarios disponibles en esta semana.
+                  No hay horarios disponibles este día.
                 </p>
                 <p class="text-xs text-gray-500">
-                  Puede que el provider no tenga horarios configurados, o que
-                  todos estén reservados. Probá seleccionar otro día o contactá
-                  al proveedor.
+                  Probá volver al paso Servicio y elegir otra fecha, o contactá
+                  al proveedor para confirmar disponibilidad.
                 </p>
               </div>
             }

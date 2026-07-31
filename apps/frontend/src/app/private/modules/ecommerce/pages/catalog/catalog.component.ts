@@ -323,6 +323,9 @@ export class CatalogComponent implements OnInit {
           this.applyCatalogSettings(response.data?.ecommerce);
           this.loadProducts();
         },
+        error: () => {
+          this.loadProducts();
+        },
       });
   }
 

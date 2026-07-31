@@ -4,7 +4,10 @@ import {
   IsString,
   IsOptional,
   Matches,
+  IsIn,
+  IsEnum,
 } from 'class-validator';
+import { booking_service_location_enum } from '@prisma/client';
 
 export class CreateEcommerceBookingDto {
   @IsInt()
@@ -32,4 +35,22 @@ export class CreateEcommerceBookingDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Appointment redesign phase 2 — dónde se realiza el servicio.
+   * `home` requiere `service_address_id` Y que el producto tenga
+   * `is_eligible_for_home_service = true` (el controller valida esto
+   * antes de llamar al service). Default `shop` (legacy).
+   */
+  @IsOptional()
+  @IsEnum(booking_service_location_enum)
+  service_location_type?: booking_service_location_enum;
+
+  /**
+   * FK a `addresses` (del customer). Obligatorio cuando
+   * `service_location_type = 'home'`; ignorado cuando `shop`.
+   */
+  @IsOptional()
+  @IsInt()
+  service_address_id?: number;
 }

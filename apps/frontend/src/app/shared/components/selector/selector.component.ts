@@ -470,7 +470,7 @@ export class SelectorComponent implements ControlValueAccessor {
       'transition-colors',
       'duration-200',
       'focus:outline-none',
-      'bg-[var(--color-surface)]',
+      'bg-[var(--color-surface,#fff)]',
       'text-[var(--color-text-primary)]',
     ];
 
@@ -508,8 +508,8 @@ export class SelectorComponent implements ControlValueAccessor {
       variantClasses = [
         ...sizeClasses[this.size()],
         'rounded-xl',
-        '!bg-[var(--color-background)]',
-        'focus:!bg-[var(--color-surface)]',
+        '!bg-[var(--color-background,#f9fafb)]',
+        'focus:!bg-[var(--color-surface,#fff)]',
         this.errorText()
           ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
           : 'focus:shadow-[0_0_0_2px_var(--color-ring)]',

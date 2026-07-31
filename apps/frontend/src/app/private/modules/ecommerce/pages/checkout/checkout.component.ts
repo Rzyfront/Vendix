@@ -34,6 +34,7 @@ import {
 } from '../../services/checkout.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
+import { CustomerAddressPickerComponent } from '../../../../../shared/components/customer-address-picker/customer-address-picker.component';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
 import { phoneDigitsValidator } from '../../utils/address-validators';
@@ -97,6 +98,7 @@ import {
     BookingSlotPickerComponent,
     GuestCheckoutDataModalComponent,
     PaymentInstructionsModalComponent,
+    CustomerAddressPickerComponent,
     CartPromotionsComponent,
     LocationPermissionModalComponent,
     AddressMapPickerComponent,
@@ -230,7 +232,16 @@ export class CheckoutComponent implements OnInit {
 
   // ========== BOOKING ==========
   /** Booking selections keyed by product and variant, so variant services do not overwrite each other. */
-  bookingSelections = new Map<string, BookingSelection>();
+  /**
+   * Mapa de selección de reserva por cart item (`product_id:variant_id`).
+   * Envuelto en `signal` para que los `@let _bookingForItem =
+   * preBookedSelectionFor(item)` del template y la tarjeta resumen
+   * "Reserva confirmada" se re-rendericen cuando el cliente cambia la
+   * modalidad desde el toggle inline. Sin el signal, el Map mutaba
+   * silenciosamente y el resumen quedaba con el `service_location_type`
+   * viejo.
+   */
+  bookingSelections = signal<Map<string, BookingSelection>>(new Map());
 
   /** True when cart has at least one bookable service */
   get cartHasBookableServices(): boolean {
@@ -265,7 +276,7 @@ export class CheckoutComponent implements OnInit {
     if (!this.cartHasBookableServices) return true;
     const bookableItems = this.bookableItems;
     return bookableItems.every((item) =>
-      this.bookingSelections.has(this.getBookingKey(item)),
+      this.bookingSelections().has(this.getBookingKey(item)),
     );
   }
 
@@ -379,40 +390,142 @@ export class CheckoutComponent implements OnInit {
    */
   private restorePendingBooking(): void {
     try {
-      const stored = sessionStorage.getItem('pending_booking');
-      if (!stored) return;
+      // Buscamos primero el formato nuevo (`pending_bookings` Map); si no
+      // existe, caemos al legacy (`pending_booking` single) — sesiones
+      // anteriores al fix siguen teniendo entries válidos bajo la clave
+      // vieja y la migración las trae al Map nuevo.
+      let stored = sessionStorage.getItem('pending_bookings');
+      if (!stored) {
+        stored = sessionStorage.getItem('pending_booking');
+        if (!stored) return;
+      }
 
-      const booking = JSON.parse(stored);
-      if (
-        booking.product_id &&
-        booking.date &&
-        booking.start_time &&
-        booking.end_time
-      ) {
-        // Verify the product/variant is actually in the current cart.
-        const cartItem = this.cart()?.items?.find(
+      const parsed = JSON.parse(stored);
+      // El formato nuevo es un Map keyed por `${product_id}:${variant_id}`.
+      // Si sessionStorage tiene el formato viejo (un único objeto bajo la
+      // clave legacy `pending_booking`), lo migramos al Map y borramos
+      // la clave vieja.
+      const bookingsMap: Record<string, Record<string, any>> | null =
+        this.isBookingMap(parsed)
+          ? parsed
+          : this.migrateLegacyPendingBooking();
+      if (!bookingsMap) {
+        sessionStorage.removeItem('pending_bookings');
+        return;
+      }
+
+      // CRITICAL: bail out if the cart is empty. The cart service may still
+      // be hydrating from the backend (race condition). The subscribe in
+      // loadData() will call us again on the next emission with the real cart.
+      const cartItems = this.cart()?.items ?? [];
+      if (cartItems.length === 0) return;
+
+      const newSelections = new Map(this.bookingSelections());
+      const validKeys = new Set<string>();
+
+      for (const [key, booking] of Object.entries(bookingsMap)) {
+        if (
+          !booking['product_id'] ||
+          !booking['date'] ||
+          !booking['start_time'] ||
+          !booking['end_time']
+        ) {
+          // Entry malformada — la saltamos (no la borramos, podrían
+          // haber otras válidas en el Map).
+          continue;
+        }
+
+        const cartItem = cartItems.find(
           (item) =>
-            item.product_id === booking.product_id &&
-            (booking.product_variant_id
-              ? item.product_variant_id === booking.product_variant_id
+            item.product_id === booking['product_id'] &&
+            (booking['product_variant_id']
+              ? item.product_variant_id === booking['product_variant_id']
               : true),
         );
         if (!cartItem) {
-          sessionStorage.removeItem('pending_booking');
-          return;
+          // El producto no está en el carrito — entry stale, la dejamos
+          // (puede re-emerger si el cliente vuelve a agregarlo).
+          continue;
         }
-        this.bookingSelections.set(this.getBookingKey(cartItem), {
-          product_id: booking.product_id,
-          product_variant_id: booking.product_variant_id,
-          date: booking.date,
-          start_time: booking.start_time,
-          end_time: booking.end_time,
+
+        newSelections.set(this.getBookingKey(cartItem), {
+          product_id: booking['product_id'],
+          product_variant_id: booking['product_variant_id'],
+          date: booking['date'],
+          start_time: booking['start_time'],
+          end_time: booking['end_time'],
+          provider_id: booking['provider_id'],
+          provider_name: booking['provider_name'],
+          service_location_type: booking['service_location_type'],
+          service_address_id: booking['service_address_id'],
+          service_address_label: booking['service_address_label'],
         });
-        // Clean up after reading
-        sessionStorage.removeItem('pending_booking');
+        validKeys.add(key);
+      }
+
+      this.bookingSelections.set(newSelections);
+
+      // NO borramos `pending_bookings` después de restaurar — si el cliente
+      // sale a /cart y vuelve, queremos volver a poblar `bookingSelections`
+      // desde el mismo origen. Solo limpiamos en el catch (JSON corrupto)
+      // o cuando TODAS las entries son inválidas/stale. La señal
+      // `bookingSelections` es la fuente de verdad DURANTE la sesión del
+      // checkout; `pending_bookings` es el backup que persiste entre tabs.
+      if (validKeys.size === 0) {
+        sessionStorage.removeItem('pending_bookings');
       }
     } catch {
+      sessionStorage.removeItem('pending_bookings');
+    }
+  }
+
+  /**
+   * Type guard: el Map nuevo es un objeto plano cuyas keys son
+   * `${product_id}:${variant_id}` y cuyos values son objetos con
+   * `product_id`. El formato legacy era un objeto único con `product_id`
+   * directamente.
+   */
+  private isBookingMap(value: unknown): value is Record<string, Record<string, any>> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const entries = Object.values(value as Record<string, unknown>);
+    if (entries.length === 0) return true; // Map vacío es válido
+    // Tomamos la primera entry y verificamos que sea un objeto con product_id
+    // (no un objeto con campos del booking directo).
+    const first = entries[0] as Record<string, unknown>;
+    return !!(first && typeof first === 'object' && 'product_id' in first);
+  }
+
+  /**
+   * Migra el formato legacy `pending_booking` (objeto único) al nuevo
+   * `pending_bookings` (Map). Devuelve el Map migrado o null si no hay
+   * legacy entry válido.
+   */
+  private migrateLegacyPendingBooking(): Record<string, Record<string, any>> | null {
+    try {
+      const legacy = sessionStorage.getItem('pending_booking');
+      if (!legacy) return null;
+      const booking = JSON.parse(legacy);
+      if (
+        !booking['product_id'] ||
+        !booking['date'] ||
+        !booking['start_time'] ||
+        !booking['end_time']
+      ) {
+        sessionStorage.removeItem('pending_booking');
+        return null;
+      }
+      const key = `${booking['product_id']}:${booking['product_variant_id'] ?? 'base'}`;
+      sessionStorage.setItem(
+        'pending_bookings',
+        JSON.stringify({ [key]: booking }),
+      );
       sessionStorage.removeItem('pending_booking');
+      return { [key]: booking };
+    } catch {
+      sessionStorage.removeItem('pending_booking');
+      return null;
     }
   }
 
@@ -669,9 +782,31 @@ export class CheckoutComponent implements OnInit {
     this.use_new_address.set(false);
   }
 
+  /**
+   * Wired to the shared <app-customer-address-picker>'s
+   * (addressSelected) event. Same effect as the legacy selectAddress
+   * — kept as a separate method so the template reads as a thin
+   * pass-through and the parent keeps the option to do per-consumer
+   * extra work in the future.
+   */
+  onServiceAddressPicked(id: number): void {
+    this.selectAddress(id);
+  }
+
   selectNewAddress(): void {
     this.selected_address_id.set(null);
     this.use_new_address.set(true);
+  }
+
+  /**
+   * Wired to the shared <app-customer-address-picker>'s
+   * (addNewClicked) event. The picker emits a generic event; this
+   * parent decides what "add new" means in the checkout context.
+   * Here we flip the inline-form flag to show the map picker and
+   * the full address form below.
+   */
+  onServiceNewAddressClicked(): void {
+    this.selectNewAddress();
   }
 
   // ========== GEO-LOCATION HANDLERS ==========
@@ -1145,23 +1280,25 @@ export class CheckoutComponent implements OnInit {
     item: CartItem,
     slot: { date: string; start_time: string; end_time: string },
   ): void {
-    this.bookingSelections.set(this.getBookingKey(item), {
+    const newMap = new Map(this.bookingSelections());
+    newMap.set(this.getBookingKey(item), {
       product_id: item.product_id,
       product_variant_id: item.product_variant_id || undefined,
       date: slot.date,
       start_time: slot.start_time,
       end_time: slot.end_time,
     });
+    this.bookingSelections.set(newMap);
   }
 
   /** Check if a specific product has a booking selection */
   hasBookingForItem(item: CartItem): boolean {
-    return this.bookingSelections.has(this.getBookingKey(item));
+    return this.bookingSelections().has(this.getBookingKey(item));
   }
 
   /** Get the booking selection summary for a product */
   getBookingSummary(item: CartItem): string {
-    const booking = this.bookingSelections.get(this.getBookingKey(item));
+    const booking = this.bookingSelections().get(this.getBookingKey(item));
     if (!booking) return '';
     const date = new Date(booking.date + 'T12:00:00');
     const formatted = date.toLocaleDateString('es-CO', {
@@ -1174,6 +1311,34 @@ export class CheckoutComponent implements OnInit {
 
   getBookingKey(item: CartItem): string {
     return `${item.product_id}:${item.product_variant_id ?? 'base'}`;
+  }
+
+  /**
+   * Lookup de la reserva pre-cargada (`bookingSelections`) por item del
+   * carrito. El template lo usa para pasar `initialDate/initialStartTime/
+   * initialEndTime` al `BookingSlotPickerComponent` cuando el usuario
+   * recién salió del flujo `BookingComponent` y ya eligió fecha + slot.
+   * Sin esto, la sección "Reserva de Horario" del checkout mostraba el
+   * picker vacío y el cliente tenía que re-elegir todo (lo que generaba
+   * también órdenes huérfanas en la práctica).
+   */
+  preBookedSelectionFor(item: CartItem): BookingSelection | undefined {
+    return this.bookingSelections().get(this.getBookingKey(item));
+  }
+
+  /**
+   * True si al menos uno de los bookings reservados requiere "A
+   * domicilio" — leído del Map de selecciones (signal). Usado por el
+   * template para renderizar el bloque `<customer-address-picker>` +
+   * mapa + form DENTRO del step "Reserva". La modalidad se eligió en
+   * el BookingComponent, no en el checkout.
+   */
+  hasHomeBooking(): boolean {
+    for (const item of this.bookableItems) {
+      const sel = this.preBookedSelectionFor(item);
+      if (sel?.service_location_type === 'home') return true;
+    }
+    return false;
   }
 
   /**
@@ -1260,6 +1425,26 @@ export class CheckoutComponent implements OnInit {
       return;
     }
 
+    // Guard: if the cart has service items but no booking was selected
+    // (e.g. user went straight to checkout without the BookingComponent flow),
+    // block the order so we don't create another orphan. The error message
+    // points them back to the product page to reserve properly.
+    if (this.cartHasBookableServices && this.bookingSelections().size === 0) {
+      const firstService = this.bookableItems[0];
+      const productId = firstService?.product_id;
+      this.error_message.set(
+        productId
+          ? 'Debes seleccionar fecha y hora para reservar el servicio. Vuelve al producto para reservar.'
+          : 'Debes seleccionar fecha y hora para reservar el servicio.',
+      );
+      this.toast.error(this.error_message());
+      if (productId) {
+        // Defer the redirect so the toast is visible first.
+        setTimeout(() => this.router.navigate(['/products', productId]), 1500);
+      }
+      return;
+    }
+
     if (!this.is_authenticated() && !this.guest_data_decision_made) {
       this.guestDataModal()?.open();
       return;
@@ -1267,6 +1452,65 @@ export class CheckoutComponent implements OnInit {
 
     this.is_submitting.set(true);
     this.error_message.set('');
+
+    // DEBUG: trace what's happening with booking detection at checkout time
+    console.log('[checkout DEBUG] placeOrder() invoked', {
+      cartHasBookableServices: this.cartHasBookableServices,
+      bookableItemsCount: this.bookableItems.length,
+      bookingSelectionsSize: this.bookingSelections().size,
+      bookingSelectionsKeys: Array.from(this.bookingSelections().keys()),
+      sessionStoragePending: sessionStorage.getItem('pending_booking'),
+      cartItemsCount: this.cart()?.items?.length ?? 0,
+      cartItemProductTypes: (this.cart()?.items ?? []).map(
+        (i: any) => `${i.product?.name}(${i.product?.product_type})`,
+      ),
+    });
+
+    // LAST-RESORT FALLBACK: also peek at sessionStorage in case the
+    // cart$ subscription + restorePendingBooking() race-condition still
+    // hasn't populated bookingSelections by the time the user hits "Pagar".
+    // We merge any pending_booking found there into the payload so the
+    // booking always travels with the order. Cleanup happens at the end
+    // of placeOrder() (success or failure).
+    const pendingBookings: Array<{
+      product_id: number;
+      product_variant_id?: number;
+      date: string;
+      start_time: string;
+      end_time: string;
+    }> = [...this.bookingSelections().values()];
+    try {
+      const stored = sessionStorage.getItem('pending_booking');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (
+          parsed?.product_id &&
+          parsed?.date &&
+          parsed?.start_time &&
+          parsed?.end_time
+        ) {
+          // Only add if not already represented in bookingSelections
+          const alreadyIn =
+            pendingBookings.find(
+              (b) =>
+                b.product_id === parsed.product_id &&
+                b.date === parsed.date &&
+                b.start_time === parsed.start_time,
+            );
+          if (!alreadyIn) {
+            pendingBookings.push({
+              product_id: parsed.product_id,
+              product_variant_id: parsed.product_variant_id,
+              date: parsed.date,
+              start_time: parsed.start_time,
+              end_time: parsed.end_time,
+            });
+          }
+        }
+      }
+    } catch {
+      // Ignore parse errors; the bookingSelections path still works.
+    }
 
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id()!,
@@ -1279,9 +1523,9 @@ export class CheckoutComponent implements OnInit {
           }
         : {}),
       // Include booking data if there are bookable services
-      ...(this.cartHasBookableServices && this.bookingSelections.size > 0
+      ...(this.cartHasBookableServices && this.bookingSelections().size > 0
         ? {
-            bookings: Array.from(this.bookingSelections.values()),
+            bookings: Array.from(this.bookingSelections().values()),
           }
         : {}),
       // Always send cart items as fallback (in case backend cart is empty/not synced)
@@ -1528,6 +1772,28 @@ export class CheckoutComponent implements OnInit {
 
   goToCart(): void {
     this.router.navigate(['/cart']);
+  }
+
+  /**
+   * Navega al wizard de booking para que el cliente pueda modificar el
+   * horario, profesional o modalidad sin tener que pasar por el carrito.
+   * Prioridad: (1) el primer bookable item sin booking en el carrito,
+   * (2) si todos tienen booking, el primero del carrito. Esto evita
+   * que con múltiples items se sobreescriban las selecciones existentes
+   * al navegar al wizard.
+   */
+  changeSchedule(): void {
+    const firstMissing = this.bookableItems.find(
+      (i) => !this.preBookedSelectionFor(i),
+    );
+    const target = firstMissing ?? this.bookableItems[0];
+    if (!target) {
+      this.toast.warning(
+        'No hay servicios con reserva para modificar en el carrito.',
+      );
+      return;
+    }
+    this.router.navigate(['/book', target.product_id]);
   }
 
   onQuickView(product: EcommerceProduct): void {

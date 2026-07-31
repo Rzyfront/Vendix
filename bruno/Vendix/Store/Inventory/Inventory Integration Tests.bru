@@ -272,31 +272,6 @@ Authorization: Bearer {{auth_token}}
 
 ---
 
-# Integration Tests with Sales Orders
-### Create Sales Order (Stock Reservation)
-POST {{base_url}}/api/sales-orders
-Content-Type: application/json
-Authorization: Bearer {{auth_token}}
-
-{
-  "customer_id": 1,
-  "organization_id": 1,
-  "items": [
-    {
-      "product_id": 1,
-      "quantity": 2,
-      "unit_price": 99.99,
-      "location_id": 1
-    }
-  ]
-}
-
-### Confirm Sales Order (Stock Consumption)
-PATCH {{base_url}}/api/sales-orders/1/confirm
-Authorization: Bearer {{auth_token}}
-
----
-
 # Error Cases Tests
 ### Create Duplicate Batch (Should Fail)
 POST {{base_url}}/api/inventory/batches

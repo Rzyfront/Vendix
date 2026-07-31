@@ -158,6 +158,23 @@ export class PosRestaurantIntegrationService {
     () => this.currentTableSession() != null,
   );
 
+  /**
+   * QUI-535 — suelta la sesión de mesa cacheada sin llamar al backend.
+   *
+   * Se usa cuando la sesión YA quedó cerrada del lado del servidor (el cobro POS
+   * la cierra dentro de su transacción): una venta cobrada cierra el ciclo de la
+   * mesa, y ningún residuo de la venta anterior puede preseleccionar mesa en la
+   * siguiente. `currentTableSession` refleja únicamente sesiones realmente
+   * abiertas. También resetea el guard anti-doble-fire, porque el carrito de la
+   * venta siguiente arranca limpio.
+   *
+   * Distinto de {@link closeTableSession}, que sí hace el `POST` de cierre.
+   */
+  clearTableSession(): void {
+    this.currentTableSession.set(null);
+    this.resetPreparedFired();
+  }
+
   constructor() {
     this.store
       .select(selectStoreSettings)

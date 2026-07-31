@@ -44,6 +44,7 @@ import {
 import {
   resolvePosStockScope,
   ResolvedInventoryScope,
+  displayableStockLevelsWhere,
 } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import { resolveProductLowStockThreshold } from '../inventory/shared/helpers/low-stock-threshold.helper';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
@@ -1144,10 +1145,18 @@ export class ProductsService {
     const posStockScope: ResolvedInventoryScope | null = pos_optimized
       ? await this.resolvePosScope()
       : null;
+    // QUI-559: the POS must only display stock it can actually charge. The
+    // filter is the configured scope INTERSECTED with the store's sellable
+    // locations — previously `all_locations` meant "no filter at all", so the
+    // grid summed inactive warehouses, the central warehouse and
+    // quarantine/damaged stock, and the sale was then rejected with a 409
+    // because the payment validation excludes exactly those locations.
     const posStockLevelsWhere =
-      posStockScope?.scope === 'main_location'
-        ? { location_id: posStockScope.mainLocationId }
-        : undefined;
+      posStockScope && context?.store_id
+        ? displayableStockLevelsWhere(context.store_id, posStockScope)
+        : posStockScope?.scope === 'main_location'
+          ? { location_id: posStockScope.mainLocationId }
+          : undefined;
     // Force stock_levels include under pos_optimized so the recomputed
     // stock_quantity always reflects the resolved scope, never the
     // denormalized cross-location aggregate.

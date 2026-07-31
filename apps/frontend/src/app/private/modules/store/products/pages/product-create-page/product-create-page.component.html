@@ -1465,6 +1465,24 @@
               </app-selector>
             </div>
 
+            <!-- Appointment redesign phase 2 — gating per-producto
+                 para "A domicilio". El backend valida como segunda línea
+                 de defensa (rechaza `service_location_type='home'` si el
+                 producto no es elegible). Lo mostramos siempre — sin
+                 condicionar a `service_modality === 'in_person'` —
+                 porque productos legacy tienen `service_modality = null`
+                 y el operador debe poder setear el flag aunque aún no
+                 haya elegido modalidad. Para servicios virtuales el
+                 flag es inocuo (no se consulta en el booking flow). -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-setting-toggle
+                formControlName="is_eligible_for_home_service"
+                label="A domicilio"
+                description="Marca este servicio como elegible para realizarse en casa del cliente. Si lo desactivas, el selector de ubicación del ecommerce mostrará solo 'En el local del técnico'."
+              >
+              </app-setting-toggle>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-setting-toggle
                 formControlName="requires_booking"

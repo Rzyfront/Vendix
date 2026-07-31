@@ -34,6 +34,7 @@ import { InfoModalComponent } from './components/info-modal';
 import { FaqModalComponent } from './components/faq-modal';
 import { ButtonComponent } from '../../../shared/components/button/button.component';
 import { ModalComponent } from '../../../shared/components/modal/modal.component';
+import { NotificationsDropdownComponent } from '../../../shared/components/notifications-dropdown/notifications-dropdown.component';
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { TableSessionSseService } from '../../modules/ecommerce/services/table-session-sse.service';
 import { parseApiError } from '../../../core/utils/parse-api-error';
@@ -98,6 +99,9 @@ interface FooterSettings {
     ModalComponent,
     CurrencyPipe,
     CartPromotionsComponent,
+    // Appointment redesign phase 2 — in-app notifications bell for the
+    // customer (reagenda aprobada/rechazada, etc.). Auth-gated in template.
+    NotificationsDropdownComponent,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],

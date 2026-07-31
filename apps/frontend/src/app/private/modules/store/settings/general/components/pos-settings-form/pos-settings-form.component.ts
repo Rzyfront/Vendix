@@ -1,4 +1,5 @@
-import { Component, OnInit, DestroyRef, effect, inject, input, output, Injector } from '@angular/core';
+import { Component, OnInit, DestroyRef, effect, inject, input, output, signal, Injector } from '@angular/core';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -13,7 +14,9 @@ import {
   ScaleDeviceConfig,
 } from '../../../../../../../core/models/store-settings.interface';
 import { PosScaleService } from '../../../../pos/services/pos-scale.service';
+import { PosCashRegisterService } from '../../../../pos/services/pos-cash-register.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { DialogService } from '../../../../../../../shared/components/dialog/dialog.service';
 
 @Component({
   selector: 'app-pos-settings-form',
@@ -32,6 +35,9 @@ export class PosSettingsForm implements OnInit {
   constructor(
     private scaleService: PosScaleService,
     private toastService: ToastService,
+    private cashRegisterService: PosCashRegisterService,
+    private dialogService: DialogService,
+    private router: Router,
   ) {
     effect(() => {
       const current = this.settings();
@@ -329,6 +335,86 @@ export class PosSettingsForm implements OnInit {
   onFieldChange() {
     if (this.form.valid) {
       this.settingsChange.emit(this.form.getRawValue());
+    }
+  }
+
+  /** QUI-560 — true mientras se consulta si hay sesiones de caja abiertas. */
+  readonly checkingOpenSessions = signal(false);
+
+  /**
+   * QUI-560 — preflight del apagado de la caja registradora.
+   *
+   * El backend es la autoridad (rechaza con `CASH_REGISTER_DISABLE_001`); esto
+   * es una capa de cortesía para que el usuario no descubra el bloqueo recién
+   * al pulsar "Guardar", con el resto del formulario ya modificado.
+   *
+   * No contradice la regla de caja no-restrictiva: no se bloquea la navegación
+   * ni la entrada al módulo, se interviene en el instante exacto de la acción
+   * destructiva. Encender la caja nunca pide nada.
+   */
+  onCashRegisterEnabledChange(): void {
+    if (this.cashRegisterEnabledControl.value !== false) {
+      this.onFieldChange();
+      return;
+    }
+
+    this.checkingOpenSessions.set(true);
+    this.cashRegisterService
+      .getSessionHistory({ status: 'open', limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ data }) => {
+          this.checkingOpenSessions.set(false);
+          if (!data.length) {
+            this.onFieldChange();
+            return;
+          }
+          this.revertCashRegisterToggle();
+          void this.warnOpenSessions(data);
+        },
+        error: () => {
+          // Si no se puede verificar, se deja pasar: el guard de backend
+          // rechaza igual y con el mensaje correcto. Fallar cerrado aquí
+          // bloquearía un apagado legítimo por una caída del listado.
+          this.checkingOpenSessions.set(false);
+          this.onFieldChange();
+        },
+      });
+  }
+
+  /**
+   * Devuelve el toggle a `true` sin re-disparar el preflight, y resincroniza
+   * los controles dependientes (que `valueChanges` ya había deshabilitado
+   * cuando el usuario apagó el switch).
+   */
+  private revertCashRegisterToggle(): void {
+    this.cashRegisterEnabledControl.setValue(true, { emitEvent: false });
+    this.syncDependentControlsState();
+  }
+
+  private async warnOpenSessions(
+    sessions: { register?: { name?: string } | null }[],
+  ): Promise<void> {
+    const names = [
+      ...new Set(
+        sessions.map((s) => s.register?.name).filter((n): n is string => !!n),
+      ),
+    ];
+    const plural = sessions.length === 1 ? 'sesión abierta' : 'sesiones abiertas';
+
+    const goToRegisters = await this.dialogService.confirm({
+      title: 'Hay caja abierta',
+      message:
+        `No se puede deshabilitar la caja registradora: la tienda tiene ` +
+        `${sessions.length} ${plural}` +
+        `${names.length ? ` en ${names.join(', ')}` : ''}. ` +
+        `Ciérralas con su conteo antes de apagar el módulo.`,
+      confirmText: 'Ir a Caja Registradora',
+      cancelText: 'Entendido',
+    });
+
+    if (goToRegisters) {
+      void this.router.navigate(['/admin/cash-registers']);
     }
   }
 

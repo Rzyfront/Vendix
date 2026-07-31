@@ -375,6 +375,14 @@
     }
 }
 
+.summary-row--address {
+    .summary-value {
+        font-weight: 500;
+        line-height: 1.5;
+        color: var(--color-text-secondary);
+    }
+}
+
 // Login prompt
 .login-prompt {
     display: flex;

@@ -56,6 +56,20 @@ export function getDefaultStoreSettings(): StoreSettings {
       tax_included: false,
       industries: [StoreIndustry.RETAIL],
     },
+    // Phase 1 of the appointment redesign: offer_home_service + the
+    // technician's shop address. Captured in Configuración → General →
+    // Servicios and consumed by the ecommerce booking flow.
+    services: {
+      offer_home_service: true,
+      local_address: {
+        address_line1: '',
+        address_line2: '',
+        city: '',
+        state_province: '',
+        country_code: 'CO',
+        postal_code: '',
+      },
+    },
     inventory: {
       low_stock_threshold: 10,
       out_of_stock_action: 'hide',
@@ -355,6 +369,12 @@ export function getDefaultStoreSettings(): StoreSettings {
         allow_staff_check_in: true,
         notify_provider_on_check_in: true,
       },
+      // Appointment redesign phase 2: whether customers can reschedule
+      // directly. Default true preserves the legacy 1-click reschedule UX;
+      // stores that need approval-first flip it to false (which routes the
+      // request through `booking_reschedule_requests` instead of mutating
+      // `bookings` immediately).
+      allow_direct_reschedule: true,
     },
 
     // Availability - Generic-slot fallback. Mon-Fri matches the historic

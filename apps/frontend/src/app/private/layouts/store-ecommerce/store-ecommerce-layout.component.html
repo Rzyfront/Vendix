@@ -78,6 +78,11 @@
           <button class="action-btn" (click)="goToAccount()" title="Mi Perfil">
             <app-icon name="user-circle" [size]="20"></app-icon>
           </button>
+
+          <!-- Appointment redesign phase 2 — in-app notifications bell.
+               Mounted here so the customer receives SSE updates when the
+               admin approves/rejects a reschedule request. Auth-gated. -->
+          <app-notifications-dropdown></app-notifications-dropdown>
           }
         </div>
 

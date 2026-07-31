@@ -42,6 +42,7 @@ import {
   ProviderAvailabilityOverview,
   ProviderAvailabilityDay,
   ProviderAvailabilityRow,
+  ProviderSchedule,
 } from '../../interfaces/reservation.interface';
 
 /**
@@ -92,6 +93,11 @@ export class ProviderAvailabilityComponent {
 
   // Provider search (filters the responsive-data-view)
   readonly providerSearch = signal('');
+
+  // Working-schedule blocks for the provider whose detail modal is open.
+  // Populated on `openDetail()` so the slot grid respects the configured
+  // bloques (almuerzo / split-shift) instead of always rendering 7-22.
+  readonly detailScheduleBlocks = signal<ProviderSchedule[]>([]);
 
   // --- Computed ---
   readonly providers = computed(
@@ -390,17 +396,31 @@ export class ProviderAvailabilityComponent {
   readonly detailSlots = computed(() => {
     const detail = this.selectedDetail();
     if (!detail) return [];
-    const day = detail.provider.days.find((d) => d.date === detail.date);
-    if (!day || day.total_slots === 0) {
-      return this.buildEmptySlots();
-    }
-
     const slotMinutes = this.slotMinutes();
-    const total = Math.max(day.total_slots, 1);
     const realBookings = this.detailBookings();
 
-    // Build a set of slot indices that overlap with real bookings
-    const busyIndices = new Set<number>();
+    // 1. Resolvemos los "rangos de trabajo" del proveedor para el día
+    // seleccionado. Si no hay schedule cargado (legacy o providerId
+    // faltante), caemos al rango completo 7-22 y avisamos al usuario
+    // en `summaryWorkSchedule`.
+    const dayOfWeek = new Date(`${detail.date}T12:00:00`).getDay();
+    const rawBlocks = this.detailScheduleBlocks();
+    const workRanges = rawBlocks
+      .filter((b) => b.day_of_week === dayOfWeek && b.is_active)
+      .map((b) => ({
+        start: this.timeToMinutes(b.start_time),
+        end: this.timeToMinutes(b.end_time),
+      }))
+      .filter((r) => r.end > r.start)
+      .sort((a, b) => a.start - b.start);
+
+    // 2. Generamos slots SOLO dentro de los rangos de trabajo. Huecos
+    // entre rangos (p.ej. 12-2 PM almuerzo) NO producen slot → la lista
+    // "Tarde" del modal empieza recién a las 14:00, sin slots fantasma
+    // de 12:00-13:30 marcados como libres.
+    const slots: Array<{ time: string; status: 'busy' | 'free' | 'past' }> = [];
+    const busySlotKeys = new Set<string>();
+    // Pre-marcamos como busy los slots que tocan un booking real.
     for (const booking of realBookings) {
       const [bStartH, bStartM] = booking.start_time.split(':').map(Number);
       const [bEndH, bEndM] = booking.end_time.split(':').map(Number);
@@ -408,28 +428,82 @@ export class ProviderAvailabilityComponent {
       const bookingStartMin = bStartH * 60 + bStartM;
       const bookingEndMin = bEndH * 60 + bEndM;
 
-      for (let i = 0; i < total; i++) {
-        const slotStartMin = this.DAY_START + i * slotMinutes;
-        const slotEndMin = slotStartMin + slotMinutes;
-        // Slot overlaps with booking if it intersects
-        if (slotStartMin < bookingEndMin && slotEndMin > bookingStartMin) {
-          busyIndices.add(i);
+      for (let r = 0; r < workRanges.length; r++) {
+        const range = workRanges[r];
+        for (let t = range.start; t + slotMinutes <= range.end; t += slotMinutes) {
+          const tEnd = t + slotMinutes;
+          if (t < bookingEndMin && tEnd > bookingStartMin) {
+            busySlotKeys.add(`${t}`);
+          }
         }
       }
     }
-
-    const slots: Array<{ time: string; status: 'busy' | 'free' }> = [];
-    for (let i = 0; i < total; i++) {
-      const minutesFromStart = i * slotMinutes;
-      const startMin = this.DAY_START + minutesFromStart;
-      const endMin = Math.min(startMin + slotMinutes, this.DAY_END);
-      slots.push({
-        time: `${this.formatHm(startMin)}–${this.formatHm(endMin)}`,
-        status: busyIndices.has(i) ? 'busy' : 'free',
-      });
+    // Past-time filter: para HOY marcamos los slots cuyo start_time ya
+    // pasó como `past`. Sin este filtro, el operador ve "Libre" en
+    // franjas que ya no puede tomar (el cliente no las ve porque el
+    // calendario ecommerce ya devuelve `has_slots: false`, pero la vista
+    // admin debe reflejarlo para no inducir a error).
+    const todayIso = this.formatDateInput(new Date());
+    const nowMin =
+      detail.date === todayIso
+        ? new Date().getHours() * 60 + new Date().getMinutes()
+        : -1;
+    for (let r = 0; r < workRanges.length; r++) {
+      const range = workRanges[r];
+      for (let t = range.start; t + slotMinutes <= range.end; t += slotMinutes) {
+        const end = Math.min(t + slotMinutes, range.end);
+        let status: 'busy' | 'free' | 'past' = 'free';
+        if (busySlotKeys.has(`${t}`)) {
+          status = 'busy';
+        } else if (nowMin >= 0 && t < nowMin) {
+          status = 'past';
+        }
+        slots.push({
+          time: `${this.formatHm(t)}–${this.formatHm(end)}`,
+          status,
+        });
+      }
     }
     return slots;
   });
+
+  /**
+   * Texto del resumen "Horario de trabajo" en el header del modal.
+   *   - Si hay exactamente 1 bloque → "8:00 AM – 6:00 PM (30 min por slot)"
+   *   - Si hay varios bloques (split-shift) → "8-12, 14-18 (30 min por slot)"
+   *   - Si no hay horario cargado → "No configurado para este día"
+   */
+  readonly summaryWorkSchedule = computed(() => {
+    const detail = this.selectedDetail();
+    if (!detail) return '';
+    const dayOfWeek = new Date(`${detail.date}T12:00:00`).getDay();
+    const blocks = this.detailScheduleBlocks()
+      .filter((b) => b.day_of_week === dayOfWeek && b.is_active)
+      .map((b) => ({
+        start: this.timeToMinutes(b.start_time),
+        end: this.timeToMinutes(b.end_time),
+      }))
+      .filter((r) => r.end > r.start)
+      .sort((a, b) => a.start - b.start);
+    const slotM = this.slotMinutes();
+    if (!blocks.length) return `Sin horario configurado (${slotM} min por slot)`;
+    const rangeText = blocks
+      .map((r) => `${this.formatHm(r.start)} – ${this.formatHm(r.end)}`)
+      .join(', ');
+    return `${rangeText} (${slotM} min por slot)`;
+  });
+
+  /**
+   * Convert "HH:mm" (or "HH:mm:ss") to minutes-since-midnight.
+   * Mirrors the parseScheduleBlock / timeToMinutes helpers used elsewhere
+   * so HH:mm compares the same way as numeric ranges.
+   */
+  private timeToMinutes(time: string): number {
+    const [h = '0', m = '0'] = (time ?? '').split(':');
+    const hh = Number(h);
+    const mm = Number(m);
+    return (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0);
+  }
 
   /** Render the working window as all-free when there's no data. */
   private buildEmptySlots(): Array<{ time: string; status: 'busy' | 'free' }> {
@@ -474,10 +548,24 @@ export class ProviderAvailabilityComponent {
       },
       error: () => this.detailBookings.set([]),
     });
+    // Traemos también los bloques de horario del proveedor para que el
+    // modal respete el split-shift / almuerzo configurado. Si la request
+    // falla (proveedor sin horario, p.ej. legacy), caemos al rango 7-22
+    // y la UI sigue funcionando como antes.
+    const providerId = provider.provider_id;
+    if (providerId) {
+      this.service.getProviderSchedule(providerId).subscribe({
+        next: (blocks) => this.detailScheduleBlocks.set(blocks ?? []),
+        error: () => this.detailScheduleBlocks.set([]),
+      });
+    } else {
+      this.detailScheduleBlocks.set([]);
+    }
   }
 
   closeDetail(): void {
     this.selectedDetail.set(null);
+    this.detailScheduleBlocks.set([]);
   }
 
   /**
@@ -493,8 +581,8 @@ export class ProviderAvailabilityComponent {
    * instance itself was dirty, missing the async update.
    */
   readonly groupedSlots = computed<{
-    morning: Array<{ time: string; status: 'busy' | 'free' }>;
-    afternoon: Array<{ time: string; status: 'busy' | 'free' }>;
+    morning: Array<{ time: string; status: 'busy' | 'free' | 'past' }>;
+    afternoon: Array<{ time: string; status: 'busy' | 'free' | 'past' }>;
   }>(() => {
     const all = this.detailSlots();
     return {

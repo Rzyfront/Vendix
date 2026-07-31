@@ -2,3 +2,38 @@
   display: block;
   width: 100%;
 }
+
+/* Appointment redesign phase 2 — visual feedback when the operator
+   clicks the "Solicitudes de reagenda" header button. The panel flashes
+   briefly so the eye lands on the queue after the smooth scroll. */
+#reschedule-requests-panel.reschedule-panel-flash,
+.reschedule-requests-panel.reschedule-panel-flash {
+  animation: reschedulePanelFlash 1.5s ease-out;
+}
+
+@keyframes reschedulePanelFlash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.55);
+    transform: scale(1);
+  }
+  20% {
+    box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.25);
+    transform: scale(1.01);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+    transform: scale(1);
+  }
+}
+
+/* Pulse animation on the header button when there are pending requests.
+   Subtle — just a glow expansion every 2.5s so the operator's eye is
+   drawn to it without being annoying. */
+button.reschedule-pulse {
+  animation: rescheduleBtnPulse 2.5s ease-in-out infinite;
+}
+
+@keyframes rescheduleBtnPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(99, 102, 241, 0); }
+}

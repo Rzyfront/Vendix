@@ -37,7 +37,7 @@
         <p class="section-label">Horarios disponibles</p>
         @if (bookingMode() === "free_booking") {
           <div class="time-grid">
-            @for (slot of freeBookingSlots(); track slot.time) {
+            @for (slot of visibleFreeSlots(); track slot.time) {
               <button
                 class="time-slot"
                 [class.selected]="selectedFreeSlot()?.time === slot.time"
@@ -50,9 +50,9 @@
               </button>
             }
           </div>
-        } @else if (slotsForSelectedDate().length > 0) {
+        } @else if (visibleSlots().length > 0) {
           <div class="time-grid">
-            @for (slot of slotsForSelectedDate(); track slot.start_time) {
+            @for (slot of visibleSlots(); track slot.start_time) {
               <button
                 class="time-slot"
                 [class.selected]="selectedSlot() === slot"

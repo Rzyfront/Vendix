@@ -13,6 +13,7 @@ import {
   ReactiveFormsModule,
   FormGroup,
   FormControl,
+  Validators,
   ValidatorFn,
 } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -26,6 +27,7 @@ import {
 } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
 import { PanelUiModulesEditorComponent } from '../../../../../../../shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
   INDUSTRY_METADATA,
   STORE_INDUSTRIES,
@@ -35,6 +37,7 @@ import {
 import type { PanelUISettings } from '../../../../../../../core/models/store-settings.interface';
 import { CurrencyService } from '../../../../../../../services/currency.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { debounceTime } from 'rxjs';
 
 export interface GeneralSettings {
   // Campos de store_settings (existentes)
@@ -66,12 +69,14 @@ const nonEmptyArray: ValidatorFn = (control) => {
     MultiSelectorComponent,
     PanelUiModulesEditorComponent,
     ModalComponent,
+    IconComponent,
   ],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
 export class GeneralSettingsForm implements OnInit {
   readonly settings = input.required<GeneralSettings>();
+  readonly services = input<any>();
   readonly settingsChange = output<GeneralSettings>();
 
   readonly panelUi = input<PanelUISettings | undefined>(undefined);
@@ -113,20 +118,76 @@ export class GeneralSettingsForm implements OnInit {
       this.editorValue.set({ ...(incoming?.STORE_ADMIN ?? {}) });
     });
 
+    // Patch the form once when the loaded settings become available.
+    // Timing: the form mounts BEFORE the parent's `loadSettings` async
+    // HTTP call resolves, so the first effect tick has `settings()`
+    // empty. We track a flag and keep retrying until the data lands,
+    // then lock the patch in. After that, subsequent settings changes
+    // (from the user's own debounced settingsChange emits) are NOT
+    // re-applied, which breaks the form-reset feedback cycle.
+    this.hasInitiallyPatchedForm = false;
     effect(() => {
+      if (this.hasInitiallyPatchedForm) return;
       const current = this.settings();
-      if (current) {
-        const sanitized = { ...current };
-        if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
-          sanitized.industries = ['retail'];
-        }
-        this.form.patchValue(sanitized, { emitEvent: false });
-        this.modulesHiddenByIndustries.set(
-          getModulesHiddenByIndustries(sanitized.industries),
-        );
+      const servicesValue = this.services();
+      if (!current) return;
+
+      this.hasInitiallyPatchedForm = true;
+
+      const sanitized = { ...current };
+      if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
+        sanitized.industries = ['retail'];
       }
+      this.form.patchValue(sanitized, { emitEvent: false });
+
+      const servicesGroup = this.form.get('services') as FormGroup | null;
+      if (servicesGroup && servicesValue) {
+        servicesGroup.patchValue(servicesValue, { emitEvent: false });
+
+        // The patchValue above uses emitEvent: false to avoid triggering
+        // a validation cascade, but the <app-services-settings-form>
+        // child subscribes to state_province.valueChanges to load the
+        // matching cities. Without an explicit emit, the city dropdown
+        // stays empty for the pre-populated department. Re-set the value
+        // here with emitEvent: true so the child's effect fires and
+        // loads cities for the persisted department.
+        const stateProv = servicesGroup.get('local_address.state_province') as FormControl | null;
+        if (stateProv && servicesValue?.local_address?.state_province) {
+          stateProv.setValue(servicesValue.local_address.state_province, { emitEvent: true });
+        }
+      }
+
+      this.modulesHiddenByIndustries.set(
+        getModulesHiddenByIndustries(sanitized.industries),
+      );
     });
+
+    // Propagate changes from the services sub-form up to the parent's
+    // settingsChange output. The nested FormGroup's valueChanges does
+    // NOT bubble automatically to the FormGroup, so we listen here.
+    //
+    // debounceTime(50) is critical: without it, every keystroke
+    // triggered a `settingsChange.emit` → settings signal update in
+    // the parent facade → `effect(() => form.patchValue(...))` cycle
+    // in THIS component, which reset the input on every keystroke
+    // and made typing feel laggy. With 50ms debounce, the emit only
+    // fires when the user pauses typing — the cycle breaks and the
+    // input stays responsive. Lower than 300ms so that "Guardar
+    // Cambios" sees fresh data if clicked right after a keystroke.
+    this.servicesForm.valueChanges
+      .pipe(debounceTime(50))
+      .subscribe(() => {
+        if (this.form.valid) {
+          this.settingsChange.emit(this.form.value);
+        }
+      });
   }
+
+  /** Guard so the settings effect patches the form exactly once on the
+   * first non-empty settings payload. After the lock, the form is the
+   * source of truth and the effect short-circuits, breaking the
+   * feedback cycle that was resetting user input on every keystroke. */
+  private hasInitiallyPatchedForm = false;
 
   form: FormGroup = new FormGroup({
     // Campos de stores
@@ -140,7 +201,31 @@ export class GeneralSettingsForm implements OnInit {
     ),
     language: new FormControl('es'),
     tax_included: new FormControl(false),
+    // Sub-form 'services' — kept in the FormGroup so the parent can
+    // still persist `offer_home_service` and the persisted address, but
+    // no longer required: the 'Servicios' card with the address inputs
+    // was hidden on 2026-07-26 (see general-settings.component.html),
+    // so we can't block save on fields the user can't see. If the card
+    // is re-enabled in the future, re-add the Validators.required on
+    // address_line1 / city / country_code below.
+    services: new FormGroup({
+      offer_home_service: new FormControl<boolean | null>(null),
+      local_address: new FormGroup({
+        address_line1: new FormControl(''),
+        address_line2: new FormControl(''),
+        city: new FormControl(''),
+        state_province: new FormControl(''),
+        country_code: new FormControl('CO'),
+        postal_code: new FormControl(''),
+      }),
+    }),
   });
+
+  /** Expose the services sub-form so the parent can pass it to the
+   * standalone ServicesSettingsForm card. */
+  get servicesForm(): FormGroup {
+    return this.form.get('services') as FormGroup;
+  }
 
   storeTypes: SelectorOption[] = [
     { value: 'physical', label: 'Tienda Física' },

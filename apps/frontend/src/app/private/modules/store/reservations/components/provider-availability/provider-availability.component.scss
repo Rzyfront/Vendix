@@ -371,6 +371,11 @@ $touch-min: 2.75rem;
 
     &--busy { background: rgba($danger, 0.2); border: 1px solid $danger; }
     &--free { background: rgba($success, 0.15); border: 1px solid $success; }
+    // Mismo gris pizarra que el slot--past para mantener la consistencia.
+    &--past {
+      background: rgba(100, 116, 139, 0.18);
+      border: 1px dashed rgba(100, 116, 139, 0.55);
+    }
   }
 
   // Morning / Afternoon section (grouped)
@@ -429,6 +434,19 @@ $touch-min: 2.75rem;
       background: rgba($success, 0.1);
       color: $success;
       border: 1px solid rgba($success, 0.25);
+    }
+
+    // Slots cuya hora ya pasó hoy. Mismo lenguaje visual que el
+    // overlay "Ya pasó" del day-view: gris pizarra, opacidad reducida,
+    // icono de reloj (clock). Diferenciado del verde "libre" para que
+    // el operador no crea que todavía puede tomar una reserva acá.
+    &--past {
+      background: rgba(100, 116, 139, 0.12);
+      color: #64748b;
+      border: 1px dashed rgba(100, 116, 139, 0.35);
+      opacity: 0.75;
+      text-decoration: line-through;
+      text-decoration-color: rgba(100, 116, 139, 0.4);
     }
   }
 

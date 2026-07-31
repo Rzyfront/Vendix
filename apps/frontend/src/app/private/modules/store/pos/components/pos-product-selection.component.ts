@@ -29,6 +29,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
+import { extractApiError } from '../../../../../shared/utils/http-error.util';
 import { Router } from '@angular/router';
 
 import { PosCartService } from '../services/pos-cart.service';
@@ -1193,16 +1194,36 @@ export class PosProductSelectionComponent {
     this.selectedProductForVariant.set(null);
   }
 
+  /** Códigos con los que el backend rechaza por stock (QUI-559). */
+  private static readonly STOCK_ERROR_CODES = [
+    'INV_STOCK_002',
+    'POS_STOCK_INSUFFICIENT_001',
+  ];
+
   /**
-   * Detect when the cart-service rejection was caused by insufficient stock.
-   * The cart service throws an Error whose `.message` includes "Stock
-   * insuficiente"; we match defensively against both `error.message` and the
-   * stringified error so future refactors of the cart service do not break
-   * this check silently.
+   * Detect when the add-to-cart rejection was caused by insufficient stock.
+   *
+   * Two shapes reach here: an `Error` thrown by the cart service (its
+   * `.message` includes "Stock insuficiente") and an `HttpErrorResponse` from
+   * the backend. QUI-559: for the latter, `error.message` is the transport
+   * description, so matching it by text silently failed and the cashier got a
+   * plain toast instead of the sourcing-suggestion modal — the `error_code`
+   * is the reliable signal, with the text kept as the cart-service fallback.
    */
   private isInsufficientStockError(error: any): boolean {
-    const msg = (error?.message ?? String(error ?? '')).toString();
+    const { code, message } = extractApiError(error);
+    if (code && PosProductSelectionComponent.STOCK_ERROR_CODES.includes(code)) {
+      return true;
+    }
+    const msg = (message ?? String(error ?? '')).toString();
     return msg.toLowerCase().includes('stock insuficiente');
+  }
+
+  /** Razón de negocio del rechazo, nunca el texto de transporte de Angular. */
+  private addToCartErrorMessage(error: any): string {
+    return (
+      extractApiError(error).message ?? 'Error al agregar producto al carrito'
+    );
   }
 
   /**
@@ -1221,7 +1242,7 @@ export class PosProductSelectionComponent {
 
     if (!isStockError || scope !== 'main_location') {
       this.toastService.warning(
-        error?.message || 'Error al agregar producto al carrito',
+        this.addToCartErrorMessage(error),
       );
       return;
     }
@@ -1229,7 +1250,7 @@ export class PosProductSelectionComponent {
     const productId = Number(product?.id);
     if (!Number.isFinite(productId)) {
       this.toastService.warning(
-        error?.message || 'Error al agregar producto al carrito',
+        this.addToCartErrorMessage(error),
       );
       return;
     }
@@ -1263,7 +1284,7 @@ export class PosProductSelectionComponent {
         error: () => {
           // Endpoint failed — fall back to the original error message.
           this.toastService.warning(
-            error?.message || 'Error al agregar producto al carrito',
+            this.addToCartErrorMessage(error),
           );
         },
       });

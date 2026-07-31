@@ -73,4 +73,23 @@ export class CreateBookingDto {
   @IsOptional()
   @IsBoolean()
   skip_order_creation?: boolean;
+
+  /**
+   * Where the service will be performed. `home` = technician goes to the
+   * customer's address (service_address_id is the customer's address);
+   * `shop` = customer goes to the technician's local. Defaults to
+   * `shop` for backwards compatibility with existing POS/ecommerce flows.
+   */
+  @IsOptional()
+  @IsEnum(['home', 'shop'])
+  service_location_type?: 'home' | 'shop';
+
+  /**
+   * FK to `addresses.id`. REQUIRED when service_location_type = 'home'
+   * (validated in the service). Ignored when service_location_type = 'shop'.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  service_address_id?: number;
 }

@@ -1,6 +1,6 @@
-import { Injectable } from '@angular/core';
+import { Injectable, effect, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map, catchError } from 'rxjs';
+import { Observable, map, tap, catchError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   Booking,
@@ -13,8 +13,21 @@ import {
   ProviderSchedule,
   ProviderException,
   ProviderAvailabilityOverview,
+  ProviderDateInfo,
   AvailabilityOverviewQuery,
+  QueueEntry,
+  BusinessHoursRow,
+  CreateRescheduleRequestDto,
+  DecideRescheduleRequestDto,
 } from '../interfaces/reservation.interface';
+import { RescheduleRequest } from '../interfaces/reservation.interface';
+
+// Re-export so consumers (reschedule-requests-page, reschedule-requests-panel)
+// can import the type from the service module. The interface lives in
+// `interfaces/reservation.interface.ts` to keep all reservation DTOs
+// co-located; this re-export avoids forcing every component to import
+// from two paths. Use `export type` for `isolatedModules: true` (TS 5+).
+export type { RescheduleRequest };
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -32,7 +45,165 @@ export interface PaginatedResponse<T> {
 export class ReservationsService {
   private apiUrl = `${environment.apiUrl}/store/reservations`;
 
-  constructor(private http: HttpClient) {}
+  /**
+   * Booking IDs that have been auto-archived by the today panel
+   * (completed N minutes ago, so the operator can briefly see the
+   * "Completada" badge before it slides off). Lives in the singleton
+   * service so it survives the panel being destroyed/recreated by
+   * the parent's periodic re-fetch (otherwise setTimeout would be
+   * cleared in onDestroy and the timer would never fire).
+   *
+   * Wrapped in a signal so updates trigger the panel's
+   * `displayedBookings` computed to re-evaluate. A bare Set would NOT
+   * notify Angular on .add() — the booking would be archived in the
+   * data but the template would keep showing it because no signal
+   * dependency fired.
+   *
+   * Persisted to localStorage so the archive state survives a page
+   * reload — otherwise a hard refresh would bring every "Completada"
+   * row back, even ones the operator had already seen auto-archive.
+   */
+  private static readonly ARCHIVE_STORAGE_KEY = 'vendix.today-archived-bookings';
+  private static readonly ARCHIVE_CHECK_INTERVAL_MS = 15_000;
+  private readonly archivedTodayBookingIds = signal<Set<number>>(
+    ReservationsService.loadArchivedFromStorage(),
+  );
+  /**
+   * Timestamp (epoch ms) of when each completed booking was first
+   * seen by the today panel. A single global setInterval in the
+   * service polls this map every 15s and archives any booking whose
+   * age exceeds `COMPLETED_VISIBLE_MS` (2 min by default). This is
+   * more reliable than per-booking setTimeout, which kept failing
+   * to fire under the parent's re-fetch pattern in this codebase.
+   */
+  private readonly completedAtByBookingId = new Map<number, number>();
+  private archiveIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private http: HttpClient) {
+    // Persist the archived set to localStorage on every change so a
+    // page reload doesn't lose the auto-archived state.
+    effect(() => {
+      this.saveArchivedToStorage(this.archivedTodayBookingIds());
+    });
+
+    // Global interval that polls the completedAt map and archives any
+    // booking that's been "completed" for > 2 minutes. Started here
+    // (in the service constructor) so it lives for the lifetime of
+    // the app, not tied to any component lifecycle. Per-booking
+    // setTimeout was unreliable in this codebase.
+    this.archiveIntervalHandle = setInterval(
+      () => this.archiveExpiredBookings(),
+      ReservationsService.ARCHIVE_CHECK_INTERVAL_MS,
+    );
+  }
+
+  private archiveExpiredBookings(): void {
+    const now = Date.now();
+    const visibleMs = 2 * 60 * 1000;
+    for (const [bookingId, completedAt] of this.completedAtByBookingId.entries()) {
+      if (now - completedAt >= visibleMs) {
+        this.archivedTodayBookingIds.update((set) => {
+          const next = new Set(set);
+          next.add(bookingId);
+          return next;
+        });
+        this.completedAtByBookingId.delete(bookingId);
+      }
+    }
+  }
+
+  private static loadArchivedFromStorage(): Set<number> {
+    if (typeof localStorage === 'undefined') return new Set();
+    try {
+      const raw = localStorage.getItem(ReservationsService.ARCHIVE_STORAGE_KEY);
+      if (!raw) return new Set();
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return new Set();
+      return new Set(
+        parsed.filter((x): x is number => typeof x === 'number'),
+      );
+    } catch {
+      return new Set();
+    }
+  }
+
+  private saveArchivedToStorage(ids: Set<number>): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(
+        ReservationsService.ARCHIVE_STORAGE_KEY,
+        JSON.stringify(Array.from(ids)),
+      );
+    } catch {
+      // localStorage might be full or disabled (e.g., private mode)
+    }
+  }
+
+  /**
+   * Record that a booking is now "completed" so the auto-archive
+   * interval can pick it up after the visibility window elapses.
+   * The actual archive happens inside `archiveExpiredBookings()`,
+   * driven by the service-level setInterval — NOT by a per-booking
+   * setTimeout, which kept failing to fire in this environment.
+   */
+  scheduleTodayArchive(bookingId: number, _delayMs: number): void {
+    if (!this.completedAtByBookingId.has(bookingId)) {
+      this.completedAtByBookingId.set(bookingId, Date.now());
+    }
+  }
+
+  isTodayBookingArchived(bookingId: number): boolean {
+    return this.archivedTodayBookingIds().has(bookingId);
+  }
+
+  /**
+   * Immediately archive a booking from the today panel (no visibility
+   * window, no polling). Used by the manual "Descartar" action on an
+   * overdue booking: the operator has decided to clear it right now.
+   *
+   * Must add `bookingId` to `archivedTodayBookingIds` in a way that
+   * NOTIFIES the signal, so the panel's `displayedBookings` computed
+   * re-evaluates and the row disappears. The persistence to
+   * localStorage is handled automatically by the constructor effect
+   * that watches this signal.
+   */
+  archiveTodayBookingNow(bookingId: number): void {
+    if (this.archivedTodayBookingIds().has(bookingId)) return;
+    this.archivedTodayBookingIds.update((set) => {
+      const next = new Set(set);
+      next.add(bookingId);
+      return next;
+    });
+    this.completedAtByBookingId.delete(bookingId);
+  }
+
+  /**
+   * Quita un booking del set de archivados del today-panel. Llamado
+   * después de acciones que "resucitan" una reserva archivada:
+   *   - reschedule (la reagendamos a un horario nuevo → vuelve a
+   *     aplicar para hoy y debe salir del archivo)
+   * Sin esto, una reserva que el operador descartó como "vencida" en
+   * una sesión anterior quedaba oculta en el panel para siempre,
+   * incluso después de moverla a un horario vigente — el siguiente
+   * fetch de /today la trae, pero `displayedBookings` la filtra por
+   * estar en `archivedTodayBookingIds` (persistido en localStorage).
+   */
+  unarchiveTodayBooking(bookingId: number): void {
+    if (!this.archivedTodayBookingIds().has(bookingId)) return;
+    this.archivedTodayBookingIds.update((set) => {
+      const next = new Set(set);
+      next.delete(bookingId);
+      return next;
+    });
+  }
+
+  getTodayArchivedCount(): number {
+    return this.archivedTodayBookingIds().size;
+  }
+
+  getTodayArchiveTimerCount(): number {
+    return this.completedAtByBookingId.size;
+  }
 
   getReservations(query: BookingQuery = {}): Observable<PaginatedResponse<Booking>> {
     let params = new HttpParams();
@@ -99,7 +270,62 @@ export class ReservationsService {
   rescheduleReservation(id: number, dto: RescheduleBookingDto): Observable<Booking> {
     return this.http.patch<any>(`${this.apiUrl}/${id}/reschedule`, dto).pipe(
       map((response) => response.data || response),
+      // Si el booking estaba archivado en el today-panel (operador lo
+      // descartó como "vencida" en una sesión anterior), el reschedule
+      // lo "resucita" → quitarlo del archivo para que vuelva a salir
+      // cuando el panel haga el próximo refetch.
+      tap((booking) => this.unarchiveTodayBooking(booking.id)),
     );
+  }
+
+  /**
+   * Appointment redesign phase 2 — lista las solicitudes de reagendamiento
+   * pendientes (la cola que ve el admin). Por defecto solo `pending`.
+   */
+  listRescheduleRequests(status?: string): Observable<any[]> {
+    let params = new HttpParams();
+    if (status) params = params.set('status', status);
+    return this.http.get<any>(`${this.apiUrl}/reschedule-requests`, { params }).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Stats cards for the reschedule-requests page header. Returns counts
+   * by status, today/week buckets, and average response time.
+   */
+  getRescheduleRequestsStats(): Observable<{
+    by_status: { pending: number; approved: number; rejected: number; cancelled: number; total: number };
+    approved_last_24h: number;
+    rejected_last_24h: number;
+    approved_this_week: number;
+    avg_response_minutes: number | null;
+    pending_over_1h: number;
+  }> {
+    return this.http.get<any>(`${this.apiUrl}/reschedule-requests/stats`).pipe(
+      map((response) => response.data),
+    );
+  }
+
+  approveRescheduleRequest(reqId: number, dto: DecideRescheduleRequestDto): Observable<Booking> {
+    return this.http
+      .patch<any>(`${this.apiUrl}/reschedule-requests/${reqId}/approve`, dto)
+      .pipe(
+        map((response) => response.data || response),
+        tap((booking: Booking) => this.unarchiveTodayBooking(booking.id)),
+      );
+  }
+
+  rejectRescheduleRequest(reqId: number, dto: DecideRescheduleRequestDto): Observable<Booking> {
+    return this.http
+      .patch<any>(`${this.apiUrl}/reschedule-requests/${reqId}/reject`, dto)
+      .pipe(map((response) => response.data || response));
+  }
+
+  cancelRescheduleRequest(reqId: number): Observable<Booking> {
+    return this.http
+      .delete<any>(`${this.apiUrl}/reschedule-requests/${reqId}`)
+      .pipe(map((response) => response.data || response));
   }
 
   /**
@@ -146,6 +372,7 @@ export class ReservationsService {
     dateTo: string,
     providerId?: number,
     productVariantId?: number,
+    includeBooked?: boolean,
   ): Observable<AvailabilitySlot[]> {
     let params = new HttpParams()
       .set('date_from', dateFrom)
@@ -157,8 +384,39 @@ export class ReservationsService {
     if (productVariantId) {
       params = params.set('product_variant_id', productVariantId.toString());
     }
+    // Forward `include_booked` explícito: tanto `true` como `false`
+    // llegan al backend. Sin esto, pasar `false` se ignoraba y el
+    // backend seguía devolviendo la franja completa con `is_booked`.
+    if (includeBooked === true) {
+      params = params.set('include_booked', 'true');
+    } else if (includeBooked === false) {
+      params = params.set('include_booked', 'false');
+    }
 
     return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Returns dates where the provider has active schedule blocks,
+   * plus existing bookings per date. Used by the reschedule modal.
+   */
+  getProviderDates(
+    providerId: number,
+    dateFrom: string,
+    dateTo: string,
+    productId?: number,
+  ): Observable<ProviderDateInfo[]> {
+    let params = new HttpParams()
+      .set('date_from', dateFrom)
+      .set('date_to', dateTo);
+
+    if (productId) {
+      params = params.set('product_id', productId.toString());
+    }
+
+    return this.http.get<any>(`${this.apiUrl}/provider-dates/${providerId}`, { params }).pipe(
       map((response) => response.data || response),
     );
   }
@@ -231,6 +489,74 @@ export class ReservationsService {
     return this.http.patch<any>(`${this.apiUrl}/${id}/start`, {}).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  /**
+   * Check-in de cliente o staff. Acepta reservas en estado `confirmed` o
+   * `arriving` (idempotente para cliente). Devuelve la reserva con
+   * `arrival_at` set.
+   */
+  checkInReservation(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/check-in`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Marca una reserva como `arriving` sin pasar por el flujo de check-in
+   * (cliente llegó a recepción sin abrir la app).
+   */
+  markArriving(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/mark-arriving`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Marca una reserva como `attending` (el staff está llamándola para
+   * pasar a la silla). El listener de cola lo usa para enviar la
+   * notificación `appointment_queued` al cliente.
+   */
+  markAttending(id: number): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/mark-attending`, {}).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * Dispara manualmente el envío de la solicitud de confirmación al cliente.
+   * El backend genera tokens de 48h y emite `booking.confirmation_request`.
+   */
+  sendConfirmation(id: number, source: 'staff' | 'system' = 'staff'): Observable<{ expires_at: string }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/send-confirmation`, { source })
+      .pipe(map((response) => response.data || response));
+  }
+
+  /**
+   * Cola inteligente del día. Por defecto el día actual; se puede pasar
+   * otra fecha ISO (YYYY-MM-DD) para revisar otro día.
+   */
+  getQueue(day?: string): Observable<QueueEntry[]> {
+    let params = new HttpParams();
+    if (day) params = params.set('day', day);
+    return this.http.get<any>(`${this.apiUrl}/queue`, { params }).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  // --- Business hours (master calendar) ---
+
+  getBusinessHours(): Observable<BusinessHoursRow[]> {
+    return this.http.get<any>(`${environment.apiUrl}/store/business-hours`).pipe(
+      map((response) => response.data || response || []),
+    );
+  }
+
+  upsertBusinessHours(items: BusinessHoursRow[]): Observable<BusinessHoursRow[]> {
+    return this.http
+      .put<any>(`${environment.apiUrl}/store/business-hours`, { items })
+      .pipe(map((response) => response.data || response || []));
   }
 
   updateNotes(id: number, dto: { notes?: string; internal_notes?: string }): Observable<Booking> {

@@ -15,6 +15,8 @@ import {
 } from '../inventory/shared/services/order-stock-commit.service';
 import { TaxesService } from '../taxes/taxes.service';
 import { LocationsService } from '../inventory/locations/locations.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { sellableStockLevelsWhere } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -28,10 +30,10 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
-import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
+import { pickCostPrice } from '../orders/utils/resolve-cost-price';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
@@ -88,6 +90,10 @@ export class PaymentsService {
     // Canonical, uniform delivery-commit (skips + reservation consume +
     // availability BLOCK + serial consume + updateStock + inventory_committed).
     private readonly orderStockCommit: OrderStockCommitService,
+    // QUI-559: spreads a POS line's reservation across the store's sellable
+    // locations, so a quantity covered only by summing warehouses is reserved
+    // (and later deducted) instead of being refused.
+    private readonly sellableStockAllocator: SellableStockAllocator,
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
@@ -769,16 +775,42 @@ export class PaymentsService {
         // Oversell is intentionally not controlled by the public POS payload.
         const allowOversell = false;
 
+        // `track_inventory` es el mismo valor para los dos bucles de stock y
+        // para toda la transacción, así que consultarlo por ítem —dos veces por
+        // ítem, una en cada bucle— no aportaba aislamiento, solo latencia
+        // dentro de la ventana transaccional (causa medida del P2028). Un
+        // prefetch único, siguiendo el patrón batch de
+        // `resolveTierSnapshotsForItems`.
+        // `track_inventory` es `Boolean @default(true)` no nulable en el schema.
+        type StockProductRow = {
+          id: number;
+          track_inventory: boolean;
+          name: string;
+        };
+        const stockProductIds = Array.from(
+          new Set(
+            (order.order_items as Array<{ product_id?: number | null }>)
+              .map((orderItem) => orderItem.product_id)
+              .filter((id): id is number => !!id),
+          ),
+        );
+        const stockProductById = new Map<number, StockProductRow>(
+          (stockProductIds.length
+            ? await tx.products.findMany({
+                where: { id: { in: stockProductIds } },
+                select: { id: true, track_inventory: true, name: true },
+              })
+            : []
+          ).map((row: StockProductRow): [number, StockProductRow] => [
+            row.id,
+            row,
+          ]),
+        );
+
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
-          const product = await tx.products.findUnique({
-            where: { id: item.product_id },
-            select: {
-              track_inventory: true,
-              name: true,
-            },
-          });
+          const product = stockProductById.get(item.product_id);
 
           if (!product?.track_inventory) continue;
 
@@ -786,16 +818,16 @@ export class PaymentsService {
           // Aggregate across store-local, sellable locations only.
           // POS canal MUST exclude central warehouse and non-sellable types
           // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
+          //
+          // QUI-559: the predicate is no longer written inline here — it comes
+          // from `sellableStockLevelsWhere`, the same helper that drives what
+          // the POS grid displays and what the delivery commit may deduct.
+          // Three copies of this filter is how they drifted apart.
           const stockAggregate = await tx.stock_levels.aggregate({
             where: {
               product_id: item.product_id,
               product_variant_id: item.product_variant_id ?? null,
-              inventory_locations: {
-                store_id: order.store_id,
-                is_central_warehouse: false,
-                is_active: true,
-                type: { notIn: ['quarantine', 'damaged_goods'] },
-              },
+              ...sellableStockLevelsWhere(order.store_id),
             },
             _sum: {
               quantity_available: true,
@@ -826,63 +858,21 @@ export class PaymentsService {
           }
         }
 
-        // Resolve default location inside tx to avoid scoping mismatch with getDefaultLocationForProduct()
-        // POS canal MUST exclude central warehouse and non-sellable types
-        // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-        const defaultLocation = await tx.inventory_locations.findFirst({
-          where: {
-            store_id: order.store_id,
-            is_active: true,
-            is_central_warehouse: false,
-            type: { notIn: ['quarantine', 'damaged_goods'] },
-          },
-          orderBy: { id: 'asc' },
-          select: { id: true },
-        });
-
+        // QUI-559: no "default location" fallback here any more. Picking an
+        // arbitrary location when the product had no row there is what let a
+        // reservation land somewhere the commit would not draw from. The
+        // allocator resolves the real sellable locations; if none covers the
+        // line, that is a stock error, not a location-resolution problem.
         for (const item of order.order_items) {
           if (!item.product_id) continue;
 
-          const product = await tx.products.findUnique({
-            where: { id: item.product_id },
-            select: { track_inventory: true },
-          });
+          const product = stockProductById.get(item.product_id);
           if (!product?.track_inventory) continue;
           try {
             // Use savepoint to isolate stock reservation errors from the main transaction.
             // PostgreSQL aborts the entire transaction on any error; a savepoint lets us
             // catch and rollback just the failed operation while keeping the transaction alive.
             await tx.$executeRawUnsafe('SAVEPOINT stock_reserve_sp');
-
-            // Use stock_level with highest available for this product, falling back to store default location.
-            // POS canal MUST exclude central warehouse and non-sellable types
-            // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-            const stockLevel = await tx.stock_levels.findFirst({
-              where: {
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id || null,
-                quantity_available: { gt: 0 },
-                inventory_locations: {
-                  store_id: order.store_id,
-                  is_central_warehouse: false,
-                  is_active: true,
-                  type: { notIn: ['quarantine', 'damaged_goods'] },
-                },
-              },
-              orderBy: { quantity_available: 'desc' },
-              select: { location_id: true },
-            });
-            const location_id = stockLevel?.location_id || defaultLocation?.id;
-
-            if (!location_id) {
-              await tx.$executeRawUnsafe(
-                'ROLLBACK TO SAVEPOINT stock_reserve_sp',
-              );
-              this.logger.warn(
-                `No location found for stock reservation of product ${item.product_id} in order #${order.id}`,
-              );
-              continue;
-            }
 
             // Multi-tarifa (Fase 5.5): si el item persistió stock_units_consumed
             // (>0), pasarlo como override al reservador para descontar la
@@ -893,20 +883,62 @@ export class PaymentsService {
               item.stock_units_consumed > 0
                 ? item.stock_units_consumed
                 : undefined;
-            await this.stockLevelManager.reserveStock(
-              item.product_id,
-              item.product_variant_id || undefined,
-              location_id,
-              item.quantity,
-              'order',
-              order.id,
-              user?.id,
-              false, // Already validated above against stock_levels source of truth.
-              tx,
-              undefined, // expires_at
-              false, // skip_reservation
-              stockUnitsConsumed,
-            );
+            const unitsToReserve = stockUnitsConsumed ?? item.quantity;
+
+            // QUI-559: reserve ACROSS the store's sellable locations instead of
+            // picking the single one with the highest availability. The
+            // validation above approved an aggregate total; reserving from one
+            // location could only ever cover part of it, and the delivery
+            // commit then refused the sale with INV_STOCK_002 ("disponible 8,
+            // requerido 10") even though the 10 units existed and were
+            // sellable — merely split between two warehouses.
+            const allocation =
+              await this.sellableStockAllocator.allocateForLine(
+                order.store_id,
+                item.product_id,
+                item.product_variant_id || undefined,
+                unitsToReserve,
+                [],
+                tx,
+              );
+
+            if (allocation.shortfall > 0) {
+              // §1.5 already proved the sellable set covers this line, so a gap
+              // here means another sale took the units in between. That is a
+              // real, user-facing condition — not an infrastructure hiccup — so
+              // it aborts the payment instead of leaving the order partially
+              // reserved and failing later at the delivery commit.
+              throw new VendixHttpException(
+                ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+                `Stock insuficiente al reservar el producto ${item.product_id}: requiere ${unitsToReserve} unidades, disponible ${allocation.available}.`,
+              );
+            }
+
+            if (!allocation.slices.length) {
+              // Nothing to reserve (a zero-unit line). Nothing to roll back
+              // either — release the savepoint and move on.
+              await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
+              continue;
+            }
+
+            for (const slice of allocation.slices) {
+              await this.stockLevelManager.reserveStock(
+                item.product_id,
+                item.product_variant_id || undefined,
+                slice.location_id,
+                slice.quantity,
+                'order',
+                order.id,
+                user?.id,
+                false, // Already validated above against stock_levels source of truth.
+                tx,
+                undefined, // expires_at
+                false, // skip_reservation
+                // The slice quantity IS the real stock-unit count: the pack
+                // multiplier was already applied when computing unitsToReserve.
+                slice.quantity,
+              );
+            }
 
             await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
           } catch (error) {
@@ -916,6 +948,17 @@ export class PaymentsService {
                 'ROLLBACK TO SAVEPOINT stock_reserve_sp',
               );
             } catch {}
+
+            // QUI-559: a stock error is a business answer, not an incident.
+            // Swallowing it here let the payment succeed with the line
+            // unreserved, and the delivery commit then rejected the whole sale
+            // with an opaque INV_STOCK_002. Re-throw so the cashier gets the
+            // real reason and the transaction rolls back cleanly; genuine
+            // infrastructure hiccups keep the previous tolerant behaviour.
+            if (error instanceof VendixHttpException) {
+              throw error;
+            }
+
             this.logger.warn(
               `Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`,
             );
@@ -1153,6 +1196,9 @@ export class PaymentsService {
               customer_id,
               base: Number(order.subtotal_amount || 0),
               ivaAmount: Number(order.tax_amount || 0),
+              // Sin `client` las 6 lecturas de la cadena salen por una segunda
+              // conexión del pool mientras esta transacción sostiene locks.
+              client: tx,
             });
           } catch (error) {
             this.logger.warn(
@@ -1221,6 +1267,11 @@ export class PaymentsService {
               counterparty_type: wh.counterparty_type,
               uvt_value_used: wh.uvt_value_used,
               lines: wh.lines,
+              // `client: tx` es lo que ata estas filas a la venta. Sin él se
+              // confirmaban por su cuenta y un rollback posterior (p.ej. el
+              // `coupon_uses.create` de más abajo violando su unique) revertía la
+              // orden dejando retenciones huérfanas.
+              client: tx,
             });
 
             // 5b. Emit order.completed for COGS on direct POS sales
@@ -1273,6 +1324,9 @@ export class PaymentsService {
               counterparty_type: wh.counterparty_type,
               uvt_value_used: wh.uvt_value_used,
               lines: wh.lines,
+              // Misma razón que en la rama de pago inmediato: la retención de una
+              // venta a crédito no puede sobrevivir al rollback de esa venta.
+              client: tx,
             });
           }
         }
@@ -1403,7 +1457,14 @@ export class PaymentsService {
           nextAction: payment?.nextAction,
           _digitalPaymentPending: isDigitalPayment || false,
         };
-      });
+        // Red de seguridad para la contención real de varias cajas cobrando a
+        // la vez, NO el arreglo del P2028: ese vino de quitar las lecturas
+        // redundantes de arriba. El default implícito de Prisma es 5000 ms y el
+        // repo ya fija opciones donde la transacción es larga
+        // (`order-flow.service.ts` usa 20 s). Si un cobro necesita más que
+        // esto para pasar, el problema es la transacción — subir el número la
+        // deja sosteniendo locks más tiempo y empeora la contención.
+      }, { timeout: 20_000, maxWait: 5_000 });
 
       // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction
       // commits, emit the kitchen.fired event + push the KDS SSE
@@ -2191,6 +2252,10 @@ export class PaymentsService {
         sale_price: true,
         product_type: true,
         allow_pos_price_override: true,
+        // `cost_price` viaja con el producto que esta función ya carga: pedirlo
+        // aquí evita el round-trip extra que hacía `resolveCostPrice` dentro de
+        // la transacción del cobro (causa del P2028).
+        cost_price: true,
       },
     });
 
@@ -2210,6 +2275,9 @@ export class PaymentsService {
             price_override: true,
             is_on_sale: true,
             sale_price: true,
+            // Idem: el costo de la variante sale de la misma lectura que ya
+            // valida su pertenencia al producto.
+            cost_price: true,
           },
         })
       : null;
@@ -2270,9 +2338,17 @@ export class PaymentsService {
         }).unitPrice
       : this.resolveCatalogUnitBasePrice(product, variant);
     const catalogUnitPrice = this.roundMoney(tierBaseUnitPrice);
+    // `client: tx` explícito: sin él esta consulta saldría por otra conexión del
+    // pool mientras la transacción del cobro sostiene locks, y con suficientes
+    // cajas cobrando a la vez el pool se agota y nadie avanza.
+    // `store_id` explícito: el `tx` viene del `baseClient` (ver
+    // `base-prisma.service.ts:43`), o sea SIN el scoping de la extensión, así que
+    // el filtro de tenant que `product_tax_assignments` traía automáticamente hay
+    // que escribirlo a mano.
     const catalogTaxInfo = await this.taxes_service.calculateProductTaxes(
       product.id,
       catalogUnitPrice,
+      { client: tx, store_id: dtoStoreId },
     );
     const catalogFinalPrice = this.roundMoney(
       catalogUnitPrice + catalogTaxInfo.total_tax_amount,
@@ -2298,15 +2374,13 @@ export class PaymentsService {
       catalogTaxInfo.total_rate > 0
         ? finalUnitPrice / (1 + catalogTaxInfo.total_rate)
         : finalUnitPrice;
-    const taxInfo = await this.taxes_service.calculateProductTaxes(
-      product.id,
-      unitBasePrice,
-    );
-    const costPrice = await resolveCostPrice(
-      tx,
-      product.id,
-      item.product_variant_id,
-    );
+    // Misma tasa, otra base gravable: se reescala en memoria en vez de volver a
+    // consultar el mismo `product_id` (ver `rescaleTaxInfo`).
+    const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, unitBasePrice);
+    // Snapshot de costo de venta. La prioridad variante > producto > null vive en
+    // `pickCostPrice` (único dueño de la regla); aquí se aplica sobre las filas
+    // que esta función ya cargó, así que no cuesta ninguna consulta.
+    const costPrice = pickCostPrice(variant?.cost_price, product.cost_price);
 
     return this.buildOrderItemSnapshot({
       item,
@@ -2331,6 +2405,35 @@ export class PaymentsService {
       productVariantId: item.product_variant_id,
       tierSnap: tierSnap ?? null,
     });
+  }
+
+  /**
+   * Reescala un desglose de impuestos ya resuelto sobre otra base gravable.
+   *
+   * `TaxesService.calculateProductTaxes` lee la tasa de la DB (un `findMany`
+   * con `include` anidado de dos niveles sobre `product_tax_assignments` →
+   * `tax_categories` → `tax_rates`) y después solo multiplica: `total_rate` no
+   * depende del `basePrice`, y cada `amount` es `basePrice * rate`. Pedir el
+   * mismo `product_id` otra vez para una base distinta era, por eso, una
+   * consulta redundante — y una que sale por `this.prisma` (otra conexión del
+   * pool) mientras la transacción del cobro sostiene locks. Dos de esas por
+   * ítem fue una de las causas medidas del P2028.
+   *
+   * El tipo se deriva del propio servicio: si su contrato cambia, esto falla en
+   * compilación en vez de divergir en silencio.
+   */
+  private rescaleTaxInfo(
+    source: Awaited<ReturnType<TaxesService['calculateProductTaxes']>>,
+    basePrice: number,
+  ): Awaited<ReturnType<TaxesService['calculateProductTaxes']>> {
+    return {
+      total_rate: source.total_rate,
+      total_tax_amount: basePrice * source.total_rate,
+      taxes: source.taxes.map((tax) => ({
+        ...tax,
+        amount: basePrice * tax.rate,
+      })),
+    };
   }
 
   private buildOrderItemSnapshot(params: {
@@ -2788,6 +2891,98 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * QUI-535 — resolve the `table_sessions.id` a POS payment must be
+   * applied to, given only the `tables.id` the cashier picked.
+   *
+   * Runs INSIDE the payment transaction and is the seam that moves the
+   * "abrir mesa" write from the checkout wizard (where a back-navigation,
+   * a switch to takeaway or a closed tab left the mesa `occupied` with a
+   * $0 draft order forever) to the charge itself.
+   *
+   * Behavior:
+   *  1. The table must exist and belong to the request store — checked
+   *     BEFORE any write, mirroring `applyPosPaymentToTableSession`.
+   *  2. If the mesa already has an open check (opened from the tables
+   *     module or by a diner scanning the QR), that session is REUSED.
+   *     Idempotent on purpose — same contract as
+   *     `TableSessionsService.openTableSessionPublic`; it must never fail
+   *     with `TABLE_SESSION_ALREADY_OPEN`, and it must never create a
+   *     second check for one mesa.
+   *  3. Otherwise the mesa is opened via
+   *     `TableSessionsService.createOpenSessionInTx` on THIS transaction,
+   *     so the draft order + session + `tables.status='occupied'` commit
+   *     (or roll back) together with the payment.
+   *
+   * Why the lookup uses `tx` instead of `TablesService.getActiveSession`:
+   * the read must see this transaction's own snapshot (the caller may
+   * retry, and the very next statements write the session we are about to
+   * create), and `TablesService` queries the non-transactional client, so
+   * it cannot honor read-your-writes here. `PaymentsService` also does not
+   * depend on `TablesService`, and wiring it in would mean touching
+   * `payments.module.ts`, outside this change. The `store_id` filter is
+   * therefore written explicitly — the scope-safe `findFirst` shape from
+   * `vendix-prisma-scopes`, never `findUnique`.
+   *
+   * NOTE: `session_opened` is deliberately NOT emitted for a mesa opened
+   * here. In the normal POS flow (cash/card/transfer) the session is
+   * opened and closed in this same transaction, and the post-commit
+   * `session_closed` emission already carries the observable transition.
+   */
+  private async resolvePosTableSessionId(
+    tx: any,
+    tableId: number,
+    dtoStoreId: number,
+    dto: CreatePosPaymentDto,
+    user: any,
+  ): Promise<number> {
+    const table = await tx.tables.findFirst({ where: { id: tableId } });
+    if (!table) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Mesa no encontrada',
+      );
+    }
+    if (table.store_id !== dtoStoreId) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_CONTEXT_001,
+        'La mesa pertenece a otra tienda',
+      );
+    }
+
+    const activeSession = await tx.table_sessions.findFirst({
+      where: {
+        table_id: tableId,
+        store_id: dtoStoreId,
+        closed_at: null,
+      },
+      orderBy: { opened_at: 'desc' },
+      select: { id: true },
+    });
+    if (activeSession) {
+      return activeSession.id;
+    }
+
+    const opened = await this.tableSessionsService.createOpenSessionInTx(tx, {
+      tableId,
+      storeId: dtoStoreId,
+      openedBy: user?.id ?? null,
+      customerId: dto.customer_id ?? null,
+      channel: 'pos',
+      deliveryType: 'direct_delivery',
+      // The POS charge does not capture the party size; the mesa can be
+      // annotated later via `setGuestCount` exactly like a QR open.
+      guestCount: null,
+      internalNotes: 'Mesa abierta al cobrar desde POS',
+      // Already resolved by `processPosPayment` before opening the
+      // transaction — passing it avoids a settings read while the tx is
+      // held open.
+      currency: dto.currency,
+    });
+
+    return opened.id;
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -2811,6 +3006,38 @@ export class PaymentsService {
       return await this.applyPosPaymentToTableSession(
         tx,
         dto,
+        user,
+        dtoStoreId,
+      );
+    }
+
+    // QUI-535: the restaurant POS now sends `table_id` instead of a
+    // session id — picking a mesa in the checkout wizard is a pure
+    // selection that writes nothing. The mesa is materialized HERE, in
+    // the payment transaction: an existing open check is reused, a new
+    // one is opened atomically, and either way we fall through to the
+    // SAME close-out path the tables module and the QR flow already use
+    // (totals, KDS fire, session close, `tables.status='cleaning'`,
+    // journal entries). A mesa therefore can never be `occupied` without
+    // a charged sale behind it.
+    //
+    // `table_session_id` takes precedence when both arrive (it is the
+    // more specific reference), which is why this branch is guarded on
+    // its absence and sits after it.
+    if (dto.table_id != null) {
+      const resolvedSessionId = await this.resolvePosTableSessionId(
+        tx,
+        dto.table_id,
+        dtoStoreId,
+        dto,
+        user,
+      );
+      // Shallow clone instead of mutating the caller's DTO: the rest of
+      // `processPosPayment` must keep seeing the request exactly as it
+      // arrived, while the close-out helper reads a resolved session id.
+      return await this.applyPosPaymentToTableSession(
+        tx,
+        { ...dto, table_session_id: resolvedSessionId },
         user,
         dtoStoreId,
       );

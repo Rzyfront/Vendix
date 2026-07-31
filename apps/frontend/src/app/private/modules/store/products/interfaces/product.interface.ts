@@ -102,6 +102,11 @@ export interface Product {
   is_ingredient?: boolean;
   is_combo?: boolean;
   is_batch_produced?: boolean;
+  /// Appointment redesign phase 2 — whether this product is eligible
+  /// to be performed at the customer's home. When false (default), the
+  /// ecommerce booking flow forces `service_location_type='shop'` for
+  /// this product only.
+  is_eligible_for_home_service?: boolean;
   stock_unit?: string | null;
   purchase_unit?: string | null;
   purchase_to_stock_factor?: number | null;
@@ -347,6 +352,11 @@ export interface CreateProductDto {
   is_ingredient?: boolean;
   is_combo?: boolean;
   is_batch_produced?: boolean;
+  /// Appointment redesign phase 2 — whether this product is eligible
+  /// to be performed at the customer's home. When false (default), the
+  /// ecommerce booking flow forces `service_location_type='shop'` for
+  /// this product only.
+  is_eligible_for_home_service?: boolean;
   stock_unit?: string | null;
   purchase_unit?: string | null;
   purchase_to_stock_factor?: number | null;

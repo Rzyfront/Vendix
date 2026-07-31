@@ -344,6 +344,30 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/reservations/components/provider-availability/provider-availability.component'
               ).then((c) => c.ProviderAvailabilityComponent),
           },
+          {
+            path: 'queue',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/appointment-queue-panel/appointment-queue-panel.component'
+              ).then((c) => c.AppointmentQueuePanelComponent),
+          },
+          {
+            path: 'business-hours',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/business-hours/business-hours.component'
+              ).then((c) => c.BusinessHoursComponent),
+          },
+          {
+            // Appointment redesign phase 2 — dedicated page for the
+            // pending-reschedule-requests queue. Reached from the
+            // "Solicitudes de reagenda" header button.
+            path: 'reschedule-requests',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/reschedule-requests-page/reschedule-requests-page.component'
+              ).then((c) => c.RescheduleRequestsPageComponent),
+          },
         ],
       },
       // Consultations Routes

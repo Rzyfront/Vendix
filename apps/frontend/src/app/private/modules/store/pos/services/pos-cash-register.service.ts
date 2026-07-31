@@ -154,7 +154,14 @@ export class PosCashRegisterService {
       );
   }
 
-  /** Close the active session */
+  /**
+   * Close a session by id.
+   *
+   * QUI-560: el panel admin cierra sesiones de OTROS operadores desde
+   * `/admin/cash-registers`, así que el signal local solo se limpia cuando la
+   * sesión cerrada es la que este servicio está rastreando. Limpiarlo siempre
+   * borraría la sesión activa del POS del usuario actual al cerrar una ajena.
+   */
   closeSession(session_id: number, actual_closing_amount: number, closing_notes?: string): Observable<CashRegisterSession> {
     return this.http
       .post<any>(`${this.baseUrl}/sessions/${session_id}/close`, {
@@ -163,7 +170,11 @@ export class PosCashRegisterService {
       })
       .pipe(
         map((res) => res.data),
-        tap(() => this.activeSession.set(null)),
+        tap(() => {
+          if (this.activeSession()?.id === session_id) {
+            this.activeSession.set(null);
+          }
+        }),
       );
   }
 

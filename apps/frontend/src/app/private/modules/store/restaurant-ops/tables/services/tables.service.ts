@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
   Table,
@@ -115,6 +115,40 @@ export class TablesService {
     return this.http
       .delete<void>(`${this.apiUrl}/store/tables/${id}`)
       .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * Libera una mesa bloqueada (QUI-535 · paso 7).
+   *
+   * Devuelve la mesa a `available` cerrando ANTES su cuenta abierta si la
+   * arrastra. No hay endpoint nuevo: compone los dos que ya existen, en el
+   * único orden válido.
+   *
+   *   1. `POST /store/table-sessions/:sessionId/close` — solo cuando la
+   *      mesa trae `active_session`. Es idempotente en el backend
+   *      (`table-sessions.service.ts:781` corta en seco si `closed_at` ya
+   *      estaba puesto) y deja la mesa en `cleaning`.
+   *   2. `PATCH /store/tables/:id { status: 'available' }`.
+   *
+   * El orden NO es negociable: `TablesService.update` del backend
+   * (`tables.service.ts:429`) rechaza pasar a `available` una mesa con
+   * `table_sessions.closed_at IS NULL` con `TABLE_INVALID_STATUS`. Esa
+   * validación preexistente es justamente la que garantiza la regla de
+   * negocio — jamás se libera una mesa dejando su cuenta abierta —, así
+   * que este helper la respeta en vez de esquivarla.
+   *
+   * Permisos ya existentes: `store:table_sessions:update` para el cierre y
+   * `store:tables:update` para el PATCH.
+   */
+  releaseTable(
+    tableId: number,
+    activeSessionId?: number | null,
+  ): Observable<Table> {
+    const markAvailable = () => this.update(tableId, { status: 'available' });
+    if (activeSessionId == null) return markAvailable();
+    return this.closeSession(activeSessionId).pipe(
+      switchMap(() => markAvailable()),
+    );
   }
 
   /**
@@ -399,6 +433,14 @@ export class TablesService {
 
   // ─── Error mapping ─────────────────────────────────────────────────
 
+  /**
+   * `TablesController` ya propaga el status HTTP real (QUI-571): un rechazo
+   * por cuenta abierta llega como `409` y no como `200 { success:false }`,
+   * así que el error viaja por el canal de error de RxJS y este handler es
+   * la única traducción necesaria. Aquí vivía un `unwrapEnvelope` que leía
+   * `success:false` de una respuesta 200 — quitarlo es parte del arreglo,
+   * no una regresión.
+   */
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console
     console.error('TablesService Error:', error);

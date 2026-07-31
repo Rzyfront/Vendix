@@ -157,11 +157,16 @@
         Caja Registradora
       </h4>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <!--
+          QUI-560: apagar la caja con sesiones abiertas corrompe el libro de
+          movimientos, así que este toggle no usa el `onFieldChange` genérico:
+          pasa por un preflight que revierte el switch si hay caja abierta.
+        -->
         <app-setting-toggle
           [formControl]="cashRegisterEnabledControl"
           label="Habilitar Caja Registradora"
           description="Control de apertura/cierre y movimientos de efectivo"
-          (changed)="onFieldChange()"
+          (changed)="onCashRegisterEnabledChange()"
         ></app-setting-toggle>
         <app-setting-toggle
           [formControl]="requireSessionForSalesControl"

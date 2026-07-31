@@ -779,6 +779,10 @@ export class DispatchNotesService {
    * ACTIVE stock reservation for the order, falling back to the store's
    * `default_location_id` (via the POS stock scope helper). Returns null when
    * neither is available (caller then keeps any per-item location_id as-is).
+   *
+   * Es la bodega a nivel ORDEN, usada solo como último recurso: la resolución
+   * fina vive en {@link resolveItemDispatchLocation}, porque la primera reserva
+   * de la orden puede pertenecer a otro producto guardado en otra bodega.
    */
   private async resolveDefaultDispatchLocation(
     store_id: number,
@@ -814,11 +818,80 @@ export class DispatchNotesService {
   }
 
   /**
+   * Resolve the dispatch location for ONE line (QUI-557).
+   *
+   * `resolveDefaultDispatchLocation` toma la primera reserva activa de la orden
+   * SIN mirar de qué producto es. En una orden multi-bodega eso asignaba a todas
+   * las líneas la bodega del primer producto reservado, y las demás se validaban
+   * (y se despachaban) contra un almacén donde no tienen existencias.
+   *
+   * Precedencia, de más específica a más genérica:
+   *   1. reserva activa de ESTA identidad (`product_id` + `product_variant_id`)
+   *      para ESTA orden — es literalmente el stock apartado para despachar;
+   *   2. bodega con más disponible para esa identidad — mismo criterio que
+   *      `StockLevelManager.getDefaultLocationForProduct`;
+   *   3. la bodega por defecto de la orden/tienda.
+   */
+  private async resolveItemDispatchLocation(
+    order_id: number,
+    product_id: number,
+    product_variant_id: number | null,
+    order_default_location_id: number | null,
+  ): Promise<number | null> {
+    const reservation = await this.prisma.stock_reservations.findFirst({
+      where: {
+        reserved_for_type: 'order',
+        reserved_for_id: order_id,
+        status: 'active',
+        product_id,
+        product_variant_id: product_variant_id ?? null,
+      },
+      select: { location_id: true },
+      orderBy: { id: 'asc' },
+    });
+    if (reservation?.location_id) return reservation.location_id;
+
+    const stockLevel = await this.prisma.stock_levels.findFirst({
+      where: {
+        product_id,
+        product_variant_id: product_variant_id ?? null,
+        quantity_available: { gt: 0 },
+      },
+      select: { location_id: true },
+      orderBy: { quantity_available: 'desc' },
+    });
+    if (stockLevel?.location_id) return stockLevel.location_id;
+
+    return order_default_location_id;
+  }
+
+  /**
    * Validate that every dispatch item has enough stock at its resolved
    * location. A remisión dispatches what is ALREADY RESERVED for this order, so
    * the units reserved for THIS order count as available on top of the live
    * `quantity_available`. Only a real shortfall (available + reserved-for-order
    * < dispatched) raises `DISPATCH_NOTE_INSUFFICIENT_STOCK`.
+   *
+   * QUI-557 — el error dejó de ser un "sin stock" plano. Cada ítem bloqueado
+   * reporta POR QUÉ lo está, porque son situaciones operativas distintas con
+   * acciones distintas:
+   *
+   *   - `no_stock`            → no hay existencias: hay que comprar/producir.
+   *   - `reserved_by_others`  → SÍ hay existencias, pero apartadas para otras
+   *                             órdenes: hay que liberar o priorizar, no comprar.
+   *   - `variant_required`    → la línea no trae variante y el inventario de ese
+   *                             producto se lleva por variante: hay que corregir
+   *                             la línea de la orden.
+   *   - `location_unresolved` → no se pudo resolver bodega de despacho: hay que
+   *                             configurar la bodega por defecto de la tienda.
+   *
+   * Colapsar los cuatro casos en "no hay stock suficiente" fue lo que convirtió
+   * QUI-557 en bloqueante: mandaba al operador a revisar el lugar equivocado.
+   *
+   * `location_unresolved` además CIERRA un hueco: antes la función hacía
+   * `continue` cuando la bodega venía en `null`, así que las tiendas sin
+   * `default_location_id` confirmaban remisiones SIN ninguna validación de
+   * existencias. Despachar a ciegas es peor que bloquear con un mensaje claro.
    */
   private async validateDispatchItemsStock(
     store_id: number,
@@ -830,15 +903,26 @@ export class DispatchNotesService {
       dispatched_quantity: number;
     }>,
   ): Promise<void> {
-    const insufficient: Array<{
+    type BlockedItem = {
       product_id: number;
       product_variant_id: number | null;
+      product_name: string | null;
+      location_id: number | null;
+      location_name: string | null;
       requested: number;
+      on_hand: number;
+      reserved_for_this_order: number;
+      reserved_by_others: number;
       available: number;
-    }> = [];
+      reason:
+        | 'no_stock'
+        | 'reserved_by_others'
+        | 'variant_required'
+        | 'location_unresolved';
+    };
+    const insufficient: BlockedItem[] = [];
 
     for (const item of items) {
-      if (item.location_id == null) continue; // no location → skip (no scope to check)
       const qty = Number(item.dispatched_quantity || 0);
       if (qty <= 0) continue;
 
@@ -848,6 +932,45 @@ export class DispatchNotesService {
         item.product_variant_id ?? undefined,
       );
       if (!tracks) continue;
+
+      const product = await this.prisma.products.findFirst({
+        where: { id: item.product_id },
+        select: { name: true },
+      });
+
+      // Sin bodega no hay nada contra qué validar. Antes esto era un `continue`
+      // silencioso; ahora bloquea con causa explícita.
+      if (item.location_id == null) {
+        insufficient.push({
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+          product_name: product?.name ?? null,
+          location_id: null,
+          location_name: null,
+          requested: qty,
+          on_hand: 0,
+          reserved_for_this_order: 0,
+          reserved_by_others: 0,
+          available: 0,
+          reason: 'location_unresolved',
+        });
+        continue;
+      }
+
+      const [stockLevel, location] = await Promise.all([
+        this.prisma.stock_levels.findFirst({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            location_id: item.location_id,
+          },
+          select: { quantity_on_hand: true, quantity_reserved: true },
+        }),
+        this.prisma.inventory_locations.findFirst({
+          where: { id: item.location_id },
+          select: { name: true },
+        }),
+      ]);
 
       const availability = await this.stockValidator.validateAvailability(
         item.product_id,
@@ -872,14 +995,55 @@ export class DispatchNotesService {
       const reservedForOrder = Number(reserved._sum.quantity || 0);
       const effectiveAvailable = availability.available + reservedForOrder;
 
-      if (effectiveAvailable < qty) {
-        insufficient.push({
-          product_id: item.product_id,
-          product_variant_id: item.product_variant_id ?? null,
-          requested: qty,
-          available: effectiveAvailable,
+      if (effectiveAvailable >= qty) continue;
+
+      const onHand = Number(stockLevel?.quantity_on_hand ?? 0);
+      const reservedTotal = Number(stockLevel?.quantity_reserved ?? 0);
+      const reservedByOthers = Math.max(0, reservedTotal - reservedForOrder);
+
+      // `variant_required`: la línea viene sin variante, la identidad base no
+      // tiene unidades en esa bodega y el stock que el operador ve en pantalla
+      // vive en las VARIANTES del producto. Una variante no es despachable como
+      // producto base, así que el arreglo es corregir la línea de la orden, no
+      // comprar ni liberar inventario. Sin este caso el mensaje diría "no hay
+      // existencias" frente a un producto visiblemente abastecido.
+      let reason: BlockedItem['reason'] = 'no_stock';
+      if (item.product_variant_id == null && onHand <= 0) {
+        const variantStock = await this.prisma.stock_levels.aggregate({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: { not: null },
+            location_id: item.location_id,
+          },
+          _sum: { quantity_available: true },
         });
+        if (Number(variantStock._sum.quantity_available ?? 0) > 0) {
+          reason = 'variant_required';
+        }
       }
+      // `reserved_by_others`: hay unidades físicas suficientes y lo único que
+      // impide despachar son reservas ajenas a esta orden.
+      if (
+        reason === 'no_stock' &&
+        reservedByOthers > 0 &&
+        onHand - reservedForOrder >= qty
+      ) {
+        reason = 'reserved_by_others';
+      }
+
+      insufficient.push({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        product_name: product?.name ?? null,
+        location_id: item.location_id,
+        location_name: location?.name ?? null,
+        requested: qty,
+        on_hand: onHand,
+        reserved_for_this_order: reservedForOrder,
+        reserved_by_others: reservedByOthers,
+        available: effectiveAvailable,
+        reason,
+      });
     }
 
     if (insufficient.length > 0) {
@@ -1924,6 +2088,18 @@ export class DispatchNotesService {
         throw new VendixHttpException(ErrorCodes.DSP_ORDER_ITEM_001);
       }
 
+      // Bodega POR LÍNEA (QUI-557): la reserva de ESTE producto manda sobre la
+      // bodega genérica de la orden, que en órdenes multi-bodega apuntaba al
+      // almacén del primer producto reservado y hacía fallar a los demás.
+      const resolved_location_id =
+        dto_item.location_id ??
+        (await this.resolveItemDispatchLocation(
+          order_id,
+          order_item.product_id,
+          order_item.product_variant_id ?? null,
+          default_location_id,
+        ));
+
       dispatch_items.push({
         product_id: order_item.product_id,
         product_variant_id: order_item.product_variant_id,
@@ -1932,9 +2108,7 @@ export class DispatchNotesService {
         // "cantidad pendiente" por ítem en getByOrder() (riesgo de doble
         // despacho silencioso). La columna sales_order_item_id ya existe.
         sales_order_item_id: order_item.id,
-        // Default to the resolved warehouse (reservation/store default) when the
-        // item carries no explicit location_id.
-        location_id: dto_item.location_id ?? default_location_id,
+        location_id: resolved_location_id,
         ordered_quantity: order_item.quantity,
         dispatched_quantity: dto_item.dispatched_quantity,
         unit_price: order_item.unit_price,
@@ -3018,8 +3192,16 @@ export class DispatchNotesService {
           items: [],
         });
       } catch (err) {
-        // p.ej. DSP_ORDER_STATE_001 (nada pendiente por despachar). Propagamos
-        // con contexto claro para no dejar la orden en el pool sin remisión.
+        // QUI-557: un fallo tipado de `createFromOrder` (p.ej.
+        // DISPATCH_NOTE_INSUFFICIENT_STOCK o DISPATCH_NOTE_NO_SHIPPING_ADDRESS)
+        // ya trae código, mensaje y `details` accionables. Reetiquetarlo como
+        // DSP_ORDER_STATE_001 mandaba al operador a revisar el estado de la
+        // orden cuando el problema era de inventario o de dirección, y sepultaba
+        // la causa real dentro de `details.cause`. Se re-lanza tal cual.
+        if (err instanceof VendixHttpException) throw err;
+
+        // Solo los errores NO tipados se envuelven: ahí sí no hay contrato que
+        // preservar y el contexto del pool es lo único útil que podemos dar.
         throw new VendixHttpException(
           ErrorCodes.DSP_ORDER_STATE_001,
           undefined,

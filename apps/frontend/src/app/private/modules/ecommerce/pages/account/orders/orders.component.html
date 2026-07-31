@@ -38,6 +38,9 @@
                 <div class="order-items">
                     <app-icon name="package" [size]="14"></app-icon>
                     {{ order.item_count }} producto(s)
+                    @if (order.first_item_name) {
+                        · {{ order.first_item_name }}
+                    }
                 </div>
             </div>
             <div class="order-total">

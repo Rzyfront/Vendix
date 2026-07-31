@@ -100,6 +100,19 @@ export class QuickBookFromSlotModalComponent {
   }
 
   onOpen(): void {
+    // Defense in depth: if the parent bypassed the date check (or this
+    // modal is ever opened from another caller with a stale input), refuse
+    // to render with a past date. Better than letting the user fill the
+    // form and only learn at submit time that the slot is in the past.
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    if (this.prefilledDate() && this.prefilledDate() < today) {
+      this.toastService.warning(
+        'No podés agendar en un horario que ya pasó.',
+      );
+      this.closed.emit();
+      return;
+    }
     this.currentStep.set(0);
     this.selectedService.set(null);
     this.selectedCustomer.set(null);

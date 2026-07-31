@@ -57,8 +57,8 @@ interface TableGroup {
       (cancel)="onCancel()"
       [size]="'lg'"
       [showCloseButton]="true"
-      title="Abrir mesa"
-      subtitle="Selecciona una mesa disponible para iniciar la cuenta"
+      [title]="modalTitle()"
+      [subtitle]="modalSubtitle()"
     >
       <div
         slot="header"
@@ -142,16 +142,20 @@ interface TableGroup {
             }
           </div>
 
-          <!-- Guest count -->
+          <!-- Guest count. Solo en modo apertura con POST: en modo selección la
+               sesión la abre el backend al cobrar y no hay dónde persistirlo,
+               así que no se le pide al operador un dato que se descartaría. -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <app-input
-              formControlName="guest_count"
-              label="Comensales"
-              type="number"
-              [min]="1"
-              placeholder="2"
-              helperText="Opcional. Útil para la cuenta dividida."
-            ></app-input>
+            @if (!selectOnly()) {
+              <app-input
+                formControlName="guest_count"
+                label="Comensales"
+                type="number"
+                [min]="1"
+                placeholder="2"
+                helperText="Opcional. Útil para la cuenta dividida."
+              ></app-input>
+            }
             <div class="flex flex-col justify-end">
               <div class="text-xs text-text-secondary">Mesa seleccionada</div>
               <div class="text-sm font-bold text-text-primary">
@@ -162,7 +166,9 @@ interface TableGroup {
         </form>
       }
 
-      @if (!customerRequirementMet()) {
+      <!-- El gate de cliente solo aplica al modo con POST: en modo selección no
+           hay nada que el backend pueda rechazar todavía. -->
+      @if (!selectOnly() && !customerRequirementMet()) {
         <p class="anon-hint">
           <app-icon name="circle-alert" [size]="14"></app-icon>
           Selecciona un cliente antes de abrir la mesa (ventas anónimas
@@ -184,7 +190,7 @@ interface TableGroup {
           @if (submitting()) {
             Abriendo...
           } @else {
-            Abrir mesa
+            {{ confirmLabel() }}
           }
         </app-button>
       </div>
@@ -326,7 +332,19 @@ export class PosOpenTableModalComponent {
    * user (legacy behavior).
    */
   readonly customer = input<PosCustomer | null>(null);
+  /**
+   * QUI-535 — modo **selección pura**. Cuando es `true`, Confirmar NO llama al
+   * backend: solo emite la {@link Table} elegida por {@link tableSelected} y
+   * cierra. El picker es un selector, no una acción de escritura — mientras el
+   * operador elige, el sistema no toma ninguna decisión irreversible sobre la
+   * mesa (la sesión se abre y se cierra dentro de la transacción del cobro).
+   * Con `false` (default) se preserva el comportamiento histórico con `POST`,
+   * que es el que usa el módulo de mesas para abrir cuentas explícitamente.
+   */
+  readonly selectOnly = input<boolean>(false);
   readonly sessionOpened = output<OpenTableSessionResult>();
+  /** Emitido solo en modo {@link selectOnly}: la mesa completa seleccionada. */
+  readonly tableSelected = output<Table>();
 
   readonly tables = signal<Table[]>([]);
   readonly loading = signal(false);
@@ -352,12 +370,30 @@ export class PosOpenTableModalComponent {
     return this.tables().filter((t) => t.zone === zone);
   });
 
-  readonly selectedTableLabel = computed(() => {
+  /** Fila completa de la mesa elegida (la fuente del nombre y la zona). */
+  readonly selectedTable = computed<Table | null>(() => {
     const id = this.selectedTableId();
-    if (id == null) return '';
-    const t = this.tables().find((x) => x.id === id);
+    if (id == null) return null;
+    return this.tables().find((x) => x.id === id) ?? null;
+  });
+
+  readonly selectedTableLabel = computed(() => {
+    const t = this.selectedTable();
     return t ? `${t.name}${t.zone ? ' · ' + t.zone : ''}` : '';
   });
+
+  // ── Copy por modo (selección vs apertura con POST) ───────────────────────
+  readonly modalTitle = computed(() =>
+    this.selectOnly() ? 'Elegir mesa' : 'Abrir mesa',
+  );
+  readonly modalSubtitle = computed(() =>
+    this.selectOnly()
+      ? 'Selecciona la mesa del consumo; se ocupará al cobrar la venta'
+      : 'Selecciona una mesa disponible para iniciar la cuenta',
+  );
+  readonly confirmLabel = computed(() =>
+    this.selectOnly() ? 'Elegir mesa' : 'Abrir mesa',
+  );
 
   /**
    * Anonymous-sale gate (same rule as the POS payment interface). A table
@@ -378,8 +414,15 @@ export class PosOpenTableModalComponent {
     () => this.allowAnonymousSales() || this.hasCustomer(),
   );
 
+  /**
+   * En modo selección basta con tener una mesa elegida: no hay escritura que el
+   * backend pueda rechazar. El gate de cliente anónimo solo aplica al modo con
+   * `POST`, donde el backend lo exige (`TABLE_SESSION_CUSTOMER_REQUIRED`).
+   */
   readonly canConfirm = computed(
-    () => this.selectedTableId() != null && this.customerRequirementMet(),
+    () =>
+      this.selectedTableId() != null &&
+      (this.selectOnly() || this.customerRequirementMet()),
   );
 
   constructor() {
@@ -447,6 +490,18 @@ export class PosOpenTableModalComponent {
   onConfirm(): void {
     const tableId = this.selectedTableId();
     if (tableId == null) return;
+
+    // QUI-535 — modo selección: cero escrituras. Emitimos la mesa completa
+    // (id + name + zone + capacity) para que el consumidor pueda mostrar el
+    // NOMBRE de la mesa y materializarla recién al cobrar.
+    if (this.selectOnly()) {
+      const table = this.selectedTable();
+      if (!table) return;
+      this.tableSelected.emit(table);
+      this.isOpenChange.emit(false);
+      return;
+    }
+
     this.submitting.set(true);
     const rawGuest = this.form.value.guest_count;
     const guestCount = rawGuest == null || rawGuest === '' ? undefined : Number(rawGuest);

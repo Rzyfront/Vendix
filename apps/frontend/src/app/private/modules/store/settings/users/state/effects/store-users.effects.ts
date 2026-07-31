@@ -262,7 +262,19 @@ export class StoreUsersEffects {
     ),
   );
 
-  // Reload after mutations
+  /**
+   * QUI-554 — ÚNICO punto de recarga post-mutación del módulo. Ningún
+   * componente debe despachar `loadUsers`/`loadStats` tras crear, actualizar,
+   * desactivar o reactivar: lo hace este effect.
+   *
+   * El requisito para que funcione es que la mutación entre por su acción. El
+   * create modal llamaba `StoreUsersManagementService.createUser()` por HTTP
+   * directo, así que `createUserSuccess` nunca llegaba aquí y la lista se
+   * quedaba con el conteo viejo hasta recargar la página a mano.
+   *
+   * Protegido por `store-users.effects.spec.ts` y por
+   * `scripts/state-refresh-audit.sh` (job `state-refresh-audit` en CI).
+   */
   mutationSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(

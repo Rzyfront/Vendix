@@ -578,10 +578,24 @@
 
 .checkout-actions {
     display: flex;
+    flex-wrap: wrap;
+    // Layout 2+1: secundarias agrupadas a la izquierda (Volver +
+    // Modificar), primaria (Continuar) sola a la derecha. Con
+    // `space-between` y el grupo izquierdo envolviendo sus botones con
+    // su propio gap interno, los 3 elementos quedan visualmente
+    // ordenados como "atrás · editar · continuar".
     justify-content: space-between;
+    align-items: center;
+    gap: 16px;
     margin-top: 2rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--color-border);
+
+    &__left {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
 }
 
 .back-btn {
@@ -672,6 +686,142 @@
     font-size: var(--fs-sm);
     color: var(--color-text-secondary);
     margin-bottom: 1.5rem;
+}
+
+// Bloque de dirección renderizado inline en el step "Reserva" cuando
+// el servicio es a domicilio. La modalidad (A domicilio / En el local)
+// ya la eligió el cliente en el BookingComponent; acá dejamos que solo
+// confirme o ajuste la dirección antes de pagar. Mismo lenguaje visual
+// que el step "Dirección" del checkout de producto: card con borde
+// sutil + título + mapa + form.
+.booking-address-block {
+    margin-bottom: 1.5rem;
+    padding: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md, 8px);
+    background: var(--color-surface);
+
+    h3 {
+        margin: 0 0 12px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+}
+
+// Banda compacta con el resumen de la reserva en el step "Pago".
+// Mismo lenguaje visual que `.prebooked-summary`, pero sin tarjeta —
+// pensado para ir justo arriba del selector de método de pago, sin
+// robarle espacio al formulario.
+.payment-booking-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin-bottom: 1.25rem;
+    background: rgba(16, 185, 129, 0.06);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: var(--radius-md, 8px);
+    font-size: 13px;
+    color: var(--color-text-primary);
+
+    app-icon {
+        color: var(--color-success, #10b981);
+        flex-shrink: 0;
+    }
+
+    &__date {
+        font-weight: 600;
+    }
+
+    &__chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 8px;
+        background: rgba(16, 185, 129, 0.18);
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 500;
+        color: #065f46;
+        white-space: nowrap;
+
+        app-icon { color: inherit; }
+
+        &--ghost {
+            background: rgba(15, 23, 42, 0.06);
+            color: var(--color-text-secondary);
+        }
+    }
+}
+
+// Tarjeta resumen cuando el usuario YA eligió fecha + slot en el flujo
+// BookingComponent. Reemplaza al `<app-booking-slot-picker>` en ese caso
+// para no obligarlo a re-picar. Mismo lenguaje visual que booking-confirmed
+// (verde success), con icono de calendario+check y la fecha/horario
+// legibles.
+.prebooked-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: var(--radius-md, 8px);
+    margin-bottom: 1rem;
+
+    app-icon {
+        color: var(--color-success, #10b981);
+        flex-shrink: 0;
+    }
+
+    &__body {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+
+        strong {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--color-text-primary);
+        }
+
+        span {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
+    // Chip compacto del proveedor dentro del resumen (icono + nombre).
+    &__provider {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        white-space: nowrap;
+    }
+
+    // Línea de modalidad: "A domicilio · Calle 123" / "En el local".
+    &__location {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+
+        app-icon { flex-shrink: 0; }
+    }
 }
 
 .booking-confirmed {

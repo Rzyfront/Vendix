@@ -14,7 +14,7 @@ import {
   tap,
   filter,
 } from 'rxjs/operators';
-import { of, Observable, EMPTY, firstValueFrom } from 'rxjs';
+import { of, Observable, EMPTY, firstValueFrom, timer } from 'rxjs';
 import { Action } from '@ngrx/store';
 import { NotificationsApiService } from '../../services/notifications.service';
 import { PushSubscriptionService } from '../../services/push-subscription.service';
@@ -173,6 +173,28 @@ export class NotificationsEffects {
         }),
       ),
     { dispatch: false },
+  );
+
+  /**
+   * Polling fallback — re-fetches notifications every 30s regardless of
+   * the SSE state. Reasons:
+   *   1. `init$` only fires once at NgRx startup; if `restoreAuthState`
+   *      didn't dispatch (e.g. user was already in session at page load),
+   *      the bell stays empty until the next login/logout cycle.
+   *   2. SSE reconnects drop a few events during the brief gap; the
+   *      poll catches up the missed notifications.
+   *
+   * Cost: 1 cheap SELECT per user per 30s. Negligible vs the cost of a
+   * stale bell that operators stop trusting.
+   */
+  poll$ = createEffect(() =>
+    timer(5_000, 30_000).pipe(
+      // Same guard as init$ — skip the carrier shell (403 noise).
+      filter(() => this.notificationsAvailableForApp()),
+      // Don't hammer while the user is unauthenticated.
+      filter(() => this.authFacade.isAuthenticated()),
+      map(() => NotificationsActions.loadNotifications()),
+    ),
   );
 
   initAfterLogin$ = createEffect(() =>

@@ -1,0 +1,22 @@
+<div class="settings-section" [formGroup]="form()!">
+  <div class="settings-section__header">
+    <h3 class="settings-section__title">
+      <app-icon name="briefcase" [size]="16"></app-icon>
+      Servicios
+    </h3>
+    <p class="settings-section__hint">
+      Como tu tienda ofrece servicios, captura la dirección de tu
+      local y define si también atiendes a domicilio.
+    </p>
+  </div>
+
+  <div class="settings-section__body">
+    <!-- Toggle: ofrece a domicilio (mismo componente que Notificaciones) -->
+    <app-setting-toggle
+      [formControl]="offerHomeServiceControl"
+      label="¿Ofrece servicio a domicilio?"
+      description="Si está activo, el cliente puede elegir entre ir a tu local o que tú vayas a su casa."
+      (changed)="onFieldChange()"
+    />
+  </div>
+</div>

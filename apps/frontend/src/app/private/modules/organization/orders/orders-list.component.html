@@ -116,13 +116,5 @@
         </div>
       }
     </div>
-
-    @defer (when showCreateOrderModal) {
-      <app-order-create-modal
-        [(isOpen)]="showCreateOrderModal"
-        [storeOptions]="storeOptionsForModal"
-        (orderCreated)="onOrderCreated($event)"
-      ></app-order-create-modal>
-    }
   </div>
 </div>
