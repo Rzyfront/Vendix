@@ -976,6 +976,14 @@
       "sessions": 1,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "fc260857",
+      "created_by": "rzy",
+      "created_at": "2026-07-31T22:09:24Z",
+      "sessions": 4,
+      "memories": 7,
+      "prompts": 0
     }
   ]
 }
