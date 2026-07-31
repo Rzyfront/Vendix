@@ -5,6 +5,7 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 
 import {
@@ -122,10 +123,37 @@ export class AppSettingsForm {
       const currentSettings = this.settings();
       if (currentSettings) {
         this.form.patchValue(currentSettings, { emitEvent: false });
-        this.logoPreview.set(currentSettings.logo_url || null);
-        this.faviconPreview.set(currentSettings.favicon_url || null);
+        this.logoPreview.set(
+          this.displayable(currentSettings.logo_url, untracked(this.logoPreview)),
+        );
+        this.faviconPreview.set(
+          this.displayable(
+            currentSettings.favicon_url,
+            untracked(this.faviconPreview),
+          ),
+        );
       }
     });
+  }
+
+  /**
+   * Un valor sólo sirve como `src` si el navegador puede resolverlo por sí
+   * mismo: un data URL propio o una URL absoluta ya firmada. Al guardar, el
+   * padre escribe la clave S3 cruda (`organizations/…/logo.webp`) en `settings`
+   * porque es lo que el PATCH debe mandar; si esa clave llegara al `src`, el
+   * navegador la resolvería contra el vhost y pediría
+   * `https://<tienda>.vendix.com/organizations/…` — 404 y logo roto a la vista
+   * hasta que el GET posterior devuelva la URL firmada. Mientras ese GET llega,
+   * conservamos el preview vigente (QUI-289).
+   *
+   * `null` sí se respeta: es el borrado explícito y debe limpiar el preview.
+   */
+  private displayable(
+    value: string | null | undefined,
+    current: string | null,
+  ): string | null {
+    if (!value) return null;
+    return /^(data:|https?:\/\/)/.test(value) ? value : current;
   }
 
   onFieldChange() {
