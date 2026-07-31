@@ -470,11 +470,14 @@ export class DispatchRoutesService {
         resolvedDriver = method.default_driver_user_id;
       }
       if (!resolvedCarrier && method.default_carrier_supplier_id) {
+        // El carrier externo de una ruta nueva debe estar activo; un archivado
+        // no puede ejecutar despachos aunque la FK aún lo apunte.
         const s = await this.prisma.suppliers.findFirst({
           where: {
             id: method.default_carrier_supplier_id,
             store_id,
             supplier_category: 'carrier',
+            state: 'active',
           },
         });
         if (s) resolvedCarrier = method.default_carrier_supplier_id;

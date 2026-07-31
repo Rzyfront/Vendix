@@ -10,7 +10,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { supplier_category_enum } from '@prisma/client';
+import { supplier_category_enum, supplier_state_enum } from '@prisma/client';
 
 export class CreateInventorySupplierDto {
   @ApiProperty({ description: 'Organization ID' })
@@ -99,9 +99,15 @@ export class CreateInventorySupplierDto {
   @IsOptional()
   notes?: string;
 
-  @ApiProperty({ description: 'Is supplier active' })
+  @ApiPropertyOptional({
+    description:
+      'Lifecycle state. `archived` no se acepta al crear ni al actualizar: archivar va por DELETE.',
+    enum: [supplier_state_enum.active, supplier_state_enum.inactive],
+    default: 'active',
+  })
   @IsOptional()
-  is_active?: boolean = true;
+  @IsEnum([supplier_state_enum.active, supplier_state_enum.inactive])
+  state?: supplier_state_enum = supplier_state_enum.active;
 
   // Plan Despacho Economía — FASE 1 paso 7.
   @ApiPropertyOptional({

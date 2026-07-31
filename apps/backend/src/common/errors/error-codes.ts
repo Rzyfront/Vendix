@@ -1097,6 +1097,23 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Brand has assigned products',
   },
+  SUPPLIER_FIND_001: {
+    code: 'SUPPLIER_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Supplier not found',
+  },
+  SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS: {
+    code: 'SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS',
+    httpStatus: 409,
+    devMessage:
+      'Supplier has open purchase orders, payables or dispatch notes',
+  },
+  SUPPLIER_STATE_INVALID_TRANSITION: {
+    code: 'SUPPLIER_STATE_INVALID_TRANSITION',
+    httpStatus: 400,
+    devMessage:
+      'Supplier state transition not allowed; archiving goes through DELETE',
+  },
   CAT_NAME_EXISTS_001: {
     code: 'CAT_NAME_EXISTS_001',
     httpStatus: 409,

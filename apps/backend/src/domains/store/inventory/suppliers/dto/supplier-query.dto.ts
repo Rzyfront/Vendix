@@ -1,6 +1,7 @@
-import { IsOptional, IsNumber, IsString, IsBoolean } from 'class-validator';
+import { IsOptional, IsNumber, IsString, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { supplier_state_enum } from '@prisma/client';
 
 export class SupplierQueryDto {
   @ApiProperty({ description: 'Organization ID', required: false })
@@ -16,10 +17,15 @@ export class SupplierQueryDto {
   @IsOptional()
   search?: string;
 
-  @ApiProperty({ description: 'Is supplier active', required: false })
-  @IsBoolean()
+  @ApiProperty({
+    description:
+      'Lifecycle state filter. Omitirlo excluye los archivados; pasar `archived` los consulta explícitamente.',
+    required: false,
+    enum: supplier_state_enum,
+  })
+  @IsEnum(supplier_state_enum)
   @IsOptional()
-  is_active?: boolean;
+  state?: supplier_state_enum;
 
   @ApiProperty({ description: 'Email filter', required: false })
   @IsString()

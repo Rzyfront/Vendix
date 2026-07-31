@@ -16,10 +16,13 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
 import { SkipSubscriptionGate } from '../../../store/subscriptions/decorators/skip-subscription-gate.decorator';
 
+import { supplier_state_enum } from '@prisma/client';
+
 import { OrgSuppliersService } from './org-suppliers.service';
 import { OrgSupplierQueryDto } from './dto/org-supplier-query.dto';
 import { CreateOrgSupplierDto } from './dto/create-org-supplier.dto';
 import { UpdateOrgSupplierDto } from './dto/update-org-supplier.dto';
+import { UpdateOrgSupplierStateDto } from './dto/update-org-supplier-state.dto';
 
 /**
  * `/api/organization/inventory/suppliers` — org-level supplier CRUD.
@@ -59,7 +62,10 @@ export class OrgSuppliersController {
   @Get('active')
   @Permissions('store:inventory:suppliers:read')
   async findActive(@Query() query: OrgSupplierQueryDto) {
-    const result = await this.suppliers.findAll({ ...query, is_active: true });
+    const result = await this.suppliers.findAll({
+      ...query,
+      state: supplier_state_enum.active,
+    });
     return this.responseService.paginated(
       result.data,
       result.meta.total,
@@ -96,10 +102,34 @@ export class OrgSuppliersController {
     );
   }
 
+  /**
+   * Transición activo ↔ inactivo. Un proveedor inactivo sigue visible en el
+   * listado pero deja de ofrecerse en selectores de OC, remisiones y rutas.
+   */
+  @Patch(':id/state')
+  @Permissions('organization:inventory:suppliers:update')
+  async setState(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrgSupplierStateDto,
+  ) {
+    const data = await this.suppliers.setState(id, dto.state);
+    return this.responseService.updated(
+      data,
+      dto.state === supplier_state_enum.active
+        ? 'Proveedor activado exitosamente'
+        : 'Proveedor inactivado exitosamente',
+    );
+  }
+
+  /**
+   * Archiva el proveedor. No borra la fila — su historia contable queda
+   * intacta — pero lo saca de listados y selectores. Se rechaza con 409 si
+   * tiene documentos abiertos.
+   */
   @Delete(':id')
   @Permissions('organization:inventory:suppliers:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.suppliers.remove(id);
-    return this.responseService.deleted('Proveedor eliminado exitosamente');
+    return this.responseService.deleted('Proveedor archivado exitosamente');
   }
 }

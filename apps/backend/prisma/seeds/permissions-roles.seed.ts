@@ -1298,26 +1298,6 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
-    // Proveedores (legacy domain: store/suppliers)
-    {
-      name: 'store:suppliers:create',
-      description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers/unique-create/legacy',
-      method: 'POST',
-    },
-    {
-      name: 'store:suppliers:update',
-      description: 'Actualizar proveedor',
-      path: '/api/store/inventory/suppliers/:id/:id',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:suppliers:delete',
-      description: 'Eliminar proveedor',
-      path: '/api/store/inventory/suppliers/:id/:id',
-      method: 'DELETE',
-    },
-
     // Direcciones (Tienda)
     {
       name: 'store:addresses:create',
@@ -1882,31 +1862,10 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/stock-transfers/:id',
       method: 'DELETE',
     },
-    // Suppliers
-    {
-      name: 'store:suppliers:create',
-      description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers',
-      method: 'POST',
-    },
-    {
-      name: 'store:suppliers:read',
-      description: 'Leer proveedores',
-      path: '/api/store/inventory/suppliers',
-      method: 'GET',
-    },
-    {
-      name: 'store:suppliers:update',
-      description: 'Actualizar proveedor',
-      path: '/api/store/inventory/suppliers/:id',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:suppliers:delete',
-      description: 'Eliminar proveedor',
-      path: '/api/store/inventory/suppliers/:id',
-      method: 'DELETE',
-    },
+    // Suppliers: el namespace canónico es `store:inventory:suppliers:*`
+    // (definido más abajo), que es el que exige
+    // `store/inventory/suppliers/suppliers.controller.ts`. El namespace
+    // `store:suppliers:*` era del módulo duplicado ya eliminado.
     // Store Addresses
     {
       name: 'store:addresses:create',
@@ -4361,7 +4320,6 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:products:read') ||
       p.name.includes('store:categories:read') ||
       p.name.includes('store:brands:read') ||
-      p.name.includes('store:suppliers:read') ||
       p.name.includes('organization:users:read') ||
       p.name.includes('organization:stores:read') ||
       p.name.includes('organization:addresses:read') ||
@@ -4586,7 +4544,6 @@ export async function seedPermissionsAndRoles(
       // Configuración de tienda - solo lectura
       p.name.includes('store:settings:read') ||
       // Proveedores - solo lectura
-      p.name.includes('store:suppliers:read') ||
       p.name.includes('store:inventory:suppliers:read') ||
       // Transferencias - solo lectura
       p.name.includes('store:stock-transfers:read') ||

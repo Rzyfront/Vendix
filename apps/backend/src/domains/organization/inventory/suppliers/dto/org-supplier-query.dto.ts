@@ -1,5 +1,6 @@
-import { IsOptional, IsNumber, IsString, IsBoolean, IsInt } from 'class-validator';
+import { IsOptional, IsNumber, IsString, IsEnum, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
+import { supplier_state_enum } from '@prisma/client';
 
 /**
  * Org-wide supplier listing query. The store-domain `SuppliersService` already
@@ -19,10 +20,10 @@ export class OrgSupplierQueryDto {
   @IsString()
   search?: string;
 
+  /** Omitirlo excluye los archivados; pasar `archived` los consulta. */
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  is_active?: boolean;
+  @IsEnum(supplier_state_enum)
+  state?: supplier_state_enum;
 
   @IsOptional()
   @IsString()

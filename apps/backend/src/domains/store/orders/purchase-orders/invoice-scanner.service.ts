@@ -278,9 +278,15 @@ export class InvoiceScannerService {
 
     try {
       // Tier 1: Match by tax_id (exact, case-insensitive)
+      // Excluye archivados: sugerir uno haría que el usuario abra una OC contra
+      // un proveedor que ya sacó de circulación. Los inactivos sí se sugieren —
+      // el matching solo propone, y reactivarlo es un clic.
       if (supplier.tax_id) {
         const byTax = await this.prisma.suppliers.findFirst({
-          where: { tax_id: { equals: supplier.tax_id, mode: 'insensitive' } },
+          where: {
+            tax_id: { equals: supplier.tax_id, mode: 'insensitive' },
+            state: { not: 'archived' },
+          },
         });
         if (byTax) {
           return {
@@ -296,6 +302,7 @@ export class InvoiceScannerService {
       // Tier 2 & 3: Load suppliers and do bidirectional + word matching
       if (supplier.name) {
         const allSuppliers = await this.prisma.suppliers.findMany({
+          where: { state: { not: 'archived' } },
           select: { id: true, name: true, tax_id: true },
           take: 200,
         });
