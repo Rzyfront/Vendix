@@ -1,9 +1,4 @@
-// `BadRequestException` (no `VendixHttpException`): estos dos fallos de
-// resolución de línea de OC no tienen entrada propia en `error-codes.ts`, y
-// ampliar ese registro queda fuera de este cambio. Igual es un `HttpException` de
-// Nest, así que `AllExceptionsFilter` responde 400 con cuerpo tipado — nunca el
-// `SYS_INTERNAL_001`/500 que produciría un `throw new Error`.
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import {
   Prisma,
@@ -20,6 +15,7 @@ import { OrderStockCommitService } from '../../inventory/shared/services/order-s
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -241,9 +237,15 @@ export class DispatchNoteEventsListener {
           // Un id fijado que no resuelve contra la OC es corrupción de datos
           // (línea de otra orden, o borrada), no un miss blando: recibir "lo que
           // se parezca" descuadraría cantidades, costeo e IVA de la OC.
-          throw new BadRequestException(
+          throw new VendixHttpException(
+            ErrorCodes.DISPATCH_NOTE_PO_LINE_UNRESOLVED,
             `Remisión #${dispatchNumber}: la línea fija purchase_order_item_id=${item.purchase_order_item_id} ` +
               `no pertenece a la orden de compra #${purchaseOrderId}. La recepción se aborta sin recibir nada.`,
+            {
+              dispatch_number: dispatchNumber,
+              purchase_order_id: purchaseOrderId,
+              purchase_order_item_id: item.purchase_order_item_id,
+            },
           );
         }
       } else {
@@ -293,9 +295,11 @@ export class DispatchNoteEventsListener {
       // Tras la resolución por id, cero líneas significa que la remisión no
       // tiene NADA recibible. Lanza en vez de `return`: un `return` acá era
       // exactamente el bug — HTTP 200 con la OC intacta en `approved`.
-      throw new BadRequestException(
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_NOTHING_RECEIVABLE,
         `Remisión #${dispatchNumber}: ninguna de sus líneas resolvió contra la orden de compra #${purchaseOrderId} — ` +
           `no hay nada que recibir.`,
+        { dispatch_number: dispatchNumber, purchase_order_id: purchaseOrderId },
       );
     }
 
