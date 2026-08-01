@@ -110,7 +110,7 @@ const MM = 2.834645669;
  * printer feeds continuous paper, so the height is measured from the content
  * instead of being fixed (see `generate`).
  */
-interface PdfLayout {
+export interface PdfLayout {
   format: PrintFormat;
   width: number;
   height: number;
@@ -128,7 +128,7 @@ interface PdfLayout {
   footer_gap: number;
 }
 
-const GEOMETRY: Record<
+export const GEOMETRY: Record<
   PrintFormat,
   Omit<PdfLayout, 'format' | 'content'> & { height: number }
 > = {

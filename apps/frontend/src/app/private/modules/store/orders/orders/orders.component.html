@@ -7,6 +7,7 @@
   <!-- Orders List (owns search, filters, loading, empty state) -->
   <app-orders-list
     [reloadTrigger]="reloadTick()"
+    [canBulkOperations]="canBulkOrderOperations()"
     (viewOrder)="viewOrderDetails($event)"
     (create)="createNewOrder()"
     (refresh)="refreshOrders()"

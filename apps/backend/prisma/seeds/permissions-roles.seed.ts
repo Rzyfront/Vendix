@@ -727,6 +727,35 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/orders/:id',
       method: 'DELETE',
     },
+    // QUI-599. Permisos PROPIOS de operaciones masivas, deliberadamente NO
+    // se reutilizan `store:orders:update` ni `store:orders:read`: transicionar
+    // 100 órdenes de un tajo (finalizar, enviar, cancelar) tiene otro impacto
+    // operativo y otra traza de auditoría que operar una. Un cajero/empleado
+    // puede corregir una orden suelta sin poder cerrar 100 a la vez.
+    //
+    // `bulk_update` cubre las acciones de escritura en lote (transición de
+    // estado, asignación a ruta de despacho) y `bulk_print` cubre la
+    // generación del PDF multi-página. La separación sigue el mismo criterio
+    // que `store:dispatch_notes:create` vs `store:dispatch_notes:print`.
+    //
+    // La ruta declarada cubre también `/bulk/transition`, `/bulk/assign-route`
+    // y `/bulk/print` porque `PermissionsGuard` hace
+    // `currentPath.startsWith(permission.path)`. El controller refuerza por
+    // nombre con `assertNamedPermission` (ver `orders-bulk.controller.ts`),
+    // igual que `products-bulk-edit.controller.ts`.
+    {
+      name: 'store:orders:bulk_update',
+      description:
+        'Operaciones masivas de escritura sobre órdenes (transición de estado, asignación a ruta)',
+      path: '/api/store/orders/bulk',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:bulk_print',
+      description: 'Impresión masiva de órdenes (PDF multi-página)',
+      path: '/api/store/orders/bulk/print',
+      method: 'POST',
+    },
 
     // Cotizaciones
     {
