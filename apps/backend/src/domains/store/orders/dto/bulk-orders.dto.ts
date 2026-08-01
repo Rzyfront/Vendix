@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_state_enum } from '@prisma/client';
+import { PrintFormat } from '../../settings/interfaces/store-settings.interface';
 
 /**
  * Tope duro de órdenes por lote, común a las tres operaciones masivas
@@ -131,16 +132,9 @@ export class BulkAssignRouteDto {
 /**
  * Cuerpo de `POST /store/orders/bulk/print`.
  *
- * `copies` opcional sobreescribe `store_settings.receipts.invoice_copies` /
- * `pos_ticket_copies` cuando el operador necesita un número distinto para esa
- * impresión puntual (p. ej. imprimir 2 copias de 100 órdenes para archivo +
- * cliente). Cuando se omite, el builder respeta la configuración de la
- * tienda.
- *
- * El formato de papel (`invoice_format` / `pos_ticket_format`) NO va aquí: se
- * resuelve desde `store_settings` en el builder, nunca desde el cliente, así
- * que el bulk nunca puede emitir en un formato que la tienda no tiene
- * configurado.
+ * El formato de papel (`pos_ticket_format`) NO va aquí: lo resuelve el backend
+ * desde `store_settings`, nunca desde el cliente, así que el bulk nunca puede
+ * emitir en un formato que la tienda no tiene configurado.
  */
 export class BulkPrintOrdersDto {
   @IsArray()
@@ -150,6 +144,17 @@ export class BulkPrintOrdersDto {
   @Type(() => Number)
   ids: number[];
 
+  /**
+   * @deprecated Ya no tiene efecto. El endpoint dejó de generar el documento:
+   * ahora devuelve los datos y el render (y con él el número de copias, leído
+   * de `store_settings.receipts.pos_ticket_copies`) ocurre en el frontend con
+   * `PosTicketService`.
+   *
+   * Se conserva el campo porque el `ValidationPipe` global corre con
+   * `forbidNonWhitelisted: true`: quitarlo haría que un cliente desplegado en
+   * una versión anterior se coma un 400 por mandar una propiedad que el DTO
+   * ya no declara.
+   */
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -192,15 +197,17 @@ export class BulkOrdersResultDto {
  *   fallo: es la regla de negocio pedida (no se imprime un comprobante de algo
  *   anulado o devuelto).
  * - `render_error` — la orden existe y es imprimible, pero sus datos rompieron
- *   el mapeo o el render. Es el único motivo que indica un defecto real y por
- *   eso se registra en el log del servidor con el detalle.
+ *   el mapeo o el render. El backend ya no lo emite (dejó de dibujar el
+ *   documento); se conserva en la unión porque es el motivo que el FRONTEND
+ *   reporta cuando `PosTicketService` no puede dibujar una orden concreta, y
+ *   `summarizeSkipped` lo sabe redactar.
  */
 export type BulkPrintSkipReason =
   | 'not_found'
   | 'non_printable_state'
   | 'render_error';
 
-/** Una orden excluida del PDF, con su motivo legible. */
+/** Una orden excluida de la impresión, con su motivo legible. */
 export class BulkPrintSkippedOrderDto {
   id: number;
   /** Ausente cuando el motivo es `not_found` (no hubo fila que leer). */
@@ -211,19 +218,56 @@ export class BulkPrintSkippedOrderDto {
 }
 
 /**
- * Resultado de `bulkPrint`. No es el `BulkOrdersResultDto` común porque el
- * payload principal es binario: el PDF viaja como body y este objeto viaja como
- * cabeceras (`X-Printed-Count`, `X-Skipped-Count`, `X-Skipped-Orders`).
+ * Resultado de `bulkPrint`. No es el `BulkOrdersResultDto` común: aquí no hay
+ * una operación por orden que pueda fallar a medias, hay una partición entre lo
+ * que el frontend va a dibujar y lo que se descartó.
  *
- * `printed + skipped.length === total` siempre.
+ * El endpoint devuelve DATOS, no un documento. El render vive en
+ * `PosTicketService` (frontend), el mismo que dibuja el tiquete post-venta del
+ * POS y la previsualización de Ajustes → Recibos, de modo que la paridad de
+ * formato queda garantizada por construcción en vez de por convenio.
+ *
+ * Invariante: `printable + skipped.length === total`, y `printable ===
+ * orders.length`.
  */
 export class BulkPrintResultDto {
   /** Ids pedidos por el cliente. */
   total: number;
-  /** Órdenes efectivamente dibujadas en el PDF. */
-  printed: number;
+  /** Órdenes que el frontend va a dibujar. Igual a `orders.length`. */
+  printable: number;
+  /**
+   * Órdenes hidratadas con exactamente lo que el tiquete POS lee: líneas,
+   * cliente, pago exitoso y factura DIAN aceptada. Sin tipar contra Prisma a
+   * propósito: los delegates de `StorePrismaService` no propagan la inferencia
+   * del `include`, así que el tipo real sería `{}` y no `any`.
+   */
+  orders: any[];
+  /** Órdenes descartadas, completas (no truncadas: van en el body, no en una cabecera). */
   skipped: BulkPrintSkippedOrderDto[];
-  buffer: Buffer;
+  /**
+   * Formato de papel canónico, leído de la DB en ESTA respuesta.
+   *
+   * No es redundante con lo que el frontend ya tiene: `StoreSettingsFacade`
+   * sirve `receipts` desde el snapshot de `vendix_auth_state`, que solo se
+   * rehidrata al re-loguear. Sin este campo, cambiar el formato en Ajustes no
+   * afectaría al masivo hasta el siguiente login — una regresión frente al
+   * comportamiento anterior, donde el papel lo resolvía el backend.
+   */
+  pos_ticket_format: PrintFormat;
+  /**
+   * Copias por tiquete, canónicas de la DB, acotadas a [1, 5].
+   *
+   * Viaja por la misma razón que `pos_ticket_format`: el frontend las leería del
+   * snapshot rancio. Mitigar el formato y no las copias dejaría el arreglo a
+   * medias — un cambio de copias sin re-login seguiría imprimiendo el número
+   * viejo y el aviso previo ("N tiquetes · P páginas") mentiría sobre el gasto
+   * de papel.
+   *
+   * El piso es 1 y no 0: `pos_ticket_copies: 0` significa "no imprimir
+   * automáticamente tras la venta", y quien pulsa "Imprimir" en el masivo pidió
+   * papel de forma explícita.
+   */
+  pos_ticket_copies: number;
 }
 
 // ===========================================================================

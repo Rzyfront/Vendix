@@ -2336,6 +2336,7 @@ model purchase_order_items {
   product_variants       product_variants?                @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   purchase_orders        purchase_orders                  @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
   reception_items        purchase_order_reception_items[]
+  dispatch_note_items    dispatch_note_items[]
 
   @@index([purchase_order_id])
   @@index([product_id, purchase_order_id])
@@ -7307,35 +7308,46 @@ model dispatch_notes {
 }
 
 model dispatch_note_items {
-  id                  Int       @id @default(autoincrement())
-  dispatch_note_id    Int
-  product_id          Int
-  product_variant_id  Int?
-  location_id         Int?
-  ordered_quantity    Int       @default(0)
-  dispatched_quantity Int
-  unit_price          Decimal?  @db.Decimal(12, 2)
-  discount_amount     Decimal?  @default(0) @db.Decimal(12, 2)
-  tax_amount          Decimal?  @default(0) @db.Decimal(12, 2)
-  total_price         Decimal?  @db.Decimal(12, 2)
-  cost_price          Decimal?  @db.Decimal(12, 2)
+  id                     Int       @id @default(autoincrement())
+  dispatch_note_id       Int
+  product_id             Int
+  product_variant_id     Int?
+  location_id            Int?
+  ordered_quantity       Int       @default(0)
+  dispatched_quantity    Int
+  unit_price             Decimal?  @db.Decimal(12, 2)
+  discount_amount        Decimal?  @default(0) @db.Decimal(12, 2)
+  tax_amount             Decimal?  @default(0) @db.Decimal(12, 2)
+  total_price            Decimal?  @db.Decimal(12, 2)
+  cost_price             Decimal?  @db.Decimal(12, 2)
   // QUI-425 — per-line pricing overrides captured in the "Crear y recibir"
   // margin/price editor. Persisted here so the `dispatch_note.received` listener
   // can forward them to PurchaseOrdersService.receive() on PO-linked receipts.
-  new_base_price      Decimal?  @db.Decimal(12, 2)
-  new_profit_margin   Decimal?  @db.Decimal(5, 2)
-  lot_serial          String?   @db.VarChar(100)
-  sales_order_item_id Int?
-  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  new_base_price         Decimal?  @db.Decimal(12, 2)
+  new_profit_margin      Decimal?  @db.Decimal(5, 2)
+  lot_serial             String?   @db.VarChar(100)
+  sales_order_item_id    Int?
+  // Exact `purchase_order_items` line this receipt line settles.
+  // `CreateDispatchNoteItemDto` already accepts `purchase_order_item_id` and
+  // `DispatchNotesService.createPurchaseReceipt` validates it, but before this
+  // column existed the value was dropped, forcing
+  // `delegatePurchaseReceiptToPurchaseOrder` to re-derive the PO line from
+  // product_id + product_variant_id — which cannot disambiguate two PO lines
+  // of the same product/variant. Nullable: sales dispatches and pre-existing
+  // rows have no PO line, hence onDelete: SetNull (never Cascade).
+  purchase_order_item_id Int?
+  created_at             DateTime? @default(now()) @db.Timestamp(6)
 
-  dispatch_note   dispatch_notes       @relation(fields: [dispatch_note_id], references: [id], onDelete: Cascade)
-  product         products             @relation(fields: [product_id], references: [id], onDelete: Restrict)
-  product_variant product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Restrict)
-  location        inventory_locations? @relation("dispatch_note_items_location", fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatch_note       dispatch_notes        @relation(fields: [dispatch_note_id], references: [id], onDelete: Cascade)
+  product             products              @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  product_variant     product_variants?     @relation(fields: [product_variant_id], references: [id], onDelete: Restrict)
+  location            inventory_locations?  @relation("dispatch_note_items_location", fields: [location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  purchase_order_item purchase_order_items? @relation(fields: [purchase_order_item_id], references: [id], onDelete: SetNull)
 
   @@index([dispatch_note_id])
   @@index([product_id])
   @@index([sales_order_item_id])
+  @@index([purchase_order_item_id])
 }
 
 // ──── Accounts Receivable (Cartera) ────────────

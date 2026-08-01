@@ -2297,6 +2297,18 @@ export const ErrorCodes = {
     devMessage:
       'Cannot void an invoiced dispatch note directly; issue a credit note via return_orders instead',
   },
+  DISPATCH_NOTE_PO_LINE_UNRESOLVED: {
+    code: 'DISPATCH_NOTE_PO_LINE_UNRESOLVED',
+    httpStatus: 400,
+    devMessage:
+      'A dispatch note item pins a purchase_order_item_id that does not belong to the linked purchase order; the receipt cannot be delegated without a valid line reference',
+  },
+  DISPATCH_NOTE_NOTHING_RECEIVABLE: {
+    code: 'DISPATCH_NOTE_NOTHING_RECEIVABLE',
+    httpStatus: 400,
+    devMessage:
+      'No purchase order line could be resolved for this purchase_receipt dispatch note, so there is nothing to receive against the purchase order',
+  },
 
   // Carrier / Repartos (Fase B6) — namespace /store/carrier/*
   CARRIER_CLAIM_TAKEN: {

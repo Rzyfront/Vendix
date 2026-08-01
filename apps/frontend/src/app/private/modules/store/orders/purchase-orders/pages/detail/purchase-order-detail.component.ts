@@ -8,8 +8,8 @@ import {
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin, of } from 'rxjs';
-import { catchError, map, switchMap } from 'rxjs/operators';
+import { Observable, forkJoin, of } from 'rxjs';
+import { catchError, map, switchMap, tap } from 'rxjs/operators';
 
 import {
   AlertBannerComponent,
@@ -305,17 +305,28 @@ interface ReceiveLine {
                         placeholder="Notas opcionales sobre esta recepción..."
                         [(ngModel)]="receptionNotes"></textarea>
                     </div>
-                    <p class="text-xs text-text-secondary flex items-center gap-1.5">
-                      <app-icon name="file-text" [size]="13" class="text-primary" />
-                      Se generará una remisión de compra (entrada) enlazada a esta orden y se confirmará automáticamente.
-                    </p>
+                    @if (pendingReceiptId(); as pendingId) {
+                      <p class="text-xs text-amber-600 flex items-start gap-1.5">
+                        <app-icon name="alert-triangle" [size]="13" class="shrink-0 mt-0.5" />
+                        <span>
+                          Un intento anterior ya generó la remisión de entrada <strong>#{{ pendingId }}</strong> y falló al
+                          {{ pendingReceiptStage() === 'receive' ? 'recibirla' : 'confirmarla' }}. El reintento continúa sobre
+                          esa misma remisión (no se crea otra), por lo que usará las cantidades ya registradas en ella.
+                        </span>
+                      </p>
+                    } @else {
+                      <p class="text-xs text-text-secondary flex items-center gap-1.5">
+                        <app-icon name="file-text" [size]="13" class="text-primary" />
+                        Se generará una remisión de compra (entrada) enlazada a esta orden y se confirmará automáticamente.
+                      </p>
+                    }
                     <div class="flex flex-col sm:flex-row gap-2 sm:justify-between">
                       <app-button variant="outline" size="sm" (clicked)="receiveAll()" [disabled]="receiveSaving() || !hasPending()">
                         <app-icon name="check-check" [size]="14" slot="icon" />
                         Recibir todo
                       </app-button>
-                      <app-button variant="primary" (clicked)="confirmReception()" [disabled]="receiveSaving() || !hasItemsToReceive()" [loading]="receiveSaving()">
-                        Recibir por remisión
+                      <app-button variant="primary" (clicked)="confirmReception()" [disabled]="receiveSaving() || (!pendingReceiptId() && !hasItemsToReceive())" [loading]="receiveSaving()">
+                        {{ pendingReceiptId() ? 'Reintentar remisión #' + pendingReceiptId() : 'Recibir por remisión' }}
                       </app-button>
                     </div>
                   </div>
@@ -546,6 +557,18 @@ export class StorePurchaseOrderDetailComponent {
   readonly receiveSaving = signal(false);
   receptionNotes = '';
 
+  /**
+   * Remisión de entrada YA creada por un intento que falló después del create
+   * (en `confirm` o en `receive`). Sin esto, reintentar "Recibir por remisión"
+   * creaba una SEGUNDA remisión para la misma mercancía y dejaba la primera
+   * huérfana en `draft`/`confirmed`. Mientras esté seteada, el reintento
+   * continúa sobre esa remisión desde la etapa que falló.
+   */
+  readonly pendingReceiptId = signal<number | null>(null);
+  readonly pendingReceiptStage = signal<'confirm' | 'receive' | null>(null);
+  /** Payload de la remisión creada (necesario para rearmar el body de seriales). */
+  private readonly pendingReceiptNote = signal<any>(null);
+
   // Payment modal
   readonly showPaymentModal = signal(false);
 
@@ -720,7 +743,11 @@ export class StorePurchaseOrderDetailComponent {
           quantity_received: received,
           pending,
           receive_quantity: 0,
-          unit_price: this.num(item.unit_price ?? item.unit_cost),
+          // `purchase_order_items.unit_cost` es Decimal(12,4) y guarda el neto
+          // sin redondear (p. ej. 840.3361 con IVA 19% incluido). El destino
+          // (`dispatch_note_items.unit_price`) es Decimal(12,2): se redondea
+          // aquí para no enviar más decimales de los que la columna admite.
+          unit_price: this.round2(item.unit_price ?? item.unit_cost),
           stock_unit: product?.stock_unit ?? null,
           purchase_unit: product?.purchase_unit ?? null,
           purchase_to_stock_factor: product?.purchase_to_stock_factor ?? null,
@@ -732,6 +759,15 @@ export class StorePurchaseOrderDetailComponent {
     );
     this.receptionNotes = '';
     this.serialsByLine.set(new Map());
+    // Cada (re)carga de la OC abre un intento limpio: la remisión pendiente de
+    // un intento anterior ya no aplica sobre estas líneas recalculadas.
+    this.clearPendingReceipt();
+  }
+
+  private clearPendingReceipt(): void {
+    this.pendingReceiptId.set(null);
+    this.pendingReceiptStage.set(null);
+    this.pendingReceiptNote.set(null);
   }
 
   // ============ Header actions ============
@@ -806,6 +842,13 @@ export class StorePurchaseOrderDetailComponent {
     const po = this.po();
     if (!po) return;
 
+    // Reintento sobre una remisión ya creada: las cantidades viven en ella, no
+    // en la tabla. Validar contra `receive_quantity` bloquearía el reintento.
+    if (this.pendingReceiptId()) {
+      this.receiveViaDispatchNote(po, this.receiveLines().filter((l) => l.receive_quantity > 0));
+      return;
+    }
+
     const lines = this.receiveLines().filter((l) => l.receive_quantity > 0);
     if (lines.length === 0) {
       this.toast.warning('Ingresa al menos una cantidad a recibir');
@@ -850,16 +893,43 @@ export class StorePurchaseOrderDetailComponent {
     } as any;
 
     this.receiveSaving.set(true);
-    this.dispatchNotesService.createPurchaseReceipt(dto).pipe(
+
+    // La cadena no tiene compensación: si `confirm` o `receive` fallan, la
+    // remisión ya existe. En vez de dejarla huérfana y crear otra al reintentar,
+    // memorizamos su id + la etapa que falló y reanudamos desde ahí.
+    const pendingId = this.pendingReceiptId();
+    const resumeStage = this.pendingReceiptStage();
+
+    const note$: Observable<any> = pendingId
+      ? of(this.pendingReceiptNote())
+      : this.dispatchNotesService.createPurchaseReceipt(dto).pipe(
+          tap((dn) => {
+            this.pendingReceiptId.set(dn.id);
+            this.pendingReceiptNote.set(dn);
+          }),
+        );
+
+    note$.pipe(
       switchMap((dn) => {
+        // `confirm` ya se aplicó en un intento previo → no repetirlo.
+        if (resumeStage === 'receive') return of(dn);
+        this.pendingReceiptStage.set('confirm');
         const confirmBody = this.buildConfirmSerialsBody(dn, lines, serialsByLine);
         return this.dispatchNotesService.confirm(dn.id, confirmBody).pipe(map(() => dn));
       }),
-      switchMap((dn) => this.dispatchNotesService.receive(dn.id)),
+      switchMap((dn) => {
+        this.pendingReceiptStage.set('receive');
+        return this.dispatchNotesService.receive(dn.id);
+      }),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: () => this.onReceptionSuccess(),
-      error: (err) => { this.receiveSaving.set(false); this.toast.error(typeof err === 'string' ? err : (extractApiError(err).message || 'Error al recibir por remisión')); },
+      error: (err) => {
+        this.receiveSaving.set(false);
+        const message = typeof err === 'string' ? err : (extractApiError(err).message || 'Error al recibir por remisión');
+        const noteId = this.pendingReceiptId();
+        this.toast.error(noteId ? `Remisión #${noteId}: ${message}` : message);
+      },
     });
   }
 
@@ -888,6 +958,7 @@ export class StorePurchaseOrderDetailComponent {
 
   private onReceptionSuccess(): void {
     this.receiveSaving.set(false);
+    this.clearPendingReceipt();
     this.toast.success('Mercancía recibida correctamente');
     this.dispatchNotesService.invalidateCache();
     this.reload();
@@ -988,6 +1059,16 @@ export class StorePurchaseOrderDetailComponent {
   num(v: number | string | null | undefined): number {
     if (v === null || v === undefined) return 0;
     return typeof v === 'number' ? v : Number(v) || 0;
+  }
+  /**
+   * `num()` con redondeo a 2 decimales, para valores que viajan a una columna
+   * `Decimal(x,2)`. Deliberadamente NO se redondea dentro de `num()`: ese helper
+   * también alimenta aritmética de visualización (`cantidad × costo` en la tabla
+   * de productos), donde el costo de origen es Decimal(12,4) y truncarlo antes
+   * de multiplicar desviaría el subtotal mostrado respecto al del backend.
+   */
+  round2(v: number | string | null | undefined): number {
+    return Math.round(this.num(v) * 100) / 100;
   }
   money(v: number | string | null | undefined): string {
     return this.currency.format(this.num(v));

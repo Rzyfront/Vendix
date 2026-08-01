@@ -42,6 +42,20 @@
             [style.width.%]="progressPercent()"
           ></div>
         </div>
+
+        <!-- Segunda fase de la impresión. La barra de arriba mide lotes HTTP y
+             llega a 100% en cuanto los datos están; dibujar 300 tiquetes y
+             esperar el diálogo es lo que de verdad tarda, y sin esta línea el
+             operador ve un 100% congelado y cree que se colgó. -->
+        @if (renderProgress().total > 0) {
+          <p class="mt-1 text-[10px] leading-tight text-text-secondary">
+            @if (renderProgress().done < renderProgress().total) {
+              Dibujando tiquetes {{ renderProgress().done }}/{{ renderProgress().total }}…
+            } @else {
+              Tiquetes listos. Esperando que cierres el diálogo de impresión…
+            }
+          </p>
+        }
       </div>
     }
 
@@ -340,6 +354,19 @@
                     <p class="mt-0.5 text-[10px] leading-tight text-text-secondary">
                       {{ action.description }}
                     </p>
+
+                    <!-- Gasto de papel ANTES de pulsar: con 300 órdenes y 2
+                         copias son 600 hojas, y el operador solo se enteraba al
+                         ver la bandeja. Inline, sin modal: el dato tiene que
+                         estar visible mientras se arma la selección. -->
+                    @if (action.id === 'print' && printVolumeNotice()) {
+                      <p
+                        class="mt-1 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-text-primary"
+                      >
+                        <app-icon name="printer" [size]="11" class="text-primary" />
+                        {{ printVolumeNotice() }}
+                      </p>
+                    }
                   </div>
 
                   <app-button

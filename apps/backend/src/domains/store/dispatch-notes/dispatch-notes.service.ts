@@ -751,6 +751,39 @@ export class DispatchNotesService {
     return Number.isFinite(n) ? n : null;
   }
 
+  /**
+   * Round a monetary value to 2 decimals — the PERSISTENCE edge for every
+   * `Decimal(12,2)` money column.
+   *
+   * The input DTOs accept up to 4 decimals because their authoritative source
+   * (`purchase_order_items.unit_cost` / `unit_price_net`) is `Decimal(12,4)`
+   * and `PurchaseOrdersService.deriveLineTax` divides gross by `(1 + rate)`
+   * without rounding. Postgres would round the extra digits away on insert
+   * anyway, but doing it here keeps the derived totals (line `total_price`,
+   * header `subtotal_amount` / `tax_amount` / `grand_total`) consistent with
+   * the values actually stored, so the header can never drift from the sum of
+   * its rounded lines.
+   */
+  private toMoney(value: unknown): number {
+    const n = Number(value ?? 0);
+    if (!Number.isFinite(n)) return 0;
+    return Math.round(n * 100) / 100;
+  }
+
+  /**
+   * {@link toMoney} preserving "absent" semantics: `null` / `undefined` stay
+   * `null` instead of collapsing to `0`. Required for optional pricing
+   * overrides (`new_base_price`, `new_profit_margin`) because the
+   * `dispatch_note.received` listener uses `!= null` to decide whether to
+   * forward an override — a `0` would be read as a deliberate price of zero.
+   */
+  private toMoneyOrNull(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.round(n * 100) / 100;
+  }
+
   /** True when the order's snapshot JSON carries a usable address line. */
   private snapshotHasAddress(
     snapshot: Prisma.JsonValue | null | undefined,
@@ -1635,16 +1668,22 @@ export class DispatchNotesService {
     // stock path (EMIT-OWN stock_in when purchase_order_id is null vs. PO.receive
     // delegation when it is set) — see dispatch-note-events.listener.ts.
     const items: any[] = dto.items || [];
-    const subtotal = items.reduce(
-      (sum, item) =>
-        sum + Number(item.unit_price || 0) * item.dispatched_quantity,
-      0,
+    // The header money columns are `Decimal(12,2)` and are read back as the
+    // document total, so they must equal the sum of the ROUNDED lines. Round
+    // every contribution with the same helper the lines use (toMoney) instead
+    // of accumulating the raw 4-decimal DTO values — otherwise the header
+    // drifts from the sum of its own items.
+    const subtotal = this.toMoney(
+      items.reduce(
+        (sum, item) =>
+          sum + this.toMoney(item.unit_price) * item.dispatched_quantity,
+        0,
+      ),
     );
-    const total_tax = items.reduce(
-      (sum, item) => sum + Number(item.tax_amount || 0),
-      0,
+    const total_tax = this.toMoney(
+      items.reduce((sum, item) => sum + this.toMoney(item.tax_amount), 0),
     );
-    const grand_total = subtotal + total_tax;
+    const grand_total = this.toMoney(subtotal + total_tax);
 
     // Resolve the receipt location. For the order-first path the PO's own
     // location is the canonical stock-in destination (PurchaseOrdersService.receive
@@ -1698,20 +1737,34 @@ export class DispatchNotesService {
                 location_id: item.location_id ?? receipt_location_id ?? undefined,
                 ordered_quantity: item.ordered_quantity,
                 dispatched_quantity: item.dispatched_quantity,
-                unit_price: item.unit_price ?? 0,
-                discount_amount: item.discount_amount || 0,
-                tax_amount: item.tax_amount || 0,
-                total_price:
-                  Number(item.unit_price || 0) * item.dispatched_quantity -
-                  Number(item.discount_amount || 0) +
-                  Number(item.tax_amount || 0),
+                // PERSISTENCE edge: the DTO accepts up to 4 decimals (its
+                // source `purchase_order_items.unit_cost` is Decimal(12,4)),
+                // these columns are Decimal(12,2). Round explicitly so the
+                // derived total_price and the header aggregates agree with what
+                // is actually stored.
+                unit_price: this.toMoney(item.unit_price),
+                discount_amount: this.toMoney(item.discount_amount),
+                tax_amount: this.toMoney(item.tax_amount),
+                total_price: this.toMoney(
+                  this.toMoney(item.unit_price) * item.dispatched_quantity -
+                    this.toMoney(item.discount_amount) +
+                    this.toMoney(item.tax_amount),
+                ),
                 lot_serial: item.lot_serial,
+                // Exact PO line this receipt line settles. Persisting it lets
+                // `delegatePurchaseReceiptToPurchaseOrder` resolve the line
+                // directly instead of re-deriving it from product + variant
+                // (which cannot disambiguate two PO lines of the same product).
+                // Null for non-PO receipts.
+                purchase_order_item_id: item.purchase_order_item_id ?? null,
                 // QUI-425 — carry the operator's per-line price/margin override
                 // onto the dispatch_note_item so the `received` listener can
                 // forward it to PurchaseOrdersService.receive() (PO-linked
-                // receipts). Null when no override was captured.
-                new_base_price: item.new_base_price ?? null,
-                new_profit_margin: item.new_profit_margin ?? null,
+                // receipts). Null when no override was captured — toMoneyOrNull
+                // keeps the absent case as null (the listener checks `!= null`),
+                // it must NOT become 0.
+                new_base_price: this.toMoneyOrNull(item.new_base_price),
+                new_profit_margin: this.toMoneyOrNull(item.new_profit_margin),
               })),
             },
           },

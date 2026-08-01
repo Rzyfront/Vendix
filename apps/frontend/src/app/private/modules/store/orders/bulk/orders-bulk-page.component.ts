@@ -27,11 +27,17 @@
  *
  * ## Impresión
  *
- * El backend devuelve un Blob `application/pdf`. Esta vista lo abre en
- * una nueva pestaña con `window.open()` + `URL.createObjectURL()` para
- * que el navegador muestre su diálogo de impresión nativo, respetando la
- * configuración de la impresora del operador (copies, papel, etc.). El
- * formato de papel lo decide el backend desde `store_settings.receipts`.
+ * El backend devuelve DATOS (órdenes hidratadas + formato + copias de la DB) y
+ * el documento lo dibuja `PosTicketService.printTicketsBatch` — el MISMO
+ * renderer del tiquete post-venta del POS y de la previsualización de
+ * Ajustes → Recibos, así que la paridad de formato está garantizada por
+ * construcción. La composición vive en `OrdersBulkPrintService`; esta vista solo
+ * dispara, avisa del gasto de papel y reporta el desenlace.
+ *
+ * El diálogo del navegador es BLOQUEANTE: `printSelection` resuelve cuando el
+ * operador lo cierra, no cuando el documento está armado. Por eso `running()`
+ * sigue en `true` durante el diálogo (el botón del header queda en loading) y la
+ * barra distingue "dibujando" de "esperando el diálogo".
  */
 
 import {
@@ -72,6 +78,7 @@ import {
 } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
 import { OrdersBulkService } from './orders-bulk.service';
+import { OrdersBulkPrintService } from './orders-bulk-print.service';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import {
   MAX_BULK_ORDERS_IDS,
@@ -211,9 +218,9 @@ const BULK_ACTIONS: BulkActionDef[] = [
   {
     id: 'print',
     group: 'documents',
-    label: 'Impresión masiva',
+    label: 'Imprimir tiquetes POS',
     description:
-      'Genera un solo PDF con el documento completo de cada orden, en el formato de papel configurado en la tienda, y lo abre para imprimir.',
+      'Imprime el tiquete POS de cada orden seleccionada en una sola tanda, con el mismo formato de papel y número de copias configurados en Ajustes → Recibos.',
     cta: 'Imprimir',
     icon: 'printer',
     variant: 'primary',
@@ -260,7 +267,7 @@ const GROUP_META: Array<Omit<BulkActionGroup, 'actions'>> = [
     key: 'documents',
     label: 'Documentos',
     icon: 'printer',
-    hint: 'Genera los documentos de la selección en un solo paso.',
+    hint: 'Imprime los documentos de la selección en una sola tanda, con un único diálogo de impresión.',
   },
 ];
 
@@ -280,6 +287,7 @@ const GROUP_META: Array<Omit<BulkActionGroup, 'actions'>> = [
 export class OrdersBulkPageComponent {
   private readonly ordersService = inject(StoreOrdersService);
   private readonly bulkService = inject(OrdersBulkService);
+  private readonly bulkPrintService = inject(OrdersBulkPrintService);
   private readonly customersService = inject(CustomersService);
   private readonly routesService = inject(PlanillasRutasService);
   private readonly currencyService = inject(CurrencyFormatService);
@@ -504,6 +512,51 @@ export class OrdersBulkPageComponent {
   });
 
   readonly progress = this.bulkService.progress;
+
+  /**
+   * Avance del render de tiquetes. Es OTRA señal que `progress`: esa cuenta
+   * lotes HTTP pedidos y llega a 100% en cuanto los datos están; esta cuenta
+   * tiquetes dibujados, que es la parte larga con 300 órdenes.
+   */
+  readonly renderProgress = this.bulkPrintService.renderProgress;
+
+  /**
+   * Aviso de gasto de papel ANTES de pulsar.
+   *
+   * Con 300 órdenes y `pos_ticket_copies: 2` salen 600 hojas, y hasta ahora no
+   * había ninguna señal previa: el operador lo descubría en el diálogo de
+   * impresión, o en la bandeja. El conteo se pinta inline en la sección
+   * Documentos — no hay modal nuevo, porque el dato debe estar visible mientras
+   * se construye la selección, no solo al confirmar.
+   *
+   * Las copias vienen del snapshot local (`configuredCopies`), que es lo único
+   * disponible antes de pedir nada. Al imprimir manda el valor canónico de la DB
+   * (`payload.pos_ticket_copies`), así que si el comerciante cambió las copias
+   * sin re-loguear el aviso puede quedarse corto: es el snapshot rancio de
+   * `vendix_auth_state`, no un error de cuenta. Reactivo porque
+   * `StoreSettingsFacade.receipts` es un `computed`.
+   */
+  readonly printVolumeNotice = computed<string>(() => {
+    const tickets = this.selectedCount();
+    if (tickets === 0) return '';
+
+    const copies = this.bulkPrintService.configuredCopies();
+    const pages = tickets * copies;
+
+    const ticketLabel = tickets === 1 ? 'tiquete' : 'tiquetes';
+    const pageLabel = pages === 1 ? 'página' : 'páginas';
+    // En carta y media carta la hoja tiene alto FIJO, así que un tiquete largo
+    // se fragmenta en dos y `tiquetes × copias` queda por debajo del papel real
+    // (medido: una orden de 16 líneas mide 209 mm contra los 140 mm de la media
+    // carta). Prometer un número exacto ahí sería justo la sorpresa que este
+    // aviso existe para evitar.
+    const exact = this.bulkPrintService.pageCountIsExact();
+    const base = `${tickets} ${ticketLabel} · ${exact ? '' : 'al menos '}${pages} ${pageLabel}`;
+
+    // La coletilla solo aparece cuando multiplica: con 1 copia, "300 tiquetes ·
+    // 300 páginas (1 copia por tiquete)" es ruido.
+    return copies > 1 ? `${base} (${copies} copias por tiquete)` : base;
+  });
 
   readonly blockedReason = computed<string>(() => {
     if (this.selectedCount() === 0) {
@@ -866,9 +919,10 @@ export class OrdersBulkPageComponent {
   // modal de pre-confirmación después del dry-run — tenerlas también aquí
   // dejaría un camino que escribe sin pasar por la confirmación.
   //
-  // La impresión NO pasa por el modal a propósito: es de solo lectura (genera
-  // un PDF, no muta ninguna orden), así que un dry-run no tendría nada que
-  // advertir y solo añadiría un clic al quick win del ticket.
+  // La impresión NO pasa por el modal a propósito: es de solo lectura (dibuja
+  // tiquetes, no muta ninguna orden), así que un dry-run no tendría nada que
+  // advertir y solo añadiría un clic al quick win del ticket. El gasto de papel
+  // se avisa inline con `printVolumeNotice`, sin robar un clic.
   // ───────────────────────────────────────────────────────────────────────────
 
   private runPrint(): void {
@@ -888,8 +942,12 @@ export class OrdersBulkPageComponent {
     }
     const requested = this.selectedCount();
     this.running.set(true);
-    this.bulkService
-      .printInBatches({ ids: this.selectedIdList() })
+    // `printSelection` resuelve DESPUÉS de que el operador cierre el diálogo del
+    // navegador, no cuando el documento está armado: `window.print()` bloquea.
+    // Por eso `running` no se apaga antes — el botón del header debe seguir en
+    // loading mientras el diálogo está abierto.
+    this.bulkPrintService
+      .printSelection(this.selectedIdList())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (outcome) => {
@@ -906,34 +964,36 @@ export class OrdersBulkPageComponent {
    *
    * Tres desenlaces, y ninguno puede quedar mudo:
    *
-   * 1. **Sin PDF** — ningún lote produjo documento. Se muestra el mensaje REAL
-   *    del backend (`failureMessage`). El texto anterior, "Revisa los permisos
-   *    y la configuración de recibos", se disparaba ante cualquier fallo y
-   *    mandaba al operador a revisar dos cosas que casi nunca eran la causa.
-   * 2. **PDF parcial** — hay documento pero el backend omitió órdenes
-   *    (canceladas, reembolsadas, inexistentes). Se abre el PDF Y se advierte,
-   *    porque un operador que pidió 20 y recibe 17 tiene que enterarse ahí, no
-   *    contando páginas.
-   * 3. **PDF completo** — se abre y se confirma con el conteo real.
+   * 1. **Nada impreso** (`rendered === 0`) — ningún tiquete llegó al papel: o el
+   *    backend no encontró nada imprimible, o todos los lotes cayeron, o el
+   *    render se rechazó. Se muestra el mensaje REAL (`failureMessage`), que con
+   *    el contrato JSON ya es el del backend sin trucos de Blob. El texto
+   *    anterior, "Revisa los permisos y la configuración de recibos", se
+   *    disparaba ante cualquier fallo y mandaba al operador a revisar dos cosas
+   *    que casi nunca eran la causa. El discriminante era `!outcome.blob`
+   *    cuando el documento lo generaba el backend.
+   * 2. **Parcial** — se imprimió, pero el backend omitió órdenes (canceladas,
+   *    reembolsadas, inexistentes). Se imprime Y se advierte, porque un operador
+   *    que pidió 20 y recibe 17 tiene que enterarse ahí, no contando hojas.
+   * 3. **Completo** — se confirma con el conteo real de tiquetes y de hojas.
    */
   private reportPrintOutcome(
     outcome: BulkPrintOutcome,
     requested: number,
   ): void {
-    if (!outcome.blob) {
+    if (outcome.rendered === 0) {
       this.toastService.error(
         outcome.failureMessage ??
-          'No se pudo generar el PDF de las órdenes seleccionadas.',
+          'No se pudo imprimir ninguna de las órdenes seleccionadas.',
       );
       return;
     }
 
-    this.openPdfInNewTab(outcome.blob);
-
-    const omitted = outcome.skippedCount + outcome.failedIds.length;
+    const omitted = outcome.skipped.length + outcome.failedIds.length;
     if (omitted === 0) {
       this.toastService.success(
-        `${outcome.printed} de ${requested} órdenes listas para imprimir`,
+        `${outcome.rendered} de ${requested} órdenes enviadas a la impresora ` +
+          `(${outcome.pages} ${outcome.pages === 1 ? 'página' : 'páginas'})`,
       );
       return;
     }
@@ -946,31 +1006,10 @@ export class OrdersBulkPageComponent {
       .join(', ');
 
     this.toastService.warning(
-      `${outcome.printed} de ${requested} órdenes impresas. ` +
+      `${outcome.rendered} de ${requested} órdenes impresas. ` +
         `${omitted} omitidas${detail ? ` (${detail}${omitted > 3 ? '…' : ''})` : ''}: ` +
         'canceladas, reembolsadas o no disponibles.',
     );
-  }
-
-  /**
-   * Abre el Blob en una nueva pestaña para que el navegador muestre su
-   * diálogo de impresión nativo. Esto respeta la configuración de la
-   * impresora del operador (copies, papel, orientación) y la
-   * configuración de recibos de la tienda (`store_settings.receipts`)
-   * que el backend ya respetó al generar el PDF.
-   */
-  private openPdfInNewTab(blob: Blob): void {
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, '_blank');
-    if (!win) {
-      // Popup bloqueado: descargar como fallback.
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ordenes_bulk_${new Date().toISOString().split('T')[0]}.pdf`;
-      a.click();
-    }
-    // Liberar el URL después de un rato para no fugar memoria.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   private onOperationDone(result: BulkOrdersResult, label: string): void {
@@ -994,6 +1033,10 @@ export class OrdersBulkPageComponent {
   private onOperationError(err: unknown): void {
     this.running.set(false);
     this.bulkService.resetProgress();
+    // `printSelection` no emite error por diseño (traduce todo a un outcome),
+    // pero si alguna vez lo hiciera el avance del render no puede quedarse
+    // colgado pintando una barra de un lote que ya no existe.
+    this.bulkPrintService.resetRenderProgress();
     this.toastService.error(extractApiErrorMessage(err));
   }
 

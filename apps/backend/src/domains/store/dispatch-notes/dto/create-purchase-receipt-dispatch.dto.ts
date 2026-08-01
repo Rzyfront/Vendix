@@ -3,6 +3,7 @@ import {
   IsString,
   IsOptional,
   IsArray,
+  ArrayNotEmpty,
   ValidateNested,
   IsDateString,
   IsEnum,
@@ -61,7 +62,15 @@ export class CreatePurchaseReceiptDispatchDto {
   @IsString()
   currency?: string;
 
+  /**
+   * At least one line is mandatory. An empty array used to create a remisión
+   * with zero lines that later reached
+   * `delegatePurchaseReceiptToPurchaseOrder`, resolved zero PO lines and
+   * returned silently: the caller got HTTP success while the purchase order was
+   * never actually received.
+   */
   @IsArray()
+  @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => CreateDispatchNoteItemDto)
   items: CreateDispatchNoteItemDto[];

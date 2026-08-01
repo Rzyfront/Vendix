@@ -494,6 +494,38 @@ export class DispatchNoteFlowService {
 
     const user_id = RequestContextService.getUserId();
 
+    // ORDEN DELIBERADO: el efecto va PRIMERO, el commit de estado después.
+    //
+    // emitAsync (no emit): se espera al listener `received` para que el stock-in
+    // y, en purchase_receipts ligados a OC, la delegación a
+    // `PurchaseOrdersService.receive()` (que crea el purchase_order_reception)
+    // TERMINEN antes de que esta llamada HTTP responda. Quien encadena un pago
+    // justo después de recibir (el flujo POP "crear + recibir + pagar") se
+    // correría de otro modo: el pago contaría 0 recepciones y lo clasificaría como
+    // anticipo a proveedor (DR 133005) en vez de abonar la CxP (DR 2205).
+    //
+    // Y emite ANTES del update precisamente para que un fallo del listener impida
+    // el commit del estado: como `inbound` solo permite `received → voided`,
+    // comprometer `received` antes del efecto dejaba la remisión atascada para
+    // siempre y la OC sin recibir, sin forma de reintentar `POST /:id/receive`.
+    // Con este orden, un throw del listener deja la remisión en `confirmed` y la
+    // operación es reintentable.
+    //
+    // El payload se arma con la nota PRE-update: el `data` de abajo solo toca
+    // status / delivered_by_user_id / delivered_at / actual_delivery_date /
+    // updated_at, ninguno de los campos que viajan acá.
+    await this.eventEmitter.emitAsync('dispatch_note.received', {
+      dispatch_note_id: id,
+      dispatch_number: dispatch_note.dispatch_number,
+      store_id: dispatch_note.store_id,
+      direction: dispatch_note.direction,
+      subtype: dispatch_note.subtype,
+      supplier_id: dispatch_note.supplier_id,
+      related_dispatch_id: dispatch_note.related_dispatch_id,
+      from_location_id: dispatch_note.from_location_id,
+      to_location_id: dispatch_note.to_location_id,
+    });
+
     const updated = await this.prisma.dispatch_notes.update({
       where: { id },
       data: {
@@ -507,27 +539,6 @@ export class DispatchNoteFlowService {
         updated_at: new Date(),
       },
       include: DISPATCH_NOTE_INCLUDE,
-    });
-
-    // emitAsync (not emit): await the `received` listener so the stock-in and,
-    // for PO-linked purchase_receipts, the delegated `PurchaseOrdersService.receive()`
-    // (which creates the purchase_order_reception) FINISH before this HTTP call
-    // returns. Callers that chain a payment right after receive (e.g. the POP
-    // "crear + recibir + pagar" flow) would otherwise race: the payment would
-    // count 0 receptions and misclassify as a supplier advance (DR 133005)
-    // instead of settling the payable (DR 2205). handleReceived owns its own
-    // try/catch, so a listener fault surfaces here as a failed receive rather
-    // than a silently-swallowed stock-in.
-    await this.eventEmitter.emitAsync('dispatch_note.received', {
-      dispatch_note_id: id,
-      dispatch_number: updated.dispatch_number,
-      store_id: updated.store_id,
-      direction: updated.direction,
-      subtype: updated.subtype,
-      supplier_id: updated.supplier_id,
-      related_dispatch_id: updated.related_dispatch_id,
-      from_location_id: updated.from_location_id,
-      to_location_id: updated.to_location_id,
     });
 
     this.logger.log(`Dispatch note #${id} received (inbound)`);

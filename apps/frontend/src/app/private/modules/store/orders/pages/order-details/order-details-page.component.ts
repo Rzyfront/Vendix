@@ -57,7 +57,8 @@ import { OrderPaymentModalComponent } from '../../components/order-payment-modal
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
-import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
+import { OrderTicketService } from '../../services/order-ticket.service';
+import { TicketData } from '../../../pos/models/ticket.model';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
@@ -1053,6 +1054,7 @@ export class OrderDetailsPageComponent {
   private currencyService = inject(CurrencyFormatService);
   private authFacade = inject(AuthFacade);
   private ticketService = inject(PosTicketService);
+  private orderTicketService = inject(OrderTicketService);
   private posShippingService = inject(PosShippingService);
   // Plan KDS fire-flows (F3): manual selective fire for online orders
   // with `prepared` items that were never auto-fired (the auto-fire
@@ -2195,145 +2197,49 @@ export class OrderDetailsPageComponent {
     return 'pdf';
   }
 
+  /**
+   * Prints the order ticket through `PosTicketService.printTicketsBatch`, the
+   * same renderer the POS post-sale ticket and the settings preview use.
+   *
+   * This used to build its own hidden iframe, and that iframe never printed:
+   * `iframe.onload` was assigned AFTER `iframeDoc.close()`, and `close()`
+   * dispatches `load` synchronously (measured in Chromium: `readyState` is
+   * already `'complete'` on the next statement). So `print()` — and the cleanup
+   * timer nested inside the same handler — never ran: the button did nothing and
+   * leaked one iframe into the DOM per click.
+   *
+   * Delegating also fixes the document itself: the duplicated `<style>` block had
+   * no `@page size` rule and ignored `receipts.pos_ticket_copies`, and the
+   * service now waits for images to decode before `print()` and removes the
+   * iframe on `afterprint`.
+   */
   async printOrder(): Promise<void> {
     const orderData = this.order();
     if (!orderData) return;
 
     try {
-      const ticketData = this.buildTicketData(orderData);
-      const html = await this.ticketService.generateTicketHTML(ticketData);
-
-      // Use iframe-based printing to avoid popup blockers
-      const iframe = document.createElement('iframe');
-      iframe.style.position = 'fixed';
-      iframe.style.right = '0';
-      iframe.style.bottom = '0';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = 'none';
-      document.body.appendChild(iframe);
-
-      const iframeDoc = iframe.contentWindow?.document;
-      if (!iframeDoc) {
-        document.body.removeChild(iframe);
-        this.toastService.error('No se pudo preparar la impresion');
-        return;
-      }
-
-      iframeDoc.open();
-      iframeDoc.write(`
-        <html>
-          <head>
-            <title>Ticket #${orderData.order_number}</title>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #fff; }
-              .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; }
-              @media print {
-                body { padding: 0; margin: 0; }
-                .ticket { border: none; border-radius: 0; }
-              }
-            </style>
-          </head>
-          <body>${html}</body>
-        </html>
-      `);
-      iframeDoc.close();
-
-      // Wait for content to render, then print
-      iframe.onload = () => {
-        iframe.contentWindow?.print();
-        // Clean up after print dialog closes
-        setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe);
-          }
-        }, 1000);
-      };
+      await this.ticketService.printTicketsBatch([
+        this.buildTicketData(orderData),
+      ]);
     } catch (err) {
       console.error('Error generating ticket:', err);
       this.toastService.error('Error al generar el ticket');
     }
   }
 
-  private buildTicketData(orderData: Order): TicketData {
-    const items: TicketItem[] = (orderData.order_items || []).map((item) => ({
-      id: String(item.id || '0'),
-      name: item.product_name || 'Producto',
-      sku: item.variant_sku || 'N/A',
-      quantity: Number(item.quantity) || 0,
-      unitPrice: Number(item.unit_price) || 0,
-      totalPrice: Number(item.total_price) || 0,
-      tax: Number(item.tax_amount_item) || 0,
-      appliedPriceTierName: item.applied_price_tier_name_snapshot ?? null,
-      isPackageUnit: this.hasPackageStockConsumption(item),
-      unitsPerPackage: this.getPackageMultiplier(item),
-    }));
-
-    // Determine payment method from the latest succeeded payment
-    const succeededPayment = (orderData.payments || []).find((p) => p.state === 'succeeded');
-    const paymentMethod = succeededPayment?.gateway_response?.metadata?.payment_method || 'N/A';
-    const cashReceived = succeededPayment?.gateway_response?.metadata?.amount_received;
-    const change = succeededPayment?.gateway_response?.change;
-
-    // Get cashier name from current user
-    const user = this.authFacade.getCurrentUser();
-    const cashierName = user ? `${user.first_name} ${user.last_name}` : 'Administrador';
-
-    // Delivery address from the order's shipping address (may be undefined for
-    // counter POS sales without a shipping address).
-    const shippingAddress = this.formatShippingAddress(orderData);
-
-    return {
-      id: orderData.order_number || 'N/A',
-      date: new Date(orderData.created_at || Date.now()),
-      items,
-      subtotal: Number(orderData.subtotal_amount) || 0,
-      tax: Number(orderData.tax_amount) || 0,
-      discount: Number(orderData.discount_amount) || 0,
-      total: Number(orderData.grand_total) || 0,
-      paymentMethod,
-      cashReceived: cashReceived ? Number(cashReceived) : undefined,
-      change: cashReceived ? Number(change || 0) : undefined,
-      cashier: cashierName,
-      transactionId: orderData.order_number,
-      customer: orderData.users
-        ? {
-            name: `${orderData.users.first_name || ''} ${orderData.users.last_name || ''}`.trim() || 'Consumidor Final',
-            email: orderData.users.email,
-            phone: orderData.users.phone,
-            shippingAddress,
-          }
-        : { name: 'Consumidor Final', shippingAddress },
-      store: orderData.stores
-        ? {
-            name: orderData.stores.name,
-            address: '',
-            phone: '',
-            email: '',
-            taxId: '',
-            id: orderData.stores.id,
-          }
-        : undefined,
-    };
-  }
-
   /**
-   * Build a single-line delivery address from the order's shipping address
-   * relation. Returns `undefined` when there is no address (e.g. counter POS
-   * sales) so the ticket omits the line entirely. Empty parts are skipped.
+   * Adapter over `OrderTicketService.toTicketData`, kept so `printOrder()` calls
+   * one local name.
+   *
+   * The cashier is resolved here and not by the service: on this page the
+   * operator printing IS the seller, so the current user is the right name. The
+   * service must not assume that — in bulk printing the same call would stamp
+   * the printer operator onto orders sold by someone else.
    */
-  private formatShippingAddress(orderData: Order): string | undefined {
-    const addr = orderData.addresses_orders_shipping_address_idToaddresses;
-    if (!addr) return undefined;
-    const parts = [
-      addr.address_line1,
-      addr.address_line2,
-      addr.city,
-      addr.state_province,
-    ]
-      .map((p) => (p ?? '').trim())
-      .filter((p) => p.length > 0);
-    return parts.length > 0 ? parts.join(', ') : undefined;
+  private buildTicketData(orderData: Order): TicketData {
+    const user = this.authFacade.getCurrentUser();
+    const cashier = user ? `${user.first_name} ${user.last_name}` : undefined;
+    return this.orderTicketService.toTicketData(orderData, { cashier });
   }
 
   // ── Bug 4: order → dispatch note → route traceability ──────
@@ -2736,18 +2642,14 @@ export class OrderDetailsPageComponent {
     return parseVariantAttributes(raw);
   }
 
+  // Template adapters over OrderTicketService: the packaging rule lives in one
+  // place (the ticket mapper needs it too) while the template keeps its names.
   hasPackageStockConsumption(item: OrderItem): boolean {
-    const consumed = Number(item.stock_units_consumed || 0);
-    const quantity = Number(item.quantity || 0);
-    return consumed > 0 && quantity > 0 && consumed !== quantity;
+    return this.orderTicketService.hasPackageStockConsumption(item);
   }
 
   getPackageMultiplier(item: OrderItem): number | null {
-    if (!this.hasPackageStockConsumption(item)) return null;
-    const consumed = Number(item.stock_units_consumed || 0);
-    const quantity = Number(item.quantity || 0);
-    if (quantity <= 0) return null;
-    return consumed / quantity;
+    return this.orderTicketService.packageMultiplier(item);
   }
 
   // ─── Restaurant Suite — Fase K Gap 2: per-item KDS state ─────

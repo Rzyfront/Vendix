@@ -87,6 +87,25 @@ export interface Order {
   // Persisted discount snapshots — read-only from backend, never recalculated.
   order_promotions?: OrderPromotionSnapshot[];
   coupon_uses?: CouponUseSnapshot[];
+  /**
+   * Electronic invoices already issued for this order, newest first and
+   * pre-filtered by the backend to `dian_status: 'accepted'` (`take: 1`).
+   * Optional: only the endpoints that print tickets include it.
+   *
+   * `OrderTicketService.toTicketData` reads `invoices[0]` to turn the ticket
+   * into an informative copy of a DIAN-validated invoice. The acceptance filter
+   * stays in the query — the printed footer asserts DIAN validation, so the
+   * frontend must not re-derive it from a laxer condition.
+   */
+  invoices?: OrderInvoiceSnapshot[];
+}
+
+/**
+ * Minimal invoice projection needed to print a ticket as an informative copy.
+ */
+export interface OrderInvoiceSnapshot {
+  invoice_number: string;
+  cufe?: string | null;
 }
 
 export interface OrderPromotionSnapshot {
@@ -237,11 +256,26 @@ export interface Payment {
   created_at: string;
   updated_at: string;
   store_payment_method_id?: number;
+  /**
+   * Payment-method relation. This — not `gateway_response.metadata` — is where
+   * the printed method name comes from: nothing writes
+   * `metadata.payment_method`, so `OrderTicketService.toTicketData` reads this
+   * cascade (`display_name` → `system_payment_method.display_name`) instead.
+   *
+   * Included by the order detail endpoint and by `POST /store/orders/bulk/print`.
+   */
   store_payment_method?: {
     id: number;
-    display_name: string;
+    /**
+     * The store's own alias for the method (`store_payment_methods.display_name`
+     * is a nullable VarChar(100)). Absent/blank means "use the catalogue name".
+     */
+    display_name?: string | null;
     system_payment_method?: {
       type: string;
+      /** Catalogue slug (`system_payment_methods.name`, unique, NOT NULL). */
+      name?: string;
+      /** Catalogue label ("Efectivo", "Tarjeta"…), NOT NULL in the DB. */
       display_name: string;
       /**
        * Structural discriminator of how the money is captured, mirrored from

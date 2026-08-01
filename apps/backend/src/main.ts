@@ -179,19 +179,17 @@ async function bootstrap() {
     // cabecera de respuesta cross-origin: sin listarla aquí, fetch/XHR la
     // recibe pero `response.headers.get()` devuelve null.
     //
-    // Las `X-*-Count` / `X-Skipped-*` las emite `POST /store/orders/bulk/print`,
-    // cuyo body es un PDF binario: el reporte de qué órdenes se omitieron no
-    // cabe en el body, así que viaja en cabeceras.
+    // Ya no se exponen `X-Total-Count` / `X-Printed-Count` / `X-Skipped-*`:
+    // las emitía `POST /store/orders/bulk/print` cuando su body era un PDF
+    // binario y el reporte de órdenes omitidas no tenía dónde ir. Ese endpoint
+    // devuelve JSON desde QUI-599, así que la partición viaja en el body,
+    // completa y sin el truncado que imponía el límite de 8 KB por cabecera de
+    // nginx.
     exposedHeaders: [
       'Authorization',
       'Cache-Control',
       'Pragma',
       'Content-Disposition',
-      'X-Total-Count',
-      'X-Printed-Count',
-      'X-Skipped-Count',
-      'X-Skipped-Orders',
-      'X-Skipped-Truncated',
     ],
   });
 

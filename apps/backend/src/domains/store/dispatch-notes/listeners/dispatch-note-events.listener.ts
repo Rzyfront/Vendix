@@ -15,6 +15,7 @@ import { OrderStockCommitService } from '../../inventory/shared/services/order-s
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -100,6 +101,46 @@ export class DispatchNoteEventsListener {
   }
 
   /**
+   * Token de idempotencia DELIMITADO de la recepción de una remisión.
+   *
+   * Espeja la convención `[VOID-REV#N]` que ya usa `reverseStockOnVoid`: sin
+   * delimitadores, un `contains` de `remisión #1` casa también dentro de
+   * `remisión #12`. Ese falso positivo hacía que los guards de idempotencia
+   * cortaran la ejecución y `POST /store/dispatch-notes/:id/receive` respondiera
+   * 200 sin recibir nada — y, en la reversa por anulación, disparara un
+   * `stock_out` fantasma de mercancía que nunca entró.
+   */
+  private receiptTag(dispatchNoteId: number): string {
+    return `[DN-RCP#${dispatchNoteId}]`;
+  }
+
+  /**
+   * ¿El texto persistido (`notes` / `reason`) referencia DE VERDAD la remisión
+   * `dispatchNoteId`?
+   *
+   * Prisma `contains` no tiene frontera de palabra, así que en los guards se usa
+   * solo como PREFILTRO (barato y aprovecha el índice). La confirmación exacta
+   * se hace acá:
+   *  - token nuevo `[DN-RCP#N]`: substring exacto, ya viene delimitado;
+   *  - marcador LEGADO (`remisión #N`, `Despacho remisión #N`): filas escritas
+   *    antes de este cambio, cuando la glosa no llevaba token. Se valida con un
+   *    lookahead negativo para que `#1` no case dentro de `#12`.
+   *
+   * El id es `number` (no hay inyección posible) y los marcadores son literales
+   * de este archivo; se escapan igualmente para no depender de esa suposición.
+   */
+  private matchesDispatchMarker(
+    text: string | null | undefined,
+    dispatchNoteId: number,
+    legacyMarker: string,
+  ): boolean {
+    if (!text) return false;
+    if (text.includes(this.receiptTag(dispatchNoteId))) return true;
+    const escaped = legacyMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`${escaped}(?![0-9])`).test(text);
+  }
+
+  /**
    * ORDER-FIRST receipt delegation. When a purchase_receipt remisión carries a
    * purchase_order_id, the received goods must flow through the SINGLE canonical
    * engine — PurchaseOrdersService.receive() — which owns stock-in, FIFO/CPP
@@ -111,7 +152,13 @@ export class DispatchNoteEventsListener {
    * 'Purchase order receipt' (no "remisión #N"), so the top-level
    * inventory_movements guard cannot catch a re-fire of THIS path. We dedupe on
    * purchase_order_receptions instead: every delegation writes the remisión ref
-   * into the reception notes, and a re-fire finds that reception and skips.
+   * (glosa legible + token `[DN-RCP#N]`) into the reception notes, and a re-fire
+   * finds that reception and skips.
+   *
+   * Fallos de resolución de línea LANZAN (no `return`): el emisor
+   * (`DispatchNoteFlowService.receive`) emite ANTES de comprometer el estado, así
+   * que un throw deja la remisión `confirmed` y reintentable en vez de responder
+   * 200 con la OC sin recibir.
    */
   private async delegatePurchaseReceiptToPurchaseOrder(
     dispatchNoteId: number,
@@ -120,6 +167,10 @@ export class DispatchNoteEventsListener {
       product_id: number;
       product_variant_id: number | null;
       dispatched_quantity: number;
+      // Línea EXACTA de la OC que liquida esta línea de recepción. Es la verdad
+      // desde la migración que agregó la columna; `null` solo en remisiones
+      // creadas antes de eso (camino legado por producto+variante más abajo).
+      purchase_order_item_id: number | null;
       // QUI-425 — per-line pricing overrides persisted on the dispatch_note_item.
       // Prisma returns Decimal columns as Prisma.Decimal (null when unset).
       new_base_price?: Prisma.Decimal | null;
@@ -135,31 +186,41 @@ export class DispatchNoteEventsListener {
     }
 
     // Idempotency dedupe on purchase_order_receptions (see method doc).
-    const receiptTag = `remisión #${dispatchNoteId}`;
-    const existingReception = await this.prisma
+    // El `contains` es solo PREFILTRO: casa el token delimitado nuevo O la glosa
+    // legada, y `matchesDispatchMarker` confirma la frontera en JS.
+    const receiptTag = this.receiptTag(dispatchNoteId);
+    const legacyReceiptMarker = `remisión #${dispatchNoteId}`;
+    const candidateReceptions = await this.prisma
       .withoutScope()
-      .purchase_order_receptions.findFirst({
+      .purchase_order_receptions.findMany({
         where: {
           purchase_order_id: purchaseOrderId,
-          notes: { contains: receiptTag },
+          OR: [
+            { notes: { contains: receiptTag } },
+            { notes: { contains: legacyReceiptMarker } },
+          ],
         },
-        select: { id: true },
+        select: { id: true, notes: true },
       });
+    const existingReception = candidateReceptions.find((r) =>
+      this.matchesDispatchMarker(r.notes, dispatchNoteId, legacyReceiptMarker),
+    );
     if (existingReception) {
       this.logger.warn(
-        `[received] Dispatch note #${dispatchNumber}: PO reception already exists for ${receiptTag} (reception #${existingReception.id}) — re-fire, skipping delegation`,
+        `[received] Dispatch note #${dispatchNumber}: PO reception already exists for ${legacyReceiptMarker} ${receiptTag} (reception #${existingReception.id}) — re-fire, skipping delegation`,
       );
       return;
     }
 
-    // Re-derive each PO line id by matching product_id (+ variant) against the
-    // PO's lines (the remisión does not persist a per-line PO reference).
     const poItems = await this.prisma
       .withoutScope()
       .purchase_order_items.findMany({
         where: { purchase_order_id: purchaseOrderId },
         select: { id: true, product_id: true, product_variant_id: true },
       });
+    // El findMany ya está acotado a `purchaseOrderId`, así que todo id presente
+    // en este mapa pertenece por construcción a ESTA orden de compra.
+    const poItemsById = new Map(poItems.map((p) => [p.id, p]));
 
     const receiveItems: Array<{
       id: number;
@@ -168,16 +229,42 @@ export class DispatchNoteEventsListener {
       new_profit_margin?: number;
     }> = [];
     for (const item of items) {
-      const poLine = poItems.find(
-        (p) =>
-          p.product_id === item.product_id &&
-          (p.product_variant_id ?? null) === (item.product_variant_id ?? null),
-      );
-      if (!poLine) {
-        this.logger.error(
-          `[received] Dispatch note #${dispatchNumber}: product #${item.product_id} not found on PO #${purchaseOrderId} — line skipped`,
+      let poLine: { id: number } | undefined;
+      if (item.purchase_order_item_id != null) {
+        // Camino canónico: la línea de OC viene FIJADA en la remisión.
+        poLine = poItemsById.get(item.purchase_order_item_id);
+        if (!poLine) {
+          // Un id fijado que no resuelve contra la OC es corrupción de datos
+          // (línea de otra orden, o borrada), no un miss blando: recibir "lo que
+          // se parezca" descuadraría cantidades, costeo e IVA de la OC.
+          throw new VendixHttpException(
+            ErrorCodes.DISPATCH_NOTE_PO_LINE_UNRESOLVED,
+            `Remisión #${dispatchNumber}: la línea fija purchase_order_item_id=${item.purchase_order_item_id} ` +
+              `no pertenece a la orden de compra #${purchaseOrderId}. La recepción se aborta sin recibir nada.`,
+            {
+              dispatch_number: dispatchNumber,
+              purchase_order_id: purchaseOrderId,
+              purchase_order_item_id: item.purchase_order_item_id,
+            },
+          );
+        }
+      } else {
+        // Camino LEGADO — remisiones creadas antes de que
+        // `dispatch_note_items.purchase_order_item_id` existiera: se reconstruye
+        // la línea por producto+variante. No puede desambiguar dos líneas de la
+        // OC con el mismo producto/variante (colapsa sobre la primera).
+        poLine = poItems.find(
+          (p) =>
+            p.product_id === item.product_id &&
+            (p.product_variant_id ?? null) === (item.product_variant_id ?? null),
         );
-        continue;
+        if (!poLine) {
+          this.logger.error(
+            `[received] Dispatch note #${dispatchNumber}: emparejamiento LEGADO (sin purchase_order_item_id) sin resultado — ` +
+              `producto #${item.product_id} (variante ${item.product_variant_id ?? '—'}) no está en la OC #${purchaseOrderId} — línea omitida`,
+          );
+          continue;
+        }
       }
       // dispatched_quantity is in PURCHASE units (same basis the direct receive
       // path uses); receive() applies purchase_to_stock_factor internally.
@@ -205,17 +292,24 @@ export class DispatchNoteEventsListener {
     }
 
     if (receiveItems.length === 0) {
-      this.logger.error(
-        `[received] Dispatch note #${dispatchNumber}: no PO lines resolved for PO #${purchaseOrderId} — nothing to receive`,
+      // Tras la resolución por id, cero líneas significa que la remisión no
+      // tiene NADA recibible. Lanza en vez de `return`: un `return` acá era
+      // exactamente el bug — HTTP 200 con la OC intacta en `approved`.
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_NOTHING_RECEIVABLE,
+        `Remisión #${dispatchNumber}: ninguna de sus líneas resolvió contra la orden de compra #${purchaseOrderId} — ` +
+          `no hay nada que recibir.`,
+        { dispatch_number: dispatchNumber, purchase_order_id: purchaseOrderId },
       );
-      return;
     }
 
     await this.purchaseOrdersService.receive(purchaseOrderId, {
       items: receiveItems,
       // Stamp the remisión ref so the reception is deduped on re-fire (above)
       // and the PO reception history is traceable back to the remisión document.
-      notes: `Recepción por ${receiptTag}`,
+      // La glosa legible se mantiene para el operador; el token delimitado es lo
+      // que leen los guards de idempotencia.
+      notes: `Recepción por ${legacyReceiptMarker} ${receiptTag}`,
     });
 
     this.logger.log(
@@ -590,6 +684,11 @@ export class DispatchNoteEventsListener {
   // ─── RECEIVED (inbound) ─────────────────────────────────────
   @OnEvent('dispatch_note.received')
   async handleReceived(event: DispatchNoteReceivedEvent) {
+    // SOLO la recepción ligada a una orden de compra re-lanza en el catch. Los
+    // demás subtypes (transfer_in, customer_return y el purchase_receipt
+    // standalone sin OC) conservan el swallow-and-log histórico: ampliar su radio
+    // de impacto está fuera de este arreglo.
+    let poLinkedReceipt = false;
     try {
       const dispatch_note = await this.prisma.dispatch_notes.findFirst({
         where: { id: event.dispatch_note_id },
@@ -611,13 +710,30 @@ export class DispatchNoteEventsListener {
       // `reason` string (which includes "remisión #N") into both
       // inventory_movements.reason and inventory_movements.notes, so a match
       // means stock was already moved.
-      const existingMovement =
-        await this.prisma.withoutScope().inventory_movements.findFirst({
+      //
+      // El `contains` es solo PREFILTRO (no tiene frontera de palabra): casa el
+      // token delimitado nuevo O la glosa legada, y `matchesDispatchMarker`
+      // confirma en JS. Antes, `remisión #1` casaba dentro de `remisión #12` y el
+      // guard cortaba en falso → HTTP 200 sin recibir nada.
+      const legacyMovementMarker = `remisión #${dispatch_note.id}`;
+      const candidateMovements = await this.prisma
+        .withoutScope()
+        .inventory_movements.findMany({
           where: {
-            notes: { contains: `remisión #${dispatch_note.id}` },
+            OR: [
+              { notes: { contains: this.receiptTag(dispatch_note.id) } },
+              { notes: { contains: legacyMovementMarker } },
+            ],
           },
-          select: { id: true },
+          select: { id: true, notes: true },
         });
+      const existingMovement = candidateMovements.find((m) =>
+        this.matchesDispatchMarker(
+          m.notes,
+          dispatch_note.id,
+          legacyMovementMarker,
+        ),
+      );
       if (existingMovement) {
         this.logger.warn(
           `[received] Dispatch note #${event.dispatch_number}: stock already moved (inventory_movement exists) — re-fire, skipping`,
@@ -658,6 +774,10 @@ export class DispatchNoteEventsListener {
           // `purchase_order.received`, which drives the DR 1435 / CR 2205
           // accounting, so the dispatch_note.accounting.received emit below is
           // intentionally skipped (receivedCost stays 0 for this path).
+          //
+          // Desde acá el fallo DEBE viajar: se marca antes de delegar para que el
+          // catch de este handler re-lance (ver `poLinkedReceipt` arriba).
+          poLinkedReceipt = true;
           await this.delegatePurchaseReceiptToPurchaseOrder(
             dispatch_note.id,
             dispatch_note.purchase_order_id,
@@ -678,7 +798,10 @@ export class DispatchNoteEventsListener {
                 location_id,
                 quantity_change: item.dispatched_quantity,
                 movement_type: 'stock_in',
-                reason: `Purchase receipt remisión #${dispatch_note.id}`,
+                // Glosa legible + token delimitado: el token es lo que leen los
+                // guards de idempotencia (`[DN-RCP#N]`), la frase es para el
+                // operador.
+                reason: `Purchase receipt remisión #${dispatch_note.id} ${this.receiptTag(dispatch_note.id)}`,
                 user_id: userId ?? undefined,
                 movement_unit_cost: Number(item.unit_price) || undefined,
                 create_movement: true,
@@ -803,6 +926,12 @@ export class DispatchNoteEventsListener {
         `[received] Error processing dispatch note #${event.dispatch_note_id}: ${error.message}`,
         error.stack,
       );
+      // Recepción ligada a OC: el fallo tiene que llegar al emisor.
+      // `DispatchNoteFlowService.receive` emite con `emitAsync` ANTES de
+      // comprometer `status = 'received'`, así que este re-throw impide el commit
+      // y deja la remisión `confirmed` y reintentable, en vez de responder 200 con
+      // la orden de compra sin recibir. Los demás subtypes NO re-lanzan.
+      if (poLinkedReceipt) throw error;
     }
   }
 
@@ -1031,16 +1160,30 @@ export class DispatchNoteEventsListener {
     }
 
     // Precondición: el movimiento original debe existir (lo creó este listener).
+    //
+    // El `contains` es solo PREFILTRO (sin frontera de palabra): casa el token
+    // delimitado nuevo O la glosa legada, y `matchesDispatchMarker` confirma en
+    // JS. Es el más peligroso de los tres guards: un falso positivo por colisión
+    // de substring (`#1` dentro de `#12`) dispararía un `stock_out` fantasma de
+    // mercancía que nunca entró.
     const originalMarker =
       direction === 'outbound'
         ? `Despacho remisión #${id}`
         : `remisión #${id}`;
-    const originalMovement = await this.prisma
+    const originalCandidates = await this.prisma
       .withoutScope()
-      .inventory_movements.findFirst({
-        where: { notes: { contains: originalMarker } },
-        select: { id: true },
+      .inventory_movements.findMany({
+        where: {
+          OR: [
+            { notes: { contains: this.receiptTag(id) } },
+            { notes: { contains: originalMarker } },
+          ],
+        },
+        select: { id: true, notes: true },
       });
+    const originalMovement = originalCandidates.find((m) =>
+      this.matchesDispatchMarker(m.notes, id, originalMarker),
+    );
     if (!originalMovement) {
       this.logger.warn(
         `[voided] Remisión #${dispatch_number}: sin movimiento original (${originalMarker}) — ` +

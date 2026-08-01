@@ -491,6 +491,25 @@ export class OrdersService {
             },
           },
         },
+        // Solo la factura ACEPTADA por la DIAN, y solo la última (QUI-604).
+        //
+        // El tiquete que se imprime desde el detalle de orden la necesita para
+        // saber si es el documento fiscal o una copia informativa: sin esta fila
+        // `OrderTicketService.toTicketData` deja `electronicInvoice` vacío,
+        // `PosTicketService.shouldShowTaxes` cae a `printsVatBreakdown()`, y una
+        // orden YA facturada sale con desglose de IVA y el pie "Este documento
+        // no es una factura electrónica". Mismo criterio que
+        // `OrdersBulkService.bulkPrint`.
+        //
+        // `accepted` y no `pending`: el pie afirma literalmente "validada por la
+        // DIAN", así que la AUSENCIA de fila es la señal correcta para no
+        // afirmarlo.
+        invoices: {
+          where: { dian_status: 'accepted' },
+          select: { invoice_number: true, cufe: true },
+          orderBy: { id: 'desc' },
+          take: 1,
+        },
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: {
