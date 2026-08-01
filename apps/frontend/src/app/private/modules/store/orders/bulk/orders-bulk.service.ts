@@ -42,12 +42,17 @@
  * (no bloquear el navegador generando un PDF gigante).
  */
 
-import { HttpClient } from '@angular/common/http';
+import {
+  HttpClient,
+  HttpErrorResponse,
+  HttpResponse,
+} from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { Observable, concatMap, from, of, toArray } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 
 import { environment } from '../../../../../../environments/environment';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   EMPTY_BULK_ORDERS_PREVIEW,
@@ -60,6 +65,8 @@ import {
   type BulkOrdersProgressPhase,
   type BulkOrdersResult,
   type BulkPrintOrdersRequest,
+  type BulkPrintOutcome,
+  type BulkPrintSkippedOrder,
   type BulkTransitionOrdersRequest,
 } from './orders-bulk.interface';
 
@@ -239,58 +246,147 @@ export class OrdersBulkService {
    * Genera un PDF multi-página con todas las órdenes seleccionadas. El
    * formato de papel lo resuelve el backend desde `store_settings.receipts`.
    *
-   * Cuando la selección excede `MAX_BULK_ORDERS_IDS`, el cliente trocea y
-   * descarga N blobs. El operador verá N diálogos de impresión en ese caso
-   * (raro para ≈100 órdenes/día). Para selecciones que caben en un lote, un
-   * solo blob → un solo diálogo, que es la UX elegida en el plan.
+   * La UI bloquea la selección en `MAX_BULK_ORDERS_IDS`, que es el mismo tope
+   * que trocea `startPhase`, así que en la práctica siempre hay UN lote: un
+   * solo blob → un solo diálogo de impresión, que es la UX elegida en el plan.
+   * El troceado se mantiene como red de seguridad por si algún día el tope de
+   * la UI y el del request divergen.
    *
-   * Devuelve `null` si la selección estaba vacía.
+   * El backend es tolerante por orden: omite las canceladas / reembolsadas /
+   * inexistentes y devuelve el PDF con el resto, reportando lo omitido en las
+   * cabeceras `X-Printed-Count` / `X-Skipped-Count` / `X-Skipped-Orders`. Por
+   * eso este método devuelve un {@link BulkPrintOutcome} y no un `Blob` pelado:
+   * el operador necesita saber que pidió 20 y salieron 17.
+   *
+   * Tampoco traga ya los errores. Antes un `catchError(() => of(null))` los
+   * silenciaba y la UI decía "Revisa los permisos y la configuración de
+   * recibos" ante CUALQUIER fallo — incluido el 400 de
+   * `pdfkit_1.default is not a constructor`, que no tenía nada que ver con
+   * permisos ni con recibos y solo era visible en la pestaña de red. Ahora el
+   * mensaje real del backend llega en `failureMessage`.
+   *
+   * Devuelve un outcome vacío si la selección estaba vacía.
    */
-  printInBatches(request: BulkPrintOrdersRequest): Observable<Blob | null> {
+  printInBatches(request: BulkPrintOrdersRequest): Observable<BulkPrintOutcome> {
     const batches = this.startPhase('print', request.ids);
     if (batches.length === 0) {
-      return of(null);
+      return of(EMPTY_PRINT_OUTCOME);
     }
 
-    // Un solo lote → un solo Blob, un solo diálogo de impresión.
-    if (batches.length === 1) {
-      return this.http
-        .post(`${this.apiUrl}/store/orders/bulk/print`, request, {
-          responseType: 'blob',
-        })
-        .pipe(
-          tap(() => this.advance(batches[0].length)),
-          catchError(() => of(null)),
-        );
-    }
-
-    // Varios lotes → concatenar los blobs en orden. Cada lote es un PDF
-    // válido; el navegador abre cada uno por separado al imprimir.
+    // El troceado se aplica igual con un lote o con varios: un solo camino de
+    // código evita que el caso de 1 lote (el 99% real) diverja del de N.
     return from(batches).pipe(
       concatMap((batch) =>
         this.http
           .post(
             `${this.apiUrl}/store/orders/bulk/print`,
             { ...request, ids: batch },
-            { responseType: 'blob' },
+            { responseType: 'blob', observe: 'response' },
           )
           .pipe(
-            catchError(() => of(null as Blob | null)),
+            map((response) => this.toPrintOutcome(response, batch)),
+            catchError((error: unknown) =>
+              this.toFailedPrintOutcome(error, batch),
+            ),
             tap(() => this.advance(batch.length)),
           ),
       ),
       toArray(),
-      map((blobs) => {
-        const valid = blobs.filter((b): b is Blob => b !== null);
-        return valid.length > 0 ? new Blob(valid, { type: 'application/pdf' }) : null;
-      }),
+      map((parts) => mergePrintOutcomes(parts)),
     );
+  }
+
+  /** Traduce una respuesta 200 con PDF a un outcome, leyendo las cabeceras. */
+  private toPrintOutcome(
+    response: HttpResponse<Blob>,
+    batch: readonly number[],
+  ): BulkPrintOutcome {
+    const skipped = this.parseSkippedHeader(
+      response.headers.get('X-Skipped-Orders'),
+    );
+    // `X-Printed-Count` es la verdad del backend. El fallback a
+    // `batch.length` solo cubre el caso de que un proxy filtre la cabecera:
+    // preferible un conteo optimista a mostrar "0 impresas" con un PDF válido
+    // en la mano.
+    const printedHeader = Number(response.headers.get('X-Printed-Count'));
+    const skippedHeader = Number(response.headers.get('X-Skipped-Count'));
+
+    return {
+      blob: response.body,
+      printed: Number.isFinite(printedHeader) && printedHeader >= 0
+        ? printedHeader
+        : batch.length,
+      skippedCount: Number.isFinite(skippedHeader) && skippedHeader >= 0
+        ? skippedHeader
+        : skipped.length,
+      skipped,
+      skippedTruncated: response.headers.get('X-Skipped-Truncated') === 'true',
+      failedIds: [],
+    };
+  }
+
+  /**
+   * Traduce un error HTTP a un outcome fallido, extrayendo el mensaje real.
+   *
+   * Con `responseType: 'blob'`, el cuerpo de error TAMBIÉN llega como Blob, así
+   * que `error.error.message` es `undefined` y el mensaje del backend queda
+   * ilegible. Hay que leer el Blob como texto y parsear el JSON — este es el
+   * paso que faltaba para que el 400 llegara a la UI.
+   */
+  private toFailedPrintOutcome(
+    error: unknown,
+    batch: readonly number[],
+  ): Observable<BulkPrintOutcome> {
+    const failed: BulkPrintOutcome = {
+      ...EMPTY_PRINT_OUTCOME,
+      failedIds: [...batch],
+    };
+
+    const body = (error as HttpErrorResponse | undefined)?.error;
+    if (!(body instanceof Blob)) {
+      return of({ ...failed, failureMessage: extractApiErrorMessage(error) });
+    }
+
+    return from(body.text()).pipe(
+      map((text) => {
+        try {
+          const parsed = JSON.parse(text) as {
+            message?: string;
+            error_code?: string;
+          };
+          return { ...failed, failureMessage: parsed.message };
+        } catch {
+          return { ...failed, failureMessage: text || undefined };
+        }
+      }),
+      catchError(() => of(failed)),
+    );
+  }
+
+  /** Decodifica `X-Skipped-Orders` (JSON en `encodeURIComponent`). */
+  private parseSkippedHeader(raw: string | null): BulkPrintSkippedOrder[] {
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(decodeURIComponent(raw));
+      return Array.isArray(parsed) ? (parsed as BulkPrintSkippedOrder[]) : [];
+    } catch {
+      // Una cabecera ilegible no puede tumbar una impresión que sí funcionó.
+      return [];
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────
   // Internos
   // ───────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Trocea la selección al tope del backend y arranca la señal de progreso.
+   *
+   * Como la UI corta la selección en el mismo `MAX_BULK_ORDERS_IDS`, en la
+   * práctica siempre sale un único lote. El troceado se mantiene como red de
+   * seguridad por si el gate de la UI y el `@ArrayMaxSize` del DTO llegaran a
+   * divergir.
+   */
   private startPhase(
     phase: Exclude<BulkOrdersProgressPhase, 'idle'>,
     ids: readonly number[],
@@ -418,4 +514,44 @@ export function mergeResults(
     }),
     { total: 0, successful: 0, failed: 0, results: [] },
   );
+}
+
+/** Outcome neutro: selección vacía o lote sin PDF. */
+export const EMPTY_PRINT_OUTCOME: BulkPrintOutcome = {
+  blob: null,
+  printed: 0,
+  skippedCount: 0,
+  skipped: [],
+  skippedTruncated: false,
+  failedIds: [],
+};
+
+/**
+ * Funde los outcomes de todos los lotes.
+ *
+ * Los blobs se concatenan en un único `Blob` como hacía la versión anterior.
+ * Solo entra en juego por encima de `MAX_BULK_ORDERS_IDS` órdenes, que es el
+ * caso raro; el camino habitual es un lote → un blob → un diálogo.
+ *
+ * `failureMessage` se queda con el PRIMER fallo, no con el último: si tres
+ * lotes fallan por la misma causa, repetir el mensaje no aporta, y el primero
+ * es el que el operador puede correlacionar con lo que vio.
+ */
+export function mergePrintOutcomes(
+  parts: readonly BulkPrintOutcome[],
+): BulkPrintOutcome {
+  const blobs = parts
+    .map((p) => p?.blob)
+    .filter((b): b is Blob => b instanceof Blob);
+
+  return {
+    blob:
+      blobs.length > 0 ? new Blob(blobs, { type: 'application/pdf' }) : null,
+    printed: parts.reduce((acc, p) => acc + (p?.printed ?? 0), 0),
+    skippedCount: parts.reduce((acc, p) => acc + (p?.skippedCount ?? 0), 0),
+    skipped: parts.flatMap((p) => p?.skipped ?? []),
+    skippedTruncated: parts.some((p) => p?.skippedTruncated === true),
+    failureMessage: parts.find((p) => p?.failureMessage)?.failureMessage,
+    failedIds: parts.flatMap((p) => p?.failedIds ?? []),
+  };
 }

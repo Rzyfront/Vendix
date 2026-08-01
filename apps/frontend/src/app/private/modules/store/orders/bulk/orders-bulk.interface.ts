@@ -11,14 +11,18 @@
  */
 
 /**
- * Tope duro de órdenes por lote. Espejo de `MAX_BULK_ORDERS_IDS`
- * (`bulk-orders.dto.ts:24`), aplicado en backend por `@ArrayMaxSize`.
- * El frontend lo reutiliza para trocear la selección en lotes y no
- * mandar más ids de los que el backend acepta.
+ * Tope duro de órdenes por lote, común a las tres operaciones masivas. Espejo
+ * de `MAX_BULK_ORDERS_IDS` (`bulk-orders.dto.ts`), aplicado en backend por
+ * `@ArrayMaxSize`.
  *
- * 100 órdenes por lote cubre el caso de uso reportado (≈100 órdenes/día).
+ * En el frontend NO es solo un gate de la acción: la selección misma se corta
+ * aquí (`toggleRow` / `toggleAllVisible`). Dejar marcar 500 casillas para luego
+ * negarse a operar es peor UX que impedir la 301 en el momento y decir por qué.
+ *
+ * Si este valor supera al del backend, la UI deja seleccionar más de lo que el
+ * DTO acepta y el operador se come un 400 de validación. Se cambian juntos.
  */
-export const MAX_BULK_ORDERS_IDS = 100;
+export const MAX_BULK_ORDERS_IDS = 300;
 
 /**
  * Estados destino permitidos en el carril masivo. Espejo de
@@ -127,6 +131,52 @@ export interface BulkAssignRouteRequest {
 export interface BulkPrintOrdersRequest {
   ids: number[];
   copies?: number;
+}
+
+/**
+ * Motivo por el que el backend dejó una orden fuera del PDF. Espeja
+ * `BulkPrintSkipReason` del backend.
+ */
+export type BulkPrintSkipReason =
+  | 'not_found'
+  | 'non_printable_state'
+  | 'render_error';
+
+/** Una orden excluida del PDF masivo, tal como llega en `X-Skipped-Orders`. */
+export interface BulkPrintSkippedOrder {
+  id: number;
+  order_number?: string;
+  reason: BulkPrintSkipReason;
+  message: string;
+}
+
+/**
+ * Resultado de la impresión masiva.
+ *
+ * El PDF viaja en el body y el reporte de lo omitido en cabeceras, porque un
+ * `application/pdf` no puede llevar metadatos JSON. `blob === null` significa
+ * que no se pudo generar NINGÚN PDF (todos los lotes fallaron).
+ *
+ * `skipped` puede venir truncado (`skippedTruncated`): el backend enumera como
+ * mucho 20 órdenes en la cabecera para no reventar el límite de nginx, pero
+ * `skippedCount` siempre es el total real.
+ */
+export interface BulkPrintOutcome {
+  blob: Blob | null;
+  /** Órdenes efectivamente dibujadas, sumadas sobre todos los lotes. */
+  printed: number;
+  /** Total real de omitidas, aunque `skipped` esté truncado. */
+  skippedCount: number;
+  skipped: BulkPrintSkippedOrder[];
+  skippedTruncated: boolean;
+  /**
+   * Mensaje de error del último lote que falló por completo, si hubo alguno.
+   * Se separa de `skipped` porque un lote caído no es "órdenes omitidas": es
+   * una petición que no llegó a producir PDF.
+   */
+  failureMessage?: string;
+  /** Ids de los lotes que no produjeron PDF alguno. */
+  failedIds: number[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

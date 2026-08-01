@@ -783,6 +783,15 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Shipping rate does not belong to the selected method',
   },
+  // Impresión masiva (QUI-599). El bulk print es tolerante por diseño: omite
+  // las órdenes no imprimibles y sigue con el resto. Este código solo se lanza
+  // cuando NO queda ninguna orden imprimible en la selección — devolver un PDF
+  // en blanco en ese caso le miente al operador.
+  ORD_BULK_PRINT_001: {
+    code: 'ORD_BULK_PRINT_001',
+    httpStatus: 400,
+    devMessage: 'No printable orders in the selection (all skipped)',
+  },
 
   // Purchase Orders
   // QUI-486: comprar/recibir contra la línea base (product_variant_id = NULL)

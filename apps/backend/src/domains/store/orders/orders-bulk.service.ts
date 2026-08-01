@@ -22,6 +22,8 @@ import {
   BulkOrderResultItemDto,
   BulkOrdersPreviewResultDto,
   BulkOrdersResultDto,
+  BulkPrintResultDto,
+  BulkPrintSkippedOrderDto,
 } from './dto/bulk-orders.dto';
 import {
   OrderPdfBuilder,
@@ -57,6 +59,22 @@ interface PreviewDispatchOrderRow extends PreviewOrderRow {
   shipping_address_id: number | null;
   order_items: Array<{ id: number; quantity: unknown }>;
 }
+
+/**
+ * Estados cuya orden NO entra en la impresión masiva.
+ *
+ * Son estados terminales negativos: la venta se anuló (`cancelled`) o se
+ * devolvió el dinero (`refunded`). Imprimir su comprobante es peor que no
+ * imprimirlo — en mostrador un papel con productos y totales se lee como una
+ * venta viva.
+ *
+ * `draft` NO está aquí a propósito: un borrador es una orden en construcción y
+ * el operador legítimamente imprime su picking para armarla.
+ */
+const NON_PRINTABLE_ORDER_STATES: ReadonlySet<order_state_enum> = new Set([
+  order_state_enum.cancelled,
+  order_state_enum.refunded,
+]);
 
 const STATE_LABELS: Record<string, string> = {
   draft: 'Borrador',
@@ -97,8 +115,8 @@ const STATE_LABELS: Record<string, string> = {
  *    `pos_ticket_format`). El emisor se resuelve desde `fiscal_data` del scope
  *    que posee la habilitación (igual que `InvoicePdfService.resolveIssuer`).
  *
- * El tope de 100 ids por lote lo impone el DTO (`@ArrayMaxSize`); el service no
- * re-valida.
+ * El tope de ids por lote lo impone el DTO (`@ArrayMaxSize`); el service no
+ * re-valida. Son dos: 100 para los carriles que escriben, 300 para `bulkPrint`.
  */
 @Injectable()
 export class OrdersBulkService {
@@ -514,12 +532,38 @@ export class OrdersBulkService {
   // ─── Print ─────────────────────────────────────────────────────────
 
   /**
-   * Genera un PDF multi-página con todas las órdenes seleccionadas. El
-   * formato de papel se resuelve desde `store_settings.receipts` (la tienda,
-   * no el cliente). Devuelve un Buffer listo para mandar como
-   * `application/pdf`.
+   * Genera un PDF multi-página con las órdenes imprimibles de la selección.
+   * El formato de papel se resuelve desde `store_settings.receipts` (la
+   * tienda, no el cliente).
+   *
+   * ## Tolerancia por orden (regla de negocio)
+   *
+   * Una selección de 100 órdenes casi nunca es homogénea: hay canceladas,
+   * reembolsadas, e ids que ya no están en la tienda. Que una sola de ellas
+   * tumbe el lote entero obliga al operador a depurar la selección a mano
+   * antes de poder imprimir nada, que es exactamente lo que la operación
+   * masiva viene a evitar.
+   *
+   * Por eso el método NUNCA falla por una orden: la omite, la reporta, y sigue
+   * con el resto. Hay tres carriles de omisión (`BulkPrintSkipReason`):
+   *
+   * 1. `not_found` — el id no volvió del `findMany`. El scope de tienda de
+   *    `StorePrismaService` ya excluye lo ajeno, así que esto cubre tanto ids
+   *    borrados como ids de otra tienda.
+   * 2. `non_printable_state` — `cancelled` / `refunded`. Se descartan antes de
+   *    dibujar: un comprobante de una venta anulada o devuelta induce a error
+   *    en mostrador.
+   * 3. `render_error` — la orden es válida pero sus datos rompen el mapeo o el
+   *    render. Único motivo que denota un defecto; va al log con el stack.
+   *
+   * El único caso que sí es error HTTP es que NO quede ninguna orden
+   * imprimible: devolver un PDF en blanco ahí le miente al operador, que vería
+   * una hoja vacía sin saber por qué.
+   *
+   * @returns el buffer del PDF junto al detalle de lo omitido; el controller
+   *   lo publica en cabeceras porque el body es binario.
    */
-  async bulkPrint(dto: BulkPrintOrdersDto): Promise<Buffer> {
+  async bulkPrint(dto: BulkPrintOrdersDto): Promise<BulkPrintResultDto> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
@@ -527,7 +571,7 @@ export class OrdersBulkService {
     }
 
     // 1. Cargar las órdenes con todo lo que el builder necesita. Una sola
-    //    consulta con includes (no N queries) para 100 órdenes.
+    //    consulta con includes (no N queries) para hasta 300 órdenes.
     const orders = await this.prisma.orders.findMany({
       where: { id: { in: dto.ids } },
       include: {
@@ -593,14 +637,46 @@ export class OrdersBulkService {
       },
     });
 
-    if (orders.length === 0) {
-      // Sin órdenes válidas: devolver un PDF vacío para que el controller
-      // siempre tenga un Buffer.
-      return OrderPdfBuilder.generate([], 'letter');
+    // 2. Repartir la selección entre imprimibles y omitidas. El orden del PDF
+    //    es el orden en que el cliente mandó los ids: `findMany` no garantiza
+    //    ninguno, y el operador espera imprimir en el orden en que seleccionó.
+    const byId = new Map<number, any>(orders.map((o: any) => [o.id, o]));
+    const skipped: BulkPrintSkippedOrderDto[] = [];
+    const printable: any[] = [];
+
+    for (const id of dto.ids) {
+      const order = byId.get(id);
+      if (!order) {
+        skipped.push({
+          id,
+          reason: 'not_found',
+          message: `La orden #${id} no existe o no pertenece a esta tienda`,
+        });
+        continue;
+      }
+      if (NON_PRINTABLE_ORDER_STATES.has(order.state)) {
+        skipped.push({
+          id,
+          order_number: order.order_number,
+          reason: 'non_printable_state',
+          message: `${order.order_number}: ${STATE_LABELS[order.state] ?? order.state} — no se imprime`,
+        });
+        continue;
+      }
+      printable.push(order);
     }
 
-    // 2. Resolver emisor + formato UNA vez (son de la tienda, no de la orden).
-    const store = orders[0].stores as any;
+    if (printable.length === 0) {
+      // Ninguna orden imprimible. Un PDF en blanco aquí sería un fallo
+      // silencioso: el operador abriría una hoja vacía sin explicación.
+      throw new VendixHttpException(
+        ErrorCodes.ORD_BULK_PRINT_001,
+        this.summarizeSkipped(dto.ids.length, skipped),
+      );
+    }
+
+    // 3. Resolver emisor + formato UNA vez (son de la tienda, no de la orden).
+    const store = printable[0].stores as any;
     const org = store?.organizations;
     const issuer = await this.resolveIssuer(org, store);
     const format = this.resolvePrintFormat(store);
@@ -617,8 +693,11 @@ export class OrdersBulkService {
       }
     }
 
-    // 3. Mapear cada orden a OrderPdfData.
-    const pdfData: OrderPdfData[] = orders.map((order: any) => {
+    // 4. Mapear cada orden a OrderPdfData. El mapeo es donde revientan los
+    //    datos sucios (un `order_items` corrupto, un total no numérico), así
+    //    que va orden por orden dentro de un try: una fila mala no puede
+    //    llevarse por delante las otras 99.
+    const toPdfData = (order: any): OrderPdfData => {
       const customer = order.users;
       // `orders` no tiene columna `customer_name` — la venta anónima simplemente
       // no trae `users`, así que el fallback es la etiqueta directa.
@@ -674,14 +753,165 @@ export class OrdersBulkService {
         total_amount: Number(order.grand_total ?? order.total_amount ?? 0),
         format,
       };
-    });
+    };
 
-    // 4. Aplicar `copies` si vino en el DTO (sobreescribe invoice_copies /
-    //    pos_ticket_copies para esta impresión puntual). El builder no repite
-    //    páginas por copia: el frontend/navegador se encarga de mandar N
-    //    copias al diálogo de impresión. Aquí solo generamos el documento
-    //    base de una vez por orden.
-    return OrderPdfBuilder.generate(pdfData, format);
+    const pdfData: OrderPdfData[] = [];
+    const rendered: Array<{ id: number; order_number: string }> = [];
+
+    for (const order of printable) {
+      try {
+        pdfData.push(toPdfData(order));
+        rendered.push({ id: order.id, order_number: order.order_number });
+      } catch (error: any) {
+        this.logger.error(
+          `bulkPrint: la orden ${order.id} (${order.order_number}) no se pudo mapear a PDF: ${error?.message}`,
+          error?.stack,
+        );
+        skipped.push({
+          id: order.id,
+          order_number: order.order_number,
+          reason: 'render_error',
+          message: `${order.order_number}: datos incompletos, se omitió del PDF`,
+        });
+      }
+    }
+
+    if (pdfData.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_BULK_PRINT_001,
+        this.summarizeSkipped(dto.ids.length, skipped),
+      );
+    }
+
+    // 5. Render. `copies` NO multiplica páginas aquí: el builder genera el
+    //    documento base una vez por orden y el navegador manda N copias al
+    //    driver desde el diálogo de impresión.
+    const buffer = await this.renderOrdersPdf(
+      pdfData,
+      rendered,
+      format,
+      skipped,
+      dto.ids.length,
+    );
+
+    // `rendered` es la fuente de verdad del conteo, no `pdfData.length`:
+    // `renderOrdersPdf` lo poda cuando el aislamiento descarta órdenes, así que
+    // `printed + skipped.length === total` se mantiene también en ese camino.
+    return {
+      total: dto.ids.length,
+      printed: rendered.length,
+      skipped,
+      buffer,
+    };
+  }
+
+  /**
+   * Renderiza el lote y, si el render completo falla, aísla las órdenes
+   * culpables para poder entregar igual el PDF con las sanas.
+   *
+   * ## Por qué dos pasadas y no una sola defensiva
+   *
+   * PDFKit escribe sobre un único documento en streaming: no hay forma de
+   * "saltarse" una orden a mitad de render, porque cuando el error aparece el
+   * documento ya está corrupto. La única manera de aislar al culpable es
+   * renderizar 1×1 — pero hacerlo siempre pagaría N renders en el caso feliz,
+   * que es el 99% de las veces.
+   *
+   * Por eso el 1×1 vive SOLO en el camino de error: el caso feliz es un render;
+   * el caso sucio es 1 fallido + N sondas + 1 final. Se paga la lentitud
+   * únicamente cuando ya había un problema.
+   *
+   * Si el 1×1 no reproduce ningún fallo, el problema no es de ninguna orden
+   * concreta (memoria, formato de papel degenerado): ahí se relanza el error
+   * original en vez de fingir que el lote es imprimible.
+   */
+  private async renderOrdersPdf(
+    pdfData: OrderPdfData[],
+    refs: Array<{ id: number; order_number: string }>,
+    format: PrintFormat,
+    skipped: BulkPrintSkippedOrderDto[],
+    totalRequested: number,
+  ): Promise<Buffer> {
+    try {
+      return await OrderPdfBuilder.generate(pdfData, format);
+    } catch (batchError: any) {
+      this.logger.error(
+        `bulkPrint: el render del lote de ${pdfData.length} órdenes falló (${batchError?.message}); aislando órdenes culpables`,
+        batchError?.stack,
+      );
+
+      const healthy: OrderPdfData[] = [];
+      for (let i = 0; i < pdfData.length; i++) {
+        try {
+          await OrderPdfBuilder.generate([pdfData[i]], format);
+          healthy.push(pdfData[i]);
+        } catch (singleError: any) {
+          this.logger.error(
+            `bulkPrint: la orden ${refs[i].id} (${refs[i].order_number}) no se puede renderizar: ${singleError?.message}`,
+            singleError?.stack,
+          );
+          skipped.push({
+            id: refs[i].id,
+            order_number: refs[i].order_number,
+            reason: 'render_error',
+            message: `${refs[i].order_number}: no se pudo dibujar, se omitió del PDF`,
+          });
+        }
+      }
+
+      if (healthy.length === pdfData.length) {
+        // Ninguna orden falla por sí sola: el problema es del lote completo
+        // (memoria, layout), no de los datos. Mentir con un PDF parcial sería
+        // peor que propagar el fallo real.
+        throw batchError;
+      }
+      if (healthy.length === 0) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_BULK_PRINT_001,
+          this.summarizeSkipped(totalRequested, skipped),
+        );
+      }
+
+      // Quitar de `refs` las omitidas para que el conteo del controller cuadre.
+      const skippedIds = new Set(
+        skipped.filter((s) => s.reason === 'render_error').map((s) => s.id),
+      );
+      for (let i = refs.length - 1; i >= 0; i--) {
+        if (skippedIds.has(refs[i].id)) refs.splice(i, 1);
+      }
+
+      return OrderPdfBuilder.generate(healthy, format);
+    }
+  }
+
+  /**
+   * Resumen legible de por qué no quedó nada que imprimir. Agrupa por motivo en
+   * vez de listar 100 ids: el operador necesita saber "todas estaban
+   * canceladas", no la enumeración.
+   */
+  private summarizeSkipped(
+    total: number,
+    skipped: BulkPrintSkippedOrderDto[],
+  ): string {
+    const counts = skipped.reduce<Record<string, number>>((acc, s) => {
+      acc[s.reason] = (acc[s.reason] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    const parts: string[] = [];
+    if (counts.non_printable_state) {
+      parts.push(`${counts.non_printable_state} canceladas o reembolsadas`);
+    }
+    if (counts.not_found) {
+      parts.push(`${counts.not_found} no encontradas en esta tienda`);
+    }
+    if (counts.render_error) {
+      parts.push(`${counts.render_error} con datos que impiden imprimir`);
+    }
+
+    return parts.length > 0
+      ? `Ninguna de las ${total} órdenes seleccionadas se puede imprimir: ${parts.join(', ')}.`
+      : `Ninguna de las ${total} órdenes seleccionadas se puede imprimir.`;
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────

@@ -252,14 +252,60 @@
         <div
           class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-gray-50 px-3 py-2"
         >
-          <p class="text-[11px] font-semibold text-text-primary">
-            {{ selectedCount() }}
-            {{ selectedCount() === 1 ? 'orden seleccionada' : 'órdenes seleccionadas' }}
-            <span class="font-normal text-text-secondary">
-              · cada operación te mostrará qué órdenes puede afectar antes de
-              aplicarla
-            </span>
-          </p>
+          <div class="flex min-w-0 flex-col gap-1">
+            <p class="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] font-semibold text-text-primary">
+              <!-- Contador con cupo: "12 / 300" dice de un vistazo cuánto
+                   margen queda. Solo el número corriente cambia de color; el
+                   "/ 300" se mantiene neutro para que el tope se lea como
+                   referencia fija y no como parte de la alerta. -->
+              <!-- `red-*` / `amber-*`, no los tokens `error` / `warning`:
+                   estos últimos son `var(--color-*)` sin `<alpha-value>`, así
+                   que `bg-warning/10` no compone. Las escalas remapeadas sí
+                   llevan alpha y además se invierten solas en modo oscuro. -->
+              <span
+                class="rounded-md px-1.5 py-0.5 font-mono tabular-nums"
+                [class]="
+                  limitTone() === 'danger'
+                    ? 'bg-red-500/10 text-red-600'
+                    : limitTone() === 'warning'
+                      ? 'bg-amber-500/10 text-amber-600'
+                      : 'bg-primary/10 text-primary'
+                "
+              >
+                {{ selectedCount() }} / {{ maxIds }}
+              </span>
+              {{ selectedCount() === 1 ? 'orden seleccionada' : 'órdenes seleccionadas' }}
+            </p>
+
+            <!-- Un solo renglón de contexto, y cambia según dónde esté el
+                 operador respecto al tope. Al tope explica cómo salir (quitar
+                 alguna), cerca avisa cuánto queda, y el resto del tiempo
+                 recuerda que ninguna acción se aplica a ciegas. -->
+            <p
+              class="flex items-start gap-1 text-[11px] leading-tight"
+              [class]="
+                limitTone() === 'danger'
+                  ? 'text-red-600'
+                  : limitTone() === 'warning'
+                    ? 'text-amber-600'
+                    : 'text-text-secondary'
+              "
+            >
+              @if (atLimit()) {
+                <app-icon name="info" [size]="12" class="mt-px shrink-0" />
+                Llegaste al máximo por operación. Quita alguna orden para
+                seleccionar otra.
+              } @else if (nearLimit()) {
+                <app-icon name="info" [size]="12" class="mt-px shrink-0" />
+                Te quedan {{ remainingSlots() }}
+                {{ remainingSlots() === 1 ? 'orden' : 'órdenes' }} antes del
+                máximo de {{ maxIds }}.
+              } @else {
+                Cada operación te mostrará qué órdenes puede afectar antes de
+                aplicarla · máximo {{ maxIds }} por operación
+              }
+            </p>
+          </div>
 
           @if (selectedCount() > 0) {
             <app-button variant="ghost" size="xsm" (clicked)="onClearStack()">

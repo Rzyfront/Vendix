@@ -175,7 +175,24 @@ async function bootstrap() {
       'X-Requested-With',
       'x-store-id',
     ],
-    exposedHeaders: ['Authorization', 'Cache-Control', 'Pragma'],
+    // `exposedHeaders` es lo único que permite al JS del navegador LEER una
+    // cabecera de respuesta cross-origin: sin listarla aquí, fetch/XHR la
+    // recibe pero `response.headers.get()` devuelve null.
+    //
+    // Las `X-*-Count` / `X-Skipped-*` las emite `POST /store/orders/bulk/print`,
+    // cuyo body es un PDF binario: el reporte de qué órdenes se omitieron no
+    // cabe en el body, así que viaja en cabeceras.
+    exposedHeaders: [
+      'Authorization',
+      'Cache-Control',
+      'Pragma',
+      'Content-Disposition',
+      'X-Total-Count',
+      'X-Printed-Count',
+      'X-Skipped-Count',
+      'X-Skipped-Orders',
+      'X-Skipped-Truncated',
+    ],
   });
 
   // Swagger configuration (disabled in development to save memory and avoid SWC metadata issues)
