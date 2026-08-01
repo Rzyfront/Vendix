@@ -1,4 +1,4 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -9,6 +9,7 @@ import { OrderStatsComponent } from '../components/order-stats';
 // Import interfaces and services
 import { ExtendedOrderStats } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 @Component({
   selector: 'app-orders',
@@ -21,6 +22,25 @@ export class OrdersComponent {
   private router = inject(Router);
   private ordersService = inject(StoreOrdersService);
   private destroyRef = inject(DestroyRef);
+  private authFacade = inject(AuthFacade);
+
+  /**
+   * QUI-599: gate del item "Operaciones masivas" del dropdown del listado —
+   * la ÚNICA puerta de entrada a /admin/orders/bulk (no hay entrada en el
+   * sidebar). Mismo patrón que `canBulkEditProducts` en
+   * `products.component.ts:168-170`: el permiso se lee en el componente de
+   * página y baja como `input` al listado presentacional.
+   *
+   * Se admite CUALQUIERA de los dos permisos porque la vista ofrece dos
+   * carriles independientes: quien solo tenga `bulk_print` debe poder entrar
+   * a imprimir en lote aunque no pueda transicionar estados. Adentro, cada
+   * acción se gatea por su propio permiso.
+   */
+  readonly canBulkOrderOperations = computed<boolean>(
+    () =>
+      this.authFacade.hasPermission('store:orders:bulk_update') ||
+      this.authFacade.hasPermission('store:orders:bulk_print'),
+  );
 
   // Stats data
   orderStats = signal<ExtendedOrderStats>({

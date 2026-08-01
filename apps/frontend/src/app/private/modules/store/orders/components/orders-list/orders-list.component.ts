@@ -7,7 +7,7 @@ import {Component,
   computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
 
@@ -68,6 +68,7 @@ export class OrdersListComponent {
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   /** Timestamp (epoch ms) del momento en que se cargó la lista actual. */
   private loadedAt = 0;
@@ -93,6 +94,19 @@ export class OrdersListComponent {
   readonly create = output<void>();
   readonly viewOrder = output<string>();
   readonly refresh = output<void>();
+
+  /**
+   * QUI-599: afordancia del item "Operaciones masivas". El permiso lo lee el
+   * componente de página (`orders.component.ts:canBulkOrderOperations`) y baja
+   * como input, igual que `canBulkEdit` en `product-list.component.ts:80`.
+   * Este componente es presentacional: no consulta `AuthFacade`.
+   */
+  readonly canBulkOperations = input(false);
+
+  /** QUI-599: único punto de entrada a la vista de operaciones masivas. */
+  navigateToBulkPage(): void {
+    this.router.navigate(['/admin/orders/bulk']);
+  }
 
   /**
    * Bug 2 (Fase K): when the parent increments this input, the list
@@ -192,15 +206,38 @@ export class OrdersListComponent {
   readonly filterValues = signal<FilterValues>({});
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Nueva Orden',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-    { label: 'Exportar', icon: 'download', action: 'export' },
-  ];
+  //
+  // QUI-599: 'bulk-operations' es la ÚNICA puerta de entrada a la vista
+  // dedicada /admin/orders/bulk (no hay entrada en el sidebar). Se inserta
+  // aquí dentro del dropdown de opciones, igual que 'Edición masiva' en
+  // products (`product-list.component.ts:174`).
+  //
+  // Es un `computed` (no un campo plano) precisamente para que el filtro por
+  // permiso sea reactivo: `canBulkOperations` es un signal input y un array
+  // literal no se volvería a evaluar cuando el snapshot de permisos llegue.
+  // Se filtra POR ACCIÓN, nunca escondiendo el dropdown completo — mismo
+  // criterio que `product-list.component.ts:181-185`. El backend
+  // `PermissionsGuard` sigue siendo el límite real de autorización.
+  readonly dropdownActions = computed<DropdownAction[]>(() => {
+    const canBulk = this.canBulkOperations();
+    const all: DropdownAction[] = [
+      {
+        label: 'Nueva Orden',
+        icon: 'plus',
+        action: 'create',
+        variant: 'primary',
+      },
+      { label: 'Exportar', icon: 'download', action: 'export' },
+      {
+        label: 'Operaciones masivas',
+        icon: 'list-checks',
+        action: 'bulk-operations',
+      },
+    ];
+    return all.filter((a) =>
+      a.action === 'bulk-operations' ? canBulk : true,
+    );
+  });
 
   // Table configuration
   columns: TableColumn[] = [
@@ -498,6 +535,9 @@ export class OrdersListComponent {
         break;
       case 'export':
         this.exportOrders();
+        break;
+      case 'bulk-operations':
+        this.navigateToBulkPage();
         break;
     }
   }

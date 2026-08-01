@@ -4,3 +4,4 @@ export * from './order-query.dto';
 export * from './order-stats.dto';
 export * from './update-order-items.dto';
 export * from './assign-shipping-method.dto';
+export * from './bulk-orders.dto';
