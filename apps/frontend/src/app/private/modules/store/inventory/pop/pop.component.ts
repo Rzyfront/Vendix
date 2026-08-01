@@ -351,6 +351,14 @@ export class PopComponent implements OnInit, OnDestroy {
   showOrderConfirmModal = signal(false);
   confirmOrderAction: 'create' | 'create-receive' = 'create';
 
+  /**
+   * OC ya creada por un intento cuya RECEPCIÓN falló. Mientras esté seteada, el
+   * carrito y la ruta se conservan (una recepción fallida no puede parecer una
+   * operación completada) y el siguiente "crear y recibir" reanuda la recepción
+   * sobre ESTA orden en vez de crear una segunda OC para la misma compra.
+   */
+  readonly pendingReceptionOrder = signal<any>(null);
+
   costPreview = signal<CostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
   /**
@@ -1241,6 +1249,9 @@ export class PopComponent implements OnInit, OnDestroy {
     });
 
     if (confirm) {
+      // Vaciar el carrito descarta el reintento pendiente: el próximo carrito ya
+      // no corresponde a esa OC y reanudar su recepción ignoraría la compra nueva.
+      this.pendingReceptionOrder.set(null);
       this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.info('Orden vaciada');
@@ -1452,6 +1463,17 @@ export class PopComponent implements OnInit, OnDestroy {
     doPay: boolean,
   ): { title: string; message: string; confirmText: string; cancelText: string } {
     const cancelText = 'Cancelar';
+    // Reintento en contexto: la OC ya existe, solo falta que entre la mercancía.
+    const pending = this.pendingReceptionOrder();
+    if (pending) {
+      const ref = pending.order_number || `#${pending.id}`;
+      return {
+        title: 'Reintentar recepción',
+        message: `La orden ${ref} ya fue creada y su recepción falló. ¿Reintentamos la recepción sobre esa misma orden? No se creará una orden nueva.`,
+        confirmText: 'Reintentar recepción',
+        cancelText,
+      };
+    }
     if (action === 'create') {
       return {
         title: 'Crear orden de compra',
@@ -1548,6 +1570,14 @@ export class PopComponent implements OnInit, OnDestroy {
 
   private _executeSubmitOrder(): void {
     const state = this.popCartService.currentState;
+
+    // La OC de un intento con recepción fallida YA existe: crear otra desde el
+    // mismo carrito duplicaría la compra. Reanudamos su recepción.
+    if (this.pendingReceptionOrder()) {
+      this._executeCreateReceivePay(true, false);
+      return;
+    }
+
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
@@ -1583,35 +1613,45 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   private _executeCreateReceivePay(doReceive: boolean, doPay: boolean): void {
     const state = this.popCartService.currentState;
-    const userId = this.authFacade.getUserId() || 0;
-    const request = cartToPurchaseOrderRequest(state, userId, undefined);
-    request.status = 'approved';
-    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
-    this.attachPurchaseToStockFactor(request, state);
 
     // Snapshot del total del carrito ANTES de limpiar: respaldo del monto de
     // pago si la respuesta de la OC no trae `total_amount`.
     const cartTotal = Number(state.summary?.total) || 0;
 
-    this.toastService.info(this._buildProgressMessage(doReceive, doPay));
+    // Reintento en contexto: un intento anterior YA creó la OC y solo falló la
+    // recepción. Reanudamos desde la etapa de recepción — crear otra OC
+    // duplicaría la compra (el carrito sobrevive al fallo, así que el operador
+    // puede volver a pulsar el botón).
+    const pendingOrder = this.pendingReceptionOrder();
 
     // Nos permite distinguir en el error si la OC llegó a crearse (limpiar
     // carrito) o si falló la creación (conservar carrito para reintentar).
-    let createdOrder: any = null;
+    let createdOrder: any = pendingOrder;
 
-    this.purchaseOrdersService
-      .createPurchaseOrder(request)
+    const order$: Observable<any> = pendingOrder
+      ? of(pendingOrder)
+      : this._createApprovedOrder$(state);
+
+    this.toastService.info(
+      pendingOrder
+        ? 'Reintentando la recepción de la orden ya creada...'
+        : this._buildProgressMessage(doReceive, doPay),
+    );
+    this.isProcessingOrder.set(true);
+
+    order$
       .pipe(
-        switchMap((response) => {
-          if (!response.success || !response.data) {
-            return throwError(() => ({ stage: 'create' as const }));
-          }
-          createdOrder = response.data;
+        switchMap((order) => {
+          createdOrder = order;
 
-          // Etapa recepción (por remisión de entrada, único camino).
+          // Etapa recepción (por remisión de entrada, único camino). El error
+          // original viaja junto al marcador de etapa: descartarlo dejaba al
+          // operador con un mensaje genérico y el motivo real solo en consola.
           const reception$: Observable<unknown> = doReceive
-            ? this._buildReceptionViaDispatch$(createdOrder).pipe(
-                catchError(() => throwError(() => ({ stage: 'receive' as const }))),
+            ? this._buildReceptionViaDispatch$(order).pipe(
+                catchError((err) =>
+                  throwError(() => ({ stage: 'receive' as const, err })),
+                ),
               )
             : of(null);
 
@@ -1620,11 +1660,11 @@ export class PopComponent implements OnInit, OnDestroy {
             switchMap(() => {
               if (!doPay) return of(null);
               const amount =
-                Number(createdOrder.total_amount) > 0
-                  ? Number(createdOrder.total_amount)
+                Number(order.total_amount) > 0
+                  ? Number(order.total_amount)
                   : cartTotal;
               return this.purchaseOrdersService
-                .registerPurchaseOrderPayment(createdOrder.id, {
+                .registerPurchaseOrderPayment(order.id, {
                   amount,
                   payment_date: this._todayISO(),
                   // TODO: leer el método de pago por defecto de store_settings
@@ -1632,7 +1672,9 @@ export class PopComponent implements OnInit, OnDestroy {
                   payment_method: 'cash',
                 })
                 .pipe(
-                  catchError(() => throwError(() => ({ stage: 'pay' as const }))),
+                  catchError((err) =>
+                    throwError(() => ({ stage: 'pay' as const, err })),
+                  ),
                 );
             }),
           );
@@ -1641,36 +1683,73 @@ export class PopComponent implements OnInit, OnDestroy {
       )
       .subscribe({
         next: () => {
+          this.isProcessingOrder.set(false);
           this.toastService.success(this._buildSuccessMessage(doReceive, doPay));
           this._finalizeAfterOrder();
         },
         error: (err: any) => {
           console.error('Error in create/receive/pay flow:', err);
+          this.isProcessingOrder.set(false);
           const stage = err?.stage;
           if (stage === 'create' || !createdOrder) {
             // La OC no se creó → no limpiamos el carrito (permite reintentar).
             this.toastService.error(
-              this._errorMessage(err, 'Error al crear la orden'),
+              this._errorMessage(err?.err ?? err, 'Error al crear la orden'),
             );
             return;
           }
           if (stage === 'receive') {
+            // La OC existe pero la mercancía NO entró. Conservamos carrito y
+            // ruta (nada de `_finalizeAfterOrder`): una recepción fallida no
+            // puede parecer una operación completada. Recordamos la OC para
+            // que el reintento no cree una segunda.
+            this.pendingReceptionOrder.set(createdOrder);
             this.toastService.error(
-              'Orden creada pero hubo error al recibir por remisión',
+              this._errorMessage(
+                err?.err,
+                'Orden creada pero hubo error al recibir por remisión',
+              ),
             );
-          } else if (stage === 'pay') {
+            return;
+          }
+          if (stage === 'pay') {
             this.toastService.error(
-              'Orden creada pero hubo error al registrar el pago',
+              this._errorMessage(
+                err?.err,
+                'Orden creada pero hubo error al registrar el pago',
+              ),
             );
           } else {
             this.toastService.error(
               'Orden creada pero una etapa posterior falló',
             );
           }
-          // La OC ya existe: limpiamos y navegamos como el flujo previo.
+          // La OC existe y la mercancía ya entró: limpiamos y navegamos como el
+          // flujo previo.
           this._finalizeAfterOrder();
         },
       });
+  }
+
+  /**
+   * Crea la OC aprobada a partir del carrito. Lanza `{ stage: 'create' }`
+   * cuando el backend responde sin `data`, para que el manejador de error
+   * conserve el carrito y permita reintentar.
+   */
+  private _createApprovedOrder$(state: PopCartState): Observable<any> {
+    const userId = this.authFacade.getUserId() || 0;
+    const request = cartToPurchaseOrderRequest(state, userId, undefined);
+    request.status = 'approved';
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, state);
+
+    return this.purchaseOrdersService.createPurchaseOrder(request).pipe(
+      switchMap((response) =>
+        response.success && response.data
+          ? of(response.data)
+          : throwError(() => ({ stage: 'create' as const })),
+      ),
+    );
   }
 
   /**
@@ -1739,15 +1818,23 @@ export class PopComponent implements OnInit, OnDestroy {
         location_id: order.location_id,
         ordered_quantity: item.quantity_ordered,
         dispatched_quantity: item.quantity_ordered,
-        unit_price: Number(item.unit_price ?? item.unit_cost ?? 0),
+        // `purchase_order_items.unit_cost` es Decimal(12,4) y guarda el neto sin
+        // redondear (p. ej. 840.3361 para una línea de 1000 con IVA 19%
+        // incluido). El destino `dispatch_note_items.unit_price` es
+        // Decimal(12,2): redondeamos aquí para no mandar decimales que la
+        // columna no admite. (`purchase_order_items` no tiene `unit_price`, así
+        // que este valor SIEMPRE sale de `unit_cost`.)
+        unit_price: this._round2(item.unit_price ?? item.unit_cost ?? 0),
         purchase_order_item_id: item.id,
         // Solo adjuntar cuando esté definido — el backend aplica el ancla-a-costo
-        // por defecto cuando AMBOS campos están ausentes.
+        // por defecto cuando AMBOS campos están ausentes. Se redondean porque el
+        // modal reenvía el valor tipeado por el operador tal cual (el derivado ya
+        // viene a 2 decimales, el tipeado no).
         ...(lineOverride?.new_base_price !== undefined && {
-          new_base_price: lineOverride.new_base_price,
+          new_base_price: this._round2(lineOverride.new_base_price),
         }),
         ...(lineOverride?.new_profit_margin !== undefined && {
-          new_profit_margin: lineOverride.new_profit_margin,
+          new_profit_margin: this._round2(lineOverride.new_profit_margin),
         }),
       };
     });
@@ -1773,9 +1860,16 @@ export class PopComponent implements OnInit, OnDestroy {
     );
   }
 
+  /** Redondeo a 2 decimales para valores que viajan a una columna Decimal(x,2). */
+  private _round2(v: number | string): number {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+  }
+
   /** Cierre común tras crear/recibir/pagar: limpia overrides + carrito y navega. */
   private _finalizeAfterOrder(): void {
     this.pricingOverrides.set(new Map());
+    this.pendingReceptionOrder.set(null);
     this.popCartService
       .clearCart()
       .pipe(takeUntilDestroyed(this.destroyRef))
