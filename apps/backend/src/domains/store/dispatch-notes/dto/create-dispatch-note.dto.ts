@@ -10,7 +10,28 @@ import {
   ValidateIf,
   Min,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type, Transform, TransformFnParams } from 'class-transformer';
+
+/**
+ * Null-safe numeric coercion for OPTIONAL money fields.
+ *
+ * The previous `({ value }) => parseFloat(value)` ran BEFORE `@IsOptional()` is
+ * evaluated, so an explicit `null` / `undefined` / `''` became `NaN`. `NaN` is
+ * neither `null` nor `undefined`, so `@IsOptional()` did not skip the field and
+ * `@IsNumber` rejected it with a hard 400 under the global `ValidationPipe`
+ * (`transform` + `whitelist` + `forbidNonWhitelisted`, see `main.ts`).
+ *
+ * Returning `undefined` for the empty cases lets `@IsOptional()` do its job.
+ * Never returns `NaN`: a non-empty value that does not parse is handed back
+ * untouched so `@IsNumber` still rejects it with a proper validation message
+ * instead of the opaque "must be a number" produced by a silent `NaN`.
+ */
+export const toOptionalNumber = ({ value }: TransformFnParams): unknown => {
+  if (value === null || value === undefined || value === '') return undefined;
+  if (typeof value === 'number') return value;
+  const parsed = parseFloat(value);
+  return Number.isNaN(parsed) ? value : parsed;
+};
 
 export class CreateDispatchNoteItemDto {
   @IsInt()
@@ -35,19 +56,33 @@ export class CreateDispatchNoteItemDto {
   @Min(1)
   dispatched_quantity: number;
 
+  /**
+   * 4 decimals, NOT 2, on purpose. This DTO sits at the INPUT edge and must
+   * accept the precision of its authoritative source: `purchase_order_items`
+   * stores `unit_cost` / `unit_price_net` as `Decimal(12,4)`, and
+   * `PurchaseOrdersService.deriveLineTax` computes `unit_price_net = gross /
+   * (1 + rate)` without rounding (a 19%-IVA-included line of 1000 becomes
+   * 840.3361). Demanding 2 decimals here rejected exactly those lines whose
+   * division does not land on 2 decimals — an intermittent 400 on a single
+   * item index. Rounding down to the 2-decimal destination column
+   * (`dispatch_note_items.unit_price Decimal(12,2)`) happens at the
+   * PERSISTENCE edge, in `DispatchNotesService`, not here.
+   */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(toOptionalNumber)
+  @IsNumber({ maxDecimalPlaces: 4 })
   unit_price?: number;
 
+  /** See {@link CreateDispatchNoteItemDto.unit_price} for why 4 decimals. */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(toOptionalNumber)
+  @IsNumber({ maxDecimalPlaces: 4 })
   discount_amount?: number;
 
+  /** See {@link CreateDispatchNoteItemDto.unit_price} for why 4 decimals. */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(toOptionalNumber)
+  @IsNumber({ maxDecimalPlaces: 4 })
   tax_amount?: number;
 
   @IsOptional()
@@ -81,15 +116,18 @@ export class CreateDispatchNoteItemDto {
    * price. Persisted on the dispatch_note_item so the `received` listener (which
    * reads the line back from the DB) can carry them. Declared here so
    * `forbidNonWhitelisted` accepts them on the purchase-receipt payload.
+   *
+   * See {@link CreateDispatchNoteItemDto.unit_price} for why 4 decimals.
    */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(toOptionalNumber)
+  @IsNumber({ maxDecimalPlaces: 4 })
   new_base_price?: number;
 
+  /** See {@link CreateDispatchNoteItemDto.unit_price} for why 4 decimals. */
   @IsOptional()
-  @Transform(({ value }) => parseFloat(value))
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @Transform(toOptionalNumber)
+  @IsNumber({ maxDecimalPlaces: 4 })
   new_profit_margin?: number;
 }
 
