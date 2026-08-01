@@ -75,6 +75,14 @@ export interface InvoiceScanResult {
   tax_amount: number;
   total: number;
   confidence: number;
+  /**
+   * Non-blocking notices raised while normalizing the AI reply — currently
+   * zero-decimal amount repairs and a line-totals vs. grand-total mismatch.
+   * The frontend round-trips these into `/match`, where they are merged into
+   * `InvoiceMatchResult.warnings` so the review step shows them before the
+   * user confirms.
+   */
+  scan_warnings?: string[];
 }
 
 // --- Interfaces for match response ---

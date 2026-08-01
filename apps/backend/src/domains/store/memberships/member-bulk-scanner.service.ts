@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { membership_status_enum } from '@prisma/client';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
+import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -127,7 +128,7 @@ export class MemberBulkScannerService {
     }
 
     try {
-      const parsed = this.parseAiJson(response.content);
+      const parsed = parseAiJson(response.content);
       return this.normalizeScanResponse(parsed);
     } catch (err: any) {
       if (err instanceof VendixHttpException) throw err;
@@ -141,41 +142,8 @@ export class MemberBulkScannerService {
     }
   }
 
-  /**
-   * Parse the model's JSON reply defensively. The vision model sometimes
-   * wraps the object in a ```json fence or in prose ("Here is the data:
-   * {...}"). We strip a fence found ANYWHERE (not only at offset 0), and if
-   * the raw parse still fails, fall back to the widest `{ ... }` slice
-   * (first '{' to last '}') before giving up.
-   *
-   * NOTE: this does NOT fix truncated output — a cut-off object has no
-   * closing brace, so `lastIndexOf('}')` yields a broken slice and the parse
-   * throws. That case is intentionally left to surface in the error log
-   * (bump the app's `max_tokens` in super-admin when it happens).
-   */
-  private parseAiJson(raw: string): any {
-    let content = raw.trim();
-
-    // 1) Prefer the contents of a fenced block if one is present anywhere.
-    const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (fenceMatch) {
-      content = fenceMatch[1].trim();
-    }
-
-    // 2) First attempt: parse the (de-fenced) content as-is.
-    try {
-      return JSON.parse(content);
-    } catch {
-      // 3) Fallback: widest JSON-object substring. Handles leading/trailing
-      //    prose around a single object.
-      const start = content.indexOf('{');
-      const end = content.lastIndexOf('}');
-      if (start >= 0 && end > start) {
-        return JSON.parse(content.slice(start, end + 1));
-      }
-      throw new Error('No JSON object found in AI response');
-    }
-  }
+  // Defensive JSON parsing now lives in `ai-engine/utils/ai-json.util.ts`,
+  // shared by every OCR scanner instead of re-derived per service.
 
   // ─────────────────────────────────────────────────────────────────────────
   // /analyze

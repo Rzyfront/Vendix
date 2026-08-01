@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
@@ -82,14 +83,7 @@ export class InventoryCountScannerService {
     }
 
     try {
-      let content = response.content.trim();
-      // Strip markdown code fences if present
-      if (content.startsWith('```')) {
-        content = content
-          .replace(/^```(?:json)?\n?/, '')
-          .replace(/\n?```$/, '');
-      }
-      const parsed = JSON.parse(content);
+      const parsed = parseAiJson(response.content);
       return this.normalizeCountOcrResponse(parsed);
     } catch (err) {
       if (err instanceof VendixHttpException) throw err;

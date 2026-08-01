@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
+import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import {
   CreateDispatchNoteDto,
   UpdateDispatchNoteDto,
@@ -352,7 +353,7 @@ export class DispatchNotesService {
 
     let normalized: RawReceiptScan;
     try {
-      const parsed = this.parseReceiptAiJson(response.content);
+      const parsed = parseAiJson(response.content);
       normalized = this.normalizeReceiptScan(parsed);
     } catch (err: any) {
       if (err instanceof VendixHttpException) throw err;
@@ -442,26 +443,6 @@ export class DispatchNotesService {
         base64: file.buffer.toString('base64'),
         mimeType: file.mimetype,
       };
-    }
-  }
-
-  /**
-   * Defensive JSON parse: strip a ```json fence found anywhere, else fall back
-   * to the widest `{ ... }` slice. Mirrors MemberBulkScannerService.parseAiJson.
-   */
-  private parseReceiptAiJson(raw: string): any {
-    let content = raw.trim();
-    const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (fenceMatch) content = fenceMatch[1].trim();
-    try {
-      return JSON.parse(content);
-    } catch {
-      const start = content.indexOf('{');
-      const end = content.lastIndexOf('}');
-      if (start >= 0 && end > start) {
-        return JSON.parse(content.slice(start, end + 1));
-      }
-      throw new Error('No JSON object found in AI response');
     }
   }
 

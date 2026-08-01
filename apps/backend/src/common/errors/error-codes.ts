@@ -2422,6 +2422,18 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Failed to parse AI OCR response as valid JSON',
   },
+  /**
+   * The model returned syntactically valid JSON but omitted a field the
+   * scanner requires (supplier, line_items or total). Kept distinct from
+   * INV_SCAN_PARSE_FAIL: both used to surface as "no se pudo parsear el
+   * JSON", which sent debugging down the wrong path — a POS receipt with no
+   * printed invoice number or subtotal is an EXTRACTION gap, not a parser bug.
+   */
+  INV_SCAN_INCOMPLETE: {
+    code: 'INV_SCAN_INCOMPLETE',
+    httpStatus: 422,
+    devMessage: 'AI OCR response parsed but is missing required fields',
+  },
   INV_SCAN_NO_FILE: {
     code: 'INV_SCAN_NO_FILE',
     httpStatus: 400,
