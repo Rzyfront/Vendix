@@ -4200,37 +4200,19 @@ export async function seedPermissionsAndRoles(
   );
   assignmentsCreated += ownerSync.added;
 
-  // Assign permissions to admin (operational management)
-  const adminPermissions = allPermissions.filter(
-    (p) =>
-      (p.name.startsWith('organization:') ||
-        p.name.startsWith('store:') ||
-        // QUI-567: edición masiva de catálogo. Ya lo recoge el
-        // `startsWith('store:')` de arriba; se lista explícito para que la
-        // asignación sobreviva cualquier futuro estrechamiento de ese filtro.
-        p.name === 'store:products:bulk_update' ||
-        p.name.startsWith('audit.') ||
-        p.name.startsWith('email.') ||
-        p.name.startsWith('domains.') ||
-        p.name.startsWith('exogenous:') ||
-        p.name.startsWith('payroll:') ||
-        p.name.startsWith('taxes:') ||
-        p.name.startsWith('withholding:') ||
-        p.name === 'subscriptions:read' ||
-        p.name === 'subscriptions:write' ||
-        p.name.startsWith('reseller:')) &&
-      !p.name.includes('super_admin') &&
-      !p.name.startsWith('system.') &&
-      !p.name.startsWith('security.') &&
-      !p.name.startsWith('rate.limiting.') &&
-      !p.name.includes('users.impersonate'),
-  );
-
+  // Assign permissions to admin (paridad con owner — QUI-600 paso 5)
+  //
+  // admin es el rol paralelo a owner: MISMO conjunto de permisos (623), con la
+  // única diferencia de que admin es asignable desde tienda/organización y
+  // owner no (HIDDEN_ROLE_NAMES). La contención de la superficie superadmin:*
+  // la hace el RolesGuard de los controllers de plataforma (paso 7), NO la
+  // ausencia del permiso — por eso admin hereda exactamente el mismo set que
+  // owner, incluidos los 43 permisos superadmin:*.
   const adminSync = await syncRolePermissions(
     client,
     adminRole.id,
-    adminPermissions.map((p) => p.id),
-    'admin (ORG_ADMIN)',
+    ownerPermissions.map((p) => p.id),
+    'admin (paridad owner)',
   );
   assignmentsCreated += adminSync.added;
 
@@ -4287,12 +4269,11 @@ export async function seedPermissionsAndRoles(
       // Gestión de usuarios de tienda (incl. su panel_ui) es exclusiva de
       // owner/admin por decisión de negocio: manager NO administra usuarios.
       !p.name.startsWith('store:users:') &&
-      // QUI-72: el catálogo global de roles de plataforma y los usuarios de
-      // cualquier tenant son exclusivos de super_admin. La cláusula permisiva
-      // de más abajo (el gran `!includes(...)` final) dejaría entrar estos
-      // nombres porque `superadmin:` no contiene `super_admin`.
-      !p.name.startsWith('superadmin:roles:') &&
-      !p.name.startsWith('superadmin:users:') &&
+      // QUI-600 paso 6: la superficie `superadmin:*` pertenece al nivel
+      // plataforma y manager nunca debe portarla. La exclusión se hace en el
+      // catch-all de abajo con `startsWith('superadmin:')`, que sustituye los
+      // parches puntuales `superadmin:roles:` / `superadmin:users:` y cubre
+      // todo el prefijo.
       (p.name.startsWith('store:') ||
         // QUI-567: STORE_ADMIN es el consumidor principal del módulo de
         // edición masiva. Ya lo recoge el `startsWith('store:')` de arriba; se
@@ -4316,6 +4297,11 @@ export async function seedPermissionsAndRoles(
         p.name.includes('auth.profile') ||
         p.name.includes('health.check') ||
         (!p.name.includes('super_admin') &&
+          // QUI-600 paso 6: cortar el leak del prefijo `superadmin:` (colon)
+          // que `includes('super_admin')` no alcanzaba. Sustituye los parches
+          // puntuales `superadmin:roles:` / `superadmin:users:` y cubre todo
+          // el prefijo de plataforma.
+          !p.name.startsWith('superadmin:') &&
           !p.name.includes('organization:roles:') &&
           !p.name.includes('organization:permissions:') &&
           !p.name.includes('organization:organizations:') &&
@@ -4337,6 +4323,28 @@ export async function seedPermissionsAndRoles(
     'STORE_ADMIN (manager)',
   );
   assignmentsCreated += managerSync.added;
+
+  // QUI-600 paso 6: revocar explícitamente los 43 permisos `superadmin:*` que
+  // manager arrastraba por la cláusula permisiva histórica. syncRolePermissions
+  // es additive-only (no revoca), así que la revocación se hace aquí de forma
+  // re-run segura: deleteMany sobre el conjunto que ya no pertenece al set
+  // canónico de manager. En la segunda corrida no encuentra filas -> no-op.
+  const leakedSuperadminPermissionIds = allPermissions
+    .filter((p) => p.name.startsWith('superadmin:'))
+    .map((p) => p.id);
+  if (leakedSuperadminPermissionIds.length > 0) {
+    const revokeResult = await client.role_permissions.deleteMany({
+      where: {
+        role_id: managerRole.id,
+        permission_id: { in: leakedSuperadminPermissionIds },
+      },
+    });
+    if (revokeResult.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeResult.count} superadmin:* from STORE_ADMIN (manager) (QUI-600)`,
+      );
+    }
+  }
 
   // Assign basic permissions to supervisor
   const supervisorPermissions = allPermissions.filter(
