@@ -16,6 +16,7 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { finalize } from 'rxjs/operators';
 import {
   ButtonComponent,
   ModalComponent,
@@ -173,6 +174,7 @@ export class PosCashMovementModalComponent {
   private fb = inject(FormBuilder);
   private cashRegisterService = inject(PosCashRegisterService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   constructor() {
     this.form = this.fb.group({
@@ -208,10 +210,12 @@ export class PosCashMovementModalComponent {
 
     this.cashRegisterService
       .addMovement(this.sessionId()!, this.form.value)
-      .pipe(takeUntilDestroyed())
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.submitting.set(false)),
+      )
       .subscribe({
         next: (movement) => {
-          this.submitting.set(false);
           this.toastService.success(
             this.form.value.type === 'cash_in'
               ? 'Entrada registrada'
@@ -221,7 +225,6 @@ export class PosCashMovementModalComponent {
           this.isOpenChange.emit(false);
         },
         error: (err) => {
-          this.submitting.set(false);
           this.toastService.error(extractApiErrorMessage(err));
         },
       });
