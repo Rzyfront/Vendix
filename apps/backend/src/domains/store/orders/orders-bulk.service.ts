@@ -35,6 +35,29 @@ import {
  * backend redacta el motivo completo (el modal solo lo pinta), así que no puede
  * depender de que el cliente sepa traducir el enum.
  */
+/**
+ * Formas de fila de los dos dry-runs.
+ *
+ * Los delegates de `StorePrismaService` no propagan la inferencia de `select`
+ * (el resultado sale como `{}`), así que hay que declarar la forma esperada a
+ * mano. Se hace con un tipo local y no con `any` a propósito: el compilador
+ * sigue verificando cada acceso contra lo que el `select` realmente pide, y si
+ * alguien quita un campo del `select` sin quitarlo de aquí, el error aparece en
+ * el sitio de uso en vez de propagarse como `undefined` en runtime.
+ */
+interface PreviewOrderRow {
+  id: number;
+  order_number: string;
+  state: order_state_enum;
+}
+
+interface PreviewDispatchOrderRow extends PreviewOrderRow {
+  delivery_type: string | null;
+  shipping_address_snapshot: unknown;
+  shipping_address_id: number | null;
+  order_items: Array<{ id: number; quantity: unknown }>;
+}
+
 const STATE_LABELS: Record<string, string> = {
   draft: 'Borrador',
   created: 'Creada',
@@ -149,11 +172,14 @@ export class OrdersBulkService {
   async previewTransition(
     dto: BulkTransitionOrdersDto,
   ): Promise<BulkOrdersPreviewResultDto> {
-    const orders = await this.prisma.orders.findMany({
+    const orders = (await this.prisma.orders.findMany({
       where: { id: { in: dto.ids } },
       select: { id: true, order_number: true, state: true },
-    });
-    const byId = new Map(orders.map((o) => [o.id, o]));
+    })) as PreviewOrderRow[];
+    // `as const` para que el callback devuelva una TUPLA y no `(number | T)[]`:
+    // sin él, `new Map` infiere `Map<number | T, number | T>` y el valor que
+    // sale de `.get()` pierde la forma de la orden.
+    const byId = new Map(orders.map((o) => [o.id, o] as const));
 
     const items: BulkOrderPreviewItemDto[] = dto.ids.map((id) => {
       const order = byId.get(id);
@@ -234,7 +260,7 @@ export class OrdersBulkService {
   async previewAssignRoute(
     dto: BulkAssignRouteDto,
   ): Promise<BulkOrdersPreviewResultDto> {
-    const orders = await this.prisma.orders.findMany({
+    const orders = (await this.prisma.orders.findMany({
       where: { id: { in: dto.ids } },
       select: {
         id: true,
@@ -245,8 +271,11 @@ export class OrdersBulkService {
         shipping_address_id: true,
         order_items: { select: { id: true, quantity: true } },
       },
-    });
-    const byId = new Map(orders.map((o) => [o.id, o]));
+    })) as PreviewDispatchOrderRow[];
+    // `as const` para que el callback devuelva una TUPLA y no `(number | T)[]`:
+    // sin él, `new Map` infiere `Map<number | T, number | T>` y el valor que
+    // sale de `.get()` pierde la forma de la orden.
+    const byId = new Map(orders.map((o) => [o.id, o] as const));
 
     // Cantidades ya remitidas por ítem, en UNA consulta para todo el lote.
     const notes = await this.prisma.dispatch_notes.findMany({
