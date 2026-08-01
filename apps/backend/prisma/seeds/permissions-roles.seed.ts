@@ -4183,9 +4183,17 @@ export async function seedPermissionsAndRoles(
   // Ojo: el filtro histórico `!p.name.includes('super_admin')` NO excluye el
   // prefijo `superadmin:` (va sin guion bajo), por eso hace falta esta
   // exclusión explícita.
+  //
+  // QUI-600-ext: ningún rol fuera de super_admin debe portar `superadmin:*`.
+  // Es la contención semántica del modelo: la superficie de plataforma es
+  // exclusiva de super_admin. Se añade `!p.name.startsWith('superadmin:')`
+  // (catch-all del prefijo de plataforma) y se conservan las exclusiones
+  // puntuales `superadmin:roles:` / `superadmin:users:` por redundancia
+  // explícita en código.
   const ownerPermissions = allPermissions.filter(
     (p) =>
       !p.name.includes('super_admin') &&
+      !p.name.startsWith('superadmin:') &&
       !p.name.startsWith('superadmin:roles:') &&
       !p.name.startsWith('superadmin:users:') &&
       !p.name.includes('system.test') &&
@@ -4200,21 +4208,73 @@ export async function seedPermissionsAndRoles(
   );
   assignmentsCreated += ownerSync.added;
 
-  // Assign permissions to admin (paridad con owner — QUI-600 paso 5)
+  // QUI-600-ext: revocar explícitamente cualquier `superadmin:*` que owner
+  // arrastrara por la cláusula permisiva histórica. syncRolePermissions es
+  // additive-only (no revoca), así que la revocación se hace aquí de forma
+  // re-run segura: deleteMany sobre el conjunto que ya no pertenece al set
+  // canónico de owner. En la segunda corrida no encuentra filas -> no-op.
+  const ownerLeakedSuperadminIds = allPermissions
+    .filter((p) => p.name.startsWith('superadmin:'))
+    .map((p) => p.id);
+  if (ownerLeakedSuperadminIds.length > 0) {
+    const revokeOwner = await client.role_permissions.deleteMany({
+      where: {
+        role_id: ownerRole.id,
+        permission_id: { in: ownerLeakedSuperadminIds },
+      },
+    });
+    if (revokeOwner.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeOwner.count} superadmin:* from owner (QUI-600-ext)`,
+      );
+    }
+  }
+
+  // Assign permissions to admin (paridad operativa con owner — sin superadmin:*)
   //
-  // admin es el rol paralelo a owner: MISMO conjunto de permisos (623), con la
-  // única diferencia de que admin es asignable desde tienda/organización y
-  // owner no (HIDDEN_ROLE_NAMES). La contención de la superficie superadmin:*
-  // la hace el RolesGuard de los controllers de plataforma (paso 7), NO la
-  // ausencia del permiso — por eso admin hereda exactamente el mismo set que
-  // owner, incluidos los 43 permisos superadmin:*.
+  // QUI-600-ext: admin es el rol paralelo a owner pero, como cualquier rol
+  // fuera de super_admin, NO debe portar permisos `superadmin:*`. Por eso se
+  // restaura un filtro restrictivo propio (mismo set que owner post-filtro
+  // actual) en lugar de heredar literalmente los 43 superadmin:* vía map().
+  // admin ≡ owner en su superficie útil operativa; la contención semántica del
+  // prefijo `superadmin:` se aplica uniformemente.
+  const adminPermissions = allPermissions.filter(
+    (p) =>
+      !p.name.includes('super_admin') &&
+      !p.name.startsWith('superadmin:') &&
+      !p.name.startsWith('superadmin:roles:') &&
+      !p.name.startsWith('superadmin:users:') &&
+      !p.name.includes('system.test') &&
+      !p.name.includes('users.impersonate'),
+  );
   const adminSync = await syncRolePermissions(
     client,
     adminRole.id,
-    ownerPermissions.map((p) => p.id),
-    'admin (paridad owner)',
+    adminPermissions.map((p) => p.id),
+    'admin (paridad owner sin superadmin:*)',
   );
   assignmentsCreated += adminSync.added;
+
+  // QUI-600-ext: revocar explícitamente cualquier `superadmin:*` que admin
+  // arrastrara por la paridad anterior con owner. Mismo patrón idempotente
+  // que owner y manager: deleteMany sobre el prefijo no canónico, no-op en
+  // re-runs.
+  const adminLeakedSuperadminIds = allPermissions
+    .filter((p) => p.name.startsWith('superadmin:'))
+    .map((p) => p.id);
+  if (adminLeakedSuperadminIds.length > 0) {
+    const revokeAdmin = await client.role_permissions.deleteMany({
+      where: {
+        role_id: adminRole.id,
+        permission_id: { in: adminLeakedSuperadminIds },
+      },
+    });
+    if (revokeAdmin.count > 0) {
+      console.log(
+        `   🗑️  Revoked ${revokeAdmin.count} superadmin:* from admin (QUI-600-ext)`,
+      );
+    }
+  }
 
   const fiscalSupervisorPermissions = allPermissions.filter(
     (p) =>
