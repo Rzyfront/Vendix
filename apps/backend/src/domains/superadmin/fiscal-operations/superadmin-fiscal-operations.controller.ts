@@ -12,6 +12,9 @@ import {
 
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { UserRole } from '../../auth/enums/user-role.enum';
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -64,7 +67,8 @@ import { UpdateOrgFiscalDataDto } from '../../organization/settings/dto/update-o
  * reuse their existing code paths without modification.
  */
 @Controller('super-admin/fiscal')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class SuperadminFiscalOperationsController {
   constructor(
     private readonly platformOrgService: PlatformOrgService,

@@ -12,13 +12,17 @@ import {
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { JournalEntriesService } from './journal-entries.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
 
 @Controller('super-admin/fiscal/accounting/journal-entries')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class JournalEntriesController {
   constructor(
     private readonly journal_entries_service: JournalEntriesService,

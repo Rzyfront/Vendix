@@ -13,13 +13,17 @@ import {
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { FiscalPeriodsService } from './fiscal-periods.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { CreateFiscalPeriodDto } from './dto/create-fiscal-period.dto';
 import { UpdateFiscalPeriodDto } from './dto/update-fiscal-period.dto';
 
 @Controller('super-admin/fiscal/accounting/fiscal-periods')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class FiscalPeriodsController {
   constructor(
     private readonly fiscal_periods_service: FiscalPeriodsService,
