@@ -2,11 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { S3Service } from '@common/services/s3.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
 import { DispatchNotesService } from '../dispatch-notes/dispatch-notes.service';
 import { DispatchRoutesService } from '../dispatch-routes/dispatch-routes.service';
-import { SettingsService } from '../settings/settings.service';
 import {
   PRINT_FORMATS,
   PrintFormat,
@@ -25,11 +23,6 @@ import {
   BulkPrintResultDto,
   BulkPrintSkippedOrderDto,
 } from './dto/bulk-orders.dto';
-import {
-  OrderPdfBuilder,
-  OrderPdfData,
-  OrderPdfItem,
-} from './orders-pdf.builder';
 
 /**
  * Etiquetas en español de los estados de orden, para los mensajes del dry-run.
@@ -110,13 +103,17 @@ const STATE_LABELS: Record<string, string> = {
  *    remisión existe pero no está en la planilla (la asignación manual queda
  *    como remedio).
  *
- * 3. `bulkPrint` — genera un PDF multi-página con `OrderPdfBuilder`, una
- *    página por orden, respetando `store_settings.receipts.invoice_format` (o
- *    `pos_ticket_format`). El emisor se resuelve desde `fiscal_data` del scope
- *    que posee la habilitación (igual que `InvoicePdfService.resolveIssuer`).
+ * 3. `bulkPrint` — NO dibuja nada. Devuelve las órdenes imprimibles hidratadas
+ *    con lo que el tiquete POS lee, más el `pos_ticket_format` de la tienda, y
+ *    el render lo hace `PosTicketService` en el frontend: el MISMO servicio que
+ *    dibuja el tiquete post-venta del POS y la previsualización de
+ *    Ajustes → Recibos. Antes había aquí un segundo renderer (PDFKit, layout de
+ *    factura) cuyo resultado no se parecía al tiquete configurado; la paridad
+ *    con dos renderers es un convenio que se rompe solo, con uno es una
+ *    propiedad estructural.
  *
  * El tope de ids por lote lo impone el DTO (`@ArrayMaxSize`); el service no
- * re-valida. Son dos: 100 para los carriles que escriben, 300 para `bulkPrint`.
+ * re-valida.
  */
 @Injectable()
 export class OrdersBulkService {
@@ -127,8 +124,6 @@ export class OrdersBulkService {
     private readonly orderFlowService: OrderFlowService,
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchRoutesService: DispatchRoutesService,
-    private readonly settingsService: SettingsService,
-    private readonly s3Service: S3Service,
   ) {}
 
   // ─── Transition ────────────────────────────────────────────────────
@@ -532,9 +527,21 @@ export class OrdersBulkService {
   // ─── Print ─────────────────────────────────────────────────────────
 
   /**
-   * Genera un PDF multi-página con las órdenes imprimibles de la selección.
-   * El formato de papel se resuelve desde `store_settings.receipts` (la
-   * tienda, no el cliente).
+   * Devuelve las órdenes imprimibles de la selección, hidratadas con
+   * exactamente lo que el tiquete POS lee, más el formato de papel de la
+   * tienda. **No genera ningún documento**: el render lo hace
+   * `PosTicketService` en el frontend.
+   *
+   * ## Por qué el backend ya no dibuja
+   *
+   * Dibujar aquí obligaba a mantener un segundo renderer (PDFKit, layout de
+   * factura) en paralelo al que ya pinta el tiquete post-venta del POS y la
+   * previsualización de Ajustes → Recibos. Dos renderers del mismo documento
+   * divergen: el masivo salía sin `receipt_header`/`receipt_footer`, sin
+   * `pos_ticket_copies`, con otra tipografía y otro orden de bloques, y encima
+   * resolvía el papel con `invoice_format ?? pos_ticket_format` — y como
+   * `invoice_format` tiene default `'letter'`, `pos_ticket_format` nunca se
+   * aplicaba. Con un solo renderer la paridad deja de ser un convenio.
    *
    * ## Tolerancia por orden (regla de negocio)
    *
@@ -545,23 +552,25 @@ export class OrdersBulkService {
    * masiva viene a evitar.
    *
    * Por eso el método NUNCA falla por una orden: la omite, la reporta, y sigue
-   * con el resto. Hay tres carriles de omisión (`BulkPrintSkipReason`):
+   * con el resto. El backend emite dos de los tres carriles de
+   * `BulkPrintSkipReason`:
    *
    * 1. `not_found` — el id no volvió del `findMany`. El scope de tienda de
    *    `StorePrismaService` ya excluye lo ajeno, así que esto cubre tanto ids
    *    borrados como ids de otra tienda.
    * 2. `non_printable_state` — `cancelled` / `refunded`. Se descartan antes de
-   *    dibujar: un comprobante de una venta anulada o devuelta induce a error
-   *    en mostrador.
-   * 3. `render_error` — la orden es válida pero sus datos rompen el mapeo o el
-   *    render. Único motivo que denota un defecto; va al log con el stack.
+   *    entregarlas: un comprobante de una venta anulada o devuelta induce a
+   *    error en mostrador.
+   *
+   * El tercero (`render_error`) ahora lo reporta el frontend, que es quien
+   * dibuja; `summarizeSkipped` sigue sabiendo redactarlo.
    *
    * El único caso que sí es error HTTP es que NO quede ninguna orden
-   * imprimible: devolver un PDF en blanco ahí le miente al operador, que vería
-   * una hoja vacía sin saber por qué.
+   * imprimible: devolver una lista vacía ahí le miente al operador, que abriría
+   * un diálogo de impresión sin páginas y sin explicación.
    *
-   * @returns el buffer del PDF junto al detalle de lo omitido; el controller
-   *   lo publica en cabeceras porque el body es binario.
+   * @returns las órdenes a dibujar, el detalle completo de lo omitido y el
+   *   formato de papel canónico de la tienda.
    */
   async bulkPrint(dto: BulkPrintOrdersDto): Promise<BulkPrintResultDto> {
     const context = RequestContextService.getContext();
@@ -570,81 +579,163 @@ export class OrdersBulkService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    // 1. Cargar las órdenes con todo lo que el builder necesita. Una sola
-    //    consulta con includes (no N queries) para hasta 300 órdenes.
+    // 1. Cargar las órdenes con lo que el tiquete POS lee, y solo con eso. Una
+    //    sola consulta con includes (no N queries) para hasta 300 órdenes.
+    //
+    //    Deliberadamente NO se reutiliza el include de `OrdersService.findOne`:
+    //    arrastra `product_images` + `signOrderItemImages` (una firma de S3 por
+    //    ítem, N round-trips) y `kitchen_ticket_items` / `promotions` /
+    //    `installments`, que el tiquete no lee.
     const orders = await this.prisma.orders.findMany({
       where: { id: { in: dto.ids } },
       include: {
-        // `applied_price_tier_id` / `applied_price_tier_name_snapshot` viven en
-        // `order_items` (schema.prisma:1181-1182), NO en `products`: son el
-        // snapshot de la tarifa aplicada a ESA línea, no un atributo del
-        // producto. Pedirlos en el select de `products` era el 400 de Prisma
-        // ("Unknown field applied_price_tier_id ... on model products").
+        // `include` sobre `order_items` devuelve TODAS sus columnas escalares,
+        // que es justo lo que el tiquete necesita: `product_name`,
+        // `variant_sku`, `quantity`, `unit_price`, `total_price`,
+        // `tax_amount_item`, `stock_units_consumed` y
+        // `applied_price_tier_name_snapshot`.
         //
-        // No hace falta listarlos: `include` sobre `order_items` ya devuelve
-        // todas sus columnas escalares. De `products` solo se necesita el
-        // nombre, como fallback cuando la línea no trae `product_name`.
-        order_items: {
-          include: {
-            products: { select: { name: true } },
-          },
-        },
+        // Sin join con `products`: el tiquete imprime `product_name`, que es
+        // columna de la LÍNEA (el nombre en el momento de vender), no del
+        // catálogo actual — que es además lo correcto en un comprobante.
+        order_items: { orderBy: { id: 'asc' } },
         // El identificador fiscal del cliente en `users` es `document_number`
         // (+ `document_type`), no `tax_id` — `tax_id` solo existe en
-        // `organizations` (schema.prisma). Es el mismo campo que selecciona
-        // `DispatchNotesService.createFromOrder`.
+        // `organizations` (schema.prisma). `phone` va porque el bloque de
+        // cliente del tiquete lo imprime.
         users: {
           select: {
             id: true,
             first_name: true,
             last_name: true,
             email: true,
+            phone: true,
             document_number: true,
           },
         },
-        addresses_orders_billing_address_idToaddresses: true,
+        // Solo la dirección de ENVÍO. La de facturación la consumía el layout
+        // de factura de PDFKit, que ya no existe.
         addresses_orders_shipping_address_idToaddresses: true,
-        stores: {
+        // Sin este include el tiquete perdía las filas "Efectivo recibido" /
+        // "Cambio" y el método de pago: el frontend hace
+        // `payments.find(p => p.state === 'succeeded')` y de ahí lee
+        // `gateway_response.metadata.amount_received` y `.change`.
+        //
+        // El filtro por `succeeded` va en la consulta y no en memoria para no
+        // mandarle al cliente los intentos de pago fallidos de la orden.
+        //
+        // `store_payment_method` va porque el NOMBRE del método de pago no está
+        // en `gateway_response`. El frontend lo lee de
+        // `gateway_response.metadata.payment_method`, pero NADIE escribe esa
+        // clave: el escritor del cobro POS
+        // (`payments.service.ts:3387`) guarda `metadata` con `register_id`,
+        // `seller_user_id`, `amount_received` e `is_pos_payment`, y el método
+        // viaja como FK en `store_payment_method_id`. Verificado en dev contra
+        // 5 órdenes: `metadata.payment_method` es `undefined` en todas. Sin
+        // esta relación el tiquete seguiría imprimiendo `Método de pago: N/A`
+        // aunque el include de `payments` esté puesto.
+        payments: {
+          where: { state: 'succeeded' },
           select: {
             id: true,
-            name: true,
-            legal_name: true,
-            logo_url: true,
-            addresses: {
-              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-              take: 1,
-            },
-            store_settings: { select: { settings: true } },
-            // La relación en `stores` se llama `organizations`, en PLURAL
-            // (schema.prisma:39) aunque sea a-uno. El schema es snake_case y
-            // nombra las relaciones por el modelo destino, no por cardinalidad.
-            organizations: {
+            state: true,
+            gateway_response: true,
+            created_at: true,
+            store_payment_method: {
               select: {
-                id: true,
-                name: true,
-                legal_name: true,
-                tax_id: true,
-                phone: true,
-                email: true,
-                logo_url: true,
-                fiscal_scope: true,
-                addresses: { take: 1 },
-                organization_settings: { select: { settings: true } },
+                display_name: true,
+                system_payment_method: {
+                  select: { name: true, display_name: true },
+                },
               },
             },
           },
+          orderBy: { created_at: 'asc' },
         },
+        // Solo la factura ACEPTADA por la DIAN, y solo la última.
+        //
+        // El filtro es `accepted` y no `pending` porque el pie del tiquete
+        // afirma literalmente "validada por la DIAN": con `pending`,
+        // `rejected` o `error` esa afirmación sería falsa. La AUSENCIA de fila
+        // es entonces la señal correcta para que el frontend imprima el
+        // desglose de IVA y el pie de "este documento no es una factura
+        // electrónica".
+        invoices: {
+          where: { dian_status: 'accepted' },
+          select: { invoice_number: true, cufe: true },
+          orderBy: { id: 'desc' },
+          take: 1,
+        },
+        // `id` + `name`, nada más. El emisor (razón social, NIT, dirección) y
+        // el logo los resuelve `PosTicketService.generateTicketHTML` por su
+        // cuenta desde el snapshot de `vendix_auth_state`, así que repetir aquí
+        // organización, direcciones y `store_settings` sería payload muerto ×N
+        // — y `store_settings.settings` lleva `fiscal_data` completo, que no
+        // tiene por qué viajar 300 veces al navegador para imprimir tiquetes.
+        stores: { select: { id: true, name: true } },
       },
     });
 
-    // 2. Repartir la selección entre imprimibles y omitidas. El orden del PDF
-    //    es el orden en que el cliente mandó los ids: `findMany` no garantiza
-    //    ninguno, y el operador espera imprimir en el orden en que seleccionó.
-    const byId = new Map<number, any>(orders.map((o: any) => [o.id, o]));
-    const skipped: BulkPrintSkippedOrderDto[] = [];
-    const printable: any[] = [];
+    // 2. Repartir la selección entre imprimibles y omitidas.
+    const { printable, skipped } = this.partitionPrintable(
+      dto.ids,
+      orders as any[],
+    );
 
-    for (const id of dto.ids) {
+    if (printable.length === 0) {
+      // Ninguna orden imprimible. Devolver una lista vacía sería un fallo
+      // silencioso: el operador abriría un diálogo de impresión sin páginas y
+      // sin saber por qué.
+      throw new VendixHttpException(
+        ErrorCodes.ORD_BULK_PRINT_001,
+        this.summarizeSkipped(dto.ids.length, skipped),
+      );
+    }
+
+    // 3. Formato de papel y copias: de la DB, una vez por lote (son de la
+    //    tienda, no de la orden), y en una consulta aparte en vez de un include
+    //    en `stores`. El lote NO puede mezclar tiendas — `orders` es un modelo
+    //    store-scoped y la extensión de Prisma inyecta `store_id` en el `where`,
+    //    así que un id ajeno cae en `not_found` —, luego un solo formato es
+    //    correcto para todo el documento.
+    const { pos_ticket_format, pos_ticket_copies } =
+      await this.resolvePosTicketSettings(store_id);
+
+    return {
+      total: dto.ids.length,
+      printable: printable.length,
+      orders: printable,
+      skipped,
+      pos_ticket_format,
+      pos_ticket_copies,
+    };
+  }
+
+  /**
+   * Reparte los ids pedidos entre las órdenes a imprimir y las omitidas, **en
+   * el orden en que el cliente mandó los ids**: `findMany` no garantiza
+   * ninguno y el operador espera el taco de tiquetes en el orden en que
+   * seleccionó.
+   *
+   * Genérico en la forma de la fila porque los includes varían según para qué
+   * se lea el lote; solo exige lo que la clasificación necesita (`id` para el
+   * mapa, `order_number` + `state` para redactar el motivo). Así un `select`
+   * más pequeño o más grande sigue sirviendo sin castear.
+   *
+   * El chequeo de "no quedó nada imprimible" NO vive aquí: es una decisión del
+   * llamador (unos querrán 400, otros una lista vacía legítima).
+   */
+  private partitionPrintable<
+    T extends { id: number; order_number: string; state: any },
+  >(
+    ids: number[],
+    orders: T[],
+  ): { printable: T[]; skipped: BulkPrintSkippedOrderDto[] } {
+    const byId = new Map<number, T>(orders.map((o) => [o.id, o]));
+    const skipped: BulkPrintSkippedOrderDto[] = [];
+    const printable: T[] = [];
+
+    for (const id of ids) {
       const order = byId.get(id);
       if (!order) {
         skipped.push({
@@ -666,222 +757,7 @@ export class OrdersBulkService {
       printable.push(order);
     }
 
-    if (printable.length === 0) {
-      // Ninguna orden imprimible. Un PDF en blanco aquí sería un fallo
-      // silencioso: el operador abriría una hoja vacía sin explicación.
-      throw new VendixHttpException(
-        ErrorCodes.ORD_BULK_PRINT_001,
-        this.summarizeSkipped(dto.ids.length, skipped),
-      );
-    }
-
-    // 3. Resolver emisor + formato UNA vez (son de la tienda, no de la orden).
-    const store = printable[0].stores as any;
-    const org = store?.organizations;
-    const issuer = await this.resolveIssuer(org, store);
-    const format = this.resolvePrintFormat(store);
-
-    // Logo opcional: descargar una sola vez (la tienda es la misma para todas).
-    let logoBuffer: Buffer | undefined;
-    if (issuer.logo_url) {
-      try {
-        logoBuffer = await this.s3Service.downloadImage(issuer.logo_url);
-      } catch {
-        this.logger.warn(
-          'bulkPrint: no se pudo descargar el logo del emisor; se omite',
-        );
-      }
-    }
-
-    // 4. Mapear cada orden a OrderPdfData. El mapeo es donde revientan los
-    //    datos sucios (un `order_items` corrupto, un total no numérico), así
-    //    que va orden por orden dentro de un try: una fila mala no puede
-    //    llevarse por delante las otras 99.
-    const toPdfData = (order: any): OrderPdfData => {
-      const customer = order.users;
-      // `orders` no tiene columna `customer_name` — la venta anónima simplemente
-      // no trae `users`, así que el fallback es la etiqueta directa.
-      const customerName = customer
-        ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
-          'Consumidor Final'
-        : 'Consumidor Final';
-
-      const items: OrderPdfItem[] = (order.order_items ?? []).map((it: any) => ({
-        description:
-          it.product_name ||
-          it.products?.name ||
-          `Producto #${it.product_id ?? '?'}`,
-        quantity: Number(it.quantity),
-        unit_price: Number(it.unit_price),
-        total_amount: Number(it.total_price),
-        // La columna de `order_items` es `applied_price_tier_name_snapshot`;
-        // `applied_price_tier_name` (sin sufijo) solo existe en `invoice_items`
-        // (schema.prisma:4902), que es de donde viene el nombre del campo en la
-        // interfaz del builder. Leer el nombre equivocado no rompía nada: dejaba
-        // la tarifa en `null` en TODAS las líneas y el PDF salía sin la línea
-        // "Tarifa: …" — un fallo silencioso, no un error.
-        applied_price_tier_name: it.applied_price_tier_name_snapshot ?? null,
-      }));
-
-      return {
-        company_name: issuer.legal_name,
-        company_nit: issuer.nit,
-        company_address: issuer.address_line,
-        company_phone: issuer.phone,
-        company_email: issuer.email,
-        company_logo_buffer: logoBuffer,
-        company_trade_name: issuer.trade_name,
-        company_tax_regime: issuer.tax_regime,
-        company_tax_responsibilities: issuer.tax_responsibilities,
-        order_number: order.order_number,
-        order_state: String(order.state),
-        issue_date: this.formatDate(order.created_at),
-        channel: order.channel,
-        currency: order.currency ?? undefined,
-        notes: order.notes || undefined,
-        customer_name: customerName,
-        customer_tax_id: customer?.document_number || undefined,
-        customer_address: this.formatAddress(
-          order.addresses_orders_billing_address_idToaddresses,
-        ),
-        customer_email: customer?.email || undefined,
-        items,
-        subtotal_amount: Number(order.subtotal_amount ?? 0),
-        discount_amount: Number(order.discount_amount ?? 0),
-        tax_amount: Number(order.tax_amount ?? 0),
-        shipping_cost: Number(order.shipping_cost ?? 0),
-        total_amount: Number(order.grand_total ?? order.total_amount ?? 0),
-        format,
-      };
-    };
-
-    const pdfData: OrderPdfData[] = [];
-    const rendered: Array<{ id: number; order_number: string }> = [];
-
-    for (const order of printable) {
-      try {
-        pdfData.push(toPdfData(order));
-        rendered.push({ id: order.id, order_number: order.order_number });
-      } catch (error: any) {
-        this.logger.error(
-          `bulkPrint: la orden ${order.id} (${order.order_number}) no se pudo mapear a PDF: ${error?.message}`,
-          error?.stack,
-        );
-        skipped.push({
-          id: order.id,
-          order_number: order.order_number,
-          reason: 'render_error',
-          message: `${order.order_number}: datos incompletos, se omitió del PDF`,
-        });
-      }
-    }
-
-    if (pdfData.length === 0) {
-      throw new VendixHttpException(
-        ErrorCodes.ORD_BULK_PRINT_001,
-        this.summarizeSkipped(dto.ids.length, skipped),
-      );
-    }
-
-    // 5. Render. `copies` NO multiplica páginas aquí: el builder genera el
-    //    documento base una vez por orden y el navegador manda N copias al
-    //    driver desde el diálogo de impresión.
-    const buffer = await this.renderOrdersPdf(
-      pdfData,
-      rendered,
-      format,
-      skipped,
-      dto.ids.length,
-    );
-
-    // `rendered` es la fuente de verdad del conteo, no `pdfData.length`:
-    // `renderOrdersPdf` lo poda cuando el aislamiento descarta órdenes, así que
-    // `printed + skipped.length === total` se mantiene también en ese camino.
-    return {
-      total: dto.ids.length,
-      printed: rendered.length,
-      skipped,
-      buffer,
-    };
-  }
-
-  /**
-   * Renderiza el lote y, si el render completo falla, aísla las órdenes
-   * culpables para poder entregar igual el PDF con las sanas.
-   *
-   * ## Por qué dos pasadas y no una sola defensiva
-   *
-   * PDFKit escribe sobre un único documento en streaming: no hay forma de
-   * "saltarse" una orden a mitad de render, porque cuando el error aparece el
-   * documento ya está corrupto. La única manera de aislar al culpable es
-   * renderizar 1×1 — pero hacerlo siempre pagaría N renders en el caso feliz,
-   * que es el 99% de las veces.
-   *
-   * Por eso el 1×1 vive SOLO en el camino de error: el caso feliz es un render;
-   * el caso sucio es 1 fallido + N sondas + 1 final. Se paga la lentitud
-   * únicamente cuando ya había un problema.
-   *
-   * Si el 1×1 no reproduce ningún fallo, el problema no es de ninguna orden
-   * concreta (memoria, formato de papel degenerado): ahí se relanza el error
-   * original en vez de fingir que el lote es imprimible.
-   */
-  private async renderOrdersPdf(
-    pdfData: OrderPdfData[],
-    refs: Array<{ id: number; order_number: string }>,
-    format: PrintFormat,
-    skipped: BulkPrintSkippedOrderDto[],
-    totalRequested: number,
-  ): Promise<Buffer> {
-    try {
-      return await OrderPdfBuilder.generate(pdfData, format);
-    } catch (batchError: any) {
-      this.logger.error(
-        `bulkPrint: el render del lote de ${pdfData.length} órdenes falló (${batchError?.message}); aislando órdenes culpables`,
-        batchError?.stack,
-      );
-
-      const healthy: OrderPdfData[] = [];
-      for (let i = 0; i < pdfData.length; i++) {
-        try {
-          await OrderPdfBuilder.generate([pdfData[i]], format);
-          healthy.push(pdfData[i]);
-        } catch (singleError: any) {
-          this.logger.error(
-            `bulkPrint: la orden ${refs[i].id} (${refs[i].order_number}) no se puede renderizar: ${singleError?.message}`,
-            singleError?.stack,
-          );
-          skipped.push({
-            id: refs[i].id,
-            order_number: refs[i].order_number,
-            reason: 'render_error',
-            message: `${refs[i].order_number}: no se pudo dibujar, se omitió del PDF`,
-          });
-        }
-      }
-
-      if (healthy.length === pdfData.length) {
-        // Ninguna orden falla por sí sola: el problema es del lote completo
-        // (memoria, layout), no de los datos. Mentir con un PDF parcial sería
-        // peor que propagar el fallo real.
-        throw batchError;
-      }
-      if (healthy.length === 0) {
-        throw new VendixHttpException(
-          ErrorCodes.ORD_BULK_PRINT_001,
-          this.summarizeSkipped(totalRequested, skipped),
-        );
-      }
-
-      // Quitar de `refs` las omitidas para que el conteo del controller cuadre.
-      const skippedIds = new Set(
-        skipped.filter((s) => s.reason === 'render_error').map((s) => s.id),
-      );
-      for (let i = refs.length - 1; i >= 0; i--) {
-        if (skippedIds.has(refs[i].id)) refs.splice(i, 1);
-      }
-
-      return OrderPdfBuilder.generate(healthy, format);
-    }
+    return { printable, skipped };
   }
 
   /**
@@ -917,109 +793,50 @@ export class OrdersBulkService {
   // ─── Helpers ────────────────────────────────────────────────────────
 
   /**
-   * Emisor legal. Réplica del `resolveIssuer` de `InvoicePdfService`: prefiere
-   * el `fiscal_data` del scope que posee la habilitación (store bajo
-   * `fiscal_scope = STORE`, organización si no) y solo cae al row de
-   * organización. La identidad impresa no puede diferir de la firmada.
+   * Formato de papel y número de copias del tiquete POS, leídos de la DB.
+   *
+   * Lee ÚNICAMENTE `receipts.pos_ticket_format`, con fallback `thermal_80` (el
+   * mismo default que `getPersistableDefaultStoreSettings`). El código anterior
+   * hacía `invoice_format ?? pos_ticket_format` y su comentario declaraba la
+   * intención opuesta a lo que ejecutaba: `invoice_format` tiene default
+   * `'letter'`, así que SIEMPRE existe y siempre ganaba — `pos_ticket_format`
+   * nunca se aplicaba. Aquí no hay cascada porque no hay ambigüedad: lo que se
+   * imprime es el tiquete POS, luego el setting que manda es el del tiquete POS.
+   *
+   * Ambos valores viajan al frontend porque allí se leerían del snapshot de
+   * `vendix_auth_state`, que solo se rehidrata al re-loguear: un comerciante que
+   * acaba de cambiar formato o copias imprimiría con los valores viejos hasta
+   * cerrar sesión. Devolverlos aquí los hace canónicos para esta impresión.
+   *
+   * `copies` se acota a [1, 5]: `pos_ticket_copies` admite 0 en settings con el
+   * significado "no imprimir automáticamente tras la venta", pero quien pulsa
+   * "Imprimir" pidió papel explícitamente, así que 0 copias sería obedecer el
+   * setting equivocado. El techo de 5 es el mismo del DTO de settings.
+   *
+   * Se consulta `store_settings` aparte en vez de incluirlo en `stores`: son un
+   * par de valores por lote y el include repetiría el JSON completo de settings
+   * (con `fiscal_data` dentro) una vez por orden, en una respuesta que puede
+   * llevar 300.
    */
-  private async resolveIssuer(org: any, store: any) {
-    const scope: string = org?.fiscal_scope ?? 'STORE';
-    const scoped_settings =
-      scope === 'STORE'
-        ? store?.store_settings?.settings
-        : org?.organization_settings?.settings;
-    const fiscal = ((scoped_settings as any)?.fiscal_data ?? {}) as {
-      nit?: string;
-      nit_dv?: string;
-      legal_name?: string;
-      tax_regime?: string;
-      tax_responsibilities?: string[];
-      fiscal_address?: string;
-      city?: string;
-      department?: string;
-    };
+  private async resolvePosTicketSettings(
+    store_id: number,
+  ): Promise<{ pos_ticket_format: PrintFormat; pos_ticket_copies: number }> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const receipts = (row?.settings as any)?.receipts;
 
-    const owner = scope === 'STORE' ? store : org;
-    const address = owner?.addresses?.[0] ?? org?.addresses?.[0];
-
-    const address_line =
-      [address?.address_line1, address?.city, address?.state_province]
-        .filter(Boolean)
-        .join(', ') ||
-      [fiscal.fiscal_address, fiscal.city, fiscal.department]
-        .filter(Boolean)
-        .join(', ') ||
-      undefined;
-
-    const nit_base = fiscal.nit || org?.tax_id || store?.legal_name;
-    const nit = nit_base
-      ? fiscal.nit_dv
-        ? `${nit_base}-${fiscal.nit_dv}`
-        : nit_base
-      : 'N/A';
-
-    const TAX_REGIME_LABELS: Record<string, string> = {
-      COMUN: 'Responsable de IVA',
-      SIMPLIFICADO: 'No responsable de IVA',
-      SIMPLE: 'Regimen Simple de Tributacion (RST)',
-      GRAN_CONTRIBUYENTE: 'Gran contribuyente',
-      NO_RESPONSABLE: 'No responsable de IVA',
-    };
-    const regime_key = (fiscal.tax_regime || '').toUpperCase();
+    const format = receipts?.pos_ticket_format;
+    const raw_copies = Number(receipts?.pos_ticket_copies);
 
     return {
-      legal_name:
-        fiscal.legal_name || owner?.legal_name || org?.name || 'N/A',
-      nit,
-      trade_name: owner?.name || undefined,
-      address_line,
-      phone: address?.phone_number || org?.phone || undefined,
-      email: org?.email || undefined,
-      logo_url: store?.logo_url || org?.logo_url || undefined,
-      tax_regime:
-        TAX_REGIME_LABELS[regime_key] || fiscal.tax_regime || undefined,
-      tax_responsibilities: Array.isArray(fiscal.tax_responsibilities)
-        ? fiscal.tax_responsibilities
-        : undefined,
+      pos_ticket_format: PRINT_FORMATS.includes(format as PrintFormat)
+        ? (format as PrintFormat)
+        : 'thermal_80',
+      pos_ticket_copies: Number.isFinite(raw_copies)
+        ? Math.min(5, Math.max(1, Math.trunc(raw_copies)))
+        : 1,
     };
-  }
-
-  /**
-   * Formato de papel para el PDF. Siempre el setting de la tienda; cae a
-   * `letter` (histórico). Prioriza `pos_ticket_format` si la tienda no tiene
-   * `invoice_format` configurado (POS receipts), igual que el POS.
-   */
-  private resolvePrintFormat(store: any): PrintFormat {
-    const receipts = (store?.store_settings?.settings as any)?.receipts;
-    const format: PrintFormat | undefined =
-      receipts?.invoice_format ?? receipts?.pos_ticket_format;
-    return PRINT_FORMATS.includes(format as PrintFormat)
-      ? (format as PrintFormat)
-      : 'letter';
-  }
-
-  /** Formatea una fecha como DD/MM/YYYY. */
-  private formatDate(date: Date | string): string {
-    const d = new Date(date);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    return `${day}/${month}/${year}`;
-  }
-
-  /** Extrae una dirección imprimible del JSON de addresses. */
-  private formatAddress(address: any): string | undefined {
-    if (!address) return undefined;
-    if (typeof address === 'string') return address;
-    if (typeof address === 'object') {
-      const parts: string[] = [];
-      if (address.address_line1) parts.push(address.address_line1);
-      if (address.address_line2) parts.push(address.address_line2);
-      if (address.city) parts.push(address.city);
-      if (address.state_province) parts.push(address.state_province);
-      if (address.country) parts.push(address.country);
-      return parts.length > 0 ? parts.join(', ') : undefined;
-    }
-    return undefined;
   }
 }

@@ -5,11 +5,9 @@ import {
   UseGuards,
   Logger,
   Req,
-  Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import type { Response } from 'express';
 import { OrdersBulkService } from './orders-bulk.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -21,15 +19,6 @@ import {
   BulkPrintOrdersDto,
   BulkTransitionOrdersDto,
 } from './dto/bulk-orders.dto';
-
-/**
- * Máximo de órdenes omitidas que se enumeran en `X-Skipped-Orders`.
- *
- * Una cabecera HTTP no es un canal para listas largas: nginx corta en 8 KB por
- * cabecera y 100 motivos serializados lo superan. Los contadores
- * (`X-Skipped-Count`) no se truncan nunca; solo el detalle.
- */
-const MAX_SKIPPED_IN_HEADER = 20;
 
 /**
  * Operaciones masivas sobre órdenes (QUI-599).
@@ -250,87 +239,43 @@ export class OrdersBulkController {
   }
 
   /**
-   * Genera un PDF multi-página (una página por orden) con todas las órdenes
-   * seleccionadas, respetando `store_settings.receipts.invoice_format` (o
-   * `pos_ticket_format`). Devuelve `application/pdf` directamente para que el
-   * navegador lo mande al diálogo de impresión en un solo documento (UX
-   * pedida: hasta 300 órdenes, una sola impresión).
+   * Devuelve las órdenes imprimibles de la selección hidratadas con lo que el
+   * tiquete POS lee, más el `pos_ticket_format` de la tienda. **No devuelve un
+   * documento**: el render lo hace `PosTicketService` en el frontend, el mismo
+   * servicio que dibuja el tiquete post-venta del POS y la previsualización de
+   * Ajustes → Recibos, de modo que los tres flujos salen idénticos por
+   * construcción.
    *
-   * `copies` opcional en el DTO sobreescribe `invoice_copies` /
-   * `pos_ticket_copies` para esta impresión puntual; el navegador se encarga
-   * de mandar N copias al driver, el backend genera el documento base una
-   * vez por orden.
+   * Contrato (`BulkPrintResultDto` dentro del envelope de `ResponseService`):
+   * `{ total, printable, orders[], skipped[], pos_ticket_format }`, con
+   * `printable + skipped.length === total`.
+   *
+   * El path y el permiso NO cambian: el row sembrado apunta a
+   * `/api/store/orders/bulk/print` y renombrarlo lo dejaría muerto sin ganar
+   * nada. La operación sigue siendo "imprimir en lote"; solo cambia dónde se
+   * dibuja.
+   *
+   * Las omitidas van COMPLETAS en el body. Antes viajaban en
+   * `X-Skipped-Orders` truncadas a 20 porque el body era binario y nginx corta
+   * las cabeceras en 8 KB; en JSON esa restricción no existe.
    */
   @Post('print')
+  @HttpCode(HttpStatus.OK)
   @Permissions('store:orders:bulk_print')
-  async print(
-    @Body() dto: BulkPrintOrdersDto,
-    @Req() request: any,
-    @Res() response: Response,
-  ) {
+  async print(@Body() dto: BulkPrintOrdersDto, @Req() request: any) {
     this.assertNamedPermission(request, 'store:orders:bulk_print');
-    try {
-      const { buffer, printed, total, skipped } =
-        await this.ordersBulkService.bulkPrint(dto);
 
-      // 200, no el 201 por defecto de Nest para POST: generar un PDF no crea
-      // ningún recurso. Con `@Res()` el handler es dueño de la respuesta, así que
-      // hay que fijarlo aquí — `@HttpCode()` no aplica cuando se pasa por alto
-      // el interceptor de respuesta.
-      response.status(HttpStatus.OK);
-      response.setHeader('Content-Type', 'application/pdf');
-      response.setHeader(
-        'Content-Disposition',
-        `attachment; filename="ordenes-bulk-${Date.now()}.pdf"`,
-      );
-      response.setHeader('Content-Length', buffer.length);
+    // Sin try/catch a propósito. `bulkPrint` lanza `VendixHttpException`
+    // (`STORE_CONTEXT_001`, `ORD_BULK_PRINT_001`) y `AllExceptionsFilter` emite
+    // el HTTP real con su `error_code`. Atraparlo para devolver
+    // `responseService.error` produciría HTTP 200 con `success:false` y el
+    // status verdadero enterrado en el body — el antipatrón que
+    // `vendix-error-handling` prohíbe.
+    const result = await this.ordersBulkService.bulkPrint(dto);
 
-      // El body es binario, así que el reporte de lo omitido viaja en
-      // cabeceras. Van en `exposedHeaders` de `enableCors` (main.ts) — sin eso
-      // el navegador las recibe pero no deja al JS leerlas.
-      //
-      // `X-Skipped-Orders` va como JSON codificado con `encodeURIComponent`:
-      // las cabeceras HTTP son ASCII y los mensajes llevan tildes ("Cancelada",
-      // "no se pudo dibujar"). Sin codificar, Node lanza
-      // `ERR_INVALID_CHAR` al escribir la cabecera y tumbaría la respuesta
-      // entera — el PDF ya generado se perdería por un acento.
-      response.setHeader('X-Printed-Count', String(printed));
-      response.setHeader('X-Skipped-Count', String(skipped.length));
-      response.setHeader('X-Total-Count', String(total));
-      if (skipped.length > 0) {
-        // El detalle se trunca a `MAX_SKIPPED_IN_HEADER`. Con el tope de 300
-        // ids del DTO, serializar 300 motivos supera de largo el límite de
-        // cabecera de nginx (8 KB por defecto) y el proxy tumbaría una
-        // respuesta que por lo demás es correcta. Los CONTADORES siempre van
-        // completos: el frontend puede decir "82 omitidas" aunque solo pueda
-        // enumerar las primeras 20.
-        response.setHeader(
-          'X-Skipped-Orders',
-          encodeURIComponent(
-            JSON.stringify(skipped.slice(0, MAX_SKIPPED_IN_HEADER)),
-          ),
-        );
-        response.setHeader(
-          'X-Skipped-Truncated',
-          String(skipped.length > MAX_SKIPPED_IN_HEADER),
-        );
-      }
-
-      response.end(buffer);
-    } catch (error) {
-      this.logger.error(
-        `Bulk print failed (ids=${dto?.ids?.length ?? 0}): ${error?.message || error}`,
-        error?.stack,
-      );
-      if (error instanceof VendixHttpException) throw error;
-      // En un endpoint que escribe binario, un error JSON tardío puede dejar
-      // la respuesta a medias. Responder con JSON solo si no se ha empezado a
-      // escribir el body (Express lo permite porque no tocamos el body aquí).
-      response.status(error.status || 400).json({
-        success: false,
-        message: error.message || 'Error al generar el PDF masivo',
-        error_code: error.code,
-      });
-    }
+    return this.responseService.success(
+      result,
+      'Órdenes listas para imprimir',
+    );
   }
 }

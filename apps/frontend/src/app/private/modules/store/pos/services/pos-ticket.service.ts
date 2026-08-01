@@ -38,6 +38,49 @@ const TAX_REGIME_LABELS: Record<string, string> = {
   NO_RESPONSABLE: 'No responsable de IVA',
 };
 
+/**
+ * Tickets rendered before handing the main thread back. Rendering is pure string
+ * building, so a 300-order batch never awaits anything and the browser paints
+ * nothing — including the progress bar — until it finishes. Yielding every N
+ * tickets costs one macrotask per chunk and keeps the UI alive.
+ */
+const BATCH_YIELD_EVERY = 20;
+
+/**
+ * Upper bound for the iframe's `load` event. `document.write` + `close()` fires
+ * it, but an engine that does not must not hang the print behind it.
+ */
+const DOCUMENT_READY_TIMEOUT_MS = 3_000;
+
+/**
+ * Upper bound for image decoding. A logo whose request never settles would
+ * otherwise leave `img.decode()` pending forever and no dialog would ever open.
+ */
+const IMAGE_DECODE_TIMEOUT_MS = 15_000;
+
+/**
+ * Backstop for removing the print iframe when `afterprint` never fires (it does
+ * not on every engine, nor when the user dismisses the dialog with the window
+ * chrome). Long on purpose: the previous 1 s could tear the document down while
+ * the print dialog was still reading it.
+ */
+const PRINT_CLEANUP_FALLBACK_MS = 60_000;
+
+/** Bounded wait for a currency load already in flight (see `ensureCurrencyLoaded`). */
+const CURRENCY_WAIT_TIMEOUT_MS = 1_000;
+const CURRENCY_WAIT_STEP_MS = 50;
+
+/**
+ * Store/organization data carried by the browser session (`localStorage`), kept
+ * apart from `TicketData` so it can be resolved once per batch and then merged
+ * into every ticket WITHOUT mutating either the caller's payload or this
+ * service's own `storeConfig`.
+ */
+interface TicketSessionOverlay {
+  store?: Partial<NonNullable<TicketData['store']>>;
+  organization?: TicketData['organization'];
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -182,7 +225,9 @@ export class PosTicketService {
       switchMap(async () => {
         if (printOptions.printReceipt) {
           const html = await this.generateTicketHTML(ticketData);
-          this.printHTML(html, printOptions.copies);
+          // Awaited so the emitted `true` means "the document reached the print
+          // dialog with its images decoded", not "the iframe was created".
+          await this.printHTML(html, printOptions.copies);
         }
 
         if (printOptions.openCashDrawer) {
@@ -205,22 +250,44 @@ export class PosTicketService {
   /**
    * `formatOverride` lets the settings preview render a format the merchant is
    * still choosing, before it is saved to `receipts.pos_ticket_format`.
+   *
+   * Thin wrapper over `renderTicketBody`, kept with its original signature
+   * because the POS confirmation, the order detail page and the receipts
+   * settings preview all call it. A batch must NOT loop over this method:
+   * `printTicketsBatch` resolves the printer, the session overlay and the
+   * currency once and then calls `renderTicketBody` per ticket.
    */
   async generateTicketHTML(
     ticketData: TicketData,
     formatOverride?: PrintFormat,
   ): Promise<string> {
-    const printer = this.currentPrinterConfig(formatOverride);
-    const showTaxes = this.shouldShowTaxes(ticketData);
-    // Without the breakdown, a `Subtotal` row that does not add up to `TOTAL`
-    // leaves the difference orphaned on paper: `subtotal` arrives from the
-    // backend as the tax-free base and `total` as the taxed amount. A merchant
-    // that does not itemise VAT prints the final price, not a broken sum.
-    const showSubtotal = showTaxes || !(ticketData.tax > 0);
-    let store = ticketData.store || this.storeConfig;
-    let organization = ticketData.organization;
+    await this.ensureCurrencyLoaded();
 
-    // Try to get from localStorage
+    return this.renderTicketBody(
+      ticketData,
+      this.currentPrinterConfig(formatOverride),
+      this.resolveSessionStore(),
+    );
+  }
+
+  /**
+   * Reads the session's store/organization/logo from `localStorage` ONCE.
+   *
+   * Two `JSON.parse` calls per ticket was invisible for a single POS sale and is
+   * 600 parses on the main thread for a 300-order batch, so the batch resolves
+   * this once and reuses the result.
+   *
+   * It returns an overlay instead of a merged store on purpose: the previous
+   * code did `let store = ticketData.store || this.storeConfig` and then wrote
+   * `store.address = …` / `store.logo = …` on it. With no `ticketData.store`
+   * that mutated `this.storeConfig` — state of a `providedIn: 'root'` service —
+   * so the first ticket's address and logo leaked into every later ticket of the
+   * batch and into the rest of the session; with a `ticketData.store` it mutated
+   * the caller's own object.
+   */
+  private resolveSessionStore(): TicketSessionOverlay {
+    const overlay: TicketSessionOverlay = {};
+
     try {
       const authState = localStorage.getItem('vendix_auth_state');
       if (authState) {
@@ -228,14 +295,22 @@ export class PosTicketService {
         const parsedUser = parsedState.user;
         if (parsedUser) {
           if (parsedUser.store) {
-            store = { ...store, ...parsedUser.store };
+            overlay.store = { ...parsedUser.store };
           }
           if (parsedUser.organizations) {
-            organization = parsedUser.organizations;
+            overlay.organization = parsedUser.organizations;
           }
-          if (parsedUser.addresses && parsedUser.addresses.length > 0) {
+          if (
+            Array.isArray(parsedUser.addresses) &&
+            parsedUser.addresses.length > 0
+          ) {
             const addr = parsedUser.addresses[0];
-            store.address = `${addr.address_line1}${addr.address_line2 ? ', ' + addr.address_line2 : ''}, ${addr.city}`;
+            // Applied after the session store so it keeps winning over
+            // `parsedUser.store.address`, exactly as the old order of writes did.
+            overlay.store = {
+              ...overlay.store,
+              address: `${addr.address_line1}${addr.address_line2 ? ', ' + addr.address_line2 : ''}, ${addr.city}`,
+            };
           }
         }
       }
@@ -243,12 +318,45 @@ export class PosTicketService {
       if (appConfig) {
         const parsedConfig = JSON.parse(appConfig);
         if (parsedConfig.branding?.logo?.url) {
-          store.logo = parsedConfig.branding.logo.url;
+          overlay.store = {
+            ...overlay.store,
+            logo: parsedConfig.branding.logo.url,
+          };
         }
       }
     } catch (e) {
       console.error('Error getting data from localStorage:', e);
     }
+
+    return overlay;
+  }
+
+  /**
+   * The ticket itself (the `.ticket` element), without the page wrapper. Every
+   * consumer goes through here — single sale, settings preview and batch — so
+   * the three documents cannot drift apart.
+   */
+  private async renderTicketBody(
+    ticketData: TicketData,
+    printer: PrinterConfig,
+    overlay: TicketSessionOverlay,
+  ): Promise<string> {
+    const showTaxes = this.shouldShowTaxes(ticketData);
+    // Without the breakdown, a `Subtotal` row that does not add up to `TOTAL`
+    // leaves the difference orphaned on paper: `subtotal` arrives from the
+    // backend as the tax-free base and `total` as the taxed amount. A merchant
+    // that does not itemise VAT prints the final price, not a broken sum.
+    const showSubtotal = showTaxes || !(ticketData.tax > 0);
+    // Composed, never mutated: `this.storeConfig` is service state and
+    // `ticketData.store` belongs to the caller. Precedence is the historical
+    // one — session overlay beats the ticket's own store, which beats the empty
+    // fallback.
+    const store = {
+      ...this.storeConfig,
+      ...(ticketData.store ?? {}),
+      ...(overlay.store ?? {}),
+    };
+    const organization = overlay.organization ?? ticketData.organization;
 
     const date = new Date(ticketData.date).toLocaleString();
 
@@ -510,20 +618,151 @@ export class PosTicketService {
     );
   }
 
-  private printHTML(html: string, copies?: number): void {
+  /**
+   * Prints N tickets as ONE document, in one dialog.
+   *
+   * Copies are contiguous per ticket (order1 ×C, order2 ×C, …) rather than the
+   * whole batch repeated C times, so the operator splits the stack by order
+   * instead of collating 600 sheets by hand.
+   *
+   * A single `@page size` governs the document: a batch cannot mix stores —
+   * `orders` is a store-scoped Prisma model, so an id from another store never
+   * comes back — and therefore cannot mix paper formats.
+   *
+   * @returns `rendered` tickets and `pages` sheets (`rendered × copies`).
+   */
+  async printTicketsBatch(
+    tickets: readonly TicketData[],
+    options?: {
+      formatOverride?: PrintFormat;
+      /**
+       * Copies per ticket, canonical from the DB. Same reason as
+       * `formatOverride`: `receipts.pos_ticket_copies` reaches this service
+       * through the `vendix_auth_state` snapshot, which only rehydrates on
+       * re-login, so a merchant who changes the copy count without logging out
+       * would keep printing the old number. Clamped to at least 1 — whoever
+       * asked to print explicitly wants paper.
+       */
+      copiesOverride?: number;
+      onProgress?: (done: number, total: number) => void;
+    },
+  ): Promise<{ rendered: number; pages: number }> {
+    const total = tickets.length;
+    if (!total) {
+      return { rendered: 0, pages: 0 };
+    }
+
+    // Before the first `currencyService.format()` call, or every amount on every
+    // ticket prints with the en-US `$` fallback.
+    await this.ensureCurrencyLoaded();
+
+    // Resolved once for the whole batch: the format/copies come from the store's
+    // settings (or the override the backend read from the DB) and the session
+    // overlay from localStorage.
+    const printer = this.currentPrinterConfig(options?.formatOverride);
+    const overlay = this.resolveSessionStore();
+    const copies = Math.max(
+      1,
+      Math.trunc(options?.copiesOverride ?? printer.copies) || 1,
+    );
+
+    const blocks: string[] = [];
+    let rendered = 0;
+
+    for (const ticket of tickets) {
+      const body = await this.renderTicketBody(ticket, printer, overlay);
+      for (let copy = 0; copy < copies; copy++) {
+        blocks.push(this.asPageBlock(body, blocks.length === 0));
+      }
+
+      rendered++;
+      options?.onProgress?.(rendered, total);
+
+      // Rendering is synchronous string work; without this the main thread never
+      // gets a frame and the progress bar stays frozen at 0 for seconds.
+      if (rendered % BATCH_YIELD_EVERY === 0 && rendered < total) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    await this.printDocument(
+      this.wrapPrintDocument(
+        blocks.join(''),
+        printer.format ?? 'thermal_80',
+        { title: total === 1 ? 'Ticket' : `Tiquetes (${total})` },
+      ),
+    );
+
+    return { rendered, pages: rendered * copies };
+  }
+
+  private async printHTML(html: string, copies?: number): Promise<void> {
     const printer = this.currentPrinterConfig();
     const total_copies = Math.max(1, copies ?? printer.copies);
-    const page_size =
-      TICKET_PAGE[printer.format ?? 'thermal_80']?.page_size ?? '80mm auto';
 
     // Browsers expose no copy count to window.print(), so extra copies are
     // extra pages: repeat the markup and force a break between copies.
     const body = Array.from({ length: total_copies }, (_, i) =>
-      i === 0
-        ? html
-        : `<div style="break-before: page; page-break-before: always;">${html}</div>`,
+      this.asPageBlock(html, i === 0),
     ).join('');
 
+    await this.printDocument(
+      this.wrapPrintDocument(body, printer.format ?? 'thermal_80'),
+    );
+  }
+
+  /**
+   * One page of the document. Every block but the first opens a new sheet — the
+   * same rule for extra copies of one ticket and for the next ticket of a batch.
+   */
+  private asPageBlock(html: string, isFirst: boolean): string {
+    return isFirst
+      ? html
+      : `<div style="break-before: page; page-break-before: always;">${html}</div>`;
+  }
+
+  /**
+   * The full print document around one or more ticket bodies.
+   *
+   * Single source of the `@page` rule and the print stylesheet, which used to be
+   * copy-pasted in three places (`printHTML`, `buildSampleTicketHTML` and the
+   * order detail page) with the preview's copy missing the `@media print` block
+   * entirely — so the merchant reviewed a bordered card on grey and the printer
+   * received something else.
+   */
+  private wrapPrintDocument(
+    bodyHtml: string,
+    format: PrintFormat,
+    opts?: { title?: string },
+  ): string {
+    const page_size = TICKET_PAGE[format]?.page_size ?? '80mm auto';
+
+    return `
+      <html>
+        <head>
+          <title>${opts?.title ?? 'Ticket'}</title>
+          <style>
+            /* Without an explicit @page size the driver falls back to its own
+               default paper and centres an 80 mm ticket on a letter sheet. */
+            @page { size: ${page_size}; margin: 0; }
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            @media print {
+              body { padding: 0; background: white; }
+              .ticket { border: none; border-radius: 0; box-shadow: none; }
+            }
+          </style>
+        </head>
+        <body>${bodyHtml}</body>
+      </html>
+    `;
+  }
+
+  /**
+   * Writes a full print document into a hidden iframe and sends it to the
+   * printer, waiting for the document and its images first.
+   */
+  private async printDocument(documentHtml: string): Promise<void> {
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.width = '0';
@@ -533,36 +772,135 @@ export class PosTicketService {
     document.body.appendChild(iframe);
 
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (doc) {
-      doc.open();
-      doc.write(`
-        <html>
-          <head>
-            <title>Ticket</title>
-            <style>
-              /* Without an explicit @page size the driver falls back to its own
-                 default paper and centres an 80 mm ticket on a letter sheet. */
-              @page { size: ${page_size}; margin: 0; }
-              body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-              .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-              @media print {
-                body { padding: 0; background: white; }
-                .ticket { border: none; border-radius: 0; box-shadow: none; }
-              }
-            </style>
-          </head>
-          <body>
-            ${body}
-          </body>
-        </html>
-      `);
-      doc.close();
-
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
+    if (!doc) {
+      iframe.remove();
+      return;
     }
 
-    setTimeout(() => iframe.remove(), 1000);
+    doc.open();
+    doc.write(documentHtml);
+    doc.close();
+
+    await this.awaitDocumentReady(iframe, doc);
+
+    const view = iframe.contentWindow;
+    // Registered BEFORE print() because print() blocks on the dialog and
+    // `afterprint` can fire the moment it returns.
+    this.removeAfterPrint(iframe, view);
+    view?.focus();
+    view?.print();
+  }
+
+  /**
+   * Blocks until the document is parsed and every image is decoded.
+   *
+   * `print()` used to run right after `doc.close()`, which is before the logo has
+   * been fetched: the preview showed it (it kept living long enough) while the
+   * paper came out without it, and a 300-ticket batch made that the normal case.
+   * Both waits are capped — a broken or hanging image must not make the document
+   * unprintable.
+   */
+  private async awaitDocumentReady(
+    iframe: HTMLIFrameElement,
+    doc: Document,
+  ): Promise<void> {
+    if (doc.readyState !== 'complete') {
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        iframe.addEventListener('load', done, { once: true });
+        setTimeout(done, DOCUMENT_READY_TIMEOUT_MS);
+      });
+    }
+
+    const images = Array.from(doc.images);
+    if (!images.length) return;
+
+    await Promise.race([
+      Promise.all(images.map((img) => this.awaitImage(img))),
+      new Promise<void>((resolve) =>
+        setTimeout(resolve, IMAGE_DECODE_TIMEOUT_MS),
+      ),
+    ]);
+  }
+
+  /**
+   * Resolves when an image is fetched AND decoded — or when it has definitively
+   * failed. Never rejects: a broken logo must degrade to a ticket without a logo,
+   * not cancel a 600-page job.
+   */
+  private awaitImage(img: HTMLImageElement): Promise<void> {
+    const fetched = img.complete
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          img.addEventListener('load', () => resolve(), { once: true });
+          img.addEventListener('error', () => resolve(), { once: true });
+        });
+
+    return fetched.then(() =>
+      typeof img.decode === 'function'
+        ? img.decode().catch(() => undefined)
+        : undefined,
+    );
+  }
+
+  /**
+   * Tears the iframe down once printing is over. The old fixed 1 s timeout could
+   * remove the document while the dialog was still rendering from it, which on a
+   * long batch means a blank or truncated job.
+   */
+  private removeAfterPrint(
+    iframe: HTMLIFrameElement,
+    view: Window | null,
+  ): void {
+    let fallback: ReturnType<typeof setTimeout> | undefined;
+    let removed = false;
+
+    const remove = () => {
+      if (removed) return;
+      removed = true;
+      if (fallback !== undefined) clearTimeout(fallback);
+      iframe.remove();
+    };
+
+    // `afterprint` does not fire on every engine, so it is the fast path and the
+    // timeout is the guarantee.
+    view?.addEventListener('afterprint', remove, { once: true });
+    fallback = setTimeout(remove, PRINT_CLEANUP_FALLBACK_MS);
+  }
+
+  /**
+   * Makes the printed currency deterministic.
+   *
+   * `CurrencyFormatService.format()` falls back to an en-US `$` while
+   * `currentCurrency()` is null (`currency.pipe.ts:275-305`), and the load is
+   * only triggered by the `currency` pipe's constructor — which neither
+   * `/admin/orders/bulk` nor `/admin/settings/general` instantiates. Without this
+   * the symbol on the paper depended on which screen the operator had visited
+   * before, and the settings preview could disagree with the batch.
+   */
+  private async ensureCurrencyLoaded(): Promise<void> {
+    if (this.currencyService.currentCurrency()) return;
+
+    try {
+      await this.currencyService.loadCurrency();
+    } catch {
+      // A ticket with the fallback symbol still prints; a rejection here would
+      // abort the whole batch instead.
+    }
+
+    // `loadCurrency()` returns null immediately when another load is already in
+    // flight, so give that one a bounded window to land rather than racing it.
+    for (
+      let waited = 0;
+      waited < CURRENCY_WAIT_TIMEOUT_MS &&
+      !this.currencyService.currentCurrency() &&
+      this.currencyService.loading();
+      waited += CURRENCY_WAIT_STEP_MS
+    ) {
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, CURRENCY_WAIT_STEP_MS),
+      );
+    }
   }
 
   private openCashDrawer(): void {}
@@ -598,10 +936,35 @@ export class PosTicketService {
   }
 
   /**
+   * Whether `tiquetes × copias` is the EXACT number of sheets for the configured
+   * format, or only a lower bound.
+   *
+   * `thermal_*` use `size: <w>mm auto`: the sheet grows with the content, so one
+   * ticket is always one page no matter how many lines it has. `letter` and
+   * `half_letter` have a FIXED height, so a long ticket fragments onto a second
+   * sheet — measured on half letter, a 16-line order renders 209 mm tall against
+   * a 140 mm page.
+   *
+   * The bulk-print notice needs this to avoid promising a page count it cannot
+   * keep: undercounting paper is exactly the surprise the notice exists to
+   * prevent.
+   */
+  pageCountIsExact(): boolean {
+    const { format } = this.currentPrinterConfig();
+    // `format` es opcional en `PrinterConfig`, y el fallback de todo el servicio
+    // es `thermal_80` (alto `auto`), así que sin formato el conteo SÍ es exacto.
+    const page_size = format
+      ? TICKET_PAGE[format]?.page_size
+      : TICKET_PAGE.thermal_80.page_size;
+    return (page_size ?? TICKET_PAGE.thermal_80.page_size).endsWith('auto');
+  }
+
+  /**
    * Full HTML document of a SAMPLE ticket in the given format, for the settings
    * preview. Built from the same `generateTicketHTML` the printer uses and
-   * wrapped in the same page rules as `printHTML`, so what the merchant reviews
-   * is what the printer receives — including the `@page size`.
+   * wrapped by the same `wrapPrintDocument` as every printed job, so what the
+   * merchant reviews is literally what the printer receives — `@page size` and
+   * `@media print` rules included.
    *
    * `asInvoiceCopy` renders it as the informative copy of an electronic invoice,
    * which is what a store already emitting invoices will actually print (no tax
@@ -655,20 +1018,12 @@ export class PosTicketService {
     };
 
     const ticket = await this.generateTicketHTML(sample, format);
-    const page_size = TICKET_PAGE[format]?.page_size ?? '80mm auto';
 
-    return `
-      <html>
-        <head>
-          <style>
-            @page { size: ${page_size}; margin: 0; }
-            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-          </style>
-        </head>
-        <body>${ticket}</body>
-      </html>
-    `;
+    // Same wrapper the printer receives — including the `@media print` rules the
+    // preview's own copy of this block used to omit.
+    return this.wrapPrintDocument(ticket, format, {
+      title: 'Tiquete de muestra',
+    });
   }
 
   getPrinterConfig(): Observable<PrinterConfig[]> {

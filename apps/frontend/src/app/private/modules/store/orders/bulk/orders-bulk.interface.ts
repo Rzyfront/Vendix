@@ -10,6 +10,9 @@
  * propiedad que no exista en el DTO devuelve 400.
  */
 
+import type { PrintFormat } from '../../../../../core/models/store-settings.interface';
+import type { Order } from '../interfaces/order.interface';
+
 /**
  * Tope duro de órdenes por lote, común a las tres operaciones masivas. Espejo
  * de `MAX_BULK_ORDERS_IDS` (`bulk-orders.dto.ts`), aplicado en backend por
@@ -127,55 +130,119 @@ export interface BulkAssignRouteRequest {
   route_id: number;
 }
 
-/** Cuerpo de `POST /store/orders/bulk/print`. */
+/**
+ * Cuerpo de `POST /store/orders/bulk/print`.
+ *
+ * `copies` está DEPRECADO en el backend y no tiene efecto: el endpoint dejó de
+ * dibujar el documento, así que el número de copias lo aplica
+ * `PosTicketService` en el frontend a partir de `pos_ticket_copies` que viene
+ * en la respuesta. Se conserva declarado porque el DTO todavía lo acepta.
+ */
 export interface BulkPrintOrdersRequest {
   ids: number[];
+  /** @deprecated Sin efecto. Las copias las resuelve el render del frontend. */
   copies?: number;
 }
 
 /**
- * Motivo por el que el backend dejó una orden fuera del PDF. Espeja
+ * Motivo por el que una orden quedó fuera de la impresión. Espeja
  * `BulkPrintSkipReason` del backend.
+ *
+ * `render_error` ya no lo emite el backend (dejó de dibujar): es el motivo que
+ * el FRONTEND usaría si `PosTicketService` no pudiera dibujar una orden. Hoy
+ * `printTicketsBatch` es todo-o-nada a propósito, así que un fallo de render se
+ * reporta como lote caído (`failureMessage` + `failedIds`) y no como omisión
+ * silenciosa de una orden que el operador sí seleccionó.
  */
 export type BulkPrintSkipReason =
   | 'not_found'
   | 'non_printable_state'
   | 'render_error';
 
-/** Una orden excluida del PDF masivo, tal como llega en `X-Skipped-Orders`. */
+/** Una orden excluida de la impresión, con su motivo legible. */
 export interface BulkPrintSkippedOrder {
   id: number;
+  /** Ausente cuando el motivo es `not_found` (no hubo fila que leer). */
   order_number?: string;
   reason: BulkPrintSkipReason;
   message: string;
 }
 
 /**
- * Resultado de la impresión masiva.
+ * Datos que devuelve `POST /store/orders/bulk/print`. Espejo de
+ * `BulkPrintResultDto` del backend, más los dos campos que agrega el cliente al
+ * fundir lotes (`failureMessage` / `failedIds`).
  *
- * El PDF viaja en el body y el reporte de lo omitido en cabeceras, porque un
- * `application/pdf` no puede llevar metadatos JSON. `blob === null` significa
- * que no se pudo generar NINGÚN PDF (todos los lotes fallaron).
+ * El endpoint devuelve DATOS, no un documento: el render vive en
+ * `PosTicketService`, el mismo servicio que dibuja el tiquete post-venta del POS
+ * y la previsualización de Ajustes → Recibos. La paridad de formato queda
+ * garantizada por construcción y no por convenio.
  *
- * `skipped` puede venir truncado (`skippedTruncated`): el backend enumera como
- * mucho 20 órdenes en la cabecera para no reventar el límite de nginx, pero
- * `skippedCount` siempre es el total real.
+ * Invariante del backend por lote: `printable + skipped.length === total` y
+ * `printable === orders.length`.
  */
-export interface BulkPrintOutcome {
-  blob: Blob | null;
-  /** Órdenes efectivamente dibujadas, sumadas sobre todos los lotes. */
-  printed: number;
-  /** Total real de omitidas, aunque `skipped` esté truncado. */
-  skippedCount: number;
-  skipped: BulkPrintSkippedOrder[];
-  skippedTruncated: boolean;
+export interface BulkPrintPayload {
+  /** Ids pedidos. */
+  total: number;
+  /** Órdenes que el frontend va a dibujar. Igual a `orders.length`. */
+  printable: number;
   /**
-   * Mensaje de error del último lote que falló por completo, si hubo alguno.
-   * Se separa de `skipped` porque un lote caído no es "órdenes omitidas": es
-   * una petición que no llegó a producir PDF.
+   * Órdenes hidratadas con exactamente lo que lee el tiquete POS: líneas,
+   * cliente, dirección de envío, pago exitoso (con la relación del método) y
+   * factura DIAN aceptada.
+   */
+  orders: Order[];
+  /**
+   * Órdenes descartadas, COMPLETAS. Antes viajaban en la cabecera
+   * `X-Skipped-Orders` truncada a 20 por el límite de 8 KB de nginx; ahora van
+   * en el body, así que el flag `skippedTruncated` desapareció junto con
+   * `skippedCount` — `skipped.length` ES el total y no puede discrepar de la
+   * lista que se le muestra al operador.
+   */
+  skipped: BulkPrintSkippedOrder[];
+  /**
+   * Formato de papel canónico leído de la DB EN esta respuesta.
+   *
+   * No es redundante con lo que el frontend ya tiene: `StoreSettingsFacade`
+   * sirve `receipts` desde el snapshot de `vendix_auth_state`, que solo se
+   * rehidrata al re-loguear. Se pasa como `formatOverride` a
+   * `printTicketsBatch`. Opcional en el tipo para tolerar un backend anterior:
+   * `currentPrinterConfig` degrada a `thermal_80`.
+   */
+  pos_ticket_format?: PrintFormat;
+  /**
+   * Copias por tiquete, canónicas de la DB. Viaja por la misma razón que
+   * `pos_ticket_format` y se pasa como `copiesOverride`: mitigar el formato y
+   * no las copias dejaría el arreglo a medias.
+   */
+  pos_ticket_copies?: number;
+  /**
+   * Mensaje del PRIMER lote que falló por completo, si hubo alguno. Se separa de
+   * `skipped` porque un lote caído no es "órdenes omitidas": es una petición que
+   * no llegó a traer datos.
    */
   failureMessage?: string;
-  /** Ids de los lotes que no produjeron PDF alguno. */
+  /** Ids de los lotes que no devolvieron datos. */
+  failedIds: number[];
+}
+
+/**
+ * Resultado de la impresión masiva, ya renderizada.
+ *
+ * `rendered === 0` significa que NADA llegó al papel: o ningún lote trajo datos,
+ * o el render falló. Es el discriminante del primer desenlace del informe al
+ * operador (antes lo era `blob === null`, cuando el backend devolvía el PDF).
+ */
+export interface BulkPrintOutcome {
+  /** Tiquetes efectivamente dibujados en el documento enviado a la impresora. */
+  rendered: number;
+  /** Hojas resultantes (`rendered × copias`), para confirmar el gasto de papel. */
+  pages: number;
+  /** Órdenes descartadas por el backend, completas. */
+  skipped: BulkPrintSkippedOrder[];
+  /** Mensaje real del primer fallo (fetch o render), si hubo alguno. */
+  failureMessage?: string;
+  /** Ids que no llegaron a dibujarse por un lote caído o un render fallido. */
   failedIds: number[];
 }
 
