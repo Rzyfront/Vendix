@@ -181,7 +181,11 @@ export class RoleUsersPanelComponent {
   private readonly toastService = inject(ToastService);
 
   readonly role = input<Role | null>(null);
-  /** false para roles de sistema: el backend los rechaza con `ROLE_ASSIGN_003`. */
+  /**
+   * Determinado por el padre con `canAssignRoleScope` (matriz de asignación,
+   * no la de edición). `false` cuando el actor no puede asignar este rol — el
+   * backend respondería 403 `ROLE_ASSIGN_003`/`ROLE_ASSIGN_002`.
+   */
   readonly canManage = input<boolean>(true);
   readonly changed = output<void>();
 
