@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { dispatch_route_stop_result_enum } from '@prisma/client';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
@@ -99,14 +100,7 @@ export class RouteSheetScannerService {
     }
 
     try {
-      let content = response.content.trim();
-      // Strip markdown code fences if present
-      if (content.startsWith('```')) {
-        content = content
-          .replace(/^```(?:json)?\n?/, '')
-          .replace(/\n?```$/, '');
-      }
-      const parsed = JSON.parse(content);
+      const parsed = parseAiJson(response.content);
       return this.normalizeScanResponse(parsed);
     } catch (err) {
       if (err instanceof VendixHttpException) throw err;

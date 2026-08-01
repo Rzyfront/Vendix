@@ -4,10 +4,14 @@ import { SettingsSyncService } from './settings-sync.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { UserRole } from '../../auth/enums/user-role.enum';
 
 @ApiTags('Super Admin - Settings Sync')
 @Controller('superadmin/settings')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class SettingsSyncController {
   constructor(
     private readonly settingsSyncService: SettingsSyncService,

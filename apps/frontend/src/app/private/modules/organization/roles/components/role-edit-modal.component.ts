@@ -23,10 +23,12 @@ import {
 import {
   ROLE_SCOPE_COLOR_MAP,
   ROLE_SCOPE_ICONS,
+  canAssignRoleScope,
   canEditRoleScope,
   getRoleReadOnlyReason,
   getRoleScopeLabel,
 } from '../../../../../shared/constants/role-scope.constant';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { Role, UpdateRoleDto } from '../interfaces/role.interface';
 import { RoleUsersPanelComponent } from './role-users-panel.component';
 
@@ -202,7 +204,7 @@ type RoleDetailTab = 'general' | 'users';
         @if (activeTab() === 'users') {
           <app-role-users-panel
             [role]="role()"
-            [canManage]="canEdit()"
+            [canManage]="canAssign()"
             (changed)="usersChanged.emit()"
           ></app-role-users-panel>
         }
@@ -239,6 +241,7 @@ type RoleDetailTab = 'general' | 'users';
 })
 export class RoleEditModalComponent {
   private readonly fb = inject(FormBuilder);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly isOpen = input<boolean>(false);
   readonly role = input<Role | null>(null);
@@ -260,6 +263,22 @@ export class RoleEditModalComponent {
    */
   readonly canEdit = computed(() =>
     canEditRoleScope(this.role()?.scope, 'organization'),
+  );
+
+  /**
+   * QUI-600 — Matriz de ASIGNACIÓN, distinta de la de edición. `canEdit`
+   * gatea "¿puede cambiar qué significa este rol?" (no, para `system`); esta
+   * gatea "¿puede dárselo a un usuario?" (sí, es gestión de personal). Sin la
+   * separación, el panel "Usuarios" se bloqueaba para `owner` y `admin` sobre
+   * roles de sistema — justamente el único panel donde un tenant de tienda
+   * única puede asignarlos.
+   */
+  readonly canAssign = computed(() =>
+    canAssignRoleScope(
+      this.role() ?? { name: '', scope: null },
+      'organization',
+      this.authFacade.userRoles(),
+    ),
   );
 
   readonly readOnlyReason = computed(() =>

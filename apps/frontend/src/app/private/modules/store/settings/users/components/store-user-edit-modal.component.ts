@@ -907,14 +907,18 @@ export class StoreUserEditModalComponent implements OnChanges {
         });
         // Sólo las asignaciones PROPIAS de esta tienda son editables. Las
         // heredadas (`assignment_store_id === null`) viven en
-        // `inheritedRoleIds()` y se pintan bloqueadas; los roles de sistema no
-        // se pueden asignar desde aquí, así que tampoco entran al set editable.
+        // `inheritedRoleIds()` y se pintan bloqueadas. El eje que decide si una
+        // asignación es editable desde la tienda es `assignment_store_id != null`
+        // (propia, no heredada) — NO el `scope` del rol: los diez roles
+        // canónicos de tienda son `scope === 'system'` por diseño del seed, y
+        // `canAssignRoleScope` (no el alcance) es quien autoriza a este actor
+        // a tenerlos. Antes se filtraba `scope !== 'system'`, lo que vaciaba la
+        // pestaña Roles y, vía `buildRoleIdsPayload`, borraba asignaciones al
+        // guardar (QUI-600).
         this.selectedRoleIds.set(
           new Set(
             (detail.roles ?? [])
-              .filter(
-                (r) => r.assignment_store_id != null && r.scope !== 'system',
-              )
+              .filter((r) => r.assignment_store_id != null)
               .map((r) => r.id),
           ),
         );
@@ -1206,8 +1210,10 @@ export class StoreUserEditModalComponent implements OnChanges {
     // Enviamos los roles seleccionados localmente (incluye carrier aun sin
     // guardar) para que el backend los persista ANTES de validar el app_type.
     // Asi asignar rol carrier + STORE_DELIVERY funciona en un solo paso.
-    // Mismo saneo que `saveRoles`: sin heredados ni roles de sistema, o el
-    // backend abortaría el guardado completo con 403.
+    // Mismo saneo que `saveRoles`: sin heredados y sin roles que la matriz de
+    // asignación rechaza para este actor — `buildRoleIdsPayload` ya intersecta
+    // con `canAssignRoleScope`, así que un cambio de `app_type` solo no puede
+    // vaciar las asignaciones vigentes (QUI-600).
     const roleIds = this.buildRoleIdsPayload();
     this.storeUsersService
       .setAppType(currentUser.id, appType, roleIds)

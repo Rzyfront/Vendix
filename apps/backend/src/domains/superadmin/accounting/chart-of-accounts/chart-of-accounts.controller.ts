@@ -12,6 +12,9 @@ import {
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { CreateAccountDto } from './dto/create-account.dto';
@@ -19,7 +22,8 @@ import { UpdateAccountDto } from './dto/update-account.dto';
 import { QueryAccountDto } from './dto/query-account.dto';
 
 @Controller('super-admin/fiscal/accounting/chart-of-accounts')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class ChartOfAccountsController {
   constructor(
     private readonly chart_of_accounts_service: ChartOfAccountsService,

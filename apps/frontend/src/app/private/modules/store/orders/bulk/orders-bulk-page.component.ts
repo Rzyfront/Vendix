@@ -77,6 +77,7 @@ import {
   MAX_BULK_ORDERS_IDS,
   type BulkOrderTransitionTarget,
   type BulkOrdersResult,
+  type BulkPrintOutcome,
 } from './orders-bulk.interface';
 import { PlanillasRutasService } from '../../planillas-rutas/services/planillas-rutas.service';
 import type { DispatchRoute } from '../../planillas-rutas/interfaces/planilla.interface';
@@ -324,6 +325,45 @@ export class OrdersBulkPageComponent {
 
   readonly selectedCount = computed<number>(() => this.selectedIds().size);
 
+  /**
+   * Cuántas órdenes más caben en la selección. La UI corta en `maxIds`, así que
+   * esto nunca es negativo: es el presupuesto restante, no un exceso.
+   */
+  readonly remainingSlots = computed<number>(() =>
+    Math.max(0, this.maxIds - this.selectedCount()),
+  );
+
+  /**
+   * La selección tocó el techo. No es un estado de error: la operación es
+   * perfectamente válida con 300, solo que no admite una más.
+   */
+  readonly atLimit = computed<boolean>(
+    () => this.selectedCount() >= this.maxIds,
+  );
+
+  /**
+   * Zona de aviso: el operador se está acercando al tope y conviene que lo vea
+   * ANTES de chocar contra él. 90% del cupo — con 300, avisa a partir de 270.
+   */
+  readonly nearLimit = computed<boolean>(
+    () => !this.atLimit() && this.selectedCount() >= this.maxIds * 0.9,
+  );
+
+  /**
+   * Color del contador. Tres estados, no dos: `neutral` mientras sobra sitio,
+   * `warning` en la recta final, `danger` al tope. Que el aviso aparezca antes
+   * del bloqueo es lo que evita que el operador descubra el límite justo cuando
+   * ya no puede hacer nada.
+   */
+  readonly limitTone = computed<'neutral' | 'warning' | 'danger'>(() =>
+    this.atLimit() ? 'danger' : this.nearLimit() ? 'warning' : 'neutral',
+  );
+
+  /**
+   * Gate residual por si la selección llegara por encima del tope sin pasar por
+   * `toggleRow` / `toggleAllVisible` (p. ej. un estado restaurado). Con la
+   * selección ya acotada en origen no debería dispararse nunca.
+   */
   readonly overLimit = computed<boolean>(
     () => this.selectedCount() > this.maxIds,
   );
@@ -451,7 +491,8 @@ export class OrdersBulkPageComponent {
       label: 'Imprimir selección',
       variant: 'primary',
       icon: 'printer',
-      disabled: this.selectedCount() === 0 || !this.canBulkPrint(),
+      disabled:
+        this.selectedCount() === 0 || !this.canBulkPrint() || this.overLimit(),
       loading: this.running() && this.bulkService.progress().phase === 'print',
       visible: this.canBulkPrint(),
     },
@@ -652,7 +693,23 @@ export class OrdersBulkPageComponent {
     this.fetchPage();
   }
 
+  /**
+   * Marca o desmarca una orden, respetando el tope.
+   *
+   * El tope se aplica AQUÍ y no solo al ejecutar: dejar marcar 500 casillas
+   * para después negarse a operar obliga al operador a deshacer a mano. Cortar
+   * en la 301 y decir por qué es una interacción, no un castigo.
+   *
+   * Desmarcar nunca se bloquea, aunque la selección esté al tope: reducir
+   * siempre debe ser posible.
+   */
   toggleRow(id: number, checked: boolean): void {
+    if (checked && !this.selectedIds().has(id) && this.atLimit()) {
+      this.toastService.warning(
+        `Llegaste al máximo de ${this.maxIds} órdenes. Quita alguna para seleccionar otra.`,
+      );
+      return;
+    }
     this.selectedIds.update((prev) => {
       const next = new Set(prev);
       if (checked) next.add(id);
@@ -661,12 +718,43 @@ export class OrdersBulkPageComponent {
     });
   }
 
+  /**
+   * Marca o desmarca todas las órdenes de la página visible.
+   *
+   * Cuando la página no cabe entera en el cupo restante se añade lo que quepa
+   * —no se descarta la acción completa— y se dice exactamente cuántas quedaron
+   * fuera. Un "no se pudo" a secas dejaría al operador sin saber si se agregó
+   * algo ni cuánto le falta.
+   */
   toggleAllVisible(checked: boolean): void {
     const visibleIds = this.orders().map((o) => o.id);
+
+    if (!checked) {
+      this.selectedIds.update((prev) => {
+        const next = new Set(prev);
+        visibleIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      return;
+    }
+
+    const current = this.selectedIds();
+    const toAdd = visibleIds.filter((id) => !current.has(id));
+    const room = this.remainingSlots();
+
+    if (toAdd.length > room) {
+      this.toastService.warning(
+        room === 0
+          ? `Llegaste al máximo de ${this.maxIds} órdenes. Quita alguna para seguir agregando.`
+          : `Se agregaron ${room} de ${toAdd.length} órdenes: el máximo por operación es ${this.maxIds}.`,
+      );
+    }
+
+    if (room === 0) return;
+
     this.selectedIds.update((prev) => {
       const next = new Set(prev);
-      if (checked) visibleIds.forEach((id) => next.add(id));
-      else visibleIds.forEach((id) => next.delete(id));
+      toAdd.slice(0, room).forEach((id) => next.add(id));
       return next;
     });
   }
@@ -792,27 +880,76 @@ export class OrdersBulkPageComponent {
       this.toastService.error('No tienes permiso para imprimir órdenes en lote');
       return;
     }
+    if (this.overLimit()) {
+      this.toastService.warning(
+        `Máximo ${this.maxIds} órdenes por impresión. Tienes ${this.selectedCount()} seleccionadas.`,
+      );
+      return;
+    }
+    const requested = this.selectedCount();
     this.running.set(true);
     this.bulkService
       .printInBatches({ ids: this.selectedIdList() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (blob) => {
+        next: (outcome) => {
           this.running.set(false);
           this.bulkService.resetProgress();
-          if (blob) {
-            this.openPdfInNewTab(blob);
-            this.toastService.success(
-              `${this.selectedCount()} órdenes listas para imprimir`,
-            );
-          } else {
-            this.toastService.error(
-              'No se pudo generar el PDF. Revisa los permisos y la configuración de recibos.',
-            );
-          }
+          this.reportPrintOutcome(outcome, requested);
         },
         error: (err) => this.onOperationError(err),
       });
+  }
+
+  /**
+   * Traduce el resultado de la impresión a lo que ve el operador.
+   *
+   * Tres desenlaces, y ninguno puede quedar mudo:
+   *
+   * 1. **Sin PDF** — ningún lote produjo documento. Se muestra el mensaje REAL
+   *    del backend (`failureMessage`). El texto anterior, "Revisa los permisos
+   *    y la configuración de recibos", se disparaba ante cualquier fallo y
+   *    mandaba al operador a revisar dos cosas que casi nunca eran la causa.
+   * 2. **PDF parcial** — hay documento pero el backend omitió órdenes
+   *    (canceladas, reembolsadas, inexistentes). Se abre el PDF Y se advierte,
+   *    porque un operador que pidió 20 y recibe 17 tiene que enterarse ahí, no
+   *    contando páginas.
+   * 3. **PDF completo** — se abre y se confirma con el conteo real.
+   */
+  private reportPrintOutcome(
+    outcome: BulkPrintOutcome,
+    requested: number,
+  ): void {
+    if (!outcome.blob) {
+      this.toastService.error(
+        outcome.failureMessage ??
+          'No se pudo generar el PDF de las órdenes seleccionadas.',
+      );
+      return;
+    }
+
+    this.openPdfInNewTab(outcome.blob);
+
+    const omitted = outcome.skippedCount + outcome.failedIds.length;
+    if (omitted === 0) {
+      this.toastService.success(
+        `${outcome.printed} de ${requested} órdenes listas para imprimir`,
+      );
+      return;
+    }
+
+    // Se nombran hasta 3 órdenes concretas: la lista completa puede ser de 80
+    // y un toast no es un informe. El conteo sí es siempre el total real.
+    const detail = outcome.skipped
+      .slice(0, 3)
+      .map((s) => s.order_number ?? `#${s.id}`)
+      .join(', ');
+
+    this.toastService.warning(
+      `${outcome.printed} de ${requested} órdenes impresas. ` +
+        `${omitted} omitidas${detail ? ` (${detail}${omitted > 3 ? '…' : ''})` : ''}: ` +
+        'canceladas, reembolsadas o no disponibles.',
+    );
   }
 
   /**

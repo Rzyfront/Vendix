@@ -23,13 +23,22 @@ import {
 } from './dto/bulk-orders.dto';
 
 /**
+ * Máximo de órdenes omitidas que se enumeran en `X-Skipped-Orders`.
+ *
+ * Una cabecera HTTP no es un canal para listas largas: nginx corta en 8 KB por
+ * cabecera y 100 motivos serializados lo superan. Los contadores
+ * (`X-Skipped-Count`) no se truncan nunca; solo el detalle.
+ */
+const MAX_SKIPPED_IN_HEADER = 20;
+
+/**
  * Operaciones masivas sobre órdenes (QUI-599).
  *
  * Controller dedicado con prefijo `store/orders/bulk` para no ensuciar
  * `OrdersController` ni chocar con su `@Get(':id')` — mismo motivo que llevó
  * a QUI-567 a crear `ProductsBulkEditController` separado.
  *
- * El tope de 100 ids lo impone el DTO (`@ArrayMaxSize`) a través del
+ * El tope de 300 ids lo impone el DTO (`@ArrayMaxSize`) a través del
  * `ValidationPipe` global; el controller no re-valida.
  *
  * Los tres endpoints son POST bajo `/api/store/`, por lo que quedan gateados
@@ -245,7 +254,7 @@ export class OrdersBulkController {
    * seleccionadas, respetando `store_settings.receipts.invoice_format` (o
    * `pos_ticket_format`). Devuelve `application/pdf` directamente para que el
    * navegador lo mande al diálogo de impresión en un solo documento (UX
-   * pedida: 100 órdenes, una sola impresión).
+   * pedida: hasta 300 órdenes, una sola impresión).
    *
    * `copies` opcional en el DTO sobreescribe `invoice_copies` /
    * `pos_ticket_copies` para esta impresión puntual; el navegador se encarga
@@ -261,7 +270,8 @@ export class OrdersBulkController {
   ) {
     this.assertNamedPermission(request, 'store:orders:bulk_print');
     try {
-      const buffer = await this.ordersBulkService.bulkPrint(dto);
+      const { buffer, printed, total, skipped } =
+        await this.ordersBulkService.bulkPrint(dto);
 
       // 200, no el 201 por defecto de Nest para POST: generar un PDF no crea
       // ningún recurso. Con `@Res()` el handler es dueño de la respuesta, así que
@@ -274,6 +284,38 @@ export class OrdersBulkController {
         `attachment; filename="ordenes-bulk-${Date.now()}.pdf"`,
       );
       response.setHeader('Content-Length', buffer.length);
+
+      // El body es binario, así que el reporte de lo omitido viaja en
+      // cabeceras. Van en `exposedHeaders` de `enableCors` (main.ts) — sin eso
+      // el navegador las recibe pero no deja al JS leerlas.
+      //
+      // `X-Skipped-Orders` va como JSON codificado con `encodeURIComponent`:
+      // las cabeceras HTTP son ASCII y los mensajes llevan tildes ("Cancelada",
+      // "no se pudo dibujar"). Sin codificar, Node lanza
+      // `ERR_INVALID_CHAR` al escribir la cabecera y tumbaría la respuesta
+      // entera — el PDF ya generado se perdería por un acento.
+      response.setHeader('X-Printed-Count', String(printed));
+      response.setHeader('X-Skipped-Count', String(skipped.length));
+      response.setHeader('X-Total-Count', String(total));
+      if (skipped.length > 0) {
+        // El detalle se trunca a `MAX_SKIPPED_IN_HEADER`. Con el tope de 300
+        // ids del DTO, serializar 300 motivos supera de largo el límite de
+        // cabecera de nginx (8 KB por defecto) y el proxy tumbaría una
+        // respuesta que por lo demás es correcta. Los CONTADORES siempre van
+        // completos: el frontend puede decir "82 omitidas" aunque solo pueda
+        // enumerar las primeras 20.
+        response.setHeader(
+          'X-Skipped-Orders',
+          encodeURIComponent(
+            JSON.stringify(skipped.slice(0, MAX_SKIPPED_IN_HEADER)),
+          ),
+        );
+        response.setHeader(
+          'X-Skipped-Truncated',
+          String(skipped.length > MAX_SKIPPED_IN_HEADER),
+        );
+      }
+
       response.end(buffer);
     } catch (error) {
       this.logger.error(

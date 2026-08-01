@@ -6,12 +6,16 @@ import {
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { ReportsService } from './reports.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { ReportParamsDto } from './dto/report-params.dto';
 
 @Controller('super-admin/fiscal/accounting/reports')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class ReportsController {
   constructor(
     private readonly reports_service: ReportsService,

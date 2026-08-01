@@ -1,4 +1,8 @@
-import PDFDocument from 'pdfkit';
+// `import PDFDocument from 'pdfkit'` compila pero revienta en producción con
+// `pdfkit_1.default is not a constructor`: tsconfig no tiene `esModuleInterop`,
+// así que tsc emite `pdfkit_1.default` sin el helper `__importDefault` y pdfkit
+// exporta la clase directamente. Ver `@common/pdf/pdfkit` para el detalle.
+import { PDFDocument } from '@common/pdf/pdfkit';
 import {
   GEOMETRY,
   PdfLayout,

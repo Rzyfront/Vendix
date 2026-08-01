@@ -18,6 +18,9 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { VendorSupportDocumentsService } from './vendor-support-documents.service';
 import { VendorSupportFiscalService } from './vendor-support-fiscal.service';
@@ -32,7 +35,8 @@ import {
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
 @Controller('super-admin/fiscal/invoicing/inbound')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 export class VendorSupportDocumentsController {
   constructor(
     private readonly service: VendorSupportDocumentsService,

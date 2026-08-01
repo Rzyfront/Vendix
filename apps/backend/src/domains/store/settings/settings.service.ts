@@ -1244,4 +1244,37 @@ export class SettingsService {
       return 'USD';
     }
   }
+
+  /**
+   * Returns the store's currency together with its `decimal_places`, read from
+   * the global `currencies` catalog.
+   *
+   * OCR scanners need the decimal count, not just the code: in a zero-decimal
+   * currency (COP, CLP, PYG, JPY…) a fractional amount is structurally
+   * impossible, which turns "how many decimals" into a deterministic validator
+   * for AI-extracted money — see `ocr-money.util.ts`.
+   *
+   * Never throws: falls back to 2 decimals, the same conservative default as
+   * the `currencies.decimal_places` column, so an unknown code can only ever
+   * disable the repair, never trigger it wrongly.
+   */
+  async getStoreCurrencyInfo(): Promise<{
+    code: string;
+    decimal_places: number;
+  }> {
+    const code = await this.getStoreCurrency();
+
+    try {
+      const currency = await this.globalPrisma.currencies.findUnique({
+        where: { code },
+        select: { decimal_places: true },
+      });
+      return { code, decimal_places: currency?.decimal_places ?? 2 };
+    } catch (err) {
+      this.logger.warn(
+        `getStoreCurrencyInfo: could not resolve decimals for ${code} (${(err as Error).message}); defaulting to 2.`,
+      );
+      return { code, decimal_places: 2 };
+    }
+  }
 }

@@ -22,9 +22,10 @@ import {
   TableColumn,
 } from '../../../../../../shared/components/index';
 import {
-  canEditRoleScope,
-  getRoleReadOnlyReason,
+  canAssignRoleScope,
+  getRoleNotAssignableReason,
 } from '../../../../../../shared/constants/role-scope.constant';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   StoreRole,
   StoreRoleUserAssignment,
@@ -59,9 +60,12 @@ const USER_STATE_COLOR_MAP: Record<string, string> = {
  * es el MISMO servicio del que el modal de usuario toma su catálogo de roles.
  *
  * Dos motivos independientes hacen una fila de sólo lectura:
- *  1. El rol no es gestionable aquí (`scope !== 'store'`).
+ *  1. La matriz de ASIGNACIÓN (`canAssignRoleScope`) no autoriza a este actor
+ *     a manejar el rol — p. ej. un `manager` no puede asignar `admin` ni
+ *     `fiscal_supervisor`. Un `owner` sí, porque `resolveAssignmentLevel` lo
+ *     eleva a nivel organización (necesario para tenants de tienda única).
  *  2. La asignación es HEREDADA de la organización (`store_id === null`):
- *     aunque el rol sea gestionable, esa fila concreta se administra desde el
+ *     aunque el rol sea asignable, esa fila concreta se administra desde el
  *     panel de la organización.
  */
 @Component({
@@ -168,6 +172,7 @@ export class StoreRoleUsersPanelComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly storeRolesService = inject(StoreRolesService);
   private readonly toast = inject(ToastService);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly role = input<StoreRole | null>(null);
   /** Época que fuerza una recarga (p. ej. al abrir el modal). */
@@ -182,12 +187,30 @@ export class StoreRoleUsersPanelComponent {
 
   readonly userToAssign = new FormControl<number | null>(null);
 
+  /**
+   * QUI-600 — La pregunta del panel "Usuarios con este rol" es de ASIGNACIÓN
+   * ("¿puede darle este rol a un usuario?"), no de edición. Antes se usaba
+   * `canEditRoleScope`, que devuelve `false` para todo `scope === 'system'`,
+   * bloqueando al `owner` y al `admin` justamente sobre los roles que sí pueden
+   * asignar (`admin`, `fiscal_supervisor` vía la elevación de `owner` a nivel
+   * organización). `canAssignRoleScope` honra la matriz correcta y deja al
+   * `manager` fuera del allowlist de tienda, igual que el backend.
+   */
   readonly canManage = computed(() =>
-    canEditRoleScope(this.role()?.scope, ACTOR_LEVEL),
+    canAssignRoleScope(
+      this.role() ?? { name: '', scope: null },
+      ACTOR_LEVEL,
+      this.authFacade.userRoles(),
+    ),
   );
 
   readonly readOnlyReason = computed(
-    () => getRoleReadOnlyReason(this.role()?.scope, ACTOR_LEVEL) ?? '',
+    () =>
+      getRoleNotAssignableReason(
+        this.role() ?? { name: '', scope: null },
+        ACTOR_LEVEL,
+        this.authFacade.userRoles(),
+      ) ?? '',
   );
 
   readonly assignedUserIds = computed(() =>

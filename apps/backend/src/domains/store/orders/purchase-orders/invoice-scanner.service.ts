@@ -20,6 +20,13 @@ import {
   PurchaseOrderItemDto,
 } from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
+import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
+import {
+  buildCurrencyInstruction,
+  checkTotalsConsistency,
+  repairScannedAmount,
+  StoreCurrencyInfo,
+} from '../../../../ai-engine/utils/ocr-money.util';
 import sharp = require('sharp');
 
 @Injectable()
@@ -64,12 +71,21 @@ export class InvoiceScannerService {
 
     this.logger.debug(`[InvoiceScan] DataURI length: ${dataUri.length} chars`);
 
+    // Anchor the model to the store's real currency. Without this the model
+    // falls back to a decimal-currency prior and reads the Colombian
+    // thousands separator as a decimal point ("24.990" → 24.99), a silent
+    // 1000x error. The instruction lives in the USER message, not the system
+    // prompt, because the currency is per-store and the prompt is global.
+    const currency = await this.resolveScanCurrency();
+
     const imageMessage: AIMessage = {
       role: 'user',
       content: [
         {
           type: 'text',
-          text: 'Extract all data from this purchase invoice image. Return ONLY the JSON object matching the schema defined in your system instructions.',
+          text:
+            'Extract all data from this purchase invoice image. Return ONLY the JSON object matching the schema defined in your system instructions.\n\n' +
+            buildCurrencyInstruction(currency),
         },
         {
           type: 'image_url',
@@ -97,26 +113,57 @@ export class InvoiceScannerService {
       throw new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
     }
 
+    // Parsing and validation are deliberately separate. They used to share one
+    // try/catch, so a model reply that parsed perfectly but omitted `total`
+    // was reported as "no se pudo parsear el JSON" — the wrong diagnosis, and
+    // exactly the shape a POS receipt (no invoice number, no printed subtotal)
+    // produces.
+    let parsed: unknown;
     try {
-      let content = response.content.trim();
-      // Strip markdown code fences if present
-      if (content.startsWith('```')) {
-        content = content
-          .replace(/^```(?:json)?\n?/, '')
-          .replace(/\n?```$/, '');
-      }
-      const parsed = JSON.parse(content);
-      return this.normalizeOcrResponse(parsed);
-    } catch {
-      this.logger.error(`Failed to parse AI OCR response: ${response.content}`);
+      parsed = parseAiJson(response.content);
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to parse AI OCR response (${err?.message}). Raw content: ${response.content}`,
+      );
       throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
+    }
+
+    try {
+      return this.normalizeOcrResponse(parsed, currency);
+    } catch (err: any) {
+      if (err instanceof VendixHttpException) throw err;
+      this.logger.error(
+        `AI OCR response incomplete (${err?.message}). Raw content: ${response.content}`,
+      );
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_INCOMPLETE);
+    }
+  }
+
+  /**
+   * Store currency + decimal places for the scan, resolved once per request.
+   * Never throws: a settings failure degrades to USD/2 decimals, which only
+   * disables the zero-decimal repair — it can never trigger it wrongly.
+   */
+  private async resolveScanCurrency(): Promise<StoreCurrencyInfo> {
+    try {
+      return await this.settingsService.getStoreCurrencyInfo();
+    } catch (err: any) {
+      this.logger.warn(
+        `[InvoiceScan] Could not resolve store currency (${err?.message}); defaulting to USD/2.`,
+      );
+      return { code: 'USD', decimal_places: 2 };
     }
   }
 
   async matchProducts(
     scanResult: InvoiceScanResult,
   ): Promise<InvoiceMatchResult> {
-    const warnings: string[] = [];
+    // Carry over the notices raised during /scan (amount repairs, totals
+    // mismatch) so they reach the review step instead of dying in the
+    // round-trip through the frontend.
+    const warnings: string[] = Array.isArray(scanResult.scan_warnings)
+      ? [...scanResult.scan_warnings]
+      : [];
     let supplierMatch: SupplierMatch;
 
     // F3 IVA lifecycle: resolve the commerce's VAT responsibility ONCE. A
@@ -650,9 +697,14 @@ export class InvoiceScannerService {
     };
   }
 
-  private normalizeOcrResponse(parsed: any): InvoiceScanResult {
+  private normalizeOcrResponse(
+    raw: unknown,
+    currency: StoreCurrencyInfo,
+  ): InvoiceScanResult {
+    const parsed = raw as any;
+
     if (
-      !parsed.supplier ||
+      !parsed?.supplier ||
       !Array.isArray(parsed.line_items) ||
       parsed.total == null
     ) {
@@ -666,6 +718,43 @@ export class InvoiceScannerService {
     // `effective_include = ... ?? false` in deriveLineTax / recalculateItemTotals.
     const pricesIncludeTax = parsed.prices_include_tax === true;
 
+    const scanWarnings: string[] = [];
+    const repairs = { count: 0 };
+
+    /** Repair one document-level money field, tallying separator misreads. */
+    const money = (value: unknown): number => {
+      const { value: fixed, repaired } = repairScannedAmount(
+        Number(value) || 0,
+        currency,
+      );
+      if (repaired) repairs.count++;
+      return fixed;
+    };
+
+    const lineItems = (parsed.line_items || []).map((item: any) =>
+      this.normalizeLineItem(item, pricesIncludeTax, currency, repairs),
+    );
+    const subtotal = money(parsed.subtotal);
+    const taxAmount = money(parsed.tax_amount);
+    const total = money(parsed.total);
+
+    if (repairs.count > 0) {
+      this.logger.warn(
+        `[InvoiceScan] Repaired ${repairs.count} amount(s) misread as decimals in ${currency.code} (0-decimal currency).`,
+      );
+      scanWarnings.push(
+        `Se corrigieron ${repairs.count} valor(es) que la IA leyó con decimales ` +
+          `pese a que ${currency.code} no los usa. Verifica los precios antes de confirmar.`,
+      );
+    }
+
+    const totalsWarning = checkTotalsConsistency(
+      lineItems.map((item) => item.total),
+      total,
+      currency.code,
+    );
+    if (totalsWarning) scanWarnings.push(totalsWarning);
+
     return {
       supplier: {
         name: parsed.supplier?.name || 'Desconocido',
@@ -677,13 +766,12 @@ export class InvoiceScannerService {
       invoice_date: String(parsed.invoice_date || ''),
       payment_terms: parsed.payment_terms || undefined,
       prices_include_tax: pricesIncludeTax,
-      line_items: (parsed.line_items || []).map((item: any) =>
-        this.normalizeLineItem(item, pricesIncludeTax),
-      ),
-      subtotal: Number(parsed.subtotal) || 0,
-      tax_amount: Number(parsed.tax_amount) || 0,
-      total: Number(parsed.total) || 0,
+      line_items: lineItems,
+      subtotal,
+      tax_amount: taxAmount,
+      total,
       confidence: Number(parsed.confidence) || 0,
+      scan_warnings: scanWarnings.length > 0 ? scanWarnings : undefined,
     };
   }
 
@@ -704,9 +792,26 @@ export class InvoiceScannerService {
   private normalizeLineItem(
     item: any,
     pricesIncludeTax: boolean,
+    currency: StoreCurrencyInfo,
+    repairs: { count: number },
   ): InvoiceScanResult['line_items'][number] {
-    const grossUnit = Number(item.unit_price) || 0;
+    // ORDER MATTERS: repair the PRINTED gross before flattening to net. The
+    // net-flattening below legitimately produces fractional values
+    // (gross / 1.19), so running the repair afterwards would inflate a
+    // correct net by 1000x.
+    const grossRepair = repairScannedAmount(
+      Number(item.unit_price) || 0,
+      currency,
+    );
+    if (grossRepair.repaired) repairs.count++;
+    const grossUnit = grossRepair.value;
+
+    const totalRepair = repairScannedAmount(Number(item.total) || 0, currency);
+    if (totalRepair.repaired) repairs.count++;
+
     // El scanner emite tax_rate como fracción (0.19), no como porcentaje.
+    // NUNCA se repara: 0.19 es fraccionario por contrato, igual que
+    // `quantity` (0,315 KGM es una cantidad real en un tiquete por peso).
     const rawRate = Number(item.tax_rate);
     const taxRate =
       Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
@@ -723,7 +828,7 @@ export class InvoiceScannerService {
       unit_price: unitNet,
       unit_price_gross: grossUnit,
       tax_rate: taxRate,
-      total: Number(item.total) || 0,
+      total: totalRepair.value,
       sku_if_visible: item.sku_if_visible || undefined,
       // Fase 4: preserva las pistas de UoM emitidas por el perfil ingredient
       // (antes se descartaban en el map original).

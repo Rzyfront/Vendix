@@ -13,15 +13,46 @@ import { Type } from 'class-transformer';
 import { order_state_enum } from '@prisma/client';
 
 /**
- * Tope duro de órdenes por lote. Hereda del mismo valor conceptual de
- * `MAX_BULK_EDIT_IDS` de QUI-567 (productos): el `ValidationPipe` global lo
- * aplica vía `@ArrayMaxSize` y el frontend lo reutiliza para truncar la
- * selección en vez de mandar más ids de los que el backend acepta.
+ * Tope duro de órdenes por lote, común a las tres operaciones masivas
+ * (`transition`, `assign-route`, `print`). El `ValidationPipe` global lo aplica
+ * vía `@ArrayMaxSize` y el frontend lo espeja para bloquear la selección en vez
+ * de mandar más ids de los que el backend acepta.
  *
- * 100 órdenes por lote cubre el caso de uso reportado (≈100 órdenes/día) sin
- * abrir un vector de DoS por payload gigante.
+ * ## Por qué 300 y no el 100 original
+ *
+ * El 100 era un tope de producto ("≈100 órdenes/día"), no una restricción
+ * técnica. Nada en la cadena lo respalda:
+ *
+ *  - `api.vendix.online` va directo a nginx en EC2 con
+ *    `proxy_read_timeout 86400s`; CloudFront solo sirve el frontend desde S3,
+ *    así que no hay ALB ni CDN con un idle timeout de 60 s en medio.
+ *  - El backend NO fija `requestTimeout` (`main.ts`, deliberado para no matar
+ *    los SSE).
+ *  - Que el operador cierre la pestaña no aborta el handler: Express no cancela
+ *    la ejecución al cerrarse el socket, el bucle termina igual en el servidor.
+ *
+ * Medido: `print` con 300 ids = 1.4 s / 283 páginas; el generador aislado
+ * despacha 800 órdenes en 0.58 s. El camino de solo lectura de `transition` con
+ * 100 = 0.26 s.
+ *
+ * ## Lo que el tope sigue acotando
+ *
+ * No un fallo de la máquina, sino el **error humano**. `bulkTransition` es un
+ * bucle secuencial SIN transacción global: cada iteración commitea sus efectos
+ * (cancela pagos, libera reservas, commit de inventario, asientos contables
+ * automáticos) antes de pasar a la siguiente. Una selección equivocada se
+ * aplica entera, y el modal de pre-confirmación es el único gate — con 300
+ * filas se revisa peor que con 100.
+ *
+ * Mitigante real: `forceOrderState` abre con `if (from === target) return
+ * order`, así que si el proceso muere a mitad (deploy, OOM) reintentar no
+ * duplica efectos.
+ *
+ * Se cambia junto a su espejo en `orders-bulk.interface.ts` del frontend — si
+ * divergen, la UI deja seleccionar más de lo que el DTO acepta y el operador se
+ * come un 400 de validación.
  */
-export const MAX_BULK_ORDERS_IDS = 100;
+export const MAX_BULK_ORDERS_IDS = 300;
 
 /**
  * Estados destino permitidos en el carril masivo. El servicio delega en
@@ -149,6 +180,50 @@ export class BulkOrdersResultDto {
   successful: number;
   failed: number;
   results: BulkOrderResultItemDto[];
+}
+
+/**
+ * Motivo por el que una orden quedó fuera del PDF masivo.
+ *
+ * - `not_found` — el id no existe o no pertenece a la tienda del contexto. El
+ *   scope de Prisma ya lo filtra, así que aquí solo se nombra la diferencia
+ *   entre lo pedido y lo encontrado.
+ * - `non_printable_state` — la orden está `cancelled` o `refunded`. No es un
+ *   fallo: es la regla de negocio pedida (no se imprime un comprobante de algo
+ *   anulado o devuelto).
+ * - `render_error` — la orden existe y es imprimible, pero sus datos rompieron
+ *   el mapeo o el render. Es el único motivo que indica un defecto real y por
+ *   eso se registra en el log del servidor con el detalle.
+ */
+export type BulkPrintSkipReason =
+  | 'not_found'
+  | 'non_printable_state'
+  | 'render_error';
+
+/** Una orden excluida del PDF, con su motivo legible. */
+export class BulkPrintSkippedOrderDto {
+  id: number;
+  /** Ausente cuando el motivo es `not_found` (no hubo fila que leer). */
+  order_number?: string;
+  reason: BulkPrintSkipReason;
+  /** Motivo humano-legible, listo para pintar en un toast. */
+  message: string;
+}
+
+/**
+ * Resultado de `bulkPrint`. No es el `BulkOrdersResultDto` común porque el
+ * payload principal es binario: el PDF viaja como body y este objeto viaja como
+ * cabeceras (`X-Printed-Count`, `X-Skipped-Count`, `X-Skipped-Orders`).
+ *
+ * `printed + skipped.length === total` siempre.
+ */
+export class BulkPrintResultDto {
+  /** Ids pedidos por el cliente. */
+  total: number;
+  /** Órdenes efectivamente dibujadas en el PDF. */
+  printed: number;
+  skipped: BulkPrintSkippedOrderDto[];
+  buffer: Buffer;
 }
 
 // ===========================================================================

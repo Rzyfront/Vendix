@@ -6,6 +6,9 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionManualPaymentService } from '../../../store/subscriptions/services/subscription-manual-payment.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 
 class ManualPaymentDto {
   bank_reference!: string;
@@ -13,7 +16,8 @@ class ManualPaymentDto {
   amount!: number;
 }
 
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 @Controller('superadmin/subscriptions/invoices')
 export class ManualPaymentController {
   constructor(

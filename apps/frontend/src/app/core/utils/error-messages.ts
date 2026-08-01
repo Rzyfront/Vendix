@@ -240,6 +240,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
   ORD_SHIP_RATE_MISMATCH_001:
     'La tarifa seleccionada no corresponde al método de envío.',
+  // Respaldo estático: la impresión masiva ya muestra el mensaje dinámico del
+  // backend ("Ninguna de las 20 órdenes … 12 canceladas, 8 no encontradas"),
+  // que es más útil. Este texto solo aparece si ese detalle no llega.
+  ORD_BULK_PRINT_001:
+    'Ninguna de las órdenes seleccionadas se puede imprimir: están canceladas, reembolsadas o no están disponibles.',
   ORD_SHIP_LOCKED_001:
     'No es posible cambiar el método: la orden ya fue enviada.',
   ORD_SHIP_NO_ZONE_001:

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
+import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import sharp = require('sharp');
 
@@ -96,14 +97,7 @@ export class RutScannerService {
     }
 
     try {
-      let content = response.content.trim();
-      // Strip markdown code fences if present
-      if (content.startsWith('```')) {
-        content = content
-          .replace(/^```(?:json)?\n?/, '')
-          .replace(/\n?```$/, '');
-      }
-      const parsed = JSON.parse(content);
+      const parsed = parseAiJson(response.content);
       return this.normalizeRutResponse(parsed);
     } catch (err) {
       if (err instanceof VendixHttpException) throw err;
