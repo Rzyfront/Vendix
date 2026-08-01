@@ -368,7 +368,9 @@ export class PaymentMethodsComponent implements OnInit {
         },
         error: (error) => {
           console.error('Error creating payment method:', error);
-          this.toastService.error('Error al crear el método de pago');
+          this.toastService.error(
+            this.getApiErrorMessage(error, 'Error al crear el método de pago'),
+          );
         },
       });
   }
@@ -394,7 +396,12 @@ export class PaymentMethodsComponent implements OnInit {
         },
         error: (error) => {
           console.error('Error updating payment method:', error);
-          this.toastService.error('Error al actualizar el método de pago');
+          this.toastService.error(
+            this.getApiErrorMessage(
+              error,
+              'Error al actualizar el método de pago',
+            ),
+          );
         },
       });
   }
@@ -410,7 +417,12 @@ export class PaymentMethodsComponent implements OnInit {
       },
       error: (error) => {
         console.error('Error toggling payment method:', error);
-        this.toastService.error('Error al cambiar estado del método de pago');
+        this.toastService.error(
+          this.getApiErrorMessage(
+            error,
+            'Error al cambiar estado del método de pago',
+          ),
+        );
       },
     });
   }
@@ -450,9 +462,37 @@ export class PaymentMethodsComponent implements OnInit {
       },
       error: (error) => {
         console.error('Error deleting payment method:', error);
-        this.toastService.error('Error al eliminar el método de pago');
+        this.toastService.error(
+          this.getApiErrorMessage(
+            error,
+            'Error al eliminar el método de pago',
+          ),
+        );
       },
     });
+  }
+
+  /**
+   * Extrae el mensaje útil del HttpErrorResponse del backend.
+   * Prioriza el primer validationError específico de ValidationPipe
+   * (envuelto por HttpExceptionFilter en `details.validationErrors`),
+   * luego `error.message` y finalmente el fallback genérico.
+   *
+   * Sin este helper el operador veía "Error al crear el método de pago"
+   * genérico sin pista de QUÉ campo falló, lo que hacía imposible
+   * diagnosticar bugs como QUI-176 (is_active no declarado) sin abrir
+   * DevTools Network.
+   */
+  private getApiErrorMessage(error: any, fallback: string): string {
+    const validationErrors = error?.error?.details?.validationErrors;
+    if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+      return validationErrors[0];
+    }
+    const message = error?.error?.message;
+    if (typeof message === 'string' && message.length > 0) {
+      return message;
+    }
+    return fallback;
   }
 
   formatDate(dateString: string): string {

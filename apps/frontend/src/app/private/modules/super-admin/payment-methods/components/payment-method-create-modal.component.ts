@@ -277,15 +277,33 @@ toggleStatus(active: boolean): void {
       return;
     }
 
-    const formData: CreatePaymentMethodDto = this.paymentMethodForm.value;
+    // Spread para clonar y poder borrar campos sin mutar el FormGroup.
+    const formData: any = { ...this.paymentMethodForm.value };
 
-    // Clean data
+    // CRÍTICO: el backend CreatePaymentMethodDto NO declara is_active
+    // (solo UpdatePaymentMethodDto lo hace, fix de QUI-176). El ValidationPipe
+    // global con forbidNonWhitelisted rechaza el POST con 400 si llega.
+    // El service.create del backend fuerza is_active=true, así que el form
+    // puede mostrar el toggle al usuario pero no enviarlo en el payload.
+    delete formData.is_active;
+
+    // Limpieza de campos opcionales vacíos para evitar basura en la BD
+    // y reducir ruido en el payload (patrón de promotion-form-modal).
+    if (!formData.description) delete formData.description;
+    if (!formData.logo_url) delete formData.logo_url;
+    if (formData.min_amount === null || formData.min_amount === undefined) {
+      delete formData.min_amount;
+    }
+    if (formData.max_amount === null || formData.max_amount === undefined) {
+      delete formData.max_amount;
+    }
+    // Comisión: si no hay tipo, no enviamos value tampoco.
     if (!formData.processing_fee_type) {
       delete formData.processing_fee_type;
       delete formData.processing_fee_value;
     }
 
-    this.onPaymentMethodCreated.emit(formData);
+    this.onPaymentMethodCreated.emit(formData as CreatePaymentMethodDto);
   }
 
   onCancel(): void {
