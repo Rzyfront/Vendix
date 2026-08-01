@@ -682,12 +682,22 @@ export class DispatchNoteEventsListener {
   }
 
   // ─── RECEIVED (inbound) ─────────────────────────────────────
-  @OnEvent('dispatch_note.received')
+  // `suppressErrors: false` es IMPRESCINDIBLE, no cosmético. El wrapper de
+  // `@nestjs/event-emitter` envuelve cada `@OnEvent` en un try/catch cuyo default
+  // es `options?.suppressErrors ?? true` (ver
+  // `node_modules/@nestjs/event-emitter/dist/event-subscribers.loader.js`): con el
+  // default, un throw de este handler se registra como `ERROR [Event]` y se
+  // DESCARTA, así que el `emitAsync` de `DispatchNoteFlowService.receive` resuelve
+  // igual y la remisión se marca `received` con la OC intacta en `approved` — el
+  // bug exacto que este arreglo persigue. Poniéndolo en false, el throw sube hasta
+  // el `emitAsync` y la recepción falla de verdad.
+  //
+  // El radio de impacto sigue acotado por el catch de abajo: sólo la recepción
+  // ligada a una OC re-lanza. Los demás subtypes (transfer_in, customer_return y
+  // el purchase_receipt standalone sin OC) conservan el swallow-and-log histórico,
+  // así que para ellos nada cambia.
+  @OnEvent('dispatch_note.received', { suppressErrors: false })
   async handleReceived(event: DispatchNoteReceivedEvent) {
-    // SOLO la recepción ligada a una orden de compra re-lanza en el catch. Los
-    // demás subtypes (transfer_in, customer_return y el purchase_receipt
-    // standalone sin OC) conservan el swallow-and-log histórico: ampliar su radio
-    // de impacto está fuera de este arreglo.
     let poLinkedReceipt = false;
     try {
       const dispatch_note = await this.prisma.dispatch_notes.findFirst({
