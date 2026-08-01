@@ -1069,6 +1069,14 @@ export class StoreUserEditModalComponent implements OnChanges {
    *  - se intersecta con lo que la matriz de asignación permite a ESTE actor
    *    (QUI-581) — enviar un rol que el backend rechaza aborta el guardado
    *    completo con 403, no sólo ese rol.
+   *
+   * QUI-600 — Esa intersección deja fuera del payload los roles que el actor NO
+   * puede asignar (p. ej. `fiscal_supervisor` visto por un `admin`), y eso es
+   * correcto: evita el 403. Lo que antes convertía la omisión en revocación era
+   * el backend, cuyo `deleteMany` borraba por tienda sin mirar autoridad. Ahora
+   * `replaceUserRoles` acota el borrado a `loadManageableRoleIds(actor)`, así que
+   * lo omitido aquí sobrevive intacto. Las dos piezas van juntas: si alguna vez
+   * se amplía este filtro, hay que ampliar el del borrado en el mismo commit.
    */
   private buildRoleIdsPayload(): number[] {
     const assignable = new Set(

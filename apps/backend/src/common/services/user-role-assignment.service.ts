@@ -6,6 +6,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import {
   HIDDEN_ROLE_NAMES,
   RoleActor,
+  buildRoleVisibilityWhere,
   canAssignRole,
   deriveRoleScope,
   isRoleVisible,
@@ -196,6 +197,19 @@ export class UserRoleAssignmentService {
    * (`store_id = NULL`) son heredadas y sólo se administran desde organización.
    * Sin esta separación, la pantalla de usuarios de una tienda revocaría
    * silenciosamente permisos que el usuario tiene en las tiendas hermanas.
+   *
+   * QUI-600 — El `deleteMany` acota por DOS ejes, no uno. Al de tienda se suma
+   * el de autoridad: sólo se borran las asignaciones de roles que este actor
+   * podría volver a crear (`loadManageableRoleIds`). El eje de tienda ya existía;
+   * faltaba el de rol, y esa asimetría era una pérdida de datos silenciosa: el
+   * frontend descarta del payload los roles que el actor no puede asignar (para
+   * no provocar el 403 de `validateAssignment`), pero el borrado los alcanzaba
+   * igual. Un `admin` que guardaba la pestaña Roles de un usuario con
+   * `fiscal_supervisor` se lo revocaba sin tocarlo ni enterarse.
+   *
+   * Regla del patrón replace-all: el `where` del borrado debe ser el MISMO
+   * predicado con el que se construyó la lista enviada. Si es más ancho, todo lo
+   * que quedó fuera de la lista por cualquier motivo se pierde.
    */
   async replaceUserRoles(input: ReplaceUserRolesInput) {
     const scopeStoreId = this.resolveScopeStoreId(input.actor, input.store_id);
@@ -212,12 +226,14 @@ export class UserRoleAssignmentService {
       validated.push({ role, store_id: target_store_id });
     }
 
+    const manageableRoleIds = await this.loadManageableRoleIds(input.actor);
+
     await this.prisma.$transaction(async (tx) => {
       await tx.user_roles.deleteMany({
         where: {
           user_id: input.user_id,
           store_id: scopeStoreId,
-          roles: { name: { notIn: [...HIDDEN_ROLE_NAMES] } },
+          role_id: { in: manageableRoleIds },
         },
       });
 
@@ -353,6 +369,37 @@ export class UserRoleAssignmentService {
       users: { store_users: { some: { store_id: actor.store_id } } },
       OR: [{ store_id: null }, { store_id: actor.store_id }],
     };
+  }
+
+  /**
+   * IDs de los roles sobre los que ESTE actor tiene autoridad de asignación:
+   * los visibles para su nivel que además pasa la matriz de asignación.
+   *
+   * Cubre los TRES alcances, así que un rol CREADO por el tenant (organización o
+   * tienda) entra igual que uno canónico: `canAssignRole` devuelve `true` para
+   * todo lo que no sea `system`, y la pertenencia al tenant ya la garantizó
+   * `buildRoleVisibilityWhere`. Es el mismo par de predicados que aplica
+   * `validateAssignment` (pasos 1 y 2) — si divergen, el borrado y la creación
+   * dejan de ser simétricos y reaparece la pérdida de datos.
+   *
+   * Fail-closed: si el actor no puede gestionar ningún rol, la lista queda vacía
+   * y `role_id: { in: [] }` no borra nada.
+   */
+  private async loadManageableRoleIds(actor: RoleActor): Promise<number[]> {
+    const visible = await this.prisma.roles.findMany({
+      where: buildRoleVisibilityWhere(actor),
+      select: {
+        id: true,
+        name: true,
+        is_system_role: true,
+        organization_id: true,
+        store_id: true,
+      },
+    });
+
+    return visible
+      .filter((role) => canAssignRole(role, actor))
+      .map((role) => role.id);
   }
 
   private async loadVisibleRole(
