@@ -311,7 +311,7 @@ export class PopHeaderComponent {
 
   private loadSuppliers(): Observable<void> {
     return this.suppliersService
-      .getSuppliers({ is_active: true })
+      .getSuppliers({ state: 'active' as const })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         tap((response) => {

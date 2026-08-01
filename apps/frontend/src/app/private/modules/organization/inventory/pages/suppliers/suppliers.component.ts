@@ -34,6 +34,13 @@ import {
   UpdateOrgSupplierRequest,
 } from '../../services/org-inventory.service';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import {
+  SUPPLIER_STATE_COLORS,
+  SUPPLIER_STATE_LABELS,
+  type SupplierAssignableState,
+  type SupplierState,
+} from '../../../../store/inventory/interfaces';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { OrganizationStoresService } from '../../../stores/services/organization-stores.service';
 import {
@@ -282,7 +289,11 @@ export class OrgSuppliersComponent {
 
   // ─── Filter state ────────────────────────────────────────────────────────
   search_term = signal('');
-  status_filter: 'all' | 'active' | 'inactive' = 'all';
+  /**
+   * `all` excluye archivados (default del backend); `archived` los consulta.
+   * Signal porque `load()` lo lee en cada ciclo.
+   */
+  status_filter = signal<'all' | 'active' | 'inactive' | 'archived'>('all');
   store_filter = signal<string>('');
   readonly filter_values = signal<FilterValues>({});
 
@@ -305,13 +316,14 @@ export class OrgSuppliersComponent {
   // ─── Filter configs ──────────────────────────────────────────────────────
   filterConfigs: FilterConfig[] = [
     {
-      key: 'is_active',
+      key: 'state',
       label: 'Estado',
       type: 'select',
       options: [
         { value: '', label: 'Todos' },
-        { value: 'true', label: 'Activos' },
-        { value: 'false', label: 'Inactivos' },
+        { value: 'active', label: 'Activos' },
+        { value: 'inactive', label: 'Inactivos' },
+        { value: 'archived', label: 'Archivados' },
       ],
     },
     {
@@ -354,12 +366,13 @@ export class OrgSuppliersComponent {
         item?.store_id == null ? 'text-purple-600 font-medium' : '',
     },
     {
-      key: 'is_active',
+      key: 'state',
       label: 'Estado',
       priority: 1,
-      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
+      transform: (value: SupplierState) => SUPPLIER_STATE_LABELS[value] ?? '-',
       badge: true,
-      badgeConfig: { type: 'status' },
+      // `custom` + colorMap: `status` solo distingue dos estados.
+      badgeConfig: { type: 'custom', colorMap: SUPPLIER_STATE_COLORS },
     },
   ];
 
@@ -387,9 +400,14 @@ export class OrgSuppliersComponent {
     subtitleKey: 'code',
     avatarFallbackIcon: 'truck',
     avatarShape: 'square',
-    badgeKey: 'is_active',
-    badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: SUPPLIER_STATE_COLORS,
+    },
+    badgeTransform: (value: SupplierState) =>
+      SUPPLIER_STATE_LABELS[value] ?? '-',
     footerKey: 'store_name',
     footerLabel: 'Tienda',
     footerTransform: (value: string | null | undefined) =>
@@ -427,8 +445,8 @@ export class OrgSuppliersComponent {
       page: p.page,
       limit: p.limit,
       ...(this.search_term() ? { search: this.search_term() } : {}),
-      ...(this.status_filter === 'active' ? { is_active: 'true' } : {}),
-      ...(this.status_filter === 'inactive' ? { is_active: 'false' } : {}),
+      // `all` no manda `state`: el backend ya excluye archivados por defecto.
+      ...(this.status_filter() !== 'all' ? { state: this.status_filter() } : {}),
       ...(this.store_filter() ? { store_id: this.store_filter() } : {}),
     };
 
@@ -508,8 +526,8 @@ export class OrgSuppliersComponent {
     let active = 0;
     let inactive = 0;
     for (const r of list) {
-      if (r.is_active) active++;
-      else inactive++;
+      if (r.state === 'active') active++;
+      else if (r.state === 'inactive') inactive++;
       if (r.store_id != null) uniqueStoreIds.add(r.store_id);
     }
     this.stats.set({
@@ -530,14 +548,14 @@ export class OrgSuppliersComponent {
   onFilterChange(values: FilterValues): void {
     this.filter_values.set({ ...values });
 
-    const isActiveValue = values['is_active'] as string | null;
-    if (isActiveValue === 'true') {
-      this.status_filter = 'active';
-    } else if (isActiveValue === 'false') {
-      this.status_filter = 'inactive';
-    } else {
-      this.status_filter = 'all';
-    }
+    const stateValue = values['state'] as string | null;
+    this.status_filter.set(
+      stateValue === 'active' ||
+        stateValue === 'inactive' ||
+        stateValue === 'archived'
+        ? stateValue
+        : 'all',
+    );
 
     const storeValue = (values['store_id'] as string | null) ?? '';
     this.store_filter.set(storeValue);
@@ -547,7 +565,7 @@ export class OrgSuppliersComponent {
   }
 
   clearFilters(): void {
-    this.status_filter = 'all';
+    this.status_filter.set('all');
     this.store_filter.set('');
     this.search_term.set('');
     this.filter_values.set({});
@@ -642,31 +660,97 @@ export class OrgSuppliersComponent {
     this.dialog
       .confirm({
         title: 'Eliminar proveedor',
-        message: `¿Está seguro de que desea eliminar "${row.name}"? Se marcará como inactivo.`,
+        message:
+          `¿Eliminar "${row.name}"? Dejará de aparecer en listados y ` +
+          `selectores, pero su historial de compras, facturas y pagos se ` +
+          `conserva y podrás consultarlo con el filtro "Archivados".`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
         if (confirmed) {
-          this.deleteSupplier(row);
+          this.archiveSupplier(row);
         }
       });
   }
 
-  private deleteSupplier(row: OrgSupplierRow): void {
+  /**
+   * "Eliminar" archiva. Ante el 409 `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS` se
+   * nombran los documentos abiertos y se ofrece inactivar como alternativa.
+   */
+  private archiveSupplier(row: OrgSupplierRow): void {
     this.service
-      .deleteSupplier(row.id)
+      .archiveSupplier(row.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toast.success('Proveedor eliminado correctamente');
+          this.toast.success('Proveedor archivado correctamente');
           this.loadSuppliers();
         },
         error: (err) => {
-          this.toast.error(
-            this.errors.humanize(err, 'No se pudo eliminar el proveedor.'),
+          const { errorCode, userMessage, details } = parseApiError(err);
+
+          if (errorCode === 'SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS') {
+            this.offerDeactivate(row, details);
+            return;
+          }
+
+          this.toast.error(userMessage);
+        },
+      });
+  }
+
+  /** Enumera los documentos abiertos y propone inactivar en su lugar. */
+  private offerDeactivate(row: OrgSupplierRow, details: any): void {
+    const reasons: string[] = [];
+    if (details?.open_purchase_orders > 0) {
+      reasons.push(
+        `${details.open_purchase_orders} orden(es) de compra sin recibir`,
+      );
+    }
+    if (details?.unpaid_payables > 0) {
+      reasons.push(`${details.unpaid_payables} cuenta(s) por pagar con saldo`);
+    }
+    if (details?.open_dispatch_notes > 0) {
+      reasons.push(`${details.open_dispatch_notes} remisión(es) en curso`);
+    }
+
+    this.dialog
+      .confirm({
+        title: 'No se puede archivar',
+        message:
+          `"${row.name}" tiene ${reasons.join(', ')}. ` +
+          `Archivarlo lo ocultaría mientras ese trabajo sigue abierto. ` +
+          `¿Prefieres inactivarlo? Seguirá visible en el listado pero nadie ` +
+          `podrá seleccionarlo en documentos nuevos.`,
+        confirmText: 'Inactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.changeState(row, 'inactive');
+        }
+      });
+  }
+
+  /** Transición activo ↔ inactivo. */
+  changeState(row: OrgSupplierRow, state: SupplierAssignableState): void {
+    this.service
+      .setSupplierState(row.id, state)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success(
+            state === 'active'
+              ? 'Proveedor activado correctamente'
+              : 'Proveedor inactivado correctamente',
           );
+          this.loadSuppliers();
+        },
+        error: (err) => {
+          this.toast.error(parseApiError(err).userMessage);
         },
       });
   }

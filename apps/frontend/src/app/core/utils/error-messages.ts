@@ -41,6 +41,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CAT_NAME_EXISTS_001: 'Ya existe una categoría con ese nombre.',
   BRAND_NAME_EXISTS_001: 'Ya existe una marca con ese nombre.',
 
+  // Suppliers lifecycle
+  SUPPLIER_FIND_001: 'El proveedor no existe.',
+  SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS:
+    'Este proveedor tiene documentos abiertos (órdenes de compra sin recibir, cuentas por pagar con saldo o remisiones en curso). Inactívalo en su lugar: seguirá visible pero nadie podrá seleccionarlo en documentos nuevos.',
+  SUPPLIER_STATE_INVALID_TRANSITION:
+    'Para archivar un proveedor usa la opción Eliminar, que valida sus documentos abiertos.',
+
   // Media uploads (shared)
   MEDIA_FILE_REQUIRED_001: 'Debes seleccionar un archivo.',
   MEDIA_FILE_TYPE_001:

@@ -1,10 +1,11 @@
-import { apiGet, apiPost, apiPut, apiDelete, ListParams } from '@/core/api/http';
+import { apiGet, apiPost, apiPut, apiPatch, apiDelete, ListParams } from '@/core/api/http';
 import { Endpoints } from '@/core/api/endpoints';
 import type {
   StockLevel,
   InventoryLocation,
   InventoryMovement,
   InventorySupplier,
+  InventorySupplierState,
   StockTransfer,
   StockAdjustment,
   SerialNumber,
@@ -58,8 +59,19 @@ export const OrgInventoryService = {
     apiPost<InventorySupplier>(Endpoints.ORGANIZATION.INVENTORY.SUPPLIERS.CREATE, body),
   updateSupplier: async (id: string, body: Partial<InventorySupplier>) =>
     apiPut<InventorySupplier>(Endpoints.ORGANIZATION.INVENTORY.SUPPLIERS.UPDATE.replace(':id', id), body),
-  deleteSupplier: async (id: string) =>
+  /**
+   * Archiva el proveedor: la fila persiste y su historia contable sigue
+   * consultable, pero sale de listados y selectores. Responde 409
+   * `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS` si tiene documentos abiertos.
+   */
+  archiveSupplier: async (id: string) =>
     apiDelete(Endpoints.ORGANIZATION.INVENTORY.SUPPLIERS.DELETE.replace(':id', id)),
+  /** Transición activo ↔ inactivo. `archived` va por `archiveSupplier`. */
+  setSupplierState: async (id: string, state: Exclude<InventorySupplierState, 'archived'>) =>
+    apiPatch<InventorySupplier>(
+      Endpoints.ORGANIZATION.INVENTORY.SUPPLIERS.STATE.replace(':id', id),
+      { state },
+    ),
   // Transfers
   listTransfers: async (params?: ListParams) =>
     apiGet<StockTransfer[]>(Endpoints.ORGANIZATION.INVENTORY.TRANSFERS.LIST, params),

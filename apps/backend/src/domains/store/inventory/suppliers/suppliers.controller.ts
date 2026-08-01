@@ -11,9 +11,11 @@ import {
   Delete,
   Query,
 } from '@nestjs/common';
+import { supplier_state_enum } from '@prisma/client';
 import { SuppliersService } from './suppliers.service';
 import { CreateInventorySupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
+import { UpdateSupplierStateDto } from './dto/update-supplier-state.dto';
 import { SupplierQueryDto } from './dto/supplier-query.dto';
 import { ResponseService } from '@common/responses/response.service';
 
@@ -28,19 +30,13 @@ export class SuppliersController {
   @Post()
   @Permissions('store:inventory:suppliers:create')
   async create(@Body() createSupplierDto: CreateInventorySupplierDto) {
-    try {
-      const result = await this.suppliersService.create(createSupplierDto);
-      return this.responseService.created(
-        result,
-        'Proveedor creado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear el proveedor',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // Sin try/catch: `responseService.error()` consumía la excepción y Nest
+    // respondía 201 con `success:false` y el statusCode real enterrado en el
+    // body, además de filtrar al cliente el texto crudo de Prisma con rutas
+    // internas del servidor. Dejando que la excepción salga del handler,
+    // `AllExceptionsFilter` emite el status correcto y un `error_code`.
+    const result = await this.suppliersService.create(createSupplierDto);
+    return this.responseService.created(result, 'Proveedor creado exitosamente');
   }
 
   @Get()
@@ -88,22 +84,18 @@ export class SuppliersController {
     }
   }
 
+  // Sin try/catch: el servicio lanza VendixHttpException / HttpException en
+  // todos sus caminos, y AllExceptionsFilter solo emite el status real cuando la
+  // excepción SALE del handler. Capturarla haría responder HTTP 200 con el 404
+  // enterrado en el body (ver vendix-error-handling).
   @Get(':id')
   @Permissions('store:inventory:suppliers:read')
   async findOne(@Param('id') id: string) {
-    try {
-      const result = await this.suppliersService.findOne(+id);
-      return this.responseService.success(
-        result,
-        'Proveedor obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener el proveedor',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.suppliersService.findOne(+id);
+    return this.responseService.success(
+      result,
+      'Proveedor obtenido exitosamente',
+    );
   }
 
   @Get(':id/products')
@@ -130,33 +122,41 @@ export class SuppliersController {
     @Param('id') id: string,
     @Body() updateSupplierDto: UpdateSupplierDto,
   ) {
-    try {
-      const result = await this.suppliersService.update(+id, updateSupplierDto);
-      return this.responseService.updated(
-        result,
-        'Proveedor actualizado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar el proveedor',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.suppliersService.update(+id, updateSupplierDto);
+    return this.responseService.updated(
+      result,
+      'Proveedor actualizado exitosamente',
+    );
   }
 
+  /**
+   * Transición activo ↔ inactivo. Un proveedor inactivo sigue visible en el
+   * listado pero deja de ofrecerse en selectores de OC, remisiones y rutas.
+   */
+  @Patch(':id/state')
+  @Permissions('store:inventory:suppliers:update')
+  async setState(
+    @Param('id') id: string,
+    @Body() dto: UpdateSupplierStateDto,
+  ) {
+    const result = await this.suppliersService.setState(+id, dto.state);
+    return this.responseService.updated(
+      result,
+      dto.state === supplier_state_enum.active
+        ? 'Proveedor activado exitosamente'
+        : 'Proveedor inactivado exitosamente',
+    );
+  }
+
+  /**
+   * Archiva el proveedor. No borra la fila — su historia contable queda
+   * intacta — pero lo saca de listados y selectores. Se rechaza con 409 si
+   * tiene documentos abiertos.
+   */
   @Delete(':id')
   @Permissions('store:inventory:suppliers:delete')
   async remove(@Param('id') id: string) {
-    try {
-      await this.suppliersService.remove(+id);
-      return this.responseService.deleted('Proveedor eliminado exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar el proveedor',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.suppliersService.remove(+id);
+    return this.responseService.deleted('Proveedor archivado exitosamente');
   }
 }

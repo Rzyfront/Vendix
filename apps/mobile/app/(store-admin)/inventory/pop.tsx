@@ -150,11 +150,13 @@ export default function PopScreen() {
     setLoading(true);
     try {
       const [suppliersRes, locationsRes, productsRes] = await Promise.all([
-        InventoryService.getSuppliers({ page: 1, limit: 200 }),
+        // Solo activos: una orden de compra no debe poder emitirse contra un
+        // proveedor que la tienda suspendió a propósito.
+        InventoryService.getSuppliers({ page: 1, limit: 200, state: 'active' }),
         InventoryService.getLocations({ page: 1, limit: 200 }),
         ProductService.list({ page: 1, limit: 200, include_variants: true }),
       ]);
-      setSuppliers((suppliersRes.data || []).map((s: any) => ({ id: Number(s.id), name: s.name, code: s.code, email: s.email, phone: s.phone, tax_id: s.tax_id, is_active: !!s.is_active })));
+      setSuppliers((suppliersRes.data || []).map((s: any) => ({ id: Number(s.id), name: s.name, code: s.code, email: s.email, phone: s.phone, tax_id: s.tax_id, state: s.state })));
       setLocations((locationsRes.data || []).map((l: any) => ({ id: Number(l.id), name: l.name, code: l.code, type: l.type, is_active: !!l.is_active })));
       setProducts((productsRes.data || []) as PopProduct[]);
     } catch (err) {
@@ -186,7 +188,7 @@ export default function PopScreen() {
         code: res.code,
         email: res.email,
         phone: res.phone,
-        is_active: !!res.is_active,
+        state: res.state,
       };
       setSuppliers((prev) => [...prev, newSupplier]);
       cart.setSupplier(newSupplier.id, newSupplier.name);

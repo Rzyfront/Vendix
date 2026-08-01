@@ -403,12 +403,19 @@ export class StoreShippingMethodsService {
       }
     }
     if (next_default_carrier != null) {
+      // Solo un transportista activo puede quedar como carrier por defecto: al
+      // archivar un proveedor esta FK se pone a NULL, así que aceptar uno
+      // inactivo aquí reintroduciría el vínculo que el archivado deshace.
       const s = await this.prisma.suppliers.findFirst({
-        where: { id: next_default_carrier, store_id: method.store_id ?? undefined },
+        where: {
+          id: next_default_carrier,
+          store_id: method.store_id ?? undefined,
+          state: 'active',
+        },
       });
       if (!s) {
         throw new BadRequestException(
-          `El proveedor transportista #${next_default_carrier} no pertenece a esta tienda`,
+          `El proveedor transportista #${next_default_carrier} no pertenece a esta tienda o no está activo`,
         );
       }
       if (s.supplier_category !== 'carrier') {

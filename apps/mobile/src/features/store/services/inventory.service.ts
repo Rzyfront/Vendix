@@ -8,6 +8,8 @@ import type {
   StockTransfer,
   StockMovement,
   Supplier,
+  SupplierState,
+  SupplierAssignableState,
   Location,
   LocationType,
   AdjustmentType,
@@ -230,6 +232,11 @@ function normalizeMovement(raw: Record<string, any>): StockMovement {
 
 export interface SupplierQuery {
   search?: string;
+  /**
+   * Omitirlo excluye los archivados (el backend aplica
+   * `state: { not: 'archived' }` por defecto). Pasar `archived` los consulta.
+   */
+  state?: SupplierState;
   page?: number;
   limit?: number;
 }
@@ -278,7 +285,8 @@ export interface CreateSupplierDto {
   lead_time_days?: number | null;
   notes?: string;
   address?: string;
-  is_active?: boolean;
+  /** `archived` no se acepta aquí: archivar va por `archiveSupplier`. */
+  state?: SupplierAssignableState;
 }
 
 export type UpdateSupplierDto = Partial<CreateSupplierDto>;
@@ -531,6 +539,7 @@ export const InventoryService = {
       page: query?.page ?? 1,
       limit: query?.limit ?? 20,
       search: query?.search,
+      state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.SUPPLIERS.LIST}${buildQuery(params)}`);
     return unwrapPaginated<Supplier>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
@@ -547,9 +556,22 @@ export const InventoryService = {
     return unwrap<Supplier>(res);
   },
 
-  async deleteSupplier(id: string): Promise<void> {
+  /**
+   * Archiva el proveedor: sale de listados y selectores, pero la fila persiste
+   * y su historia de compras, facturas y pagos sigue consultable.
+   * Responde 409 `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS` cuando tiene documentos
+   * abiertos; el llamador debe ofrecer inactivar en su lugar.
+   */
+  async archiveSupplier(id: string): Promise<void> {
     const endpoint = Endpoints.STORE.INVENTORY.SUPPLIERS.DELETE.replace(':id', id);
     await apiClient.delete(endpoint);
+  },
+
+  /** Transición activo ↔ inactivo. `archived` no es destino válido aquí. */
+  async setSupplierState(id: string, state: SupplierAssignableState): Promise<Supplier> {
+    const endpoint = Endpoints.STORE.INVENTORY.SUPPLIERS.STATE.replace(':id', id);
+    const res = await apiClient.patch(endpoint, { state });
+    return unwrap<Supplier>(res);
   },
 
   async getLocations(query?: LocationQuery): Promise<PaginatedResponse<Location>> {

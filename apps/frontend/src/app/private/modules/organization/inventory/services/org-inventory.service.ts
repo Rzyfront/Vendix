@@ -2,6 +2,10 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import type {
+  SupplierState,
+  SupplierAssignableState,
+} from '../../../store/inventory/interfaces';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -109,7 +113,7 @@ export interface OrgSupplierRow {
   currency?: string | null;
   lead_time_days?: number | null;
   notes?: string | null;
-  is_active?: boolean;
+  state: SupplierState;
   store_id?: number | null;
   store_name?: string | null;
 }
@@ -135,7 +139,8 @@ export interface CreateOrgSupplierRequest {
   lead_time_days?: number;
   notes?: string;
   address_id?: number;
-  is_active?: boolean;
+  /** `archived` no se acepta aquí: archivar va por `archiveSupplier`. */
+  state?: SupplierAssignableState;
 }
 
 export type UpdateOrgSupplierRequest = Partial<CreateOrgSupplierRequest>;
@@ -284,7 +289,8 @@ export class OrgInventoryService {
   getSuppliers(query?: {
     store_id?: number | string;
     search?: string;
-    is_active?: boolean | string;
+    /** Omitirlo excluye archivados; pasar `archived` los consulta. */
+    state?: SupplierState;
     page?: number;
     limit?: number;
   }): Observable<ApiResponse<OrgSupplierRow[]>> {
@@ -318,9 +324,25 @@ export class OrgInventoryService {
     );
   }
 
-  deleteSupplier(id: number): Observable<ApiResponse<void>> {
+  /**
+   * Archiva el proveedor: sale de listados y selectores, su historia contable
+   * queda intacta. Responde 409 `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS` si tiene
+   * documentos abiertos.
+   */
+  archiveSupplier(id: number): Observable<ApiResponse<void>> {
     return this.http.delete<ApiResponse<void>>(
       `${this.apiUrl}/organization/inventory/suppliers/${id}`,
+    );
+  }
+
+  /** Transición activo ↔ inactivo. `archived` no es destino válido aquí. */
+  setSupplierState(
+    id: number,
+    state: SupplierAssignableState,
+  ): Observable<ApiResponse<OrgSupplierRow>> {
+    return this.http.patch<ApiResponse<OrgSupplierRow>>(
+      `${this.apiUrl}/organization/inventory/suppliers/${id}/state`,
+      { state },
     );
   }
 

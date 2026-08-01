@@ -437,7 +437,7 @@ export class WithholdingCertificateViewerComponent {
 
   private loadSuppliers(): void {
     this.suppliersService
-      .getSuppliers({ is_active: true, limit: 100 })
+      .getSuppliers({ state: 'active' as const, limit: 100 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => this.suppliers.set(res.data ?? []),

@@ -1,15 +1,21 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { supplier_state_enum } from '@prisma/client';
 
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+import { ErrorCodes } from '@common/errors/error-codes';
+import {
+  TERMINAL_PURCHASE_ORDER_STATUS,
+  TERMINAL_DISPATCH_NOTE_STATUS,
+} from '@common/constants/supplier-lifecycle.constants';
 
 import { OrgSupplierQueryDto } from './dto/org-supplier-query.dto';
 import { CreateOrgSupplierDto } from './dto/create-org-supplier.dto';
@@ -33,10 +39,15 @@ import { UpdateOrgSupplierDto } from './dto/update-org-supplier.dto';
  *   - `create` derives `organization_id` from RequestContext; optional
  *     `store_id` is validated to belong to the caller's organization.
  *   - `update` validates store_id transitions (must stay inside the org).
- *   - `remove` is a soft-delete (sets `is_active=false`). Suppliers have
- *     `onDelete: Restrict` from `purchase_orders`, `invoices`,
- *     `withholding_calculations`, and `accounts_payable`, so a hard delete
- *     would fail on any active business record. Soft-delete keeps history.
+ *   - `remove` archiva (`state='archived'`). No es un borrado: las FKs
+ *     `onDelete: Restrict` de `purchase_orders`, `invoices`,
+ *     `withholding_calculations` y `accounts_payable` siguen resolviendo
+ *     porque la fila persiste. A diferencia del viejo soft-delete
+ *     (`is_active=false`), archivar además lo oculta de listados y selectores,
+ *     que es lo que ese soft-delete pretendía sin lograrlo. Se bloquea con 409
+ *     si el proveedor tiene documentos abiertos.
+ *   - `setState` cubre la transición activo ↔ inactivo: un proveedor inactivo
+ *     sigue visible en el listado pero deja de ofrecerse en flujos nuevos.
  */
 @Injectable()
 export class OrgSuppliersService {
@@ -99,7 +110,8 @@ export class OrgSuppliersService {
 
     const where: any = {
       // organization_id is auto-injected by the scoped client.
-      ...(query.is_active != null ? { is_active: query.is_active } : {}),
+      // Los archivados quedan fuera salvo que se pidan explícitamente.
+      state: query.state ?? { not: supplier_state_enum.archived },
       ...(query.email ? { email: query.email } : {}),
       ...(query.phone ? { phone: query.phone } : {}),
     };
@@ -194,7 +206,7 @@ export class OrgSuppliersService {
     currency: string | null;
     lead_time_days: number | null;
     notes: string | null;
-    is_active: boolean;
+    state: supplier_state_enum;
     store_id: number | null;
     store?: { id: number; name: string | null; slug: string | null } | null;
   }) {
@@ -212,7 +224,7 @@ export class OrgSuppliersService {
       currency: row.currency ?? null,
       lead_time_days: row.lead_time_days ?? null,
       notes: row.notes ?? null,
-      is_active: row.is_active,
+      state: row.state,
       store_id: row.store_id ?? null,
       store_name: row.store?.name ?? null,
     };
@@ -279,33 +291,136 @@ export class OrgSuppliersService {
   }
 
   /**
-   * Soft-delete: set `is_active = false`.
+   * Cuenta los documentos del proveedor que siguen abiertos, a nivel
+   * organización (el proveedor pertenece a la org, no a una tienda).
+   */
+  private async countOpenDocuments(supplierId: number, organizationId: number) {
+    const client = this.globalPrisma.withoutScope();
+
+    const [open_purchase_orders, unpaid_payables, open_dispatch_notes] =
+      await Promise.all([
+        client.purchase_orders.count({
+          where: {
+            supplier_id: supplierId,
+            organization_id: organizationId,
+            status: { notIn: [...TERMINAL_PURCHASE_ORDER_STATUS] },
+          },
+        }),
+        client.accounts_payable.count({
+          where: {
+            supplier_id: supplierId,
+            organization_id: organizationId,
+            balance: { gt: 0 },
+          },
+        }),
+        client.dispatch_notes.count({
+          where: {
+            supplier_id: supplierId,
+            // La relación se llama `store` (singular) en dispatch_notes.
+            store: { organization_id: organizationId },
+            status: { notIn: [...TERMINAL_DISPATCH_NOTE_STATUS] },
+          },
+        }),
+      ]);
+
+    return {
+      open_purchase_orders,
+      unpaid_payables,
+      open_dispatch_notes,
+      total: open_purchase_orders + unpaid_payables + open_dispatch_notes,
+    };
+  }
+
+  /**
+   * Archiva el proveedor (`state='archived'`).
    *
-   * Hard delete is unsafe — `purchase_orders`, `invoices`,
-   * `withholding_calculations` and `accounts_payable` all reference suppliers
-   * with `onDelete: Restrict`, so any historical document would block the
-   * deletion. Soft-delete keeps history while removing the supplier from
-   * pickers and active flows.
+   * No borra la fila: `purchase_orders`, `invoices`, `withholding_calculations`
+   * y `accounts_payable` la referencian con `onDelete: Restrict` y siguen
+   * resolviendo. A diferencia del viejo soft-delete, archivar además lo saca de
+   * listados y selectores. Se rechaza con 409 si tiene documentos abiertos:
+   * volverlo invisible mientras una OC sigue en curso esconde trabajo vivo.
    */
   async remove(id: number) {
     const organization_id = this.requireOrgId();
 
     const existing = await this.orgPrisma.suppliers.findFirst({
       where: { id, organization_id },
-      select: { id: true, is_active: true },
+      select: { id: true, state: true },
     });
 
     if (!existing) {
       throw new NotFoundException(`Supplier ${id} not found`);
     }
 
-    if (existing.is_active === false) {
-      throw new ConflictException(`Supplier ${id} is already inactive`);
+    if (existing.state === supplier_state_enum.archived) {
+      return existing;
     }
 
-    return this.orgPrisma.suppliers.update({
-      where: { id },
-      data: { is_active: false },
+    const open = await this.countOpenDocuments(id, organization_id);
+
+    if (open.total > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS,
+        undefined,
+        {
+          open_purchase_orders: open.open_purchase_orders,
+          unpaid_payables: open.unpaid_payables,
+          open_dispatch_notes: open.open_dispatch_notes,
+        },
+      );
+    }
+
+    // Desvincula al proveedor como carrier por defecto para que ningún flujo
+    // nuevo lo resuelva. Todo por el `tx` del callback, nunca por otro cliente.
+    return this.globalPrisma.$transaction(async (tx: any) => {
+      await tx.shipping_methods.updateMany({
+        where: { default_carrier_supplier_id: id },
+        data: { default_carrier_supplier_id: null },
+      });
+
+      await tx.dispatch_routes.updateMany({
+        where: { external_carrier_supplier_id: id },
+        data: { external_carrier_supplier_id: null },
+      });
+
+      return tx.suppliers.update({
+        where: { id },
+        data: { state: supplier_state_enum.archived },
+      });
     });
+  }
+
+  /**
+   * Transición activo ↔ inactivo. `archived` no es destino válido aquí:
+   * archivar tiene un único camino auditado (DELETE) que valida documentos.
+   */
+  async setState(id: number, state: supplier_state_enum) {
+    if (state === supplier_state_enum.archived) {
+      throw new VendixHttpException(
+        ErrorCodes.SUPPLIER_STATE_INVALID_TRANSITION,
+        'Use DELETE /organization/inventory/suppliers/:id to archive a supplier',
+      );
+    }
+
+    const organization_id = this.requireOrgId();
+
+    const existing = await this.orgPrisma.suppliers.findFirst({
+      where: { id, organization_id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException(`Supplier ${id} not found`);
+    }
+
+    const updated = await this.orgPrisma.suppliers.update({
+      where: { id },
+      data: { state },
+      include: {
+        store: { select: { id: true, name: true, slug: true } },
+      },
+    });
+
+    return this.toFlatRow(updated);
   }
 }

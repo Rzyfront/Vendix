@@ -12,7 +12,6 @@ import { AddressesModule } from './addresses/addresses.module';
 import { StoresModule } from './stores/stores.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PurchaseOrdersModule } from './orders/purchase-orders/purchase-orders.module';
-import { SuppliersModule } from './suppliers/suppliers.module';
 import { StoreUsersModule } from './store-users/store-users.module';
 import { SettingsModule } from './settings/settings.module';
 import { CustomersModule } from './customers/customers.module';
@@ -80,7 +79,6 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     AddressesModule,
     StoresModule,
     InventoryModule,
-    SuppliersModule,
     StoreUsersModule,
     SettingsModule,
     CustomersModule,

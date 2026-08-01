@@ -835,7 +835,7 @@ export class OrgPurchaseOrderCreateComponent {
 
   private loadSuppliers(): void {
     this.inventoryService
-      .getSuppliers({ is_active: true, limit: 200 })
+      .getSuppliers({ state: 'active', limit: 200 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

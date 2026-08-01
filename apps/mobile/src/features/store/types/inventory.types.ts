@@ -84,7 +84,7 @@ export interface Supplier {
   lead_time_days?: number | null;
   notes?: string;
   address?: string;
-  is_active: boolean;
+  state: SupplierState;
   created_at: string;
 }
 
@@ -196,14 +196,28 @@ export type LocationType =
   | 'damaged_goods';
 
 /**
- * Aliases legacy — mantener para compatibilidad hacia atrás.
- * El contrato real del backend es `is_active: boolean`
- * (ver Prisma `inventory_locations`/`suppliers`, backend DTOs en
- * `apps/backend/src/domains/store/inventory/{locations,suppliers}/dto/`,
- * y el frontend Angular `inventory.interface.ts`).
- * NO usar en código nuevo — usar `item.is_active` directamente.
+ * Ciclo de vida del proveedor, espejo de `supplier_state_enum` en Prisma.
+ *
+ * - `active`: usable en flujos nuevos (OC, remisiones, rutas).
+ * - `inactive`: visible en el listado pero no seleccionable.
+ * - `archived`: lo que produce "Eliminar". Oculto de listados y selectores;
+ *   su historia contable queda intacta.
  */
-export type SupplierState = 'active' | 'inactive';
+export type SupplierState = 'active' | 'inactive' | 'archived';
+
+/** Estados asignables: archivar va por el flujo de eliminar. */
+export type SupplierAssignableState = Exclude<SupplierState, 'archived'>;
+
+export const SUPPLIER_STATE_LABELS: Record<SupplierState, string> = {
+  active: 'Activo',
+  inactive: 'Inactivo',
+  archived: 'Archivado',
+};
+
+/**
+ * Alias legacy — solo para `inventory_locations`, cuyo contrato sigue siendo
+ * `is_active: boolean`. NO usar para proveedores: usa `SupplierState`.
+ */
 export type LocationState = 'active' | 'inactive';
 
 export const ADJUSTMENT_TYPE_LABELS: Record<AdjustmentType, string> = {

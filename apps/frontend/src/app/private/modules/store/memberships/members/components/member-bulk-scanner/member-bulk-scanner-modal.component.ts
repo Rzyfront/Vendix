@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -14,6 +15,7 @@ import { FormsModule } from '@angular/forms';
 import { catchError, of, switchMap, tap } from 'rxjs';
 
 import {
+  AiReviewAckComponent,
   BadgeComponent,
   BadgeVariant,
   ButtonComponent,
@@ -95,6 +97,7 @@ const ACCEPTED_MIMETYPES = [
     SpinnerComponent,
     StepsLineComponent,
     CurrencyPipe,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -558,6 +561,14 @@ const ACCEPTED_MIMETYPES = [
               }
             </div>
           </section>
+
+          <!-- Verificación obligatoria de los datos precargados por la IA -->
+          <app-ai-review-ack
+            #ackBlock
+            [(acknowledged)]="aiAck"
+            [itemCount]="editableMembers().length"
+            entityLabel="socios"
+          ></app-ai-review-ack>
         </div>
       }
 
@@ -630,6 +641,14 @@ export class MemberBulkScannerModalComponent {
 
   /** 1 = upload, 2 = analyze, 3 = review. */
   readonly currentStep = signal<1 | 2 | 3>(1);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. El botón de
+   * confirmar sigue habilitado: si esto es false, `onConfirm` desvía el clic a
+   * `requestAttention()` en vez de emitir el commit del roster.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
 
   /** Phase-1 upload state. */
   readonly selectedFile = signal<File | null>(null);
@@ -1089,6 +1108,13 @@ export class MemberBulkScannerModalComponent {
     const members = this.editableMembers();
     if (members.length === 0) return;
 
+    // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
+    // lleva al usuario a la casilla de verificación y la resalta.
+    if (!this.aiAck()) {
+      this.ackBlock()?.requestAttention();
+      return;
+    }
+
     const commitPlans: CommitPlanDto[] = plans
       .filter((p) => p.status !== 'existing' || p.matched_plan_id != null)
       .map((p) =>
@@ -1172,6 +1198,10 @@ export class MemberBulkScannerModalComponent {
     this.analysis.set(null);
     this.editablePlans.set([]);
     this.editableMembers.set([]);
+    // Obligatorio: el contenido proyectado en app-modal no se destruye al
+    // cerrar, así que sin este reset la segunda apertura traería el check ya
+    // marcado y el guard quedaría anulado.
+    this.aiAck.set(false);
   }
 
   private closeAfterCommit(): void {

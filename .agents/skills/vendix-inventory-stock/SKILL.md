@@ -68,6 +68,30 @@ Call sync after any stock/reservation change unless the manager method already d
 - `releaseReservationsByReference(..., 'cancelled')` restores available stock without reducing on-hand stock.
 - `releaseAllReservationsForProduct()` and `releaseAllActiveReservations()` are bulk helpers for cleanup flows.
 
+### Who releases an order's reservations, and when
+
+A reservation created for an order is never released by inventory code on its
+own — it is released by the **order state machine**. Every release is a side
+effect of a state transition in `OrderFlowService`:
+
+| Transition | Who releases | How |
+| --- | --- | --- |
+| `→ cancelled` | `cancelOrder()` | `releaseReservationsByReference('order', id, 'cancelled')` — restores available, keeps on-hand |
+| `→ finished` | `updateOrderState()` → `OrderStockCommitService` | consumes: reduces on-hand |
+| `→ shipped` | the `order.shipped` **event** → `OrderAutoFulfillmentListener` | ORG scope only, and only for reservations held **at the central warehouse**: it auto-creates a transfer central→store and consumes that reservation. STORE scope, or reservations at the store's own location, are a no-op here |
+
+The `shipped` row is the trap. The consumption is **not** in `shipOrder()`'s
+body — it hangs off `eventEmitter.emit('order.shipped', ...)`, which only fires
+when `order.stores.organization_id` is set. Any path that moves an order to
+`shipped` without going through `shipOrder()` silently skips it, and the units
+stay reserved forever even though they physically left. That is exactly what
+`PATCH /store/orders/:id {"state":"shipped"}` used to do (QUI-557 follow-up).
+
+Rule: never write `orders.state` outside `OrderFlowService`. The manual UI
+buttons that need to bypass the state machine go through
+`OrderFlowService.forceOrderState()`, which skips **preconditions only** and
+still runs the release/consume chain. See `vendix-backend-domain` for the seam.
+
 ## Simple And Variant Modes
 
 Simple/base stock uses `product_variant_id = null`. Variant stock uses a variant id.

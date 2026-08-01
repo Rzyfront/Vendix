@@ -4,6 +4,7 @@ import { Observable, catchError, throwError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
     Supplier,
+    SupplierAssignableState,
     CreateSupplierDto,
     UpdateSupplierDto,
     SupplierQueryDto,
@@ -48,10 +49,28 @@ export class SuppliersService {
             .pipe(catchError(this.handleError));
     }
 
-    deleteSupplier(id: number): Observable<ApiResponse<void>> {
-        return this.http
-            .delete<ApiResponse<void>>(`${this.api_url}/${id}`)
-            .pipe(catchError(this.handleError));
+    /**
+     * Archiva el proveedor: deja de aparecer en listados y selectores, pero su
+     * historia de compras se conserva. Responde 409
+     * `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS` si tiene documentos abiertos.
+     *
+     * No usa `handleError`: ese mapper aplasta el error a un string y perdería
+     * el `error_code` y los conteos que el componente necesita para ofrecer
+     * inactivar como alternativa.
+     */
+    archiveSupplier(id: number): Observable<ApiResponse<void>> {
+        return this.http.delete<ApiResponse<void>>(`${this.api_url}/${id}`);
+    }
+
+    /** Transición activo ↔ inactivo. `archived` no es destino válido aquí. */
+    setSupplierState(
+        id: number,
+        state: SupplierAssignableState,
+    ): Observable<ApiResponse<Supplier>> {
+        return this.http.patch<ApiResponse<Supplier>>(
+            `${this.api_url}/${id}/state`,
+            { state },
+        );
     }
 
     // ============================================================

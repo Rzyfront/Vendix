@@ -310,6 +310,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'bulk',
+            loadComponent: () =>
+              import('../../private/modules/store/orders/bulk/orders-bulk-page.component').then(
+                (c) => c.OrdersBulkPageComponent,
+              ),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(

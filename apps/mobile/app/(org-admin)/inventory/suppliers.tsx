@@ -41,9 +41,9 @@ export default function SuppliersScreen() {
           description={s.city ?? s.contact_name}
           leftIcon="factory"
           rightBadge={
-            s.is_active
+            s.state === 'active'
               ? { label: 'Activo', variant: 'success' }
-              : { label: 'Inactivo', variant: 'muted' }
+              : { label: s.state === 'archived' ? 'Archivado' : 'Inactivo', variant: 'muted' }
           }
           chevron
         />

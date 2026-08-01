@@ -243,7 +243,7 @@ export class InventoryDashboardComponent implements OnInit {
 
   loadTopSuppliers(): void {
     this.is_loading_suppliers = true;
-    this.suppliersService.getSuppliers({ limit: 5, is_active: true }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.suppliersService.getSuppliers({ limit: 5, state: 'active' as const }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.data) {
           this.top_suppliers = response.data;

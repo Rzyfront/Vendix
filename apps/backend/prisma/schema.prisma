@@ -2057,7 +2057,16 @@ model suppliers {
   currency                            String?                    @db.VarChar(10)
   notes                               String?
   lead_time_days                      Int?
+  /// DEPRECADO — reemplazado por `state`. La columna sobrevive este deploy porque
+  /// contiene datos productivos; su DROP va en una migración posterior con
+  /// snapshot y autorización explícita. Nada en el código la lee ni la escribe.
   is_active                           Boolean                    @default(true)
+  /// Ciclo de vida del proveedor, alineado con brands/categories/products:
+  /// `active` = usable en flujos nuevos; `inactive` = visible en listados pero
+  /// no seleccionable; `archived` = lo que produce "Eliminar", oculto de
+  /// listados y pickers pero con su historia contable intacta (las FKs
+  /// entrantes siguen resolviendo porque la fila persiste).
+  state                               supplier_state_enum        @default(active)
   // Plan Despacho Economía — FASE 1 paso 7. Categoría distingue al proveedor
   // de transporte (carrier) que se usa como ejecutor externo de la ruta y
   // dispara AP+retención. `goods` preserva el comportamiento actual por backfill.
@@ -4210,6 +4219,12 @@ enum supplier_category_enum {
   goods
   carrier
   service
+}
+
+enum supplier_state_enum {
+  active
+  inactive
+  archived
 }
 
 enum employee_advance_status_enum {

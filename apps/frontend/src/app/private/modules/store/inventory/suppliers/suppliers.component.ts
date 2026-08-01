@@ -15,7 +15,15 @@ import { SuppliersService } from '../services';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 // Interfaces
-import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../interfaces';
+import {
+  Supplier,
+  SupplierAssignableState,
+  CreateSupplierDto,
+  UpdateSupplierDto,
+} from '../interfaces';
+
+// Utils
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 // Child Components
 import { SupplierFormModalComponent } from './components/supplier-form-modal.component';
@@ -52,11 +60,22 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
         <app-stats
           title="Inactivos"
           [value]="stats().inactive"
-          smallText="Suspendidos o deshabilitados"
+          smallText="Visibles pero no seleccionables"
           iconName="x-circle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
+
+        @if (status_filter() === 'archived') {
+          <app-stats
+            title="Archivados"
+            [value]="stats().archived"
+            smallText="Eliminados; historial conservado"
+            iconName="archive"
+            iconBgColor="bg-gray-100"
+            iconColor="text-gray-600"
+          ></app-stats>
+        }
 
         <app-stats
           title="Órdenes Pendientes"
@@ -123,10 +142,17 @@ export class SuppliersComponent implements OnInit {
     total: 0,
     active: 0,
     inactive: 0,
+    archived: 0,
     pending_orders: 0,
   });
 
-  status_filter: 'all' | 'active' | 'inactive' = 'all';
+  /**
+   * `all` excluye archivados (es el default del backend); `archived` los
+   * consulta explícitamente. Es signal porque `loadSuppliers` lo lee en cada
+   * ciclo y el filtro debe poder recomponerse sin depender del orden de
+   * asignación.
+   */
+  status_filter = signal<'all' | 'active' | 'inactive' | 'archived'>('all');
   search_term = signal('');
 
   is_loading = signal(false);
@@ -171,10 +197,10 @@ export class SuppliersComponent implements OnInit {
       query.search = this.search_term();
     }
 
-    if (this.status_filter === 'active') {
-      query.is_active = true;
-    } else if (this.status_filter === 'inactive') {
-      query.is_active = false;
+    // `all` no manda `state`: el backend ya excluye archivados por defecto.
+    const status = this.status_filter();
+    if (status !== 'all') {
+      query.state = status;
     }
 
     this.suppliersService
@@ -203,8 +229,9 @@ export class SuppliersComponent implements OnInit {
     this.stats.update((s) => ({
       ...s,
       total: list.length,
-      active: list.filter((sup) => sup.is_active).length,
-      inactive: list.filter((sup) => !sup.is_active).length,
+      active: list.filter((sup) => sup.state === 'active').length,
+      inactive: list.filter((sup) => sup.state === 'inactive').length,
+      archived: list.filter((sup) => sup.state === 'archived').length,
     }));
   }
 
@@ -215,15 +242,15 @@ export class SuppliersComponent implements OnInit {
   }
 
   onFilterChange(values: FilterValues): void {
-    const isActiveValue = values['is_active'] as string;
+    const stateValue = values['state'] as string;
 
-    if (isActiveValue === 'true') {
-      this.status_filter = 'active';
-    } else if (isActiveValue === 'false') {
-      this.status_filter = 'inactive';
-    } else {
-      this.status_filter = 'all';
-    }
+    this.status_filter.set(
+      stateValue === 'active' ||
+        stateValue === 'inactive' ||
+        stateValue === 'archived'
+        ? stateValue
+        : 'all',
+    );
 
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadSuppliers();
@@ -310,29 +337,100 @@ export class SuppliersComponent implements OnInit {
     this.dialogService
       .confirm({
         title: 'Eliminar Proveedor',
-        message: `¿Está seguro de que desea eliminar "${supplier.name}"? Esta acción no se puede deshacer.`,
+        message:
+          `¿Eliminar "${supplier.name}"? Dejará de aparecer en listados y ` +
+          `selectores, pero su historial de compras, facturas y pagos se ` +
+          `conserva y podrás consultarlo con el filtro "Archivados".`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
       })
       .then((confirmed) => {
         if (confirmed) {
-          this.deleteSupplier(supplier);
+          this.archiveSupplier(supplier);
         }
       });
   }
 
-  deleteSupplier(supplier: Supplier): void {
+  /**
+   * "Eliminar" archiva. Si el backend responde 409
+   * `SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS`, se nombran los documentos abiertos y
+   * se ofrece inactivar como alternativa: el proveedor deja de ser
+   * seleccionable sin esconder el trabajo que sigue en curso.
+   */
+  archiveSupplier(supplier: Supplier): void {
     this.suppliersService
-      .deleteSupplier(supplier.id)
+      .archiveSupplier(supplier.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toastService.success('Proveedor eliminado correctamente');
+          this.toastService.success('Proveedor archivado correctamente');
           this.loadSuppliers();
         },
         error: (error) => {
-          this.toastService.error(error || 'Error al eliminar proveedor');
+          const { errorCode, userMessage, details } = parseApiError(error);
+
+          if (errorCode === 'SUPPLIER_ARCHIVE_HAS_OPEN_DOCUMENTS') {
+            this.offerDeactivate(supplier, details);
+            return;
+          }
+
+          this.toastService.error(userMessage);
+        },
+      });
+  }
+
+  /** Enumera los documentos abiertos y propone inactivar en su lugar. */
+  private offerDeactivate(supplier: Supplier, details: any): void {
+    const reasons: string[] = [];
+    if (details?.open_purchase_orders > 0) {
+      reasons.push(
+        `${details.open_purchase_orders} orden(es) de compra sin recibir`,
+      );
+    }
+    if (details?.unpaid_payables > 0) {
+      reasons.push(`${details.unpaid_payables} cuenta(s) por pagar con saldo`);
+    }
+    if (details?.open_dispatch_notes > 0) {
+      reasons.push(`${details.open_dispatch_notes} remisión(es) en curso`);
+    }
+
+    this.dialogService
+      .confirm({
+        title: 'No se puede archivar',
+        message:
+          `"${supplier.name}" tiene ${reasons.join(', ')}. ` +
+          `Archivarlo lo ocultaría mientras ese trabajo sigue abierto. ` +
+          `¿Prefieres inactivarlo? Seguirá visible en el listado pero nadie ` +
+          `podrá seleccionarlo en documentos nuevos.`,
+        confirmText: 'Inactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.changeState(supplier, 'inactive');
+        }
+      });
+  }
+
+  /** Transición activo ↔ inactivo. */
+  changeState(supplier: Supplier, state: SupplierAssignableState): void {
+    if (!this.canMutate()) return;
+    this.suppliersService
+      .setSupplierState(supplier.id, state)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            state === 'active'
+              ? 'Proveedor activado correctamente'
+              : 'Proveedor inactivado correctamente',
+          );
+          this.loadSuppliers();
+        },
+        error: (error) => {
+          this.toastService.error(parseApiError(error).userMessage);
         },
       });
   }

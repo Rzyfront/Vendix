@@ -1,3 +1,5 @@
+import { supplier_state_enum } from '@prisma/client';
+
 export interface Supplier {
   id: number;
   organization_id: number;
@@ -11,7 +13,7 @@ export interface Supplier {
   tax_id?: string;
   payment_terms?: string;
   notes?: string;
-  is_active: boolean;
+  state: supplier_state_enum;
   address_id?: number;
   created_at: Date;
   updated_at: Date;
@@ -59,7 +61,8 @@ export interface UpdateSupplierDto {
   tax_id?: string;
   payment_terms?: string;
   notes?: string;
-  is_active?: boolean;
+  /** `archived` no se acepta aquí: archivar va por DELETE. */
+  state?: Exclude<supplier_state_enum, 'archived'>;
   address_id?: number;
 }
 
@@ -67,7 +70,8 @@ export interface SupplierQueryDto {
   page?: number;
   limit?: number;
   search?: string;
-  is_active?: boolean;
+  /** Omitirlo excluye archivados; pasar `archived` los consulta. */
+  state?: supplier_state_enum;
   contact_person?: string;
   email?: string;
   sort_by?: 'name' | 'code' | 'created_at';

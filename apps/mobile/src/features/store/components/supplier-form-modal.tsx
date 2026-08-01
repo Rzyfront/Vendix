@@ -4,6 +4,7 @@ import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 import { CURRENCY_OPTIONS, TAX_REGIME_OPTIONS, PERSON_TYPE_OPTIONS } from '@/features/store/constants/inventory-labels';
+import type { SupplierAssignableState } from '@/features/store/types';
 
 export interface SupplierFormData {
   name: string;
@@ -19,7 +20,11 @@ export interface SupplierFormData {
   lead_time_days: number | null;
   notes: string;
   address: string;
-  is_active: boolean;
+  /**
+   * `undefined` significa "proveedor archivado": el formulario no ofrece estado
+   * asignable y quien envíe el DTO debe omitir `state` para no desarchivarlo.
+   */
+  state?: SupplierAssignableState;
   tax_regime: string;
   person_type: string;
   is_self_withholder: boolean;
@@ -336,18 +341,18 @@ export default function SupplierFormModal({
               />
             </View>
 
-            {/* Proveedor activo — toggle (estilo web) */}
-            {isStoreScope && (
+            {/* Estado — toggle activo/inactivo; los archivados no lo exponen */}
+            {isStoreScope && form.state && (
               <Pressable
                 style={styles.toggleRow}
-                onPress={() => setForm({ ...form, is_active: !form.is_active })}
+                onPress={() => setForm({ ...form, state: form.state === 'active' ? 'inactive' : 'active' })}
               >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.toggleLabel}>Proveedor activo</Text>
-                  <Text style={styles.toggleHint}>Desactiva para ocultar este proveedor de las listas</Text>
+                  <Text style={styles.toggleHint}>Inactívalo para que siga visible pero no seleccionable</Text>
                 </View>
-                <View style={[styles.toggleSwitch, form.is_active && styles.toggleSwitchOn]}>
-                  <View style={[styles.toggleKnob, form.is_active && styles.toggleKnobOn]} />
+                <View style={[styles.toggleSwitch, form.state === 'active' && styles.toggleSwitchOn]}>
+                  <View style={[styles.toggleKnob, form.state === 'active' && styles.toggleKnobOn]} />
                 </View>
               </Pressable>
             )}

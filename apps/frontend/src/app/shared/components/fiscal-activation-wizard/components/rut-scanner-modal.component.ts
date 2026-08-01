@@ -6,10 +6,12 @@ import {
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
+import { AiReviewAckComponent } from '../../ai-review-ack/ai-review-ack.component';
 import { ModalComponent } from '../../modal/modal.component';
 import { ButtonComponent } from '../../button/button.component';
 import { BadgeComponent } from '../../badge/badge.component';
@@ -56,6 +58,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
     BadgeComponent,
     IconComponent,
     StepsLineComponent,
+    AiReviewAckComponent,
   ],
   template: `
     <app-modal
@@ -357,6 +360,13 @@ const TAX_REGIME_LABELS: Record<string, string> = {
               </p>
             </div>
           }
+
+          <!-- Verificación obligatoria de los datos precargados por la IA -->
+          <app-ai-review-ack
+            #ackBlock
+            [(acknowledged)]="aiAck"
+            entityLabel="datos del RUT"
+          ></app-ai-review-ack>
         </div>
       }
 
@@ -712,6 +722,14 @@ export class RutScannerModalComponent {
 
   // Wizard state
   readonly currentStep = signal<RutScannerStep>(1);
+
+  /**
+   * Verificación obligatoria de los datos precargados por la IA. El botón de
+   * confirmar sigue habilitado: si esto es false, `onConfirm` desvía el clic a
+   * `requestAttention()` en vez de emitir los datos fiscales extraídos.
+   */
+  readonly aiAck = signal(false);
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
   readonly selectedFile = signal<File | null>(null);
   readonly filePreviewUrl = signal<string | null>(null);
   readonly fileError = signal<string | null>(null);
@@ -916,7 +934,16 @@ export class RutScannerModalComponent {
 
   onConfirm(): void {
     const data = this.result();
+    // Este early-return también actúa como guard de doble clic: `closeAndReset`
+    // limpia `result`, así que un segundo clic no puede volver a emitir.
     if (!data) return;
+
+    // El botón sigue habilitado a propósito: en vez de quedar inerte, el clic
+    // lleva al usuario a la casilla de verificación y la resalta.
+    if (!this.aiAck()) {
+      this.ackBlock()?.requestAttention();
+      return;
+    }
 
     this.confirmed.emit(data);
     this.closeAndReset();
@@ -945,6 +972,10 @@ export class RutScannerModalComponent {
     this.isProcessingFile.set(false);
     this.isScanning.set(false);
     this.result.set(null);
+    // Obligatorio: el contenido proyectado en app-modal no se destruye al
+    // cerrar, así que sin este reset la segunda apertura traería el check ya
+    // marcado y el guard quedaría anulado.
+    this.aiAck.set(false);
   }
 
   private closeAndReset(): void {

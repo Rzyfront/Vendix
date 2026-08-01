@@ -274,6 +274,11 @@ export class InvoicingService {
       );
     }
 
+    // Sin filtro de `state` a propósito: el documento soporte se emite sobre
+    // una compra que ya ocurrió, y su plazo de radicación ante la DIAN puede
+    // vencer después de que el proveedor haya sido inactivado o archivado.
+    // Los pickers son los que restringen a `active`; esto solo copia los datos
+    // fiscales de la contraparte al documento.
     const supplier = await this.prisma.suppliers.findFirst({
       where: { id: dto.supplier_id },
       select: {

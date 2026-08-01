@@ -1,0 +1,29 @@
+/**
+ * Estilos de la vista de operaciones masivas de órdenes (QUI-599).
+ *
+ * Casi todo el layout es Tailwind en la plantilla. Aquí viven solo las
+ * cosas que Tailwind no resuelve bien: el scroll del stack en escritorio,
+ * que debe quedarse pegado mientras el usuario recorre la lista larga.
+ */
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+/**
+ * En escritorio, el stack de seleccionados + barra de acciones se queda a
+ * la vista mientras el usuario pagina y busca en el panel izquierdo. El
+ * `top` deja hueco al `app-sticky-header`, que es el único elemento pegado
+ * por encima.
+ *
+ * El scroll del admin ocurre en el `<main overflow-y-auto>` del layout,
+ * no en `window`, así que `position: sticky` se resuelve contra ese
+ * contenedor.
+ */
+@media (min-width: 1024px) {
+  .bulk-stack-column {
+    position: sticky;
+    top: 5.5rem;
+  }
+}

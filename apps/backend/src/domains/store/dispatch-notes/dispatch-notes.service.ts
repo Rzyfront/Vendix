@@ -528,11 +528,16 @@ export class DispatchNotesService {
     warnings: string[],
   ): Promise<number | null> {
     try {
+      // Excluye archivados en ambos tiers: resolver un proveedor archivado
+      // ataría una remisión nueva a alguien ya sacado de circulación.
       if (supplier.tax_id) {
         const normalizedTax = supplier.tax_id.replace(/[\s\-.]/g, '');
         if (normalizedTax) {
           const byTax = await this.prisma.suppliers.findFirst({
-            where: { tax_id: { equals: normalizedTax, mode: 'insensitive' } },
+            where: {
+              tax_id: { equals: normalizedTax, mode: 'insensitive' },
+              state: { not: 'archived' },
+            },
             select: { id: true },
           });
           if (byTax) return byTax.id;
@@ -540,7 +545,10 @@ export class DispatchNotesService {
       }
       if (supplier.name) {
         const byName = await this.prisma.suppliers.findMany({
-          where: { name: { equals: supplier.name, mode: 'insensitive' } },
+          where: {
+            name: { equals: supplier.name, mode: 'insensitive' },
+            state: { not: 'archived' },
+          },
           select: { id: true },
           take: 2,
         });

@@ -9,8 +9,22 @@ import {
   ValidateIf,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { supplier_category_enum } from '@prisma/client';
+import { supplier_category_enum, supplier_state_enum } from '@prisma/client';
+
+/**
+ * Convierte `null` en `undefined` para que Prisma omita el campo y aplique el
+ * default de la columna.
+ *
+ * `@IsOptional()` no valida cuando el valor es `null`, así que un `null`
+ * enviado por el cliente atraviesa la validación y llega al `data` de Prisma.
+ * En una columna NOT NULL con default eso invalida el input *unchecked*,
+ * Prisma cae al *checked* y responde `Argument 'organizations' is missing` —
+ * un error que no menciona el campo culpable y manda a buscar la relación.
+ */
+const nullToUndefined = () =>
+  Transform(({ value }) => (value === null ? undefined : value));
 
 export class CreateInventorySupplierDto {
   @ApiProperty({ description: 'Organization ID' })
@@ -76,6 +90,7 @@ export class CreateInventorySupplierDto {
     default: false,
   })
   @IsOptional()
+  @nullToUndefined()
   @IsBoolean()
   is_self_withholder?: boolean;
 
@@ -99,9 +114,16 @@ export class CreateInventorySupplierDto {
   @IsOptional()
   notes?: string;
 
-  @ApiProperty({ description: 'Is supplier active' })
+  @ApiPropertyOptional({
+    description:
+      'Lifecycle state. `archived` no se acepta al crear ni al actualizar: archivar va por DELETE.',
+    enum: [supplier_state_enum.active, supplier_state_enum.inactive],
+    default: 'active',
+  })
   @IsOptional()
-  is_active?: boolean = true;
+  @nullToUndefined()
+  @IsEnum([supplier_state_enum.active, supplier_state_enum.inactive])
+  state?: supplier_state_enum = supplier_state_enum.active;
 
   // Plan Despacho Economía — FASE 1 paso 7.
   @ApiPropertyOptional({
@@ -110,6 +132,7 @@ export class CreateInventorySupplierDto {
     default: 'goods',
   })
   @IsOptional()
+  @nullToUndefined()
   @IsEnum(supplier_category_enum)
   supplier_category?: supplier_category_enum;
 

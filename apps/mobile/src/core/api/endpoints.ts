@@ -262,7 +262,10 @@ export const Endpoints = {
         LIST: '/store/inventory/suppliers',
         CREATE: '/store/inventory/suppliers',
         UPDATE: '/store/inventory/suppliers/:id',
+        /** Archiva (no borra la fila): sale de listados y selectores. */
         DELETE: '/store/inventory/suppliers/:id',
+        /** Transición activo ↔ inactivo. `archived` va por DELETE. */
+        STATE: '/store/inventory/suppliers/:id/state',
       },
       LOCATIONS: {
         LIST: '/store/inventory/locations',
@@ -458,7 +461,10 @@ export const Endpoints = {
         GET: '/organization/inventory/suppliers/:id',
         CREATE: '/organization/inventory/suppliers',
         UPDATE: '/organization/inventory/suppliers/:id',
+        /** Archiva (no borra la fila): sale de listados y selectores. */
         DELETE: '/organization/inventory/suppliers/:id',
+        /** Transición activo ↔ inactivo. `archived` va por DELETE. */
+        STATE: '/organization/inventory/suppliers/:id/state',
       },
       TRANSFERS: {
         LIST: '/organization/inventory/transfers',

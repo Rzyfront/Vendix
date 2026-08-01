@@ -19,7 +19,12 @@ import {
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
-import { Supplier } from '../../../interfaces';
+import {
+  Supplier,
+  SupplierState,
+  SUPPLIER_STATE_LABELS,
+  SUPPLIER_STATE_COLORS,
+} from '../../../interfaces';
 
 @Component({
   selector: 'app-supplier-list',
@@ -63,16 +68,19 @@ export class SupplierListComponent {
   searchTerm = signal('');
   selectedStatus = signal('');
 
-  // Filter configuration for the options dropdown
+  // Filter configuration for the options dropdown.
+  // "Todos" no incluye archivados — el backend los excluye salvo pedido
+  // explícito, así que "Archivados" es la única forma de verlos.
   filterConfigs: FilterConfig[] = [
     {
-      key: 'is_active',
+      key: 'state',
       label: 'Estado',
       type: 'select',
       options: [
         { value: '', label: 'Todos' },
-        { value: 'true', label: 'Activos' },
-        { value: 'false', label: 'Inactivos' },
+        { value: 'active', label: 'Activos' },
+        { value: 'inactive', label: 'Inactivos' },
+        { value: 'archived', label: 'Archivados' },
       ],
     },
   ];
@@ -115,13 +123,16 @@ export class SupplierListComponent {
     { key: 'email', label: 'Email', defaultValue: '-', priority: 2 },
     { key: 'phone', label: 'Teléfono', defaultValue: '-', priority: 3 },
     {
-      key: 'is_active',
+      key: 'state',
       label: 'Estado',
       priority: 1,
-      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
+      transform: (value: SupplierState) => SUPPLIER_STATE_LABELS[value] ?? '-',
       badge: true,
       badgeConfig: {
-        type: 'status',
+        // `custom` + colorMap porque `status` solo distingue dos estados.
+        // El lookup usa el valor crudo del enum, no la etiqueta traducida.
+        type: 'custom',
+        colorMap: SUPPLIER_STATE_COLORS,
       },
     },
   ];
@@ -151,9 +162,13 @@ export class SupplierListComponent {
     subtitleKey: 'contact_person',
     avatarFallbackIcon: 'building-2',
     avatarShape: 'square',
-    badgeKey: 'is_active',
-    badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
+    badgeKey: 'state',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: SUPPLIER_STATE_COLORS,
+    },
+    badgeTransform: (val: SupplierState) => SUPPLIER_STATE_LABELS[val] ?? '-',
     detailKeys: [
       { key: 'code', label: 'Código', icon: 'hash' },
       { key: 'email', label: 'Email', icon: 'mail' },
@@ -170,7 +185,7 @@ export class SupplierListComponent {
 
   onFilterChange(values: FilterValues): void {
     this.filterValues = values;
-    this.selectedStatus.set((values['is_active'] as string) || '');
+    this.selectedStatus.set((values['state'] as string) || '');
     this.filter.emit(values);
   }
 

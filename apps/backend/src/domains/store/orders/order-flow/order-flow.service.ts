@@ -30,7 +30,16 @@ import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 
 type OrderState = order_state_enum;
 
-const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
+/**
+ * Máquina de estados de la orden. Se EXPORTA (QUI-599) para que el dry-run del
+ * carril masivo pueda decir de antemano si una transición será canónica o
+ * forzada, sin duplicar el mapa — una copia en el servicio de bulk se
+ * desincronizaría en cuanto se abriera una arista nueva aquí.
+ *
+ * Solo lectura para los consumidores externos: la autoridad sobre las aristas
+ * sigue siendo este archivo.
+ */
+export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   draft: ['created', 'cancelled'],
   created: ['pending_payment', 'processing', 'finished', 'cancelled'],
   pending_payment: ['processing', 'finished', 'cancelled'],

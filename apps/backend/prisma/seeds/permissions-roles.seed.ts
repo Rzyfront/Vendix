@@ -727,6 +727,35 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/orders/:id',
       method: 'DELETE',
     },
+    // QUI-599. Permisos PROPIOS de operaciones masivas, deliberadamente NO
+    // se reutilizan `store:orders:update` ni `store:orders:read`: transicionar
+    // 100 órdenes de un tajo (finalizar, enviar, cancelar) tiene otro impacto
+    // operativo y otra traza de auditoría que operar una. Un cajero/empleado
+    // puede corregir una orden suelta sin poder cerrar 100 a la vez.
+    //
+    // `bulk_update` cubre las acciones de escritura en lote (transición de
+    // estado, asignación a ruta de despacho) y `bulk_print` cubre la
+    // generación del PDF multi-página. La separación sigue el mismo criterio
+    // que `store:dispatch_notes:create` vs `store:dispatch_notes:print`.
+    //
+    // La ruta declarada cubre también `/bulk/transition`, `/bulk/assign-route`
+    // y `/bulk/print` porque `PermissionsGuard` hace
+    // `currentPath.startsWith(permission.path)`. El controller refuerza por
+    // nombre con `assertNamedPermission` (ver `orders-bulk.controller.ts`),
+    // igual que `products-bulk-edit.controller.ts`.
+    {
+      name: 'store:orders:bulk_update',
+      description:
+        'Operaciones masivas de escritura sobre órdenes (transición de estado, asignación a ruta)',
+      path: '/api/store/orders/bulk',
+      method: 'POST',
+    },
+    {
+      name: 'store:orders:bulk_print',
+      description: 'Impresión masiva de órdenes (PDF multi-página)',
+      path: '/api/store/orders/bulk/print',
+      method: 'POST',
+    },
 
     // Cotizaciones
     {
@@ -1298,26 +1327,6 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
-    // Proveedores (legacy domain: store/suppliers)
-    {
-      name: 'store:suppliers:create',
-      description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers/unique-create/legacy',
-      method: 'POST',
-    },
-    {
-      name: 'store:suppliers:update',
-      description: 'Actualizar proveedor',
-      path: '/api/store/inventory/suppliers/:id/:id',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:suppliers:delete',
-      description: 'Eliminar proveedor',
-      path: '/api/store/inventory/suppliers/:id/:id',
-      method: 'DELETE',
-    },
-
     // Direcciones (Tienda)
     {
       name: 'store:addresses:create',
@@ -1882,31 +1891,10 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/stock-transfers/:id',
       method: 'DELETE',
     },
-    // Suppliers
-    {
-      name: 'store:suppliers:create',
-      description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers',
-      method: 'POST',
-    },
-    {
-      name: 'store:suppliers:read',
-      description: 'Leer proveedores',
-      path: '/api/store/inventory/suppliers',
-      method: 'GET',
-    },
-    {
-      name: 'store:suppliers:update',
-      description: 'Actualizar proveedor',
-      path: '/api/store/inventory/suppliers/:id',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:suppliers:delete',
-      description: 'Eliminar proveedor',
-      path: '/api/store/inventory/suppliers/:id',
-      method: 'DELETE',
-    },
+    // Suppliers: el namespace canónico es `store:inventory:suppliers:*`
+    // (definido más abajo), que es el que exige
+    // `store/inventory/suppliers/suppliers.controller.ts`. El namespace
+    // `store:suppliers:*` era del módulo duplicado ya eliminado.
     // Store Addresses
     {
       name: 'store:addresses:create',
@@ -4361,7 +4349,6 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:products:read') ||
       p.name.includes('store:categories:read') ||
       p.name.includes('store:brands:read') ||
-      p.name.includes('store:suppliers:read') ||
       p.name.includes('organization:users:read') ||
       p.name.includes('organization:stores:read') ||
       p.name.includes('organization:addresses:read') ||
@@ -4586,7 +4573,6 @@ export async function seedPermissionsAndRoles(
       // Configuración de tienda - solo lectura
       p.name.includes('store:settings:read') ||
       // Proveedores - solo lectura
-      p.name.includes('store:suppliers:read') ||
       p.name.includes('store:inventory:suppliers:read') ||
       // Transferencias - solo lectura
       p.name.includes('store:stock-transfers:read') ||

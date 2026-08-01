@@ -1,0 +1,309 @@
+<app-modal
+  [(isOpen)]="modalOpen"
+  size="xl"
+  [title]="request()?.title ?? 'Confirmar operación masiva'"
+  [subtitle]="request()?.subtitle ?? ''"
+  [closeOnBackdrop]="false"
+>
+  <!-- ═══════════════ Calculando el dry-run ═══════════════════════════════ -->
+  @if (stage() === 'previewing') {
+    <div class="flex flex-col items-center gap-2 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-primary" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Calculando el impacto sobre {{ ids().length }}
+        {{ ids().length === 1 ? 'orden' : 'órdenes' }}…
+      </p>
+      <p class="text-[11px] text-text-secondary">
+        Es una simulación: todavía no se ha escrito nada.
+      </p>
+
+      @if (progress().totalBatches > 1) {
+        <p class="text-[11px] text-text-secondary">
+          Lote {{ progress().doneBatches }} de {{ progress().totalBatches }}
+        </p>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ El preview entero se cayó ═══════════════════════════ -->
+  @if (stage() === 'preview-failed') {
+    <div class="flex flex-col gap-3 py-2">
+      <app-alert-banner variant="danger" icon="alert-triangle">
+        No pudimos calcular la previsualización, así que no se tocó ninguna
+        orden.
+      </app-alert-banner>
+
+      @if (failureMessage()) {
+        <p class="rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-tight text-text-secondary">
+          {{ failureMessage() }}
+        </p>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ Preview listo: el consentimiento informado ══════════ -->
+  @if (stage() === 'ready' && previewResult()) {
+    <div class="flex flex-col gap-3">
+      <!-- Desglose. Cinco casillas porque `skipped` NO es un fallo y mezclarlo
+           con los errores haría que el operador buscara un problema que no
+           existe: la orden simplemente ya estaba en el estado destino. -->
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">
+            Seleccionadas
+          </p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ previewResult()!.total }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-green-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-green-700">
+            Se aplicarán
+          </p>
+          <p class="text-lg font-bold text-green-700">
+            {{ previewResult()!.ok }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-amber-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-amber-700">
+            Se forzarán
+          </p>
+          <p class="text-lg font-bold text-amber-700">
+            {{ previewResult()!.warnings }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-gray-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">
+            Se omiten
+          </p>
+          <p class="text-lg font-bold text-text-secondary">
+            {{ previewResult()!.skipped }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-red-50 px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-error">
+            No se pueden
+          </p>
+          <p class="text-lg font-bold text-error">
+            {{ previewResult()!.errors }}
+          </p>
+        </div>
+      </div>
+
+      @if (applicableCount() === 0) {
+        <app-alert-banner variant="danger" icon="alert-triangle">
+          Ninguna de las órdenes seleccionadas admite esta operación. Revisa los
+          motivos de abajo o cambia la selección: confirmar ahora no cambiaría
+          nada.
+        </app-alert-banner>
+      } @else {
+        <app-alert-banner variant="info" icon="info">
+          Se van a modificar {{ applicableCount() }} de
+          {{ previewResult()!.total }}
+          {{ previewResult()!.total === 1 ? 'orden' : 'órdenes' }}.
+          @if (previewResult()!.skipped > 0) {
+            {{ previewResult()!.skipped }} se
+            {{ previewResult()!.skipped === 1 ? 'omite' : 'omiten' }} por estar
+            ya en ese estado.
+          }
+          @if (previewResult()!.errors > 0) {
+            {{ previewResult()!.errors }} no
+            {{ previewResult()!.errors === 1 ? 'cumple' : 'cumplen' }} los
+            requisitos y no se
+            {{ previewResult()!.errors === 1 ? 'tocará' : 'tocarán' }}.
+          }
+          La operación es parcial a propósito.
+        </app-alert-banner>
+      }
+
+      @if (previewResult()!.warnings > 0) {
+        <app-alert-banner variant="warning" icon="alert-triangle">
+          {{ previewResult()!.warnings }}
+          {{ previewResult()!.warnings === 1 ? 'orden' : 'órdenes' }}
+          {{ previewResult()!.warnings === 1 ? 'saltará' : 'saltarán' }} la
+          máquina de estados. Se aplicará igual y quedará registrado como
+          transición forzada en el historial de cada orden.
+        </app-alert-banner>
+      }
+
+      @if (request()?.danger) {
+        <app-alert-banner variant="danger" icon="shield-alert">
+          Esta operación no se puede deshacer desde la aplicación.
+        </app-alert-banner>
+      }
+
+      @if (progress().totalBatches > 1) {
+        <p class="text-[11px] text-text-secondary">
+          Se enviará en {{ progress().totalBatches }} lotes de 100 órdenes.
+        </p>
+      }
+
+      <!-- Veredicto orden por orden -->
+      <div class="max-h-[45vh] overflow-y-auto rounded-xl border border-border">
+        <ul class="divide-y divide-border">
+          @for (item of previewItems(); track item.id) {
+            <li class="px-3 py-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
+                <p class="min-w-0 truncate text-xs font-semibold text-text-primary">
+                  {{ item.order_number }}
+                </p>
+
+                <span
+                  class="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                  [class.bg-green-100]="item.status === 'ok'"
+                  [class.text-green-700]="item.status === 'ok'"
+                  [class.bg-amber-100]="item.status === 'warning'"
+                  [class.text-amber-700]="item.status === 'warning'"
+                  [class.bg-gray-100]="item.status === 'skipped'"
+                  [class.text-text-secondary]="item.status === 'skipped'"
+                  [class.bg-red-100]="item.status === 'error'"
+                  [class.text-error]="item.status === 'error'"
+                >
+                  <app-icon [name]="statusIcon(item.status)" [size]="11" />
+                  {{ statusLabel(item.status) }}
+                </span>
+              </div>
+
+              <p
+                class="mt-1 flex items-start gap-1 text-[11px] leading-tight"
+                [class.text-error]="item.status === 'error'"
+                [class.text-amber-700]="item.status === 'warning'"
+                [class.text-text-secondary]="
+                  item.status === 'ok' || item.status === 'skipped'
+                "
+              >
+                <app-icon name="info" [size]="12" class="mt-px shrink-0" />
+                {{ describeReason(item) }}
+              </p>
+            </li>
+          }
+        </ul>
+      </div>
+    </div>
+  }
+
+  <!-- ═══════════════ Aplicando: progreso por lotes ═══════════════════════ -->
+  @if (stage() === 'applying') {
+    <div class="flex flex-col items-center gap-3 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-primary" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Aplicando… {{ progress().doneIds }} de {{ progress().totalIds }}
+      </p>
+
+      <div class="h-2 w-full max-w-sm overflow-hidden rounded-full bg-gray-200">
+        <div
+          class="h-full rounded-full bg-primary"
+          [style.width.%]="progressPercent()"
+        ></div>
+      </div>
+
+      <p class="text-[11px] text-text-secondary">
+        Lote {{ progress().doneBatches }} de {{ progress().totalBatches }} · no
+        cierres esta ventana.
+      </p>
+    </div>
+  }
+
+  <!-- ═══════════════ Informe final ═══════════════════════════════════════ -->
+  @if (stage() === 'done') {
+    <div class="flex flex-col gap-3">
+      @if (applyResult()) {
+        <div class="grid grid-cols-3 gap-2">
+          <div class="rounded-xl border border-border bg-surface px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-text-secondary">
+              Enviadas
+            </p>
+            <p class="text-lg font-bold text-text-primary">
+              {{ applyResult()!.total }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-green-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-green-700">
+              Procesadas
+            </p>
+            <p class="text-lg font-bold text-green-700">
+              {{ applyResult()!.successful }}
+            </p>
+          </div>
+          <div class="rounded-xl border border-border bg-red-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-error">
+              Con error
+            </p>
+            <p class="text-lg font-bold text-error">
+              {{ applyResult()!.failed }}
+            </p>
+          </div>
+        </div>
+
+        @if (failedResults().length > 0) {
+          <div class="max-h-[35vh] overflow-y-auto rounded-xl border border-border">
+            <ul class="divide-y divide-border">
+              @for (row of failedResults(); track row.id) {
+                <li class="px-3 py-2">
+                  <p class="text-xs font-semibold text-text-primary">
+                    Orden #{{ row.id }}
+                  </p>
+                  <p class="mt-0.5 text-[11px] leading-tight text-error">
+                    {{ row.message || row.code || 'Error sin detalle' }}
+                  </p>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+      }
+
+      @if (failureMessage()) {
+        <app-alert-banner variant="danger" icon="alert-triangle">
+          {{ failureMessage() }}
+        </app-alert-banner>
+      }
+    </div>
+  }
+
+  <!-- ═══════════════ Pie ═════════════════════════════════════════════════ -->
+  <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
+    @if (stage() === 'ready') {
+      <app-button variant="outline" size="sm" (clicked)="onClose()">
+        Cancelar
+      </app-button>
+      <app-button
+        [variant]="request()?.danger ? 'danger' : 'primary'"
+        size="sm"
+        [disabled]="!canConfirm()"
+        (clicked)="onConfirm()"
+      >
+        <app-icon slot="icon" name="check" [size]="14" />
+        {{ request()?.confirmVerb }} {{ applicableCount() }}
+        {{ applicableCount() === 1 ? 'orden' : 'órdenes' }}
+      </app-button>
+    }
+
+    @if (stage() === 'preview-failed') {
+      <app-button variant="outline" size="sm" (clicked)="onClose()">
+        Cerrar
+      </app-button>
+      <app-button variant="primary" size="sm" (clicked)="onRetryPreview()">
+        <app-icon slot="icon" name="refresh-cw" [size]="14" />
+        Reintentar
+      </app-button>
+    }
+
+    @if (stage() === 'previewing' || stage() === 'applying') {
+      <app-button
+        variant="outline"
+        size="sm"
+        [disabled]="stage() === 'applying'"
+        (clicked)="onClose()"
+      >
+        Cancelar
+      </app-button>
+    }
+
+    @if (stage() === 'done') {
+      <app-button variant="primary" size="sm" (clicked)="onClose()">
+        Listo
+      </app-button>
+    }
+  </div>
+</app-modal>

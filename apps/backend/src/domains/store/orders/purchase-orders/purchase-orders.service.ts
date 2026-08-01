@@ -1008,12 +1008,18 @@ export class PurchaseOrdersService {
       }
 
       if (orderData.supplier_id) {
+        // Solo proveedores activos pueden recibir una OC nueva: `inactive` y
+        // `archived` existen para el histórico, no para abrir trabajo.
         const supplierExists = await tx.suppliers.findFirst({
-          where: { id: orderData.supplier_id, organization_id },
+          where: {
+            id: orderData.supplier_id,
+            organization_id,
+            state: 'active',
+          },
         });
         if (!supplierExists) {
           throw new BadRequestException(
-            `El proveedor con ID ${orderData.supplier_id} no existe.`,
+            `El proveedor con ID ${orderData.supplier_id} no existe o no está activo.`,
           );
         }
       }

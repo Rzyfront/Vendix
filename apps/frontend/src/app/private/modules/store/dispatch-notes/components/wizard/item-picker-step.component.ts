@@ -2,8 +2,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -17,6 +19,7 @@ import { catchError, map } from 'rxjs/operators';
 import * as XLSX from 'xlsx';
 
 import {
+  AiReviewAckComponent,
   EmptyStateComponent,
   IconComponent,
   InputComponent,
@@ -108,6 +111,7 @@ interface PendingLink {
     FormsModule,
     ReactiveFormsModule,
     WizardStepSectionComponent,
+    AiReviewAckComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -589,6 +593,20 @@ interface PendingLink {
           }
         </form>
       </app-wizard-step-section>
+
+      <!--
+        Verificación obligatoria. Solo aparece si el escaneo con IA precargó los
+        ítems: una carga por Excel o manual no debe quedar bloqueada por una
+        casilla sobre datos de IA que nunca se generaron.
+      -->
+      @if (wizardService.aiPrefilled()) {
+        <app-ai-review-ack
+          #ackBlock
+          [(acknowledged)]="wizardService.aiAck"
+          [itemCount]="wizardService.items().length"
+          entityLabel="ítems del recibo"
+        ></app-ai-review-ack>
+      }
     </div>
   `,
 })
@@ -618,6 +636,10 @@ export class ItemPickerStepComponent {
   readonly scanning = signal(false);
   readonly detectedSupplierName = signal<string | null>(null);
   readonly importWarnings = signal<string[]>([]);
+
+  // --- Verificación humana de los ítems precargados por IA ---
+  private readonly ackBlock = viewChild<AiReviewAckComponent>('ackBlock');
+  private lastAckAttention = 0;
 
   // --- "Por vincular" state ---
   readonly pendingLinks = signal<PendingLink[]>([]);
@@ -680,6 +702,15 @@ export class ItemPickerStepComponent {
     this.seedDetailsForm();
     this.loadLocations();
     this.syncFormToService();
+
+    // El botón "Siguiente" vive en el wizard padre, así que la petición de
+    // atención llega por el contador del servicio en vez de un viewChild.
+    effect(() => {
+      const requested = this.wizardService.aiAckAttention();
+      if (requested === this.lastAckAttention) return;
+      this.lastAckAttention = requested;
+      if (requested > 0) this.ackBlock()?.requestAttention();
+    });
   }
 
   // ==========================================================================
@@ -887,6 +918,11 @@ export class ItemPickerStepComponent {
             this.toast.warning('El recibo no arrojó líneas de producto.');
           } else {
             this.toast.success(`Recibo escaneado: ${total} línea(s) detectada(s).`);
+            // Exige verificación humana antes de avanzar. Se reinicia el check
+            // porque estos son datos nuevos: un escaneo previo ya verificado no
+            // debe dar por buenos los ítems que acaban de llegar.
+            this.wizardService.aiPrefilled.set(true);
+            this.wizardService.aiAck.set(false);
           }
         },
         error: (err) => {
