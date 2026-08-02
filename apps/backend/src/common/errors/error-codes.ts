@@ -1707,6 +1707,27 @@ export const ErrorCodes = {
     devMessage:
       'The numbering resolution does not have enough remaining numbers for the 50-document test set',
   },
+  /**
+   * There is no submitted batch to act upon: no ZipKey was ever persisted for
+   * this configuration, so there is nothing to re-poll, diagnose or abandon.
+   */
+  DIAN_TEST_SET_004: {
+    code: 'DIAN_TEST_SET_004',
+    httpStatus: 412,
+    devMessage:
+      'This configuration has no submitted DIAN test set to inspect or abandon',
+  },
+  /**
+   * Per-document diagnosis needs the document keys persisted with the batch.
+   * Batches submitted before `documents[]` existed cannot be interrogated by
+   * CUFE because the emission timestamp they were derived from was discarded.
+   */
+  DIAN_TEST_SET_005: {
+    code: 'DIAN_TEST_SET_005',
+    httpStatus: 412,
+    devMessage:
+      'The stored test set predates per-document evidence; re-send it to obtain diagnosable document keys',
+  },
   DIAN_ENABLEMENT_001: {
     code: 'DIAN_ENABLEMENT_001',
     httpStatus: 412,

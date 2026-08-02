@@ -224,6 +224,28 @@ export class InvoicingService {
     return this.http.get(this.getApiUrl(`dian-config/${config_id}/test-set-status`));
   }
 
+  /**
+   * Asks DIAN document by document whether the submitted batch reached its
+   * records. Answers what the ZipKey cannot: whether the batch is queued or was
+   * never classified at all. Read-only, never re-sends.
+   */
+  getDianTestSetDocuments(config_id: number): Observable<any> {
+    return this.http.get(
+      this.getApiUrl(`dian-config/${config_id}/test-set-documents`),
+    );
+  }
+
+  /**
+   * Discards a batch DIAN never judged, releasing the re-send guard so a new
+   * test set can be submitted.
+   */
+  abandonDianTestSet(config_id: number): Observable<any> {
+    return this.http.post(
+      this.getApiUrl(`dian-config/${config_id}/abandon-test-set`),
+      {},
+    );
+  }
+
   /** Read-only checklist of what is still missing before emitting real invoices. */
   getDianProductionReadiness(config_id: number): Observable<any> {
     return this.http.get(

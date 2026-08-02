@@ -234,6 +234,30 @@ export class DianConfigController {
   }
 
   /**
+   * Asks DIAN, document by document, whether the submitted batch reached its
+   * records. Separates "queued" from "never classified" — a distinction the
+   * ZipKey alone cannot express. Read-only: never re-sends anything.
+   */
+  @Get(':id/test-set-documents')
+  @Permissions('invoicing:read')
+  async getTestSetDocuments(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.getTestSetDocumentStatus(id);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Discards a batch DIAN never judged so a new test set can be sent. Write
+   * operation: it releases the re-send guard that otherwise leaves the
+   * configuration stuck behind a dead ZipKey.
+   */
+  @Post(':id/abandon-test-set')
+  @Permissions('invoicing:write')
+  async abandonTestSet(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.abandonTestSet(id);
+    return this.response_service.success(result);
+  }
+
+  /**
    * Read-only checklist of everything still missing before this configuration can
    * emit real invoices. Same predicates as the emission gate, so the UI cannot
    * promise production readiness the backend would then refuse.

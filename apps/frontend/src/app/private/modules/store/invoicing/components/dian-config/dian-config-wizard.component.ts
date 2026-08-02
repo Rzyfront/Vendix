@@ -113,6 +113,25 @@ const DIAN_TIPS: ReadonlyArray<{ title: string; body: string }> = [
 /** Visual state of the test-set panel. */
 type TestSetState = 'idle' | 'running' | 'pending' | 'passed' | 'rejected';
 
+/** Per-document answer from DIAN about an already submitted batch. */
+interface TestSetDiagnosisDocument {
+  number: string;
+  kind: string;
+  cufe: string;
+  registered: boolean;
+  status_code: string;
+  status_message: string;
+}
+
+interface TestSetDiagnosis {
+  zip_key: string;
+  total_documents: number;
+  sampled: number;
+  registered_count: number;
+  verdict: 'not_registered' | 'partially_registered' | 'registered';
+  documents: TestSetDiagnosisDocument[];
+}
+
 /** The persisted `last_test_result` JSON, as returned by GET :id/test-results. */
 interface PersistedTestResult {
   executed_at?: string;
@@ -684,8 +703,14 @@ interface PersistedTestResult {
                           : 'El envío ya se completó. Ahora esperamos el veredicto, que la DIAN entrega de forma asíncrona.' }}
                       </p>
                       @if (testSetState() === 'pending' && waitingSinceLabel()) {
+                        <!--
+                          The status line must derive from the polling signals, never
+                          assert activity on its own: a batch left three days in this
+                          state showed "consultando cada 15 segundos" long after the
+                          automatic window had closed.
+                        -->
                         <p class="text-xs text-text-secondary mt-1">
-                          Enviado {{ waitingSinceLabel() }}@if (polling()) {, consultando cada 15 segundos}.
+                          Enviado {{ waitingSinceLabel() }}@if (polling()) {, consultando cada 15 segundos}@else {. El sondeo automático está detenido}.
                         </p>
                       }
                     </div>
@@ -729,6 +754,76 @@ interface PersistedTestResult {
                           <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
                           Seguir consultando
                         </app-button>
+                      </div>
+                    </div>
+                  }
+
+                  <!--
+                    Escape hatch for a batch DIAN never judges. Re-polling the
+                    ZipKey can only ever repeat "en proceso"; asking per document
+                    tells us whether it reached DIAN's records at all, and if it
+                    did not, the batch can be discarded and re-sent.
+                  -->
+                  @if (testSetState() === 'pending' && testSetResult()?.zip_key) {
+                    <div class="flex flex-wrap gap-2 justify-end">
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="diagnoseDocuments()"
+                        [loading]="diagnosing()"
+                      >
+                        <app-icon slot="icon" name="stethoscope" [size]="14"></app-icon>
+                        Diagnosticar documentos
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="abandonBatch()"
+                        [loading]="abandoning()"
+                      >
+                        <app-icon slot="icon" name="trash-2" [size]="14"></app-icon>
+                        Descartar lote y reenviar
+                      </app-button>
+                    </div>
+                  }
+
+                  @if (diagnosis(); as diag) {
+                    <div
+                      class="p-3 rounded-lg border text-xs space-y-2"
+                      [ngClass]="{
+                        'bg-error-light border-error': diag.verdict === 'not_registered',
+                        'bg-warning-light border-warning': diag.verdict === 'partially_registered',
+                        'bg-success-light border-success': diag.verdict === 'registered'
+                      }"
+                    >
+                      <p class="font-semibold">
+                        @switch (diag.verdict) {
+                          @case ('not_registered') {
+                            La DIAN no tiene registrado ninguno de los documentos consultados.
+                            El lote nunca se clasificó: descártalo y vuelve a enviarlo.
+                          }
+                          @case ('partially_registered') {
+                            La DIAN registró {{ diag.registered_count }} de {{ diag.sampled }} documentos consultados.
+                          }
+                          @default {
+                            Los documentos sí llegaron a la DIAN; el lote está en su cola de validación.
+                          }
+                        }
+                      </p>
+                      <div class="space-y-1">
+                        @for (doc of diag.documents; track doc.cufe) {
+                          <div class="flex items-start gap-2">
+                            <app-icon
+                              [name]="doc.registered ? 'check-circle' : 'x-circle'"
+                              [size]="12"
+                              class="mt-0.5 shrink-0"
+                            ></app-icon>
+                            <span class="min-w-0">
+                              <span class="font-mono">{{ doc.number }}</span>
+                              — {{ doc.status_message || doc.status_code }}
+                            </span>
+                          </div>
+                        }
                       </div>
                     </div>
                   }
@@ -989,6 +1084,10 @@ export class DianConfigWizardComponent {
   readonly polling = signal(false);
   readonly pollAttempts = signal(0);
   readonly pollExhausted = signal(false);
+  readonly diagnosing = signal(false);
+  readonly abandoning = signal(false);
+  /** Per-document answer from DIAN; null until the merchant asks for it. */
+  readonly diagnosis = signal<TestSetDiagnosis | null>(null);
   readonly tipIndex = signal(0);
 
   // Step 3 (production transition)
@@ -1657,6 +1756,78 @@ export class DianConfigWizardComponent {
     this.pollExhausted.set(false);
     this.pollAttempts.set(0);
     this.checkTestSetStatus(false);
+  }
+
+  /**
+   * Asks DIAN, document by document, whether the batch reached its records.
+   * Re-polling the ZipKey can only repeat "en proceso" forever; this is the
+   * question that distinguishes a queued batch from one never classified.
+   */
+  diagnoseDocuments(): void {
+    const config = this.selectedConfig();
+    if (!config?.id || this.diagnosing()) return;
+
+    this.diagnosing.set(true);
+    this.invoicingService
+      .getDianTestSetDocuments(config.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const data: TestSetDiagnosis = response?.data ?? response;
+          this.diagnosis.set(data);
+          this.diagnosing.set(false);
+          if (data?.verdict === 'not_registered') {
+            this.toast.error(
+              'La DIAN no tiene registrado ninguno de los documentos: el lote nunca se clasificó.',
+            );
+          } else {
+            this.toast.success(
+              `La DIAN registró ${data?.registered_count} de ${data?.sampled} documentos consultados.`,
+            );
+          }
+        },
+        error: (err) => {
+          this.diagnosing.set(false);
+          this.toast.error(
+            extractApiErrorMessage(err) ||
+              'No se pudo diagnosticar el set de pruebas',
+          );
+        },
+      });
+  }
+
+  /**
+   * Discards a batch DIAN never judged so a new set can be sent. Without this
+   * the re-send guard leaves the configuration stuck behind a dead ZipKey and
+   * the only way out is editing the database by hand.
+   */
+  abandonBatch(): void {
+    const config = this.selectedConfig();
+    if (!config?.id || this.abandoning()) return;
+
+    this.abandoning.set(true);
+    this.invoicingService
+      .abandonDianTestSet(config.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.abandoning.set(false);
+          this.stopPolling();
+          this.pollExhausted.set(false);
+          this.pollAttempts.set(0);
+          this.diagnosis.set(null);
+          this.testSetResult.set(null);
+          this.toast.success(
+            'Lote descartado. Ya puedes ejecutar un nuevo set de pruebas.',
+          );
+        },
+        error: (err) => {
+          this.abandoning.set(false);
+          this.toast.error(
+            extractApiErrorMessage(err) || 'No se pudo descartar el lote',
+          );
+        },
+      });
   }
 
   private startTips(): void {
