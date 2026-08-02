@@ -13,7 +13,6 @@ export { DunningBoardComponent } from './pages/dunning/dunning-board.component';
 export { PartnerPayoutsComponent } from './pages/payouts/partner-payouts.component';
 export { SubscriptionEventsComponent } from './pages/events/subscription-events.component';
 export { GatewayComponent } from './pages/gateway/gateway.component';
-export { FiscalBillingComponent } from './pages/fiscal-billing/fiscal-billing.component';
 
 // Components
 export { AiFeatureMatrixComponent } from './components/ai-feature-matrix.component';
