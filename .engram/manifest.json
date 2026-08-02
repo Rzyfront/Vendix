@@ -1056,6 +1056,14 @@
       "sessions": 6,
       "memories": 6,
       "prompts": 0
+    },
+    {
+      "id": "ce0869a4",
+      "created_by": "rzy",
+      "created_at": "2026-08-02T02:34:07Z",
+      "sessions": 4,
+      "memories": 7,
+      "prompts": 0
     }
   ]
 }
