@@ -6,6 +6,7 @@ import { S3Module } from '../../../../common/services/s3.module';
 import { DianDirectModule } from '../../../store/invoicing/providers/dian-direct/dian-direct.module';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { SubscriptionFiscalController } from './subscription-fiscal.controller';
 import { SubscriptionFiscalListener } from './subscription-fiscal.listener';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
@@ -16,6 +17,7 @@ import { SubscriptionFiscalService } from './subscription-fiscal.service';
   providers: [
     ManualCertificateIssuerAdapter,
     DianTestService,
+    PlatformOrgService,
     SubscriptionFiscalService,
     SubscriptionFiscalListener,
   ],

@@ -116,6 +116,28 @@
           </h2>
         </div>
 
+        @if (identityPrefillApplied()) {
+          <div
+            class="flex items-start gap-2 rounded-card border border-info bg-info-light px-3 py-2"
+          >
+            <app-icon
+              name="info"
+              [size]="16"
+              customClasses="text-info shrink-0 mt-0.5"
+            ></app-icon>
+            <p class="text-xs text-text-secondary">
+              Prellenado desde la identidad fiscal de la plataforma. Verifica los
+              datos antes de guardar — si algo está mal, corrígelo en
+              <a
+                routerLink="/super-admin/fiscal/identity"
+                class="text-primary-600 underline underline-offset-2"
+                >Identidad fiscal</a
+              >
+              para que quede igual en todos lados.
+            </p>
+          </div>
+        }
+
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           <app-input
             label="ID organización plataforma"

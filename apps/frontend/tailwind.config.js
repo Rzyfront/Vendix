@@ -243,6 +243,11 @@ module.exports = {
         'warning-light': 'var(--color-warning-light)',
         error: 'var(--color-error)',
         'error-light': 'var(--color-error-light)',
+        // `--color-info` y `--color-info-light` ya existían en styles.scss (light
+        // y dark), pero sin este mapeo no había utilidad que los alcanzara:
+        // escribir `bg-info-light` compilaba a nada, en silencio.
+        info: 'var(--color-info)',
+        'info-light': 'var(--color-info-light)',
       },
       borderRadius: {
         sm: '0.375rem' /* 6px */,

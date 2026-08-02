@@ -1,4 +1,5 @@
 import { DatePipe, JsonPipe } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import {
   Component,
   DestroyRef,
@@ -138,6 +139,7 @@ const confirmProductionValidator: ValidatorFn = (
     PaginationComponent,
     SelectorComponent,
     ToggleComponent,
+    RouterLink,
   ],
   templateUrl: './fiscal-billing.component.html',
 })
@@ -165,6 +167,13 @@ export class FiscalBillingComponent {
   readonly isEnabled = signal(false);
   readonly formInvalid = signal(true);
   readonly search = signal('');
+  /**
+   * Cierto cuando al menos un campo del formulario se rellenó desde la
+   * identidad fiscal de la plataforma en lugar de una config ya guardada. Mueve
+   * la nota que explica de dónde salió el dato: un campo prellenado sin avisar
+   * se lee como un dato confirmado.
+   */
+  readonly identityPrefillApplied = signal(false);
 
   readonly pagination = signal({
     page: 1,
@@ -851,15 +860,40 @@ export class FiscalBillingComponent {
   private applyStatusToForm(status: SubscriptionFiscalStatus): void {
     const settings = status.settings;
     const config = status.dian_config;
+    // La sugerencia solo rellena huecos: si ya hay config guardada, manda ella.
+    // Prellenar por encima de lo guardado convertiría una recarga de página en
+    // una edición silenciosa de la configuración fiscal.
+    const suggested = status.suggested ?? null;
+
+    const organizationId =
+      settings.platform_organization_id ??
+      suggested?.platform_organization_id ??
+      null;
+    const accountingEntityId =
+      settings.accounting_entity_id ?? suggested?.accounting_entity_id ?? null;
+    const name = config?.name ?? suggested?.name ?? null;
+    // El DV pertenece al NIT del que salió. Mezclar el NIT guardado con el DV
+    // sugerido (o al revés) produce un par que no valida en la DIAN.
+    const nit = config?.nit ?? suggested?.nit ?? null;
+    const nitDv = config?.nit
+      ? (config.nit_dv ?? null)
+      : (suggested?.nit_dv ?? null);
+
+    this.identityPrefillApplied.set(
+      !!suggested &&
+        (!config || settings.platform_organization_id === null) &&
+        (!!name || !!nit || organizationId !== null),
+    );
+
     this.form.patchValue(
       {
-        platform_organization_id: this.toIdValue(settings.platform_organization_id),
-        accounting_entity_id: this.toIdValue(settings.accounting_entity_id),
+        platform_organization_id: this.toIdValue(organizationId),
+        accounting_entity_id: this.toIdValue(accountingEntityId),
         invoice_resolution_id: this.toIdValue(settings.invoice_resolution_id),
         dian_configuration_id: this.toIdValue(settings.dian_configuration_id),
-        name: config?.name ?? null,
-        nit: config?.nit ?? null,
-        nit_dv: config?.nit_dv ?? null,
+        name,
+        nit,
+        nit_dv: nitDv,
         software_id: config?.software_id ?? null,
         software_pin: null,
         test_set_id: config?.test_set_id ?? null,

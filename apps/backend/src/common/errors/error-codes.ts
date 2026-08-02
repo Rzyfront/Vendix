@@ -553,6 +553,14 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Pending domain registration limit exceeded',
   },
+  // `organizations.tax_id` is @unique: two tenants cannot claim the same NIT.
+  // Surfaced explicitly so the fiscal identity form says "ese NIT ya está
+  // registrado" instead of leaking a Prisma P2002 as a 500.
+  ORG_TAX_ID_CONFLICT_001: {
+    code: 'ORG_TAX_ID_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'Another organization is already registered with this NIT',
+  },
 
   // Store
   STORE_FIND_001: {

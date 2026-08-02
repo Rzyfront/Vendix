@@ -54,6 +54,19 @@ export interface FiscalResolutionView {
   is_active: boolean;
 }
 
+/**
+ * Identidad fiscal de la plataforma resuelta por el backend para prellenar el
+ * formulario. Los campos que emite la DIAN (`software_id`, `software_pin`,
+ * `test_set_id`) no aparecen aquí a propósito: no son derivables.
+ */
+export interface SubscriptionFiscalSuggestion {
+  platform_organization_id: number | null;
+  accounting_entity_id: number | null;
+  name: string | null;
+  nit: string | null;
+  nit_dv: string | null;
+}
+
 export interface SubscriptionFiscalStatus {
   settings: SubscriptionFiscalSettings;
   dian_config: MaskedDianConfiguration | null;
@@ -63,6 +76,7 @@ export interface SubscriptionFiscalStatus {
     errors: number;
     pending: number;
   };
+  suggested?: SubscriptionFiscalSuggestion | null;
 }
 
 export interface UpsertSubscriptionFiscalConfigDto {
