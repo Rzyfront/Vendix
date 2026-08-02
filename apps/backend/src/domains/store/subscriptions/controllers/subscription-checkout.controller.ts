@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
   ParseIntPipe,
   Post,
@@ -15,6 +16,7 @@ import { SubscriptionPaymentService } from '../services/subscription-payment.ser
 import { SubscriptionResolverService } from '../services/subscription-resolver.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
 import { PromotionalApplyService } from '../services/promotional-apply.service';
+import { SubscriptionBillingProfileService } from '../services/subscription-billing-profile.service';
 import { PlatformGatewayService } from '../../../superadmin/subscriptions/gateway/platform-gateway.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
@@ -50,6 +52,7 @@ export class SubscriptionCheckoutController {
     private readonly resolver: SubscriptionResolverService,
     private readonly stateService: SubscriptionStateService,
     private readonly promotional: PromotionalApplyService,
+    private readonly billingProfile: SubscriptionBillingProfileService,
     private readonly platformGw: PlatformGatewayService,
     private readonly prisma: GlobalPrismaService,
     private readonly responseService: ResponseService,
@@ -403,6 +406,22 @@ export class SubscriptionCheckoutController {
     return newMonthly.greaterThan(currentMonthly) ? 'upgrade' : 'downgrade';
   }
 
+  /**
+   * Fiscal identity Vendix already holds for this organization, plus whether it
+   * is complete. The checkout form uses it to prefill and to decide whether it
+   * has to ask at all — a returning customer should not retype their NIT.
+   */
+  @Permissions('subscriptions:read')
+  @Get('billing-profile')
+  async getBillingProfile() {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const result = await this.billingProfile.get(context.organization_id);
+    return this.responseService.success(result, 'Billing profile retrieved');
+  }
+
   @Permissions('subscriptions:write')
   @Post('commit')
   async commit(@Body() dto: CheckoutCommitDto) {
@@ -466,6 +485,18 @@ export class SubscriptionCheckoutController {
       throw new VendixHttpException(
         ErrorCodes.SUBSCRIPTION_VALIDATION,
         'Debes aceptar la política de no-reembolso',
+      );
+    }
+
+    // Fiscal identity of the adquiriente. Required only when the commit will
+    // actually charge: Vendix issues an electronic invoice for that charge, and
+    // without these fields DIAN rejects the document after the fiscal
+    // consecutive is already spent. Free plans and trial swaps emit nothing.
+    if (context?.organization_id) {
+      await this.billingProfile.ensureCaptured(
+        context.organization_id,
+        dto.billing_profile,
+        { required: !isTrialSwap && !isFreePlan },
       );
     }
 

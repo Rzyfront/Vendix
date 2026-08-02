@@ -446,6 +446,22 @@ model organizations {
   slug                          String                            @unique @db.VarChar(255)
   legal_name                    String?                           @db.VarChar(255)
   tax_id                        String?                           @unique @db.VarChar(50)
+  /// Identidad fiscal del ADQUIRIENTE. Vendix factura electrónicamente sus
+  /// propias suscripciones, así que la organización cliente es el adquiriente de
+  /// una factura DIAN y `cac:AccountingCustomerParty` necesita estos campos.
+  /// Nombres y tipos calcados de `suppliers`, que ya modela la misma parte
+  /// fiscal. La dirección fiscal NO se duplica aquí: vive en `addresses` con
+  /// `type = 'billing'` y `organization_id`.
+  /// Código DIAN del documento: '31' NIT, '13' CC, '22' CE, ...
+  document_type                 String?                           @db.VarChar(10)
+  /// Dígito de verificación del NIT (CompanyID/@schemeID).
+  verification_digit            String?                           @db.VarChar(1)
+  /// '1' Persona Jurídica / '2' Persona Natural (cbc:AdditionalAccountID).
+  person_type                   String?                           @db.VarChar(20)
+  /// '48' responsable de IVA / '49' no responsable (PartyTaxScheme).
+  tax_regime                    String?                           @db.VarChar(50)
+  /// Responsabilidades fiscales DIAN (cbc:TaxLevelCode): O-13, O-15, O-23, R-99-PN...
+  fiscal_responsibilities       String[]                          @default([])
   email                         String                            @db.VarChar(255)
   phone                         String?                           @db.VarChar(50)
   website                       String?                           @db.VarChar(255)

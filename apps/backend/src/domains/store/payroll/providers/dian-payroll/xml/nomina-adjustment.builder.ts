@@ -7,6 +7,10 @@ import {
 } from '../constants/nomina-codes';
 import { CuneCalculator } from '../cune-calculator';
 import { NominaDocumentData } from '../interfaces/nomina-data.interface';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localTimeString,
+} from '../../../../../../common/utils/store-timezone.util';
 
 /**
  * Builds NominaIndividualDeAjuste (DSPNE tipo 103) XML documents.
@@ -382,18 +386,11 @@ export class NominaAdjustmentBuilder {
   }
 
   /**
-   * Formats the current time in HH:mm:ss-05:00 format (Colombia timezone).
+   * Emission time as `HH:mm:ss±HH:MM` in Colombia time — this value feeds HorNE
+   * and therefore the CUNE. The offset is derived from the same tz conversion
+   * that produced the clock, so the label can never disagree with the instant.
    */
   private static formatIssueTime(): string {
-    const now = new Date();
-    const colombia_offset = -5 * 60;
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const colombia_time = new Date(utc + colombia_offset * 60000);
-
-    const hours = String(colombia_time.getHours()).padStart(2, '0');
-    const minutes = String(colombia_time.getMinutes()).padStart(2, '0');
-    const seconds = String(colombia_time.getSeconds()).padStart(2, '0');
-
-    return `${hours}:${minutes}:${seconds}-05:00`;
+    return localTimeString(new Date(), DEFAULT_STORE_TIMEZONE);
   }
 }

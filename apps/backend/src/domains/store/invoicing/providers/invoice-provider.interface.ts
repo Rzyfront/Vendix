@@ -73,6 +73,15 @@ export interface ProviderInvoiceData {
   customer_phone?: string;
   customer_document_type?: string;
   customer_regime?: string;
+  /** DV of `customer_tax_id` — becomes CompanyID/@schemeID for the adquiriente. */
+  customer_verification_digit?: string;
+  /** '1' Persona Jurídica / '2' Persona Natural (cbc:AdditionalAccountID). */
+  customer_person_type?: string;
+  /**
+   * DIAN fiscal responsibilities of the adquiriente (cbc:TaxLevelCode), e.g.
+   * ['O-13','O-15']. Absent means the builder falls back to 'R-99-PN'.
+   */
+  customer_tax_responsibilities?: string[];
   payment_means?: string;
   payment_form?: string; // DIAN: '1' = contado, '2' = crédito
   payment_method?: string;

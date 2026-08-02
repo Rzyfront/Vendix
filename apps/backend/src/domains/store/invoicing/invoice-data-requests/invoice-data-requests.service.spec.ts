@@ -105,6 +105,14 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
       ...overrides.invoice_flow,
     };
 
+    // S3 is only touched when a request carries an attachment; these flows do
+    // not, so the stub exists to satisfy the constructor, not to be exercised.
+    const s3Service = {
+      uploadImage: jest.fn(),
+      downloadImage: jest.fn(),
+      ...overrides.s3Service,
+    };
+
     return {
       service: new InvoiceDataRequestsService(
         prisma as any,
@@ -112,12 +120,14 @@ describe('InvoiceDataRequestsService (nominative conversion)', () => {
         invoicing as any,
         credit_notes as any,
         invoice_flow as any,
+        s3Service as any,
       ),
       prisma,
       event_emitter,
       invoicing,
       credit_notes,
       invoice_flow,
+      s3Service,
     };
   };
 

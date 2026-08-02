@@ -27,6 +27,7 @@ import { SubscriptionPaymentService } from '../../../store/subscriptions/service
 import { SubscriptionProrationService } from '../../../store/subscriptions/services/subscription-proration.service';
 import { SubscriptionInvoicePdfService } from '../../../store/subscriptions/services/subscription-invoice-pdf.service';
 import { PromotionalApplyService } from '../../../store/subscriptions/services/promotional-apply.service';
+import { SubscriptionBillingProfileService } from '../../../store/subscriptions/services/subscription-billing-profile.service';
 import { PlatformGatewayService } from '../../../superadmin/subscriptions/gateway/platform-gateway.service';
 import { SkipSubscriptionGate } from '../../../store/subscriptions/decorators/skip-subscription-gate.decorator';
 
@@ -75,6 +76,7 @@ export class OrgSubscriptionsController {
     private readonly proration: SubscriptionProrationService,
     private readonly invoicePdf: SubscriptionInvoicePdfService,
     private readonly promotional: PromotionalApplyService,
+    private readonly billingProfile: SubscriptionBillingProfileService,
     private readonly platformGw: PlatformGatewayService,
     private readonly prisma: GlobalPrismaService,
     private readonly responseService: ResponseService,
@@ -541,6 +543,16 @@ export class OrgSubscriptionsController {
         throw new VendixHttpException(
           ErrorCodes.SUBSCRIPTION_VALIDATION,
           'Debes aceptar la política de no-reembolso',
+        );
+      }
+
+      // Same fiscal gate as the store-level checkout — see
+      // SubscriptionCheckoutController.commit.
+      if (context?.organization_id) {
+        await this.billingProfile.ensureCaptured(
+          context.organization_id,
+          dto.billing_profile,
+          { required: !isTrialSwap && !isFreePlan },
         );
       }
 

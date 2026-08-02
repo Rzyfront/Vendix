@@ -7,6 +7,10 @@ import {
   StatusResponse,
 } from './invoice-provider.interface';
 import { CufeCalculator } from '../utils/cufe-calculator';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localTimeString,
+} from '../../../../common/utils/store-timezone.util';
 
 /**
  * Mock invoice provider for development and testing.
@@ -36,8 +40,7 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     const cufe = CufeCalculator.generate({
       invoice_number: invoiceData.invoice_number,
       issue_date: invoiceData.issue_date,
-      issue_time:
-        new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
+      issue_time: localTimeString(new Date(), DEFAULT_STORE_TIMEZONE),
       total_before_tax: invoiceData.subtotal_amount,
       tax_iva: invoiceData.tax_amount,
       total_amount: invoiceData.total_amount,
@@ -119,7 +122,7 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
       issue_date: supportDocumentData.issue_date,
       issue_time:
         supportDocumentData.issue_time ||
-        new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
+        localTimeString(new Date(), DEFAULT_STORE_TIMEZONE),
       total_before_tax: supportDocumentData.subtotal_amount,
       tax_iva: supportDocumentData.tax_amount,
       total_amount: supportDocumentData.total_amount,

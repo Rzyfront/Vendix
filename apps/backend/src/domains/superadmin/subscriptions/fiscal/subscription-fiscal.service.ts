@@ -6,6 +6,16 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import {
+  PLATFORM_FISCAL_SETTINGS_KEY,
+  PLATFORM_TIMEZONE,
+} from '../../../../common/constants/platform-fiscal.constants';
+import { normalizeNit } from '../../../../common/utils/nit.util';
+import {
+  localDateString,
+  localTimeString,
+} from '../../../../common/utils/store-timezone.util';
 import { DianDirectProvider } from '../../../store/invoicing/providers/dian-direct/dian-direct.provider';
 import {
   DianSoapClient,
@@ -17,6 +27,7 @@ import {
   ProviderResponse,
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
+import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import {
   CreatePlatformResolutionDto,
   ListPlatformResolutionsQueryDto,
@@ -27,7 +38,7 @@ import {
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
 
-const SETTINGS_KEY = 'subscription_fiscal_billing';
+const SETTINGS_KEY = PLATFORM_FISCAL_SETTINGS_KEY;
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const PLATFORM_ORGANIZATION_ID = 1;
@@ -86,6 +97,26 @@ interface SubscriptionInvoiceForFiscal {
         legal_name: string | null;
         tax_id: string | null;
         email: string | null;
+        document_type: string | null;
+        verification_digit: string | null;
+        person_type: string | null;
+        tax_regime: string | null;
+        fiscal_responsibilities: string[];
+        /**
+         * Fiscal address of the adquiriente. Not duplicated on `organizations`:
+         * it is the `addresses` row with `type = 'billing'`, preferring the one
+         * flagged `is_primary`.
+         */
+        addresses: Array<{
+          address_line1: string;
+          address_line2: string | null;
+          city: string;
+          state_province: string | null;
+          country_code: string;
+          postal_code: string | null;
+          municipality_code: string | null;
+          is_primary: boolean;
+        }>;
       } | null;
     };
   };
@@ -103,6 +134,7 @@ export class SubscriptionFiscalService {
     private readonly dianSoapClient: DianSoapClient,
     private readonly dianXmlSigner: DianXmlSignerService,
     private readonly certificateAdapter: ManualCertificateIssuerAdapter,
+    private readonly dianTestService: DianTestService,
   ) {}
 
   async getStatus() {
@@ -345,6 +377,96 @@ export class SubscriptionFiscalService {
     return testResult;
   }
 
+  // ─────────────────────────────────────────────────────────
+  // DIAN test set (habilitación) for the platform's own NIT
+  // ─────────────────────────────────────────────────────────
+
+  /**
+   * Runs `DianTestService` — the same, already-hardened store implementation —
+   * under a platform request context.
+   *
+   * `DianTestService` reads through the scoped `StorePrismaService`, so it needs
+   * a context to exist. The platform has an organization but no store, and that
+   * is exactly the shape the scopes already handle: `dian_configurations` scopes
+   * as `organization_id` + `OR[store_id = ctx.store_id, store_id IS NULL]`
+   * (with `store_id` undefined the OR is satisfied by the NULL branch), and
+   * fiscal-entity models fall back to `store_id IS NULL`, which is where the
+   * platform's resolution lives.
+   *
+   * Without this, Vendix could store DIAN credentials for its own NIT but had no
+   * way to submit the 50-document test set that DIAN requires before enabling
+   * production — the platform rail stopped one step short of usable.
+   */
+  private async runInPlatformContext<T>(
+    settings: SubscriptionFiscalSettings,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return RequestContextService.run(
+      {
+        organization_id: settings.platform_organization_id!,
+        store_id: undefined,
+        user_id: RequestContextService.getUserId(),
+        is_super_admin: true,
+        is_owner: false,
+        roles: ['super_admin'],
+        permissions: [],
+        app_type: 'VENDIX_ADMIN',
+      },
+      fn,
+    );
+  }
+
+  /** Config + resolution ids the test set needs, or a 412 naming what is missing. */
+  private async requireTestSetTargets(): Promise<{
+    settings: SubscriptionFiscalSettings;
+    configId: number;
+    resolutionId: number;
+  }> {
+    const settings = await this.requireConfiguredSettings();
+    const config = await this.getActiveConfig(settings);
+    if (!settings.invoice_resolution_id) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_FISCAL_001,
+        'Registra la resolución de numeración de la plataforma antes de enviar el set de pruebas.',
+        { field: 'invoice_resolution_id' },
+      );
+    }
+    return {
+      settings,
+      configId: config.id,
+      resolutionId: settings.invoice_resolution_id,
+    };
+  }
+
+  async runTestSet() {
+    const { settings, configId, resolutionId } =
+      await this.requireTestSetTargets();
+    return this.runInPlatformContext(settings, () =>
+      this.dianTestService.runTestSet(configId, resolutionId),
+    );
+  }
+
+  async checkTestSetStatus() {
+    const { settings, configId } = await this.requireTestSetTargets();
+    return this.runInPlatformContext(settings, () =>
+      this.dianTestService.checkTestSetStatus(configId),
+    );
+  }
+
+  async getTestSetDocuments(sampleSize?: number) {
+    const { settings, configId } = await this.requireTestSetTargets();
+    return this.runInPlatformContext(settings, () =>
+      this.dianTestService.getTestSetDocumentStatus(configId, sampleSize),
+    );
+  }
+
+  async abandonTestSet() {
+    const { settings, configId } = await this.requireTestSetTargets();
+    return this.runInPlatformContext(settings, () =>
+      this.dianTestService.abandonTestSet(configId),
+    );
+  }
+
   async listTransmissions(query: SubscriptionFiscalQueryDto) {
     const page = Math.max(1, query.page ?? 1);
     const limit = Math.min(Math.max(1, query.limit ?? 20), 100);
@@ -434,6 +556,33 @@ export class SubscriptionFiscalService {
         throw new BadRequestException('Only paid subscription invoices can be issued electronically');
       }
       return { skipped: true, reason: 'subscription_invoice_not_paid' };
+    }
+
+    // Completeness gate BEFORE ensureTransmission — that call allocates the
+    // fiscal consecutive, and a rejected document still burns its number.
+    const missing = this.missingCustomerFiscalData(invoice);
+    if (missing.length > 0) {
+      const detail = {
+        subscription_invoice_id: invoiceId,
+        organization_id:
+          invoice.store_subscription.store.organizations?.id ?? null,
+        missing_fields: missing,
+      };
+      if (opts.manual) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_FISCAL_001,
+          `The organization is missing fiscal data required by DIAN: ${missing.join(', ')}`,
+          detail,
+        );
+      }
+      this.logger.warn(
+        `Subscription fiscal issue skipped invoice=${invoiceId}: incomplete acquirer data (${missing.join(', ')})`,
+      );
+      return {
+        skipped: true,
+        reason: 'subscription_customer_fiscal_data_incomplete',
+        missing_fields: missing,
+      };
     }
 
     const config = await this.getActiveConfig(settings);
@@ -881,6 +1030,26 @@ export class SubscriptionFiscalService {
                     legal_name: true,
                     tax_id: true,
                     email: true,
+                    document_type: true,
+                    verification_digit: true,
+                    person_type: true,
+                    tax_regime: true,
+                    fiscal_responsibilities: true,
+                    addresses: {
+                      where: { type: 'billing' },
+                      orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                      take: 1,
+                      select: {
+                        address_line1: true,
+                        address_line2: true,
+                        city: true,
+                        state_province: true,
+                        country_code: true,
+                        postal_code: true,
+                        municipality_code: true,
+                        is_primary: true,
+                      },
+                    },
                   },
                 },
               },
@@ -999,6 +1168,72 @@ export class SubscriptionFiscalService {
     };
   }
 
+  /**
+   * Fields DIAN needs from the adquiriente that Vendix cannot invent. Returns
+   * the list of what is missing (empty = complete) so the caller can name them
+   * to whoever has to fix them, instead of failing with an opaque rejection
+   * hours later.
+   *
+   * `person_type` and `document_type` are NOT required: the UBL builder derives
+   * both from the NIT when absent, and that derivation is correct for the only
+   * two shapes a paying organization can take.
+   */
+  private missingCustomerFiscalData(
+    invoice: SubscriptionInvoiceForFiscal,
+  ): string[] {
+    const org = invoice.store_subscription.store.organizations;
+    const missing: string[] = [];
+    if (!org) return ['organization'];
+
+    const { number, dv } = this.splitCustomerNit(org);
+    if (!number) missing.push('tax_id');
+    // A NIT without its DV cannot fill CompanyID/@schemeID. Other document
+    // types (CC, CE) legitimately have no DV, so only demand it for NIT.
+    // `dv` covers the persisted column, the inline `900123456-8` form, and the
+    // derived checksum — all three are equally valid sources.
+    const documentType = org.document_type ?? (org.tax_id ? '31' : null);
+    if (documentType === '31' && !dv) {
+      missing.push('verification_digit');
+    }
+    if (!org.legal_name?.trim()) missing.push('legal_name');
+    if (!org.email?.trim()) missing.push('email');
+
+    const address = org.addresses?.[0];
+    if (!address) {
+      missing.push('billing_address');
+    } else if (!address.municipality_code) {
+      // Without the DIAN municipality code the provider omits PhysicalLocation
+      // and RegistrationAddress entirely, which DIAN rejects for a NIT acquirer.
+      missing.push('billing_address.municipality_code');
+    }
+
+    return missing;
+  }
+
+  /**
+   * Shapes the adquiriente's billing address the way `DianDirectProvider`
+   * normalizes it (`address_line1` / `city` / `state_province` /
+   * `municipality_code`). Returns undefined when the organization has no
+   * billing address — the provider then omits PhysicalLocation entirely rather
+   * than emitting a half-filled one.
+   */
+  private buildCustomerAddress(
+    org: SubscriptionInvoiceForFiscal['store_subscription']['store']['organizations'],
+  ): Record<string, unknown> | undefined {
+    const address = org?.addresses?.[0];
+    if (!address) return undefined;
+    return {
+      address_line: [address.address_line1, address.address_line2]
+        .filter(Boolean)
+        .join(' '),
+      city: address.city,
+      municipality_code: address.municipality_code ?? undefined,
+      state_province: address.state_province ?? undefined,
+      country_code: address.country_code,
+      postal_code: address.postal_code ?? undefined,
+    };
+  }
+
   private buildProviderData(
     invoice: SubscriptionInvoiceForFiscal,
     fiscalNumber: string,
@@ -1035,11 +1270,17 @@ export class SubscriptionFiscalService {
     return {
       invoice_number: fiscalNumber,
       invoice_type: 'sales_invoice',
-      issue_date: issuedAt.toISOString().split('T')[0],
-      issue_time: `${issuedAt.toISOString().split('T')[1].split('.')[0]}-05:00`,
-      due_date: invoice.due_at.toISOString().split('T')[0],
+      // The platform is the DIAN obligado here, so its own timezone governs:
+      // date and offset must come from the same tz-aware conversion, never from
+      // a UTC clock with an offset appended (that names a different instant and
+      // silently rolls the day between 00:00Z and the offset).
+      issue_date: localDateString(issuedAt, PLATFORM_TIMEZONE),
+      issue_time: localTimeString(issuedAt, PLATFORM_TIMEZONE),
+      due_date: localDateString(invoice.due_at, PLATFORM_TIMEZONE),
       customer_name: org?.legal_name ?? org?.name ?? invoice.store_subscription.store.name,
-      customer_tax_id: this.onlyDigits(org?.tax_id) ?? undefined,
+      // NOT onlyDigits: most rows store the NIT with the DV inline, and
+      // concatenating them yields a document number that belongs to nobody.
+      customer_tax_id: org ? this.splitCustomerNit(org).number : undefined,
       subtotal_amount: this.money(invoice.subtotal),
       discount_amount: '0.00',
       tax_amount: this.money(invoice.tax_amount ?? DECIMAL_ZERO),
@@ -1050,8 +1291,21 @@ export class SubscriptionFiscalService {
       taxes: this.buildTaxRows(invoice),
       notes: `Factura electrónica generada desde factura SaaS ${invoice.invoice_number}`,
       customer_email: org?.email ?? undefined,
-      customer_document_type: org?.tax_id ? '31' : '13',
-      customer_regime: '49',
+      customer_address: this.buildCustomerAddress(org),
+      // Read the adquiriente's real fiscal identity. The previous code inferred
+      // '31'/'13' from the mere presence of a tax_id and hardcoded regime '49',
+      // which mislabels every responsable de IVA. Falling back only when the
+      // field is genuinely absent keeps old rows transmitting as before.
+      customer_document_type:
+        org?.document_type ?? (org?.tax_id ? '31' : '13'),
+      customer_verification_digit: org
+        ? this.splitCustomerNit(org).dv
+        : undefined,
+      customer_person_type: org?.person_type ?? undefined,
+      customer_regime: org?.tax_regime ?? '49',
+      customer_tax_responsibilities: org?.fiscal_responsibilities?.length
+        ? org.fiscal_responsibilities
+        : undefined,
       payment_form: '1',
       payment_method: invoice.payments[0]?.payment_method ?? 'subscription',
       order_reference: invoice.invoice_number,
@@ -1182,6 +1436,42 @@ export class SubscriptionFiscalService {
   private onlyDigits(value?: string | null): string | undefined {
     const digits = String(value ?? '').replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  /**
+   * Splits `organizations.tax_id` into the DIAN document number and its DV.
+   *
+   * Most rows store the NIT with the DV already inline (`800987654-3`) — every
+   * organization with a NIT in dev does. Stripping non-digits would produce
+   * `8009876543`, a ten-digit "NIT" that is not the company's, so the
+   * adquiriente on the invoice would be a party that does not exist.
+   *
+   * The DV is always the derived one. It is a checksum of the number, so any
+   * stored digit that disagrees is wrong — and some do: the dev seed holds
+   * `800987654-3` while the modulo-11 DV of that NIT is 4. A mismatch is logged
+   * rather than silently preferred, because it usually means the row's NIT was
+   * typed by hand.
+   */
+  private splitCustomerNit(org: {
+    tax_id: string | null;
+    verification_digit: string | null;
+  }): { number?: string; dv?: string } {
+    const parsed = normalizeNit(org.tax_id);
+    if (!parsed.number) return {};
+    if (parsed.dv_mismatch) {
+      this.logger.warn(
+        `Acquirer NIT ${parsed.number} carries DV ${parsed.provided_dv} but its modulo-11 DV is ${parsed.dv}; using the derived one`,
+      );
+    }
+    if (
+      org.verification_digit &&
+      org.verification_digit !== parsed.dv
+    ) {
+      this.logger.warn(
+        `organizations.verification_digit (${org.verification_digit}) disagrees with the DV of NIT ${parsed.number} (${parsed.dv}); using the derived one`,
+      );
+    }
+    return { number: parsed.number, dv: parsed.dv };
   }
 
   private hash(value: unknown): string {

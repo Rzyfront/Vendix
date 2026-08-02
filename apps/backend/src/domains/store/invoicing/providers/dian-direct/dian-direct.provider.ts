@@ -27,6 +27,10 @@ import {
   DianCustomerData,
 } from './interfaces/dian-config.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localOffsetString,
+} from '../../../../../common/utils/store-timezone.util';
 
 type DianConfigurationType = 'invoicing' | 'support_document' | 'payroll';
 
@@ -867,16 +871,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
+  /**
+   * Fallback when the caller did not resolve the emission time: midnight of the
+   * issue date, with the offset that zone really had on that date. The previous
+   * form built the time from a UTC instant and appended a literal `-05:00`,
+   * which names a different instant while parsing perfectly.
+   */
   private issueTime(document_data: ProviderInvoiceData): string {
-    return (
-      document_data.issue_time ||
-      `${
-        new Date(`${document_data.issue_date}T00:00:00.000Z`)
-          .toISOString()
-          .split('T')[1]
-          .split('.')[0]
-      }-05:00`
-    );
+    if (document_data.issue_time) return document_data.issue_time;
+    // Probe at midday to stay clear of any offset transition boundary.
+    const probe = new Date(`${document_data.issue_date}T12:00:00.000Z`);
+    return `00:00:00${localOffsetString(probe, DEFAULT_STORE_TIMEZONE)}`;
   }
 
   private buildSoftwareSecurity(
@@ -1072,6 +1077,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     return {
       document_type,
       document_number: invoice_data.customer_tax_id || '222222222222',
+      document_dv: invoice_data.customer_verification_digit,
+      person_type: invoice_data.customer_person_type,
+      tax_responsibilities: invoice_data.customer_tax_responsibilities?.length
+        ? invoice_data.customer_tax_responsibilities
+        : undefined,
       legal_name: invoice_data.customer_name || 'Consumidor Final',
       address_line: address?.address_line,
       city_code: address?.city_code,

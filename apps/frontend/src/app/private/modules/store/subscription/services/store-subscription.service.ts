@@ -25,6 +25,57 @@ export interface RetryPaymentResponse {
   invoice: { id: number; total: string; currency: string };
 }
 
+/**
+ * Fiscal identity of the organization paying the subscription. Vendix issues an
+ * electronic invoice for every charge, so this organization is the DIAN
+ * *adquiriente* and these are the fields the invoice cannot be built without.
+ *
+ * `verification_digit` is read-only: the backend derives it from `tax_id`
+ * (modulo-11 checksum), so the form never asks for it.
+ */
+export interface BillingProfileAddress {
+  address_line1: string;
+  address_line2?: string | null;
+  city: string;
+  state_province?: string | null;
+  municipality_code: string;
+  country_code?: string | null;
+  postal_code?: string | null;
+}
+
+export interface BillingProfile {
+  legal_name: string;
+  tax_id: string;
+  document_type: string;
+  person_type?: string | null;
+  tax_regime?: string | null;
+  fiscal_responsibilities?: string[] | null;
+  email?: string | null;
+  address: BillingProfileAddress;
+}
+
+export interface BillingProfileStatus {
+  /**
+   * Vendix emite factura electrónica real por las suscripciones (switch de
+   * plataforma encendido y apuntando a producción). En falso, el checkout no
+   * pide ni muestra datos fiscales: no habría documento que los llevara.
+   */
+  enabled: boolean;
+  complete: boolean;
+  /**
+   * The organization already runs its own electronic invoicing, so this fiscal
+   * identity is master data owned by the fiscal module. Checkout must show it
+   * read-only; the backend drops any edit that arrives anyway.
+   */
+  locked: boolean;
+  profile:
+    | (Partial<BillingProfile> & {
+        verification_digit?: string | null;
+        address: BillingProfileAddress | null;
+      })
+    | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class StoreSubscriptionService {
   private http = inject(HttpClient);
@@ -102,6 +153,19 @@ export class StoreSubscriptionService {
     );
   }
 
+  /**
+   * Fiscal identity Vendix already holds for this organization. Used by the
+   * checkout to prefill the billing form and to skip it entirely for a
+   * returning customer whose data is already complete.
+   */
+  getBillingProfile(): Observable<BillingProfileStatus> {
+    return this.http
+      .get<
+        ApiResponse<BillingProfileStatus>
+      >(this.getApiUrl('checkout/billing-profile'))
+      .pipe(map((res) => res.data as BillingProfileStatus));
+  }
+
   checkoutCommit(
     planId: string | number,
     paymentMethodId?: string | number,
@@ -109,6 +173,7 @@ export class StoreSubscriptionService {
     noRefundAcknowledged: boolean = false,
     noRefundAcknowledgedAt?: string,
     couponCode?: string,
+    billingProfile?: BillingProfile,
   ): Observable<ApiResponse<any>> {
     const body: Record<string, number | string | boolean> = {
       planId: Number(planId),
@@ -129,7 +194,16 @@ export class StoreSubscriptionService {
     if (couponCode && couponCode.trim()) {
       body['coupon_code'] = couponCode.trim();
     }
-    return this.http.post<ApiResponse<any>>(this.getApiUrl('checkout/commit'), body);
+    // Only sent when the form actually collected it; a returning customer with
+    // a complete profile commits without resending anything.
+    const payload: Record<string, unknown> = { ...body };
+    if (billingProfile) {
+      payload['billing_profile'] = billingProfile;
+    }
+    return this.http.post<ApiResponse<any>>(
+      this.getApiUrl('checkout/commit'),
+      payload,
+    );
   }
 
   /**

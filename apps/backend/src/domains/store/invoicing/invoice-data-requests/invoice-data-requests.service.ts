@@ -16,6 +16,10 @@ import { CreditNotesService } from '../credit-notes/credit-notes.service';
 import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import { CreateCreditNoteDto } from '../credit-notes/dto/create-credit-note.dto';
 import { CreateInvoiceTaxDto } from '../dto/create-invoice.dto';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localDateString,
+} from '@common/utils/store-timezone.util';
 
 interface InvoiceDataRequestCustomerData {
   first_name?: string | null;
@@ -741,7 +745,11 @@ export class InvoiceDataRequestsService {
     const dto: CreateCreditNoteDto = {
       related_invoice_id: originalInvoice.id,
       reason: 'Conversión a factura nominativa por solicitud del cliente',
-      issue_date: new Date().toISOString().split('T')[0],
+      // Fiscal day, not UTC day: between 00:00 and 05:00 Colombia the UTC date
+      // is already tomorrow, which would date the credit note into a period the
+      // original invoice does not belong to. DIAN only accepts Colombian
+      // emitters, so the emitter's fiscal day is always Bogotá's.
+      issue_date: localDateString(new Date(), DEFAULT_STORE_TIMEZONE),
       currency: originalInvoice.currency || undefined,
       items: (originalInvoice.invoice_items || []).map((item) => ({
         product_id: item.product_id ?? undefined,

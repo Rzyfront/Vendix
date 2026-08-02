@@ -14,6 +14,13 @@ import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.servic
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
 import { WithholdingFlowService } from '../../withholding-tax/withholding-flow.service';
 import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localDateString,
+  localTimeString,
+  resolveOrganizationTimezone,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
 
 type InvoiceStatus =
   | 'draft'
@@ -334,8 +341,36 @@ export class InvoiceFlowService {
     }
   }
 
-  private formatIssueTime(value: Date): string {
-    return `${value.toISOString().split('T')[1].split('.')[0]}-05:00`;
+  /**
+   * DIAN reads `IssueDate` + `IssueTime` as one local instant, and both feed the
+   * CUFE. Deriving them from `toISOString()` names the UTC wall clock while the
+   * appended offset claims it is local — the document then declares an instant
+   * hours away from the real one, and rolls a whole day between 00:00Z and the
+   * offset. Both fields must come from the same tz-aware conversion.
+   */
+  private formatIssueDate(value: Date, timezone: string): string {
+    return localDateString(value, timezone);
+  }
+
+  private formatIssueTime(value: Date, timezone: string): string {
+    return localTimeString(value, timezone);
+  }
+
+  /** Timezone of the emitting tenant: store first, organization as fallback. */
+  private async resolveTimezone(invoice: {
+    store_id: number | bigint | null;
+    organization_id: number | bigint | null;
+  }): Promise<string> {
+    if (invoice.store_id != null) {
+      return resolveStoreTimezone(this.prisma, Number(invoice.store_id));
+    }
+    if (invoice.organization_id != null) {
+      return resolveOrganizationTimezone(
+        this.prisma.withoutScope(),
+        Number(invoice.organization_id),
+      );
+    }
+    return DEFAULT_STORE_TIMEZONE;
   }
 
   private async assertFiscalPeriodOpen(
@@ -490,14 +525,16 @@ export class InvoiceFlowService {
       this.assertSupportDocumentReady(invoice);
     }
 
+    const timezone = await this.resolveTimezone(invoice);
+
     // Build provider data from invoice
     const provider_data: ProviderInvoiceData = {
       invoice_number: invoice.invoice_number,
       invoice_type: invoice.invoice_type,
-      issue_date: invoice.issue_date.toISOString().split('T')[0],
-      issue_time: this.formatIssueTime(invoice.issue_date),
+      issue_date: this.formatIssueDate(invoice.issue_date, timezone),
+      issue_time: this.formatIssueTime(invoice.issue_date, timezone),
       due_date: invoice.due_date
-        ? invoice.due_date.toISOString().split('T')[0]
+        ? this.formatIssueDate(invoice.due_date, timezone)
         : undefined,
       customer_name:
         invoice.customer_name || invoice.supplier?.name || undefined,
@@ -535,7 +572,7 @@ export class InvoiceFlowService {
       original_invoice_number: invoice.related_invoice?.invoice_number,
       original_invoice_cufe: invoice.related_invoice?.cufe || undefined,
       original_invoice_issue_date: invoice.related_invoice?.issue_date
-        ? invoice.related_invoice.issue_date.toISOString().split('T')[0]
+        ? this.formatIssueDate(invoice.related_invoice.issue_date, timezone)
         : undefined,
     };
 

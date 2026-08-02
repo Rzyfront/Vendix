@@ -1,6 +1,11 @@
 import * as crypto from 'crypto';
 import { C14nCanonicalization } from 'xml-crypto';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localDateString,
+  localTimeString,
+} from '../../../../../../common/utils/store-timezone.util';
 
 // node-forge is imported via require to stay consistent with the rest of the
 // dian-direct provider (see dian-xml-signer.service.ts).
@@ -407,14 +412,16 @@ export class XadesEpesBuilder {
     return node;
   }
 
-  /** Formats a Date as ISO 8601 with a fixed Colombia (-05:00) offset. */
+  /**
+   * Formats a Date as ISO 8601 in Colombia time (`SigningTime`). Date, clock
+   * and offset all come from the same tz conversion, so the three can never
+   * describe different instants.
+   */
   private formatColombianTime(date: Date): string {
-    const bogota = new Date(date.getTime() - 5 * 60 * 60 * 1000);
-    const pad = (value: number): string => String(value).padStart(2, '0');
-    return (
-      `${bogota.getUTCFullYear()}-${pad(bogota.getUTCMonth() + 1)}-${pad(bogota.getUTCDate())}` +
-      `T${pad(bogota.getUTCHours())}:${pad(bogota.getUTCMinutes())}:${pad(bogota.getUTCSeconds())}-05:00`
-    );
+    return `${localDateString(date, DEFAULT_STORE_TIMEZONE)}T${localTimeString(
+      date,
+      DEFAULT_STORE_TIMEZONE,
+    )}`;
   }
 
   /** Minimal XML text/attribute escaping for injected string values. */

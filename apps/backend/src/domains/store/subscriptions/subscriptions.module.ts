@@ -15,6 +15,7 @@ import { SubscriptionPaymentService } from './services/subscription-payment.serv
 import { SubscriptionWebhookService } from './services/subscription-webhook.service';
 import { SubscriptionProrationService } from './services/subscription-proration.service';
 import { PromotionalApplyService } from './services/promotional-apply.service';
+import { SubscriptionBillingProfileService } from './services/subscription-billing-profile.service';
 import { PromotionalRulesEvaluator } from './evaluators/promotional-rules.evaluator';
 import { PartnerCommissionsService } from './services/partner-commissions.service';
 import { SubscriptionTrialService } from './services/subscription-trial.service';
@@ -65,6 +66,7 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     SubscriptionWebhookService,
     SubscriptionProrationService,
     PromotionalApplyService,
+    SubscriptionBillingProfileService,
     PromotionalRulesEvaluator,
     PartnerCommissionsService,
     SubscriptionTrialService,
@@ -102,6 +104,7 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     SubscriptionWebhookService,
     SubscriptionProrationService,
     PromotionalApplyService,
+    SubscriptionBillingProfileService,
     PartnerCommissionsService,
     SubscriptionTrialService,
     SubscriptionPaymentMethodsService,

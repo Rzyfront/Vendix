@@ -11,7 +11,11 @@ import {
   StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
-import { StoreSubscriptionService } from '../../services/store-subscription.service';
+import {
+  BillingProfile,
+  BillingProfileStatus,
+  StoreSubscriptionService,
+} from '../../services/store-subscription.service';
 import { CheckoutPreviewResponse, SubscriptionPlan } from '../../interfaces/store-subscription.interface';
 import {
   WompiCheckoutService,
@@ -30,6 +34,15 @@ const COUPON_REASON_COPY: Record<string, string> = {
   not_eligible: 'Tu tienda no cumple los requisitos del cupón',
   invalid_state: 'El cupón está deshabilitado',
   network_error: 'Error de red al validar el cupón',
+};
+
+// Códigos DIAN de tipo de documento del adquiriente. Las claves deben coincidir
+// con los `<option value>` del formulario y con BILLING_DOCUMENT_TYPES del DTO.
+const BILLING_DOCUMENT_LABELS: Record<string, string> = {
+  '31': 'NIT',
+  '13': 'Cédula de ciudadanía',
+  '22': 'Cédula de extranjería',
+  '41': 'Pasaporte',
 };
 
 @Component({
@@ -414,6 +427,229 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 </p>
               }
 
+              <!-- Datos fiscales del adquiriente. Aparece siempre que el commit
+                   vaya a cobrar: si faltan datos se piden en formulario, y si ya
+                   están en archivo se muestran en tarjeta compacta para que el
+                   cliente confirme a nombre de quién sale la factura antes de
+                   pagar. El DV no se pide — el backend lo deriva del NIT. -->
+              @if (billingSectionVisible()) {
+                <div class="pt-3 border-t border-border/50 space-y-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="space-y-1 min-w-0">
+                      <h4 class="text-sm font-semibold text-text-primary">
+                        Datos de facturación
+                      </h4>
+                      <p class="text-xs text-text-secondary leading-tight">
+                        @if (billingFormVisible()) {
+                          Emitimos factura electrónica ante la DIAN por este
+                          cobro. Necesitamos los datos fiscales de tu empresa.
+                        } @else {
+                          Emitimos la factura electrónica de este cobro a nombre
+                          de esta empresa.
+                        }
+                      </p>
+                    </div>
+
+                    <!-- Editar solo cuando el checkout es dueño del dato. Con el
+                         módulo fiscal activo la identidad la administra ese
+                         módulo y aquí sería una fuente de verdad paralela. -->
+                    @if (billingSummaryVisible() && !billingProfileLocked()) {
+                      <button
+                        type="button"
+                        (click)="startBillingEdit()"
+                        class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <app-icon name="pencil" [size]="12"></app-icon>
+                        Editar
+                      </button>
+                    }
+                  </div>
+
+                  <!-- Tarjeta compacta: confirma sin volver a pedir nada. -->
+                  @if (billingSummaryVisible()) {
+                    <div class="rounded-lg border border-border bg-background/60 p-3 space-y-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <app-icon
+                          name="building"
+                          [size]="14"
+                          class="text-text-secondary shrink-0"
+                        ></app-icon>
+                        <p class="text-sm font-medium text-text-primary truncate">
+                          {{ billingLegalName() || '—' }}
+                        </p>
+                      </div>
+
+                      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                        <div class="min-w-0">
+                          <dt class="text-text-secondary">{{ billingDocumentLabel() }}</dt>
+                          <dd class="text-text-primary font-medium truncate">
+                            {{ billingTaxIdDisplay() }}
+                          </dd>
+                        </div>
+                        <div class="min-w-0">
+                          <dt class="text-text-secondary">Ciudad</dt>
+                          <dd class="text-text-primary font-medium truncate">
+                            {{ billingCityDisplay() }}
+                          </dd>
+                        </div>
+                        <div class="min-w-0 sm:col-span-2">
+                          <dt class="text-text-secondary">Dirección</dt>
+                          <dd class="text-text-primary font-medium truncate">
+                            {{ billingAddressLine() || '—' }}
+                          </dd>
+                        </div>
+                        @if (billingEmail()) {
+                          <div class="min-w-0 sm:col-span-2">
+                            <dt class="text-text-secondary">Correo de facturación</dt>
+                            <dd class="text-text-primary font-medium truncate">
+                              {{ billingEmail() }}
+                            </dd>
+                          </div>
+                        }
+                      </dl>
+
+                      @if (billingProfileLocked()) {
+                        <p class="flex items-start gap-1.5 pt-1 border-t border-border/50 text-xs text-text-secondary leading-tight">
+                          <app-icon name="lock" [size]="12" class="shrink-0 mt-0.5"></app-icon>
+                          <span>
+                            Tu módulo fiscal administra esta identidad. Para
+                            cambiarla, edítala en
+                            <a
+                              [routerLink]="'/admin/fiscal'"
+                              class="font-medium text-primary hover:underline"
+                              >Fiscal</a
+                            >.
+                          </span>
+                        </p>
+                      }
+                    </div>
+                  }
+
+                  @if (billingFormVisible()) {
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label class="flex flex-col gap-1 sm:col-span-2">
+                      <span class="text-xs font-medium text-text-secondary">Razón social</span>
+                      <input
+                        type="text"
+                        [value]="billingLegalName()"
+                        (input)="setBillingField(billingLegalName, $event)"
+                        placeholder="Nombre legal registrado ante la DIAN"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">Tipo de documento</span>
+                      <select
+                        [value]="billingDocumentType()"
+                        (change)="setBillingField(billingDocumentType, $event)"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      >
+                        <option value="31">NIT</option>
+                        <option value="13">Cédula de ciudadanía</option>
+                        <option value="22">Cédula de extranjería</option>
+                        <option value="41">Pasaporte</option>
+                      </select>
+                    </label>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">Número</span>
+                      <input
+                        type="text"
+                        inputmode="numeric"
+                        [value]="billingTaxId()"
+                        (input)="setBillingField(billingTaxId, $event)"
+                        placeholder="900123456"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">Régimen de IVA</span>
+                      <select
+                        [value]="billingTaxRegime()"
+                        (change)="setBillingField(billingTaxRegime, $event)"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      >
+                        <option value="49">No responsable de IVA</option>
+                        <option value="48">Responsable de IVA</option>
+                      </select>
+                    </label>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">
+                        Correo de facturación
+                      </span>
+                      <input
+                        type="email"
+                        [value]="billingEmail()"
+                        (input)="setBillingField(billingEmail, $event)"
+                        placeholder="facturacion@empresa.com"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+
+                    <label class="flex flex-col gap-1 sm:col-span-2">
+                      <span class="text-xs font-medium text-text-secondary">Dirección</span>
+                      <input
+                        type="text"
+                        [value]="billingAddressLine()"
+                        (input)="setBillingField(billingAddressLine, $event)"
+                        placeholder="Calle 10 # 20-30"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">Ciudad</span>
+                      <input
+                        type="text"
+                        [value]="billingCity()"
+                        (input)="setBillingField(billingCity, $event)"
+                        placeholder="Bogotá"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+
+                    <label class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-text-secondary">
+                        Código DANE del municipio
+                      </span>
+                      <input
+                        type="text"
+                        inputmode="numeric"
+                        maxlength="5"
+                        [value]="billingMunicipalityCode()"
+                        (input)="setBillingField(billingMunicipalityCode, $event)"
+                        placeholder="11001"
+                        class="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-text-primary focus:ring-1 focus:ring-primary focus:border-primary"
+                      />
+                    </label>
+                  </div>
+
+                  @if (!billingProfileValid()) {
+                    <p class="text-xs text-text-secondary">
+                      Completa razón social, número de documento, dirección,
+                      ciudad y el código DANE de 5 dígitos.
+                    </p>
+                  }
+
+                  <!-- Cancelar solo existe sobre un perfil que ya estaba
+                       completo; si faltan datos el formulario no se puede
+                       cerrar sin llenarlo. -->
+                  @if (billingEditing()) {
+                    <button
+                      type="button"
+                      (click)="cancelBillingEdit()"
+                      class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      Cancelar edición
+                    </button>
+                  }
+                  }
+                </div>
+              }
+
               <label class="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -436,7 +672,11 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 <app-button
                   variant="primary"
                   [loading]="committing()"
-                  [disabled]="(chargeNow() > 0 && !noRefundAcknowledged()) || committing()"
+                  [disabled]="
+                    (chargeNow() > 0 && !noRefundAcknowledged()) ||
+                    (billingFormVisible() && !billingProfileValid()) ||
+                    committing()
+                  "
                   [fullWidth]="true"
                   (clicked)="confirmCheckout()"
                 >
@@ -559,6 +799,137 @@ export class CheckoutComponent implements OnInit {
   readonly selectedPlan = signal<SubscriptionPlan | null>(null);
   // G8 — checkbox obligatorio de aceptación de política de no-reembolso.
   readonly noRefundAcknowledged = signal(false);
+
+  // ── Datos fiscales del adquiriente ──────────────────────────────────────
+  // Vendix emite factura electrónica por cada cobro, así que la organización
+  // que paga es el adquiriente ante la DIAN. Si estos datos faltan, el
+  // documento se rechaza DESPUÉS de haber consumido un consecutivo fiscal —
+  // por eso se piden aquí, mientras el cliente está presente, y no después.
+  //
+  // Señales sueltas en vez de ReactiveForms: un `computed` sobre un
+  // FormControl no es reactivo en zoneless (el control no notifica al grafo
+  // de señales), así que la validación en vivo se rompería en silencio.
+  readonly billingProfileComplete = signal(false);
+  readonly billingProfileLoaded = signal(false);
+  /**
+   * La plataforma emite factura electrónica real. Mientras esté en falso el
+   * checkout no muestra nada fiscal: no hay documento que llevaría el NIT.
+   */
+  readonly billingProfileEnabled = signal(false);
+  /** El módulo fiscal del cliente es dueño de estos datos: aquí solo se leen. */
+  readonly billingProfileLocked = signal(false);
+  /** El usuario abrió el formulario sobre un perfil que ya estaba completo. */
+  readonly billingEditing = signal(false);
+  readonly billingLegalName = signal('');
+  readonly billingTaxId = signal('');
+  readonly billingDocumentType = signal('31');
+  readonly billingTaxRegime = signal('49');
+  readonly billingEmail = signal('');
+  readonly billingAddressLine = signal('');
+  readonly billingCity = signal('');
+  readonly billingStateProvince = signal('');
+  readonly billingMunicipalityCode = signal('');
+  /** Derivado por el backend; solo se muestra, nunca se edita. */
+  readonly billingVerificationDigit = signal('');
+
+  /** Últimos valores en archivo, para poder descartar una edición. */
+  private billingProfileSnapshot: BillingProfileStatus['profile'] = null;
+
+  /**
+   * La sección fiscal solo tiene sentido cuando la plataforma emite factura
+   * electrónica real Y el commit va a cobrar: en un plan gratis o en un cambio
+   * dentro del trial no se emite documento, así que pedir un NIT sería ruido.
+   */
+  readonly billingSectionVisible = computed(
+    () =>
+      this.billingProfileLoaded() &&
+      this.billingProfileEnabled() &&
+      !this.freePlan() &&
+      !this.trialSwapInfo() &&
+      this.chargeNow() > 0,
+  );
+
+  /** Faltan datos: el formulario es obligatorio y no se puede cerrar. */
+  readonly needsBillingProfile = computed(
+    () => this.billingSectionVisible() && !this.billingProfileComplete(),
+  );
+
+  /** Perfil ya en archivo: se muestra en tarjeta compacta, no en formulario. */
+  readonly billingSummaryVisible = computed(
+    () =>
+      this.billingSectionVisible() &&
+      this.billingProfileComplete() &&
+      !this.billingEditing(),
+  );
+
+  /** El formulario está abierto por falta de datos o porque el usuario editó. */
+  readonly billingFormVisible = computed(
+    () =>
+      this.billingSectionVisible() &&
+      (this.needsBillingProfile() || this.billingEditing()),
+  );
+
+  /**
+   * Número de documento sin el DV. Muchas organizaciones tienen el NIT
+   * guardado con el DV pegado (`800987654-3`); quitar todo lo no-numérico
+   * daría `8009876543`, un NIT de diez dígitos que no es de nadie. El DV es
+   * checksum: el backend lo deriva, aquí solo se descarta.
+   */
+  private documentNumber(): string {
+    const raw = this.billingTaxId().trim();
+    const head = raw.includes('-') ? raw.split('-')[0] : raw;
+    return head.replace(/\D/g, '');
+  }
+
+  /** Campos mínimos que la DIAN exige del adquiriente. */
+  readonly billingProfileValid = computed(() => {
+    // Reads `billingTaxId()` inside the computed, so the dependency is tracked.
+    const nit = this.documentNumber();
+    return (
+      this.billingLegalName().trim().length >= 3 &&
+      nit.length >= 5 &&
+      this.billingAddressLine().trim().length >= 3 &&
+      this.billingCity().trim().length >= 2 &&
+      /^\d{5}$/.test(this.billingMunicipalityCode().trim())
+    );
+  });
+
+  /** Etiqueta legible del tipo de documento para la tarjeta compacta. */
+  readonly billingDocumentLabel = computed(
+    () =>
+      BILLING_DOCUMENT_LABELS[this.billingDocumentType()] ?? 'Documento',
+  );
+
+  /**
+   * Documento con su DV cuando el backend ya lo derivó. Se muestra solo en
+   * lectura: el DV nunca se pide, es un checksum del número.
+   */
+  readonly billingTaxIdDisplay = computed(() => {
+    const number = this.documentNumber();
+    if (!number) return '—';
+    const dv = this.billingVerificationDigit();
+    return dv ? `${number}-${dv}` : number;
+  });
+
+  /** Ciudad + código DANE, la línea que la DIAN exige del adquiriente. */
+  readonly billingCityDisplay = computed(() => {
+    const city = this.billingCity().trim();
+    const code = this.billingMunicipalityCode().trim();
+    if (!city) return code || '—';
+    return code ? `${city} (${code})` : city;
+  });
+
+  /** Abre el formulario sobre un perfil ya completo. */
+  startBillingEdit(): void {
+    if (this.billingProfileLocked()) return;
+    this.billingEditing.set(true);
+  }
+
+  /** Descarta la edición y vuelve a los valores en archivo. */
+  cancelBillingEdit(): void {
+    this.applyBillingProfile(this.billingProfileSnapshot);
+    this.billingEditing.set(false);
+  }
 
   // RNC-PaidPlan — Tracks whether the Wompi widget produced a terminal payment
   // outcome (APPROVED or PENDING). When the user closes the widget without
@@ -744,6 +1115,83 @@ export class CheckoutComponent implements OnInit {
     }
     this.loadPreview(planId, existing?.code ?? queryCoupon ?? undefined);
     this.loadSelectedPlan(planId);
+    this.loadBillingProfile();
+  }
+
+  /**
+   * Reads the fiscal identity already on file. Prefills whatever exists so a
+   * returning customer only fills the gaps, and marks the profile complete so
+   * the block stays hidden when there is nothing to ask.
+   *
+   * A failure here does NOT block checkout: the form simply shows empty and the
+   * backend remains the authority on completeness.
+   */
+  private loadBillingProfile(): void {
+    this.subscriptionService
+      .getBillingProfile()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (status) => {
+          this.billingProfileSnapshot = status.profile;
+          this.applyBillingProfile(status.profile);
+          this.billingProfileEnabled.set(status.enabled);
+          this.billingProfileComplete.set(status.complete);
+          this.billingProfileLocked.set(status.locked);
+          this.billingProfileLoaded.set(true);
+        },
+        error: () => {
+          // Sin respuesta no se asume que haya que pedir datos fiscales: el
+          // backend es la autoridad y bloquearía el commit si hicieran falta.
+          this.billingProfileEnabled.set(false);
+          this.billingProfileComplete.set(false);
+          this.billingProfileLocked.set(false);
+          this.billingProfileLoaded.set(true);
+        },
+      });
+  }
+
+  /** Vuelca un perfil en las señales del formulario. `null` las deja vacías. */
+  private applyBillingProfile(p: BillingProfileStatus['profile']): void {
+    this.billingLegalName.set(p?.legal_name ?? '');
+    this.billingTaxId.set(p?.tax_id ?? '');
+    this.billingDocumentType.set(p?.document_type ?? '31');
+    this.billingTaxRegime.set(p?.tax_regime ?? '49');
+    this.billingEmail.set(p?.email ?? '');
+    this.billingVerificationDigit.set(p?.verification_digit ?? '');
+
+    const addr = p?.address ?? null;
+    this.billingAddressLine.set(addr?.address_line1 ?? '');
+    this.billingCity.set(addr?.city ?? '');
+    this.billingStateProvince.set(addr?.state_province ?? '');
+    this.billingMunicipalityCode.set(addr?.municipality_code ?? '');
+  }
+
+  /** Reads a text input into the given signal. */
+  setBillingField(target: ReturnType<typeof signal<string>>, event: Event): void {
+    target.set((event.target as HTMLInputElement | HTMLSelectElement).value);
+  }
+
+  /**
+   * Payload for the commit, or undefined when there is nothing new to send.
+   * Un perfil bloqueado nunca viaja: lo edita el módulo fiscal, no el checkout.
+   */
+  private buildBillingProfile(): BillingProfile | undefined {
+    if (this.billingProfileLocked()) return undefined;
+    if (!this.billingFormVisible()) return undefined;
+    return {
+      legal_name: this.billingLegalName().trim(),
+      tax_id: this.documentNumber(),
+      document_type: this.billingDocumentType(),
+      tax_regime: this.billingTaxRegime(),
+      email: this.billingEmail().trim() || undefined,
+      address: {
+        address_line1: this.billingAddressLine().trim(),
+        city: this.billingCity().trim(),
+        state_province: this.billingStateProvince().trim() || undefined,
+        municipality_code: this.billingMunicipalityCode().trim(),
+        country_code: 'CO',
+      },
+    };
   }
 
   private loadSelectedPlan(planId: string): void {
@@ -844,6 +1292,16 @@ export class CheckoutComponent implements OnInit {
       return;
     }
 
+    // Datos fiscales del adquiriente: si el cobro va a existir y aún no hay
+    // perfil completo, sin esto la factura electrónica se rechaza después de
+    // gastar un consecutivo.
+    if (this.billingFormVisible() && !this.billingProfileValid()) {
+      this.toastService.error(
+        'Completa los datos de facturación de tu empresa para continuar',
+      );
+      return;
+    }
+
     const returnUrl = `${window.location.origin}/admin/subscription`;
     const acknowledgedAt = new Date().toISOString();
     // Flows without a charge (trial swap, free plan) send `false` so the
@@ -854,7 +1312,15 @@ export class CheckoutComponent implements OnInit {
     this.committing.set(true);
     const couponCode = this.appliedCoupon()?.code;
     this.subscriptionService
-      .checkoutCommit(planId, undefined, returnUrl, ackFlag, acknowledgedAt, couponCode)
+      .checkoutCommit(
+        planId,
+        undefined,
+        returnUrl,
+        ackFlag,
+        acknowledgedAt,
+        couponCode,
+        this.buildBillingProfile(),
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

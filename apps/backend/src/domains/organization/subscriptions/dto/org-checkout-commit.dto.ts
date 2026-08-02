@@ -5,8 +5,10 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { BillingProfileDto } from '../../../store/subscriptions/dto/billing-profile.dto';
 
 /**
  * Org-level checkout commit DTO. Mirrors `CheckoutCommitDto` but requires
@@ -41,4 +43,10 @@ export class OrgCheckoutCommitDto {
   @IsOptional()
   @IsString()
   coupon_code?: string;
+
+  /** See `CheckoutCommitDto.billing_profile` — same contract, same enforcement. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BillingProfileDto)
+  billing_profile?: BillingProfileDto;
 }

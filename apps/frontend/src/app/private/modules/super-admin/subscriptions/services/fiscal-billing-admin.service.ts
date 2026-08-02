@@ -65,6 +65,40 @@ export class FiscalBillingAdminService {
       .pipe(map((res) => res.data));
   }
 
+  // ─────────────────────────────────────────────────────────
+  // DIAN test set (habilitación) for the platform's own NIT
+  //
+  // Vendix has to pass the same 50-document test set as any other obligado
+  // before DIAN enables it for production. These four calls mirror the
+  // store-level flow (send / re-poll / diagnose per document / discard).
+  // ─────────────────────────────────────────────────────────
+
+  runTestSet(): Observable<unknown> {
+    return this.http
+      .post<ApiEnvelope<unknown>>(`${this.base}/test-set`, {})
+      .pipe(map((res) => res.data));
+  }
+
+  checkTestSetStatus(): Observable<unknown> {
+    return this.http
+      .get<ApiEnvelope<unknown>>(`${this.base}/test-set/status`)
+      .pipe(map((res) => res.data));
+  }
+
+  getTestSetDocuments(sampleSize?: number): Observable<unknown> {
+    let params = new HttpParams();
+    if (sampleSize) params = params.set('sample_size', String(sampleSize));
+    return this.http
+      .get<ApiEnvelope<unknown>>(`${this.base}/test-set/documents`, { params })
+      .pipe(map((res) => res.data));
+  }
+
+  abandonTestSet(): Observable<unknown> {
+    return this.http
+      .post<ApiEnvelope<unknown>>(`${this.base}/test-set/abandon`, {})
+      .pipe(map((res) => res.data));
+  }
+
   listTransmissions(
     query: SubscriptionFiscalQuery,
   ): Observable<PaginatedEnvelope<SubscriptionFiscalTransmission>> {
