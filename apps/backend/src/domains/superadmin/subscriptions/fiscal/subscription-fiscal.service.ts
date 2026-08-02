@@ -13,6 +13,10 @@ import {
 } from '../../../../common/constants/platform-fiscal.constants';
 import { normalizeNit } from '../../../../common/utils/nit.util';
 import {
+  PlatformOrgService,
+  PlatformOrgContext,
+} from '../../../../common/services/platform-org.service';
+import {
   localDateString,
   localTimeString,
 } from '../../../../common/utils/store-timezone.util';
@@ -135,6 +139,7 @@ export class SubscriptionFiscalService {
     private readonly dianXmlSigner: DianXmlSignerService,
     private readonly certificateAdapter: ManualCertificateIssuerAdapter,
     private readonly dianTestService: DianTestService,
+    private readonly platformOrg: PlatformOrgService,
   ) {}
 
   async getStatus() {
@@ -161,7 +166,107 @@ export class SubscriptionFiscalService {
       dian_config: config ? this.maskConfig(config) : null,
       resolution,
       stats: { accepted, errors, pending },
+      suggested: await this.buildSuggestedConfig(),
     };
+  }
+
+  /**
+   * Identidad fiscal de la plataforma resuelta server-side, para prellenar el
+   * formulario en vez de pedirle al superadmin que reteclee lo que Vendix ya
+   * sabe. Cinco de los ocho campos del formulario son datos derivables; los
+   * tres restantes (`software_id`, `software_pin`, `test_set_id`) los emite la
+   * DIAN y no hay forma de inferirlos.
+   *
+   * Va en el backend y no en el front porque el superadmin no tiene contexto de
+   * tenant: `PlatformOrgService` es el único que sabe cuál de todas las
+   * organizaciones es Vendix.
+   *
+   * Best-effort por diseño: una plataforma a medio bootstrapear devuelve nulls,
+   * nunca rompe la carga de la página.
+   */
+  private async buildSuggestedConfig(): Promise<{
+    platform_organization_id: number | null;
+    accounting_entity_id: number | null;
+    name: string | null;
+    nit: string | null;
+    nit_dv: string | null;
+  }> {
+    const empty = {
+      platform_organization_id: null,
+      accounting_entity_id: null,
+      name: null,
+      nit: null,
+      nit_dv: null,
+    };
+
+    let platformContext: PlatformOrgContext | null = null;
+    try {
+      platformContext = await this.platformOrg.getPlatformContext();
+    } catch (err) {
+      // getPlatformContext() lanza cuando la org existe pero no tiene entidad
+      // contable activa. Es un estado real e informativo, pero degradar una
+      // sugerencia no justifica tumbar el endpoint de estado.
+      this.logger.warn(
+        `No se pudo resolver el contexto de plataforma para sugerencias: ${(err as Error).message}`,
+      );
+      return empty;
+    }
+    if (!platformContext) return empty;
+
+    const org = await this.prisma.withoutScope().organizations.findUnique({
+      where: { id: platformContext.organization_id },
+      select: { name: true, legal_name: true, tax_id: true },
+    });
+    if (!org) return empty;
+
+    // Precedencia: columnas primero (canónicas tras la unificación de identidad
+    // fiscal), `settings.fiscal_data` como respaldo para organizaciones que aún
+    // no han vuelto a guardar su identidad desde entonces.
+    const fiscalData = await this.readPlatformFiscalData(
+      platformContext.organization_id,
+    );
+
+    const rawNit =
+      org.tax_id?.trim() ||
+      (typeof fiscalData?.tax_id === 'string' && fiscalData.tax_id.trim()) ||
+      (typeof fiscalData?.nit === 'string' && fiscalData.nit.trim()) ||
+      null;
+    // `normalizeNit` y no `computeNitDv`: hay filas históricas donde `tax_id`
+    // guarda el NIT con su DV pegado (`900123456-7`). Calcular el módulo 11
+    // sobre esa cadena incluye el DV como dígito y devuelve un valor incorrecto.
+    const { number: nit, dv: nitDv } = normalizeNit(rawNit);
+    const name =
+      org.legal_name?.trim() ||
+      (typeof fiscalData?.legal_name === 'string' &&
+        fiscalData.legal_name.trim()) ||
+      org.name?.trim() ||
+      null;
+
+    return {
+      platform_organization_id: platformContext.organization_id,
+      accounting_entity_id: platformContext.accounting_entity_id,
+      name,
+      // El NIT se sugiere sin DV; el DV va en su propio campo. Derivado, nunca
+      // leído: un DV almacenado que discrepe es por definición incorrecto.
+      nit: nit || null,
+      nit_dv: nit ? nitDv || null : null,
+    };
+  }
+
+  private async readPlatformFiscalData(
+    organization_id: number,
+  ): Promise<Record<string, unknown> | null> {
+    const row = await this.prisma
+      .withoutScope()
+      .organization_settings.findFirst({
+        where: { organization_id },
+        select: { settings: true },
+      });
+    const settings = (row?.settings ?? null) as Record<string, unknown> | null;
+    const fiscalData = settings?.fiscal_data;
+    return fiscalData && typeof fiscalData === 'object'
+      ? (fiscalData as Record<string, unknown>)
+      : null;
   }
 
   async upsertConfig(
@@ -169,6 +274,14 @@ export class SubscriptionFiscalService {
     userId: number | null,
   ) {
     const previous = await this.getSettings();
+    // El DV es un checksum, no un dato: se deriva del NIT y se ignora lo que
+    // haya llegado en el DTO. Un DV tecleado con typo no falla aquí — falla
+    // después, al validar el certificado P12 contra `expected_dv`, con un error
+    // que culpa al certificado en vez de al dígito.
+    const { number: normalizedNit, dv: derivedDv } = normalizeNit(dto.nit);
+    dto.nit = normalizedNit || dto.nit;
+    dto.nit_dv = derivedDv || undefined;
+
     await this.assertFiscalContext(dto.platform_organization_id, dto.accounting_entity_id);
     if (dto.invoice_resolution_id) {
       await this.assertResolution(dto.invoice_resolution_id, dto.accounting_entity_id);

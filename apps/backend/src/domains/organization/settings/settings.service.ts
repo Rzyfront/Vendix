@@ -22,6 +22,8 @@ import { getDefaultStoreSettings } from '../../store/settings/defaults/default-s
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { buildOrganizationFiscalColumns } from '@common/helpers/organization-fiscal-columns.helper';
+import { Prisma } from '@prisma/client';
 import type { dian_nit_type_enum } from '@prisma/client';
 
 @Injectable()
@@ -537,20 +539,40 @@ export class SettingsService {
       });
     }
 
-    // ciiu_code también persiste en la columna real `organizations.ciiu_code`
-    // (leída por tax-declaration-draft.service.ts:calculateIca vía cascada
-    // store→org). No hay columna `municipality_code` a nivel organización — el
-    // ICA siempre se declara por tienda, así que ese campo solo aplica al
-    // target 'store' (rama de arriba).
-    const orgCiiuCode =
-      typeof cleanDto.ciiu_code === 'string'
-        ? cleanDto.ciiu_code.trim()
-        : undefined;
-    if (orgCiiuCode !== undefined) {
-      await this.prisma.withoutScope().organizations.update({
-        where: { id: context.organization_id },
-        data: { ciiu_code: orgCiiuCode || null, updated_at: new Date() },
-      });
+    // La identidad fiscal también persiste en las columnas reales de
+    // `organizations`. No es duplicación gratuita: el emisor electrónico lee las
+    // columnas (`cac:AccountingCustomerParty`) y el checklist lee el JSON, así
+    // que escribir solo uno de los dos deja al tenant con dos identidades
+    // distintas — el síntoma es un formulario que "se guarda" pero no aparece
+    // en ningún otro lado. Traducción de vocabularios en el helper.
+    //
+    // No hay columna `municipality_code` a nivel organización: el ICA siempre se
+    // declara por tienda, así que ese campo solo aplica al target 'store'.
+    const fiscalColumns = buildOrganizationFiscalColumns(
+      cleanDto,
+      nextFiscalData,
+    );
+    if (Object.keys(fiscalColumns).length > 0) {
+      try {
+        await this.prisma.withoutScope().organizations.update({
+          where: { id: context.organization_id },
+          data: { ...fiscalColumns, updated_at: new Date() },
+        });
+      } catch (err) {
+        // `organizations.tax_id` es @unique. Sin este mapeo el usuario recibe un
+        // 500 opaco al teclear un NIT que ya pertenece a otro tenant.
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.ORG_TAX_ID_CONFLICT_001,
+            `El NIT ${fiscalColumns.tax_id} ya está registrado por otra organización`,
+            { tax_id: fiscalColumns.tax_id },
+          );
+        }
+        throw err;
+      }
     }
 
     if (context.user_id) {
