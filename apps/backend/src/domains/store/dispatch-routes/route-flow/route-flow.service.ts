@@ -701,10 +701,13 @@ export class RouteFlowService {
       }
     }
 
-    // Sin crédito en ruta: el pago es total o no hay pago. `credit_amount`
-    // permanece en 0 siempre (la columna se conserva en el schema, pero ya no
-    // se usa). `anticipo_amount` deja de funcionar como pago parcial.
-    const credit_amount = 0;
+    // Sin crédito en ruta: el pago es total o no hay pago. La liquidación NO
+    // escribe `credit_amount` — la columna existe con `@default(0)` y toda fila
+    // nueva queda en 0. `anticipo_amount` deja de funcionar como pago parcial.
+    // Las columnas y los valores `partial` de los enums se conservan en el
+    // schema (quitarlos sería una migración destructiva) y solo sobreviven en
+    // los caminos de LECTURA, para no volver no-terminales las paradas
+    // liquidadas antes de esta regla. Ver `SETTLED_RESULTS` en route-stop-calc.
 
     const from_status = stop.status;
 
@@ -730,7 +733,6 @@ export class RouteFlowService {
           change_amount: change,
           withholding_amount: withholding,
           withholding_breakdown: dto.withholding_breakdown as any,
-          credit_amount,
           payment_method: dto.payment_method,
           notes: dto.notes,
           settled_at: new Date(),
@@ -750,7 +752,6 @@ export class RouteFlowService {
             anticipo_amount: anticipo,
             change_amount: change,
             withholding_amount: withholding,
-            credit_amount,
             payment_method: dto.payment_method,
           } as any,
         },
@@ -800,18 +801,9 @@ export class RouteFlowService {
           withholding_breakdown: dto.withholding_breakdown,
         });
       }
-      if (credit_amount > 0) {
-        await this.cashSettlement.emitCreditSale({
-          store_id,
-          route_id: id,
-          stop_id: stopId,
-          dispatch_note_id: stop.dispatch_note_id,
-          customer_id: stop.dispatch_note.customer_id,
-          sales_order_id: stop.dispatch_note.sales_order_id,
-          amount: credit_amount,
-          user_id,
-        });
-      }
+      // No hay rama de venta a crédito: una parada entregada está cobrada al
+      // 100% (o es prepaga), así que la liquidación nunca genera
+      // `accounts_receivable` ni emite `credit_sale.created`.
       if (change > 0) {
         await this.cashSettlement.emitRefundCompleted({
           store_id,
@@ -861,7 +853,7 @@ export class RouteFlowService {
     }
 
     this.logger.log(
-      `Parada #${stopId} liquidada: result=${dto.result} collected=${collected} withholding=${withholding} credit=${credit_amount}`,
+      `Parada #${stopId} liquidada: result=${dto.result} collected=${collected} withholding=${withholding}`,
     );
     return updated;
   }
@@ -1083,6 +1075,11 @@ export class RouteFlowService {
         total_collected: totals.total_collected,
         total_to_collect: totals.total_to_collect,
         total_prepaid: totals.total_prepaid,
+        // `total_credit` es un espejo denormalizado de `credit_amount` de las
+        // paradas, que la liquidación ya no escribe: para toda ruta nueva vale
+        // 0. Se conserva para que el espejo siga coherente con
+        // `aggregateRouteTotals` y para no alterar las rutas históricas
+        // (todas cerradas) que sí acumularon crédito antes de la regla.
         total_credit: totals.total_credit,
         total_withholdings: totals.total_withholdings,
         total_changes: totals.total_changes,
@@ -1246,7 +1243,9 @@ export class RouteFlowService {
           if (vehicle.settlement_type === 'per_route') {
             gross_cost = rate;
           } else if (vehicle.settlement_type === 'per_delivery') {
-            // Cuentan: delivered + partial. rejected/released no cuentan.
+            // Cuentan: delivered. rejected/released no cuentan. `partial` se
+            // acepta solo por LECTURA de paradas históricas liquidadas antes de
+            // la regla "sin pago parcial"; ninguna parada nueva puede tenerlo.
             deliveries_count = (route.stops ?? []).filter(
               (s: any) =>
                 s.result === 'delivered' || s.result === 'partial',

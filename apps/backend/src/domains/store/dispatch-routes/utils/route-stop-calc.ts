@@ -129,7 +129,17 @@ export interface RouteReconciliation {
   by_stop: ReconciliationStop[];
 }
 
-/** Terminal stop results: the stop is considered settled/closed. */
+/**
+ * Terminal stop results: the stop is considered settled/closed.
+ *
+ * `partial` es TOLERANCIA DE LECTURA, no un resultado que el sistema pueda
+ * producir: la liquidación lo rechaza con `DISPATCH_ROUTE_PARTIAL_DISABLED`
+ * porque una parada se entrega solo con pago total. Sobrevive aquí para las
+ * paradas liquidadas antes de esa regla — quitarlo las volvería no-terminales
+ * y `close()` rechazaría cerrar sus rutas históricas, además de contarlas como
+ * cobro pendiente en la reconciliación. El valor sigue en el enum de Postgres
+ * porque retirarlo exigiría una migración destructiva.
+ */
 const SETTLED_RESULTS: ReadonlySet<string> = new Set([
   'delivered',
   'partial',

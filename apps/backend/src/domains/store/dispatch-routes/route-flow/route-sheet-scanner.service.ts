@@ -279,7 +279,15 @@ export class RouteSheetScannerService {
     // 1. Settle each confirmed stop via the existing settleStop flow, with
     //    per-stop reconciliation. One failing stop must NOT abort the batch.
     const settled: Array<{ stop_id: number; result: string }> = [];
-    const skipped: Array<{ stop_id: number; reason: string }> = [];
+    // `collected_amount` / `net` solo viajan con
+    // `reason: 'short_payment_requires_decision'`, para que el operador vea
+    // cuánto falta sin tener que reabrir la parada.
+    const skipped: Array<{
+      stop_id: number;
+      reason: string;
+      collected_amount?: number;
+      net?: number;
+    }> = [];
     const errors: Array<{ stop_id: number; message: string }> = [];
 
     for (const decision of dto.stops) {
@@ -298,15 +306,29 @@ export class RouteSheetScannerService {
         continue;
       }
 
-      const settleDto = new SettleStopDto();
-      settleDto.result =
+      const collected_amount = Number(decision.collected_amount ?? 0);
+      const resolvedResult =
         (decision.result as dispatch_route_stop_result_enum) ??
-        this.deriveResult(
-          decision.delivered,
-          Number(decision.collected_amount ?? 0),
-          current.net,
-        );
-      settleDto.collected_amount = Number(decision.collected_amount ?? 0);
+        this.deriveResult(decision.delivered, collected_amount, current.net);
+
+      // Entregada con cobro menor al neto: no hay resultado derivable. En ruta el
+      // pago es total o no hay entrega, así que ni liquidamos ni elegimos por el
+      // operador — reversar inventario ya despachado (`rejected`) o asumir el
+      // faltante (`delivered`) es una decisión de caja suya. La parada queda sin
+      // tocar y el batch sigue con las demás.
+      if (resolvedResult == null) {
+        skipped.push({
+          stop_id: decision.stop_id,
+          reason: 'short_payment_requires_decision',
+          collected_amount,
+          net: current.net,
+        });
+        continue;
+      }
+
+      const settleDto = new SettleStopDto();
+      settleDto.result = resolvedResult;
+      settleDto.collected_amount = collected_amount;
       settleDto.payment_method = decision.payment_method;
       settleDto.withholding_breakdown = decision.withholding_breakdown;
       // Derive withholding_amount from the breakdown sum. settleStop reads
@@ -399,17 +421,23 @@ export class RouteSheetScannerService {
   /**
    * Derive the settle result from the delivery flag + collected amount. Mirrors
    * the validation in `RouteFlowService.settleStop`:
-   *   delivered + covers net  → 'delivered'
-   *   delivered + partial pay → 'partial'
    *   not delivered           → 'rejected'
+   *   delivered + covers net  → 'delivered'
+   *   delivered + short pay   → null (sin derivación — requiere decisión humana)
+   *
+   * Nunca devuelve `'partial'`: en ruta DSD el pago es total o no hay entrega, y
+   * `settleStop` rechaza ese resultado con `DISPATCH_ROUTE_PARTIAL_DISABLED`.
+   * Devolver `null` en el cobro corto es deliberado — ninguna de las dos salidas
+   * automáticas es segura: `rejected` reversaría inventario de mercancía que ya
+   * salió físicamente, y `delivered` moriría en el gate de monto de `settleStop`.
    */
   private deriveResult(
     delivered: boolean,
     collected: number,
     net: number,
-  ): dispatch_route_stop_result_enum {
+  ): dispatch_route_stop_result_enum | null {
     if (!delivered) return 'rejected';
-    if (net > 0 && collected < net) return 'partial';
+    if (net > 0 && collected < net) return null;
     return 'delivered';
   }
 

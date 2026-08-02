@@ -16,17 +16,6 @@ interface PaymentReceivedInput {
   withholding_breakdown?: { retefuente?: number; reteiva?: number; reteica?: number };
 }
 
-interface CreditSaleInput {
-  store_id: number;
-  route_id: number;
-  stop_id: number;
-  dispatch_note_id: number;
-  customer_id: number;
-  sales_order_id: number | null;
-  amount: number;
-  user_id: number | undefined;
-}
-
 interface RefundInput {
   store_id: number;
   route_id: number;
@@ -149,64 +138,11 @@ export class CashSettlementService {
     });
   }
 
-  async emitCreditSale(input: CreditSaleInput) {
-    // Sin crédito / pago parcial en ruta: el pago es total o no hay pago. La
-    // liquidación de paradas ya nunca produce credit_amount > 0, así que esta
-    // rama queda muerta. La protegemos como defensa en profundidad para que un
-    // monto residual jamás genere un accounts_receivable ni emita
-    // 'credit_sale.created' por una venta a crédito en ruta. NO toca las demás
-    // emisiones (payment.received / refund.completed / withholding).
-    if (!(input.amount > 0)) {
-      return null;
-    }
-
-    const store = await this.prisma.stores.findUnique({
-      where: { id: input.store_id },
-      select: { organization_id: true },
-    });
-    const organization_id = store?.organization_id;
-    if (!organization_id) {
-      this.logger.warn(`[emitCreditSale] No organization_id for store ${input.store_id}`);
-      return null;
-    }
-
-    const today = new Date();
-    const due_date = new Date(today);
-    due_date.setDate(due_date.getDate() + 30);
-
-    // Create accounts_receivable row (real schema: original_amount, paid_amount, balance, issue_date, due_date, status)
-    const ar = await this.prisma.accounts_receivable.create({
-      data: {
-        store_id: input.store_id,
-        organization_id,
-        customer_id: input.customer_id,
-        source_type: 'dispatch_route',
-        source_id: input.sales_order_id || input.dispatch_note_id,
-        original_amount: input.amount,
-        paid_amount: 0,
-        balance: input.amount,
-        issue_date: today,
-        due_date,
-        status: 'open',
-        notes: `Parada #${input.stop_id} de planilla #${input.route_id}`,
-      },
-    });
-
-    this.eventEmitter.emit('credit_sale.created', {
-      source_type: 'dispatch_route',
-      source_id: input.route_id,
-      stop_id: input.stop_id,
-      order_id: input.sales_order_id,
-      accounts_receivable_id: ar.id,
-      organization_id,
-      store_id: input.store_id,
-      total_amount: input.amount,
-      customer_id: input.customer_id,
-      user_id: input.user_id,
-    });
-
-    return ar;
-  }
+  // NOTA: `emitCreditSale` fue eliminado. En ruta DSD no hay venta a crédito:
+  // una parada se entrega solo con pago total (o es prepaga), y si el cliente no
+  // paga la parada se marca `rejected`. Por eso la liquidación nunca genera
+  // `accounts_receivable` ni emite `credit_sale.created`. El gate de negocio
+  // vive en `RouteFlowService.settleStop` (DISPATCH_ROUTE_PARTIAL_DISABLED).
 
   async emitRefundCompleted(input: RefundInput) {
     // refunds table requires order_id NOT NULL. For dispatch_route changes, we
