@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { normalizeNit } from '@common/utils/nit.util';
 import { PayrollRulesService } from '../calculation/payroll-rules.service';
 import {
   PilaCsvExport,
@@ -1134,31 +1135,12 @@ export class PilaReportService {
   /**
    * Extrae número de identificación y dígito de verificación del NIT del
    * aportante. Si el tax_id no incluye el DV, lo calcula (algoritmo DIAN).
+   *
+   * Delega en `normalizeNit` (common/utils/nit.util) para que PILA y la
+   * facturación electrónica no puedan divergir en el mismo checksum.
    */
   private parseNit(tax_id: string): { numero: string; dv: string } {
-    const raw = (tax_id || '').trim();
-    if (!raw) return { numero: '', dv: '' };
-    if (raw.includes('-')) {
-      const [n, d] = raw.split('-');
-      const numero = (n || '').replace(/\D/g, '');
-      const dv = (d || '').replace(/\D/g, '') || this.computeNitDv(numero);
-      return { numero, dv: dv.slice(-1) };
-    }
-    const numero = raw.replace(/\D/g, '');
-    return { numero, dv: this.computeNitDv(numero) };
-  }
-
-  /** Dígito de verificación de un NIT colombiano (algoritmo módulo 11 DIAN). */
-  private computeNitDv(nit: string): string {
-    const digits = (nit || '').replace(/\D/g, '');
-    if (!digits) return '';
-    const weights = [3, 7, 13, 17, 19, 23, 29, 37, 41, 43, 47, 53, 59, 67, 71];
-    const reversed = digits.split('').reverse();
-    let sum = 0;
-    for (let i = 0; i < reversed.length && i < weights.length; i++) {
-      sum += Number(reversed[i]) * weights[i];
-    }
-    const mod = sum % 11;
-    return String(mod > 1 ? 11 - mod : mod);
+    const { number, dv } = normalizeNit(tax_id);
+    return { numero: number, dv };
   }
 }

@@ -11,6 +11,10 @@ import {
   DianSoftwareSecurity,
 } from '../interfaces/dian-config.interface';
 import { ProviderInvoiceData } from '../../invoice-provider.interface';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localTimeString,
+} from '../../../../../../common/utils/store-timezone.util';
 
 const SUPPORT_DOCUMENT_PROFILE_ID =
   'DIAN 2.1: Documento Soporte en adquisiciones efectuadas a sujetos no obligados a expedir factura de venta o documento equivalente';
@@ -360,7 +364,11 @@ export class UblSupportDocumentBuilder {
     });
   }
 
+  /**
+   * Fallback only — see UblInvoiceBuilder. The offset is derived from the zone,
+   * never concatenated to a UTC clock, which would declare a future instant.
+   */
   private static defaultIssueTime(): string {
-    return new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
+    return localTimeString(new Date(), DEFAULT_STORE_TIMEZONE);
   }
 }

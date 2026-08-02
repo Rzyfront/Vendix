@@ -76,6 +76,14 @@ describe('InvoicingService support adjustment notes', () => {
       fiscal_close_sessions: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      // The live-emission check reads the DIAN configuration outside the tenant
+      // scope. Returning null means "no habilitación", which is the state these
+      // cases assume — they assert numbering and linkage, not transmission.
+      withoutScope: () => ({
+        dian_configurations: {
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+      }),
       ...overrides.prisma,
     };
     const generator = {
@@ -87,10 +95,23 @@ describe('InvoicingService support adjustment notes', () => {
     const eventEmitter = { emit: jest.fn() } as unknown as EventEmitter2;
     const fiscalScope = {
       resolveAccountingEntityForFiscal: jest.fn().mockResolvedValue({ id: 77 }),
+      // Default tenant shape: fiscal identity lives at the store, which is what
+      // every case in this file assumes.
+      requireFiscalScope: jest.fn().mockResolvedValue('STORE'),
+      getFiscalScope: jest.fn().mockResolvedValue('STORE'),
+      ...overrides.fiscalScope,
     };
     const retryQueue = {
       getRetryStatusByInvoiceIds: jest.fn().mockResolvedValue(new Map()),
       ...overrides.retryQueue,
+    };
+
+    // Defaults to "everything enabled" so these tests keep exercising the
+    // business flow; a test that wants the gate closed overrides it.
+    const fiscalGate = {
+      isAreaEnabled: jest.fn().mockResolvedValue(true),
+      isSubflowEnabled: jest.fn().mockResolvedValue(true),
+      ...overrides.fiscalGate,
     };
 
     return {
@@ -100,11 +121,13 @@ describe('InvoicingService support adjustment notes', () => {
         eventEmitter,
         fiscalScope as any,
         retryQueue as any,
+        fiscalGate as any,
       ),
       prisma,
       generator,
       eventEmitter,
       retryQueue,
+      fiscalGate,
     };
   };
 

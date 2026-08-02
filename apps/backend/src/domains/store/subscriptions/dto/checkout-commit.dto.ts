@@ -5,8 +5,10 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { BillingProfileDto } from './billing-profile.dto';
 
 export class CheckoutCommitDto {
   @Type(() => Number)
@@ -41,4 +43,16 @@ export class CheckoutCommitDto {
   @IsOptional()
   @IsString()
   coupon_code?: string;
+
+  /**
+   * Fiscal identity of the paying organization. Vendix invoices subscriptions
+   * electronically, so this is the DIAN *adquiriente*. Optional in the contract
+   * because a renewal by an organization that already has a complete profile
+   * does not need to resend it; the commit handler requires it when the profile
+   * is incomplete and the plan actually charges.
+   */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BillingProfileDto)
+  billing_profile?: BillingProfileDto;
 }

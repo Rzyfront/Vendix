@@ -12,6 +12,10 @@ import {
   DianInvoiceControl,
 } from '../interfaces/dian-config.interface';
 import { ProviderInvoiceData } from '../../invoice-provider.interface';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localTimeString,
+} from '../../../../../../common/utils/store-timezone.util';
 
 /**
  * Builds UBL 2.1 Credit Note XML documents compliant with DIAN Colombia.
@@ -94,9 +98,11 @@ export class UblCreditNoteBuilder {
 
     doc.ele(UBL_NAMESPACES.CBC, 'IssueDate').txt(credit_note_data.issue_date);
 
+    // Fallback only — see UblInvoiceBuilder: the offset must be derived, never
+    // concatenated to a UTC clock.
     const issue_time =
       credit_note_data.issue_time ||
-      new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
+      localTimeString(new Date(), DEFAULT_STORE_TIMEZONE);
     doc.ele(UBL_NAMESPACES.CBC, 'IssueTime').txt(issue_time);
 
     doc

@@ -89,6 +89,11 @@ describe('InvoiceFlowService support documents', () => {
       fiscal_close_sessions: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      // `send()` resolves the tenant timezone to build IssueDate/IssueTime.
+      // Returning null exercises the documented fallback to America/Bogota.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       withoutScope: () => configClient,
       ...overrides.prisma,
     };
@@ -131,6 +136,15 @@ describe('InvoiceFlowService support documents', () => {
       ...overrides.fiscalGate,
     };
 
+    // WithholdingFlowService is only reached for documents that practise
+    // withholding; the flows under test do not, so a stub that reports "no
+    // withholding" keeps the arity honest without inventing behaviour.
+    const withholdingFlow = {
+      resolvePracticed: jest.fn().mockResolvedValue({ lines: [], total: 0 }),
+      persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
+      ...overrides.withholdingFlow,
+    };
+
     return {
       service: new InvoiceFlowService(
         prisma as any,
@@ -139,6 +153,7 @@ describe('InvoiceFlowService support documents', () => {
         retryQueue as any,
         fiscalLedger as any,
         fiscalGate as any,
+        withholdingFlow as any,
       ),
       prisma,
       configClient,
@@ -147,6 +162,7 @@ describe('InvoiceFlowService support documents', () => {
       eventEmitter,
       fiscalLedger,
       fiscalGate,
+      withholdingFlow,
     };
   };
 

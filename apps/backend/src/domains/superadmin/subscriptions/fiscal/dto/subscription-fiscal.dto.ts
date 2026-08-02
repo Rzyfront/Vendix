@@ -6,10 +6,16 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
+  Matches,
   MaxLength,
   Min,
 } from 'class-validator';
+import {
+  TrimString,
+  TrimTaxId,
+} from '../../../../../common/decorators/trim-string.decorator';
 
 export type SubscriptionFiscalEnvironment = 'test' | 'production';
 
@@ -44,25 +50,40 @@ export class UpsertSubscriptionFiscalConfigDto {
   @Min(1)
   dian_configuration_id?: number;
 
+  @TrimString()
   @IsString()
+  @MaxLength(100)
   name!: string;
 
+  // Dots and spaces are stripped; hyphens are NOT, so `900123456-8` fails the
+  // digits-only guard instead of silently becoming a corrupt NIT.
+  @TrimTaxId()
   @IsString()
+  @Matches(/^\d+$/, { message: 'nit must contain only digits' })
   nit!: string;
 
   @IsOptional()
+  @TrimString()
   @IsString()
+  @Matches(/^\d$/, { message: 'nit_dv must be a single digit' })
   nit_dv?: string;
 
-  @IsString()
+  // DIAN issues software_id and test_set_id as UUIDs. A pasted value with a
+  // trailing space or a stray character is accepted by the DIAN endpoint and
+  // then never classified, which is indistinguishable from a queue backlog.
+  @TrimString()
+  @IsUUID(undefined, { message: 'software_id must be the UUID issued by DIAN' })
   software_id!: string;
 
   @IsOptional()
+  @TrimString()
   @IsString()
+  @MaxLength(100)
   software_pin?: string;
 
   @IsOptional()
-  @IsString()
+  @TrimString()
+  @IsUUID(undefined, { message: 'test_set_id must be the UUID issued by DIAN' })
   test_set_id?: string;
 
   @IsIn(['test', 'production'])

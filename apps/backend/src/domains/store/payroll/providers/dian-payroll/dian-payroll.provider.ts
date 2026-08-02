@@ -17,6 +17,10 @@ import {
 } from '../../../../store/invoicing/providers/dian-direct/dian-soap.client';
 import { DianXmlSignerService } from '../../../../store/invoicing/providers/dian-direct/dian-xml-signer.service';
 import { DianConfigDecrypted } from '../../../../store/invoicing/providers/dian-direct/interfaces/dian-config.interface';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localDateString,
+} from '../../../../../common/utils/store-timezone.util';
 import { NominaIndividualBuilder } from './xml/nomina-individual.builder';
 import { NominaAdjustmentBuilder } from './xml/nomina-adjustment.builder';
 import {
@@ -1040,10 +1044,13 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
   }
 
   /**
-   * Formats a Date to YYYY-MM-DD string.
+   * Formats a Date as the Colombian fiscal day (YYYY-MM-DD). Reading the UTC
+   * date instead would report tomorrow for anything emitted between 00:00 and
+   * 05:00 local, shifting period boundaries and the CUNE input. DIAN only
+   * accepts Colombian emitters, so the fiscal day is always Bogotá's.
    */
   private formatDate(date: Date): string {
-    return date.toISOString().split('T')[0];
+    return localDateString(date, DEFAULT_STORE_TIMEZONE);
   }
 
   /**

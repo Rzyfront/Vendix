@@ -327,6 +327,83 @@
     </form>
 
     <div class="px-2 md:px-6 pb-6 space-y-6">
+      <!-- Set de pruebas DIAN de la plataforma. La DIAN exige aprobar 50
+           documentos con el NIT propio antes de habilitar producción; sin
+           esto la pantalla guardaba credenciales que nunca podían usarse. -->
+      <div
+        class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="clipboard-check"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Set de pruebas DIAN
+          </h2>
+        </div>
+
+        <p class="text-xs text-text-secondary leading-relaxed">
+          Envía los 50 documentos de habilitación con el NIT de la plataforma.
+          Si el lote queda sin veredicto, «Diagnosticar» pregunta documento por
+          documento (por CUFE) si la DIAN los registró, y «Descartar lote»
+          libera el envío para intentar con un TestSetId nuevo.
+        </p>
+
+        <div class="flex flex-col md:flex-row gap-2 md:flex-wrap">
+          <app-button
+            type="button"
+            variant="primary"
+            [loading]="testSetBusy()"
+            [disabled]="!configured() || testSetBusy()"
+            (clicked)="onRunTestSet()"
+          >
+            <app-icon slot="icon" name="upload-cloud" [size]="16"></app-icon>
+            Enviar set de pruebas
+          </app-button>
+
+          <app-button
+            type="button"
+            variant="outline"
+            [disabled]="!configured() || testSetBusy()"
+            (clicked)="onCheckTestSet()"
+          >
+            <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
+            Consultar estado
+          </app-button>
+
+          <app-button
+            type="button"
+            variant="outline"
+            [disabled]="!configured() || testSetBusy()"
+            (clicked)="onDiagnoseTestSet()"
+          >
+            <app-icon slot="icon" name="stethoscope" [size]="16"></app-icon>
+            Diagnosticar documentos
+          </app-button>
+
+          <app-button
+            type="button"
+            variant="ghost"
+            [disabled]="!configured() || testSetBusy()"
+            (clicked)="onAbandonTestSet()"
+          >
+            <app-icon slot="icon" name="trash-2" [size]="16"></app-icon>
+            Descartar lote
+          </app-button>
+        </div>
+
+        @if (testSetResult(); as result) {
+          <pre
+            class="text-[11px] leading-relaxed bg-background border border-border rounded-lg p-3 overflow-x-auto text-text-secondary"
+            >{{ result | json }}</pre
+          >
+        }
+      </div>
+
       <div
         class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
       >

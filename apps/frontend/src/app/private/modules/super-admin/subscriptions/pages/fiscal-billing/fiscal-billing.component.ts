@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, JsonPipe } from '@angular/common';
 import {
   Component,
   DestroyRef,
@@ -126,6 +126,7 @@ const confirmProductionValidator: ValidatorFn = (
     ReactiveFormsModule,
     DatePipe,
     CurrencyPipe,
+    JsonPipe,
     StickyHeaderComponent,
     ButtonComponent,
     EmptyStateComponent,
@@ -152,6 +153,9 @@ export class FiscalBillingComponent {
   readonly loadingTransmissions = signal(false);
   readonly saving = signal(false);
   readonly testing = signal(false);
+  /** Un solo candado para las 4 acciones del set de pruebas: son excluyentes. */
+  readonly testSetBusy = signal(false);
+  readonly testSetResult = signal<unknown>(null);
   readonly uploadingCertificate = signal(false);
   readonly issuingInvoice = signal(false);
   readonly retryingTransmissionId = signal<number | null>(null);
@@ -575,6 +579,106 @@ export class FiscalBillingComponent {
           this.uploadingCertificate.set(false);
           this.toast.error(
             err?.error?.message ?? 'No se pudo subir el certificado',
+            'Error',
+          );
+        },
+      });
+  }
+
+  // ── Set de pruebas DIAN de la plataforma ────────────────────────────────
+  // Vendix debe aprobar el mismo set de 50 documentos que cualquier obligado
+  // antes de que la DIAN lo habilite en producción. Hasta ahora la pantalla
+  // permitía guardar credenciales y probar conectividad, pero no enviar el
+  // set — el riel se quedaba a un paso de ser usable.
+
+  onRunTestSet(): void {
+    if (!this.configured() || this.testSetBusy()) return;
+    this.testSetBusy.set(true);
+    this.fiscal
+      .runTestSet()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.testSetBusy.set(false);
+          this.testSetResult.set(result);
+          this.toast.success('Set de pruebas enviado a la DIAN', 'Enviado');
+          this.loadStatus();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.testSetBusy.set(false);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo enviar el set de pruebas',
+            'Error',
+          );
+        },
+      });
+  }
+
+  onCheckTestSet(): void {
+    if (!this.configured() || this.testSetBusy()) return;
+    this.testSetBusy.set(true);
+    this.fiscal
+      .checkTestSetStatus()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.testSetBusy.set(false);
+          this.testSetResult.set(result);
+          this.toast.success('Estado consultado a la DIAN', 'Consultado');
+          this.loadStatus();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.testSetBusy.set(false);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo consultar el estado',
+            'Error',
+          );
+        },
+      });
+  }
+
+  onDiagnoseTestSet(): void {
+    if (!this.configured() || this.testSetBusy()) return;
+    this.testSetBusy.set(true);
+    this.fiscal
+      .getTestSetDocuments()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.testSetBusy.set(false);
+          this.testSetResult.set(result);
+          this.toast.success('Diagnóstico por documento listo', 'Diagnóstico');
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.testSetBusy.set(false);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo diagnosticar el lote',
+            'Error',
+          );
+        },
+      });
+  }
+
+  onAbandonTestSet(): void {
+    if (!this.configured() || this.testSetBusy()) return;
+    this.testSetBusy.set(true);
+    this.fiscal
+      .abandonTestSet()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.testSetBusy.set(false);
+          this.testSetResult.set(result);
+          this.toast.success(
+            'Lote descartado. Puedes enviar un set nuevo.',
+            'Descartado',
+          );
+          this.loadStatus();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.testSetBusy.set(false);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo descartar el lote',
             'Error',
           );
         },

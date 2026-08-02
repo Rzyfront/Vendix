@@ -6,6 +6,11 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
+import {
+  localDateString,
+  localTimeString,
+} from '../../../../common/utils/store-timezone.util';
 import { DianDirectProvider } from '../../../store/invoicing/providers/dian-direct/dian-direct.provider';
 import {
   ProviderInvoiceData,
@@ -683,9 +688,11 @@ export class VendorSupportFiscalService {
     return {
       invoice_number: fiscalNumber,
       invoice_type: 'support_document',
-      issue_date: issueDate.toISOString().split('T')[0],
-      issue_time: `${issueDate.toISOString().split('T')[1]?.split('.')[0] ?? '00:00:00'}-05:00`,
-      due_date: issueDate.toISOString().split('T')[0],
+      // Platform-issued documento soporte: date and offset both derived from
+      // the platform timezone so the declared instant matches the real one.
+      issue_date: localDateString(issueDate, PLATFORM_TIMEZONE),
+      issue_time: localTimeString(issueDate, PLATFORM_TIMEZONE),
+      due_date: localDateString(issueDate, PLATFORM_TIMEZONE),
       // For documento soporte the "customer" fields carry the vendor (supplier)
       // identification — the DIAN provider uses them as the seller.
       customer_name: doc.vendor_name,

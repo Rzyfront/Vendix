@@ -2772,6 +2772,21 @@ export const ErrorCodes = {
     httpStatus: 402,
     devMessage: 'Plan retired — choose an active plan to continue',
   },
+  /**
+   * The client organization lacks the fiscal identity DIAN requires from the
+   * adquiriente (NIT, DV, document type, legal name, or billing address).
+   *
+   * This is checked BEFORE the fiscal consecutive is allocated: a rejected
+   * document still burns its number, and a numbering resolution has a finite
+   * range, so emitting a knowingly-incomplete document trades a permanent hole
+   * in the sequence for a rejection that was predictable.
+   */
+  SUBSCRIPTION_FISCAL_001: {
+    code: 'SUBSCRIPTION_FISCAL_001',
+    httpStatus: 412,
+    devMessage:
+      'The organization is missing fiscal data required by DIAN for the acquirer party',
+  },
   SUBSCRIPTION_INTERNAL_ERROR: {
     code: 'SUBSCRIPTION_INTERNAL_ERROR',
     httpStatus: 500,

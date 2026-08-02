@@ -92,6 +92,52 @@ export class SubscriptionFiscalController {
     );
   }
 
+  // ─────────────────────────────────────────────────────────
+  // DIAN test set (habilitación) for the platform's own NIT
+  // ─────────────────────────────────────────────────────────
+
+  @Post('test-set')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({ summary: 'Submit the 50-document DIAN test set for the platform NIT' })
+  async runTestSet(): Promise<any> {
+    const result = await this.fiscalService.runTestSet();
+    return this.responseService.success(result, 'Set de pruebas enviado a la DIAN');
+  }
+
+  @Get('test-set/status')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({ summary: 'Re-poll the DIAN verdict for the platform test set' })
+  async checkTestSetStatus(): Promise<any> {
+    const result = await this.fiscalService.checkTestSetStatus();
+    return this.responseService.success(result, 'Estado del set de pruebas consultado');
+  }
+
+  @Get('test-set/documents')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({
+    summary:
+      'Ask DIAN per-document (by CUFE) whether the test set documents were registered',
+  })
+  async getTestSetDocuments(
+    @Query('sample_size') sampleSize?: string,
+  ): Promise<any> {
+    const parsed = sampleSize ? Number(sampleSize) : undefined;
+    const result = await this.fiscalService.getTestSetDocuments(
+      Number.isFinite(parsed) && parsed! > 0 ? parsed : undefined,
+    );
+    return this.responseService.success(result, 'Diagnóstico por documento');
+  }
+
+  @Post('test-set/abandon')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({ summary: 'Discard the stuck platform test set so a new one can be sent' })
+  async abandonTestSet(): Promise<any> {
+    const result = await this.fiscalService.abandonTestSet();
+    return this.responseService.success(result, 'Lote descartado');
+  }
+
   @Get('transmissions')
   @Permissions('superadmin:subscriptions:fiscal:read')
   @ApiOperation({ summary: 'List platform SaaS fiscal transmissions' })
