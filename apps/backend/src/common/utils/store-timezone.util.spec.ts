@@ -8,6 +8,9 @@ import {
   enumerateLocalPeriodKeys,
   localPeriodSql,
   zonedWallClockToUtc,
+  localOffsetString,
+  localDateString,
+  localTimeString,
 } from './store-timezone.util';
 
 const BOGOTA = 'America/Bogota'; // UTC-5, no DST
@@ -348,6 +351,55 @@ describe('store-timezone.util', () => {
       const sql = localPeriodSql('o.created_at', "'; DROP TABLE orders; --", 'day');
       expect(sql.sql).not.toContain('DROP');
       expect(sql.sql).toContain("AT TIME ZONE 'America/Bogota'");
+    });
+  });
+
+  // The DIAN habilitación bug: emission timestamps were built by taking the UTC
+  // clock and appending a literal `-05:00`, so every document declared an instant
+  // five hours in the future and, late in the UTC day, the wrong date too. These
+  // guard the helpers that replaced that concatenation.
+  describe('localDateString / localTimeString / localOffsetString', () => {
+    it('keeps the civil date of the issuer when UTC has already rolled over', () => {
+      // 2026-07-30T02:30:00Z is still 2026-07-29 21:30 in Bogota.
+      const instant = new Date('2026-07-30T02:30:00Z');
+      expect(localDateString(instant, BOGOTA)).toBe('2026-07-29');
+      expect(localTimeString(instant, BOGOTA)).toBe('21:30:00-05:00');
+    });
+
+    it('never declares a future instant — the offset matches the wall clock', () => {
+      // The real HIDRO submission: 13:15:44Z. The old code emitted
+      // "13:15:44-05:00" (= 18:15:44Z, five hours ahead). It must be 08:15:44.
+      const instant = new Date('2026-07-29T13:15:44Z');
+      expect(localTimeString(instant, BOGOTA)).toBe('08:15:44-05:00');
+
+      const [hms, offset] = ['08:15:44', '-05:00'];
+      const declared = new Date(
+        `${localDateString(instant, BOGOTA)}T${hms}${offset}`,
+      );
+      expect(declared.getTime()).toBe(instant.getTime());
+    });
+
+    it('derives the offset from the zone, including DST and half-hour zones', () => {
+      expect(localOffsetString(new Date('2026-07-29T13:15:44Z'), BOGOTA)).toBe(
+        '-05:00',
+      );
+      // New York in July is on DST (-04:00), in January it is not (-05:00).
+      expect(
+        localOffsetString(new Date('2026-07-15T12:00:00Z'), 'America/New_York'),
+      ).toBe('-04:00');
+      expect(
+        localOffsetString(new Date('2026-01-15T12:00:00Z'), 'America/New_York'),
+      ).toBe('-05:00');
+      // Half-hour offset: a hand-written `-05:00` could never express this.
+      expect(
+        localOffsetString(new Date('2026-07-15T12:00:00Z'), 'Asia/Kolkata'),
+      ).toBe('+05:30');
+    });
+
+    it('pads every component so DIAN receives a fixed-width timestamp', () => {
+      const instant = new Date('2026-01-05T14:02:07Z');
+      expect(localDateString(instant, BOGOTA)).toBe('2026-01-05');
+      expect(localTimeString(instant, BOGOTA)).toBe('09:02:07-05:00');
     });
   });
 });

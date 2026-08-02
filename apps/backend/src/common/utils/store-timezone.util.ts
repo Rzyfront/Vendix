@@ -210,6 +210,50 @@ export function localCivil(date: Date, tz: string): CivilDateTime {
 }
 
 /**
+ * Formats the UTC offset of `tz` at `date` as `+HH:MM` / `-HH:MM`.
+ *
+ * Derived from the SAME conversion that produces the wall-clock parts, so the
+ * offset can never contradict the time it labels. Writing the offset by hand
+ * (e.g. concatenating a literal `-05:00` to a UTC clock) yields a string that
+ * parses fine but describes a different instant — the exact defect this exists
+ * to prevent.
+ */
+export function localOffsetString(date: Date, tz: string): string {
+  const offset_ms = tzOffsetMs(date.getTime(), assertSafeTimezone(tz));
+  const total_minutes = Math.round(offset_ms / 60000);
+  const sign = total_minutes < 0 ? '-' : '+';
+  const abs_minutes = Math.abs(total_minutes);
+  const hh = String(Math.floor(abs_minutes / 60)).padStart(2, '0');
+  const mm = String(abs_minutes % 60).padStart(2, '0');
+  return `${sign}${hh}:${mm}`;
+}
+
+/** Local civil date of a UTC instant as `YYYY-MM-DD`. */
+export function localDateString(date: Date, tz: string): string {
+  const p = localCivil(date, tz);
+  return [
+    String(p.year).padStart(4, '0'),
+    String(p.month).padStart(2, '0'),
+    String(p.day).padStart(2, '0'),
+  ].join('-');
+}
+
+/**
+ * Local wall-clock time of a UTC instant as `HH:MM:SS` plus its real offset,
+ * e.g. `18:15:44-05:00`. This is the shape DIAN expects for `IssueTime` and the
+ * `HorFac` component of the CUFE.
+ */
+export function localTimeString(date: Date, tz: string): string {
+  const p = localCivil(date, tz);
+  const hms = [
+    String(p.hour).padStart(2, '0'),
+    String(p.minute).padStart(2, '0'),
+    String(p.second).padStart(2, '0'),
+  ].join(':');
+  return `${hms}${localOffsetString(date, tz)}`;
+}
+
+/**
  * Offset (localWallClock - UTC) in ms for a given UTC instant in tz.
  *
  * The wall-clock parts only carry second precision, so the probe instant is

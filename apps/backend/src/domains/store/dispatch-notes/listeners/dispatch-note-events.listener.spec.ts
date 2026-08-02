@@ -714,4 +714,29 @@ describe('DispatchNoteEventsListener — handleReceived → recepción de OC por
     ).resolves.toBeUndefined();
     expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
   });
+
+  // (p) El caso (m) prueba que handleReceived RECHAZA, pero eso por sí solo no
+  // hace fallar la recepción HTTP: el wrapper de @nestjs/event-emitter envuelve
+  // cada @OnEvent en un try/catch cuyo default es
+  // `options?.suppressErrors ?? true` (ver
+  // node_modules/@nestjs/event-emitter/dist/event-subscribers.loader.js), y con
+  // ese default el rechazo se loguea como `ERROR [Event]` y se DESCARTA, así que
+  // el emitAsync resuelve igual y la remisión se marca `received` con la OC en
+  // `approved`. Eso fue exactamente lo que se observó en runtime antes del
+  // arreglo. Esta prueba fija la opción del decorador, porque es la pieza que
+  // convierte el rechazo del handler en una recepción realmente fallida y nada
+  // en el cuerpo del método la delata.
+  it('(p) @OnEvent declara suppressErrors:false — sin eso el rechazo de (m) se descartaría y el emisor resolvería igual', () => {
+    const metadata = Reflect.getMetadata(
+      'EVENT_LISTENER_METADATA',
+      DispatchNoteEventsListener.prototype.handleReceived,
+    ) as Array<{ event: string; options?: { suppressErrors?: boolean } }>;
+
+    expect(metadata).toBeDefined();
+    const entry = metadata.find((m) => m.event === 'dispatch_note.received');
+    expect(entry).toBeDefined();
+    // Explícitamente false: `undefined` haría que el wrapper aplique su default
+    // `?? true` y volvería a tragarse el error.
+    expect(entry!.options?.suppressErrors).toBe(false);
+  });
 });

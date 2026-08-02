@@ -22,6 +22,17 @@ import {
   DianCustomerData,
 } from '../providers/dian-direct/interfaces/dian-config.interface';
 import { ProviderInvoiceData } from '../providers/invoice-provider.interface';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localDateString,
+  localTimeString,
+  resolveStoreTimezone,
+} from '../../../../common/utils/store-timezone.util';
+import {
+  buildDianXmlFileName,
+  buildDianZipFileName,
+  DianDocumentKind,
+} from '../utils/dian-file-naming.util';
 
 /** One GetStatusZip poll attempt recorded in last_test_result for diagnostics. */
 export interface TestSetPollAttempt {
@@ -263,21 +274,9 @@ export class DianTestService {
       );
     }
 
-    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
-    // numbering-resolution row so the AuthorizedInvoices range and authorization
-    // period rendered in the XML are the real habilitación values, not empty.
-    const control = {
-      invoice_authorization: resolution.resolution_number,
-      authorization_start_date: resolution.valid_from
-        .toISOString()
-        .split('T')[0],
-      authorization_end_date: resolution.valid_to.toISOString().split('T')[0],
-      prefix: resolution.prefix,
-      range_from: String(resolution.range_from),
-      range_to: String(resolution.range_to),
-    };
-
-    // 3. Build issuer data from config + organization
+    // 3. Resolve tenant context and the issuer's timezone up front: every date
+    //    rendered into the XML below is a CIVIL date of the issuer, so it must be
+    //    derived in their zone, never by serializing a UTC instant.
     const context = RequestContextService.getContext();
     if (!context) {
       throw new VendixHttpException(
@@ -285,6 +284,25 @@ export class DianTestService {
         'No request context',
       );
     }
+    const store_id = context.store_id;
+    const timezone = store_id
+      ? await resolveStoreTimezone(this.prisma, store_id)
+      : DEFAULT_STORE_TIMEZONE;
+
+    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
+    // numbering-resolution row so the AuthorizedInvoices range and authorization
+    // period rendered in the XML are the real habilitación values, not empty.
+    // The validity range is a civil date range: `toISOString()` would shift it a
+    // day whenever the stored instant falls before the zone's UTC offset.
+    const control = {
+      invoice_authorization: resolution.resolution_number,
+      authorization_start_date: localDateString(resolution.valid_from, timezone),
+      authorization_end_date: localDateString(resolution.valid_to, timezone),
+      prefix: resolution.prefix,
+      range_from: String(resolution.range_from),
+      range_to: String(resolution.range_to),
+    };
+
     const organization = await this.prisma.organizations.findFirst({
       where: { id: context.organization_id },
     });
@@ -360,8 +378,27 @@ export class DianTestService {
     // 6. Generate 50 documents
     const files: { name: string; content: string }[] = [];
     const invoice_cufes: { number: string; cufe: string; date: string }[] = [];
-    const today = new Date().toISOString().split('T')[0];
-    const time_now = `${new Date().toISOString().split('T')[1].substring(0, 8)}-05:00`;
+    // Evidence persisted alongside the batch. Without the document key there is
+    // no way to ask DIAN about an individual document later, which is exactly
+    // what left a stalled batch undiagnosable: the ZipKey only answers "did you
+    // process my package?", never "does this document exist in your records?".
+    const documents: {
+      number: string;
+      cufe: string;
+      kind: DianDocumentKind;
+      file_name: string;
+      issue_date: string;
+      issue_time: string;
+    }[] = [];
+    // Emission timestamp MUST be the issuer's civil wall clock, not UTC. The
+    // previous code took the UTC clock and appended a literal `-05:00`, so every
+    // document declared an instant five hours in the future — and between 00:00Z
+    // and 05:00Z the date rolled a day ahead of Colombia as well. That value
+    // feeds both the UBL and the CUFE, so a wrong clock invalidates the whole
+    // document. Offset and time now come from the same conversion.
+    const issued_at = new Date();
+    const today = localDateString(issued_at, timezone);
+    const time_now = localTimeString(issued_at, timezone);
 
     // 6a. Generate 30 invoices
     for (let i = 0; i < 30; i++) {
@@ -441,8 +478,21 @@ export class DianTestService {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
 
-      files.push({ name: `${invoice_number}.xml`, content: xml });
+      const invoice_file = buildDianXmlFileName(
+        'invoice',
+        config.nit,
+        next_number + i,
+      );
+      files.push({ name: invoice_file, content: xml });
       invoice_cufes.push({ number: invoice_number, cufe, date: today });
+      documents.push({
+        number: invoice_number,
+        cufe,
+        kind: 'invoice',
+        file_name: invoice_file,
+        issue_date: today,
+        issue_time: time_now,
+      });
     }
 
     // 6b. Generate 10 debit notes (referencing invoices 0-9)
@@ -527,7 +577,20 @@ export class DianTestService {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
 
-      files.push({ name: `${note_number}.xml`, content: xml });
+      const debit_file = buildDianXmlFileName(
+        'debit_note',
+        config.nit,
+        next_number + 30 + i,
+      );
+      files.push({ name: debit_file, content: xml });
+      documents.push({
+        number: note_number,
+        cufe: cude,
+        kind: 'debit_note',
+        file_name: debit_file,
+        issue_date: today,
+        issue_time: time_now,
+      });
     }
 
     // 6c. Generate 10 credit notes (referencing invoices 10-19)
@@ -612,18 +675,32 @@ export class DianTestService {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
 
-      files.push({ name: `${note_number}.xml`, content: xml });
+      const credit_file = buildDianXmlFileName(
+        'credit_note',
+        config.nit,
+        next_number + 40 + i,
+      );
+      files.push({ name: credit_file, content: xml });
+      documents.push({
+        number: note_number,
+        cufe: cude,
+        kind: 'credit_note',
+        file_name: credit_file,
+        issue_date: today,
+        issue_time: time_now,
+      });
     }
 
     // 7. Build multi-file ZIP
     const zip_base64 = this.buildMultiFileZip(files);
+    const zip_file_name = buildDianZipFileName(config.nit, next_number);
 
     // 8. Submit to DIAN. SendTestSetAsync is ASYNCHRONOUS: DIAN only returns a
     //    ZipKey acknowledgement here; the real validation verdict is obtained
     //    afterwards by polling GetStatusZip(ZipKey).
     const submit = await this.soap_client.sendTestSetAsync(
       zip_base64,
-      'test_set.zip',
+      zip_file_name,
       config.test_set_id,
       environment,
       ws_credentials,
@@ -662,9 +739,17 @@ export class DianTestService {
       debit_notes: 10,
       credit_notes: 10,
       zip_key,
+      zip_file_name,
       resolution_id,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
+      // Per-document evidence: number, document key, kind and the exact civil
+      // timestamp used to derive the key. This is what makes GetStatus-by-CUFE
+      // possible after the fact.
+      timezone,
+      issue_date: today,
+      issue_time: time_now,
+      documents,
       dian_response: {
         success: verdict.success,
         status_code: verdict.status_code,
@@ -838,6 +923,160 @@ export class DianTestService {
         : still_processing
           ? 'La DIAN sigue validando el set de pruebas. Vuelve a consultar en unos minutos.'
           : `La DIAN rechazó el set de pruebas: ${verdict.status_message}`,
+    };
+  }
+
+  /**
+   * Per-document diagnosis of a submitted batch.
+   *
+   * `GetStatusZip` answers "did you process my package?" and nothing else — a
+   * queued batch and a batch DIAN silently discarded look identical. Asking
+   * `GetStatus` for an individual document key answers a different question:
+   * "does this document exist in your records?". That is what separates
+   * "still queued" from "never classified", which is undecidable from the
+   * ZipKey alone.
+   *
+   * Read-only: never re-sends documents and never consumes numbering.
+   */
+  async getTestSetDocumentStatus(config_id: number, sample_size = 3) {
+    const started_at = Date.now();
+    const config = await this.getConfigById(config_id);
+    const environment = config.environment as 'test' | 'production';
+
+    const previous = (config.last_test_result ?? {}) as Record<string, any>;
+    if (!previous.zip_key) {
+      throw new VendixHttpException(ErrorCodes.DIAN_TEST_SET_004);
+    }
+
+    const persisted: any[] = Array.isArray(previous.documents)
+      ? previous.documents
+      : [];
+    if (!persisted.length) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_005,
+        `El set ${previous.zip_key} se envió antes de que se persistieran las claves de documento, así que no puede consultarse por CUFE.`,
+        { dian_configuration_id: config_id, zip_key: previous.zip_key },
+      );
+    }
+
+    // One document per kind: the batch is homogeneous within a kind, so three
+    // probes answer the question without hammering DIAN with fifty round-trips.
+    const sample: any[] = [];
+    for (const kind of ['invoice', 'debit_note', 'credit_note']) {
+      const first = persisted.find((doc) => doc.kind === kind);
+      if (first) sample.push(first);
+    }
+    const probes = (sample.length ? sample : persisted).slice(0, sample_size);
+
+    const ws_credentials = await this.loadWsCredentials(config);
+
+    const documents: Array<Record<string, any>> = [];
+    for (const doc of probes) {
+      const status = await this.soap_client.getStatus(
+        doc.cufe,
+        environment,
+        ws_credentials,
+      );
+      // Tri-state, never a plain boolean: DIAN answering "no verdict" about a
+      // document it DOES know is a different fact from not knowing it at all.
+      const has_verdict =
+        status.has_dian_verdict === true ||
+        (status.error_messages?.length ?? 0) > 0;
+      documents.push({
+        number: doc.number,
+        kind: doc.kind,
+        cufe: doc.cufe,
+        file_name: doc.file_name ?? null,
+        registered: has_verdict || status.success === true,
+        status_code: status.status_code,
+        status_message: status.status_message,
+        error_messages: status.error_messages ?? [],
+      });
+    }
+
+    const registered_count = documents.filter((d) => d.registered).length;
+
+    await this.createAuditLog(config.id, {
+      action: 'diagnose_test_set_documents',
+      status: registered_count > 0 ? 'success' : 'pending',
+      error_message:
+        registered_count > 0
+          ? null
+          : `Ninguno de los ${documents.length} documentos consultados está registrado en la DIAN (ZipKey ${previous.zip_key}).`,
+      duration_ms: Date.now() - started_at,
+    });
+
+    return {
+      zip_key: previous.zip_key,
+      environment,
+      total_documents: persisted.length,
+      sampled: documents.length,
+      registered_count,
+      // The actionable reading, so the UI does not have to re-derive it.
+      verdict:
+        registered_count === 0
+          ? 'not_registered'
+          : registered_count < documents.length
+            ? 'partially_registered'
+            : 'registered',
+      documents,
+      response_time_ms: Date.now() - started_at,
+    };
+  }
+
+  /**
+   * Marks a batch DIAN never judged as abandoned, releasing the re-send guard.
+   *
+   * `DIAN_TEST_SET_002` exists to stop accidental double submissions, not to
+   * leave a configuration permanently stuck: a batch that never gets a verdict
+   * would otherwise require editing `last_test_result` by hand in the database.
+   * The discarded ZipKey is preserved as history so the abandonment is auditable.
+   */
+  async abandonTestSet(config_id: number) {
+    const config = await this.getConfigById(config_id);
+    const previous = (config.last_test_result ?? {}) as Record<string, any>;
+    const zip_key: string | null = previous.zip_key ?? null;
+
+    if (!zip_key) {
+      throw new VendixHttpException(ErrorCodes.DIAN_TEST_SET_004);
+    }
+
+    const abandoned_batches = Array.isArray(previous.abandoned_batches)
+      ? previous.abandoned_batches
+      : [];
+
+    const result_data = {
+      ...previous,
+      pending: false,
+      abandoned: true,
+      abandoned_at: new Date().toISOString(),
+      abandoned_batches: [
+        ...abandoned_batches,
+        {
+          zip_key,
+          executed_at: previous.executed_at ?? null,
+          number_from: previous.number_from ?? null,
+          number_to: previous.number_to ?? null,
+        },
+      ],
+    };
+
+    await this.prisma.dian_configurations.update({
+      where: { id: config_id },
+      data: { last_test_result: result_data, enablement_status: 'testing' },
+    });
+
+    await this.createAuditLog(config.id, {
+      action: 'abandon_test_set',
+      status: 'success',
+      error_message: `Lote ${zip_key} descartado sin veredicto de la DIAN; la configuración queda libre para reenviar.`,
+    });
+
+    return {
+      abandoned: true,
+      zip_key,
+      message:
+        'El lote anterior quedó descartado. Puedes ejecutar un nuevo set de pruebas.',
     };
   }
 
