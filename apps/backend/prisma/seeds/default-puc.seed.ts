@@ -33,23 +33,40 @@ export interface SeedDefaultPucResult {
  *
  * @param organization_id - The organization to seed accounts for
  * @param prisma - Optional PrismaClient instance
+ * @param options.accounting_entity_ids - Restrict seeding to these entities.
+ *   By default every active entity of the organization gets the full PUC,
+ *   which is right for a tenant being onboarded but wrong for a caller that
+ *   just created one entity and wants only that one populated: an org with
+ *   three entities would otherwise take 3× the writes, most of them for
+ *   entities the caller never asked about. Pass the ids to scope the work.
  */
 export async function seedDefaultPuc(
   organization_id: number,
   prisma?: PrismaClient,
+  options?: { accounting_entity_ids?: number[] },
 ): Promise<SeedDefaultPucResult> {
   const client = prisma || getPrismaClient();
 
   const accounts = getColombiaPucAccounts();
   let accounts_created = 0;
 
+  const requested = options?.accounting_entity_ids;
   const accounting_entities = await client.accounting_entities.findMany({
-    where: { organization_id, is_active: true },
+    where: {
+      organization_id,
+      is_active: true,
+      ...(requested?.length ? { id: { in: requested } } : {}),
+    },
     select: { id: true },
   });
+  // The `[null]` fallback seeds org-scope rows for organizations that have no
+  // entity yet. It must NOT trigger when a caller asked for specific entities
+  // and none matched — that would silently write to the wrong scope.
   const accounting_entity_ids: (number | null)[] = accounting_entities.length
     ? accounting_entities.map((entity) => entity.id)
-    : [null];
+    : requested?.length
+      ? []
+      : [null];
 
   for (const accounting_entity_id of accounting_entity_ids) {
     for (const account of accounts) {

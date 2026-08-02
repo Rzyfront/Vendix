@@ -138,8 +138,17 @@ export async function seedVendixPlatformOrg(
     accounting_entity_created = true;
   }
 
-  // 4. Seed the full Colombian PUC for the platform org.
-  const pucResult = await seedDefaultPuc(vendixOrg.id, client);
+  // 4. Seed the full Colombian PUC for the platform's CONSOLIDATED entity only.
+  //
+  //    Scoped on purpose. `seedDefaultPuc` defaults to every active entity of
+  //    the organization, which is right when onboarding a tenant but wrong
+  //    here: the platform org may still carry leftover STORE-scope entities
+  //    (production's org 1 has two, from inert demo stores), and seeding those
+  //    would write ~600 accounts each for entities no platform flow ever
+  //    reads. The platform's fiscal scope is ORGANIZATION — one entity.
+  const pucResult = await seedDefaultPuc(vendixOrg.id, client, {
+    accounting_entity_ids: [accountingEntity.id],
+  });
 
   // 4.5 Ensure the platform org has the SaaS-fee subaccounts used by the
   //     inbound vendor-support-document flow (5295.01 Servicios SaaS —
@@ -714,8 +723,17 @@ async function ensurePlatformSupportDocumentDianConfig(
   client: PrismaClient,
   organizationId: number,
   accountingEntityId: number,
-  nit: string,
+  taxId: string,
 ): Promise<boolean> {
+  // The caller passes `organizations.tax_id`, which carries the DV inline
+  // (`900123456-7`). Splitting here is not cosmetic: the invoicing config
+  // stores the NIT split, so comparing the raw string against it never
+  // matches. That made the slot guard below a no-op and let this stub be
+  // created next to the invoicing row — the partial unique index on
+  // (organization_id, nit) WHERE store_id IS NULL did not fire only because
+  // the two rows disagreed on how to spell the same NIT.
+  const { nit, nit_dv } = splitNitDv(taxId);
+
   const existing = await client.dian_configurations.findFirst({
     where: {
       organization_id: organizationId,
@@ -752,6 +770,7 @@ async function ensurePlatformSupportDocumentDianConfig(
       accounting_entity_id: accountingEntityId,
       name: 'Vendix S.A.S. — Documento Soporte (stub)',
       nit,
+      nit_dv,
       nit_type: 'NIT',
       is_default: false,
       configuration_type: 'support_document',
