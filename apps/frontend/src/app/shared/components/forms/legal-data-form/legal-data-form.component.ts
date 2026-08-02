@@ -389,6 +389,51 @@ export class LegalDataFormComponent {
     (r) => ({ value: r.code, label: r.label }),
   );
 
+  /**
+   * Etiquetas de los controles obligatorios, para poder nombrar en el error
+   * exactamente lo que falta. Sin esto el usuario solo ve "hay campos
+   * incompletos" sobre un formulario que a simple vista está lleno, y no tiene
+   * forma de saber cuál falla — sobre todo con `department`/`city`, que son
+   * selectores en cascada y quedan vacíos si el catálogo no cargó.
+   */
+  private static readonly REQUIRED_LABELS: Record<string, string> = {
+    nit: 'Número de documento',
+    nit_dv: 'Dígito de verificación',
+    legal_name: 'Razón social',
+    fiscal_address: 'Dirección fiscal',
+    country: 'País',
+    department: 'Departamento',
+    city: 'Ciudad / Municipio',
+  };
+
+  /**
+   * Lista legible de lo que impide guardar. Vacía cuando el formulario es
+   * válido. Distingue campo faltante de campo inconsistente: un DV que no
+   * corresponde al NIT no es un dato "incompleto" y decírselo así al usuario
+   * lo manda a buscar un campo vacío que no existe.
+   */
+  describeProblems(): string[] {
+    const problems: string[] = [];
+
+    for (const [name, label] of Object.entries(
+      LegalDataFormComponent.REQUIRED_LABELS,
+    )) {
+      const control = this.form.get(name);
+      // Un control deshabilitado u oculto (DV cuando el documento no es NIT)
+      // no participa en la validación y no debe reportarse.
+      if (!control || control.disabled || control.valid) continue;
+      problems.push(label);
+    }
+
+    if (this.form.errors?.['nitDv']) {
+      problems.push(
+        'el dígito de verificación no corresponde al número de documento',
+      );
+    }
+
+    return problems;
+  }
+
   /** Single in-flight departments fetch shared across init + prefill paths. */
   private departmentsPromise: Promise<void> | null = null;
 
