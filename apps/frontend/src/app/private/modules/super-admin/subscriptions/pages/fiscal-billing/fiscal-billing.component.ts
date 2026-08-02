@@ -33,6 +33,7 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { computeNitDv } from '../../../../../../shared/utils/nit.util';
 import {
   StickyHeaderActionButton,
   StickyHeaderComponent,
@@ -483,6 +484,21 @@ export class FiscalBillingComponent {
     this.certificatePasswordControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.certificatePasswordFilled.set(!!value?.trim()));
+
+    // El DV es un checksum del NIT, no un dato independiente: se recalcula al
+    // teclear. El backend lo vuelve a derivar al guardar, así que esto es solo
+    // para que el usuario vea el dígito correcto antes de enviar.
+    this.form.controls.nit.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        // Se corta por el guion: quien escribe `900123456-7` está dando el NIT
+        // y su DV juntos, y calcular el módulo 11 sobre la cadena completa
+        // metería el propio DV como dígito y daría un resultado equivocado.
+        const base = (value ?? '').split('-')[0];
+        this.form.controls.nit_dv.setValue(computeNitDv(base) ?? null, {
+          emitEvent: false,
+        });
+      });
   }
 
   loadStatus(): void {
@@ -872,12 +888,11 @@ export class FiscalBillingComponent {
     const accountingEntityId =
       settings.accounting_entity_id ?? suggested?.accounting_entity_id ?? null;
     const name = config?.name ?? suggested?.name ?? null;
-    // El DV pertenece al NIT del que salió. Mezclar el NIT guardado con el DV
-    // sugerido (o al revés) produce un par que no valida en la DIAN.
     const nit = config?.nit ?? suggested?.nit ?? null;
-    const nitDv = config?.nit
-      ? (config.nit_dv ?? null)
-      : (suggested?.nit_dv ?? null);
+    // Siempre derivado del NIT que se está mostrando, nunca el almacenado: hay
+    // configuraciones antiguas con un DV tecleado a mano que no cuadra, y
+    // mostrarlo tal cual lo haría pasar por verificado.
+    const nitDv = computeNitDv((nit ?? '').split('-')[0]) ?? null;
 
     this.identityPrefillApplied.set(
       !!suggested &&

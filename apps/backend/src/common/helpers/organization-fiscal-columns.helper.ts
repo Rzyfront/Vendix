@@ -1,4 +1,4 @@
-import { computeNitDv } from '../utils/nit.util';
+import { normalizeNit } from '../utils/nit.util';
 import { isVatResponsible } from './vat-responsibility.helper';
 
 /**
@@ -104,19 +104,29 @@ export function buildOrganizationFiscalColumns(
       DIAN_PERSON_TYPE_BY_LABEL[personType.toUpperCase()] ?? null;
   }
 
-  const taxId = readFirst(patch, ['tax_id', 'nit']);
-  if (taxId !== undefined) {
-    columns.tax_id = taxId || null;
-    // El DV se DERIVA, nunca se copia del formulario (ver nit.util.ts). Solo el
-    // NIT lo lleva; una cédula con DV es un dato inventado.
+  const rawTaxId = readFirst(patch, ['tax_id', 'nit']);
+  if (rawTaxId !== undefined) {
     const documentType =
       columns.document_type !== undefined
         ? columns.document_type
         : DIAN_DOCUMENT_TYPE_NIT;
-    columns.verification_digit =
-      taxId && documentType === DIAN_DOCUMENT_TYPE_NIT
-        ? computeNitDv(taxId) || null
-        : null;
+
+    if (documentType === DIAN_DOCUMENT_TYPE_NIT) {
+      // `normalizeNit` y no `computeNitDv` a secas: la gente escribe el NIT con
+      // su DV pegado (`902056589-9`), y `computeNitDv` sobre esa cadena calcula
+      // el módulo 11 incluyendo el propio DV como dígito — devuelve '1' donde
+      // corresponde '9'. `normalizeNit` parte por el guion y deriva desde la
+      // cabecera. La columna guarda el número SIN DV; el DV vive aparte y el
+      // emisor los une.
+      const { number, dv } = normalizeNit(rawTaxId);
+      columns.tax_id = number || null;
+      columns.verification_digit = number ? dv || null : null;
+    } else {
+      // Documentos que no son NIT no llevan DV, y pueden traer letras (NIT
+      // extranjero), así que no se les aplica el saneado de dígitos.
+      columns.tax_id = rawTaxId || null;
+      columns.verification_digit = null;
+    }
   }
 
   if ('tax_responsibilities' in patch) {

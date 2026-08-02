@@ -11,7 +11,7 @@ import {
   PLATFORM_FISCAL_SETTINGS_KEY,
   PLATFORM_TIMEZONE,
 } from '../../../../common/constants/platform-fiscal.constants';
-import { computeNitDv, normalizeNit } from '../../../../common/utils/nit.util';
+import { normalizeNit } from '../../../../common/utils/nit.util';
 import {
   PlatformOrgService,
   PlatformOrgContext,
@@ -226,11 +226,15 @@ export class SubscriptionFiscalService {
       platformContext.organization_id,
     );
 
-    const nit =
+    const rawNit =
       org.tax_id?.trim() ||
       (typeof fiscalData?.tax_id === 'string' && fiscalData.tax_id.trim()) ||
       (typeof fiscalData?.nit === 'string' && fiscalData.nit.trim()) ||
       null;
+    // `normalizeNit` y no `computeNitDv`: hay filas históricas donde `tax_id`
+    // guarda el NIT con su DV pegado (`900123456-7`). Calcular el módulo 11
+    // sobre esa cadena incluye el DV como dígito y devuelve un valor incorrecto.
+    const { number: nit, dv: nitDv } = normalizeNit(rawNit);
     const name =
       org.legal_name?.trim() ||
       (typeof fiscalData?.legal_name === 'string' &&
@@ -242,10 +246,10 @@ export class SubscriptionFiscalService {
       platform_organization_id: platformContext.organization_id,
       accounting_entity_id: platformContext.accounting_entity_id,
       name,
-      nit,
-      // Derivado, nunca leído: un DV almacenado que discrepe es por definición
-      // incorrecto (ver nit.util.ts).
-      nit_dv: nit ? computeNitDv(nit) || null : null,
+      // El NIT se sugiere sin DV; el DV va en su propio campo. Derivado, nunca
+      // leído: un DV almacenado que discrepe es por definición incorrecto.
+      nit: nit || null,
+      nit_dv: nit ? nitDv || null : null,
     };
   }
 
@@ -270,6 +274,14 @@ export class SubscriptionFiscalService {
     userId: number | null,
   ) {
     const previous = await this.getSettings();
+    // El DV es un checksum, no un dato: se deriva del NIT y se ignora lo que
+    // haya llegado en el DTO. Un DV tecleado con typo no falla aquí — falla
+    // después, al validar el certificado P12 contra `expected_dv`, con un error
+    // que culpa al certificado en vez de al dígito.
+    const { number: normalizedNit, dv: derivedDv } = normalizeNit(dto.nit);
+    dto.nit = normalizedNit || dto.nit;
+    dto.nit_dv = derivedDv || undefined;
+
     await this.assertFiscalContext(dto.platform_organization_id, dto.accounting_entity_id);
     if (dto.invoice_resolution_id) {
       await this.assertResolution(dto.invoice_resolution_id, dto.accounting_entity_id);

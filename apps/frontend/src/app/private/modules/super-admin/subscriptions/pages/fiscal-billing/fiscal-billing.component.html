@@ -214,7 +214,9 @@
             type="text"
             formControlName="nit_dv"
             [control]="form.get('nit_dv')"
-            placeholder="1"
+            [readonly]="true"
+            placeholder="—"
+            helperText="Se calcula solo a partir del NIT"
           ></app-input>
 
           <app-input

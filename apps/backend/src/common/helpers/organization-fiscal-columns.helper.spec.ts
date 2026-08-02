@@ -91,6 +91,35 @@ describe('buildOrganizationFiscalColumns', () => {
       ).toBe('900123456');
     });
 
+    it('separa el DV cuando el NIT llega con el guion pegado', () => {
+      // Regresión: `computeNitDv('902056589-9')` incluye el propio DV como
+      // dígito del módulo 11 y devuelve '1'. Debe derivarse desde la cabecera.
+      const columns = buildOrganizationFiscalColumns(
+        { nit: '902056589-9' },
+        {},
+      );
+      expect(columns.tax_id).toBe('902056589');
+      expect(columns.verification_digit).toBe('9');
+    });
+
+    it('limpia puntos y guiones del NIT antes de guardarlo', () => {
+      const columns = buildOrganizationFiscalColumns(
+        { nit: '902.056.589-9' },
+        {},
+      );
+      expect(columns.tax_id).toBe('902056589');
+      expect(columns.verification_digit).toBe('9');
+    });
+
+    it('conserva letras en documentos extranjeros en vez de saneárselas', () => {
+      const columns = buildOrganizationFiscalColumns(
+        { nit_type: 'NIT_EXTRANJERIA', nit: 'ES-B12345678' },
+        {},
+      );
+      expect(columns.tax_id).toBe('ES-B12345678');
+      expect(columns.verification_digit).toBeNull();
+    });
+
     it('no inventa DV para documentos que no son NIT', () => {
       const columns = buildOrganizationFiscalColumns(
         { nit_type: 'CC', nit: '1085123456' },
