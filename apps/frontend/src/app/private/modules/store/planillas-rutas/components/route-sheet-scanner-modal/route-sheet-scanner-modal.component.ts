@@ -22,7 +22,10 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { StepsLineComponent } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../shared/pipes/currency/currency.pipe';
 
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import {
@@ -504,6 +507,10 @@ export class RouteSheetScannerModalComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(PlanillasRutasService);
   private readonly toast = inject(ToastService);
+  // Formatea los montos del aviso de cobro corto con la moneda de la tienda —
+  // el `CurrencyPipe` no sirve aquí porque el mensaje se arma en TS, no en la
+  // plantilla.
+  private readonly currencyFormat = inject(CurrencyFormatService);
 
   // Inputs / outputs
   readonly routeId = input.required<number>();
@@ -951,15 +958,24 @@ export class RouteSheetScannerModalComponent {
 
   /**
    * Summarize the idempotent settle response: how many stops were settled,
-   * how many were reconciled (already settled / not in route), and list any
-   * per-stop errors so the operator can react instead of seeing a raw toast.
+   * how many were reconciled (already settled / not in route), which ones need
+   * a cash decision from the operator, and list any per-stop errors so the
+   * operator can react instead of seeing a raw toast.
    */
   private showConfirmSummary(res: ConfirmRouteSheetResult): void {
     const settled = res.settled?.length ?? 0;
-    const skipped = res.skipped?.length ?? 0;
+    const allSkipped = res.skipped ?? [];
     const errors = res.errors ?? [];
 
-    const summary = `Liquidadas: ${settled} / Conciliadas: ${skipped} / Errores: ${errors.length}`;
+    // Un cobro corto NO es una conciliación silenciosa: la parada quedó SIN
+    // liquidar esperando que el operador decida rechazarla o cobrarla completa.
+    // Se separa del resto de `skipped` para que no se lea como "ya estaba lista".
+    const shortPayment = allSkipped.filter(
+      (s) => s.reason === 'short_payment_requires_decision',
+    );
+    const reconciled = allSkipped.length - shortPayment.length;
+
+    const summary = `Liquidadas: ${settled} / Conciliadas: ${reconciled} / Pendientes de decisión: ${shortPayment.length} / Errores: ${errors.length}`;
 
     if (errors.length > 0) {
       const detail = errors
@@ -967,11 +983,26 @@ export class RouteSheetScannerModalComponent {
         .join('\n');
       // Keep the summary visible and surface the failing stops explicitly.
       this.toast.warning(`${summary}\n${detail}`);
-    } else if (skipped > 0) {
-      this.toast.success(`${summary} (paradas ya liquidadas conciliadas)`);
-    } else {
-      this.toast.success(summary);
+      return;
     }
+
+    if (shortPayment.length > 0) {
+      const detail = shortPayment
+        .map(
+          (s) =>
+            `Parada #${s.stop_id}: entregada con cobro insuficiente (${this.currencyFormat.format(s.collected_amount ?? 0)} de ${this.currencyFormat.format(s.net ?? 0)}). Decide: rechazarla o liquidarla con el cobro completo.`,
+        )
+        .join('\n');
+      this.toast.warning(`${summary}\n${detail}`);
+      return;
+    }
+
+    if (reconciled > 0) {
+      this.toast.success(`${summary} (paradas ya liquidadas conciliadas)`);
+      return;
+    }
+
+    this.toast.success(summary);
   }
 
   /**
