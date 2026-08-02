@@ -55,7 +55,19 @@ export interface BillingProfile {
 }
 
 export interface BillingProfileStatus {
+  /**
+   * Vendix emite factura electrónica real por las suscripciones (switch de
+   * plataforma encendido y apuntando a producción). En falso, el checkout no
+   * pide ni muestra datos fiscales: no habría documento que los llevara.
+   */
+  enabled: boolean;
   complete: boolean;
+  /**
+   * The organization already runs its own electronic invoicing, so this fiscal
+   * identity is master data owned by the fiscal module. Checkout must show it
+   * read-only; the backend drops any edit that arrives anyway.
+   */
+  locked: boolean;
   profile:
     | (Partial<BillingProfile> & {
         verification_digit?: string | null;

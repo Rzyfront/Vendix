@@ -7,7 +7,10 @@ import { EncryptionService } from '../../../../common/services/encryption.servic
 import { S3Service } from '../../../../common/services/s3.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { PLATFORM_TIMEZONE } from '../../../../common/constants/platform-fiscal.constants';
+import {
+  PLATFORM_FISCAL_SETTINGS_KEY,
+  PLATFORM_TIMEZONE,
+} from '../../../../common/constants/platform-fiscal.constants';
 import { normalizeNit } from '../../../../common/utils/nit.util';
 import {
   localDateString,
@@ -35,7 +38,7 @@ import {
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
 
-const SETTINGS_KEY = 'subscription_fiscal_billing';
+const SETTINGS_KEY = PLATFORM_FISCAL_SETTINGS_KEY;
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const PLATFORM_ORGANIZATION_ID = 1;

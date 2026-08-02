@@ -13,6 +13,7 @@ import {
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import {
   BillingProfile,
+  BillingProfileStatus,
   StoreSubscriptionService,
 } from '../../services/store-subscription.service';
 import { CheckoutPreviewResponse, SubscriptionPlan } from '../../interfaces/store-subscription.interface';
@@ -33,6 +34,15 @@ const COUPON_REASON_COPY: Record<string, string> = {
   not_eligible: 'Tu tienda no cumple los requisitos del cupón',
   invalid_state: 'El cupón está deshabilitado',
   network_error: 'Error de red al validar el cupón',
+};
+
+// Códigos DIAN de tipo de documento del adquiriente. Las claves deben coincidir
+// con los `<option value>` del formulario y con BILLING_DOCUMENT_TYPES del DTO.
+const BILLING_DOCUMENT_LABELS: Record<string, string> = {
+  '31': 'NIT',
+  '13': 'Cédula de ciudadanía',
+  '22': 'Cédula de extranjería',
+  '41': 'Pasaporte',
 };
 
 @Component({
@@ -417,22 +427,105 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 </p>
               }
 
-              <!-- Datos fiscales del adquiriente. Solo aparece cuando el
-                   commit va a cobrar y la organización aún no tiene el perfil
-                   completo: un cliente recurrente no vuelve a escribir su NIT.
-                   El DV no se pide — el backend lo deriva del NIT. -->
-              @if (needsBillingProfile()) {
+              <!-- Datos fiscales del adquiriente. Aparece siempre que el commit
+                   vaya a cobrar: si faltan datos se piden en formulario, y si ya
+                   están en archivo se muestran en tarjeta compacta para que el
+                   cliente confirme a nombre de quién sale la factura antes de
+                   pagar. El DV no se pide — el backend lo deriva del NIT. -->
+              @if (billingSectionVisible()) {
                 <div class="pt-3 border-t border-border/50 space-y-3">
-                  <div class="space-y-1">
-                    <h4 class="text-sm font-semibold text-text-primary">
-                      Datos de facturación
-                    </h4>
-                    <p class="text-xs text-text-secondary leading-tight">
-                      Emitimos factura electrónica ante la DIAN por este cobro.
-                      Necesitamos los datos fiscales de tu empresa.
-                    </p>
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="space-y-1 min-w-0">
+                      <h4 class="text-sm font-semibold text-text-primary">
+                        Datos de facturación
+                      </h4>
+                      <p class="text-xs text-text-secondary leading-tight">
+                        @if (billingFormVisible()) {
+                          Emitimos factura electrónica ante la DIAN por este
+                          cobro. Necesitamos los datos fiscales de tu empresa.
+                        } @else {
+                          Emitimos la factura electrónica de este cobro a nombre
+                          de esta empresa.
+                        }
+                      </p>
+                    </div>
+
+                    <!-- Editar solo cuando el checkout es dueño del dato. Con el
+                         módulo fiscal activo la identidad la administra ese
+                         módulo y aquí sería una fuente de verdad paralela. -->
+                    @if (billingSummaryVisible() && !billingProfileLocked()) {
+                      <button
+                        type="button"
+                        (click)="startBillingEdit()"
+                        class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-primary hover:bg-primary/10 transition-colors"
+                      >
+                        <app-icon name="pencil" [size]="12"></app-icon>
+                        Editar
+                      </button>
+                    }
                   </div>
 
+                  <!-- Tarjeta compacta: confirma sin volver a pedir nada. -->
+                  @if (billingSummaryVisible()) {
+                    <div class="rounded-lg border border-border bg-background/60 p-3 space-y-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <app-icon
+                          name="building"
+                          [size]="14"
+                          class="text-text-secondary shrink-0"
+                        ></app-icon>
+                        <p class="text-sm font-medium text-text-primary truncate">
+                          {{ billingLegalName() || '—' }}
+                        </p>
+                      </div>
+
+                      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                        <div class="min-w-0">
+                          <dt class="text-text-secondary">{{ billingDocumentLabel() }}</dt>
+                          <dd class="text-text-primary font-medium truncate">
+                            {{ billingTaxIdDisplay() }}
+                          </dd>
+                        </div>
+                        <div class="min-w-0">
+                          <dt class="text-text-secondary">Ciudad</dt>
+                          <dd class="text-text-primary font-medium truncate">
+                            {{ billingCityDisplay() }}
+                          </dd>
+                        </div>
+                        <div class="min-w-0 sm:col-span-2">
+                          <dt class="text-text-secondary">Dirección</dt>
+                          <dd class="text-text-primary font-medium truncate">
+                            {{ billingAddressLine() || '—' }}
+                          </dd>
+                        </div>
+                        @if (billingEmail()) {
+                          <div class="min-w-0 sm:col-span-2">
+                            <dt class="text-text-secondary">Correo de facturación</dt>
+                            <dd class="text-text-primary font-medium truncate">
+                              {{ billingEmail() }}
+                            </dd>
+                          </div>
+                        }
+                      </dl>
+
+                      @if (billingProfileLocked()) {
+                        <p class="flex items-start gap-1.5 pt-1 border-t border-border/50 text-xs text-text-secondary leading-tight">
+                          <app-icon name="lock" [size]="12" class="shrink-0 mt-0.5"></app-icon>
+                          <span>
+                            Tu módulo fiscal administra esta identidad. Para
+                            cambiarla, edítala en
+                            <a
+                              [routerLink]="'/admin/fiscal'"
+                              class="font-medium text-primary hover:underline"
+                              >Fiscal</a
+                            >.
+                          </span>
+                        </p>
+                      }
+                    </div>
+                  }
+
+                  @if (billingFormVisible()) {
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label class="flex flex-col gap-1 sm:col-span-2">
                       <span class="text-xs font-medium text-text-secondary">Razón social</span>
@@ -540,6 +633,20 @@ const COUPON_REASON_COPY: Record<string, string> = {
                       ciudad y el código DANE de 5 dígitos.
                     </p>
                   }
+
+                  <!-- Cancelar solo existe sobre un perfil que ya estaba
+                       completo; si faltan datos el formulario no se puede
+                       cerrar sin llenarlo. -->
+                  @if (billingEditing()) {
+                    <button
+                      type="button"
+                      (click)="cancelBillingEdit()"
+                      class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+                    >
+                      Cancelar edición
+                    </button>
+                  }
+                  }
                 </div>
               }
 
@@ -567,7 +674,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
                   [loading]="committing()"
                   [disabled]="
                     (chargeNow() > 0 && !noRefundAcknowledged()) ||
-                    (needsBillingProfile() && !billingProfileValid()) ||
+                    (billingFormVisible() && !billingProfileValid()) ||
                     committing()
                   "
                   [fullWidth]="true"
@@ -704,6 +811,15 @@ export class CheckoutComponent implements OnInit {
   // de señales), así que la validación en vivo se rompería en silencio.
   readonly billingProfileComplete = signal(false);
   readonly billingProfileLoaded = signal(false);
+  /**
+   * La plataforma emite factura electrónica real. Mientras esté en falso el
+   * checkout no muestra nada fiscal: no hay documento que llevaría el NIT.
+   */
+  readonly billingProfileEnabled = signal(false);
+  /** El módulo fiscal del cliente es dueño de estos datos: aquí solo se leen. */
+  readonly billingProfileLocked = signal(false);
+  /** El usuario abrió el formulario sobre un perfil que ya estaba completo. */
+  readonly billingEditing = signal(false);
   readonly billingLegalName = signal('');
   readonly billingTaxId = signal('');
   readonly billingDocumentType = signal('31');
@@ -713,15 +829,44 @@ export class CheckoutComponent implements OnInit {
   readonly billingCity = signal('');
   readonly billingStateProvince = signal('');
   readonly billingMunicipalityCode = signal('');
+  /** Derivado por el backend; solo se muestra, nunca se edita. */
+  readonly billingVerificationDigit = signal('');
 
-  /** Solo se piden datos fiscales cuando el commit va a cobrar de verdad. */
-  readonly needsBillingProfile = computed(
+  /** Últimos valores en archivo, para poder descartar una edición. */
+  private billingProfileSnapshot: BillingProfileStatus['profile'] = null;
+
+  /**
+   * La sección fiscal solo tiene sentido cuando la plataforma emite factura
+   * electrónica real Y el commit va a cobrar: en un plan gratis o en un cambio
+   * dentro del trial no se emite documento, así que pedir un NIT sería ruido.
+   */
+  readonly billingSectionVisible = computed(
     () =>
       this.billingProfileLoaded() &&
-      !this.billingProfileComplete() &&
+      this.billingProfileEnabled() &&
       !this.freePlan() &&
       !this.trialSwapInfo() &&
       this.chargeNow() > 0,
+  );
+
+  /** Faltan datos: el formulario es obligatorio y no se puede cerrar. */
+  readonly needsBillingProfile = computed(
+    () => this.billingSectionVisible() && !this.billingProfileComplete(),
+  );
+
+  /** Perfil ya en archivo: se muestra en tarjeta compacta, no en formulario. */
+  readonly billingSummaryVisible = computed(
+    () =>
+      this.billingSectionVisible() &&
+      this.billingProfileComplete() &&
+      !this.billingEditing(),
+  );
+
+  /** El formulario está abierto por falta de datos o porque el usuario editó. */
+  readonly billingFormVisible = computed(
+    () =>
+      this.billingSectionVisible() &&
+      (this.needsBillingProfile() || this.billingEditing()),
   );
 
   /**
@@ -748,6 +893,43 @@ export class CheckoutComponent implements OnInit {
       /^\d{5}$/.test(this.billingMunicipalityCode().trim())
     );
   });
+
+  /** Etiqueta legible del tipo de documento para la tarjeta compacta. */
+  readonly billingDocumentLabel = computed(
+    () =>
+      BILLING_DOCUMENT_LABELS[this.billingDocumentType()] ?? 'Documento',
+  );
+
+  /**
+   * Documento con su DV cuando el backend ya lo derivó. Se muestra solo en
+   * lectura: el DV nunca se pide, es un checksum del número.
+   */
+  readonly billingTaxIdDisplay = computed(() => {
+    const number = this.documentNumber();
+    if (!number) return '—';
+    const dv = this.billingVerificationDigit();
+    return dv ? `${number}-${dv}` : number;
+  });
+
+  /** Ciudad + código DANE, la línea que la DIAN exige del adquiriente. */
+  readonly billingCityDisplay = computed(() => {
+    const city = this.billingCity().trim();
+    const code = this.billingMunicipalityCode().trim();
+    if (!city) return code || '—';
+    return code ? `${city} (${code})` : city;
+  });
+
+  /** Abre el formulario sobre un perfil ya completo. */
+  startBillingEdit(): void {
+    if (this.billingProfileLocked()) return;
+    this.billingEditing.set(true);
+  }
+
+  /** Descarta la edición y vuelve a los valores en archivo. */
+  cancelBillingEdit(): void {
+    this.applyBillingProfile(this.billingProfileSnapshot);
+    this.billingEditing.set(false);
+  }
 
   // RNC-PaidPlan — Tracks whether the Wompi widget produced a terminal payment
   // outcome (APPROVED or PENDING). When the user closes the widget without
@@ -950,29 +1132,38 @@ export class CheckoutComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (status) => {
-          const p = status.profile;
-          if (p) {
-            this.billingLegalName.set(p.legal_name ?? '');
-            this.billingTaxId.set(p.tax_id ?? '');
-            this.billingDocumentType.set(p.document_type ?? '31');
-            this.billingTaxRegime.set(p.tax_regime ?? '49');
-            this.billingEmail.set(p.email ?? '');
-            const addr = p.address;
-            if (addr) {
-              this.billingAddressLine.set(addr.address_line1 ?? '');
-              this.billingCity.set(addr.city ?? '');
-              this.billingStateProvince.set(addr.state_province ?? '');
-              this.billingMunicipalityCode.set(addr.municipality_code ?? '');
-            }
-          }
+          this.billingProfileSnapshot = status.profile;
+          this.applyBillingProfile(status.profile);
+          this.billingProfileEnabled.set(status.enabled);
           this.billingProfileComplete.set(status.complete);
+          this.billingProfileLocked.set(status.locked);
           this.billingProfileLoaded.set(true);
         },
         error: () => {
+          // Sin respuesta no se asume que haya que pedir datos fiscales: el
+          // backend es la autoridad y bloquearía el commit si hicieran falta.
+          this.billingProfileEnabled.set(false);
           this.billingProfileComplete.set(false);
+          this.billingProfileLocked.set(false);
           this.billingProfileLoaded.set(true);
         },
       });
+  }
+
+  /** Vuelca un perfil en las señales del formulario. `null` las deja vacías. */
+  private applyBillingProfile(p: BillingProfileStatus['profile']): void {
+    this.billingLegalName.set(p?.legal_name ?? '');
+    this.billingTaxId.set(p?.tax_id ?? '');
+    this.billingDocumentType.set(p?.document_type ?? '31');
+    this.billingTaxRegime.set(p?.tax_regime ?? '49');
+    this.billingEmail.set(p?.email ?? '');
+    this.billingVerificationDigit.set(p?.verification_digit ?? '');
+
+    const addr = p?.address ?? null;
+    this.billingAddressLine.set(addr?.address_line1 ?? '');
+    this.billingCity.set(addr?.city ?? '');
+    this.billingStateProvince.set(addr?.state_province ?? '');
+    this.billingMunicipalityCode.set(addr?.municipality_code ?? '');
   }
 
   /** Reads a text input into the given signal. */
@@ -980,9 +1171,13 @@ export class CheckoutComponent implements OnInit {
     target.set((event.target as HTMLInputElement | HTMLSelectElement).value);
   }
 
-  /** Payload for the commit, or undefined when there is nothing new to send. */
+  /**
+   * Payload for the commit, or undefined when there is nothing new to send.
+   * Un perfil bloqueado nunca viaja: lo edita el módulo fiscal, no el checkout.
+   */
   private buildBillingProfile(): BillingProfile | undefined {
-    if (!this.needsBillingProfile()) return undefined;
+    if (this.billingProfileLocked()) return undefined;
+    if (!this.billingFormVisible()) return undefined;
     return {
       legal_name: this.billingLegalName().trim(),
       tax_id: this.documentNumber(),
@@ -1100,7 +1295,7 @@ export class CheckoutComponent implements OnInit {
     // Datos fiscales del adquiriente: si el cobro va a existir y aún no hay
     // perfil completo, sin esto la factura electrónica se rechaza después de
     // gastar un consecutivo.
-    if (this.needsBillingProfile() && !this.billingProfileValid()) {
+    if (this.billingFormVisible() && !this.billingProfileValid()) {
       this.toastService.error(
         'Completa los datos de facturación de tu empresa para continuar',
       );

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { computeNitDv, normalizeNit } from '@common/utils/nit.util';
+import { PLATFORM_FISCAL_SETTINGS_KEY } from '@common/constants/platform-fiscal.constants';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { BillingProfileDto } from '../dto/billing-profile.dto';
 
@@ -97,8 +98,73 @@ export class SubscriptionBillingProfileService {
   }
 
   /**
+   * True only when Vendix is really emitting electronic invoices for its own
+   * subscriptions: the platform switch is on AND it points at production.
+   *
+   * This is the master gate for the whole billing-profile flow. While the
+   * platform is unconfigured — or still inside DIAN habilitación, where every
+   * document is a test artefact — asking a customer for their NIT, DANE code
+   * and fiscal responsibilities collects data no document will carry, and
+   * blocking a payment over it would be indefensible.
+   */
+  async platformInvoicingLive(): Promise<boolean> {
+    const row = await this.prisma.withoutScope().platform_settings.findUnique({
+      where: { key: PLATFORM_FISCAL_SETTINGS_KEY },
+      select: { value: true },
+    });
+    const value = (row?.value ?? {}) as {
+      is_enabled?: boolean;
+      environment?: string;
+    };
+    return value.is_enabled === true && value.environment === 'production';
+  }
+
+  /**
+   * True when the customer already runs its own electronic invoicing.
+   *
+   * The same fiscal identity that Vendix uses as *adquiriente* is what the
+   * customer's fiscal module uses as *emisor*. Once that module is live, the
+   * identity is master data owned by it — letting a checkout screen rewrite the
+   * NIT or the razón social would silently change the emitter of documents the
+   * DIAN has already accepted.
+   *
+   * Read as "active anywhere in the organization" rather than through
+   * `FiscalGateService`: the gate needs a `store_id` when `fiscal_scope=STORE`
+   * and fails closed to `false` without one, which would report "editable" for
+   * an organization whose stores are invoicing. A lock that fails open is not a
+   * lock. Two indexed JSON-path probes cost less than resolving the scope.
+   */
+  async fiscalModuleActive(organizationId: number): Promise<boolean> {
+    const client = this.prisma.withoutScope();
+    const activeStates = ['ACTIVE', 'LOCKED'].map((state) => ({
+      settings: {
+        path: ['fiscal_status', 'invoicing', 'state'],
+        equals: state,
+      },
+    }));
+
+    const org = await client.organization_settings.findFirst({
+      where: { organization_id: organizationId, OR: activeStates },
+      select: { id: true },
+    });
+    if (org) return true;
+
+    const store = await client.store_settings.findFirst({
+      where: { stores: { organization_id: organizationId }, OR: activeStates },
+      select: { id: true },
+    });
+    return !!store;
+  }
+
+  /**
    * Current profile plus whether it is complete, so the checkout form can
    * prefill known values and only demand what is genuinely missing.
+   *
+   * `locked` says the data is on file AND owned by the customer's fiscal
+   * module, so checkout must render it read-only. It is deliberately
+   * `active && complete`: an organization whose module is live but whose
+   * profile is still missing a field would otherwise be unable to pay and
+   * unable to fix it from here.
    */
   async get(organizationId: number) {
     const org = await this.prisma.withoutScope().organizations.findUnique({
@@ -129,8 +195,18 @@ export class SubscriptionBillingProfileService {
       },
     });
 
+    const [enabled, complete, fiscalActive] = await Promise.all([
+      this.platformInvoicingLive(),
+      this.isComplete(organizationId),
+      this.fiscalModuleActive(organizationId),
+    ]);
+
     return {
-      complete: await this.isComplete(organizationId),
+      // `enabled: false` means the checkout must not render the fiscal section
+      // at all — not that the data is missing.
+      enabled,
+      complete,
+      locked: complete && fiscalActive,
       profile: org
         ? {
             legal_name: org.legal_name,
@@ -161,12 +237,34 @@ export class SubscriptionBillingProfileService {
     profile: BillingProfileDto | undefined,
     opts: { required: boolean },
   ): Promise<void> {
+    // Master gate: with the platform not emitting real invoices there is no
+    // fiscal data to demand and nothing to save. A checkout must never fail
+    // over paperwork for a document that will not exist.
+    if (!(await this.platformInvoicingLive())) return;
+
+    const complete = await this.isComplete(organizationId);
+
+    // The fiscal module owns the identity once it is live. Checkout hides the
+    // edit affordance in that case, but the hiding is cosmetic — a crafted
+    // request would still reach here, so the write is dropped server-side.
+    // Dropped, not rejected: the client legitimately echoes back the prefilled
+    // values, and failing a payment over a no-op write helps nobody.
+    if (complete && (await this.fiscalModuleActive(organizationId))) {
+      if (profile) {
+        this.logger.warn(
+          `Billing profile edit ignored for organization=${organizationId}: ` +
+            'fiscal module is active and owns the fiscal identity',
+        );
+      }
+      return;
+    }
+
     if (profile) {
       await this.save(organizationId, profile);
       return;
     }
     if (!opts.required) return;
-    if (await this.isComplete(organizationId)) return;
+    if (complete) return;
 
     throw new VendixHttpException(
       ErrorCodes.SUBSCRIPTION_FISCAL_001,

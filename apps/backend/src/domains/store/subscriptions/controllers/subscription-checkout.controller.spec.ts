@@ -20,6 +20,7 @@ describe('SubscriptionCheckoutController', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any, // billingProfile
       {} as any,
       prismaMock,
       {} as any,
@@ -188,6 +189,13 @@ function buildHarness(opts: {
     success: (data: unknown, message: string) => ({ data, message }),
   };
 
+  // These cases exercise the reactivation seam, not fiscal capture. A stub that
+  // captures nothing keeps `commit` on its business path; the guard itself is
+  // covered in subscription-billing-profile.service.spec.ts.
+  const billingProfile: any = {
+    ensureCaptured: jest.fn().mockResolvedValue(undefined),
+  };
+
   const controller = new SubscriptionCheckoutController(
     proration,
     billing,
@@ -195,6 +203,7 @@ function buildHarness(opts: {
     resolver,
     { transition, ensureOperational } as any,
     promotional,
+    billingProfile,
     platformGw,
     prisma,
     responseService,
