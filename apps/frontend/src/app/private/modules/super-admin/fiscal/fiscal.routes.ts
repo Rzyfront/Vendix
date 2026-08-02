@@ -118,6 +118,20 @@ export const FISCAL_ROUTES: Routes = [
     ],
   },
   // -------------------------------------------------------------------
+  // Submódulo "Facturación" — emisión electrónica DIAN de las suscripciones
+  // SaaS de la plataforma. Vivía bajo `/super-admin/subscriptions/fiscal-billing`
+  // como un único componente de ~2.3k líneas con 10 secciones apiladas; ahora
+  // cuelga de Fiscal con pestañas de cabecera, igual que el módulo de
+  // facturación de tiendas. Las URLs viejas redirigen (ver subscriptions.routes).
+  // -------------------------------------------------------------------
+  {
+    path: 'invoicing',
+    loadChildren: () =>
+      import('./invoicing/invoicing.routes').then(
+        (m) => m.PLATFORM_INVOICING_ROUTES,
+      ),
+  },
+  // -------------------------------------------------------------------
   // Submódulo "Contabilidad" — Plan Único de Cuentas, asientos,
   // mapeos y reportes contables de la plataforma. No forma parte del
   // Centro Fiscal (Operación fiscal) del tenant; es el equivalente

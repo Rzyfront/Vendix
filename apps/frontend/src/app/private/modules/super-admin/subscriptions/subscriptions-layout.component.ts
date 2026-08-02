@@ -33,7 +33,10 @@ export class SubscriptionsLayoutComponent {
     { id: 'payouts', route: 'payouts', label: 'Pagos', icon: 'banknote' },
     { id: 'events', route: 'events', label: 'Eventos', icon: 'activity' },
     { id: 'gateway', route: 'gateway', label: 'Pasarela', shortLabel: 'Pasarela', icon: 'shield-check' },
-    { id: 'fiscal-billing', route: 'fiscal-billing', label: 'Facturación', shortLabel: 'Fiscal', icon: 'file-check' },
+    // 'fiscal-billing' se movió al módulo Fiscal
+    // (/super-admin/fiscal/invoicing). La ruta vieja sigue redirigiendo, pero
+    // no se ofrece como pestaña de Suscripciones: emitir ante la DIAN es
+    // operación fiscal, no una sección del cobro de planes.
     { id: 'metrics', route: 'metrics', label: 'Métricas', shortLabel: 'Métricas', icon: 'chart-line' },
   ];
 }

@@ -367,6 +367,11 @@ export class SuperAdminLayoutComponent {
             route: '/super-admin/fiscal/dashboard',
           },
           {
+            label: 'Facturación',
+            icon: 'file-text',
+            route: '/super-admin/fiscal/invoicing/invoices',
+          },
+          {
             label: 'Contabilidad',
             icon: 'folder',
             children: [

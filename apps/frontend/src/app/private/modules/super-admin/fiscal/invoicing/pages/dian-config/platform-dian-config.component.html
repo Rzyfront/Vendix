@@ -1,0 +1,438 @@
+@if (store.loadingStatus() && !store.status()) {
+  <div
+    class="bg-[var(--color-surface)] rounded-card border border-border p-6 flex items-center justify-center min-h-[200px]"
+  >
+    <div class="text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-sm text-text-secondary">
+        Cargando configuración fiscal...
+      </p>
+    </div>
+  </div>
+} @else {
+  <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-6">
+    <div class="space-y-6 min-w-0">
+      <form [formGroup]="form" (ngSubmit)="onSave()" class="space-y-6">
+        <!-- Entidad emisora -->
+        <div
+          class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="building-2" [size]="18" class="text-text-primary"></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              Entidad emisora Vendix
+            </h2>
+          </div>
+
+          @if (identityPrefillApplied()) {
+            <div
+              class="flex items-start gap-2 rounded-card border border-info bg-info-light px-3 py-2"
+            >
+              <app-icon name="info" [size]="16" class="text-info shrink-0 mt-0.5"></app-icon>
+              <p class="text-xs text-text-secondary">
+                Prellenado desde la identidad fiscal de la plataforma. Verifica
+                los datos antes de guardar — si algo está mal, corrígelo en
+                <a
+                  routerLink="/super-admin/fiscal/identity"
+                  class="text-primary-600 underline underline-offset-2"
+                  >Identidad fiscal</a
+                >
+                para que quede igual en todos lados.
+              </p>
+            </div>
+          }
+
+          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <app-input
+              label="ID organización plataforma"
+              type="number"
+              formControlName="platform_organization_id"
+              [control]="form.get('platform_organization_id')"
+              [required]="true"
+              helperText="Organización legal que emite la factura"
+            ></app-input>
+
+            <app-input
+              label="ID entidad contable"
+              type="number"
+              formControlName="accounting_entity_id"
+              [control]="form.get('accounting_entity_id')"
+              [required]="true"
+              helperText="Entidad fiscal dueña del NIT"
+            ></app-input>
+
+            <app-selector
+              label="Resolución activa (factura)"
+              formControlName="invoice_resolution_id"
+              [options]="salesInvoiceResolutionOptions()"
+              helperText="Resoluciones tipo factura del ambiente seleccionado"
+            ></app-selector>
+
+            <app-input
+              label="ID config DIAN"
+              type="number"
+              formControlName="dian_configuration_id"
+              [control]="form.get('dian_configuration_id')"
+              helperText="Opcional: reutiliza una configuración existente"
+            ></app-input>
+          </div>
+        </div>
+
+        <!-- Credenciales DIAN -->
+        <div
+          class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="shield-check" [size]="18" class="text-text-primary"></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              Credenciales DIAN
+            </h2>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              label="Nombre de configuración"
+              type="text"
+              formControlName="name"
+              [control]="form.get('name')"
+              [required]="true"
+              placeholder="Vendix SaaS DIAN"
+            ></app-input>
+
+            <app-input
+              label="NIT"
+              type="text"
+              formControlName="nit"
+              [control]="form.get('nit')"
+              [required]="true"
+              placeholder="900123456"
+              helperText="Solo dígitos. El DV se calcula solo."
+            ></app-input>
+
+            <app-input
+              label="DV"
+              type="text"
+              formControlName="nit_dv"
+              [control]="form.get('nit_dv')"
+              [readonly]="true"
+              placeholder="—"
+              helperText="Se calcula solo a partir del NIT"
+            ></app-input>
+
+            <app-input
+              label="Software ID"
+              type="text"
+              formControlName="software_id"
+              [control]="form.get('software_id')"
+              [required]="true"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              helperText="UUID emitido por la DIAN"
+            ></app-input>
+
+            <app-input
+              label="PIN de software"
+              type="password"
+              formControlName="software_pin"
+              [control]="form.get('software_pin')"
+              [required]="!store.configured()"
+              [placeholder]="
+                store.configured() ? 'Configurado · dejar vacío para no cambiar' : ''
+              "
+              helperText="Se guarda encriptado; solo diligéncialo para crear o rotar"
+            ></app-input>
+
+            <app-input
+              label="Test Set ID"
+              type="text"
+              formControlName="test_set_id"
+              [control]="form.get('test_set_id')"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              helperText="UUID de habilitación/sandbox DIAN"
+            ></app-input>
+          </div>
+        </div>
+
+        <!-- Flujo de emisión -->
+        <div
+          class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="settings" [size]="18" class="text-text-primary"></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              Flujo de emisión
+            </h2>
+          </div>
+
+          <p class="text-sm text-text-secondary max-w-3xl">
+            La emisión DIAN es independiente del cobro. Si está inactiva o falla,
+            la venta de planes continúa y el cliente conserva su factura SaaS
+            normal.
+          </p>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+            <app-selector
+              label="Ambiente"
+              formControlName="environment"
+              [options]="environmentOptions"
+              [required]="true"
+            ></app-selector>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="flex items-center gap-2 text-sm text-text-primary">
+                <app-toggle formControlName="is_enabled"></app-toggle>
+                <span>Activar facturación DIAN</span>
+              </label>
+              <label class="flex items-center gap-2 text-sm text-text-primary">
+                <app-toggle formControlName="auto_issue"></app-toggle>
+                <span>Emitir automáticamente al pagar</span>
+              </label>
+            </div>
+          </div>
+
+          @if (selectedEnvironment() === 'production' && isEnabled()) {
+            <div
+              class="border border-warning bg-warning-light rounded-md px-4 py-3 space-y-2"
+            >
+              <div class="flex items-start gap-2">
+                <app-icon name="alert-triangle" [size]="18" class="text-warning mt-0.5"></app-icon>
+                <div class="text-sm text-warning">
+                  <p class="font-semibold">Estás activando producción DIAN.</p>
+                  <p>
+                    Para guardar producción activa, primero debe existir un test
+                    exitoso de producción reciente con esta misma configuración.
+                  </p>
+                </div>
+              </div>
+              <label
+                class="flex items-center gap-2 text-sm text-warning pt-1 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  class="rounded border-warning text-warning focus:ring-warning"
+                  formControlName="confirm_production"
+                />
+                <span>
+                  Confirmo que esta configuración pertenece a producción DIAN y
+                  que Vendix emitirá facturas electrónicas reales.
+                </span>
+              </label>
+              @if (
+                form.errors?.['confirm_production_required'] &&
+                form.controls.confirm_production.touched
+              ) {
+                <p class="text-xs text-error">
+                  Debes confirmar para activar producción.
+                </p>
+              }
+            </div>
+          }
+
+          @if (lastTest(); as test) {
+            <div
+              class="rounded-md border px-3 py-2 text-sm"
+              [class.border-success]="test.ok"
+              [class.bg-success-light]="test.ok"
+              [class.text-success]="test.ok"
+              [class.border-error]="!test.ok"
+              [class.bg-error-light]="!test.ok"
+              [class.text-error]="!test.ok"
+            >
+              Último test: {{ test.ok ? 'OK' : 'Falló' }}
+              · {{ environmentLabel(test.environment) }}
+              · {{ lastTestedAt() | date: 'short' }}
+              @if (test.message) {
+                <span>· {{ test.message }}</span>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- Qué impide guardar: el error de grupo no cuelga de ningún control,
+             así que sin esto el botón se deshabilita sin explicar por qué. -->
+        @if (blockingProblems().length > 0) {
+          <div
+            class="rounded-card border border-warning bg-warning-light px-4 py-3"
+          >
+            <div class="flex items-start gap-2">
+              <app-icon name="alert-triangle" [size]="16" class="text-warning shrink-0 mt-0.5"></app-icon>
+              <div class="text-sm text-warning">
+                <p class="font-semibold">Faltan datos para guardar</p>
+                <ul class="list-disc pl-4 pt-1 space-y-0.5">
+                  @for (problem of blockingProblems(); track problem) {
+                    <li>{{ problem }}</li>
+                  }
+                </ul>
+              </div>
+            </div>
+          </div>
+        }
+
+        <div class="flex flex-col md:flex-row gap-2 md:justify-end">
+          <app-button
+            type="button"
+            variant="outline"
+            [loading]="testing()"
+            [disabled]="!store.configured() || testing() || saving()"
+            (clicked)="onTestConnection()"
+          >
+            <app-icon slot="icon" name="zap" [size]="16"></app-icon>
+            Probar DIAN
+          </app-button>
+
+          <app-button
+            type="submit"
+            variant="primary"
+            [loading]="saving()"
+            [disabled]="saving() || testing()"
+          >
+            <app-icon slot="icon" name="save" [size]="16"></app-icon>
+            {{
+              store.configured()
+                ? 'Actualizar configuración'
+                : 'Guardar configuración'
+            }}
+          </app-button>
+        </div>
+      </form>
+
+      <!-- Certificado P12 -->
+      <div
+        class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon name="shield" [size]="18" class="text-text-primary"></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Certificado P12
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_280px_auto] gap-4 items-end">
+          <app-file-upload-dropzone
+            label="Subir certificado"
+            helperText=".p12 o .pfx"
+            accept=".p12,.pfx,application/x-pkcs12"
+            icon="upload-cloud"
+            [disabled]="uploadingCertificate() || !store.configured()"
+            (fileSelected)="onCertificateSelected($event)"
+            (fileRemoved)="onCertificateRemoved()"
+          ></app-file-upload-dropzone>
+
+          <app-input
+            label="Contraseña"
+            type="password"
+            [formControl]="certificatePasswordControl"
+            [control]="certificatePasswordControl"
+            [disabled]="uploadingCertificate() || !store.configured()"
+          ></app-input>
+
+          <app-button
+            type="button"
+            variant="primary"
+            [loading]="uploadingCertificate()"
+            [disabled]="!certificateReady() || !store.configured()"
+            (clicked)="onUploadCertificate()"
+          >
+            <app-icon slot="icon" name="upload" [size]="16"></app-icon>
+            Guardar P12
+          </app-button>
+        </div>
+
+        @if (store.dianConfig()?.has_certificate) {
+          <div
+            class="text-sm text-success bg-success-light border border-success rounded-md px-3 py-2"
+          >
+            Certificado cargado
+            @if (store.dianConfig()?.certificate_expiry) {
+              · vence
+              {{ store.dianConfig()?.certificate_expiry | date: 'mediumDate':'UTC' }}
+            }
+          </div>
+        }
+      </div>
+
+      <!-- Set de pruebas DIAN -->
+      <div
+        class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon name="clipboard-check" [size]="18" class="text-text-primary"></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Set de pruebas DIAN
+          </h2>
+        </div>
+
+        <p class="text-xs text-text-secondary leading-relaxed">
+          Envía los 50 documentos de habilitación con el NIT de la plataforma. Si
+          el lote queda sin veredicto, «Diagnosticar» pregunta documento por
+          documento (por CUFE) si la DIAN los registró, y «Descartar lote» libera
+          el envío para intentar con un TestSetId nuevo.
+        </p>
+
+        <div class="flex flex-col md:flex-row gap-2 md:flex-wrap">
+          <app-button
+            type="button"
+            variant="primary"
+            [loading]="testSetBusy()"
+            [disabled]="!store.configured() || testSetBusy()"
+            (clicked)="onRunTestSet()"
+          >
+            <app-icon slot="icon" name="upload-cloud" [size]="16"></app-icon>
+            Enviar set de pruebas
+          </app-button>
+
+          <app-button
+            type="button"
+            variant="outline"
+            [disabled]="!store.configured() || testSetBusy()"
+            (clicked)="onCheckTestSet()"
+          >
+            <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
+            Consultar estado
+          </app-button>
+
+          <app-button
+            type="button"
+            variant="outline"
+            [disabled]="!store.configured() || testSetBusy()"
+            (clicked)="onDiagnoseTestSet()"
+          >
+            <app-icon slot="icon" name="stethoscope" [size]="16"></app-icon>
+            Diagnosticar documentos
+          </app-button>
+
+          <app-button
+            type="button"
+            variant="ghost"
+            [disabled]="!store.configured() || testSetBusy()"
+            (clicked)="onAbandonTestSet()"
+          >
+            <app-icon slot="icon" name="trash-2" [size]="16"></app-icon>
+            Descartar lote
+          </app-button>
+        </div>
+
+        @if (testSetResult(); as result) {
+          <pre
+            class="text-[11px] leading-relaxed bg-background border border-border rounded-lg p-3 overflow-x-auto text-text-secondary"
+            >{{ result | json }}</pre
+          >
+        }
+      </div>
+    </div>
+
+    <!-- Guía de habilitación: paridad con el módulo fiscal de tiendas. -->
+    <app-platform-dian-guide [status]="store.status()" />
+  </div>
+}
