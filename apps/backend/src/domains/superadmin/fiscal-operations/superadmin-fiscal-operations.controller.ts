@@ -7,8 +7,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -54,6 +57,7 @@ import {
   FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
 } from '../../fiscal-operations/constants/fiscal-responsibilities.catalog';
 import { UpdateOrgFiscalDataDto } from '../../organization/settings/dto/update-org-fiscal-data.dto';
+import { RutScannerService } from '../../store/settings/rut-scanner.service';
 
 /**
  * Super-admin mirror of the store-level fiscal operations controller.
@@ -82,6 +86,7 @@ export class SuperadminFiscalOperationsController {
     private readonly checklist: FiscalConfigChecklistService,
     private readonly prisma: GlobalPrismaService,
     private readonly response: ResponseService,
+    private readonly rutScanner: RutScannerService,
   ) {}
 
   /**
@@ -573,6 +578,36 @@ export class SuperadminFiscalOperationsController {
         },
       ),
     );
+  }
+
+  /**
+   * Super-admin mirror of `POST {store|organization}/settings/rut-scanner/scan`.
+   *
+   * The identity panel is shared across the three tenant scopes and builds the
+   * scanner URL from its own scope, so under `platform` it was posting to
+   * `/platform/settings/rut-scanner/scan` — a namespace that has no controller.
+   * The button therefore 404-ed for every super-admin. Scanning is scope-free
+   * (it reads a document and returns fields; it touches no tenant data), so the
+   * platform scope needs the route, not a different implementation.
+   */
+  @Post('identity/rut-scanner/scan')
+  @Permissions('superadmin:fiscal:identity:write')
+  @UseInterceptors(FileInterceptor('file'))
+  async scanRut(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.RUT_SCAN_NO_FILE);
+    }
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+    ];
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new VendixHttpException(ErrorCodes.RUT_SCAN_INVALID_FILE);
+    }
+    const result = await this.rutScanner.scanRutDocument(file);
+    return this.response.success(result, 'RUT escaneado exitosamente');
   }
 
   @Patch('identity/fiscal-data')

@@ -50,8 +50,20 @@ export class RutScannerService {
     );
   }
 
+  /**
+   * `store` y `organization` cuelgan de `{scope}/settings/rut-scanner`, pero la
+   * plataforma no: su namespace es `super-admin/fiscal`, igual que hace
+   * `FiscalOperationsService.baseUrl()`. Interpolar el scope crudo producía
+   * `/platform/settings/rut-scanner/scan`, una ruta que no existe — por eso el
+   * escáner devolvía 404 para todo super-admin.
+   */
   private scanUrl(scope?: RutScannerScope): string {
-    return `${environment.apiUrl}/${this.resolveScope(scope)}/settings/rut-scanner/scan`;
+    const resolved = this.resolveScope(scope);
+    const path =
+      resolved === 'platform'
+        ? 'super-admin/fiscal/identity/rut-scanner'
+        : `${resolved}/settings/rut-scanner`;
+    return `${environment.apiUrl}/${path}/scan`;
   }
 
   private resolveScope(scope?: RutScannerScope): RutScannerScope {

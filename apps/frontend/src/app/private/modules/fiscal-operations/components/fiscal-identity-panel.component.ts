@@ -717,8 +717,14 @@ export class FiscalIdentityPanelComponent {
     const form = this.legalForm();
     form.markAllTouched();
     if (!this.legalValid()) {
+      // Nombrar lo que falla en vez de decir "hay campos incompletos" sobre un
+      // formulario que a simple vista está lleno: el usuario no tiene forma de
+      // adivinar cuál control quedó inválido.
+      const problems = form.describeProblems();
       this.toast.error(
-        'Revisa los datos legales: hay campos obligatorios incompletos.',
+        problems.length
+          ? `No se puede guardar — revisa: ${problems.join(', ')}.`
+          : 'Revisa los datos legales: hay campos obligatorios incompletos.',
       );
       return;
     }
