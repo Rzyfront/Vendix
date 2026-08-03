@@ -507,6 +507,16 @@ export class CartService {
       type: 'percentage' | 'fixed_amount';
       scope: 'order' | 'product' | 'category';
       discount_amount: number;
+      /**
+       * Human-readable labels for the products/categories the discount was
+       * applied to. Empty for `scope: 'order'` (whole order). Used by the
+       * cart summary UI to render "(Guanabana, Mango)" next to the promo
+       * name so the customer knows exactly which line got the discount.
+       */
+      applicable_descriptions?: Array<{
+        label: string;
+        kind: 'product' | 'category';
+      }>;
     }>;
     tier_progress: Array<{
       promotion_id: number;
@@ -518,8 +528,12 @@ export class CartService {
   }> {
     // Auth users: prefer the backend cart so quantities are server-side
     // canonical. Guests: use the DTO items array as the source of truth.
+    // `product_name` is retained alongside `product_id` so the cart UI can
+    // show which line the discount was applied to (Phase 4 — products on
+    // promotions).
     let resolvedItems: Array<{
       product_id: number;
+      product_name: string;
       product_variant_id: number | null;
       quantity: number;
       unit_price: number;
@@ -544,6 +558,7 @@ export class CartService {
           );
           return {
             product_id: item.product_id,
+            product_name: product.name,
             product_variant_id: item.product_variant_id ?? null,
             quantity: item.quantity,
             unit_price: Math.round(priceResult.unitPrice * 100) / 100,
@@ -564,8 +579,21 @@ export class CartService {
           tier_progress: [],
         };
       }
+      // The cart_items rows do not denormalize the product name; pull the
+      // names in a single batch query to avoid N+1.
+      const cartProductIds = Array.from(
+        new Set(cart.cart_items.map((ci) => ci.product_id)),
+      );
+      const cartProducts = await this.prisma.products.findMany({
+        where: { id: { in: cartProductIds } },
+        select: { id: true, name: true },
+      });
+      const cartProductName = new Map<number, string>(
+        cartProducts.map((p) => [p.id, p.name]),
+      );
       resolvedItems = cart.cart_items.map((ci) => ({
         product_id: ci.product_id,
+        product_name: cartProductName.get(ci.product_id) ?? '',
         product_variant_id: ci.product_variant_id,
         quantity: ci.quantity,
         unit_price: Number(ci.unit_price),
@@ -609,21 +637,92 @@ export class CartService {
       customer_id: RequestContextService.getUserId() ?? null,
     });
 
+    // Pre-fetch category names only if any applied promotion has scope
+    // 'category'. Avoids the join when not needed.
+    const appliedCategories = quote.applied_promotions.filter(
+      (p) => p.scope === 'category',
+    );
+    let categoryLabelMap = new Map<number, string>();
+    if (appliedCategories.length > 0) {
+      const allCategoryIds = Array.from(
+        new Set(
+          appliedCategories.flatMap((p) =>
+            (p.applicable_item_ids ?? [])
+              .map((lineId) => {
+                const idx =
+                  typeof lineId === 'number' ? lineId : Number(lineId);
+                const item = Number.isFinite(idx)
+                  ? resolvedItems[idx]
+                  : undefined;
+                return item
+                  ? (categoryMap.get(item.product_id) ?? [])
+                  : [];
+              })
+              .flat(),
+          ),
+        ),
+      );
+      if (allCategoryIds.length > 0) {
+        const categoryNameRows =
+          await this.prisma.categories.findMany({
+            where: { id: { in: allCategoryIds } },
+            select: { id: true, name: true },
+          });
+        categoryLabelMap = new Map<number, string>(
+          categoryNameRows.map((c) => [c.id, c.name]),
+        );
+      }
+    }
+
     return {
       subtotal: quote.subtotal,
       promotion_discount: quote.total_discount,
       promotional_subtotal: quote.promotional_subtotal,
       item_count: resolvedItems.reduce((sum, i) => sum + i.quantity, 0),
-      applied_promotions: quote.applied_promotions.map((p) => ({
-        promotion_id: p.promotion_id,
-        name: p.name,
-        type: p.type,
-        scope: p.scope,
-        discount_amount: p.discount_amount,
-        // Surfaced for the cart UI audit trail. With the winner-takes-all
-        // engine, an order has at most one entry here.
-        priority: p.priority,
-      })),
+      applied_promotions: quote.applied_promotions.map((p) => {
+        const base = {
+          promotion_id: p.promotion_id,
+          name: p.name,
+          type: p.type,
+          scope: p.scope,
+          discount_amount: p.discount_amount,
+          // Surfaced for the cart UI audit trail. With the winner-takes-all
+          // engine, an order has at most one entry here.
+          priority: p.priority,
+        };
+        // For 'order' scope, the discount applies to the whole cart — no
+        // per-line labels to surface.
+        if (p.scope === 'order') {
+          return { ...base, applicable_descriptions: [] };
+        }
+
+        // Map the engine's per-line IDs back to product/category labels.
+        const labels: Array<{ label: string; kind: 'product' | 'category' }> = [];
+        const seenLabel = new Set<string>();
+        for (const lineId of p.applicable_item_ids ?? []) {
+          const idx = typeof lineId === 'number' ? lineId : Number(lineId);
+          if (!Number.isFinite(idx)) continue;
+          const item = resolvedItems[idx];
+          if (!item) continue;
+
+          if (p.scope === 'product') {
+            const label = item.product_name;
+            if (label && !seenLabel.has(label)) {
+              seenLabel.add(label);
+              labels.push({ label, kind: 'product' });
+            }
+          } else if (p.scope === 'category') {
+            for (const categoryId of categoryMap.get(item.product_id) ?? []) {
+              const label = categoryLabelMap.get(categoryId);
+              if (label && !seenLabel.has(label)) {
+                seenLabel.add(label);
+                labels.push({ label, kind: 'category' });
+              }
+            }
+          }
+        }
+        return { ...base, applicable_descriptions: labels };
+      }),
       tier_progress: quote.tier_progress,
     };
   }
