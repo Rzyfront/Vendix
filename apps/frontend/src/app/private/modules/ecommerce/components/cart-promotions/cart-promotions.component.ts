@@ -94,21 +94,30 @@ import {
             </div>
 
             @for (promo of appliedPromotions(); track promo.promotion_id) {
-              <div class="flex items-center justify-between gap-2">
-                <div class="flex min-w-0 items-center gap-1.5">
-                  <span
-                    class="truncate text-text-secondary"
-                    [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                    >{{ promo.name }}</span
-                  >
-                  @if (promo.affectedLabel) {
+              <div class="flex flex-col gap-0.5">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="flex min-w-0 flex-1 items-baseline gap-1.5 flex-wrap">
                     <span
-                      class="truncate text-text-muted"
-                      [ngClass]="compact() ? 'text-[10px]' : 'text-xs'"
-                      [title]="'Aplicada a: ' + promo.affectedLabel"
-                      >({{ promo.affectedLabel }})</span
+                      class="text-text-secondary"
+                      [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
+                      [title]="promo.name"
+                      >{{ promo.name }}</span
                     >
-                  }
+                    @if (promo.affectedLabel) {
+                      <span
+                        class="text-text-muted"
+                        [ngClass]="compact() ? 'text-[10px]' : 'text-xs'"
+                        [title]="'Aplicada a: ' + promo.affectedLabel"
+                        >({{ promo.affectedLabel }})</span
+                      >
+                    }
+                  </div>
+                  <span
+                    class="shrink-0 font-semibold text-green-600"
+                    [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
+                    >-{{ promo.discount_amount | currency }}</span
+                </div>
+                <div class="flex items-center gap-1.5">
                   <app-badge
                     [variant]="promo.typeVariant"
                     size="xs"
@@ -125,11 +134,6 @@ import {
                     Aplicada
                   </app-badge>
                 </div>
-                <span
-                  class="shrink-0 font-semibold text-green-600"
-                  [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                  >-{{ promo.discount_amount | currency }}</span
-                >
               </div>
             }
           </div>
