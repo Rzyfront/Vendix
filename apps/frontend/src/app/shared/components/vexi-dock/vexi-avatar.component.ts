@@ -98,7 +98,7 @@ const LABELS: Record<VexiExpression, string> = {
           rgba(var(--color-primary-rgb, 46, 204, 113), 0.85) 0%,
           rgba(var(--color-primary-rgb, 46, 204, 113), 0) 68%
         );
-        opacity: 0.08;
+        opacity: 0.104;
         transition: opacity 260ms ease;
         pointer-events: none;
       }
@@ -143,15 +143,15 @@ const LABELS: Record<VexiExpression, string> = {
         opacity: 1;
       }
 
-      /* Sub-3px over a slow cycle: enough to read as alive at a glance, not
-         enough to pull the eye away from the screen underneath. */
+      /* Still sub-3px over a slow cycle: enough to read as alive at a glance,
+         not enough to pull the eye away from the screen underneath. */
       @keyframes vexi-breathe {
         0%,
         100% {
           transform: translateY(0);
         }
         50% {
-          transform: translateY(-2.5px);
+          transform: translateY(-2.9px);
         }
       }
 

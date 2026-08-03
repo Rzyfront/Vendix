@@ -147,7 +147,7 @@ export const uiTools: RegisteredTool[] = [
     domain: 'ui',
     clientSide: true,
     description:
-      'Lee el carrito actual del Punto de Venta: líneas, cantidades, subtotal y total. Úsala para resumirle al usuario qué lleva antes de preguntarle si desea crear, enviar o pagar la orden. Vexi nunca cobra: el pago lo hace la persona.',
+      'Muestra en pantalla el detalle línea por línea del carrito del Punto de Venta. NO la uses para enterarte de qué lleva el usuario: el conteo de líneas, el total y el cliente asignado ya te llegan en el contexto de pantalla de cada turno, y esta herramienta corre en el navegador sin devolverte nada. Úsala solo cuando la persona pida ver el desglose. Para resumirle qué lleva antes de preguntarle si desea crear, enviar o pagar la orden, habla desde el contexto que ya tienes. Vexi nunca cobra: el pago lo hace la persona.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
   {

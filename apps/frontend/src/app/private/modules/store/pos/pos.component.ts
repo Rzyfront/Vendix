@@ -16,6 +16,7 @@ import {
   type VexiPosActionResult,
   type VexiPosCartSnapshot,
 } from '../../../../core/services/vexi-pos-bridge.service';
+import { VexiUiContextService } from '../../../../core/services/vexi-ui-context.service';
 
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -1009,6 +1010,7 @@ export class PosComponent {
   );
   private customerService = inject(PosCustomerService);
   private vexiPos = inject(VexiPosBridgeService);
+  private vexiUiContext = inject(VexiUiContextService);
   private paymentService = inject(PosPaymentService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -1044,6 +1046,30 @@ export class PosComponent {
     // screen that is tearing down is silently lost.
     this.vexiPos.register(this);
     this.destroyRef.onDestroy(() => this.vexiPos.unregister(this));
+
+    // The cart travels with every turn as prompt context, not as a tool result.
+    // `ui_pos_read_cart` is a `clientSide` tool, so the browser runs it and the
+    // server never learns the answer — for a *read* that is the whole point of
+    // the call, which left Vexi asked "¿qué llevo?" with nothing to say. The
+    // context channel and its backend renderer (`buildUiContext`) already
+    // existed and simply had no producer; this is it. Pushed from an effect so
+    // the snapshot is current at send time, and cleared on destroy because a
+    // cart reported from a screen the user already left is worse than none.
+    effect(() => {
+      const summary = this.cartSummary();
+      const customer = this.selectedCustomer();
+      this.vexiUiContext.contribute('pos', {
+        pos: {
+          item_count: this.cartItems().length,
+          total: summary.total,
+          customer: customer
+            ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
+              null
+            : null,
+        },
+      });
+    });
+    this.destroyRef.onDestroy(() => this.vexiUiContext.clear('pos'));
 
     this.checkMobile();
     this.setupSubscriptions();
@@ -2293,8 +2319,19 @@ export class PosComponent {
     const units = Math.max(1, Math.min(Math.trunc(quantity) || 1, 99));
     const before = this.vexiCartUnits();
 
+    // One shared deadline rather than one per unit: `withUserInputTimeout`
+    // cuts the whole command off at 20s, so a per-unit budget would let a
+    // large quantity sail past that cap and get reported as "pending on the
+    // user" when it is really a stall.
+    const deadline = Date.now() + 12000;
+
     for (let i = 0; i < units; i++) {
       await child.onAddToCart(product);
+      // Verified unit by unit, and sequentially: the cart merges repeats into
+      // a single line, so firing all N and checking once cannot tell "3 went
+      // in" from "1 went in three times over the same line".
+      const target = before + i + 1;
+      if ((await this.vexiWaitForCartUnits(target, deadline)) < target) break;
     }
 
     // `onAddToCart` returns nothing and swallows its own refusals: out of
@@ -2335,6 +2372,36 @@ export class PosComponent {
       (total, item) => total + (Number(item.quantity) || 0),
       0,
     );
+  }
+
+  /**
+   * Waits until the cart reports at least `target` units, or the deadline hits.
+   *
+   * The cart is the only honest witness to an add, but it has to be given time
+   * to answer. `onAddToCart` resolves *before* the cart does: it subscribes to
+   * `cartService.addToCart()` and returns without awaiting the round trip
+   * (`pos-product-selection.component.ts:1511`). Reading the count the instant
+   * that call returns therefore reads the value from before the add, which
+   * reported every single successful add as a refusal.
+   *
+   * Resolves with whatever the count is when it stops waiting — never throws,
+   * because the caller decides what a short count means.
+   */
+  private vexiWaitForCartUnits(
+    target: number,
+    deadline: number,
+  ): Promise<number> {
+    return new Promise<number>((resolve) => {
+      const poll = () => {
+        const units = this.vexiCartUnits();
+        if (units >= target || Date.now() >= deadline) {
+          resolve(units);
+          return;
+        }
+        setTimeout(poll, 80);
+      };
+      poll();
+    });
   }
 
   async vexiRemoveLineByName(query: string): Promise<VexiPosActionResult> {

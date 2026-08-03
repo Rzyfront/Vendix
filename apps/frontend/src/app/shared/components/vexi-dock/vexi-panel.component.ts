@@ -227,11 +227,15 @@ const SUGGESTIONS: readonly string[] = [
         display: block;
       }
 
-      /* A fixed height (not max-height) so the panel is a stable surface
-         instead of a box that grows a line at a time while Vexi streams —
-         which reflows the dock and the page behind it. The floor is what an
-         empty state needs to look deliberate; the ceiling keeps the panel off
-         a laptop's header. */
+      /* Grows with the conversation between a 450px floor and a 600px ceiling,
+         rather than sitting at one fixed height. The floor is what an empty
+         state needs to look deliberate; past the ceiling the message list takes
+         over and scrolls. The tradeoff accepted here is that the box does
+         reflow as Vexi streams — the min() against the viewport is what keeps a
+         laptop from having the panel run under its own header.
+         NOTE: no backticks anywhere in this stylesheet — it lives inside a
+         template literal, so one backtick closes the string and Angular fails
+         with "Code 1010: Failed to resolve styles ... to a string". */
       .vexi-panel {
         position: absolute;
         bottom: calc(100% + 12px);
@@ -239,7 +243,8 @@ const SUGGESTIONS: readonly string[] = [
         display: flex;
         flex-direction: column;
         width: 360px;
-        height: clamp(350px, 60vh, 400px);
+        min-height: 450px;
+        max-height: min(600px, calc(100vh - 120px));
         background: var(--color-surface, #fff);
         border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
         border-radius: 16px;
@@ -315,7 +320,11 @@ const SUGGESTIONS: readonly string[] = [
 
       .vexi-panel__body {
         display: flex;
-        flex: 1;
+        /* Basis auto, not the 0 that a plain "flex: 1" implies: the panel's
+           height is now content-driven, and a zero basis makes the content
+           contribute nothing to it — the box would stay pinned at its 450px
+           floor and never grow. */
+        flex: 1 1 auto;
         min-height: 0;
       }
 
@@ -323,6 +332,13 @@ const SUGGESTIONS: readonly string[] = [
         width: 148px;
         flex-shrink: 0;
         overflow: hidden;
+        /* Anchors the absolutely-positioned inner list below. The list must NOT
+           decide the panel's height: with dozens of saved conversations its
+           intrinsic height pinned the panel at its 600px ceiling even for a
+           one-message chat, so the panel never appeared to grow with the
+           conversation. Taking the list out of flow leaves the message column
+           as the only thing the height follows. */
+        position: relative;
         border-right: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
         background: var(--color-surface-secondary, rgba(0, 0, 0, 0.02));
         transition:
@@ -337,8 +353,9 @@ const SUGGESTIONS: readonly string[] = [
       }
 
       .vexi-panel__sidebar-inner {
+        position: absolute;
+        inset: 0;
         width: 148px;
-        height: 100%;
         overflow-y: auto;
         padding: 6px;
       }
@@ -378,7 +395,10 @@ const SUGGESTIONS: readonly string[] = [
       }
 
       .vexi-panel__messages {
-        flex: 1;
+        /* Same reason as .vexi-panel__body: the list's own content is what
+           makes the panel grow, so its basis must be auto. The zero min-height
+           still lets it shrink and scroll once the 600px ceiling is reached. */
+        flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
         padding: 12px;
