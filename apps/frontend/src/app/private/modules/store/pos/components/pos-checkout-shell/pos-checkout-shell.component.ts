@@ -156,7 +156,12 @@ export class PosCheckoutShellComponent {
    * corre al leerse (ya inicializado).
    */
   readonly customerRequired = computed<boolean>(
-    () => !this.allowAnonymousSales(),
+    () =>
+      // Pickup always passes through Cliente first (even when anonymous sales
+      // are allowed — operator picks "Venta Anónima" in the sub-step to skip).
+      // Delivery keeps the original semantics: cliente required only when
+      // anonymous sales are forbidden at the store level.
+      this.checkoutIntent() === 'pickup' || !this.allowAnonymousSales(),
   );
 
   /**
@@ -280,15 +285,14 @@ export class PosCheckoutShellComponent {
     if (this.checkoutIntent() === 'delivery') {
       return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
     }
-    const cobroLast = this.customerRequired();
     if (this.showConsumoStep()) {
-      return cobroLast
-        ? [{ label: 'Consumo' }, { label: 'Cliente' }, { label: 'Cobro' }]
-        : [{ label: 'Consumo' }, { label: 'Cobro' }, { label: 'Cliente' }];
+      return [
+        { label: 'Consumo' },
+        { label: 'Cliente' },
+        { label: 'Cobro' },
+      ];
     }
-    return cobroLast
-      ? [{ label: 'Cliente' }, { label: 'Cobro' }]
-      : [{ label: 'Cobro' }, { label: 'Cliente' }];
+    return [{ label: 'Cliente' }, { label: 'Cobro' }];
   });
 
   /** Parallel key array (same order/length as {@link steps}) used to render the
@@ -299,13 +303,10 @@ export class PosCheckoutShellComponent {
     if (this.checkoutIntent() === 'delivery') {
       return ['cliente', 'envio', 'cobro'];
     }
-    const cobroLast = this.customerRequired();
     if (this.showConsumoStep()) {
-      return cobroLast
-        ? ['consumo', 'cliente', 'cobro']
-        : ['consumo', 'cobro', 'cliente'];
+      return ['consumo', 'cliente', 'cobro'];
     }
-    return cobroLast ? ['cliente', 'cobro'] : ['cobro', 'cliente'];
+    return ['cliente', 'cobro'];
   });
 
   readonly currentStepKey = computed<string>(
