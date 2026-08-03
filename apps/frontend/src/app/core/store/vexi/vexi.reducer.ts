@@ -1,5 +1,6 @@
 import { createReducer, on } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
+import type { ToolStep, VexiProposal } from './vexi.actions';
 import { AIConversation, AIMessage } from '../../services/vexi-api.service';
 
 export interface VexiState {
@@ -11,6 +12,10 @@ export interface VexiState {
   isSending: boolean;
   loading: boolean;
   error: string | null;
+  /** Live trace of the current turn, cleared when the next one starts. */
+  toolSteps: ToolStep[];
+  /** A write awaiting the user's approval. Survives closing the panel. */
+  pendingProposal: VexiProposal | null;
 }
 
 export const initialVexiState: VexiState = {
@@ -22,6 +27,8 @@ export const initialVexiState: VexiState = {
   isSending: false,
   loading: false,
   error: null,
+  toolSteps: [],
+  pendingProposal: null,
 };
 
 export const vexiReducer = createReducer(
@@ -138,9 +145,90 @@ export const vexiReducer = createReducer(
     error,
   })),
 
+  // A new turn wipes the previous trace. Keeping it would stack the tools of
+  // every question in the conversation into one ever-growing list.
+  on(VexiActions.streamStarted, (state) => ({
+    ...state,
+    toolSteps: [],
+    streamingContent: '',
+    isStreaming: true,
+    isSending: true,
+    error: null,
+  })),
+
   on(VexiActions.receiveStreamChunk, (state, { content }) => ({
     ...state,
     streamingContent: state.streamingContent + content,
+  })),
+
+  on(VexiActions.toolCallStarted, (state, { id, name, arguments: args }) => ({
+    ...state,
+    toolSteps: [
+      ...state.toolSteps,
+      { id, name, arguments: args, status: 'running' as const },
+    ],
+  })),
+
+  on(VexiActions.toolCallFinished, (state, { id, name, summary, failed }) => {
+    const index = state.toolSteps.findIndex((step) => step.id === id);
+    const resolved: ToolStep = {
+      id,
+      name,
+      arguments: index >= 0 ? state.toolSteps[index].arguments : undefined,
+      summary,
+      status: failed ? 'failed' : 'done',
+    };
+
+    // A result with no matching call happens when the stream drops the
+    // `tool_call` frame (reconnect mid-turn). Appending rather than discarding
+    // keeps the trace truthful about what ran.
+    return {
+      ...state,
+      toolSteps:
+        index >= 0
+          ? state.toolSteps.map((step, i) => (i === index ? resolved : step))
+          : [...state.toolSteps, resolved],
+    };
+  }),
+
+  on(
+    VexiActions.proposalReceived,
+    (state, { tool, arguments: args, confirmationToken, preview }) => ({
+      ...state,
+      pendingProposal: {
+        tool,
+        arguments: args,
+        confirmationToken,
+        preview,
+        applying: false,
+      },
+    }),
+  ),
+
+  on(VexiActions.confirmProposal, (state) => ({
+    ...state,
+    pendingProposal: state.pendingProposal
+      ? { ...state.pendingProposal, applying: true }
+      : null,
+  })),
+
+  on(VexiActions.confirmProposalSuccess, (state) => ({
+    ...state,
+    pendingProposal: null,
+  })),
+
+  // The proposal is dropped, not left pending: the token is single-use and
+  // consumed on the failed attempt, so retrying it would fail again. Vexi has
+  // to re-propose.
+  on(VexiActions.confirmProposalFailure, (state, { error }) => ({
+    ...state,
+    pendingProposal: null,
+    error,
+  })),
+
+  on(VexiActions.rejectProposal, (state) => ({
+    ...state,
+    pendingProposal: null,
   })),
 
   on(VexiActions.streamComplete, (state) => {

@@ -168,6 +168,13 @@ export class DefaultPanelUIService {
         payroll_employees: true,
         payroll_runs: true,
         payroll_settlements: true,
+        // Añadidas para cerrar una deriva real: existían en
+        // `APP_MODULES.STORE_ADMIN` (el editor "Módulos del Panel" las
+        // renderiza) pero no aquí, así que a los usuarios cuyo `panel_ui` se
+        // creó antes nunca se les activaba por defecto y el submódulo quedaba
+        // invisible sin causa consultable. El spec de deriva lo vigila ahora.
+        payroll_novelties: true,
+        payroll_pila: true,
         payroll_advances: true,
         payroll_settings: true,
         settings: true,

@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
+import type { ToolStep, VexiProposal } from './vexi.actions';
 import * as VexiSelectors from './vexi.selectors';
 import { AIConversation, AIMessage } from '../../services/vexi-api.service';
 
@@ -21,6 +22,10 @@ export class VexiFacade {
   readonly isSending$ = this.store.select(VexiSelectors.selectIsSending);
   readonly loading$ = this.store.select(VexiSelectors.selectLoading);
   readonly error$ = this.store.select(VexiSelectors.selectError);
+  readonly toolSteps$ = this.store.select(VexiSelectors.selectToolSteps);
+  readonly pendingProposal$ = this.store.select(
+    VexiSelectors.selectPendingProposal,
+  );
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
   readonly conversations = toSignal(this.conversations$, {
@@ -37,6 +42,12 @@ export class VexiFacade {
   readonly isSending = toSignal(this.isSending$, { initialValue: false });
   readonly loading = toSignal(this.loading$, { initialValue: false });
   readonly error = toSignal(this.error$, { initialValue: null as string | null });
+  readonly toolSteps = toSignal(this.toolSteps$, {
+    initialValue: [] as ToolStep[],
+  });
+  readonly pendingProposal = toSignal(this.pendingProposal$, {
+    initialValue: null as VexiProposal | null,
+  });
 
   loadConversations(): void {
     this.store.dispatch(VexiActions.loadConversations());
@@ -71,5 +82,14 @@ export class VexiFacade {
 
   clearActiveConversation(): void {
     this.store.dispatch(VexiActions.clearActiveConversation());
+  }
+
+  /** Applies the pending write. The effect reads the token from the store. */
+  confirmProposal(): void {
+    this.store.dispatch(VexiActions.confirmProposal());
+  }
+
+  rejectProposal(): void {
+    this.store.dispatch(VexiActions.rejectProposal());
   }
 }

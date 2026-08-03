@@ -1,4 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createProductTools } from '../../../ai-engine/tools/domains/products.tools';
+import { createProductWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { SettingsService } from '../settings/settings.service';
 import { ProductsService } from './products.service';
 import { ProductsController } from './products.controller';
 import { ProductsBulkController } from './products-bulk.controller';
@@ -56,4 +61,40 @@ import { SettingsModule } from '../settings/settings.module';
     PriceResolverService,
   ],
 })
-export class ProductsModule {}
+export class ProductsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly productsService: ProductsService,
+    private readonly priceResolver: PriceResolverService,
+    private readonly settingsService: SettingsService,
+    private readonly prisma: StorePrismaService,
+  ) {}
+
+  /**
+   * Registers the products tool family for the AI agent. It lives here and not
+   * in `AIEngineModule` because that module is `@Global()`: importing one
+   * domain module per tool family into it generates dependency cycles.
+   * `AIToolRegistry` is exported globally, so the dependency points from the
+   * domain to the engine and this module imports nothing extra.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createProductTools({
+        productsService: this.productsService,
+        priceResolver: this.priceResolver,
+        settingsService: this.settingsService,
+        prisma: this.prisma,
+      }),
+    );
+
+    // `update_product_price` y `create_product`. Ambas delegan en
+    // `ProductsService`, que ya es propiedad de este módulo: registrarlas desde
+    // aquí no cuesta ningún import cruzado entre dominios.
+    this.toolRegistry.registerMany(
+      createProductWriteTools({
+        productsService: this.productsService,
+        prisma: this.prisma,
+      }),
+    );
+  }
+}

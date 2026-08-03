@@ -42,3 +42,13 @@ export const selectError = createSelector(
   selectVexiState,
   (state) => state.error,
 );
+
+export const selectToolSteps = createSelector(
+  selectVexiState,
+  (state) => state.toolSteps,
+);
+
+export const selectPendingProposal = createSelector(
+  selectVexiState,
+  (state) => state.pendingProposal,
+);

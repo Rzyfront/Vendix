@@ -40,6 +40,43 @@ export interface SendMessageResponse {
   };
 }
 
+/**
+ * What the browser tells Vexi about the screen the user is on.
+ *
+ * Mirrors the backend `VexiUiContext`. It is prompt material only — the server
+ * interpolates it so Vexi can say "veo que estás en el POS" and explain a
+ * hidden module by the layer that hides it, and it never authorizes anything.
+ */
+export interface VexiUiContext {
+  route?: string;
+  visible_modules?: string[];
+  hidden_modules?: Array<{ key: string; blocked_by: string }>;
+  pos?: {
+    item_count?: number;
+    total?: number;
+    customer?: string | null;
+  };
+}
+
+/** Live narration of an agent turn, as it arrives over SSE. */
+export interface VexiStreamChunk {
+  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error';
+  content?: string;
+  tool?: {
+    id: string;
+    name: string;
+    arguments?: Record<string, unknown>;
+    summary?: string;
+    failed?: boolean;
+  };
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  error?: string;
+}
+
 export interface PaginatedConversations {
   data: AIConversation[];
   meta: {
@@ -120,7 +157,51 @@ export class VexiApiService {
       .pipe(map((res) => res.data));
   }
 
-  getStreamUrl(conversationId: number): string {
+  /**
+   * Handshake that must precede `getStreamUrl`.
+   *
+   * `EventSource` cannot send a body, so the message and the UI context go
+   * over POST and the stream URL carries only the opaque id this returns.
+   * The previous shape put the prompt in `?content=`, which meant every
+   * question a user typed was written to the access log next to their JWT.
+   */
+  createStreamIntent(
+    conversationId: number,
+    content: string,
+    uiContext?: VexiUiContext,
+  ): Observable<string> {
+    return this.http
+      .post<{ data: { stream_id: string } }>(
+        `${this.baseUrl}/conversations/${conversationId}/stream-intent`,
+        { content, ui_context: uiContext },
+      )
+      .pipe(map((res) => res.data.stream_id));
+  }
+
+  /**
+   * Applies a write the user approved in the confirmation card.
+   *
+   * Lives under `/store/vexi` and not under `/store/ai-chat` because the same
+   * approval can come from voice, where there is no conversation.
+   */
+  applyConfirmation(
+    tool: string,
+    args: Record<string, unknown>,
+    confirmationToken: string,
+  ): Observable<{ tool: string; output: string }> {
+    return this.http
+      .post<{ data: { tool: string; output: string } }>(
+        `${environment.apiUrl}/store/vexi/confirmations/apply`,
+        { tool, arguments: args, confirmation_token: confirmationToken },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Returns `''` when there is no usable token — the caller must treat that as
+   * "cannot stream" rather than opening an EventSource on a malformed URL.
+   */
+  getStreamUrl(conversationId: number, streamId: string): string {
     const auth_state = localStorage.getItem('vendix_auth_state');
     if (!auth_state) {
       return '';
@@ -129,6 +210,6 @@ export class VexiApiService {
     if (!token) {
       return '';
     }
-    return `${this.baseUrl}/conversations/${conversationId}/stream?token=${token}`;
+    return `${this.baseUrl}/conversations/${conversationId}/stream?token=${token}&stream_id=${encodeURIComponent(streamId)}`;
   }
 }

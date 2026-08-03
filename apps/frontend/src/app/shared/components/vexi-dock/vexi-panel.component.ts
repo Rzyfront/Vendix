@@ -4,21 +4,46 @@ import {
   ElementRef,
   afterRenderEffect,
   computed,
-  effect,
   inject,
   input,
   output,
   signal,
   viewChild,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
+import { markdownToHtml } from '../../utils/markdown.util';
 import { IconComponent } from '../icon/icon.component';
+import { VexiAvatarComponent } from './vexi-avatar.component';
+import { VexiConfirmationCardComponent } from './vexi-confirmation-card.component';
+import { VexiToolTraceComponent } from './vexi-tool-trace.component';
+
+/** One rendered transcript entry. `html` is only produced for Vexi's turns. */
+interface RenderedMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  text: string;
+  html: string;
+}
+
+/**
+ * Cold-start prompts. Read-only questions plus one navigation, so a first-time
+ * owner sees what Vexi is for without having to invent a phrasing.
+ */
+const SUGGESTIONS: readonly string[] = [
+  '¿Qué productos tengo bajo stock?',
+  '¿Cómo van las ventas de hoy?',
+  'Llévame al Punto de Venta',
+];
 
 @Component({
   selector: 'app-vexi-panel',
   standalone: true,
-  imports: [FormsModule, IconComponent],
+  imports: [
+    IconComponent,
+    VexiAvatarComponent,
+    VexiConfirmationCardComponent,
+    VexiToolTraceComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="vexi-panel" [class.vexi-panel--left]="anchorLeft()">
@@ -26,14 +51,22 @@ import { IconComponent } from '../icon/icon.component';
         <button
           type="button"
           class="vexi-panel__icon-btn"
-          (click)="showSidebar.set(!showSidebar())"
-          [attr.aria-expanded]="showSidebar()"
-          aria-label="Conversaciones"
+          (click)="sidebarOpen.set(!sidebarOpen())"
+          [attr.aria-expanded]="sidebarOpen()"
+          [attr.aria-label]="
+            sidebarOpen() ? 'Ocultar conversaciones' : 'Ver conversaciones'
+          "
         >
-          <app-icon name="menu" [size]="18" />
+          <app-icon
+            [name]="sidebarOpen() ? 'panel-left-close' : 'panel-left-open'"
+            [size]="18"
+          />
         </button>
 
-        <span class="vexi-panel__title">Vexi</span>
+        <span class="vexi-panel__heading">
+          <span class="vexi-panel__title">Vexi</span>
+          <span class="vexi-panel__subtitle">{{ statusLine() }}</span>
+        </span>
 
         <button
           type="button"
@@ -41,7 +74,7 @@ import { IconComponent } from '../icon/icon.component';
           (click)="newConversation()"
           aria-label="Nueva conversación"
         >
-          <app-icon name="plus" [size]="18" />
+          <app-icon name="square-pen" [size]="18" />
         </button>
 
         <button
@@ -55,8 +88,16 @@ import { IconComponent } from '../icon/icon.component';
       </header>
 
       <div class="vexi-panel__body">
-        @if (showSidebar()) {
-          <aside class="vexi-panel__sidebar">
+        <!-- Kept in the DOM and collapsed by width instead of destroyed: an
+             @if would drop and rebuild the list on every toggle, which cannot
+             be animated and loses the scroll position of a long history. -->
+        <aside
+          class="vexi-panel__sidebar"
+          [class.is-collapsed]="!sidebarOpen()"
+          [attr.inert]="sidebarOpen() ? null : ''"
+          [attr.aria-hidden]="!sidebarOpen()"
+        >
+          <div class="vexi-panel__sidebar-inner">
             @for (conversation of conversations(); track conversation.id) {
               <button
                 type="button"
@@ -67,25 +108,88 @@ import { IconComponent } from '../icon/icon.component';
                 {{ conversation.title || 'Sin título' }}
               </button>
             } @empty {
-              <p class="vexi-panel__empty">Sin conversaciones</p>
+              <p class="vexi-panel__no-history">Sin conversaciones</p>
             }
-          </aside>
-        }
+          </div>
+        </aside>
 
         <div #scroller class="vexi-panel__messages">
-          @for (message of messages(); track message.id) {
-            <div class="vexi-msg" [class.vexi-msg--user]="message.role === 'user'">
-              {{ message.content }}
+          @if (showEmptyState()) {
+            <div class="vexi-empty">
+              <span class="vexi-empty__portrait" aria-hidden="true">
+                <app-vexi-avatar [expression]="'neutro'" />
+              </span>
+              <p class="vexi-empty__title">Hola, soy Vexi</p>
+              <p class="vexi-empty__text">
+                Pregúntame por tu inventario, tus ventas o tu contabilidad. Si
+                quieres, también te llevo al módulo que necesites.
+              </p>
+              <div class="vexi-empty__chips">
+                @for (suggestion of suggestions; track suggestion) {
+                  <button
+                    type="button"
+                    class="vexi-empty__chip"
+                    (click)="useSuggestion(suggestion)"
+                  >
+                    {{ suggestion }}
+                  </button>
+                }
+              </div>
             </div>
           }
 
-          @if (streamingContent()) {
-            <div class="vexi-msg vexi-msg--streaming">
-              {{ streamingContent() }}<span class="vexi-caret"></span>
+          @for (message of renderedMessages(); track message.id) {
+            @if (message.role === 'user') {
+              <div class="vexi-msg vexi-msg--user">{{ message.text }}</div>
+            } @else {
+              <div class="vexi-turn">
+                <span class="vexi-turn__avatar" aria-hidden="true">
+                  <app-vexi-avatar [expression]="'neutro'" />
+                </span>
+                <div
+                  class="vexi-msg vexi-msg--assistant vexi-md"
+                  [innerHTML]="message.html"
+                ></div>
+              </div>
+            }
+          }
+
+          <!-- Guarded here as well as inside the component: an empty block
+               element is still a flex item and would leave a phantom gap in
+               the transcript on every turn that used no tools. -->
+          @if (toolSteps().length) {
+            <app-vexi-tool-trace [steps]="toolSteps()" />
+          }
+
+          @if (pendingProposal(); as proposal) {
+            <app-vexi-confirmation-card
+              [proposal]="proposal"
+              (approve)="confirmProposal()"
+              (reject)="rejectProposal()"
+            />
+          }
+
+          @if (streamingHtml()) {
+            <div class="vexi-turn">
+              <span class="vexi-turn__avatar" aria-hidden="true">
+                <app-vexi-avatar [expression]="'hablando'" />
+              </span>
+              <div class="vexi-msg vexi-msg--assistant vexi-md">
+                <span [innerHTML]="streamingHtml()"></span>
+                <span class="vexi-caret"></span>
+              </div>
             </div>
           } @else if (isSending()) {
-            <div class="vexi-msg vexi-msg--typing" aria-label="Vexi está escribiendo">
-              <span></span><span></span><span></span>
+            <div class="vexi-turn">
+              <span class="vexi-turn__avatar" aria-hidden="true">
+                <app-vexi-avatar [expression]="'pensando'" />
+              </span>
+              <div
+                class="vexi-msg vexi-msg--assistant vexi-msg--typing"
+                aria-label="Vexi está escribiendo"
+              >
+                <span></span><span></span><span></span>
+              </div>
             </div>
           }
 
@@ -95,13 +199,15 @@ import { IconComponent } from '../icon/icon.component';
         </div>
       </div>
 
-      <form class="vexi-panel__composer" (ngSubmit)="send()">
+      <form class="vexi-panel__composer" (submit)="send($event)">
         <input
           class="vexi-panel__input"
           name="vexiMessage"
           autocomplete="off"
           placeholder="Pregúntale a Vexi…"
-          [(ngModel)]="draft"
+          aria-label="Mensaje para Vexi"
+          [value]="draft()"
+          (input)="onDraftInput($event)"
           [disabled]="isSending()"
         />
         <button
@@ -121,6 +227,11 @@ import { IconComponent } from '../icon/icon.component';
         display: block;
       }
 
+      /* A fixed height (not max-height) so the panel is a stable surface
+         instead of a box that grows a line at a time while Vexi streams —
+         which reflows the dock and the page behind it. The floor is what an
+         empty state needs to look deliberate; the ceiling keeps the panel off
+         a laptop's header. */
       .vexi-panel {
         position: absolute;
         bottom: calc(100% + 12px);
@@ -128,12 +239,13 @@ import { IconComponent } from '../icon/icon.component';
         display: flex;
         flex-direction: column;
         width: 360px;
-        max-height: min(70vh, 560px);
+        height: clamp(350px, 60vh, 400px);
         background: var(--color-surface, #fff);
-        border: 1px solid rgb(0 0 0 / 0.08);
+        border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
         border-radius: 16px;
-        box-shadow: 0 18px 48px rgb(0 0 0 / 0.18);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
         overflow: hidden;
+        color: var(--color-text-primary, inherit);
       }
 
       /* When the dock is parked on the left edge the panel must open rightward
@@ -147,30 +259,58 @@ import { IconComponent } from '../icon/icon.component';
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid rgb(0 0 0 / 0.07);
+        padding: 9px 10px;
+        border-bottom: 1px solid
+          rgba(var(--color-primary-rgb, 46, 204, 113), 0.18);
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb, 46, 204, 113), 0.18) 0%,
+          rgba(var(--color-primary-rgb, 46, 204, 113), 0.04) 100%
+        );
+      }
+
+      .vexi-panel__heading {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        line-height: 1.15;
       }
 
       .vexi-panel__title {
-        flex: 1;
         font-weight: 600;
         font-size: 0.95rem;
+      }
+
+      .vexi-panel__subtitle {
+        font-size: 0.68rem;
+        color: var(--color-text-secondary, inherit);
+        opacity: 0.75;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .vexi-panel__icon-btn {
         display: grid;
         place-items: center;
-        width: 30px;
-        height: 30px;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
         border: 0;
-        border-radius: 8px;
+        border-radius: 9px;
         background: transparent;
         cursor: pointer;
         color: inherit;
       }
 
       .vexi-panel__icon-btn:hover {
-        background: rgb(0 0 0 / 0.06);
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.14);
+      }
+
+      .vexi-panel__icon-btn:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 46, 204, 113), 0.8);
+        outline-offset: -2px;
       }
 
       .vexi-panel__body {
@@ -180,22 +320,39 @@ import { IconComponent } from '../icon/icon.component';
       }
 
       .vexi-panel__sidebar {
-        width: 140px;
+        width: 148px;
         flex-shrink: 0;
+        overflow: hidden;
+        border-right: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
+        background: var(--color-surface-secondary, rgba(0, 0, 0, 0.02));
+        transition:
+          width 200ms ease,
+          opacity 160ms ease;
+      }
+
+      .vexi-panel__sidebar.is-collapsed {
+        width: 0;
+        opacity: 0;
+        border-right-width: 0;
+      }
+
+      .vexi-panel__sidebar-inner {
+        width: 148px;
+        height: 100%;
         overflow-y: auto;
-        border-right: 1px solid rgb(0 0 0 / 0.07);
         padding: 6px;
       }
 
       .vexi-panel__conversation {
         display: block;
         width: 100%;
-        padding: 7px 8px;
+        padding: 8px;
         border: 0;
         border-radius: 8px;
         background: transparent;
         text-align: left;
-        font-size: 0.8rem;
+        font-family: inherit;
+        font-size: 0.78rem;
         cursor: pointer;
         color: inherit;
         overflow: hidden;
@@ -203,14 +360,21 @@ import { IconComponent } from '../icon/icon.component';
         white-space: nowrap;
       }
 
-      .vexi-panel__conversation.is-active {
-        background: rgb(var(--color-primary-500, 34 197 94) / 0.14);
+      .vexi-panel__conversation:hover {
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.1);
       }
 
-      .vexi-panel__empty {
+      .vexi-panel__conversation.is-active {
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.18);
+        font-weight: 600;
+      }
+
+      .vexi-panel__no-history {
         padding: 8px;
-        font-size: 0.78rem;
-        opacity: 0.6;
+        margin: 0;
+        font-size: 0.75rem;
+        color: var(--color-text-muted, inherit);
+        opacity: 0.7;
       }
 
       .vexi-panel__messages {
@@ -220,23 +384,114 @@ import { IconComponent } from '../icon/icon.component';
         padding: 12px;
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 9px;
+      }
+
+      /* ── Empty state ─────────────────────────────────────────────────── */
+
+      .vexi-empty {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        text-align: center;
+        padding: 4px 2px;
+      }
+
+      /* The avatar is position:absolute + inset:0, so it needs a sized,
+         positioned box to resolve against. */
+      .vexi-empty__portrait {
+        position: relative;
+        display: block;
+        width: 58px;
+        height: 74px;
+        flex-shrink: 0;
+      }
+
+      .vexi-empty__title {
+        margin: 2px 0 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      .vexi-empty__text {
+        margin: 0;
+        max-width: 240px;
+        font-size: 0.76rem;
+        line-height: 1.4;
+        color: var(--color-text-secondary, inherit);
+        opacity: 0.85;
+      }
+
+      .vexi-empty__chips {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 6px;
+      }
+
+      .vexi-empty__chip {
+        padding: 7px 11px;
+        border: 1px solid rgba(var(--color-primary-rgb, 46, 204, 113), 0.35);
+        border-radius: 999px;
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.08);
+        color: inherit;
+        font-family: inherit;
+        font-size: 0.73rem;
+        cursor: pointer;
+      }
+
+      .vexi-empty__chip:hover {
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.18);
+      }
+
+      .vexi-empty__chip:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 46, 204, 113), 0.8);
+        outline-offset: 2px;
+      }
+
+      /* ── Transcript ──────────────────────────────────────────────────── */
+
+      .vexi-turn {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+        max-width: 92%;
+      }
+
+      .vexi-turn__avatar {
+        position: relative;
+        display: block;
+        width: 24px;
+        height: 30px;
+        flex-shrink: 0;
       }
 
       .vexi-msg {
-        max-width: 85%;
         padding: 8px 11px;
-        border-radius: 12px;
-        background: rgb(0 0 0 / 0.05);
         font-size: 0.87rem;
         line-height: 1.45;
-        white-space: pre-wrap;
         overflow-wrap: anywhere;
+      }
+
+      /* Asymmetric corners: the flat corner points at who is speaking, which
+         is what makes a two-column transcript scannable without reading it. */
+      .vexi-msg--assistant {
+        border-radius: 14px 14px 14px 4px;
+        background: var(--color-surface-secondary, rgba(0, 0, 0, 0.05));
+        border: 1px solid var(--color-border, rgba(0, 0, 0, 0.06));
       }
 
       .vexi-msg--user {
         align-self: flex-end;
-        background: rgb(var(--color-primary-500, 34 197 94) / 0.16);
+        max-width: 85%;
+        border-radius: 14px 14px 4px 14px;
+        background: rgba(var(--color-primary-rgb, 46, 204, 113), 0.16);
+        border: 1px solid rgba(var(--color-primary-rgb, 46, 204, 113), 0.24);
+        white-space: pre-wrap;
       }
 
       .vexi-caret {
@@ -258,6 +513,8 @@ import { IconComponent } from '../icon/icon.component';
       .vexi-msg--typing {
         display: flex;
         gap: 4px;
+        align-items: center;
+        min-height: 34px;
       }
 
       .vexi-msg--typing span {
@@ -290,35 +547,46 @@ import { IconComponent } from '../icon/icon.component';
       }
 
       .vexi-panel__error {
+        margin: 0;
         font-size: 0.8rem;
-        color: rgb(var(--color-danger-500, 239 68 68));
+        color: var(--color-error, #ef4444);
       }
+
+      /* ── Composer ────────────────────────────────────────────────────── */
 
       .vexi-panel__composer {
         display: flex;
         gap: 8px;
         padding: 10px;
-        border-top: 1px solid rgb(0 0 0 / 0.07);
+        border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
+        background: var(--color-surface, #fff);
       }
 
       .vexi-panel__input {
         flex: 1;
         min-width: 0;
-        padding: 8px 11px;
-        border: 1px solid rgb(0 0 0 / 0.12);
+        padding: 9px 11px;
+        border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
         border-radius: 10px;
+        font-family: inherit;
         font-size: 0.87rem;
         background: transparent;
         color: inherit;
       }
 
+      .vexi-panel__input:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 46, 204, 113), 0.55);
+        outline-offset: -1px;
+      }
+
       .vexi-panel__send {
         display: grid;
         place-items: center;
-        width: 36px;
+        width: 40px;
+        flex-shrink: 0;
         border: 0;
         border-radius: 10px;
-        background: rgb(var(--color-primary-500, 34 197 94));
+        background: var(--color-primary, #2ecc71);
         color: #fff;
         cursor: pointer;
       }
@@ -328,16 +596,72 @@ import { IconComponent } from '../icon/icon.component';
         cursor: not-allowed;
       }
 
-      @media (max-width: 480px) {
-        .vexi-panel {
-          width: calc(100vw - 24px);
-        }
+      /* ── Markdown produced by markdownToHtml ─────────────────────────── */
+      /* innerHTML content never receives the emulated-encapsulation
+         attribute, so scoped selectors alone would not reach it. */
+
+      :host ::ng-deep .vexi-md p {
+        margin: 0 0 6px;
+      }
+
+      :host ::ng-deep .vexi-md p:last-child {
+        margin-bottom: 0;
+      }
+
+      :host ::ng-deep .vexi-md h2,
+      :host ::ng-deep .vexi-md h3 {
+        margin: 8px 0 4px;
+        font-size: 0.88rem;
+        font-weight: 600;
+      }
+
+      :host ::ng-deep .vexi-md ul {
+        margin: 4px 0;
+        padding-left: 18px;
+      }
+
+      :host ::ng-deep .vexi-md li {
+        margin: 2px 0;
+      }
+
+      :host ::ng-deep .vexi-md a {
+        color: var(--color-primary, #2ecc71);
+        text-decoration: underline;
+      }
+
+      :host ::ng-deep .vexi-md img {
+        max-width: 100%;
+        border-radius: 8px;
+      }
+
+      :host ::ng-deep .vexi-md br + br {
+        display: none;
       }
 
       @media (prefers-reduced-motion: reduce) {
         .vexi-caret,
         .vexi-msg--typing span {
           animation: none;
+        }
+
+        .vexi-panel__sidebar {
+          transition: none;
+        }
+      }
+
+      /* Mobile overrides last: source order decides which rule wins between
+         two selectors of equal specificity. */
+      @media (max-width: 480px) {
+        .vexi-panel {
+          width: calc(100vw - 24px);
+        }
+
+        .vexi-panel__sidebar {
+          width: 132px;
+        }
+
+        .vexi-panel__sidebar-inner {
+          width: 132px;
         }
       }
     `,
@@ -352,7 +676,10 @@ export class VexiPanelComponent {
   readonly anchorLeft = input(false);
   readonly closed = output<void>();
 
-  protected draft = '';
+  protected readonly suggestions = SUGGESTIONS;
+
+  /** Composer text. A signal, not a field: the template reads it. */
+  protected readonly draft = signal('');
 
   // Read the facade's signal parallels straight through. Mirroring them into
   // local signals with manual subscriptions is what the previous widget did,
@@ -363,9 +690,54 @@ export class VexiPanelComponent {
   protected readonly streamingContent = this.facade.streamingContent;
   protected readonly isSending = this.facade.isSending;
   protected readonly error = this.facade.error;
+  protected readonly toolSteps = this.facade.toolSteps;
+  protected readonly pendingProposal = this.facade.pendingProposal;
 
-  protected readonly showSidebar = signal(false);
-  protected readonly canSend = computed(() => !this.isSending());
+  protected readonly sidebarOpen = signal(false);
+  protected readonly canSend = computed(
+    () => !this.isSending() && this.draft().trim().length > 0,
+  );
+
+  /**
+   * `tool` and `system` turns are plumbing, not conversation: the trace already
+   * shows what ran, and printing the raw tool payload would bury the answer.
+   *
+   * Vexi's turns go through markdown; the user's do not. Rendering what the
+   * user typed as markdown would let a pasted asterisk silently change their
+   * own words back at them.
+   */
+  protected readonly renderedMessages = computed<RenderedMessage[]>(() =>
+    this.messages()
+      .filter(
+        (message) => message.role === 'user' || message.role === 'assistant',
+      )
+      .map((message) => ({
+        id: message.id,
+        role: message.role as 'user' | 'assistant',
+        text: message.content,
+        html: message.role === 'assistant' ? markdownToHtml(message.content) : '',
+      })),
+  );
+
+  protected readonly streamingHtml = computed(() => {
+    const content = this.streamingContent();
+    return content ? markdownToHtml(content) : '';
+  });
+
+  protected readonly showEmptyState = computed(
+    () =>
+      this.renderedMessages().length === 0 &&
+      !this.streamingContent() &&
+      !this.isSending() &&
+      this.toolSteps().length === 0,
+  );
+
+  protected readonly statusLine = computed(() => {
+    if (this.pendingProposal()) return 'Esperando tu confirmación';
+    if (this.streamingContent()) return 'Respondiendo…';
+    if (this.isSending()) return 'Pensando…';
+    return 'Tu copiloto de tienda';
+  });
 
   constructor() {
     this.facade.loadConversations();
@@ -376,13 +748,21 @@ export class VexiPanelComponent {
     afterRenderEffect(() => {
       this.messages();
       this.streamingContent();
+      this.toolSteps();
+      this.pendingProposal();
       const el = this.scroller().nativeElement;
       el.scrollTop = el.scrollHeight;
     });
   }
 
-  protected send(): void {
-    const content = this.draft.trim();
+  protected onDraftInput(event: Event): void {
+    this.draft.set((event.target as HTMLInputElement).value);
+  }
+
+  protected send(event?: Event): void {
+    event?.preventDefault();
+
+    const content = this.draft().trim();
     if (!content || this.isSending()) return;
 
     const conversationId = this.activeConversationId();
@@ -392,16 +772,34 @@ export class VexiPanelComponent {
       this.facade.startConversation(content);
     }
 
-    this.draft = '';
+    this.draft.set('');
+  }
+
+  protected useSuggestion(suggestion: string): void {
+    if (this.isSending()) return;
+    this.draft.set(suggestion);
+    this.send();
   }
 
   protected newConversation(): void {
     this.facade.createConversation();
-    this.showSidebar.set(false);
+    this.sidebarOpen.set(false);
   }
 
   protected selectConversation(id: number): void {
     this.facade.selectConversation(id);
-    this.showSidebar.set(false);
+    this.sidebarOpen.set(false);
+  }
+
+  /**
+   * Approving is a deliberate click and nothing else: no timeout applies it, no
+   * keyboard shortcut reaches it, and the card never pre-focuses it.
+   */
+  protected confirmProposal(): void {
+    this.facade.confirmProposal();
+  }
+
+  protected rejectProposal(): void {
+    this.facade.rejectProposal();
   }
 }

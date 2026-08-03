@@ -238,10 +238,21 @@ export class AIEngineService implements OnModuleInit {
 
   // --- Application-level API ---
 
+  /**
+   * Application-level call: resolves the app, enforces the subscription gate
+   * and rate limit, interpolates the stored prompts and writes an
+   * `ai_engine_logs` row. Everything that talks to a provider on a user's
+   * behalf must come through here — `chat()`/`chatWith()` skip all three.
+   *
+   * `optionsOverride` exists so the agent loop can pass `tools`/`tool_choice`
+   * per iteration without abandoning the gate. It is merged last, so a caller
+   * may also deliberately override the app's temperature or token ceiling.
+   */
   async run(
     appKey: string,
     variables?: Record<string, string>,
     extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
   ): Promise<AIResponse> {
     const startTime = Date.now();
     let logStatus: 'success' | 'error' = 'error';
@@ -307,6 +318,11 @@ export class AIEngineService implements OnModuleInit {
       }
       if (app.max_tokens !== null) {
         options.maxTokens = app.max_tokens;
+      }
+      // Merged last so the caller wins — this is how the agent loop injects its
+      // tool catalog while still going through the gate above.
+      if (optionsOverride) {
+        Object.assign(options, optionsOverride);
       }
 
       // Execute with retry
@@ -410,6 +426,7 @@ export class AIEngineService implements OnModuleInit {
     appKey: string,
     variables?: Record<string, string>,
     extraMessages?: AIMessage[],
+    optionsOverride?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk> {
     const startTime = Date.now();
     let lastChunk: AIStreamChunk | null = null;
@@ -493,6 +510,11 @@ export class AIEngineService implements OnModuleInit {
       }
       if (app.max_tokens !== null) {
         options.maxTokens = app.max_tokens;
+      }
+      // Without this the tool catalog never reached the streaming path, so
+      // opening a stream silently disabled the agent.
+      if (optionsOverride) {
+        Object.assign(options, optionsOverride);
       }
 
       try {

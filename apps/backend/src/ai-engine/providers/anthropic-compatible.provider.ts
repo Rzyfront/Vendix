@@ -227,6 +227,22 @@ export class AnthropicCompatibleProvider implements AIProvider {
       }
 
       const finalMessage = await stream.finalMessage();
+
+      // Anthropic assembles tool calls into `tool_use` content blocks on the
+      // final message, so unlike the OpenAI path there is nothing to
+      // accumulate — the deltas would only give us partial JSON.
+      for (const block of finalMessage.content ?? []) {
+        if (block.type !== 'tool_use') continue;
+        yield {
+          type: 'tool_call',
+          tool: {
+            id: block.id,
+            name: block.name,
+            arguments: (block.input ?? {}) as Record<string, any>,
+          },
+        };
+      }
+
       yield {
         type: 'done',
         usage: {

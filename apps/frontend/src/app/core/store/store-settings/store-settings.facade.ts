@@ -8,6 +8,7 @@ import {
   PosSettings,
   NotificationsSettings,
   ReceiptsSettings,
+  VexiSettings,
 } from '../../models/store-settings.interface';
 
 /**
@@ -66,5 +67,22 @@ export class StoreSettingsFacade {
 
   readonly modules = computed<Record<string, any> | null>(
     () => this.settings()?.module_flows ?? null,
+  );
+
+  /** Raw Vexi block. `null` when the store never persisted the switch. */
+  readonly vexi = computed<VexiSettings | null>(
+    () => this.settings()?.vexi ?? null,
+  );
+
+  /**
+   * Whether the Vexi assistant is on for this store.
+   *
+   * Absent block means enabled: Vexi ships on, and a settings row written
+   * before the switch existed must not silently lose the assistant. Only an
+   * explicit `false` turns it off, which mirrors `VexiEnabledGuard` on the
+   * backend — the two must agree or the dock renders against dead endpoints.
+   */
+  readonly vexiEnabled = computed<boolean>(
+    () => this.settings()?.vexi?.enabled !== false,
   );
 }

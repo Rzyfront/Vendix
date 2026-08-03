@@ -439,6 +439,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    // Vexi - on by default. It is a capability of the product, so a store
+    // that has never heard of the setting still gets the assistant; only an
+    // explicit `false` takes it away.
+    vexi: {
+      enabled: true,
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

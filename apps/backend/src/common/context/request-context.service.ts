@@ -21,6 +21,15 @@ export interface RequestContext {
   is_owner: boolean;
   email?: string;
   request_id?: string;
+  /**
+   * The caller's raw bearer token.
+   *
+   * Carried so the AI api-bridge can replay a `GET` over internal HTTP as the
+   * very same user, traversing the real guard chain instead of reimplementing
+   * authorization. Never log it and never return it in a response body — it is
+   * a live credential, not context.
+   */
+  access_token?: string;
 }
 
 @Injectable()

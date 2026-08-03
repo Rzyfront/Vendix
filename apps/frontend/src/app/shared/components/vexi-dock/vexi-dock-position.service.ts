@@ -10,8 +10,14 @@ export interface DockPosition {
 
 const STORAGE_KEY = 'vendix_vexi_dock_position';
 
-/** Dock diameter; mirrors `--vexi-dock-size` in the component styles. */
-export const DOCK_SIZE = 78;
+/**
+ * Dock diameter; mirrors the `--vexi-dock-size` fallback in the dock component
+ * styles. The two are a single truth expressed twice, so they must be changed
+ * in the same commit: `restore()` re-clamps positions that were persisted with
+ * the previous size, and a mismatch would park the dock a few pixels off the
+ * edge it snapped to.
+ */
+export const DOCK_SIZE = 94;
 
 /** Keeps the dock clear of the viewport edges and of iOS home indicators. */
 const EDGE_MARGIN = 12;

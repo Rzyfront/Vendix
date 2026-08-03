@@ -10,6 +10,12 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
+import {
+  VexiPosBridgeService,
+  type VexiPosActionResult,
+  type VexiPosCartSnapshot,
+} from '../../../../core/services/vexi-pos-bridge.service';
 
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -1002,6 +1008,7 @@ export class PosComponent {
     PosProductSelectionComponent,
   );
   private customerService = inject(PosCustomerService);
+  private vexiPos = inject(VexiPosBridgeService);
   private paymentService = inject(PosPaymentService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -1030,6 +1037,14 @@ export class PosComponent {
   );
 
   constructor() {
+    // Vexi reaches the POS through this handle while the screen is mounted.
+    // Registering here rather than letting the command service query the URL
+    // means "is the POS open" is answered by the component's own lifetime —
+    // the two disagree during a route transition, and an item added to a
+    // screen that is tearing down is silently lost.
+    this.vexiPos.register(this);
+    this.destroyRef.onDestroy(() => this.vexiPos.unregister(this));
+
     this.checkMobile();
     this.setupSubscriptions();
     this.loadStoreSettings();
@@ -2200,6 +2215,201 @@ export class PosComponent {
           );
         },
       });
+  }
+
+  // ── Vexi: API pública del POS ───────────────────────────────────────────
+  //
+  // Same doctrine as `handleBarcodeScan`: every add goes through the
+  // product-selection child's own `onAddToCart` / `onVariantSelected`, so
+  // stock validation, variant mapping, the prepared-vs-KDS decision and the
+  // toasts stay identical to a manual tap. Vexi never touches `PosCartService`
+  // directly — carts built that way are the ones checkout later rejects.
+  //
+  // Decisions the product reserves for a human — variant, weight,
+  // prepared-vs-stock, reservation, and payment — are NOT made here. They
+  // return `needs_user_input` and Vexi asks.
+
+  /**
+   * Resolves a product by free text and adds it, or reports what a human has
+   * to decide. Registered with `VexiPosBridgeService` while the POS is mounted.
+   */
+  async vexiAddProductByName(
+    query: string,
+    quantity: number,
+  ): Promise<VexiPosActionResult> {
+    const child = this.productSelectionList()[0];
+    if (!child) {
+      return {
+        status: 'error',
+        message: 'El selector de productos aún no está listo en pantalla.',
+      };
+    }
+
+    const results = await firstValueFrom(
+      this.productService.searchProducts({ query } as any, 1, 8),
+    ).catch(() => null);
+
+    const products: Product[] = (results as any)?.products ?? [];
+
+    if (!products.length) {
+      return {
+        status: 'not_found',
+        message: `No encontré ningún producto que coincida con "${query}".`,
+      };
+    }
+
+    // More than one match is a decision, not a problem to solve by guessing:
+    // adding the wrong item to a live sale is worse than one more question.
+    const exact = products.filter(
+      (p) => p.name?.trim().toLowerCase() === query.trim().toLowerCase(),
+    );
+    const candidates = exact.length === 1 ? exact : products;
+
+    if (candidates.length > 1) {
+      return {
+        status: 'needs_user_input',
+        message: `Hay ${candidates.length} productos que coinciden con "${query}".`,
+        detail: candidates.slice(0, 5).map((p) => p.name),
+      };
+    }
+
+    const product = candidates[0];
+
+    if ((product.product_variants ?? []).length > 0) {
+      // Opens the child's variant modal. The promise below does not wait for
+      // the click — the command service caps the wait and reports it as
+      // pending on the user.
+      void child.onAddToCart(product);
+      return {
+        status: 'needs_user_input',
+        message: `"${product.name}" tiene variantes. Le abrí el selector para que elija.`,
+      };
+    }
+
+    // `onAddToCart` takes no quantity — it adds one unit and the cart merges
+    // repeats into a single line. Looping reuses that exact path instead of
+    // reaching past it to set a quantity directly, which would skip the stock
+    // check it runs per unit.
+    const units = Math.max(1, Math.min(Math.trunc(quantity) || 1, 99));
+    const before = this.vexiCartUnits();
+
+    for (let i = 0; i < units; i++) {
+      await child.onAddToCart(product);
+    }
+
+    // `onAddToCart` returns nothing and swallows its own refusals: out of
+    // stock, not sellable, a modal it opened and is waiting on. Reporting `ok`
+    // on the strength of having called it made Vexi tell the user "agregué el
+    // café" over an empty cart. The cart itself is the only honest witness.
+    const added = this.vexiCartUnits() - before;
+
+    if (added <= 0) {
+      return {
+        status: 'error',
+        message: `Pedí agregar "${product.name}" pero el carrito no lo aceptó. Puede estar sin stock, no ser vendible, o el punto de venta puede estar esperando un dato en pantalla.`,
+      };
+    }
+
+    if (added < units) {
+      return {
+        status: 'needs_user_input',
+        message: `De ${units} unidades de ${product.name} solo entraron ${added}. Revisa el stock disponible en pantalla.`,
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `Agregué ${units > 1 ? `${units} × ` : ''}${product.name} al carrito.`,
+    };
+  }
+
+  /**
+   * Total units in the cart, used to tell a real add from a silent refusal.
+   *
+   * Units and not line count: adding a second unit of something already in the
+   * cart merges into the existing line, so counting lines would read that as
+   * nothing having happened.
+   */
+  private vexiCartUnits(): number {
+    return this.cartItems().reduce(
+      (total, item) => total + (Number(item.quantity) || 0),
+      0,
+    );
+  }
+
+  async vexiRemoveLineByName(query: string): Promise<VexiPosActionResult> {
+    const needle = query.trim().toLowerCase();
+    const matches = this.cartItems().filter((item) =>
+      (item.product?.name ?? item.description ?? '').toLowerCase().includes(needle),
+    );
+
+    if (!matches.length) {
+      return {
+        status: 'not_found',
+        message: `No hay ninguna línea que coincida con "${query}" en el carrito.`,
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        status: 'needs_user_input',
+        message: `Hay ${matches.length} líneas que coinciden con "${query}". Dime cuál quitar.`,
+        detail: matches.map((m) => m.product?.name ?? m.description),
+      };
+    }
+
+    await firstValueFrom(this.cartService.removeFromCart(matches[0].id));
+    return {
+      status: 'ok',
+      message: `Quité ${matches[0].product?.name ?? matches[0].description} del carrito.`,
+    };
+  }
+
+  async vexiSetCustomerByQuery(query: string): Promise<VexiPosActionResult> {
+    const response = await firstValueFrom(
+      this.customerService.searchCustomers({ query, limit: 5 }),
+    ).catch(() => null);
+
+    const customers = (response as any)?.data ?? [];
+
+    if (!customers.length) {
+      return {
+        status: 'not_found',
+        message: `No encontré ningún cliente que coincida con "${query}".`,
+      };
+    }
+    if (customers.length > 1) {
+      return {
+        status: 'needs_user_input',
+        message: `Hay ${customers.length} clientes que coinciden con "${query}".`,
+        detail: customers.map(
+          (c: PosCustomer) => `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
+        ),
+      };
+    }
+
+    this.customerService.selectCustomer(customers[0]);
+    const name =
+      `${customers[0].first_name ?? ''} ${customers[0].last_name ?? ''}`.trim();
+    return { status: 'ok', message: `Asigné la venta a ${name}.` };
+  }
+
+  vexiReadCart(): VexiPosCartSnapshot {
+    const summary = this.cartSummary();
+    const customer = this.selectedCustomer();
+
+    return {
+      lines: this.cartItems().map((item) => ({
+        name: item.product?.name ?? item.description ?? 'Línea sin nombre',
+        quantity: item.quantity ?? 0,
+        unit_price: Number(item.unitPrice ?? 0),
+        total: Number(item.totalPrice ?? 0),
+      })),
+      subtotal: Number(summary?.subtotal ?? 0),
+      total: Number(summary?.total ?? 0),
+      customer: customer
+        ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim()
+        : null,
+    };
   }
 
   onCartItemRemoved(itemId: string): void {

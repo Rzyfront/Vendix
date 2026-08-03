@@ -16,6 +16,7 @@ import {
   DispatchSettingsDto,
   RestaurantSettingsDto,
   MembershipSettingsDto,
+  VexiSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
   ModuleFlowsSettingsDto,
@@ -116,6 +117,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => MembershipSettingsDto)
   membership?: MembershipSettingsDto;
+
+  @ApiProperty({ type: VexiSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VexiSettingsDto)
+  vexi?: VexiSettingsDto;
 
   @ApiProperty({ type: PanelUISettingsDto, required: false })
   @IsOptional()

@@ -633,6 +633,15 @@ export class OpenAICompatibleProvider implements AIProvider {
     return { success: false, message: response.error || 'Unknown error' };
   }
 
+  private parseToolArguments(raw: string): Record<string, any> {
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+
   async *chatStream(
     messages: AIMessage[],
     options?: AIRequestOptions,
@@ -662,6 +671,16 @@ export class OpenAICompatibleProvider implements AIProvider {
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
 
+      // Tool calls arrive as deltas keyed by `index`, with `function.arguments`
+      // split across chunks — often a few characters at a time. They have to be
+      // accumulated and emitted once complete; reading only `delta.content`
+      // (as this loop used to) meant a turn where the model asked for a tool
+      // ended at `done` with no text and no signal at all.
+      const pending = new Map<
+        number,
+        { id: string; name: string; args: string }
+      >();
+
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta;
 
@@ -669,11 +688,38 @@ export class OpenAICompatibleProvider implements AIProvider {
           yield { type: 'text', content: delta.content };
         }
 
+        for (const call of delta?.tool_calls ?? []) {
+          const slot = pending.get(call.index) ?? {
+            id: '',
+            name: '',
+            args: '',
+          };
+          if (call.id) slot.id = call.id;
+          if (call.function?.name) slot.name += call.function.name;
+          if (call.function?.arguments) slot.args += call.function.arguments;
+          pending.set(call.index, slot);
+        }
+
         // Capture usage from the final chunk
         if (chunk.usage) {
           totalPromptTokens = chunk.usage.prompt_tokens || 0;
           totalCompletionTokens = chunk.usage.completion_tokens || 0;
         }
+      }
+
+      for (const slot of pending.values()) {
+        if (!slot.name) continue;
+        yield {
+          type: 'tool_call',
+          tool: {
+            id: slot.id || slot.name,
+            name: slot.name,
+            // Malformed JSON is the model's mistake, not a transport failure.
+            // Emit the call anyway with empty args so the consumer can report
+            // a bad invocation rather than lose the event entirely.
+            arguments: this.parseToolArguments(slot.args),
+          },
+        };
       }
 
       yield {

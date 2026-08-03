@@ -1275,3 +1275,23 @@ export class ReservationsSettingsDto {
   @IsBoolean()
   allow_direct_reschedule?: boolean;
 }
+
+/**
+ * Master switch for the Vexi assistant.
+ *
+ * Defaults to enabled: Vexi is a capability of the product, not an opt-in.
+ * Turning it off is enforced in three places, not one — route guard, sidebar
+ * entry, and the Vexi endpoints themselves — because a switch that only hides
+ * the UI is bypassed by calling the API by hand.
+ */
+export class VexiSettingsDto {
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Habilita el asistente Vexi para toda la tienda. Con false el dock no se monta y los endpoints de Vexi responden módulo deshabilitado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}

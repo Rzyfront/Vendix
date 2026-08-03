@@ -22,6 +22,7 @@ import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-doc
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 
 import { map } from 'rxjs/operators';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -105,8 +106,14 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
     <app-fiscal-gate-outlet />
 
-    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado -->
-    <app-vexi-dock />
+    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
+         Se respeta el mismo interruptor de tienda: sin contexto de tienda el
+         ajuste está ausente y vexiEnabled() devuelve true, así que el panel
+         de organización sólo pierde el dock cuando la tienda activa lo apagó
+         de verdad — que es exactamente cuando el backend lo rechazaría. -->
+    @if (vexiEnabled()) {
+      <app-vexi-dock />
+    }
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
@@ -119,6 +126,10 @@ export class OrganizationAdminLayoutComponent {
   private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
   private readonly menuFilterService = inject(MenuFilterService);
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade);
+
+  /** Vexi's store-wide master switch. Absent means enabled. */
+  readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
   private readonly configFacade = inject(ConfigFacade);
 
   // --- Signals from facade observables ---

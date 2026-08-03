@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { VexiUiCommandService } from './vexi-ui-command.service';
 
 /**
  * What the dock is doing right now. Drives the avatar expression, so the
@@ -54,6 +55,7 @@ interface RealtimeServerEvent {
 @Injectable({ providedIn: 'root' })
 export class VexiRealtimeService {
   private readonly http = inject(HttpClient);
+  private readonly uiCommands = inject(VexiUiCommandService);
   private readonly baseUrl = `${environment.apiUrl}/store/vexi/realtime`;
 
   readonly state = signal<VexiVoiceState>('idle');
@@ -292,6 +294,14 @@ export class VexiRealtimeService {
       args = rawArgs ? (JSON.parse(rawArgs) as Record<string, unknown>) : {};
     } catch {
       return JSON.stringify({ error: 'Argumentos inválidos' });
+    }
+
+    // UI commands are intercepted before the network hop: they act on this
+    // browser's router and cart, and the server has neither. Navigating by
+    // voice is the natural case for these, so they are published to the voice
+    // catalog too — they just never leave the tab.
+    if (this.uiCommands.handles(name)) {
+      return this.uiCommands.execute(name, args);
     }
 
     try {

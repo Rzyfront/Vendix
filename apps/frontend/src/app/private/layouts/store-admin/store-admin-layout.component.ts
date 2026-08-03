@@ -27,6 +27,7 @@ import { TourModalComponent } from '../../../shared/components/tour/tour-modal/t
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
@@ -212,8 +213,13 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
     <app-fiscal-gate-outlet />
 
-    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado -->
-    <app-vexi-dock />
+    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
+         El interruptor maestro de la tienda decide si llega a montarse: un
+         dock presente contra endpoints que responden "módulo deshabilitado"
+         se lee como una avería, no como un ajuste. -->
+    @if (vexiEnabled()) {
+      <app-vexi-dock />
+    }
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
@@ -226,7 +232,14 @@ export class StoreAdminLayoutComponent {
   private menuFilterService = inject(MenuFilterService);
   private subscriptionFacade = inject(SubscriptionFacade);
   private ambientAccess = inject(MembershipAmbientAccessService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
   private destroyRef = inject(DestroyRef);
+
+  /**
+   * Vexi's store-wide master switch. Absent means enabled (see the facade),
+   * so a store that never touched the setting keeps the assistant.
+   */
+  readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
 
   /**
    * W4 — Ambient membership-access validation. Reads the store setting
@@ -844,6 +857,18 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/security',
         },
         {
+          // `alwaysVisible` because Vexi deliberately has NO `panel_ui` key:
+          // the assistant is not a module an admin curates per user, it is a
+          // store-wide capability. Without this flag the entry falls into the
+          // filter's "no mapping, no children" branch and is dropped outright.
+          // Its real gate is `passesAuthorizationGates` (owner/admin), which
+          // runs before every case.
+          label: 'Vexi',
+          icon: 'circle',
+          route: '/admin/settings/vexi',
+          alwaysVisible: true,
+        },
+        {
           label: 'Dominios',
           icon: 'circle',
           route: '/admin/settings/domains',
@@ -898,73 +923,23 @@ export class StoreAdminLayoutComponent {
    * True when the current store has at least one PQR. Drives the
    * visibility of the "PQRS" sidebar entry — we hide it for stores with
    * zero PQRs (and re-show it as soon as the count goes above zero). Fed
-   * by an HTTP fetch on store-context activation. Safe default `false`
-   * so the entry stays hidden until we know otherwise; better to hide
-   * than to flash a brand-new store with an empty mailbox.
+   * by an HTTP fetch on store-context activation.
+   *
+   * The layout owns the *fetch*; `MenuFilterService` owns the *rule*. The
+   * value is pushed into the service (see the PQR stats effect below) so both
+   * the sidebar filter and Vexi's visibility diagnostic read one source — the
+   * layout used to splice the entry out of the tree itself, which made the
+   * item simply vanish with no explanation available to anyone downstream.
    */
   readonly hasStorePqrs = signal<boolean>(false);
 
-  // Reactive menu items as signal via toSignal.
-  // Reacts to BOTH `canManageUsers` (Usuarios gate) and `hasStorePqrs`
-  // (PQRS gate) — combineLatest emits only after both signals have
-  // produced at least one value, so the menu tree stabilizes immediately
-  // and updates on either condition flip.
+  // Reactive menu items as signal via toSignal. Both authorization gates
+  // ("Usuarios" by permission, "PQRS" by count) now live inside
+  // `filterMenuItems`, which re-emits on its own when either flips.
   readonly filteredMenuItems = toSignal(
-    combineLatest([
-      toObservable(this.canManageUsers),
-      toObservable(this.hasStorePqrs),
-    ]).pipe(
-      switchMap(([canManageUsers, hasStorePqrs]) =>
-        this.menuFilterService.filterMenuItems(
-          this.getBaseMenuItems(canManageUsers, hasStorePqrs),
-        ),
-      ),
-    ),
+    this.menuFilterService.filterMenuItems(this.allMenuItems),
     { initialValue: [] as MenuItem[] },
   );
-
-  /**
-   * Returns the base menu tree with two authorizacion-driven entry
-   * removals applied:
-   *   - "Usuarios" hidden when the logged-in user cannot manage users.
-   *   - "PQRS" hidden when the store has no PQRs.
-   *
-   * Both checks are visibility-only — the route guards
-   * (`manageUsersGuard`, the PQR list's own existence) are the real
-   * security boundary. Filters run BEFORE panel_ui/scope/fiscal so they
-   * stay scoped to this layout.
-   */
-  private getBaseMenuItems(
-    canManageUsers: boolean,
-    hasStorePqrs: boolean,
-  ): MenuItem[] {
-    let items = this.allMenuItems;
-    if (!canManageUsers) {
-      items = items.map((item) =>
-        item.children
-          ? {
-              ...item,
-              children: item.children.filter(
-                (child) => child.route !== '/admin/settings/users',
-              ),
-            }
-          : item,
-      );
-    }
-    if (!hasStorePqrs) {
-      items = items.map((item) =>
-        item.children
-          ? {
-              ...item,
-              children: item.children.filter(
-                (child) => child.route !== '/admin/pqrs',
-              ),
-            }
-          : item,
-      );
-    }
-    return items;
-  }
 
   readonly posTourConfig = POS_TOUR_CONFIG;
 
@@ -1048,11 +1023,13 @@ export class StoreAdminLayoutComponent {
           next: (res) => {
             const total = res?.data?.total ?? 0;
             this.hasStorePqrs.set(total > 0);
+            this.menuFilterService.storeHasPqrs.set(total > 0);
           },
           error: () => {
             // Safe default: leave the entry hidden. Better to require
             // an explicit refresh than to show a broken inbox.
             this.hasStorePqrs.set(false);
+            this.menuFilterService.storeHasPqrs.set(false);
           },
         });
     });

@@ -14,6 +14,7 @@ import {
 import { Observable } from 'rxjs';
 import { AIChatService } from './ai-chat.service';
 import { ResponseService } from '../../../common/responses/response.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import {
   AiAccessGuard,
   RequireAIFeature,
@@ -22,6 +23,7 @@ import {
   CreateConversationDto,
   SendMessageDto,
   ConversationQueryDto,
+  StreamIntentDto,
 } from './dto';
 
 @Controller('store/ai-chat')
@@ -66,23 +68,49 @@ export class AIChatController {
     return this.responseService.success(result, 'Message sent');
   }
 
+  /**
+   * Handshake that precedes the SSE connection.
+   *
+   * `EventSource` cannot send a body, and the previous design worked around
+   * that with `?content=`, which put every question the user ever typed into
+   * the access logs beside the JWT. The message travels here in a POST body
+   * and the stream call carries only a short-lived opaque id.
+   */
+  @Post('conversations/:id/stream-intent')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('streaming_chat')
+  async createStreamIntent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: StreamIntentDto,
+  ) {
+    const streamId = await this.chatService.createStreamIntent(id, dto);
+    return this.responseService.success({ stream_id: streamId }, 'Stream ready');
+  }
+
   @Sse('conversations/:id/stream')
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('streaming_chat')
   streamMessage(
     @Param('id') id: string,
-    @Query('content') content: string,
+    @Query('stream_id') streamId: string,
   ): Observable<MessageEvent> {
     const conversationId = parseInt(id, 10);
 
-    return new Observable<MessageEvent>((subscriber) => {
-      (async () => {
-        try {
-          const dto: SendMessageDto = { content, stream: true };
+    // Captured HERE, synchronously, while the request's AsyncLocalStorage
+    // context is still alive. Nest subscribes to this Observable after the
+    // handler returns and the interceptor's ALS scope has been torn down, so
+    // everything inside the deferred body — tenant scoping in
+    // `StorePrismaService`, the business snapshot, every tool the agent runs —
+    // would otherwise fail with "no request context". Re-entering the captured
+    // context with `run()` is what makes the whole agent turn tenant-aware.
+    const requestContext = RequestContextService.getContext();
 
+    return new Observable<MessageEvent>((subscriber) => {
+      const stream = async () => {
+        try {
           for await (const chunk of this.chatService.sendMessageStream(
             conversationId,
-            dto,
+            streamId,
           )) {
             subscriber.next({
               data: JSON.stringify(chunk),
@@ -90,8 +118,13 @@ export class AIChatController {
             } as MessageEvent);
 
             if (chunk.type === 'done' || chunk.type === 'error') {
+              // Complete the subscriber so the browser closes promptly, but do
+              // NOT `return`: leaving the `for await` early calls
+              // `generator.return()`, which abandons the generator at its last
+              // `yield` and skips everything after the loop — including the
+              // writes that persist the assistant reply and its tool trace.
+              // `done` is the final chunk, so draining costs one more tick.
               subscriber.complete();
-              return;
             }
           }
           subscriber.complete();
@@ -102,7 +135,13 @@ export class AIChatController {
           } as MessageEvent);
           subscriber.complete();
         }
-      })();
+      };
+
+      if (requestContext) {
+        RequestContextService.run(requestContext, stream);
+      } else {
+        void stream();
+      }
     });
   }
 

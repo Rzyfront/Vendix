@@ -138,7 +138,11 @@ export class VexiRealtimeService {
     name: string,
     args: Record<string, unknown>,
   ): Promise<string> {
-    if (!this.toolRegistry.isReadOnly(name)) {
+    // A client-side command reaching this bridge means the browser failed to
+    // dispatch it locally. Let it fall through so `executeTool()` answers with
+    // the specific "this runs in the browser" error instead of the generic
+    // voice veto — the two failures need different fixes.
+    if (!this.toolRegistry.isReadOnly(name) && !this.toolRegistry.isClientSide(name)) {
       this.logger.warn(
         `Realtime voice attempted a non-read-only tool: ${name} ` +
           `(store=${RequestContextService.getContext()?.store_id})`,
@@ -213,14 +217,19 @@ export class VexiRealtimeService {
     // roles instead of pinning the catalog to zero tools.
     const granted = context?.permissions;
     const scope = granted?.length ? granted : context?.roles;
-    return this.toolRegistry
-      .getReadOnlyDefinitions(scope)
-      .map((d) => ({
-        type: 'function' as const,
-        name: d.function.name,
-        description: d.function.description,
-        parameters: d.function.parameters,
-      }));
+    // Read-only data tools plus client-side UI commands. The latter belong in
+    // voice more than anywhere else — "llévame a inventario" is the whole
+    // reason to talk instead of click — and they carry no write risk: the
+    // browser dispatches them and `executeTool()` refuses them outright.
+    return [
+      ...this.toolRegistry.getReadOnlyDefinitions(scope),
+      ...this.toolRegistry.getClientSideDefinitions(scope),
+    ].map((d) => ({
+      type: 'function' as const,
+      name: d.function.name,
+      description: d.function.description,
+      parameters: d.function.parameters,
+    }));
   }
 
   private safetyIdentifier(): string {

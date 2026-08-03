@@ -63,6 +63,10 @@ const KNOWN_SECTIONS = [
   // Appointment redesign phase 2: reschedule policy (directo vs aprobación)
   // and per-product home service eligibility live here.
   'reservations',
+  // Vexi's store-wide master switch. Must be listed here or the sanitizer
+  // drops `{ vexi: { enabled: false } }` before validation and the endpoint
+  // answers 200 with the old value — a switch that silently refuses to move.
+  'vexi',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
@@ -365,6 +369,27 @@ export class SettingsService {
       raw as Record<string, unknown>,
       store_id,
     );
+
+    // El interruptor de Vexi es exclusivo de propietario y administrador, y eso
+    // tiene que decidirse acá. `store:settings:update` — el permiso que protege
+    // este endpoint — también lo tienen `manager` y `Preventista`, así que el
+    // guard de permisos no alcanza: sin esta comprobación, un manager apaga la
+    // asistente de toda la tienda con un curl aunque el panel le oculte la
+    // opción. Ocultar una UI no es restringir una capacidad.
+    if (dto.vexi !== undefined) {
+      const roles = RequestContextService.getRoles();
+      const puedeConfigurarVexi = roles.some((role) =>
+        ['owner', 'admin', 'STORE_OWNER', 'ORG_OWNER', 'super_admin'].includes(
+          role,
+        ),
+      );
+      if (!puedeConfigurarVexi) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario o un administrador de la tienda pueden activar o desactivar a Vexi.',
+        );
+      }
+    }
 
     // Validar que el sonido de notificación referenciado exista en el
     // catálogo global y esté activo. Permitimos null (sin sonido).

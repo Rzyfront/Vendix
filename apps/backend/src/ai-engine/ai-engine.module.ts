@@ -1,33 +1,42 @@
 import { Global, Module, OnModuleInit } from '@nestjs/common';
+import { DiscoveryModule } from '@nestjs/core';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ApiCatalogService } from './tools/bridge/api-catalog.service';
+import { createApiBridgeTools } from './tools/bridge/api-bridge.tools';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
 import { AIQueueModule } from './queue/ai-queue.module';
 import { AIStreamController } from './ai-stream.controller';
 import { AIAgentService } from './ai-agent.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
-import { salesTools } from './tools/domains/sales.tools';
-import { createInventoryTools } from './tools/domains/inventory.tools';
-import { accountingTools } from './tools/domains/accounting.tools';
-import { customerTools } from './tools/domains/customers.tools';
-import { searchTools } from './tools/domains/search.tools';
+import { createSearchTools } from './tools/domains/search.tools';
+import { uiTools } from './tools/domains/ui.tools';
 import { EmbeddingModule } from './embeddings/embedding.module';
-import { InventoryModule } from '../domains/store/inventory/inventory.module';
-import { StockLevelsService } from '../domains/store/inventory/stock-levels/stock-levels.service';
-import { InventoryIntegrationService } from '../domains/store/inventory/shared/services/inventory-integration.service';
-import { InventoryAdjustmentsService } from '../domains/store/inventory/adjustments/inventory-adjustments.service';
-import { MovementsService } from '../domains/store/inventory/movements/movements.service';
-import { LocationsService } from '../domains/store/inventory/locations/locations.service';
+import { EmbeddingService } from './embeddings/embedding.service';
 import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
+import { VexiConfirmationService } from '../domains/store/vexi/vexi-confirmation.service';
 
+/**
+ * Tool registration is decentralized: each domain module registers its own
+ * families against `AIToolRegistry` from its own `onModuleInit`, with its own
+ * services already injected. This module registers only the two families that
+ * are not owned by any domain — semantic search, whose dependency
+ * (`EmbeddingService`) lives inside ai-engine, and the client-side UI command
+ * declarations, which have no server dependency at all.
+ *
+ * Do NOT import domain modules here to register their tools. This module is
+ * `@Global()`, so every such import is a dependency cycle waiting to happen,
+ * and the domain count only grows.
+ */
 @Global()
 @Module({
   imports: [
     PrismaModule,
     AIQueueModule,
     EmbeddingModule,
-    InventoryModule,
     SubscriptionsModule,
+    // Needed by ApiCatalogService to walk the controller graph at boot.
+    DiscoveryModule,
   ],
   controllers: [AIStreamController],
   providers: [
@@ -35,12 +44,21 @@ import { SubscriptionsModule } from '../domains/store/subscriptions/subscription
     AILoggingService,
     AIAgentService,
     AIToolRegistry,
+    // Provided here rather than in VexiModule even though the class lives in
+    // that folder: AIToolRegistry depends on it, and importing VexiModule into
+    // this @Global() module would close a cycle (VexiModule imports this one).
+    // Its only dependency is the globally-provided Redis client, so it
+    // resolves standalone.
+    VexiConfirmationService,
+    ApiCatalogService,
   ],
   exports: [
     AIEngineService,
     AILoggingService,
     AIAgentService,
     AIToolRegistry,
+    VexiConfirmationService,
+    ApiCatalogService,
     AIQueueModule,
     EmbeddingModule,
   ],
@@ -48,29 +66,17 @@ import { SubscriptionsModule } from '../domains/store/subscriptions/subscription
 export class AIEngineModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
-    private readonly stockLevelsService: StockLevelsService,
-    private readonly inventoryIntegrationService: InventoryIntegrationService,
-    private readonly adjustmentsService: InventoryAdjustmentsService,
-    private readonly movementsService: MovementsService,
-    private readonly locationsService: LocationsService,
+    private readonly embeddingService: EmbeddingService,
+    private readonly apiCatalog: ApiCatalogService,
   ) {}
 
   onModuleInit() {
-    const allTools = [
-      ...salesTools,
-      ...createInventoryTools({
-        stockLevelsService: this.stockLevelsService,
-        inventoryIntegrationService: this.inventoryIntegrationService,
-        adjustmentsService: this.adjustmentsService,
-        movementsService: this.movementsService,
-        locationsService: this.locationsService,
-      }),
-      ...accountingTools,
-      ...customerTools,
-      ...searchTools,
-    ];
-    for (const tool of allTools) {
-      this.toolRegistry.register(tool);
-    }
+    this.toolRegistry.registerMany(
+      createSearchTools({ embeddingService: this.embeddingService }),
+    );
+    this.toolRegistry.registerMany(uiTools);
+    this.toolRegistry.registerMany(
+      createApiBridgeTools({ catalog: this.apiCatalog }),
+    );
   }
 }

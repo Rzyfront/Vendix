@@ -10,6 +10,7 @@ import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscript
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
+import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   CloseRealtimeSessionDto,
@@ -29,7 +30,7 @@ import {
  * segments and stock levels.
  */
 @Controller('store/vexi/realtime')
-@UseGuards(RolesGuard)
+@UseGuards(RolesGuard, VexiEnabledGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
 export class VexiRealtimeController {
   constructor(

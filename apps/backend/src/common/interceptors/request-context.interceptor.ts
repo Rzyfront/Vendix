@@ -50,6 +50,14 @@ export class RequestContextInterceptor implements NestInterceptor {
         user.is_super_admin || effectiveRoles.includes('super_admin');
       contextObj.is_owner = user.is_owner || effectiveRoles.includes('owner');
       contextObj.email = user.email;
+
+      // Only captured for authenticated requests, and only the bearer form.
+      // The AI api-bridge replays GETs as this user over internal HTTP; that
+      // is the whole reason the token has to survive past the guard layer.
+      const authHeader = req.headers?.authorization;
+      if (typeof authHeader === 'string' && /^Bearer /i.test(authHeader)) {
+        contextObj.access_token = authHeader.slice(7);
+      }
     }
 
     // In ecommerce routes, the DomainResolverMiddleware might have found a store_id
