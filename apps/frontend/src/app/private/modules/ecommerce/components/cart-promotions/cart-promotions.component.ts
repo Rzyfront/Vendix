@@ -116,6 +116,7 @@ import {
                     class="shrink-0 font-semibold text-green-600"
                     [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
                     >-{{ promo.discount_amount | currency }}</span
+                  >
                 </div>
                 <div class="flex items-center gap-1.5">
                   <app-badge
