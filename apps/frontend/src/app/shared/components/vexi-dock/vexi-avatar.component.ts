@@ -1,43 +1,52 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
 /**
- * Vexi's expression vocabulary. Mirrors the sprite filenames in
- * `assets/vexi/` — the character sheet defines many more poses, these are the
- * states the dock can actually be in.
+ * Vexi's expression vocabulary.
+ *
+ * The names ARE the sprite filenames (`assets/vexi/vexi-<pose>.png`), so a
+ * pose that has no artwork cannot be named — the previous vocabulary was
+ * chosen independently of the sheet and drifted from it, and when the sprites
+ * were replaced every `<img>` silently 404'd while the code still typechecked.
  */
 export type VexiExpression =
-  | 'neutro'
-  | 'pensando'
-  | 'hablando'
-  | 'escuchando'
-  | 'error'
-  | 'ok';
+  | 'idle'
+  | 'thinking'
+  | 'excited'
+  | 'happy'
+  | 'wow'
+  | 'sad'
+  | 'sleeping'
+  | 'error';
 
 /**
- * Every pose, in render order. All six are mounted at once so switching
+ * Every pose, in render order. All eight are mounted at once so switching
  * expression is an opacity cross-fade between two already-decoded layers: a
  * single `<img>` whose `src` changes cannot fade by construction — the old
  * frame is gone the moment the new one is assigned, and the new one may not be
- * decoded yet, so the swap reads as a flicker. Mounting all six also doubles
+ * decoded yet, so the swap reads as a flicker. Mounting them all also doubles
  * as the preload: the browser fetches every sprite on first paint, long before
  * the first state change needs one.
  */
 export const VEXI_EXPRESSIONS: readonly VexiExpression[] = [
-  'neutro',
-  'pensando',
-  'hablando',
-  'escuchando',
+  'idle',
+  'thinking',
+  'excited',
+  'happy',
+  'wow',
+  'sad',
+  'sleeping',
   'error',
-  'ok',
 ];
 
 const LABELS: Record<VexiExpression, string> = {
-  neutro: 'Vexi en reposo',
-  pensando: 'Vexi está procesando',
-  hablando: 'Vexi está respondiendo',
-  escuchando: 'Vexi te está escuchando',
-  error: 'Vexi encontró un error',
-  ok: 'Vexi completó la acción',
+  idle: 'Vexi en reposo',
+  thinking: 'Vexi está pensando',
+  excited: 'Vexi está respondiendo',
+  happy: 'Vexi se alegra de verte',
+  wow: 'Vexi tiene algo que proponerte',
+  sad: 'Vexi se despide',
+  sleeping: 'Vexi está descansando',
+  error: 'Vexi encontró un problema',
 };
 
 @Component({
@@ -63,7 +72,7 @@ const LABELS: Record<VexiExpression, string> = {
         <img
           class="vexi-avatar__layer"
           [class.vexi-avatar__layer--active]="pose === expression()"
-          [src]="'assets/vexi/' + pose + '.png'"
+          [src]="'assets/vexi/vexi-' + pose + '.png'"
           alt=""
           aria-hidden="true"
           draggable="false"
@@ -126,6 +135,12 @@ const LABELS: Record<VexiExpression, string> = {
         animation: vexi-breathe 4s ease-in-out infinite;
       }
 
+      /* The outgoing layer leaves slower than the incoming one arrives (260ms
+         vs 200ms) and shrinks a touch on its way out. With both layers on the
+         same symmetric fade there is a midpoint where each sits at ~0.5 and
+         the two faces show through one another — harmless when the poses were
+         near-identical, very visible now that they differ by mouth, eyes and
+         props. The asymmetry keeps the stack visually opaque throughout. */
       .vexi-avatar__layer {
         position: absolute;
         inset: 0;
@@ -133,7 +148,10 @@ const LABELS: Record<VexiExpression, string> = {
         height: 100%;
         object-fit: contain;
         opacity: 0;
-        transition: opacity 180ms ease;
+        transform: scale(0.965);
+        transition:
+          opacity 260ms ease-in,
+          transform 260ms ease-in;
         user-select: none;
         -webkit-user-drag: none;
         filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.28));
@@ -141,6 +159,10 @@ const LABELS: Record<VexiExpression, string> = {
 
       .vexi-avatar__layer--active {
         opacity: 1;
+        transform: scale(1);
+        transition:
+          opacity 200ms ease-out,
+          transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
       }
 
       /* Two rounds of "+15%" went unnoticed because the amplitude was the wrong
@@ -180,12 +202,21 @@ const LABELS: Record<VexiExpression, string> = {
           animation: none;
           opacity: 0;
         }
+
+        /* The pose still changes — it just cuts instead of crossing, and
+           never scales. Reduced motion is about movement, not about hiding
+           what Vexi is doing. */
+        .vexi-avatar__layer,
+        .vexi-avatar__layer--active {
+          transition: none;
+          transform: none;
+        }
       }
     `,
   ],
 })
 export class VexiAvatarComponent {
-  readonly expression = input<VexiExpression>('neutro');
+  readonly expression = input<VexiExpression>('idle');
 
   /** True while a voice turn is open — drives the halo's contrast jump. */
   readonly voice = input(false);

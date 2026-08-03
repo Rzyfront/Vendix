@@ -151,7 +151,7 @@ const SUGGESTIONS: readonly string[] = [
           @if (showEmptyState()) {
             <div class="vexi-empty">
               <span class="vexi-empty__portrait" aria-hidden="true">
-                <app-vexi-avatar [expression]="'neutro'" />
+                <app-vexi-avatar [expression]="'idle'" />
               </span>
               <p class="vexi-empty__title">Hola, soy Vexi</p>
               <p class="vexi-empty__text">
@@ -178,7 +178,7 @@ const SUGGESTIONS: readonly string[] = [
             } @else {
               <div class="vexi-turn">
                 <span class="vexi-turn__avatar" aria-hidden="true">
-                  <app-vexi-avatar [expression]="'neutro'" />
+                  <app-vexi-avatar [expression]="'idle'" />
                 </span>
                 <div
                   class="vexi-msg vexi-msg--assistant vexi-md"
@@ -206,7 +206,7 @@ const SUGGESTIONS: readonly string[] = [
           @if (streamingHtml()) {
             <div class="vexi-turn">
               <span class="vexi-turn__avatar" aria-hidden="true">
-                <app-vexi-avatar [expression]="'hablando'" />
+                <app-vexi-avatar [expression]="'excited'" />
               </span>
               <div class="vexi-msg vexi-msg--assistant vexi-md">
                 <span [innerHTML]="streamingHtml()"></span>
@@ -216,7 +216,7 @@ const SUGGESTIONS: readonly string[] = [
           } @else if (isSending()) {
             <div class="vexi-turn">
               <span class="vexi-turn__avatar" aria-hidden="true">
-                <app-vexi-avatar [expression]="'pensando'" />
+                <app-vexi-avatar [expression]="'thinking'" />
               </span>
               <div class="vexi-msg vexi-msg--assistant vexi-msg--working">
                 <span

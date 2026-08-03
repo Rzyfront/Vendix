@@ -81,6 +81,19 @@ export class VexiPresenceService {
   /** The greeting the dock should be showing, or `null`. */
   readonly proactiveHint = this.hint.asReadonly();
 
+  private readonly dormantState = signal(false);
+
+  /**
+   * True while proactive mode is silenced by recent use — the two hours bought
+   * by `noteInteraction()`.
+   *
+   * Published as a signal because the avatar sleeps during exactly this window.
+   * The condition already existed as a comparison inside `canGreetNow()`, but a
+   * value read once inside a method is invisible to the UI; only a signal can
+   * put a face on it.
+   */
+  readonly dormant = this.dormantState.asReadonly();
+
   /**
    * True while the dock is in a state where a greeting must not appear: panel
    * open, voice turn, or an in-flight drag. Pushed by the dock rather than
@@ -99,6 +112,9 @@ export class VexiPresenceService {
     if (!this.isBrowser) return;
 
     this.restore();
+    // Seeded before the first tick so a reload inside the silence window shows
+    // a sleeping dock immediately, instead of thirty seconds of `idle` first.
+    this.refreshDormant();
 
     const tick = setInterval(() => this.evaluate(), TICK_MS);
     this.destroyRef.onDestroy(() => {
@@ -122,6 +138,7 @@ export class VexiPresenceService {
     this.hint.set(null);
     this.lastInteractionAt = Date.now();
     this.ignoredStreak = 0;
+    this.refreshDormant();
     this.persist();
   }
 
@@ -143,11 +160,28 @@ export class VexiPresenceService {
   // ── Budget machine ──────────────────────────────────────────────────────
 
   private evaluate(): void {
+    this.refreshDormant();
+
     // One greeting at a time; a second would stack on the same bubble.
     if (this.hint()) return;
     if (!this.canGreetNow()) return;
 
     this.show(this.pick());
+  }
+
+  /**
+   * Recomputes the sleeping window.
+   *
+   * Driven by the same 30s tick as the rest of the budget machine rather than
+   * by its own timer: waking up is not urgent, and half a minute of latency on
+   * a two-hour window is imperceptible. Also called straight from
+   * `noteInteraction()`, where the change IS immediate — the person just used
+   * Vexi, so the dock should settle down without waiting for the next tick.
+   */
+  private refreshDormant(): void {
+    this.dormantState.set(
+      Date.now() - this.lastInteractionAt < INTERACTION_SILENCE_MS,
+    );
   }
 
   private canGreetNow(): boolean {

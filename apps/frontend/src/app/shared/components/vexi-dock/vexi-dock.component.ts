@@ -64,6 +64,20 @@ const SETTLE_MS = 500;
 /** Duration of the landing / open / close shake. Matches `vexi-wobble`. */
 const WOBBLE_MS = 200;
 
+/** How long the greeting pose stays up when the panel opens. */
+const GREETING_POSE_MS = 900;
+
+/**
+ * The goodbye lingers, and for a randomised while.
+ *
+ * Closing the panel starts the two-hour silence, so the state underneath is
+ * already `sleeping` — without a pause the dock would snap from conversation
+ * straight to a nap. Holding `sad` bridges the two, and randomising the hold
+ * keeps it from reading as a scripted animation that always lasts the same.
+ */
+const FAREWELL_MIN_MS = 5_000;
+const FAREWELL_MAX_MS = 15_000;
+
 @Component({
   selector: 'app-vexi-dock',
   standalone: true,
@@ -372,8 +386,8 @@ export class VexiDockComponent {
     // Some moments have no state to derive from: opening the panel, closing
     // it, or the reply landing are events, not conditions, and the avatar was
     // silent through all of them. Measuring a real turn showed the vocabulary
-    // in practice was two poses out of six — `neutro` and `pensando` — which
-    // is why the face read as frozen on the wink.
+    // in practice was two poses out of the whole sheet — the resting one and
+    // the thinking one — which is why the face read as frozen on the wink.
     const flash = this.flashedExpression();
     if (flash) return flash;
 
@@ -381,42 +395,60 @@ export class VexiDockComponent {
       case 'permission':
       case 'connecting':
       case 'thinking':
-        return 'pensando';
       case 'listening':
-        return 'escuchando';
+        return 'thinking';
       case 'speaking':
-        return 'hablando';
+        return 'excited';
       case 'error':
-        // Transient: once the notice has faded, Vexi returns to rest even
-        // though the service still reports the failed turn.
-        return this.hintVisible() && this.hintSource() === 'voice'
-          ? 'error'
-          : 'neutro';
+        // Only while the notice is on screen. `error` is a *sticky* state —
+        // the service keeps reporting the failed turn forever, so a user who
+        // denies the microphone once would otherwise pin the face here for the
+        // rest of the session. Crucially this falls THROUGH instead of
+        // returning a resting pose: returning would short-circuit every state
+        // below it, and a denied microphone would silently cost the avatar its
+        // chat, proactive and sleeping faces too. Measured live: with
+        // `voice.state() === 'error'` and the notice faded, `dormant()` was
+        // true and the face still read `idle`.
+        if (this.hintVisible() && this.hintSource() === 'voice') return 'error';
+        break;
     }
 
-    const greeting = this.presence.proactiveHint();
-    if (greeting && this.hintVisible() && this.hintSource() === 'proactive') {
-      return greeting.expression;
+    // Every proactive offer wears the same face. It is one behaviour — Vexi
+    // stepping forward to suggest something — and varying the pose per line
+    // made it read as nine unrelated moods.
+    if (
+      this.presence.proactiveHint() &&
+      this.hintVisible() &&
+      this.hintSource() === 'proactive'
+    ) {
+      return 'wow';
     }
 
     // The typed conversation gets a face too. Until now only the voice surface
     // and proactive greetings moved it, so a chat turn — the way Vexi is
-    // actually used — ran from question to answer with the avatar frozen on
-    // `neutro`, and `ok` was never reached by any code path at all.
+    // actually used — ran from question to answer with the avatar frozen.
     if (this.chat.error()) return 'error';
-    if (this.chat.pendingProposal()) return 'ok';
+    // A queued write is Vexi holding something out for approval, the same
+    // gesture as a proactive offer, so it wears the same face.
+    if (this.chat.pendingProposal()) return 'wow';
     // `streamingContent` is NOT checked here even though it looks like the
     // obvious witness for "talking": sampling a real turn at 50ms showed it
     // stays empty from start to finish, and the assistant message jumps from 0
     // to its full length in one step — the UI never renders a typing phase, so
-    // there is no condition to derive `hablando` from. It is flashed when the
+    // there is no condition to derive it from. `excited` is flashed when the
     // reply lands instead (see the effect below).
-    if (this.chat.isSending() || this.chat.isStreaming()) return 'pensando';
+    if (this.chat.isSending() || this.chat.isStreaming()) return 'thinking';
     if (this.chat.toolSteps().some((step) => step.status === 'running')) {
-      return 'pensando';
+      return 'thinking';
     }
 
-    return 'neutro';
+    // Asleep during the two hours of silence that recent use buys. Ranked
+    // below every active state on purpose: being within the quiet window says
+    // nothing about whether Vexi is busy right now, and a dock that dozed off
+    // mid-answer would be worse than one that never sleeps.
+    if (this.presence.dormant()) return 'sleeping';
+
+    return 'idle';
   });
 
   private readonly position = this.positionService.position;
@@ -474,10 +506,10 @@ export class VexiDockComponent {
       untracked(() => {
         if (wasBusy && !busy) {
           // Not when the turn ended badly: `error` and `pendingProposal` are
-          // real states the face should keep showing, and a cheerful "hablando"
+          // real states the face should keep showing, and a cheerful `excited`
           // over a failure would be the avatar contradicting the message.
           if (!this.chat.error() && !this.chat.pendingProposal()) {
-            this.flashExpression('hablando', 1400);
+            this.flashExpression('excited', 1400);
             this.wobble();
           }
         }
@@ -625,9 +657,18 @@ export class VexiDockComponent {
     this.presence.noteInteraction();
     this.panelOpen.update((open) => !open);
 
-    // Opening reads as Vexi turning to face you, closing as an acknowledgement.
+    // Opening is a greeting, closing is a goodbye. The goodbye matters beyond
+    // politeness: `noteInteraction()` above just started the two-hour silence,
+    // so the state underneath is already `sleeping`, and `sad` is what makes
+    // the dock look like it is settling down rather than snapping to a nap.
+    // Which is also why the goodbye outlasts the greeting by an order of
+    // magnitude — it has a transition to cover, not just a moment to mark.
     this.wobble();
-    this.flashExpression(this.panelOpen() ? 'hablando' : 'ok', 700);
+    if (this.panelOpen()) {
+      this.flashExpression('happy', GREETING_POSE_MS);
+    } else {
+      this.flashExpression('sad', this.farewellMs());
+    }
   }
 
   // ── Primitivas de reacción ──────────────────────────────────────────────
@@ -639,15 +680,36 @@ export class VexiDockComponent {
    * rather than queueing, so rapid open/close cannot leave the avatar stuck on
    * a stale pose.
    */
+  /**
+   * A fresh goodbye length, 5s-15s, drawn per close.
+   *
+   * Uniform on purpose: the point is that two consecutive closes do not look
+   * alike, and any distribution achieves that — but a uniform one also keeps
+   * the short goodbyes as likely as the long ones, so the dock does not
+   * settle into one apparent duration with occasional outliers.
+   */
+  private farewellMs(): number {
+    return (
+      FAREWELL_MIN_MS + Math.random() * (FAREWELL_MAX_MS - FAREWELL_MIN_MS)
+    );
+  }
+
   private flashExpression(pose: VexiExpression, ms: number): void {
     if (!this.isBrowser) return;
-    if (this.flashTimer) clearTimeout(this.flashTimer);
+    this.clearFlash();
 
     this.flashedExpression.set(pose);
     this.flashTimer = setTimeout(() => {
       this.flashedExpression.set(null);
       this.flashTimer = null;
     }, ms);
+  }
+
+  /** Hands the face straight back to the derived state. */
+  private clearFlash(): void {
+    if (this.flashTimer) clearTimeout(this.flashTimer);
+    this.flashTimer = null;
+    this.flashedExpression.set(null);
   }
 
   /**
@@ -745,6 +807,11 @@ export class VexiDockComponent {
   // ── Voice mode ──────────────────────────────────────────────────────────
 
   private enterVoiceMode(): void {
+    // A flash outranks every derived state, and the goodbye now holds for up
+    // to fifteen seconds — long enough that pressing to talk right after
+    // closing the panel would leave a sad face on a Vexi that is listening.
+    // A voice turn is a live state, so it takes the face back.
+    this.clearFlash();
     this.presence.noteInteraction();
     this.mode.set('voice');
     void this.voice.start().then((opened) => {
