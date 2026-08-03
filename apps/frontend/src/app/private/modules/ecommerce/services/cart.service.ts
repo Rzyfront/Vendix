@@ -58,6 +58,14 @@ export interface AppliedPromotion {
    * applied promotion; this field is for the operator audit trail.
    */
   priority?: number;
+  /**
+   * Human-readable labels for the products or categories the discount was
+   * applied to. Empty for `scope: 'order'` (whole order). Rendered in the
+   * cart summary as "(Guanabana, Mango)" so the customer knows which line
+   * got the discount. Backend computes this from the engine's
+   * `applicable_item_ids`; absent on older backend versions.
+   */
+  applicable_descriptions?: Array<{ label: string; kind: 'product' | 'category' }>;
 }
 
 /**
