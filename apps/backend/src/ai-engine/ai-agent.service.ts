@@ -552,8 +552,59 @@ export class AIAgentService {
         }
       }
 
-      // Max iterations reached
-      throw new VendixHttpException(ErrorCodes.AI_AGENT_001);
+      // Iterations exhausted.
+      //
+      // This used to throw AI_AGENT_001, which surfaced to the person as a raw
+      // error at the exact moment Vexi had worked hardest — ten rounds of
+      // searching and nothing to show for it but red text. And the model was
+      // in the best possible position to close: it had every tool result from
+      // the whole loop in `messages`.
+      //
+      // So instead of abandoning, it gets one last turn with the tools taken
+      // away. With no tool to call it can only answer in words, which is
+      // exactly the pessimistic-but-human close the situation calls for.
+      // Failing THAT, the fallback below is still a sentence, never an error.
+      messages.push({
+        role: 'user',
+        content:
+          'Ya no puedes usar más herramientas en este turno. Responde ahora con lo que hayas averiguado: si encontraste algo, dilo; si no, dile con naturalidad que no diste con lo que buscaba y qué le sugieres hacer. No menciones herramientas, rutas, reintentos ni límites internos.',
+      });
+
+      let closing = '';
+      try {
+        const lastCall = params.app_key
+          ? await this.aiEngine.run(
+              params.app_key,
+              params.variables,
+              messages,
+              {},
+            )
+          : params.config_id
+            ? await this.aiEngine.chatWith(params.config_id, messages, {})
+            : await this.aiEngine.chat(messages, {});
+
+        totalTokens += lastCall?.usage?.totalTokens ?? 0;
+        closing = (lastCall?.content ?? '').trim();
+      } catch (closingError: any) {
+        this.logger.warn(
+          `Agent closing turn failed: ${closingError?.message ?? 'unknown'}`,
+        );
+      }
+
+      const content =
+        closing ||
+        'Estuve buscando por varios lados y no logré dar con lo que necesitas. ¿Me lo describes de otra forma o me das algún dato más para intentarlo de nuevo?';
+
+      yield { type: 'text', content };
+
+      return {
+        content,
+        iterations: iteration,
+        tools_used: toolsUsed,
+        total_tokens: totalTokens,
+        success: true,
+        pending_confirmation: pendingConfirmation,
+      };
     } catch (error: any) {
       if (error instanceof VendixHttpException) throw error;
 

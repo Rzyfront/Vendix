@@ -1,13 +1,16 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   afterRenderEffect,
   computed,
+  effect,
   inject,
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
@@ -29,6 +32,37 @@ interface RenderedMessage {
  * Cold-start prompts. Read-only questions plus one navigation, so a first-time
  * owner sees what Vexi is for without having to invent a phrasing.
  */
+/**
+ * What Vexi says while it waits on a tool. Present continuous throughout: the
+ * phrase has to read as something still happening, or a rotation makes it look
+ * like each step already finished.
+ */
+const WORKING_PHRASES: readonly string[] = [
+  'Buscando en tus datos…',
+  'Revisando los registros…',
+  'Cruzando la información…',
+  'Consultando el detalle…',
+  'Verificando lo que encontré…',
+];
+
+/** Tools came back; now it is making sense of what they returned. */
+const REASONING_PHRASES: readonly string[] = [
+  'Leyendo lo que encontré…',
+  'Ordenando los resultados…',
+  'Sacando conclusiones…',
+  'Armando la respuesta…',
+];
+
+/** No tools involved — just composing an answer. */
+const THINKING_PHRASES: readonly string[] = [
+  'Pensándolo…',
+  'Dame un segundo…',
+  'Preparando la respuesta…',
+];
+
+/** How long each phrase stays up. Long enough to read, short enough to move. */
+const PHRASE_ROTATE_MS = 2200;
+
 const SUGGESTIONS: readonly string[] = [
   '¿Qué productos tengo bajo stock?',
   '¿Cómo van las ventas de hoy?',
@@ -184,17 +218,28 @@ const SUGGESTIONS: readonly string[] = [
               <span class="vexi-turn__avatar" aria-hidden="true">
                 <app-vexi-avatar [expression]="'pensando'" />
               </span>
-              <div
-                class="vexi-msg vexi-msg--assistant vexi-msg--typing"
-                aria-label="Vexi está escribiendo"
-              >
-                <span></span><span></span><span></span>
+              <div class="vexi-msg vexi-msg--assistant vexi-msg--working">
+                <span
+                  class="vexi-msg--typing"
+                  aria-hidden="true"
+                  ><span></span><span></span><span></span
+                ></span>
+                <!-- The phrase is what makes a fifteen-second turn tolerable:
+                     three dots say "still alive", they do not say "I am doing
+                     something for you". It rotates so the wait reads as work
+                     in progress rather than as a stall. -->
+                <span class="vexi-msg__phrase" role="status">{{
+                  progressPhrase()
+                }}</span>
               </div>
             </div>
           }
 
-          @if (error(); as errorMessage) {
-            <p class="vexi-panel__error" role="alert">{{ errorMessage }}</p>
+          <!-- Never the raw failure. A person who asked for their sales does
+               not need an error code, they need to know Vexi came back
+               empty-handed and what to try next. -->
+          @if (error()) {
+            <p class="vexi-panel__notice" role="status">{{ noticeText() }}</p>
           }
         </div>
       </div>
@@ -566,10 +611,39 @@ const SUGGESTIONS: readonly string[] = [
         }
       }
 
-      .vexi-panel__error {
+      /* Deliberately not the error colour. Red is an alarm, and a search that
+         came back empty is not an alarm — it is an answer. Painting it red
+         made routine misses look like the product was broken. */
+      .vexi-panel__notice {
         margin: 0;
         font-size: 0.8rem;
-        color: var(--color-error, #ef4444);
+        color: var(--color-text-secondary, #6b7280);
+        font-style: italic;
+      }
+
+      .vexi-msg--working {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .vexi-msg__phrase {
+        font-size: 0.78rem;
+        color: var(--color-text-secondary, #6b7280);
+        /* Fades in on every change so the rotation reads as a sequence of
+           steps rather than as text glitching in place. */
+        animation: vexi-phrase-in 260ms ease;
+      }
+
+      @keyframes vexi-phrase-in {
+        from {
+          opacity: 0;
+          transform: translateY(2px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
 
       /* ── Composer ────────────────────────────────────────────────────── */
@@ -689,6 +763,7 @@ const SUGGESTIONS: readonly string[] = [
 })
 export class VexiPanelComponent {
   private readonly facade = inject(VexiFacade);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly scroller =
     viewChild.required<ElementRef<HTMLElement>>('scroller');
 
@@ -717,6 +792,55 @@ export class VexiPanelComponent {
   protected readonly canSend = computed(
     () => !this.isSending() && this.draft().trim().length > 0,
   );
+
+  // ── Muletillas de progreso ──────────────────────────────────────────────
+
+  /** Index into the phrase list, advanced by a timer while Vexi is working. */
+  private readonly phraseTick = signal(0);
+
+  /**
+   * What Vexi says it is doing while it works.
+   *
+   * Derived from the tool trace rather than picked at random, so the wording
+   * tracks reality: with a tool running it reads as searching, once results
+   * are back it reads as reasoning over them. A turn that chains ten tools can
+   * take fifteen seconds, and three bouncing dots for fifteen seconds reads as
+   * a hang.
+   */
+  protected readonly progressPhrase = computed(() => {
+    const steps = this.toolSteps();
+    const running = steps.some((step) => step.status === 'running');
+
+    const phrases = running
+      ? WORKING_PHRASES
+      : steps.length
+        ? REASONING_PHRASES
+        : THINKING_PHRASES;
+
+    return phrases[this.phraseTick() % phrases.length];
+  });
+
+  /**
+   * The failure, said the way a person would say it.
+   *
+   * The raw message is never shown: it is written for whoever is reading the
+   * logs, and by the time it reaches the panel the only thing the person can
+   * act on is "it did not work, here is what to try". The backend already
+   * turns an exhausted tool loop into a written answer, so what survives to
+   * here is a genuine breakdown — network, session, provider — and those all
+   * come down to the same advice.
+   */
+  protected readonly noticeText = computed(() => {
+    const raw = (this.error() ?? '').toLowerCase();
+
+    if (raw.includes('network') || raw.includes('conex')) {
+      return 'Se me cayó la conexión a mitad de camino. Vuelve a intentarlo en un momento.';
+    }
+    if (raw.includes('401') || raw.includes('unauthor') || raw.includes('sesi')) {
+      return 'Tu sesión venció. Vuelve a entrar y seguimos donde quedamos.';
+    }
+    return 'No pude completar eso. Inténtalo otra vez, o dímelo de otra forma y lo busco por otro lado.';
+  });
 
   /**
    * `tool` and `system` turns are plumbing, not conversation: the trace already
@@ -761,6 +885,41 @@ export class VexiPanelComponent {
 
   constructor() {
     this.facade.loadConversations();
+
+    // Rotate the progress phrase only while there is something to narrate.
+    //
+    // The interval is created and torn down by the busy state rather than
+    // running for the panel's whole life: a timer ticking behind an idle panel
+    // wakes the app for nothing, and in a zoneless app every tick is a signal
+    // write that schedules a frame.
+    let rotateTimer: ReturnType<typeof setInterval> | null = null;
+    const stopRotating = () => {
+      if (rotateTimer) {
+        clearInterval(rotateTimer);
+        rotateTimer = null;
+      }
+    };
+
+    effect(() => {
+      const busy = this.isSending();
+
+      untracked(() => {
+        if (!busy) {
+          stopRotating();
+          // Reset so the next turn opens on the first phrase instead of
+          // resuming wherever the last one happened to stop.
+          this.phraseTick.set(0);
+          return;
+        }
+        if (rotateTimer) return;
+        rotateTimer = setInterval(
+          () => this.phraseTick.update((tick) => tick + 1),
+          PHRASE_ROTATE_MS,
+        );
+      });
+    });
+
+    this.destroyRef.onDestroy(stopRotating);
 
     // Pin to the newest content whenever the transcript grows or a stream
     // ticks. `afterRenderEffect` runs after the DOM is written, so

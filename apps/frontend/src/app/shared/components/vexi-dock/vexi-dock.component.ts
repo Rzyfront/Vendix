@@ -52,6 +52,18 @@ const VOICE_HINT_MS = 5_000;
  */
 const HINT_FADE_MS = 200;
 
+/**
+ * How long the dock takes to glide back to its edge after a drag.
+ *
+ * Must match the transition on `.vexi-dock__anchor--settling`: the timer is
+ * what decides when the landing shake fires, so a shorter value would shake
+ * mid-flight and a longer one would leave a visible pause on arrival.
+ */
+const SETTLE_MS = 500;
+
+/** Duration of the landing / open / close shake. Matches `vexi-wobble`. */
+const WOBBLE_MS = 200;
+
 @Component({
   selector: 'app-vexi-dock',
   standalone: true,
@@ -66,11 +78,16 @@ const HINT_FADE_MS = 200;
          staying *outside* the role="button" element: assistive tech announces a
          button as a leaf, so anything interactive nested inside it (the panel's
          input, send and close controls) is not reliably reachable. -->
-    <div class="vexi-dock__anchor" [style.transform]="transform()">
+    <div
+      class="vexi-dock__anchor"
+      [class.vexi-dock__anchor--settling]="settling()"
+      [style.transform]="transform()"
+    >
       <div
         class="vexi-dock"
         [class.vexi-dock--dragging]="mode() === 'drag'"
         [class.vexi-dock--voice]="voiceActive()"
+        [class.vexi-dock--wobble]="wobbling()"
         role="button"
         tabindex="0"
         [attr.aria-label]="ariaLabel()"
@@ -164,6 +181,41 @@ const HINT_FADE_MS = 200;
         cursor: grabbing;
       }
 
+      /* Only while returning to the edge. Sitting on the anchor permanently
+         would put a half-second transition on the same transform the drag
+         writes every pointermove, and the dock would trail the finger. The
+         easing overshoots slightly, so the arrival reads as settling rather
+         than as stopping dead. Keep in sync with SETTLE_MS. */
+      .vexi-dock__anchor--settling {
+        transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      /* Applied to the inner dock, never to the anchor: the anchor's transform
+         is the position, and animating it here would fight the settle
+         transition and leave the dock a few pixels off its edge. */
+      .vexi-dock--wobble {
+        animation: vexi-wobble 200ms ease-in-out;
+      }
+
+      /* A shake, not a bounce — it plays on top of live screens. Rotation
+         rather than translation so it cannot nudge the dock past the viewport
+         edge it just snapped to. */
+      @keyframes vexi-wobble {
+        0%,
+        100% {
+          transform: rotate(0deg) scale(1);
+        }
+        25% {
+          transform: rotate(-7deg) scale(1.04);
+        }
+        60% {
+          transform: rotate(5deg) scale(1.02);
+        }
+        85% {
+          transform: rotate(-2deg) scale(1);
+        }
+      }
+
       .vexi-dock__panel {
         position: absolute;
         inset: 0;
@@ -235,6 +287,15 @@ const HINT_FADE_MS = 200;
         .vexi-dock__hint--visible {
           animation: none;
         }
+
+        /* The dock still returns to its edge — it just arrives instantly. */
+        .vexi-dock__anchor--settling {
+          transition: none;
+        }
+
+        .vexi-dock--wobble {
+          animation: none;
+        }
       }
     `,
   ],
@@ -250,6 +311,25 @@ export class VexiDockComponent {
 
   protected readonly mode = signal<DockMode>('idle');
   protected readonly panelOpen = signal(false);
+
+  // ── Reacciones ──────────────────────────────────────────────────────────
+  //
+  // Two primitives cover every "the dock should react to this" request:
+  // a transient pose and a transient shake. Both are plain timers rather than
+  // Angular animations because the dock is `OnPush` in a zoneless app and the
+  // signal write is what schedules the frame.
+
+  /** Pose held for a moment, overriding whatever state would otherwise show. */
+  private readonly flashedExpression = signal<VexiExpression | null>(null);
+  private flashTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** True while the little shake plays. */
+  protected readonly wobbling = signal(false);
+  private wobbleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** True while the dock glides back to its edge after a drag. */
+  protected readonly settling = signal(false);
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── Bubble ──────────────────────────────────────────────────────────────
   //
@@ -287,6 +367,16 @@ export class VexiDockComponent {
    * borrows the face only while its bubble is up.
    */
   protected readonly expression = computed<VexiExpression>(() => {
+    // A short-lived pose wins over every derived state.
+    //
+    // Some moments have no state to derive from: opening the panel, closing
+    // it, or the reply landing are events, not conditions, and the avatar was
+    // silent through all of them. Measuring a real turn showed the vocabulary
+    // in practice was two poses out of six — `neutro` and `pensando` — which
+    // is why the face read as frozen on the wink.
+    const flash = this.flashedExpression();
+    if (flash) return flash;
+
     switch (this.voice.state()) {
       case 'permission':
       case 'connecting':
@@ -315,9 +405,12 @@ export class VexiDockComponent {
     // `neutro`, and `ok` was never reached by any code path at all.
     if (this.chat.error()) return 'error';
     if (this.chat.pendingProposal()) return 'ok';
-    // Streaming text before tool activity: once the answer is being written,
-    // that is what the face should say, even if a tool is still marked running.
-    if (this.chat.streamingContent()) return 'hablando';
+    // `streamingContent` is NOT checked here even though it looks like the
+    // obvious witness for "talking": sampling a real turn at 50ms showed it
+    // stays empty from start to finish, and the assistant message jumps from 0
+    // to its full length in one step — the UI never renders a typing phase, so
+    // there is no condition to derive `hablando` from. It is flashed when the
+    // reply lands instead (see the effect below).
     if (this.chat.isSending() || this.chat.isStreaming()) return 'pensando';
     if (this.chat.toolSteps().some((step) => step.status === 'running')) {
       return 'pensando';
@@ -368,6 +461,30 @@ export class VexiDockComponent {
     // the browser has laid out — never during SSR.
     afterNextRender(() => this.positionService.restore());
 
+    // The reply landing.
+    //
+    // The UI has no typing phase — the assistant message goes from empty to
+    // complete in a single step — so "Vexi is talking" is an instant, not a
+    // condition, and no computed can express it. Watching the busy flags fall
+    // is what turns that instant into a visible pose.
+    let wasBusy = false;
+    effect(() => {
+      const busy = this.chat.isSending() || this.chat.isStreaming();
+
+      untracked(() => {
+        if (wasBusy && !busy) {
+          // Not when the turn ended badly: `error` and `pendingProposal` are
+          // real states the face should keep showing, and a cheerful "hablando"
+          // over a failure would be the avatar contradicting the message.
+          if (!this.chat.error() && !this.chat.pendingProposal()) {
+            this.flashExpression('hablando', 1400);
+            this.wobble();
+          }
+        }
+        wasBusy = busy;
+      });
+    });
+
     // Bubble arbitration. A voice notice always displaces a greeting; a
     // greeting only shows when voice has nothing to report.
     effect(() => {
@@ -405,6 +522,9 @@ export class VexiDockComponent {
     this.destroyRef.onDestroy(() => {
       this.cancelHoldTimer();
       this.clearHintTimers();
+      if (this.flashTimer) clearTimeout(this.flashTimer);
+      if (this.wobbleTimer) clearTimeout(this.wobbleTimer);
+      if (this.settleTimer) clearTimeout(this.settleTimer);
       // Presence is root-scoped and outlives the dock. Leaving it suppressed
       // because the dock happened to be busy at teardown would silence Vexi
       // for the rest of the session.
@@ -469,7 +589,7 @@ export class VexiDockComponent {
         this.togglePanel();
         break;
       case 'drag':
-        this.positionService.snapToEdge();
+        this.settleToEdge();
         break;
       case 'voice':
         this.exitVoiceMode();
@@ -489,7 +609,7 @@ export class VexiDockComponent {
     this.cancelHoldTimer();
     this.activePointerId = null;
 
-    if (mode === 'drag') this.positionService.snapToEdge();
+    if (mode === 'drag') this.settleToEdge();
     if (mode === 'voice') this.exitVoiceMode();
 
     this.mode.set('idle');
@@ -504,6 +624,72 @@ export class VexiDockComponent {
     // use, which resets fatigue and buys the two-hour silence.
     this.presence.noteInteraction();
     this.panelOpen.update((open) => !open);
+
+    // Opening reads as Vexi turning to face you, closing as an acknowledgement.
+    this.wobble();
+    this.flashExpression(this.panelOpen() ? 'hablando' : 'ok', 700);
+  }
+
+  // ── Primitivas de reacción ──────────────────────────────────────────────
+
+  /**
+   * Shows a pose for `ms` and then hands the face back to the derived state.
+   *
+   * Re-entrant on purpose: a second flash before the first expires replaces it
+   * rather than queueing, so rapid open/close cannot leave the avatar stuck on
+   * a stale pose.
+   */
+  private flashExpression(pose: VexiExpression, ms: number): void {
+    if (!this.isBrowser) return;
+    if (this.flashTimer) clearTimeout(this.flashTimer);
+
+    this.flashedExpression.set(pose);
+    this.flashTimer = setTimeout(() => {
+      this.flashedExpression.set(null);
+      this.flashTimer = null;
+    }, ms);
+  }
+
+  /**
+   * Plays the shake once.
+   *
+   * The class has to come off and go back on for the animation to replay: CSS
+   * will not restart an animation that is already applied, so a second wobble
+   * during the first one would do nothing at all.
+   */
+  private wobble(): void {
+    if (!this.isBrowser) return;
+    if (this.wobbleTimer) clearTimeout(this.wobbleTimer);
+
+    this.wobbling.set(false);
+    requestAnimationFrame(() => {
+      this.wobbling.set(true);
+      this.wobbleTimer = setTimeout(() => {
+        this.wobbling.set(false);
+        this.wobbleTimer = null;
+      }, WOBBLE_MS);
+    });
+  }
+
+  /**
+   * Snaps back to the edge as a glide, then shakes on landing.
+   *
+   * The transition lives behind a class instead of sitting on the anchor
+   * permanently: the same `transform` carries the drag, and a transition on it
+   * would make the dock trail the finger by half a second.
+   */
+  private settleToEdge(): void {
+    this.positionService.snapToEdge();
+
+    if (!this.isBrowser) return;
+    if (this.settleTimer) clearTimeout(this.settleTimer);
+
+    this.settling.set(true);
+    this.settleTimer = setTimeout(() => {
+      this.settling.set(false);
+      this.settleTimer = null;
+      this.wobble();
+    }, SETTLE_MS);
   }
 
   // ── Bubble plumbing ─────────────────────────────────────────────────────
