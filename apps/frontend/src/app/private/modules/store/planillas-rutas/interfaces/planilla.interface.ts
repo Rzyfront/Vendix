@@ -474,7 +474,19 @@ export interface ConfirmRouteSheetResult {
   settled: Array<{ stop_id: number; result: string }>;
   skipped: Array<{
     stop_id: number;
-    reason: 'not_in_route' | 'already_settled';
+    /**
+     * `short_payment_requires_decision` ⇒ la hoja dice entregada pero el cobro es
+     * menor al neto. En ruta no hay pago parcial, y el backend no elige por el
+     * operador (rechazar reversaría inventario ya despachado; liquidar asumiría
+     * el faltante), así que la parada NO se liquidó. Solo en este caso viajan
+     * `collected_amount` y `net`.
+     */
+    reason:
+      | 'not_in_route'
+      | 'already_settled'
+      | 'short_payment_requires_decision';
+    collected_amount?: number;
+    net?: number;
   }>;
   errors: Array<{ stop_id: number; message: string }>;
   /** Fully-updated route, same shape as `GET /store/dispatch-routes/:id`. */

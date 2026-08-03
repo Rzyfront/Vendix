@@ -639,15 +639,15 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
-          label: 'Clientes',
-          icon: 'circle',
-          route: '/admin/analytics/customers',
-          alwaysVisible: true,
-        },
-        {
           label: 'Compras',
           icon: 'shopping-cart',
           route: '/admin/analytics/purchases',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Clientes',
+          icon: 'circle',
+          route: '/admin/analytics/customers',
           alwaysVisible: true,
         },
         {
@@ -693,15 +693,15 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
-          label: 'Clientes',
-          icon: 'circle',
-          route: '/admin/reports/customers',
-          alwaysVisible: true,
-        },
-        {
           label: 'Compras',
           icon: 'circle',
           route: '/admin/reports/purchases',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Clientes',
+          icon: 'circle',
+          route: '/admin/reports/customers',
           alwaysVisible: true,
         },
         {

@@ -188,6 +188,50 @@ describe('RouteSheetScannerService', () => {
       expect(match.warnings).toHaveLength(0);
     });
 
+    it('suggests null (never partial) when the sheet says delivered but the cash is short', async () => {
+      // La hoja dice ENTREGADA cobrando 120 de un neto de 200. `partial` no es un
+      // resultado válido en ruta, y ninguna derivación automática es segura, así
+      // que la sugerencia es `null` → decisión del operador.
+      aiMock.run.mockResolvedValue({
+        success: true,
+        model: 'MiniMax-VL-01',
+        content: JSON.stringify({
+          stops: [
+            {
+              stop_sequence: 1,
+              remision_number: 'REM-1',
+              delivered: true,
+              collected_amount: 120,
+              payment_method: 'efectivo',
+              notes: 'abonó solo una parte',
+            },
+          ],
+          confidence: 90,
+        }),
+      });
+      prismaMock.dispatch_route_stops.findMany.mockResolvedValue([
+        {
+          id: 51,
+          stop_sequence: 1,
+          status: 'pending',
+          result: null,
+          collected_amount: new Prisma.Decimal(0),
+          dispatch_note: {
+            dispatch_number: 'REM-1',
+            grand_total: new Prisma.Decimal(200),
+          },
+        },
+      ]);
+
+      const scan = await service.scanRouteSheet(ROUTE_ID, file());
+      const match = await service.matchStops(ROUTE_ID, scan);
+
+      expect(match.stops[0]).toMatchObject({
+        stop_id: 51,
+        suggested_result: null,
+      });
+    });
+
     it('throws RTSCAN_MATCH_001 when no row maps to any stop', async () => {
       prismaMock.dispatch_route_stops.findMany.mockResolvedValue([
         {
@@ -362,6 +406,52 @@ describe('RouteSheetScannerService', () => {
       expect(result.settled).toEqual([{ stop_id: 52, result: 'delivered' }]);
       expect(result.errors).toEqual([{ stop_id: 51, message: 'boom' }]);
       expect(result.skipped).toHaveLength(0);
+    });
+
+    it('escala el cobro corto a decisión humana sin llamar a settleStop', async () => {
+      // Stop 51: entregada cobrando 120 de 200 → no se liquida, sale en skipped
+      // con los montos. Stop 52: cobro completo → se liquida normal. El cobro
+      // corto NO puede llegar a settleStop (moriría en el gate de monto) ni
+      // derivarse a rejected (reversaría inventario ya despachado).
+      prismaMock.dispatch_route_stops.findMany.mockResolvedValue([
+        {
+          id: 51,
+          status: 'pending',
+          dispatch_note: { grand_total: new Prisma.Decimal(200) },
+        },
+        {
+          id: 52,
+          status: 'pending',
+          dispatch_note: { grand_total: new Prisma.Decimal(150) },
+        },
+      ]);
+
+      const dto: any = {
+        stops: [
+          { stop_id: 51, delivered: true, collected_amount: 120 },
+          { stop_id: 52, delivered: true, collected_amount: 150 },
+        ],
+        scan_result: { stops: [], confidence: 91 },
+      };
+
+      const result = await service.confirmAndSettle(ROUTE_ID, file(), dto);
+
+      expect(routeFlowMock.settleStop).toHaveBeenCalledTimes(1);
+      expect(routeFlowMock.settleStop).toHaveBeenCalledWith(
+        ROUTE_ID,
+        52,
+        expect.objectContaining({ result: 'delivered' }),
+      );
+      expect(result.settled).toEqual([{ stop_id: 52, result: 'delivered' }]);
+      expect(result.skipped).toEqual([
+        {
+          stop_id: 51,
+          reason: 'short_payment_requires_decision',
+          collected_amount: 120,
+          net: 200,
+        },
+      ]);
+      expect(result.errors).toHaveLength(0);
     });
   });
 });

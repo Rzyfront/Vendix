@@ -61,8 +61,16 @@ export interface RouteSheetMatchedStop {
     grand_total: number;
     collected_amount: number;
   } | null;
-  /** Suggested settle result derived from the extracted row. */
-  suggested_result: dispatch_route_stop_result_enum;
+  /**
+   * Suggested settle result derived from the extracted row.
+   *
+   * `null` ⇒ la planilla dice ENTREGADA pero el cobro es menor al neto. No es un
+   * resultado válido (una parada se entrega solo con pago total) y tampoco puede
+   * derivarse automáticamente: marcarla `rejected` reversaría inventario ya
+   * despachado y marcarla `delivered` chocaría con el gate de monto. Requiere
+   * decisión del operador — ver `short_payment_requires_decision` en el confirm.
+   */
+  suggested_result: dispatch_route_stop_result_enum | null;
 }
 
 export interface RouteSheetMatchResult {
@@ -96,8 +104,13 @@ export class ConfirmRouteSheetStopDto {
 
   /**
    * Explicit settle result. When omitted, the service derives it from
-   * `delivered` + `collected_amount` (delivered → 'delivered' if it covers the
-   * net, else 'partial'; not delivered → 'rejected').
+   * `delivered` + `collected_amount`:
+   *   - no entregada                       → 'rejected'
+   *   - entregada y cubre el neto           → 'delivered'
+   *   - entregada y NO cubre el neto        → sin derivación: la parada sale en
+   *     `skipped[]` con `reason: 'short_payment_requires_decision'` y no se
+   *     liquida, porque en ruta no hay pago parcial y la disyuntiva (rechazar vs
+   *     asumir el faltante) es una decisión de caja que toma el operador.
    */
   @IsOptional()
   @IsString()

@@ -885,11 +885,11 @@ export class FiscalFlowDashboardComponent {
     const isPlatform = this.scope() === 'platform';
     if (isPlatform) {
       const map: Record<string, string | null> = {
-        'sales/emission': '/super-admin/subscriptions/fiscal-billing',
-        'sales/dian': '/super-admin/subscriptions/fiscal-billing',
+        'sales/emission': '/super-admin/fiscal/invoicing/invoices',
+        'sales/dian': '/super-admin/fiscal/invoicing/dian-config',
         'sales/journal': '/super-admin/fiscal/accounting/journal-entries',
         'purchases/support_documents':
-          '/super-admin/subscriptions/fiscal-billing',
+          '/super-admin/fiscal/invoicing/support-document',
         'purchases/withholdings':
           '/super-admin/fiscal/accounting/account-mappings',
         'payroll/settlement': null,
@@ -948,7 +948,7 @@ export class FiscalFlowDashboardComponent {
       // resoluciones; lo demás queda en Contabilidad + identidad.
       const map: Record<string, string | null> = {
         'settings/fiscal': '/super-admin/fiscal/identity',
-        'fiscal/dian': '/super-admin/subscriptions/fiscal-billing',
+        'fiscal/dian': '/super-admin/fiscal/invoicing/dian-config',
         'accounting/chart-of-accounts':
           '/super-admin/fiscal/accounting/chart-of-accounts',
         'accounting/periods': null,
@@ -957,7 +957,7 @@ export class FiscalFlowDashboardComponent {
           '/super-admin/fiscal/accounting/account-mappings',
         'fiscal/withholding': null,
         'invoicing/resolutions':
-          '/super-admin/subscriptions/fiscal-billing',
+          '/super-admin/fiscal/invoicing/resolutions',
         'fiscal/uvt': null,
         'payroll/settings': null,
       };

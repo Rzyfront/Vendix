@@ -11,9 +11,28 @@ import {
 import { Transform } from 'class-transformer';
 import { dispatch_route_stop_result_enum } from '@prisma/client';
 
+/**
+ * Payload de liquidación de una parada de ruta DSD.
+ *
+ * NO acepta `credit_amount`: en ruta no hay venta a crédito ni pago parcial —
+ * una parada se entrega con pago total (o es prepaga) y si el cliente no paga se
+ * marca `rejected`. El `ValidationPipe` global corre con `whitelist: true` +
+ * `forbidNonWhitelisted: true` (ver `main.ts`), así que enviar `credit_amount`
+ * produce un 400 en validación en vez de colarse hasta el servicio. La columna
+ * `dispatch_route_stops.credit_amount` sigue en el schema (siempre 0) porque
+ * retirarla exigiría una migración destructiva; no es input ni output del settle.
+ *
+ * `result` acepta solo `delivered`, `rejected` y `released`. El valor `partial`
+ * existe en el enum de Postgres por datos históricos, pero `settleStop` lo
+ * rechaza con `DISPATCH_ROUTE_PARTIAL_DISABLED`.
+ *
+ * Ojo con el nivel: la restricción es por PARADA. Una RUTA sí cierra
+ * normalmente con unas paradas entregadas y otras rechazadas o liberadas — no
+ * lograr entregar todo no es un error.
+ */
 export class SettleStopDto {
   @IsEnum(dispatch_route_stop_result_enum, {
-    message: 'result debe ser: delivered, partial, rejected o released',
+    message: 'result debe ser: delivered, rejected o released',
   })
   result: dispatch_route_stop_result_enum;
 

@@ -100,11 +100,12 @@ export const SUBSCRIPTIONS_ROUTES: Routes = [
           ),
       },
       {
+        // Facturación se mudó al módulo Fiscal (`/super-admin/fiscal/invoicing`).
+        // El redirect se queda: hay deep-links guardados y enlaces internos que
+        // apuntaban aquí, y romperlos por una reorganización de menús no aporta.
         path: 'fiscal-billing',
-        loadComponent: () =>
-          import('./pages/fiscal-billing/fiscal-billing.component').then(
-            (c) => c.FiscalBillingComponent,
-          ),
+        pathMatch: 'full',
+        redirectTo: '/super-admin/fiscal/invoicing',
       },
       {
         path: 'metrics',

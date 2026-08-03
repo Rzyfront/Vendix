@@ -1,0 +1,250 @@
+<div class="space-y-6">
+  <!-- Resumen de estado: las 3 cifras que dicen si la emisión va bien. -->
+  <div
+    class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6"
+  >
+    <div
+      class="flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+    >
+      <div class="space-y-1">
+        <div class="flex items-center gap-2">
+          <app-icon name="info" [size]="18" class="text-primary"></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Estado fiscal SaaS
+          </h2>
+        </div>
+        <p class="text-sm text-text-secondary max-w-3xl">
+          La emisión DIAN es independiente del cobro. Si está inactiva o falla,
+          la venta de planes continúa y el cliente conserva su factura SaaS
+          normal.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
+        <div class="rounded-md border border-border px-3 py-2 text-center">
+          <p class="text-xs text-text-secondary">Aceptadas</p>
+          <p class="text-lg font-semibold text-success">
+            {{ store.stats().accepted }}
+          </p>
+        </div>
+        <div class="rounded-md border border-border px-3 py-2 text-center">
+          <p class="text-xs text-text-secondary">Pendientes</p>
+          <p class="text-lg font-semibold text-warning">
+            {{ store.stats().pending }}
+          </p>
+        </div>
+        <div class="rounded-md border border-border px-3 py-2 text-center">
+          <p class="text-xs text-text-secondary">Errores</p>
+          <p class="text-lg font-semibold text-error">
+            {{ store.stats().errors }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Emisión manual -->
+  <div
+    class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6"
+  >
+    <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+      <div class="flex-1">
+        <div class="flex items-center gap-2 mb-3">
+          <app-icon name="file-plus" [size]="18" class="text-text-primary"></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Emisión manual
+          </h2>
+        </div>
+        <p class="text-sm text-text-secondary">
+          Úsalo para emitir o reemitir una factura SaaS pagada sin bloquear el
+          proceso de cobro.
+        </p>
+      </div>
+
+      <app-input
+        class="lg:w-64"
+        label="ID factura SaaS"
+        type="number"
+        [formControl]="manualInvoiceIdControl"
+        [control]="manualInvoiceIdControl"
+      ></app-input>
+
+      <app-button
+        type="button"
+        variant="outline"
+        [loading]="issuingInvoice()"
+        [disabled]="issuingInvoice() || !store.configured()"
+        (clicked)="onIssueManualInvoice()"
+      >
+        <app-icon slot="icon" name="send" [size]="16"></app-icon>
+        Emitir
+      </app-button>
+    </div>
+
+    @if (!store.configured()) {
+      <p class="text-xs text-warning pt-3">
+        Configura primero las credenciales DIAN en la pestaña «Configuración
+        DIAN».
+      </p>
+    }
+  </div>
+
+  <!-- Registro de transmisiones -->
+  <div
+    class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
+  >
+    <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+      <div class="flex-1">
+        <div class="flex items-center gap-2 mb-3">
+          <app-icon name="list-checks" [size]="18" class="text-text-primary"></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Registro de facturación
+          </h2>
+        </div>
+        <app-inputsearch
+          placeholder="Buscar por número, CUFE o error..."
+          [debounceTime]="500"
+          (searchChange)="onSearchChange($event)"
+        />
+      </div>
+
+      <app-selector
+        class="lg:w-56"
+        label="Estado"
+        [formControl]="statusFilterControl"
+        [options]="statusOptions"
+      ></app-selector>
+
+      <app-selector
+        class="lg:w-56"
+        label="Ambiente"
+        [formControl]="environmentFilterControl"
+        [options]="filterEnvironmentOptions"
+      ></app-selector>
+    </div>
+
+    @if (loadingTransmissions()) {
+      <div class="p-8 text-center">
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
+        <p class="mt-2 text-text-secondary">Cargando registro...</p>
+      </div>
+    } @else if (transmissions().length === 0) {
+      <app-empty-state
+        icon="file-text"
+        title="Sin transmisiones"
+        description="Cuando se paguen suscripciones con DIAN activo, aparecerán aquí."
+      ></app-empty-state>
+    } @else {
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="border-b border-border text-left text-text-secondary">
+              <th class="py-3 pr-4 font-medium">Documento</th>
+              <th class="py-3 pr-4 font-medium">Factura SaaS</th>
+              <th class="py-3 pr-4 font-medium">Estado</th>
+              <th class="py-3 pr-4 font-medium">Ambiente</th>
+              <th class="py-3 pr-4 font-medium text-right">Total</th>
+              <th class="py-3 pr-4 font-medium">Fecha</th>
+              <th class="py-3 font-medium text-right">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of transmissions(); track row.id) {
+              <tr class="border-b border-border/70 last:border-0">
+                <td class="py-3 pr-4">
+                  <div class="font-medium text-text-primary">
+                    {{ row.document_number }}
+                  </div>
+                  @if (row.cufe) {
+                    <div
+                      class="text-xs text-text-secondary truncate max-w-[220px]"
+                    >
+                      CUFE {{ row.cufe }}
+                    </div>
+                  }
+                  @if (row.error_message) {
+                    <div class="text-xs text-error truncate max-w-[260px]">
+                      {{ row.error_message }}
+                    </div>
+                  }
+                </td>
+                <td class="py-3 pr-4">
+                  <div class="text-text-primary">
+                    {{ row.subscription_invoice?.invoice_number ?? row.source_id }}
+                  </div>
+                  <div class="text-xs text-text-secondary">
+                    ID {{ row.source_id }}
+                  </div>
+                </td>
+                <td class="py-3 pr-4">
+                  <span
+                    class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
+                    [class]="statusBadgeClasses(row.transmission_status)"
+                  >
+                    {{ statusLabel(row.transmission_status) }}
+                  </span>
+                </td>
+                <td class="py-3 pr-4">
+                  {{ environmentLabel(row.dian_configuration?.environment) }}
+                </td>
+                <td class="py-3 pr-4 text-right font-medium text-text-primary">
+                  {{ asNumber(row.subscription_invoice?.total) | currency }}
+                  <span class="text-xs text-text-secondary">
+                    {{ row.subscription_invoice?.currency }}
+                  </span>
+                </td>
+                <td class="py-3 pr-4 text-text-secondary">
+                  {{ row.created_at | date: 'short' }}
+                </td>
+                <td class="py-3 text-right">
+                  <div class="flex justify-end gap-2">
+                    @if (row.pdf_url) {
+                      <a
+                        class="inline-flex items-center justify-center rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-[var(--color-surface-secondary)]"
+                        [href]="row.pdf_url"
+                        target="_blank"
+                        rel="noopener"
+                      >
+                        PDF
+                      </a>
+                    }
+                    <app-button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      [loading]="retryingTransmissionId() === row.id"
+                      [disabled]="!canRetry(row)"
+                      (clicked)="onRetry(row)"
+                    >
+                      <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                      Reintentar
+                    </app-button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pt-2 flex justify-center">
+        <app-pagination
+          [currentPage]="pagination().page"
+          [totalPages]="pagination().totalPages"
+          [total]="pagination().total"
+          [limit]="pagination().limit"
+          infoStyle="page"
+          (pageChange)="changePage($event)"
+        ></app-pagination>
+      </div>
+    }
+  </div>
+</div>

@@ -169,10 +169,15 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
           result: 'delivered',
           collected_amount: 200,
           withholding_amount: 0,
-          credit_amount: 0,
         }),
       }),
     );
+    // `credit_amount` ya NO se escribe: sin crédito en ruta, la columna queda en
+    // su `@default(0)`. Este assert es el guardián de esa regla — si vuelve a
+    // aparecer en el payload, alguien reintrodujo el crédito.
+    const stopUpdateData =
+      prismaMock.dispatch_route_stops.update.mock.calls[0][0].data;
+    expect(stopUpdateData).not.toHaveProperty('credit_amount');
   });
 
   // ── b) PARCIAL DESHABILITADO ───────────────────────────────────────
@@ -434,5 +439,93 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       'dispatch_note.delivered',
       expect.anything(),
     );
+  });
+
+  // ── k) CIERRE CON ENTREGAS INCOMPLETAS ─────────────────────────────
+  //
+  // La regla es por NIVEL y estos dos casos la fijan:
+  //   - PARADA: se entrega solo con pago total (cubierto en b/h — `partial` 400).
+  //   - RUTA:   cierra con normalidad mezclando delivered / rejected / released.
+  //             No lograr entregar todo NO es un error.
+  // Sin estas pruebas, un refactor futuro puede endurecer `close()` por accidente
+  // y bloquear el cierre de cualquier ruta con una entrega fallida.
+  describe('close() — parcialidad a nivel de RUTA', () => {
+    const buildClosableStop = (id: number, overrides: any = {}) => ({
+      id,
+      route_id: ROUTE_ID,
+      is_prepaid: false,
+      payment_method: 'cash',
+      collected_amount: new Prisma.Decimal(0),
+      anticipo_amount: new Prisma.Decimal(0),
+      change_amount: new Prisma.Decimal(0),
+      withholding_amount: new Prisma.Decimal(0),
+      credit_amount: new Prisma.Decimal(0),
+      dispatch_note: null,
+      ...overrides,
+    });
+
+    it('k) cierra una ruta con paradas delivered + rejected + released', async () => {
+      const stops = [
+        buildClosableStop(1, {
+          status: 'delivered',
+          result: 'delivered',
+          collected_amount: new Prisma.Decimal(200),
+        }),
+        buildClosableStop(2, { status: 'rejected', result: 'rejected' }),
+        buildClosableStop(3, { status: 'released', result: 'released' }),
+      ];
+      const route = buildRoute({
+        stops,
+        vehicle_id: null,
+        external_carrier_supplier_id: null,
+        shipping_method_id: null,
+      });
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(route);
+      prismaMock.dispatch_routes.update.mockImplementation((args: any) => ({
+        ...route,
+        ...args.data,
+        stops,
+      }));
+
+      const result = await service.close(ROUTE_ID, {
+        declared_cash: 200,
+      } as any);
+
+      expect(result.status).toBe('closed');
+      // Solo la parada entregada aporta al recaudo; rejected/released no.
+      expect(prismaMock.dispatch_routes.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'closed',
+            total_collected: 200,
+            cash_variance: 0,
+          }),
+        }),
+      );
+      expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+        'dispatch_route.closed',
+        expect.objectContaining({ route_id: ROUTE_ID, total_collected: 200 }),
+      );
+      // Solo reconcilia la orden de la parada ENTREGADA.
+      expect(
+        orderFlowServiceMock.reconcileOrderFromDispatch,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('k2) rechaza el cierre si queda una parada NO terminal (in_progress)', async () => {
+      const stops = [
+        buildClosableStop(1, { status: 'delivered', result: 'delivered' }),
+        buildClosableStop(2, { status: 'in_progress', result: null }),
+      ];
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+        buildRoute({ stops }),
+      );
+
+      await expect(
+        service.close(ROUTE_ID, { declared_cash: 0 } as any),
+      ).rejects.toThrow(/parada\(s\) sin liquidar/);
+
+      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    });
   });
 });
