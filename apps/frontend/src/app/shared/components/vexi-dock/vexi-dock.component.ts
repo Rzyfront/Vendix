@@ -59,10 +59,20 @@ const HINT_FADE_MS = 200;
  * what decides when the landing shake fires, so a shorter value would shake
  * mid-flight and a longer one would leave a visible pause on arrival.
  */
-const SETTLE_MS = 500;
+const SETTLE_MS = 300;
 
 /** Duration of the landing / open / close shake. Matches `vexi-wobble`. */
 const WOBBLE_MS = 200;
+
+/**
+ * How far before the glide ends the landing shake starts.
+ *
+ * Firing the shake exactly on arrival reads as two separate events — the dock
+ * stops, then it wobbles. Overlapping the last 50ms makes the shake look
+ * caused by the landing instead of appended to it. It has to stay well under
+ * SETTLE_MS: start too early and the dock is shaking in mid-flight.
+ */
+const WOBBLE_LEAD_MS = 50;
 
 /** How long the greeting pose stays up when the panel opens. */
 const GREETING_POSE_MS = 900;
@@ -201,7 +211,7 @@ const FAREWELL_MAX_MS = 15_000;
          easing overshoots slightly, so the arrival reads as settling rather
          than as stopping dead. Keep in sync with SETTLE_MS. */
       .vexi-dock__anchor--settling {
-        transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+        transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
       }
 
       /* Applied to the inner dock, never to the anchor: the anchor's transform
@@ -211,22 +221,25 @@ const FAREWELL_MAX_MS = 15_000;
         animation: vexi-wobble 200ms ease-in-out;
       }
 
-      /* A shake, not a bounce — it plays on top of live screens. Rotation
-         rather than translation so it cannot nudge the dock past the viewport
-         edge it just snapped to. */
+      /* Horizontal, and small. It starts 50ms before the glide ends, so for
+         that overlap the dock is still moving sideways underneath — a shake on
+         the same axis reads as the impact absorbing, whereas a rotation would
+         read as a second, unrelated motion. The amplitude stays under the
+         dock's own margin so it never crosses the viewport edge it is landing
+         against. */
       @keyframes vexi-wobble {
         0%,
         100% {
-          transform: rotate(0deg) scale(1);
+          transform: translateX(0);
         }
         25% {
-          transform: rotate(-7deg) scale(1.04);
+          transform: translateX(-5px);
         }
-        60% {
-          transform: rotate(5deg) scale(1.02);
+        55% {
+          transform: translateX(4px);
         }
-        85% {
-          transform: rotate(-2deg) scale(1);
+        80% {
+          transform: translateX(-2px);
         }
       }
 
@@ -344,6 +357,8 @@ export class VexiDockComponent {
   /** True while the dock glides back to its edge after a drag. */
   protected readonly settling = signal(false);
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Fires the landing shake `WOBBLE_LEAD_MS` before the glide finishes. */
+  private settleShakeTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ── Bubble ──────────────────────────────────────────────────────────────
   //
@@ -442,11 +457,18 @@ export class VexiDockComponent {
       return 'thinking';
     }
 
-    // Asleep during the two hours of silence that recent use buys. Ranked
-    // below every active state on purpose: being within the quiet window says
-    // nothing about whether Vexi is busy right now, and a dock that dozed off
-    // mid-answer would be worse than one that never sleeps.
-    if (this.presence.dormant()) return 'sleeping';
+    // Asleep during the two hours of silence that recent use buys, and only
+    // with the panel shut. Ranked below every active state on purpose: being
+    // inside the quiet window says nothing about whether Vexi is busy right
+    // now, and a dock that dozed off mid-answer would be worse than one that
+    // never sleeps.
+    //
+    // The open-panel clause is the load-bearing half. `dormant` is true
+    // *because* the panel was opened — `togglePanel()` calls
+    // `noteInteraction()`, which starts the silence — so without it the face
+    // fell asleep the moment the conversation began and stayed asleep between
+    // turns, in front of somebody actively typing.
+    if (!this.panelOpen() && this.presence.dormant()) return 'sleeping';
 
     return 'idle';
   });
@@ -557,6 +579,7 @@ export class VexiDockComponent {
       if (this.flashTimer) clearTimeout(this.flashTimer);
       if (this.wobbleTimer) clearTimeout(this.wobbleTimer);
       if (this.settleTimer) clearTimeout(this.settleTimer);
+      if (this.settleShakeTimer) clearTimeout(this.settleShakeTimer);
       // Presence is root-scoped and outlives the dock. Leaving it suppressed
       // because the dock happened to be busy at teardown would silence Vexi
       // for the rest of the session.
@@ -745,12 +768,21 @@ export class VexiDockComponent {
 
     if (!this.isBrowser) return;
     if (this.settleTimer) clearTimeout(this.settleTimer);
+    if (this.settleShakeTimer) clearTimeout(this.settleShakeTimer);
 
     this.settling.set(true);
+
+    // Two timers, not one. The shake has to start *before* the glide ends, so
+    // it cannot hang off the timer that ends the glide — the overlap is the
+    // whole point, and a single timer can only place them back to back.
+    this.settleShakeTimer = setTimeout(() => {
+      this.settleShakeTimer = null;
+      this.wobble();
+    }, SETTLE_MS - WOBBLE_LEAD_MS);
+
     this.settleTimer = setTimeout(() => {
       this.settling.set(false);
       this.settleTimer = null;
-      this.wobble();
     }, SETTLE_MS);
   }
 

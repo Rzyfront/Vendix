@@ -245,7 +245,14 @@ const SUGGESTIONS: readonly string[] = [
       </div>
 
       <form class="vexi-panel__composer" (submit)="send($event)">
+        <!-- Never disabled while sending. A disabled input cannot hold focus,
+             so the browser blurs it the instant the flag flips and nothing
+             hands the caret back when it re-enables — the cursor simply left
+             the conversation on every message. Staying enabled also lets the
+             next question be typed while Vexi is still answering; the send()
+             method is what refuses to fire a second turn. -->
         <input
+          #composer
           class="vexi-panel__input"
           name="vexiMessage"
           autocomplete="off"
@@ -253,7 +260,6 @@ const SUGGESTIONS: readonly string[] = [
           aria-label="Mensaje para Vexi"
           [value]="draft()"
           (input)="onDraftInput($event)"
-          [disabled]="isSending()"
         />
         <button
           type="submit"
@@ -766,6 +772,8 @@ export class VexiPanelComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly scroller =
     viewChild.required<ElementRef<HTMLElement>>('scroller');
+  private readonly composer =
+    viewChild.required<ElementRef<HTMLInputElement>>('composer');
 
   /** Flips the panel origin when the dock is parked on the left edge. */
   readonly anchorLeft = input(false);
@@ -952,6 +960,12 @@ export class VexiPanelComponent {
     }
 
     this.draft.set('');
+
+    // Explicit, not just a side effect of staying enabled: the send button and
+    // the suggestion chips are also entry points, and after clicking one the
+    // focus sits on that control. Sending should always leave the caret where
+    // the next message gets typed.
+    this.composer().nativeElement.focus();
   }
 
   protected useSuggestion(suggestion: string): void {
