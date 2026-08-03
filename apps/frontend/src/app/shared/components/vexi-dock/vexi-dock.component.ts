@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { VexiAvatarComponent, VexiExpression } from './vexi-avatar.component';
+import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
 import { VexiPanelComponent } from './vexi-panel.component';
 import { VexiDockPositionService, DOCK_SIZE } from './vexi-dock-position.service';
 import { VexiPresenceService } from './vexi-presence.service';
@@ -245,6 +246,7 @@ export class VexiDockComponent {
 
   private readonly voice = inject(VexiRealtimeService);
   private readonly presence = inject(VexiPresenceService);
+  private readonly chat = inject(VexiFacade);
 
   protected readonly mode = signal<DockMode>('idle');
   protected readonly panelOpen = signal(false);
@@ -303,9 +305,25 @@ export class VexiDockComponent {
     }
 
     const greeting = this.presence.proactiveHint();
-    return greeting && this.hintVisible() && this.hintSource() === 'proactive'
-      ? greeting.expression
-      : 'neutro';
+    if (greeting && this.hintVisible() && this.hintSource() === 'proactive') {
+      return greeting.expression;
+    }
+
+    // The typed conversation gets a face too. Until now only the voice surface
+    // and proactive greetings moved it, so a chat turn — the way Vexi is
+    // actually used — ran from question to answer with the avatar frozen on
+    // `neutro`, and `ok` was never reached by any code path at all.
+    if (this.chat.error()) return 'error';
+    if (this.chat.pendingProposal()) return 'ok';
+    // Streaming text before tool activity: once the answer is being written,
+    // that is what the face should say, even if a tool is still marked running.
+    if (this.chat.streamingContent()) return 'hablando';
+    if (this.chat.isSending() || this.chat.isStreaming()) return 'pensando';
+    if (this.chat.toolSteps().some((step) => step.status === 'running')) {
+      return 'pensando';
+    }
+
+    return 'neutro';
   });
 
   private readonly position = this.positionService.position;

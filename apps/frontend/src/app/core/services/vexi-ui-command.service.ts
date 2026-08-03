@@ -79,6 +79,8 @@ export class VexiUiCommandService {
           return await this.posSetCustomer(String(args['query'] ?? ''));
         case 'ui_pos_read_cart':
           return this.posReadCart();
+        case 'ui_pos_checkout':
+          return await this.posCheckout();
         case 'ui_refresh':
           return this.refresh(String(args['domain'] ?? ''));
         default:
@@ -235,7 +237,7 @@ export class VexiUiCommandService {
       ...result,
       next_step:
         result.status === 'ok'
-          ? 'Pregúntale si quiere algo más, o si desea crear, enviar o pagar la orden. Nunca cobres tú.'
+          ? 'Pregúntale si quiere algo más. Si ya está completa, resúmele la venta y pregúntale si confirma para cobrar; con su sí, cóbrala con ui_pos_checkout.'
           : 'Cuéntale exactamente qué pasó y qué tiene que hacer él.',
     });
   }
@@ -271,7 +273,31 @@ export class VexiUiCommandService {
       status: 'ok',
       ...cart,
       next_step:
-        'Resume lo que lleva y pregúntale si desea crear, enviar o pagar la orden. El pago lo hace la persona, no tú.',
+        'Resume lo que lleva y pregúntale si confirma para cobrar. Con su sí, cóbrala con ui_pos_checkout.',
+    });
+  }
+
+  /**
+   * Charges the open sale.
+   *
+   * The only POS command that does NOT go through `withUserInputTimeout`: that
+   * helper caps the wait at 20s, and counting cash or picking a payment method
+   * routinely takes longer. `vexiCheckout` carries its own 90s budget and
+   * already reports a timeout as `needs_user_input`, so wrapping it would only
+   * cut a live checkout short and mislabel it as pending.
+   */
+  private async posCheckout(): Promise<string> {
+    const host = this.pos.current();
+    if (!host) return this.posNotOpen();
+
+    const result = await host.vexiCheckout();
+
+    return JSON.stringify({
+      ...result,
+      next_step:
+        result.status === 'ok'
+          ? 'Confírmale que la venta quedó cobrada y dile el número de orden.'
+          : 'Dile exactamente en qué quedó el cobro y qué falta para completarlo.',
     });
   }
 

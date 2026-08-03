@@ -51,12 +51,25 @@ export class RequestContextInterceptor implements NestInterceptor {
       contextObj.is_owner = user.is_owner || effectiveRoles.includes('owner');
       contextObj.email = user.email;
 
-      // Only captured for authenticated requests, and only the bearer form.
-      // The AI api-bridge replays GETs as this user over internal HTTP; that
-      // is the whole reason the token has to survive past the guard layer.
+      // Only captured for authenticated requests. The AI api-bridge replays
+      // requests as this user over internal HTTP; that is the whole reason the
+      // token has to survive past the guard layer.
+      //
+      // Both sources are read, in the same order as `JwtStrategy`'s
+      // `fromExtractors([fromAuthHeaderAsBearerToken, fromUrlQueryParameter])`.
+      // Reading only the header made this silently asymmetric: `EventSource`
+      // cannot send headers, so the SSE chat endpoint authenticates via
+      // `?token=` and lands inside this `if (user)` block with no token
+      // captured. Every bridge call during an agent turn then failed with "no
+      // hay credencial", which reads like a permissions problem and is really
+      // this branch. If the two extractor lists ever diverge again, the same
+      // class of bug comes back.
       const authHeader = req.headers?.authorization;
+      const queryToken = req.query?.token;
       if (typeof authHeader === 'string' && /^Bearer /i.test(authHeader)) {
         contextObj.access_token = authHeader.slice(7);
+      } else if (typeof queryToken === 'string' && queryToken) {
+        contextObj.access_token = queryToken;
       }
     }
 

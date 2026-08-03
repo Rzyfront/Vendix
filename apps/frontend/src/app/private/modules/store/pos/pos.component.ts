@@ -2479,6 +2479,114 @@ export class PosComponent {
     };
   }
 
+  /**
+   * Charges the open sale, and reports what actually happened.
+   *
+   * Deliberately drives `onCheckout()` — the very method the cashier's button
+   * calls — instead of assembling a payment of its own. The checkout shell is
+   * where fulfillment, table, payment method, cash received and change are
+   * decided, and where the backend fires the KDS inside the payment
+   * transaction. A second payment path written for Vexi would be a second set
+   * of accounting and inventory consequences, subtly out of step with the
+   * first.
+   *
+   * The outcome is read from the screen's own witnesses rather than from a
+   * callback: the shell has three separate exits (payment completed, closed by
+   * the user, closed programmatically), so a hook per exit would silently miss
+   * the fourth one somebody adds later. Watching state covers all of them.
+   */
+  async vexiCheckout(): Promise<VexiPosActionResult> {
+    if (this.isEmpty) {
+      return {
+        status: 'error',
+        message: 'El carrito está vacío, así que no hay nada que cobrar.',
+      };
+    }
+
+    if (this.isEditMode()) {
+      return {
+        status: 'error',
+        message:
+          'Esta venta está en modo edición de una orden existente, no en una venta nueva.',
+      };
+    }
+
+    const cart = this.vexiReadCart();
+    const orderBefore = this.currentOrderNumber();
+
+    this.onCheckout();
+
+    // Not opening at all means a guard inside `onCheckout` refused (no cart
+    // state). Reporting "waiting on the user" there would be a lie.
+    if (!this.showCheckoutModal()) {
+      return {
+        status: 'error',
+        message: 'No pude abrir el cobro para esta venta.',
+      };
+    }
+
+    const settled = await this.vexiWaitForCheckoutOutcome(orderBefore);
+
+    if (settled === 'paid') {
+      return {
+        status: 'ok',
+        message: `Venta cobrada por ${cart.total}. Orden ${
+          this.currentOrderNumber() ?? 'creada'
+        }.`,
+        detail: { order_number: this.currentOrderNumber(), total: cart.total },
+      };
+    }
+
+    if (settled === 'abandoned') {
+      return {
+        status: 'needs_user_input',
+        message: 'Se cerró el cobro sin completar el pago.',
+      };
+    }
+
+    return {
+      status: 'needs_user_input',
+      message:
+        'Le abrí el cobro y está eligiendo el medio de pago. La venta todavía no está cobrada.',
+    };
+  }
+
+  /**
+   * Resolves once the checkout shell settles: `paid` when a new order number
+   * appears, `abandoned` when the shell closes without one, `pending` on
+   * timeout — which is not a failure, only the end of Vexi's turn.
+   */
+  private vexiWaitForCheckoutOutcome(
+    orderBefore: string | null,
+  ): Promise<'paid' | 'abandoned' | 'pending'> {
+    // Longer than the 20s cap on other POS commands on purpose: choosing a
+    // payment method and counting cash is slower than picking a variant.
+    const deadline = Date.now() + 90000;
+
+    return new Promise((resolve) => {
+      const poll = () => {
+        const orderNow = this.currentOrderNumber();
+        if (orderNow && orderNow !== orderBefore) {
+          resolve('paid');
+          return;
+        }
+        // Checked after the order number, not before: the success path closes
+        // the shell and sets the order in the same handler, and the opposite
+        // order would report a completed sale as abandoned.
+        if (!this.showCheckoutModal()) {
+          resolve('abandoned');
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve('pending');
+          return;
+        }
+        setTimeout(poll, 150);
+      };
+      poll();
+    });
+  }
+
   onCartItemRemoved(itemId: string): void {
     this.cartService
       .removeFromCart(itemId)

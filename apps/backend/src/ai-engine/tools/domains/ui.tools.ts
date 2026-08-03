@@ -147,7 +147,15 @@ export const uiTools: RegisteredTool[] = [
     domain: 'ui',
     clientSide: true,
     description:
-      'Muestra en pantalla el detalle línea por línea del carrito del Punto de Venta. NO la uses para enterarte de qué lleva el usuario: el conteo de líneas, el total y el cliente asignado ya te llegan en el contexto de pantalla de cada turno, y esta herramienta corre en el navegador sin devolverte nada. Úsala solo cuando la persona pida ver el desglose. Para resumirle qué lleva antes de preguntarle si desea crear, enviar o pagar la orden, habla desde el contexto que ya tienes. Vexi nunca cobra: el pago lo hace la persona.',
+      'Muestra en pantalla el detalle línea por línea del carrito del Punto de Venta. NO la uses para enterarte de qué lleva el usuario: el conteo de líneas, el total y el cliente asignado ya te llegan en el contexto de pantalla de cada turno, y esta herramienta corre en el navegador sin devolverte nada. Úsala solo cuando la persona pida ver el desglose. Para resumirle la venta antes de preguntarle si confirma para cobrar, habla desde el contexto que ya tienes.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'ui_pos_checkout',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Cobra la venta abierta en el Punto de Venta. Úsala SOLO después de haberle resumido la venta a la persona —líneas, cantidades, total y a qué cliente va— y de que ella haya confirmado que quiere cobrar. Abre el cobro con el medio de pago que la persona elija y te devuelve si la venta quedó cobrada, con su número de orden. Si te dice explícitamente el medio de pago pero no lo has confirmado todo, primero resume y pregunta. Nunca contestes que el cobro lo tiene que hacer ella.',
     parameters: { type: 'object', properties: {}, required: [] },
   },
   {

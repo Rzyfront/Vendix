@@ -42,6 +42,7 @@ export interface VexiPosHost {
   vexiRemoveLineByName(query: string): Promise<VexiPosActionResult>;
   vexiSetCustomerByQuery(query: string): Promise<VexiPosActionResult>;
   vexiReadCart(): VexiPosCartSnapshot;
+  vexiCheckout(): Promise<VexiPosActionResult>;
 }
 
 /**

@@ -123,7 +123,7 @@ const LABELS: Record<VexiExpression, string> = {
         position: absolute;
         inset: 0;
         display: block;
-        animation: vexi-breathe 6s ease-in-out infinite;
+        animation: vexi-breathe 4s ease-in-out infinite;
       }
 
       .vexi-avatar__layer {
@@ -143,15 +143,18 @@ const LABELS: Record<VexiExpression, string> = {
         opacity: 1;
       }
 
-      /* Still sub-3px over a slow cycle: enough to read as alive at a glance,
-         not enough to pull the eye away from the screen underneath. */
+      /* Two rounds of "+15%" went unnoticed because the amplitude was the wrong
+         knob: 15% of 2.9px is 0.4px, well under what the eye resolves on a 94px
+         avatar, and a 6s cycle is slow enough to read as a static image between
+         glances. Amplitude and tempo both moved. Still a float, not a bounce —
+         the dock sits over live screens and must not compete with them. */
       @keyframes vexi-breathe {
         0%,
         100% {
           transform: translateY(0);
         }
         50% {
-          transform: translateY(-2.9px);
+          transform: translateY(-4.5px);
         }
       }
 

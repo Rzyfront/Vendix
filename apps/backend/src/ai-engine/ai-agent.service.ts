@@ -100,9 +100,16 @@ export class AIAgentService {
    * The sentence shown for a write that is proposed but not applied.
    *
    * Built from the preview the tool itself computed, so what the user reads
-   * and what the approval card shows come from the same source. Falls back to
-   * naming the tool when the preview is missing or has an unexpected shape —
-   * an unhelpful sentence beats a confident false one.
+   * and what the approval card shows come from the same source.
+   *
+   * Two preview shapes are accepted because two families of tools produce
+   * them: the typed tools describe *what* they touch (`target`), while
+   * `write_endpoint` describes *the operation* (`label`, e.g. "Crear un
+   * gasto"). Reading only `target` made every bridge write fall through to the
+   * last resort, which used to name the tool — "la propuesta para
+   * write_endpoint" — exactly the internal detail the agent is told never to
+   * show. The fallback is now generic instead: vague beats leaking, and the
+   * approval card carries the specifics regardless.
    */
   private describePendingWrite(
     pending: NonNullable<AgentResult['pending_confirmation']>,
@@ -110,6 +117,7 @@ export class AIAgentService {
     const preview = pending.preview as
       | {
           target?: unknown;
+          label?: unknown;
           message?: unknown;
           changes?: Array<{ label?: unknown; from?: unknown; to?: unknown }>;
         }
@@ -120,14 +128,24 @@ export class AIAgentService {
         ? preview.target.trim()
         : null;
 
+    // Labels are verb-initial by construction (`describeWrite`), so they read
+    // as a clause once the leading capital is dropped.
+    const label =
+      typeof preview?.label === 'string' && preview.label.trim()
+        ? preview.label.trim().charAt(0).toLowerCase() +
+          preview.label.trim().slice(1)
+        : null;
+
     const diff = (preview?.changes ?? [])
       .filter((change) => typeof change?.label === 'string')
       .map((change) => `${change.label}: ${change.from} → ${change.to}`)
       .join('; ');
 
-    const head = target
-      ? `Tengo lista la propuesta para ${target}.`
-      : `Tengo lista la propuesta para "${pending.tool}".`;
+    const head = label
+      ? `Tengo lista la propuesta: ${label}.`
+      : target
+        ? `Tengo lista la propuesta para ${target}.`
+        : 'Tengo lista la propuesta del cambio.';
 
     const note =
       typeof preview?.message === 'string' && preview.message.trim()
@@ -450,14 +468,46 @@ export class AIAgentService {
               const details = payload.details as
                 | Record<string, any>
                 | undefined;
-              if (details?.confirmation_token) {
-                pendingConfirmation = {
-                  tool: toolName,
-                  arguments: toolArgs,
-                  confirmation_token: details.confirmation_token,
-                  preview: details.preview,
+
+              // The token is what separates the two outcomes that share this
+              // error code. `enforceConfirmation` throws it both when a change
+              // is queued for approval AND when the preview already proved the
+              // change impossible — and the second case deliberately mints no
+              // token. Reporting both as `requires_confirmation: true` told the
+              // model a rejected write was waiting on the user, so it narrated
+              // approval cards that did not exist. Without a token there is no
+              // proposal: it is a refusal the model can still fix and retry.
+              if (!details?.confirmation_token) {
+                messages.push({
+                  role: 'tool',
+                  content: JSON.stringify({
+                    requires_confirmation: false,
+                    applied: false,
+                    error: payload.message,
+                    preview: details?.preview,
+                    next_step:
+                      'Este cambio NO quedó propuesto y no hay nada que el usuario pueda aprobar. Corrige lo que falló y vuelve a intentarlo, o dile a la persona qué dato hace falta.',
+                  }),
+                  tool_call_id: toolCall.id,
+                });
+                yield {
+                  type: 'tool_result',
+                  tool: {
+                    id: toolCall.id,
+                    name: toolName,
+                    summary: 'No se pudo preparar el cambio.',
+                  },
                 };
+                continue;
               }
+
+              pendingConfirmation = {
+                tool: toolName,
+                arguments: toolArgs,
+                confirmation_token: details.confirmation_token,
+                preview: details.preview,
+              };
+
               messages.push({
                 role: 'tool',
                 content: JSON.stringify({
