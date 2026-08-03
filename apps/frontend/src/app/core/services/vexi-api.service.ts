@@ -51,7 +51,7 @@ export interface PaginatedConversations {
 }
 
 @Injectable({ providedIn: 'root' })
-export class AIChatApiService {
+export class VexiApiService {
   private http = inject(HttpClient);
   private baseUrl = `${environment.apiUrl}/store/ai-chat`;
 
@@ -70,11 +70,27 @@ export class AIChatApiService {
     status?: string;
     search?: string;
   }): Observable<PaginatedConversations> {
+    // The backend service returns `{ data, meta }`, but the response
+    // interceptor flattens it: the wire shape is `{ success, message, data:
+    // AIConversation[], meta }` — `data` is the array itself, not a nested
+    // page object. Reading `res.data.data` yields `undefined`, which then
+    // poisons the reducer (`[conv, ...undefined]` → "not iterable").
     return this.http
-      .get<{ data: PaginatedConversations }>(`${this.baseUrl}/conversations`, {
-        params: params as any,
-      })
-      .pipe(map((res) => res.data));
+      .get<{ data: AIConversation[]; meta: PaginatedConversations['meta'] }>(
+        `${this.baseUrl}/conversations`,
+        { params: params as any },
+      )
+      .pipe(
+        map((res) => ({
+          data: res.data ?? [],
+          meta: res.meta ?? {
+            total: res.data?.length ?? 0,
+            page: 1,
+            limit: params?.limit ?? 50,
+            totalPages: 1,
+          },
+        })),
+      );
   }
 
   getConversation(id: number): Observable<AIConversation> {

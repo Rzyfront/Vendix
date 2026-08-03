@@ -102,6 +102,11 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
         monthly_jobs_cap: 0,
         degradation: 'block',
       },
+      realtime_voice: {
+        enabled: false,
+        monthly_voice_seconds_cap: 0,
+        degradation: 'block',
+      },
     },
   },
   {
@@ -154,6 +159,13 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
         enabled: true,
         monthly_jobs_cap: 1000,
         degradation: 'warn',
+      },
+      // 30 min/month. `block` (not `warn`) because realtime audio is the
+      // costliest AI surface and must hard-stop at the cap.
+      realtime_voice: {
+        enabled: true,
+        monthly_voice_seconds_cap: 1800,
+        degradation: 'block',
       },
     },
   },
@@ -208,6 +220,15 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
         enabled: true,
         monthly_jobs_cap: null,
         degradation: 'warn',
+      },
+      // Deliberately finite where the rest of the tier is unlimited: realtime
+      // audio bills per minute of open session, so an uncapped enterprise seat
+      // has no ceiling on provider spend. 10h/month is generous; raise it per
+      // contract rather than setting null.
+      realtime_voice: {
+        enabled: true,
+        monthly_voice_seconds_cap: 36000,
+        degradation: 'block',
       },
     },
   },

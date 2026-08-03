@@ -18,6 +18,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 // store-scoped only; org-level renders would either flash stale data or show
 // the wrong tienda's status.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-dock.component';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
@@ -47,6 +48,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     PaywallOutletComponent,
     FiscalGateOutletComponent,
     FiscalObligationBannerComponent,
+    VexiDockComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -102,6 +104,9 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
 
     <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
     <app-fiscal-gate-outlet />
+
+    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado -->
+    <app-vexi-dock />
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })

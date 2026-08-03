@@ -4,6 +4,7 @@ export const accountingTools: RegisteredTool[] = [
   {
     name: 'get_profit_and_loss',
     domain: 'accounting',
+    readOnly: true,
     description: 'Get the profit and loss (P&L) report for a given period',
     parameters: {
       type: 'object',
@@ -25,6 +26,7 @@ export const accountingTools: RegisteredTool[] = [
   {
     name: 'get_account_entries',
     domain: 'accounting',
+    readOnly: true,
     description:
       'Get journal entries for a specific account code and date range',
     parameters: {

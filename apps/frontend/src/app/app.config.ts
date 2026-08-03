@@ -29,8 +29,8 @@ import {
   notificationsReducer,
   NotificationsEffects,
 } from './core/store/notifications';
-import { aiChatReducer } from './core/store/ai-chat/ai-chat.reducer';
-import { AIChatEffects } from './core/store/ai-chat/ai-chat.effects';
+import { vexiReducer } from './core/store/vexi/vexi.reducer';
+import { VexiEffects } from './core/store/vexi/vexi.effects';
 import { subscriptionReducer, SubscriptionEffects } from './core/store/subscription';
 import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
@@ -122,9 +122,9 @@ export const appConfig: ApplicationConfig = {
     provideState('auth', authReducer, { initialState: hydrateAuthState() }),
     provideState('config', configReducer),
     provideState('notifications', notificationsReducer),
-    provideState('aiChat', aiChatReducer),
+    provideState('vexi', vexiReducer),
     provideState('subscription', subscriptionReducer),
-    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects, AIChatEffects, SubscriptionEffects]),
+    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects, VexiEffects, SubscriptionEffects]),
     provideStoreDevtools({
       maxAge: 25,
       logOnly: !isDevMode(),

@@ -4,6 +4,7 @@ export const searchTools: RegisteredTool[] = [
   {
     name: 'semantic_search',
     domain: 'search',
+    readOnly: true,
     description:
       'Search the business database using natural language. Finds products, customers, or other entities by meaning, not just keywords.',
     parameters: {

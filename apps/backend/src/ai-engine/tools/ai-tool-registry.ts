@@ -40,12 +40,33 @@ export class AIToolRegistry {
 
   getAvailableDefinitions(userPermissions?: string[]): AIToolDefinition[] {
     return Array.from(this.tools.values())
-      .filter((t) => {
-        if (!t.requiredPermissions?.length) return true;
-        if (!userPermissions) return false;
-        return t.requiredPermissions.every((p) => userPermissions.includes(p));
-      })
+      .filter((t) => this.isPermitted(t, userPermissions))
       .map((t) => this.toDefinition(t));
+  }
+
+  /**
+   * Permission-filtered catalog restricted to side-effect-free tools.
+   * Used by surfaces that execute without a confirmation step (realtime
+   * voice). Fail-closed: a tool that does not declare `readOnly: true` is
+   * excluded even if the user holds every permission it requires.
+   */
+  getReadOnlyDefinitions(userPermissions?: string[]): AIToolDefinition[] {
+    return Array.from(this.tools.values())
+      .filter((t) => t.readOnly === true && this.isPermitted(t, userPermissions))
+      .map((t) => this.toDefinition(t));
+  }
+
+  isReadOnly(name: string): boolean {
+    return this.tools.get(name)?.readOnly === true;
+  }
+
+  private isPermitted(
+    tool: RegisteredTool,
+    userPermissions?: string[],
+  ): boolean {
+    if (!tool.requiredPermissions?.length) return true;
+    if (!userPermissions) return false;
+    return tool.requiredPermissions.every((p) => userPermissions.includes(p));
   }
 
   async executeTool(name: string, args: Record<string, any>): Promise<string> {
@@ -67,8 +88,10 @@ export class AIToolRegistry {
 
     // Check permissions — use granular permissions if available, fall back to roles
     if (tool.requiredPermissions?.length) {
-      const userPermissions =
-        requestContext?.permissions || context.roles || [];
+      // `[]` is truthy, so `permissions || roles` never reaches the fallback
+      // for a user whose permission list resolved empty. Check length.
+      const granted = requestContext?.permissions;
+      const userPermissions = granted?.length ? granted : (context.roles ?? []);
       const hasPermission = tool.requiredPermissions.every((p) =>
         userPermissions.includes(p),
       );

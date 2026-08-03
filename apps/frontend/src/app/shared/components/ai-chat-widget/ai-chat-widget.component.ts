@@ -11,7 +11,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { AIChatFacade } from '../../../core/store/ai-chat/ai-chat.facade';
+import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
@@ -424,7 +424,7 @@ export class AIChatWidgetComponent implements OnInit {
   isStreaming = signal(false);
   isSending = signal(false);
 
-  private readonly chatFacade = inject(AIChatFacade);
+  private readonly chatFacade = inject(VexiFacade);
   private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {

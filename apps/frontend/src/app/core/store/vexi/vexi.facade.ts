@@ -1,0 +1,75 @@
+import { Injectable, inject } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { Store } from '@ngrx/store';
+import * as VexiActions from './vexi.actions';
+import * as VexiSelectors from './vexi.selectors';
+import { AIConversation, AIMessage } from '../../services/vexi-api.service';
+
+@Injectable({ providedIn: 'root' })
+export class VexiFacade {
+  private store = inject(Store);
+
+  readonly conversations$ = this.store.select(VexiSelectors.selectConversations);
+  readonly activeConversationId$ = this.store.select(
+    VexiSelectors.selectActiveConversationId,
+  );
+  readonly messages$ = this.store.select(VexiSelectors.selectMessages);
+  readonly streamingContent$ = this.store.select(
+    VexiSelectors.selectStreamingContent,
+  );
+  readonly isStreaming$ = this.store.select(VexiSelectors.selectIsStreaming);
+  readonly isSending$ = this.store.select(VexiSelectors.selectIsSending);
+  readonly loading$ = this.store.select(VexiSelectors.selectLoading);
+  readonly error$ = this.store.select(VexiSelectors.selectError);
+
+  // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
+  readonly conversations = toSignal(this.conversations$, {
+    initialValue: [] as AIConversation[],
+  });
+  readonly activeConversationId = toSignal(this.activeConversationId$, {
+    initialValue: null as number | null,
+  });
+  readonly messages = toSignal(this.messages$, {
+    initialValue: [] as AIMessage[],
+  });
+  readonly streamingContent = toSignal(this.streamingContent$, { initialValue: '' });
+  readonly isStreaming = toSignal(this.isStreaming$, { initialValue: false });
+  readonly isSending = toSignal(this.isSending$, { initialValue: false });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly error = toSignal(this.error$, { initialValue: null as string | null });
+
+  loadConversations(): void {
+    this.store.dispatch(VexiActions.loadConversations());
+  }
+
+  createConversation(appKey?: string, title?: string): void {
+    this.store.dispatch(VexiActions.createConversation({ appKey, title }));
+  }
+
+  selectConversation(conversationId: number): void {
+    this.store.dispatch(
+      VexiActions.selectConversation({ conversationId }),
+    );
+  }
+
+  sendMessage(conversationId: number, content: string): void {
+    this.store.dispatch(
+      VexiActions.sendMessage({ conversationId, content }),
+    );
+  }
+
+  /** Sends the first message when no conversation is active yet. */
+  startConversation(content: string, appKey?: string): void {
+    this.store.dispatch(VexiActions.startConversation({ content, appKey }));
+  }
+
+  archiveConversation(conversationId: number): void {
+    this.store.dispatch(
+      VexiActions.archiveConversation({ conversationId }),
+    );
+  }
+
+  clearActiveConversation(): void {
+    this.store.dispatch(VexiActions.clearActiveConversation());
+  }
+}

@@ -45,7 +45,7 @@ export class RequestContextInterceptor implements NestInterceptor {
       contextObj.store_id = user.store_id;
       contextObj.app_type = user.app_type; // ✅ Del JWT — DomainScopeGuard
       contextObj.roles = effectiveRoles;
-      contextObj.permissions = user.permissions || [];
+      contextObj.permissions = this.normalizePermissions(user.permissions);
       contextObj.is_super_admin =
         user.is_super_admin || effectiveRoles.includes('super_admin');
       contextObj.is_owner = user.is_owner || effectiveRoles.includes('owner');
@@ -71,5 +71,31 @@ export class RequestContextInterceptor implements NestInterceptor {
     return RequestContextService.asyncLocalStorage.run(contextObj, () => {
       return next.handle();
     });
+  }
+
+  /**
+   * `JwtStrategy` hydrates `req.user.permissions` as row objects
+   * (`{ name, path, method, status }`) because `PermissionsGuard` matches on
+   * path + method. `RequestContext.permissions` is declared `string[]` and
+   * every ALS consumer calls `.includes('store:...')` on it, so the objects
+   * have to be flattened to names here — otherwise the comparison is
+   * string-vs-object and silently never matches.
+   *
+   * Inactive permission rows are dropped so a revoked grant cannot satisfy a
+   * name check, mirroring the `status === 'active'` filter in the guard.
+   */
+  private normalizePermissions(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((p) => {
+        if (typeof p === 'string') return p;
+        if (p && typeof p === 'object') {
+          const row = p as { name?: unknown; status?: unknown };
+          if (row.status !== undefined && row.status !== 'active') return '';
+          return typeof row.name === 'string' ? row.name : '';
+        }
+        return '';
+      })
+      .filter((name): name is string => name.length > 0);
   }
 }

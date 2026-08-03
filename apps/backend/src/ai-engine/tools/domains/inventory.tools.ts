@@ -51,6 +51,7 @@ export function createInventoryTools(
     {
       name: 'get_stock_levels',
       domain: 'inventory',
+      readOnly: true,
       description:
         'Get current stock levels for products, optionally filtered by product, location, or low-stock status. Returns on_hand, reserved, and available quantities per location.',
       parameters: {
@@ -107,6 +108,7 @@ export function createInventoryTools(
     {
       name: 'get_low_stock_alerts',
       domain: 'inventory',
+      readOnly: true,
       description:
         'Get products that are below their minimum stock threshold and need reordering, with current stock vs reorder point per location.',
       parameters: {
@@ -163,6 +165,7 @@ export function createInventoryTools(
     {
       name: 'check_stock_availability',
       domain: 'inventory',
+      readOnly: true,
       description:
         'Check if sufficient stock is available for a product across all locations. Returns availability status, total available quantity, per-location breakdown, and suggested allocation.',
       parameters: {
@@ -219,6 +222,7 @@ export function createInventoryTools(
     {
       name: 'get_stock_movements',
       domain: 'inventory',
+      readOnly: true,
       description:
         'Query inventory movement history with filters for product, location, movement type, and date range.',
       parameters: {
@@ -297,6 +301,7 @@ export function createInventoryTools(
     {
       name: 'get_inventory_locations',
       domain: 'inventory',
+      readOnly: true,
       description:
         'List active inventory locations (warehouses, stores, etc.) with their type and code. Useful for finding location IDs needed by other tools.',
       parameters: {
@@ -340,6 +345,7 @@ export function createInventoryTools(
     {
       name: 'get_stock_adjustments',
       domain: 'inventory',
+      readOnly: true,
       description:
         'Query inventory adjustment history (damage, loss, theft, expiration, count corrections) with filters for product, location, type, and date range.',
       parameters: {

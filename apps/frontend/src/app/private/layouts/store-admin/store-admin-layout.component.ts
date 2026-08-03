@@ -30,6 +30,7 @@ import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-dock.component';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
 import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
@@ -59,6 +60,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
     ArrivalBannerComponent,
+    VexiDockComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -209,6 +211,9 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
     <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
     <app-fiscal-gate-outlet />
+
+    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado -->
+    <app-vexi-dock />
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })

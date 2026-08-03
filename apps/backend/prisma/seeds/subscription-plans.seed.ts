@@ -71,6 +71,14 @@ export async function seedSubscriptionPlans(
       monthly_jobs_cap: 5000,
       degradation: 'warn',
     },
+    // 2h/month of open realtime session. Metered in seconds because
+    // push-to-talk turns are short; `degradation: 'block'` because audio
+    // is orders of magnitude costlier than text and must hard-stop.
+    realtime_voice: {
+      enabled: true,
+      monthly_voice_seconds_cap: 7200,
+      degradation: 'block',
+    },
   };
 
   const planData = {

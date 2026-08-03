@@ -38,9 +38,19 @@ export class AIChatService {
   async createConversation(dto: CreateConversationDto) {
     const context = RequestContextService.getContext();
 
+    // `StorePrismaService` injects `store_id` on create, but not
+    // `organization_id` / `user_id` — and both are required columns with no
+    // default, so they have to be supplied here or Prisma rejects the insert.
+    // `user_id` is also the ownership filter in `getConversation`, so a
+    // placeholder value would create a row nobody can ever read back.
+    if (!context?.organization_id || !context?.user_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
     const conversation = await this.prisma.ai_conversations.create({
       data: {
-        user_id: context?.user_id ?? 0,
+        organization_id: context.organization_id,
+        user_id: context.user_id,
         title: dto.title || null,
         app_key: dto.app_key || null,
         status: 'active',

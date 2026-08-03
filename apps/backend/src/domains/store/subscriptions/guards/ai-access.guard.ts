@@ -55,7 +55,15 @@ export class AiAccessGuard implements CanActivate {
       return true;
     }
 
-    const storeId = RequestContextService.getStoreId();
+    // Read from `req.user` first, the way `StoreOperationsGuard` does.
+    // Guards run before `RequestContextInterceptor`, so the AsyncLocalStorage
+    // context is not populated yet at this point — and `getContext()` falls
+    // back to a process-wide static, which means the ALS-only read can return
+    // whichever tenant the *previous* request left behind.
+    const req = ctx.switchToHttp().getRequest<{
+      user?: { store_id?: number | null };
+    }>();
+    const storeId = req?.user?.store_id ?? RequestContextService.getStoreId();
     if (!storeId) {
       if (this.gateConfig.isEnforce()) {
         throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);

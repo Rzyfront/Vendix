@@ -37,6 +37,7 @@ import { ExogenousModule } from './exogenous/exogenous.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
+import { VexiModule } from './vexi/vexi.module';
 import { DispatchNotesModule } from './dispatch-notes/dispatch-notes.module';
 import { DispatchRoutesModule } from './dispatch-routes/dispatch-routes.module';
 import { CarrierModule } from './carrier/carrier.module';
@@ -104,6 +105,7 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     ReservationsModule,
     ReviewsModule,
     AIChatModule,
+    VexiModule,
     DispatchNotesModule,
     DispatchRoutesModule,
     CarrierModule,

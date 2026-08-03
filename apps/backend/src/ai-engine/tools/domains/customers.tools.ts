@@ -4,6 +4,7 @@ export const customerTools: RegisteredTool[] = [
   {
     name: 'get_customer_segments',
     domain: 'customers',
+    readOnly: true,
     description:
       'Get customer segmentation analysis (RFM: Recency, Frequency, Monetary)',
     parameters: {
@@ -28,6 +29,7 @@ export const customerTools: RegisteredTool[] = [
   {
     name: 'get_customer_history',
     domain: 'customers',
+    readOnly: true,
     description: 'Get the purchase history and profile of a specific customer',
     parameters: {
       type: 'object',

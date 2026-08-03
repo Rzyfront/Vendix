@@ -4,6 +4,7 @@ export const salesTools: RegisteredTool[] = [
   {
     name: 'get_sales_report',
     domain: 'sales',
+    readOnly: true,
     description:
       'Get a sales report for a given date range with totals, order count, and average order value',
     parameters: {
@@ -26,6 +27,7 @@ export const salesTools: RegisteredTool[] = [
   {
     name: 'get_top_products',
     domain: 'sales',
+    readOnly: true,
     description:
       'Get the top selling products by revenue or quantity for a date range',
     parameters: {

@@ -1,45 +1,44 @@
 import { createSelector, createFeatureSelector } from '@ngrx/store';
-import { AIChatState } from './ai-chat.reducer';
+import { VexiState } from './vexi.reducer';
 
-export const selectAIChatState =
-  createFeatureSelector<AIChatState>('aiChat');
+export const selectVexiState = createFeatureSelector<VexiState>('vexi');
 
 export const selectConversations = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.conversations,
 );
 
 export const selectActiveConversationId = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.activeConversationId,
 );
 
 export const selectMessages = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.messages,
 );
 
 export const selectStreamingContent = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.streamingContent,
 );
 
 export const selectIsStreaming = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.isStreaming,
 );
 
 export const selectIsSending = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.isSending,
 );
 
 export const selectLoading = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.loading,
 );
 
 export const selectError = createSelector(
-  selectAIChatState,
+  selectVexiState,
   (state) => state.error,
 );

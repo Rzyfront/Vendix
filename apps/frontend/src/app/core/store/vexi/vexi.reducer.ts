@@ -1,8 +1,8 @@
 import { createReducer, on } from '@ngrx/store';
-import * as AIChatActions from './ai-chat.actions';
-import { AIConversation, AIMessage } from '../../services/ai-chat-api.service';
+import * as VexiActions from './vexi.actions';
+import { AIConversation, AIMessage } from '../../services/vexi-api.service';
 
-export interface AIChatState {
+export interface VexiState {
   conversations: AIConversation[];
   activeConversationId: number | null;
   messages: AIMessage[];
@@ -13,7 +13,7 @@ export interface AIChatState {
   error: string | null;
 }
 
-export const initialAIChatState: AIChatState = {
+export const initialVexiState: VexiState = {
   conversations: [],
   activeConversationId: null,
   messages: [],
@@ -24,28 +24,32 @@ export const initialAIChatState: AIChatState = {
   error: null,
 };
 
-export const aiChatReducer = createReducer(
-  initialAIChatState,
+export const vexiReducer = createReducer(
+  initialVexiState,
 
-  on(AIChatActions.loadConversations, (state) => ({
+  on(VexiActions.loadConversations, (state) => ({
     ...state,
     loading: true,
     error: null,
   })),
 
-  on(AIChatActions.loadConversationsSuccess, (state, { conversations }) => ({
+  // Coerced rather than trusted: `conversations` is the only writer of this
+  // slice from the network, and every other handler spreads it. A single
+  // non-array payload would turn `[conv, ...state.conversations]` into a
+  // TypeError that takes down the whole panel.
+  on(VexiActions.loadConversationsSuccess, (state, { conversations }) => ({
     ...state,
-    conversations,
+    conversations: Array.isArray(conversations) ? conversations : [],
     loading: false,
   })),
 
-  on(AIChatActions.loadConversationsFailure, (state, { error }) => ({
+  on(VexiActions.loadConversationsFailure, (state, { error }) => ({
     ...state,
     loading: false,
     error,
   })),
 
-  on(AIChatActions.createConversationSuccess, (state, { conversation }) => ({
+  on(VexiActions.createConversationSuccess, (state, { conversation }) => ({
     ...state,
     conversations: [conversation, ...state.conversations],
     activeConversationId: conversation.id,
@@ -53,7 +57,7 @@ export const aiChatReducer = createReducer(
     streamingContent: '',
   })),
 
-  on(AIChatActions.selectConversation, (state, { conversationId }) => ({
+  on(VexiActions.selectConversation, (state, { conversationId }) => ({
     ...state,
     activeConversationId: conversationId,
     messages: [],
@@ -61,28 +65,28 @@ export const aiChatReducer = createReducer(
     isStreaming: false,
   })),
 
-  on(AIChatActions.loadMessagesSuccess, (state, { messages }) => ({
+  on(VexiActions.loadMessagesSuccess, (state, { messages }) => ({
     ...state,
     messages,
   })),
 
-  on(AIChatActions.createConversationFailure, (state, { error }) => ({
+  on(VexiActions.createConversationFailure, (state, { error }) => ({
     ...state,
     error,
   })),
 
-  on(AIChatActions.selectConversationFailure, (state, { error }) => ({
+  on(VexiActions.selectConversationFailure, (state, { error }) => ({
     ...state,
     error,
     activeConversationId: null,
   })),
 
-  on(AIChatActions.loadMessagesFailure, (state, { error }) => ({
+  on(VexiActions.loadMessagesFailure, (state, { error }) => ({
     ...state,
     error,
   })),
 
-  on(AIChatActions.sendMessage, (state, { content }) => {
+  on(VexiActions.sendMessage, (state, { content }) => {
     if (!state.activeConversationId) return state;
     return {
       ...state,
@@ -106,7 +110,7 @@ export const aiChatReducer = createReducer(
     };
   }),
 
-  on(AIChatActions.sendMessageSuccess, (state, { assistantMessage }) => ({
+  on(VexiActions.sendMessageSuccess, (state, { assistantMessage }) => ({
     ...state,
     isSending: false,
     isStreaming: false,
@@ -127,19 +131,19 @@ export const aiChatReducer = createReducer(
     ],
   })),
 
-  on(AIChatActions.sendMessageFailure, (state, { error }) => ({
+  on(VexiActions.sendMessageFailure, (state, { error }) => ({
     ...state,
     isSending: false,
     isStreaming: false,
     error,
   })),
 
-  on(AIChatActions.receiveStreamChunk, (state, { content }) => ({
+  on(VexiActions.receiveStreamChunk, (state, { content }) => ({
     ...state,
     streamingContent: state.streamingContent + content,
   })),
 
-  on(AIChatActions.streamComplete, (state) => {
+  on(VexiActions.streamComplete, (state) => {
     if (!state.activeConversationId) return { ...state, isStreaming: false, isSending: false, streamingContent: '' };
     return {
       ...state,
@@ -163,19 +167,19 @@ export const aiChatReducer = createReducer(
     };
   }),
 
-  on(AIChatActions.streamError, (state, { error }) => ({
+  on(VexiActions.streamError, (state, { error }) => ({
     ...state,
     isStreaming: false,
     isSending: false,
     error,
   })),
 
-  on(AIChatActions.archiveConversationFailure, (state, { error }) => ({
+  on(VexiActions.archiveConversationFailure, (state, { error }) => ({
     ...state,
     error,
   })),
 
-  on(AIChatActions.archiveConversationSuccess, (state, { conversationId }) => ({
+  on(VexiActions.archiveConversationSuccess, (state, { conversationId }) => ({
     ...state,
     conversations: state.conversations.filter((c) => c.id !== conversationId),
     activeConversationId:
@@ -184,7 +188,7 @@ export const aiChatReducer = createReducer(
         : state.activeConversationId,
   })),
 
-  on(AIChatActions.clearActiveConversation, (state) => ({
+  on(VexiActions.clearActiveConversation, (state) => ({
     ...state,
     activeConversationId: null,
     messages: [],
