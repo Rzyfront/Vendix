@@ -101,21 +101,19 @@ import {
                       class="text-text-secondary"
                       [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
                       [title]="promo.name"
-                      >{{ promo.name }}</span
-                    >
+                      >{{ promo.name }}</span>
                     @if (promo.affectedLabel) {
                       <span
                         class="text-text-muted"
                         [ngClass]="compact() ? 'text-[10px]' : 'text-xs'"
                         [title]="'Aplicada a: ' + promo.affectedLabel"
-                        >({{ promo.affectedLabel }})</span
-                      >
+                        >({{ promo.affectedLabel }})</span>
                     }
                   </div>
                   <span
                     class="shrink-0 font-semibold text-green-600"
                     [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                    >-{{ promo.discount_amount | currency }}</span
+                    >-{{ promo.discount_amount | currency }}</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                   <app-badge
