@@ -624,6 +624,13 @@ export class PosCartService {
               is_auto_applied: true,
               // Presentation-only tier label (mirrors backend "Desde N und: -X%").
               badge_label: this.buildTierBadgeLabel(matchedTier),
+              // Affected products for tiered promos that scope to a subset of
+              // the cart (e.g. `quantity_tiered` on a specific product). For
+              // `scope: 'order'` this is empty and the UI hides the suffix.
+              affected_products: this.collectAffectedProducts(
+                promo,
+                applicableItems,
+              ),
             };
             if (
               winner === null ||
@@ -654,6 +661,13 @@ export class PosCartService {
             discountAmount = Math.min(discountAmount, maxDiscountAmount);
           }
 
+          // For scope: 'order' the affected list is empty (whole order). The
+          // POS UI hides the suffix in that case so the operator sees a clean
+          // discount line for order-wide promos.
+          const flatApplicableItems = this.getPromotionApplicableItems(
+            promo,
+            currentState.items,
+          );
           const candidateDiscount: CartDiscount = {
             id: 'PROMO_' + promo.id,
             type: promo.type === 'percentage' ? 'percentage' : 'fixed',
@@ -662,6 +676,10 @@ export class PosCartService {
             amount: Math.round(discountAmount * 100) / 100,
             promotion_id: promo.id,
             is_auto_applied: true,
+            affected_products: this.collectAffectedProducts(
+              promo,
+              flatApplicableItems,
+            ),
           };
           if (
             winner === null ||
@@ -727,6 +745,32 @@ export class PosCartService {
     }
 
     return items;
+  }
+
+  /**
+   * Build a deduplicated list of product names affected by the promotion.
+   * Returns `undefined` (not an empty array) when the promo is order-wide so
+   * the template can use a single `@if (disc.affected_products?.length)` to
+   * distinguish "no scope restriction" from "restriction with zero matches".
+   *
+   * Mirrors the ecommerce `applicable_descriptions` array but the POS only
+   * renders product names (categories are a softer signal that the operator
+   * can derive from the line items below).
+   */
+  private collectAffectedProducts(
+    promo: any,
+    applicableItems: CartItem[],
+  ): string[] | undefined {
+    if (promo.scope === 'order') return undefined;
+    const seen = new Set<string>();
+    const names: string[] = [];
+    for (const item of applicableItems) {
+      const name = item.product?.name?.trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
+    }
+    return names;
   }
 
   /**

@@ -154,10 +154,20 @@ import {
                   @for (disc of getPromotionDiscounts(); track disc.id) {
                     <div class="flex items-start justify-between gap-2 py-0.5">
                       <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-1 min-w-0">
+                        <div class="flex items-baseline gap-1 min-w-0 flex-wrap">
                           <span class="text-[11px] text-green-700 truncate">{{
                             disc.description
                           }}</span>
+                          @if (formatAffectedProducts(disc.affected_products); as
+                            affectedLabel) {
+                            @if (affectedLabel) {
+                              <span
+                                class="text-[10px] text-green-600/80"
+                                [title]="'Aplicada a: ' + affectedLabel"
+                                >[{{ affectedLabel }}]</span
+                              >
+                            }
+                          }
                           @if (disc.is_auto_applied) {
                             <span
                               class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600 shrink-0"
@@ -1547,6 +1557,30 @@ private cartService = inject(PosCartService);
     return disc.type === 'percentage'
       ? { label: 'Porcentaje', variant: 'success' }
       : { label: 'Monto fijo', variant: 'primary' };
+  }
+
+  /**
+   * Compress the list of products the discount was applied to into a compact
+   * parenthetical label for the cart sidebar. Mirrors the ecommerce
+   * `formatAffectedLabel` but uses square brackets to fit the tighter POS
+   * density:
+   *   [] / undefined → '' (whole-order scope, no suffix)
+   *   ['Guanabana'] → 'Guanabana'
+   *   ['A', 'B']    → 'A, B'
+   *   ['A', 'B', 'C'] → 'A, B +1'
+   *
+   * The template uses `@if (...; as affectedLabel)` to bind the formatted
+   * string once, so the conditional + interpolation read cleanly.
+   */
+  formatAffectedProducts(products: string[] | undefined): string {
+    if (!products || products.length === 0) return '';
+    const names = products
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0);
+    if (names.length === 0) return '';
+    if (names.length === 1) return names[0];
+    if (names.length === 2) return `${names[0]}, ${names[1]}`;
+    return `${names[0]}, ${names[1]} +${names.length - 2}`;
   }
 
   removePromoDiscount(discountId: string): void {
