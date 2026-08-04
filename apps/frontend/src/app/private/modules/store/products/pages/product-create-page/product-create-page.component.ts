@@ -1806,7 +1806,14 @@ export class ProductCreatePageComponent {
 
     this.productForm.patchValue({
       name: product.name,
-      slug: product.slug,
+      // QUI-504: normalizamos el slug heredado al cargar. Los productos
+      // creados ANTES de este PR no pasaron por `slugValidator`, así que su
+      // slug puede traer mayúsculas, espacios o acentos — justo la data que
+      // rompe el detalle del ecommerce. Sin normalizar acá, el control queda
+      // inválido y `collectSaveRequirements()` lista "Slug (URL)" como
+      // bloqueante, impidiendo guardar CUALQUIER otro campo del producto
+      // hasta que el operador arregle el slug a mano.
+      slug: product.slug ? ProductUtils.generateSlug(product.slug) : '',
       description: product.description,
       cost_price: product.cost_price || 0,
       profit_margin: product.profit_margin || 0,
