@@ -7,7 +7,7 @@ import {
   computed,
   viewChild,
   DestroyRef,
-  OnInit,
+  effect,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -428,7 +428,7 @@ interface TransferItem {
     </app-modal>
   `,
 })
-export class TransferCreateModalComponent implements OnInit {
+export class TransferCreateModalComponent {
   private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
   private toastService = inject(ToastService);
@@ -537,11 +537,34 @@ export class TransferCreateModalComponent implements OnInit {
       confirmVariant: 'danger'});
   };
 
-  ngOnInit(): void {
-    // Reset inicial una sola vez al montar; ya no usamos effect() reactivo
-    // porque ese patrón disparaba resetModal() en cada fluctuación de isOpen
-    // (por ejemplo, re-mounts del @defer del padre).
-    this.resetModal();
+  /**
+   * Último valor observado de `isOpen`, para detectar el flanco de apertura.
+   * No es señal a propósito: es memoria del effect, no estado de la vista.
+   */
+  private wasOpen = false;
+
+  constructor() {
+    // QUI-440: el reset se dispara SOLO en el flanco cerrado→abierto.
+    //
+    // No alcanza con `ngOnInit`: el padre renderiza este modal dentro de un
+    // `@defer`, y los triggers de `@defer` son de una sola vía — el bloque
+    // monta cuando la condición se cumple y NO se desmonta cuando vuelve a
+    // ser falsa. O sea que el componente sobrevive al cierre del wizard y
+    // `ngOnInit` corre una única vez en toda la sesión. Con el reset ahí,
+    // reabrir el wizard después de guardar mostraba la transferencia anterior
+    // completa — ubicaciones, ítems y todo — lista para reenviarse.
+    //
+    // Tampoco alcanza con un `effect` que resetee cada vez que `isOpen()` es
+    // verdadero: eso vuelve a barrer el formulario ante cualquier
+    // re-ejecución mientras el modal está abierto. El flanco es la condición
+    // exacta: resetear al abrir, nunca mientras ya está abierto.
+    effect(() => {
+      const open = this.isOpen();
+      if (open && !this.wasOpen) {
+        this.resetModal();
+      }
+      this.wasOpen = open;
+    });
   }
 
   onFromLocationChange(value: any): void {
