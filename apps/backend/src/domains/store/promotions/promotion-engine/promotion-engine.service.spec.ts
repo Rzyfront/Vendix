@@ -584,6 +584,13 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(l2.promotion_ids).toEqual([101]);
       expect(result.applied_promotions[0].promotion_id).toBe(101);
       expect(result.applied_promotions[0].applicable_item_ids).toEqual(['l1', 'l2']);
+      // cart_total grouping: the discount spans multiple distinct SKUs as a
+      // single cart-wide deal, so the "which product triggered it" concept
+      // doesn't apply. The frontend uses the empty array as the signal to
+      // skip the "en: X, Y" line under the promotion name — otherwise it
+      // would mislead the customer into thinking the promo was tied to
+      // specific SKUs when in reality it was triggered by the sum.
+      expect(result.applied_promotions[0].target_product_ids).toEqual([]);
       expect(result.order_promotions_snapshot).toEqual([
         { promotion_id: 101, discount_amount: 17775 },
       ]);
@@ -660,6 +667,13 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         expect(line.promotion_ids).toEqual([]);
       }
       expect(result.applied_promotions).toEqual([]);
+      // Banner (tier_progress) must still surface so the customer knows what
+      // to do — and name the closest product. With all 3 products at qty=1
+      // tied, the engine picks the first one encountered (lowest index).
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].promotion_id).toBe(201);
+      expect(result.tier_progress[0].remaining_quantity).toBe(1);
+      expect(result.tier_progress[0].target_product_id).toBe(1);
     });
 
     // Case 2c — per_product grouping: 1 product reaches min_quantity on its own.
@@ -703,6 +717,17 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(result.applied_promotions).toHaveLength(1);
       expect(result.applied_promotions[0].promotion_id).toBe(202);
       expect(result.applied_promotions[0].applicable_item_ids).toEqual(['l1']);
+      // Applied promotion must report ONLY the product(s) that actually
+      // unlocked the deal. Products 2 and 3 had qty=1 and must NOT appear
+      // here even though they share scope (otherwise the UI would falsely
+      // tell the customer "Super promo applied to B and C too").
+      expect(result.applied_promotions[0].target_product_ids).toEqual([1]);
+      // Banner: now that product 1 already qualified, the next nudge points
+      // to whichever product is closest to qualifying next. Product 2 and
+      // product 3 are tied at qty=1 → engine picks the first one (lowest
+      // index) for stable, deterministic output.
+      expect(result.tier_progress).toHaveLength(1);
+      expect(result.tier_progress[0].target_product_id).toBe(2);
     });
 
     // Case 3 — product scope with base + variant sharing the same product_id.

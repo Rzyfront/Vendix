@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Image,
   ActivityIndicator,
+  Alert,
   type LayoutChangeEvent,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -596,15 +597,34 @@ function AssetCard({
   actionLabel: string;
   variant: 'logo' | 'favicon';
 }) {
+  const handlePress = () => {
+    // La carga real de imágenes vive en el panel web (subida a CDN + caché).
+    // En móvil dejamos el botón activo para que el usuario sepa que la
+    // funcionalidad existe, y le decimos DÓNDE hacerlo en lugar de un
+    // toast de error genérico que parece un bug.
+    Alert.alert(
+      'Disponible solo en la web',
+      `La carga de ${variant === 'logo' ? 'logos' : 'favicons'} se administra desde el panel web de Vendix.\n\nIngresa desde tu navegador para subir o cambiar este ${variant === 'logo' ? 'logo' : 'favicon'}.`,
+      [
+        { text: 'Entendido', style: 'default' },
+      ],
+    );
+  };
   return (
     <View style={styles.assetCard}>
       <View style={[styles.assetPreview, variant === 'favicon' && styles.assetPreviewFavicon]}>
         {previewNode}
       </View>
       <View style={styles.assetContent}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.assetLabel}>{label}</Text>
           <Text style={styles.assetDescription}>{description}</Text>
+          <View style={styles.assetHelperRow}>
+            <Icon name="info" size={12} color={colorScales.amber[700]} />
+            <Text style={styles.assetHelperText}>
+              Solo disponible en el panel web.
+            </Text>
+          </View>
         </View>
         <View style={styles.assetActions}>
           <Button
@@ -612,10 +632,7 @@ function AssetCard({
             variant="outline"
             size="sm"
             leftIcon={<Icon name="upload" size={14} color={colorScales.gray[700]} />}
-            onPress={() => {
-              toastError('La carga de imágenes se administra desde el panel web.');
-            }}
-            disabled
+            onPress={handlePress}
           />
         </View>
       </View>
@@ -986,6 +1003,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colorScales.gray[500],
     lineHeight: typography.lineHeight.tight * 12,
+  },
+  assetHelperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: spacing[2],
+  },
+  assetHelperText: {
+    fontSize: 11,
+    color: colorScales.amber[700],
+    fontWeight: typography.fontWeight.medium,
   },
   assetActions: {
     flexDirection: 'row',

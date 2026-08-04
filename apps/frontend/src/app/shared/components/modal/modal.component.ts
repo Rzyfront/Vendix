@@ -133,7 +133,12 @@ export class ModalComponent {
   readonly subtitle = input<string>();
   readonly size = input<ModalSize>('md');
   readonly centered = input<boolean>(true);
-  readonly closeOnBackdrop = input<boolean>(true);
+  // QUI-438: default `false` para no cerrar al hacer click fuera del modal
+  // — solo el botón X, el botón "Cancelar" del consumidor o el setter
+  // programático (close()) pueden cerrarlo. Si un modal necesita el
+  // comportamiento anterior, debe setear explícitamente
+  // `[closeOnBackdrop]="true"`.
+  readonly closeOnBackdrop = input<boolean>(false);
   readonly closeOnEscape = input<boolean>(true);
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);

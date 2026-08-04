@@ -86,6 +86,15 @@ export interface CartDiscount {
    * applied discount. Surfaced for the operator audit trail.
    */
   priority?: number;
+  /**
+   * Names of the cart products the discount was actually applied to. Empty
+   * for `scope: 'order'` (whole order) — the POS UI hides the suffix in
+   * that case. Used by the cart sidebar to show "(Guanabana, Mango)" so
+   * the operator knows which line the discount is hitting. Mirrors the
+   * ecommerce `AppliedPromotion.applicable_descriptions` so operators and
+   * shoppers see the same UX.
+   */
+  affected_products?: string[];
 }
 
 export interface CartSummary {

@@ -126,6 +126,12 @@ export class MenuBuilderPageComponent implements OnInit {
   readonly isCreateMode = signal(false);
   readonly isSaving = signal(false);
   readonly newMenuName = signal('');
+  /**
+   * Marca visual de error en el input del nombre (MENU_DUP_NAME).
+   * El template usa esto para pintar el input en rojo; el texto NO se
+   * borra para que el operador corrija sin re-tipear.
+   */
+  readonly newMenuNameError = signal(false);
 
   readonly productOptions = signal<ProductOption[]>([]);
 
@@ -249,11 +255,30 @@ export class MenuBuilderPageComponent implements OnInit {
             { replaceUrl: true },
           );
         },
-        error: (e: unknown) => {
+        error: (e: any) => {
           this.isSaving.set(false);
-          this.toastService.error(
-            typeof e === 'string' ? e : 'Error al crear la carta',
-          );
+          // MENU_DUP_NAME (HTTP 409 desde el backend): marcar el input
+          // como error visual y conservar el texto para que el usuario
+          // corrija sin re-tipear. Antes mostraba "Carta creada"
+          // falsamente porque el controller devolvía 200 con
+          // success:false y el frontend desempacaba res.data.
+          const errorCode = e?.error_code;
+          const statusCode = e?.statusCode ?? e?.status;
+          if (
+            errorCode === 'MENU_DUP_NAME' ||
+            statusCode === 409
+          ) {
+            this.newMenuNameError.set(true);
+            this.toastService.error(
+              'Ya existe una carta con este nombre. Elige uno diferente.',
+            );
+            return;
+          }
+          const msg =
+            (typeof e === 'string' && e) ||
+            e?.message ||
+            'Error al crear la carta';
+          this.toastService.error(msg);
         },
       });
   }

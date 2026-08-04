@@ -571,7 +571,7 @@ const STORE_ADMIN_MODULES: AppModule[] = [
     {
       key: 'reports',
       label: 'Reportes',
-      description: 'Reportes y análisis de datos del negocio',
+      description: 'Reportes y an\u00e1lisis de datos del negocio',
     },
 
     // Contabilidad (padre con hijos)

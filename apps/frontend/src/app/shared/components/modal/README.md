@@ -245,7 +245,7 @@ export class ConfirmModalComponent {
 | `subtitle` | `string` | `undefined` | Subtítulo del modal |
 | `size` | `'sm' \| 'md' \| 'lg' \| 'xl'` | `'md'` | Tamaño del modal |
 | `centered` | `boolean` | `true` | Centrar modal verticalmente |
-| `closeOnBackdrop` | `boolean` | `true` | Cerrar al hacer click en el backdrop |
+| `closeOnBackdrop` | `boolean` | `false` | Cerrar al hacer click en el backdrop (QUI-438: ahora `false` por default) |
 | `closeOnEscape` | `boolean` | `true` | Cerrar con tecla Escape |
 | `showCloseButton` | `boolean` | `true` | Mostrar botón X en la cabecera |
 | `customClasses` | `string` | `''` | Clases CSS adicionales |

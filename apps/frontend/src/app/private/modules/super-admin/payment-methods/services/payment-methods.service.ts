@@ -189,19 +189,19 @@ export class SuperAdminPaymentMethodsService {
     return providerMap[provider] || provider;
   }
 
+  /**
+   * Propaga el HttpErrorResponse original para que el componente padre
+   * pueda inspeccionar `error.error.details.validationErrors` (envuelto por
+   * HttpExceptionFilter) y mostrar el mensaje específico del campo que
+   * falló en lugar del genérico "Error al crear".
+   *
+   * El handleError anterior envolvía todo en `new Error(string)` lo cual
+   * destruía la estructura. Ahora solo logueamos y re-lanzamos el error
+   * intacto. Los componentes consumen `error.error?.details?.validationErrors[0]`.
+   */
   private handleError(error: any): Observable<never> {
-    let errorMessage = 'An unknown error occurred';
-
-    if (error.error instanceof ErrorEvent) {
-      errorMessage = error.error.message;
-    } else if (error.error && error.error.message) {
-      errorMessage = error.error.message;
-    } else if (error.message) {
-      errorMessage = error.message;
-    }
-
     console.error('SuperAdminPaymentMethodsService error:', error);
-    return throwError(() => new Error(errorMessage));
+    return throwError(() => error);
   }
 
   /**

@@ -45,6 +45,13 @@ export interface Promotion {
   promotion_products?: PromotionProduct[];
   promotion_categories?: PromotionCategory[];
   promotion_quantity_tiers?: PromotionQuantityTier[];
+  /**
+   * Phase 2d: cómo se cuentan las unidades para `quantity_tiered`.
+   *  - 'cart_total' (default): suma SKUs distintos de la promo.
+   *  - 'per_product': exige N unidades del mismo product_id.
+   * Backend default = 'cart_total' si no se envía.
+   */
+  quantity_grouping?: 'cart_total' | 'per_product';
   _count?: { order_promotions: number };
 }
 
@@ -80,6 +87,12 @@ export interface CreatePromotionDto {
   priority?: number;
   product_ids?: number[];
   category_ids?: number[];
+  /**
+   * Phase 2d: cómo se cuentan las unidades para `quantity_tiered`.
+   * Ignorado por el backend cuando `rule_type === 'flat'`. El form lo
+   * retira del payload en ese caso para evitar ValidationPipe surprises.
+   */
+  quantity_grouping?: 'cart_total' | 'per_product';
   /**
    * Phase 2c: when `rule_type === 'quantity_tiered'`, each tier overrides
    * the flat `type`/`value` based on the matching quantity bucket.

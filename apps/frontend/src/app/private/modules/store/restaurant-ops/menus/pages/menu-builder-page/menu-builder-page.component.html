@@ -20,8 +20,9 @@
             [type]="'text'"
             placeholder="Ej: Almuerzo, Cena, Carta principal"
             [ngModel]="newMenuName()"
-            (ngModelChange)="newMenuName.set($event)"
+            (ngModelChange)="newMenuName.set($event); newMenuNameError.set(false)"
             (keyup.enter)="createMenu()"
+            [error]="newMenuNameError() ? 'Ya existe una carta con este nombre' : ''"
           />
           <app-button
             variant="primary"

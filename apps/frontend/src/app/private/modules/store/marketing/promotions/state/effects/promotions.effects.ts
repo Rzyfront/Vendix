@@ -2,7 +2,9 @@ import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import { of } from 'rxjs';
-import { map, switchMap, catchError, withLatestFrom } from 'rxjs/operators';
+import { map, switchMap, catchError, withLatestFrom, tap } from 'rxjs/operators';
+import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { PromotionsService } from '../../services/promotions.service';
 import { PromotionsActions } from '../actions/promotions.actions';
 import { selectPromotionsState } from '../selectors/promotions.selectors';
@@ -12,6 +14,7 @@ export class PromotionsEffects {
   private actions$ = inject(Actions);
   private store = inject(Store);
   private promotions_service = inject(PromotionsService);
+  private toast_service = inject(ToastService);
 
   // ── Load Promotions ────────────────────────────────────────────────
   loadPromotions$ = createEffect(() =>
@@ -260,5 +263,56 @@ export class PromotionsEffects {
         PromotionsActions.loadSummary(),
       ]),
     ),
+  );
+
+  // ── Toast feedback (cierra el bug del issue: "no aparece ningún toast
+  //    de éxito, no se crea la fila en la lista"). Antes el reload silencioso
+  //    no daba feedback al usuario; ahora mostramos toast en Success y Failure.
+  notifyMutationSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          PromotionsActions.createPromotionSuccess,
+          PromotionsActions.updatePromotionSuccess,
+          PromotionsActions.deletePromotionSuccess,
+          PromotionsActions.activatePromotionSuccess,
+          PromotionsActions.pausePromotionSuccess,
+          PromotionsActions.cancelPromotionSuccess,
+        ),
+        tap((action) => {
+          const messages: Record<string, string> = {
+            createPromotionSuccess: 'Promocion creada exitosamente',
+            updatePromotionSuccess: 'Promocion actualizada exitosamente',
+            deletePromotionSuccess: 'Promocion eliminada exitosamente',
+            activatePromotionSuccess: 'Promocion activada exitosamente',
+            pausePromotionSuccess: 'Promocion pausada exitosamente',
+            cancelPromotionSuccess: 'Promocion cancelada exitosamente',
+          };
+          this.toast_service.success(messages[action.type] ?? 'Operacion exitosa');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  notifyMutationFailure$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          PromotionsActions.createPromotionFailure,
+          PromotionsActions.updatePromotionFailure,
+          PromotionsActions.deletePromotionFailure,
+          PromotionsActions.activatePromotionFailure,
+          PromotionsActions.pausePromotionFailure,
+          PromotionsActions.cancelPromotionFailure,
+        ),
+        tap(({ error }) => {
+          this.toast_service.error(
+            typeof error === 'string'
+              ? error
+              : extractApiErrorMessage(error) || 'No se pudo completar la operacion',
+          );
+        }),
+      ),
+    { dispatch: false },
   );
 }

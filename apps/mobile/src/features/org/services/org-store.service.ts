@@ -26,8 +26,6 @@ export const OrgStoreService = {
   },
   get: async (id: string | number) =>
     apiGet<StoreDetail>(Endpoints.ORGANIZATION.STORES.GET.replace(':id', String(id))),
-  getById: async (id: string | number) =>
-    apiGet<StoreDetail>(Endpoints.ORGANIZATION.STORES.GET.replace(':id', String(id))),
   create: async (input: CreateStoreInput) =>
     apiPost<StoreListItem>(Endpoints.ORGANIZATION.STORES.CREATE, normalize(input)),
   update: async (id: string | number, input: UpdateStoreInput) =>

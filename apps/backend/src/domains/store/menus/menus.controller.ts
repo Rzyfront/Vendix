@@ -60,17 +60,15 @@ export class MenusController {
   @Post()
   @Permissions('store:menus:create')
   async create(@Body() dto: CreateMenuDto) {
-    try {
-      const data = await this.menusService.create(dto);
-      return this.responseService.created(data, 'Menú creado exitosamente');
-    } catch (error: any) {
-      return this.responseService.error(
-        error.message || 'Error al crear el menú',
-        error.response?.message || error.message,
-        error.status || 400,
-        error.error_code,
-      );
-    }
+    // Sin try/catch: dejamos que VendixHttpException(MENU_DUP_NAME) se
+    // propague al AllExceptionsFilter global, que devuelve HTTP 409 nativo
+    // con body { statusCode, error_code, message, ... }. El handler
+    // anterior atrapaba la excepción y devolvía HTTP 200 con success:false
+    // en el body, lo que hacía que el frontend (HttpClient desempaca
+    // res.data sin chequear success) mostrara el toast "Carta creada"
+    // falsamente. Mismo patrón que el resto de controllers del repo.
+    const data = await this.menusService.create(dto);
+    return this.responseService.created(data, 'Menú creado exitosamente');
   }
 
   @Get()
