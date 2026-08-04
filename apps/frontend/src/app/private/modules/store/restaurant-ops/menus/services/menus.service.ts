@@ -116,6 +116,29 @@ export class MenusService {
           if (err?.isBusinessError) {
             return throwError(() => err);
           }
+          // QUI-533: el controller ahora propaga un 409 nativo, y ese camino
+          // NO puede pasar por `handleError` porque éste termina en
+          // `throwError(() => message)` — devuelve un STRING plano y con eso
+          // se pierden `status` y `error_code`. El componente quedaba sin
+          // forma de distinguir el duplicado y nunca pintaba el input en
+          // rojo. `AllExceptionsFilter` pone `error_code` en la RAÍZ del
+          // body, así que dentro de un HttpErrorResponse vive en
+          // `err.error.error_code`. Normalizamos SOLO este caso a la misma
+          // forma que ya espera el componente; el resto de los errores sigue
+          // por `handleError`, que devuelve string y es lo que consumen los
+          // otros métodos del service.
+          const errorCode = err?.error?.error_code;
+          if (err?.status === 409 || errorCode === 'MENU_DUP_NAME') {
+            return throwError(() => ({
+              error_code: errorCode ?? 'MENU_DUP_NAME',
+              message:
+                typeof err?.error?.message === 'string'
+                  ? err.error.message
+                  : 'Ya existe una carta con este nombre',
+              statusCode: err?.status ?? 409,
+              isBusinessError: true,
+            }));
+          }
           return this.handleError(err);
         }),
       );
