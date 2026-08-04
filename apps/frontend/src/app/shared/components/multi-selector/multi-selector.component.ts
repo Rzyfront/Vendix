@@ -315,6 +315,14 @@ export class MultiSelectorComponent implements ControlValueAccessor {
 
   getOptionLabel(value: string | number): string {
     const option = this.options().find(o => o.value === value);
+    // Fallback deliberadamente neutro. NO prefijar con "ID: " — este
+    // componente lo consumen 18 archivos, y sus opciones casi siempre se
+    // cargan de forma asíncrona: durante esa ventana `options()` está vacío
+    // y TODOS los chips caerían al fallback, así que el prefijo convertiría
+    // un valor transitorio en texto visible para el usuario en cupones,
+    // productos, remisiones y promociones. La causa raíz (el preseleccionado
+    // fuera del límite de paginación) se resuelve trayendo esos ítems en el
+    // consumidor — ver `loadProductOptions()` en promotion-form-modal.
     return option?.label || String(value);
   }
 

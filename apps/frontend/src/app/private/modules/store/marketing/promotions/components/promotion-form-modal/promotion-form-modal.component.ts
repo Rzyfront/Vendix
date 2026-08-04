@@ -11,6 +11,8 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { startWith } from 'rxjs/operators';
+import { forkJoin, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 import {
   Promotion,
   PromotionQuantityTier,
@@ -23,6 +25,7 @@ import {
   MultiSelectorComponent,
   MultiSelectorOption,
 } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
+import { Product } from '../../../../products/interfaces/product.interface';
 import {
   ModalComponent,
   ButtonComponent,
@@ -165,7 +168,7 @@ interface NormalizedTier {
               type="number"
               formControlName="value"
               [required]="true"
-              placeholder="0"
+              placeholder=""
               [prefixIcon]="true"
               [min]="0"
               [max]="form.get('type')?.value === 'percentage' ? 100 : ''"
@@ -418,6 +421,7 @@ interface NormalizedTier {
               type="number"
               formControlName="max_discount_amount"
               placeholder="Sin limite"
+              tooltipText="Tope en pesos del descuento. Ej: 10% sobre $2,000,000 serían $200,000; si pones 50,000, el descuento se limita a $50,000 aunque el porcentaje dé más."
               [min]="0"
             ></app-input>
           }
@@ -576,13 +580,20 @@ export class PromotionFormModalComponent {
       code: [''],
       rule_type: ['flat' as PromotionRuleType, Validators.required],
       type: ['percentage', Validators.required],
-      value: [null, [Validators.required, Validators.min(0), Validators.max(100)]],
+      // Source of truth for `value` validators lives in `configureValueValidators`
+      // (called by the `type` valueChanges subscription) and `configureRuleTypeValidators`
+      // (called by the `rule_type` valueChanges subscription). Both run before
+      // the form is rendered, so the initial `Validators.required` here is
+      // intentionally minimal — extra min/max bounds are layered per-rule.
+      value: [null, [Validators.required]],
       scope: ['order'],
       /**
        * Phase 2d: cómo se cuentan las unidades para `quantity_tiered`.
        * - 'cart_total' (default legacy): suma SKUs distintos de la promo.
        * - 'per_product': exige N unidades del mismo product_id.
-       * Backend default = 'cart_total' si no se envía.
+       * Backend default = 'cart_total' si no se envía. El form lo elimina del
+       * payload en `onSubmit` cuando `rule_type === 'flat'` para no contaminar
+       * el DTO con un campo que el backend ignora.
        */
       quantity_grouping: ['cart_total' as 'cart_total' | 'per_product'],
       start_date: ['', Validators.required],
@@ -645,17 +656,70 @@ export class PromotionFormModalComponent {
         this.configureRuleTypeValidators(ruleType);
       });
 
-    // Load product and category options for multi-selectors
-    this.productsService.getProducts({ limit: 500 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(res => {
-        this.productOptions.set(res.data.map(p => ({ value: p.id, label: p.name, description: p.sku })));
-      });
+    // Load product and category options for multi-selectors.
+    // For editing mode: also fetch the products already associated with the
+    // promotion so they appear in the multi-selector even if they've scrolled
+    // past the 500-product fetch limit. Without this, the chips in editing
+    // mode show raw IDs instead of product names (the user reports "los items
+    // no se cargan en su input").
+    this.loadProductOptions();
 
     this.categoriesService.getCategories()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(cats => {
         this.categoryOptions.set(cats.map(c => ({ value: c.id, label: c.name })));
+      });
+  }
+
+  /**
+   * Fetch the list of products used to populate the multi-selector, plus any
+   * products already associated with the promotion being edited. The merged
+   * list is what `MultiSelectorComponent` uses to render chip labels; if the
+   * pre-selected products are missing from the merged list, the chips fall
+   * back to raw IDs.
+   */
+  private loadProductOptions(): void {
+    const promotion = this.promotion();
+    const preselectedIds = (promotion?.promotion_products ?? [])
+      .map((pp) => Number(pp.product_id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    const fullList$ = this.productsService.getProducts({ limit: 500 }).pipe(
+      map((res) => res.data as Product[]),
+      catchError(() => of([] as Product[])),
+    );
+
+    const preselected$: import('rxjs').Observable<Product[]> = preselectedIds.length
+      ? forkJoin(
+          preselectedIds.map((id) =>
+            this.productsService.getProductById(id).pipe(
+              catchError(() => of(null as Product | null)),
+            ),
+          ),
+        ).pipe(map((items) => items.filter((p): p is Product => p !== null)))
+      : of([] as Product[]);
+
+    forkJoin([fullList$, preselected$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([full, preselected]) => {
+        const merged = new Map<number, MultiSelectorOption>();
+        for (const p of full) {
+          merged.set(Number(p.id), {
+            value: p.id,
+            label: p.name,
+            description: p.sku,
+          });
+        }
+        for (const p of preselected) {
+          if (!merged.has(Number(p.id))) {
+            merged.set(Number(p.id), {
+              value: p.id,
+              label: p.name,
+              description: p.sku,
+            });
+          }
+        }
+        this.productOptions.set(Array.from(merged.values()));
       });
   }
 
@@ -838,7 +902,11 @@ export class PromotionFormModalComponent {
 
   private configureValueValidators(type: string): void {
     const valueControl = this.form.get('value');
-    const validators = [Validators.required, Validators.min(0.01)];
+    // Alineado con `configureRuleTypeValidators` (flat branch) y con el DTO
+    // backend (`@Min(0)` en `create-promotion.dto.ts`). El form NO debe
+    // bloquear `value=0` — algunas promociones válidas usan 0 (p.ej. tiered
+    // que persiste 0 en el padre porque el motor ignora el top-level).
+    const validators: ValidatorFn[] = [Validators.required, Validators.min(0)];
     if (type === 'percentage') {
       validators.push(Validators.max(100));
     }
@@ -1068,8 +1136,11 @@ export class PromotionFormModalComponent {
         .sort((a, b) => a.min_quantity - b.min_quantity)
         .map((tier, idx) => ({ ...tier, sort_order: idx }));
     } else {
-      // Flat: drop the tiers array (it must not be persisted as dirty data).
+      // Flat: drop the tiers array AND the grouping toggle (it must not be
+      // persisted as dirty data — the backend engine ignores it for flat
+      // rules, and a stale value would trigger a stray column update).
       delete dto.quantity_tiers;
+      delete dto.quantity_grouping;
     }
 
     this.save.emit(dto);

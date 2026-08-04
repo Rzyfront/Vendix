@@ -88,6 +88,12 @@ export interface CreatePromotionDto {
   product_ids?: number[];
   category_ids?: number[];
   /**
+   * Phase 2d: cómo se cuentan las unidades para `quantity_tiered`.
+   * Ignorado por el backend cuando `rule_type === 'flat'`. El form lo
+   * retira del payload en ese caso para evitar ValidationPipe surprises.
+   */
+  quantity_grouping?: 'cart_total' | 'per_product';
+  /**
    * Phase 2c: when `rule_type === 'quantity_tiered'`, each tier overrides
    * the flat `type`/`value` based on the matching quantity bucket.
    * Server replaces existing tiers on update (no merge semantics).
