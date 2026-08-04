@@ -370,6 +370,21 @@ export class AdminTablesSseService {
       return;
     }
 
+    // `session_closed` (Restaurant Suite / POS cash-out, comensal
+    // `close_tab`): the backend has already flipped `tables.status` to
+    // `cleaning` and stamped `table_sessions.closed_at` BEFORE emitting.
+    // The badge change lives on `TablesService.tables()` (NOT in
+    // `tablesLive`), so the only thing that can refresh the floor page is
+    // a `getFloorMap()` refetch. Like `session_opened`, the closed
+    // session's id may not be in `tablesLive` if the operator reloaded
+    // the page mid-session — so we trigger the refetch BEFORE the
+    // sessionId guard rather than mutating the live map (which no longer
+    // represents the post-close state anyway).
+    if (event.type === 'session_closed') {
+      void this.handleSessionClosed(event);
+      return;
+    }
+
     const sessionId = this.extractSessionId(event.data);
     if (sessionId == null) return;
 
@@ -492,6 +507,24 @@ export class AdminTablesSseService {
    */
   private async handleSessionOpened(event: AdminTablesEvent): Promise<void> {
     if (event.type !== 'session_opened') return;
+    this.lastEventAt.set(new Date());
+    await this.refetchFloorMap();
+  }
+
+  /**
+   * Mirror of `handleSessionOpened` for the close path. The backend
+   * already committed `tables.status = 'cleaning'` and stamped
+   * `table_sessions.closed_at` BEFORE emitting this event (see
+   * `PaymentsService.applyPosPaymentToTableSession` and
+   * `TableSessionsService.closeSession`). The badge change on the floor
+   * page is driven by `TablesService.tables()`, which the SSE event
+   * itself does NOT mutate — only `getFloorMap()` does. Without this
+   * refetch the operator sees the pre-close badge for up to 10s (until
+   * the manual-mode polling tick catches up) and may double-fire a
+   * payment on what looks like an open table.
+   */
+  private async handleSessionClosed(event: AdminTablesEvent): Promise<void> {
+    if (event.type !== 'session_closed') return;
     this.lastEventAt.set(new Date());
     await this.refetchFloorMap();
   }
