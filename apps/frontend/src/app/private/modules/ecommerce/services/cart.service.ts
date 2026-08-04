@@ -69,6 +69,22 @@ export interface AppliedPromotion {
    * Phase 2d per_product grouping rollout.
    */
   target_product_ids?: number[];
+  /**
+   * Etiquetas de los productos o categorías a los que se aplicó el descuento.
+   * Vacío para `scope: 'order'` (todo el carrito). El backend lo calcula desde
+   * `applicable_item_ids` del engine.
+   *
+   * QUI-515: se CONSERVA junto a `target_product_ids`, no lo reemplaza. Los dos
+   * responden preguntas distintas: `target_product_ids` dice qué SKU desbloqueó
+   * una promo `per_product`, y este campo dice a qué líneas se aplicó el
+   * descuento. Para una promo `cart_total` de scope producto/categoría el
+   * primero viene vacío y este es el único que puede decirle al cliente sobre
+   * qué se le aplicó el descuento.
+   */
+  applicable_descriptions?: Array<{
+    label: string;
+    kind: 'product' | 'category';
+  }>;
 }
 
 /**

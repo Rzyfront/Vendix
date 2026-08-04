@@ -7,7 +7,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-import { Cart } from '../../services/cart.service';
+import { AppliedPromotion, Cart } from '../../services/cart.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import type { BadgeVariant } from '../../../../../shared/components/badge/badge.component';
@@ -272,31 +272,35 @@ export class CartPromotionsComponent {
             ? 'Monto fijo'
             : 'Promoción',
       typeVariant: promo.type === 'fixed_amount' ? 'primary' : 'success',
-      target_product_names: this.resolveProductNames(promo.target_product_ids),
+      target_product_names: this.resolveAffectedNames(promo),
     })),
   );
 
   /**
-   * Compress the list of applicable products/categories into a compact
-   * parenthetical label:
-   *   [] / undefined → '' (whole-order scope, no suffix)
-   *   ['Guanabana']  → 'Guanabana'
-   *   ['A', 'B']     → 'A, B'
-   *   ['A', 'B', 'C'] → 'A, B +1'
-   * Empty strings are filtered out as a safety net for malformed backend
-   * payloads (e.g. cart cart_items joined to a product that was deleted).
+   * Nombres que se muestran en la línea "en: ..." debajo de la promo aplicada.
+   *
+   * QUI-515: hay DOS fuentes y no son intercambiables, así que se consultan en
+   * orden de especificidad:
+   *
+   *  1. `target_product_ids` — sólo lo llena el engine para promos
+   *     `per_product`, y dice exactamente qué SKU alcanzó la escala por su
+   *     cuenta. Es la información más precisa: los productos que NO calificaron
+   *     quedan fuera aunque compartan el scope.
+   *  2. `applicable_descriptions` — a qué líneas se aplicó el descuento. Es la
+   *     única fuente disponible para promos `cart_total` de scope
+   *     producto/categoría, donde el punto 1 viene vacío por definición.
+   *
+   * Sin el fallback al punto 2, toda promo que no sea `per_product` perdería la
+   * etiqueta que hoy ya se muestra, y el cliente dejaría de ver sobre qué se le
+   * aplicó el descuento. Para `scope: 'order'` ambas vienen vacías y la línea no
+   * se pinta, que es lo correcto: el descuento va sobre todo el carrito.
    */
-  private formatAffectedLabel(
-    descriptions: ReadonlyArray<{ label: string; kind: 'product' | 'category' }> | undefined,
-  ): string {
-    if (!descriptions || descriptions.length === 0) return '';
-    const labels = descriptions
-      .map((d) => d.label.trim())
-      .filter((label) => label.length > 0);
-    if (labels.length === 0) return '';
-    if (labels.length === 1) return labels[0];
-    if (labels.length === 2) return `${labels[0]}, ${labels[1]}`;
-    return `${labels[0]}, ${labels[1]} +${labels.length - 2}`;
+  private resolveAffectedNames(promo: AppliedPromotion): string[] {
+    const targeted = this.resolveProductNames(promo.target_product_ids);
+    if (targeted.length > 0) return targeted;
+    return (promo.applicable_descriptions ?? [])
+      .map((d) => d.label?.trim())
+      .filter((label): label is string => !!label && label.length > 0);
   }
 
   /**
