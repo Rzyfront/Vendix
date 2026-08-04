@@ -73,6 +73,7 @@ import {
 } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ProductUtils } from '../../utils/product.utils';
+import { ValidationUtils } from '../../utils/validation.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
@@ -1349,6 +1350,39 @@ export class ProductCreatePageComponent {
         }
         this.productForm.get('barcode')?.setValue(code);
       });
+
+    // QUI-504: autogen del slug desde el nombre, con override manual.
+    // Patrón replicado de store-create-modal.component.ts:661-718 — solo
+    // autogenramos si el slug está vacío, así un edit manual gana sin tener
+    // que trackear un flag `dirty` separado.
+    this.setupAutoSlugGeneration();
+  }
+
+  /**
+   * Autogen del slug desde el nombre del producto.
+   *
+   * Reglas:
+   *  - Solo autogenramos cuando el campo slug está vacío (override manual
+   *    = operador escribió algo y luego cambió el nombre → el slug se
+   *    preserva tal cual).
+   *  - El slug generado pasa por `ProductUtils.generateSlug` que normaliza:
+   *    lowercase, sin acentos, sin caracteres especiales, colapsa espacios
+   *    y guiones múltiples, recorta guiones de los extremos.
+   *  - Usamos `emitEvent: false` para que el valueChanges del slug no
+   *    dispare validaciones ni reactive otros listeners en cascada.
+   */
+  private setupAutoSlugGeneration(): void {
+    this.productForm
+      .get('name')
+      ?.valueChanges.pipe(takeUntilDestroyed())
+      .subscribe((name: string) => {
+        const slugControl = this.productForm.get('slug');
+        if (name && !slugControl?.value) {
+          slugControl?.setValue(ProductUtils.generateSlug(name), {
+            emitEvent: false,
+          });
+        }
+      });
   }
 
   private applyDraftData(draft: any): void {
@@ -1536,7 +1570,19 @@ export class ProductCreatePageComponent {
             Validators.maxLength(255),
           ],
         ],
-        slug: ['', [Validators.maxLength(255)]],
+        slug: [
+          '',
+          [
+            // Patrón: ^[a-z0-9-]+$ — sin espacios, mayúsculas, acentos ni caracteres
+            // especiales. El error en BD (slug con espacio al final de copy-paste)
+            // bloquea el detail del ecommerce con "Producto no disponible" — ver QUI-504.
+            Validators.maxLength(255),
+            ValidationUtils.slugValidator(),
+            // notBlankValidator NO se aplica aquí porque slug es opcional (se
+            // autogenera desde nombre). Solo bloquea si alguien escribe solo
+            // espacios. Verificamos en onSubmit si quedó solo-espacios.
+          ],
+        ],
         description: [''],
         cost_price: [0, [Validators.min(0)]],
         profit_margin: [0, [Validators.min(0)]],
@@ -1760,7 +1806,14 @@ export class ProductCreatePageComponent {
 
     this.productForm.patchValue({
       name: product.name,
-      slug: product.slug,
+      // QUI-504: normalizamos el slug heredado al cargar. Los productos
+      // creados ANTES de este PR no pasaron por `slugValidator`, así que su
+      // slug puede traer mayúsculas, espacios o acentos — justo la data que
+      // rompe el detalle del ecommerce. Sin normalizar acá, el control queda
+      // inválido y `collectSaveRequirements()` lista "Slug (URL)" como
+      // bloqueante, impidiendo guardar CUALQUIER otro campo del producto
+      // hasta que el operador arregle el slug a mano.
+      slug: product.slug ? ProductUtils.generateSlug(product.slug) : '',
       description: product.description,
       cost_price: product.cost_price || 0,
       profit_margin: product.profit_margin || 0,
@@ -3432,7 +3485,14 @@ export class ProductCreatePageComponent {
     // Basic DTO
     const productData: CreateProductDto = {
       name: formValue.name,
-      slug: formValue.slug || undefined,
+      // QUI-504: defense-in-depth — aunque el validador del form ya rechaza
+      // slugs con espacios/format raro, normalizamos el slug aquí también
+      // antes de enviarlo. Si viene vacío después del trim, mandamos
+      // undefined para que el backend autogenere (consistente con el patrón
+      // histórico).
+      slug: formValue.slug?.trim()
+        ? ProductUtils.generateSlug(formValue.slug)
+        : undefined,
       description: formValue.description || undefined,
       cost_price: Number(formValue.cost_price),
       profit_margin: Number(formValue.profit_margin),
@@ -3741,6 +3801,12 @@ export class ProductCreatePageComponent {
     if (!field || !field.errors || !field.touched) return '';
     if (field.errors['required']) return 'Campo obligatorio';
     if (field.errors['min']) return `Valor mínimo: ${field.errors['min'].min}`;
+    // QUI-504: el slug se valida con ValidationUtils.slugValidator (regex
+    // /^[a-z0-9-]+$/). Si el operador pega algo con espacios, mayúsculas o
+    // caracteres raros, mostramos mensaje específico en lugar del genérico.
+    if (field.errors['invalidSlug']) {
+      return 'Solo letras minúsculas, números y guiones (sin espacios ni acentos)';
+    }
     return 'Valor inválido';
   }
 
