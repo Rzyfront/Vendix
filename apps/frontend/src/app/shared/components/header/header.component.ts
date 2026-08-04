@@ -361,6 +361,12 @@ export class HeaderComponent {
 
   // --- Observables (async pipe compatible con Zoneless) ---
   readonly breadcrumb$: Observable<{
+    /** Cadena completa de padres, desde el más externo al más cercano.
+     *  Espeja el shape que `BreadcrumbService.breadcrumb` ya publica; sin
+     *  declararlo aquí el consumidor no puede leer `parents` aunque el
+     *  servicio lo emita en runtime. */
+    parents?: BreadcrumbItem[];
+    /** Último padre (= parents[parents.length - 1]). Backward compat. */
     parent?: BreadcrumbItem;
     current: BreadcrumbItem;
     title: string;
