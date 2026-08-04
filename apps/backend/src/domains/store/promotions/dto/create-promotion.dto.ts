@@ -60,6 +60,26 @@ export class CreatePromotionDto {
   @IsEnum(['order', 'product', 'category'])
   scope?: 'order' | 'product' | 'category';
 
+  /**
+   * Phase 2d: how units are counted toward tiers for `quantity_tiered` rules.
+   *   - 'cart_total' (default): sum quantity across every line in scope.
+   *                            Different SKUs that share the promotion are
+   *                            aggregated. Legacy behavior.
+   *   - 'per_product':          each product_id is evaluated independently.
+   *                            Tier fires only when a single product reaches
+   *                            min_quantity on its own. Prevents the bug
+   *                            where N distinct SKUs × qty 1 trigger a
+   *                            "N+1" promotion that was meant for the same
+   *                            SKU.
+   *
+   * Ignored when `rule_type` is not `quantity_tiered`. Backend default is
+   * 'cart_total' (preserves existing semantics); the admin form exposes a
+   * toggle to opt-in per promotion.
+   */
+  @IsOptional()
+  @IsEnum(['cart_total', 'per_product'])
+  quantity_grouping?: 'cart_total' | 'per_product';
+
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
