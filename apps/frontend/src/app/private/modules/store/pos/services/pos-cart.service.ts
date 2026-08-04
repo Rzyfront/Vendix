@@ -661,6 +661,20 @@ export class PosCartService {
             discountAmount = Math.min(discountAmount, maxDiscountAmount);
           }
 
+          // Un candidato que no descuenta nada NO compite. Sin esta guarda,
+          // una promo flat con `value = 0` entra a la comparación de abajo y,
+          // si su prioridad es más alta, GANA — y como el modelo es
+          // winner-takes-all, suprime al descuento real que sí aplicaba.
+          //
+          // El motor del backend ya descarta estos candidatos
+          // (`promotion-engine.service.ts`: `if (discountAmount <= 0) continue`)
+          // y la rama tiered de acá también. La flat era la única sin la
+          // guarda, así que el mismo carrito daba un precio en el POS y otro
+          // en el carrito online — y el POS persiste su propio
+          // `discount_amount` (`pos-order.service.ts`), el backend no
+          // recalcula. `value = 0` es guardable porque el DTO es `@Min(0)`.
+          if (discountAmount <= 0) continue;
+
           // For scope: 'order' the affected list is empty (whole order). The
           // POS UI hides the suffix in that case so the operator sees a clean
           // discount line for order-wide promos.

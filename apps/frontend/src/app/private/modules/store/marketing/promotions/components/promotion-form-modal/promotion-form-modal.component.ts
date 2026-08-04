@@ -785,7 +785,14 @@ export class PromotionFormModalComponent {
       min_quantity: [null, [Validators.required, Validators.min(1)]],
       max_quantity: [null, [Validators.min(1)]],
       type: ['percentage', Validators.required],
-      value: [null, [Validators.required, Validators.min(0), Validators.max(100)]],
+      // `min(0.01)` para igualar al tramo persistido (`pushTierRow`), al
+      // subscribe de abajo y al DTO backend, que rechaza el 0 con
+      // `value_non_positive`. Con `min(0)` el tramo nuevo pasaba la validación
+      // del form y el error aparecía recién como 400 del servidor.
+      value: [
+        null,
+        [Validators.required, Validators.min(0.01), Validators.max(100)],
+      ],
     });
 
     // Per-row type toggles its own `value` max(100) constraint, mirroring
@@ -902,11 +909,29 @@ export class PromotionFormModalComponent {
 
   private configureValueValidators(type: string): void {
     const valueControl = this.form.get('value');
-    // Alineado con `configureRuleTypeValidators` (flat branch) y con el DTO
-    // backend (`@Min(0)` en `create-promotion.dto.ts`). El form NO debe
-    // bloquear `value=0` — algunas promociones válidas usan 0 (p.ej. tiered
-    // que persiste 0 en el padre porque el motor ignora el top-level).
-    const validators: ValidatorFn[] = [Validators.required, Validators.min(0)];
+
+    // `value` solo tiene sentido en `flat`. En `quantity_tiered` el motor lee
+    // los tramos e ignora el top-level, que se persiste como 0 — y ese 0 no
+    // debe invalidar el formulario desde un control oculto.
+    //
+    // Esta guarda es la que hace falta: este método lo dispara `type`
+    // valueChanges por su cuenta (sin pasar por `configureRuleTypeValidators`),
+    // así que sin consultar el `rule_type` le rearmaba validadores de `value`
+    // a una promo tiered y bloqueaba el guardado. Antes eso se tapaba bajando
+    // el mínimo a `min(0)` para todos, lo cual habilitó crear promos flat con
+    // descuento 0 — promos que no descuentan nada pero igual ganan el
+    // winner-takes-all y suprimen a la que sí aplicaba.
+    if (this.form.get('rule_type')?.value === 'quantity_tiered') {
+      valueControl?.clearValidators();
+      valueControl?.setErrors(null);
+      valueControl?.updateValueAndValidity({ emitEvent: false });
+      return;
+    }
+
+    const validators: ValidatorFn[] = [
+      Validators.required,
+      Validators.min(0.01),
+    ];
     if (type === 'percentage') {
       validators.push(Validators.max(100));
     }
@@ -957,11 +982,16 @@ export class PromotionFormModalComponent {
       // form via a hidden control while editing an existing tiered promotion.
       tiersCtrl?.setValidators([Validators.required, this.validateTiersOrder()]);
     } else {
-      // Flat: existing required validators.
-      // Alineado con af0b07dea — backend acepta value=0 (@Min(0) en DTO),
-      // así que el form no debe bloquear ese caso con Min(0.01).
+      // Flat: `value` ES el descuento, así que tiene que ser mayor a 0.
+      // El backend acepta 0 (`@Min(0)` en el DTO) porque ese 0 es el valor
+      // que las promos tiered persisten en el padre, no un descuento válido.
+      // Permitirlo acá dejaba crear promos flat que no descuentan nada y que,
+      // por el winner-takes-all, tapan al descuento real.
       const flatType = this.form.get('type')?.value ?? 'percentage';
-      const flatValidators: ValidatorFn[] = [Validators.required, Validators.min(0)];
+      const flatValidators: ValidatorFn[] = [
+        Validators.required,
+        Validators.min(0.01),
+      ];
       if (flatType === 'percentage') {
         flatValidators.push(Validators.max(100));
       }
