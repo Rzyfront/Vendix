@@ -702,6 +702,26 @@ export class PromotionEngineService {
         applicable_item_ids: winner.applicableIndexes
           .map((idx) => itemBreakdownMap.get(idx)?.line_id)
           .filter((lineId): lineId is string | number => lineId !== undefined),
+        /**
+         * For `quantity_grouping='per_product'` promos the engine narrows
+         * `applicableIndexes` (via `chargedIndexes`) to the products that
+         * actually reached the tier on their own, so we can derive a clean
+         * list of `product_id`s that unlocked the deal. For `cart_total`
+         * (legacy) the discount is prorated across the whole scope and the
+         * concept of "which product triggered it" doesn't apply — we return
+         * an empty array so the frontend knows not to render a "en: X, Y"
+         * line that would mislead the customer.
+         */
+        target_product_ids:
+          (winner.promo.quantity_grouping ?? 'cart_total') === 'per_product'
+            ? Array.from(
+                new Set(
+                  winner.applicableIndexes.map((idx) =>
+                    Number(items[idx].product_id),
+                  ),
+                ),
+              )
+            : [],
       });
     }
 
@@ -800,6 +820,14 @@ export class PromotionEngineService {
       const grouping = promo.quantity_grouping ?? 'cart_total';
       let nextTier: (typeof tiers)[number] | undefined;
       let remaining = 0;
+      /**
+       * `product_id` of the cart line(s) that are closest to qualifying for
+       * the next tier. Only meaningful when `grouping === 'per_product'` —
+       * in `cart_total` the scope crosses products so the nudge refers to
+       * "the cart" as a whole, not a single SKU. The frontend uses this to
+       * render "Agrega 1 und más de '<nombre>'" instead of a generic line.
+       */
+      let targetProductId: number | null = null;
 
       if (grouping === 'per_product') {
         // For each product in scope, find its current per-product qty and
@@ -819,6 +847,7 @@ export class PromotionEngineService {
           if (!nextTier || gap < remaining) {
             nextTier = candidate;
             remaining = gap;
+            targetProductId = pid;
           }
         }
       } else {
@@ -842,6 +871,7 @@ export class PromotionEngineService {
         remaining_quantity: remaining,
         benefit_type: nextTier.type,
         benefit_value: Number(nextTier.value),
+        target_product_id: targetProductId,
       });
     }
 

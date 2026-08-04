@@ -689,15 +689,36 @@ export class CartService {
           // Surfaced for the cart UI audit trail. With the winner-takes-all
           // engine, an order has at most one entry here.
           priority: p.priority,
+          // product_ids that actually unlocked the discount under
+          // `per_product` grouping. Empty for `cart_total` promos — the
+          // frontend uses this to render "en: Producto X, Producto Y" next
+          // to the applied promotion name and resolve it locally against
+          // `cart.items[]`.
+          target_product_ids: p.target_product_ids ?? [],
         };
-        // For 'order' scope, the discount applies to the whole cart — no
-        // per-line labels to surface.
+
+        // QUI-515: `applicable_descriptions` se CONSERVA junto al campo nuevo,
+        // no se reemplaza. Los dos responden preguntas distintas:
+        //   - target_product_ids → "qué SKU desbloqueó la promo per_product"
+        //   - applicable_descriptions → "a qué líneas se aplicó el descuento"
+        // El segundo es el que hoy alimenta la etiqueta "(Guanabana, Mango)"
+        // en promos `cart_total` de scope producto/categoría. Si se borra, esas
+        // promos pierden esa etiqueta y el cliente deja de saber sobre qué se
+        // le aplicó el descuento. Además `categoryLabelMap` arriba ya paga la
+        // query de nombres de categoría, así que sin este consumidor esa
+        // consulta quedaría sin uso.
         if (p.scope === 'order') {
+          // Scope 'order': el descuento va sobre todo el carrito, no hay
+          // etiquetas por línea que mostrar.
           return { ...base, applicable_descriptions: [] };
         }
 
-        // Map the engine's per-line IDs back to product/category labels.
-        const labels: Array<{ label: string; kind: 'product' | 'category' }> = [];
+        // `applicable_item_ids` trae los `line_id` que el engine recibió, y
+        // esos line_id SON el índice de `resolvedItems` (ver el map de
+        // `quoteDiscounts` arriba: `line_id: index`), así que indexar es
+        // correcto.
+        const labels: Array<{ label: string; kind: 'product' | 'category' }> =
+          [];
         const seenLabel = new Set<string>();
         for (const lineId of p.applicable_item_ids ?? []) {
           const idx = typeof lineId === 'number' ? lineId : Number(lineId);
@@ -723,6 +744,8 @@ export class CartService {
         }
         return { ...base, applicable_descriptions: labels };
       }),
+      // Each entry may include `target_product_id` (populated by the engine
+      // for `per_product` promos) which the banner uses to name the SKU.
       tier_progress: quote.tier_progress,
     };
   }

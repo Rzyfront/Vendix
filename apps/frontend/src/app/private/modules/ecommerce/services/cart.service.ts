@@ -59,13 +59,32 @@ export interface AppliedPromotion {
    */
   priority?: number;
   /**
-   * Human-readable labels for the products or categories the discount was
-   * applied to. Empty for `scope: 'order'` (whole order). Rendered in the
-   * cart summary as "(Guanabana, Mango)" so the customer knows which line
-   * got the discount. Backend computes this from the engine's
-   * `applicable_item_ids`; absent on older backend versions.
+   * `product_id`s that actually unlocked the discount under
+   * `quantity_grouping='per_product'`. Empty array for `cart_total` (legacy)
+   * promos — the frontend uses this to render "en: Producto X, Producto Y"
+   * next to the applied promotion name and avoid mixing references when
+   * the cart has multiple SKUs sharing the same promo.
+   *
+   * Optional for back-compat with older backend versions that predate the
+   * Phase 2d per_product grouping rollout.
    */
-  applicable_descriptions?: Array<{ label: string; kind: 'product' | 'category' }>;
+  target_product_ids?: number[];
+  /**
+   * Etiquetas de los productos o categorías a los que se aplicó el descuento.
+   * Vacío para `scope: 'order'` (todo el carrito). El backend lo calcula desde
+   * `applicable_item_ids` del engine.
+   *
+   * QUI-515: se CONSERVA junto a `target_product_ids`, no lo reemplaza. Los dos
+   * responden preguntas distintas: `target_product_ids` dice qué SKU desbloqueó
+   * una promo `per_product`, y este campo dice a qué líneas se aplicó el
+   * descuento. Para una promo `cart_total` de scope producto/categoría el
+   * primero viene vacío y este es el único que puede decirle al cliente sobre
+   * qué se le aplicó el descuento.
+   */
+  applicable_descriptions?: Array<{
+    label: string;
+    kind: 'product' | 'category';
+  }>;
 }
 
 /**
@@ -80,6 +99,16 @@ export interface CartTierProgress {
   remaining_quantity: number;
   benefit_type: 'percentage' | 'fixed_amount';
   benefit_value: number;
+  /**
+   * `product_id` of the cart line(s) closest to qualifying for the next
+   * tier. Populated when the promotion uses `quantity_grouping='per_product'`
+   * (so the customer knows exactly which SKU needs more units); null for
+   * `cart_total` (the scope crosses products — the banner says "Agrega N
+   * und más" without naming a single SKU).
+   *
+   * Optional for back-compat with older backend versions.
+   */
+  target_product_id?: number | null;
 }
 
 /**
