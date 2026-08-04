@@ -261,11 +261,33 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   };
 
   // Template helpers
-  getGrowthText(growth?: number): string {
-    if (growth === undefined || growth === null) return '';
+
+  /**
+   * `null` means the previous period had no base to compare against. Saying
+   * "0 %" there asserts "no change" about a period that had nothing — it read as
+   * a flat business instead of a new one.
+   */
+  getGrowthText(growth?: number | null): string {
+    if (growth === undefined || growth === null) {
+      return 'sin base de comparación';
+    }
     const sign = growth >= 0 ? '+' : '';
     return `${sign}${growth.toFixed(1)}% vs periodo anterior`;
   }
+
+  /** True when some sold units have no cost snapshot, so profit is overstated. */
+  readonly hasIncompleteCost = computed(() => {
+    const coverage = this.summary()?.cost_coverage;
+    return !!coverage && coverage.units_without_cost > 0;
+  });
+
+  /** Human sentence for the incomplete-cost warning. */
+  readonly incompleteCostText = computed(() => {
+    const coverage = this.summary()?.cost_coverage;
+    if (!coverage || coverage.units_without_cost === 0) return '';
+    const pct = (coverage.coverage_ratio * 100).toFixed(0);
+    return `${coverage.units_without_cost} de ${coverage.units_total} unidades vendidas no tienen costo registrado (cobertura ${pct} %). El costo de ventas y la ganancia están sobreestimados hasta que se registre ese costo.`;
+  });
 
   formatBreakevenRatio(ratio?: number): string {
     if (ratio === undefined || ratio === null) return '0%';
@@ -291,16 +313,21 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     return 'text-red-600';
   }
 
+  /**
+   * The ratio now measures ALL costs (cost of goods + operating expenses) against
+   * revenue, so the wording says "costos totales" — before it said "gastos" while
+   * the number omitted the cost of goods entirely.
+   */
   getBreakevenStatusText(ratio?: number): string {
     if (!ratio)
-      return 'Registra ingresos y gastos para ver el estado de tu negocio.';
+      return 'Registra ingresos, costos y gastos para ver el estado de tu negocio.';
     if (ratio < 70) {
-      return `Tu negocio opera con un margen saludable. Solo el ${ratio.toFixed(1)}% de tus ingresos se destina a cubrir gastos.`;
+      return `Tu negocio opera con un margen saludable. El ${ratio.toFixed(1)}% de tus ingresos se destina a cubrir el costo de la mercancía y los gastos.`;
     }
     if (ratio < 90) {
-      return `Tus gastos representan el ${ratio.toFixed(1)}% de tus ingresos. Considera optimizar costos para mejorar el margen.`;
+      return `Tus costos totales (mercancía + gastos) representan el ${ratio.toFixed(1)}% de tus ingresos. Considera optimizarlos para mejorar el margen.`;
     }
-    return `Atención: tus gastos representan el ${ratio.toFixed(1)}% de tus ingresos. Revisa tu estructura de costos.`;
+    return `Atención: tus costos totales (mercancía + gastos) representan el ${ratio.toFixed(1)}% de tus ingresos. Revisa tu estructura de costos.`;
   }
 
   // Chart builders
@@ -321,8 +348,12 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     );
 
     // Series config — avoids repeating the gradient area style for each line.
+    // `Costo de Ventas` is plotted explicitly: without it on the chart, the drop
+    // from Ventas to Rend. Bruto had no visible cause, and Rend. Neto used to be
+    // computed WITHOUT it — which let the net line sit ABOVE the gross line.
     const seriesConfig: { name: string; color: string; values: number[] }[] = [
       { name: 'Ventas', color: '#22c55e', values: trends.map((t) => t.sales) },
+      { name: 'Costo de Ventas', color: '#f97316', values: trends.map((t) => t.cost_of_goods) },
       { name: 'Gastos', color: '#ef4444', values: trends.map((t) => t.expenses) },
       { name: 'Impuestos', color: '#f59e0b', values: trends.map((t) => t.taxes) },
       { name: 'Rend. Bruto', color: '#3b82f6', values: trends.map((t) => t.gross_profit) },

@@ -4,11 +4,22 @@ import type { Cache } from 'cache-manager';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
-import { parseDateRange } from '../utils/date.util';
+import { parseDateRange, getPreviousPeriod } from '../utils/date.util';
 import {
   DEFAULT_STORE_TIMEZONE,
   resolveStoreTimezone,
+  resolveLocalDateOnlyRange,
 } from '@common/utils/store-timezone.util';
+import {
+  COMPLETED_SALE_STATES,
+  RECOGNIZED_EXPENSE_STATES,
+  CostCoverage,
+  buildCostCoverage,
+  computeGrowth,
+  computeOperatingRevenue,
+  round2 as roundMoney,
+  sqlStateList,
+} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 // Aggregated P&L tolerates 1-2 min of staleness → short TTL (ms).
@@ -92,17 +103,20 @@ export class FinancialAnalyticsService {
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
-  private readonly COMPLETED_STATES = ['delivered', 'finished'];
+  private readonly COMPLETED_STATES = [...COMPLETED_SALE_STATES];
 
   /**
-   * Order states that count as REVENUE for the period. Includes 'refunded' so
-   * that an order created and refunded in the same period nets to zero instead
-   * of producing a phantom negative on net_profit (the refund subtotal is
-   * still subtracted below). Cross-period refunds are recognized in the period
-   * they occur (standard returns accounting). Keep in sync with the COGS raw
-   * SQL filter below.
+   * Order states that count as REVENUE for the period. This is the CONTRACT's
+   * {@link COMPLETED_SALE_STATES} plus `refunded`, and the addition is deliberate:
+   * an order created and refunded inside the same period must net to zero instead
+   * of producing a phantom negative on net_profit (the refund subtotal is still
+   * subtracted below). Cross-period refunds are recognized in the period they
+   * occur (standard returns accounting).
+   *
+   * Derived from the contract rather than re-typed, so a change to the canonical
+   * sale states propagates here instead of silently diverging.
    */
-  private readonly REVENUE_STATES = ['delivered', 'finished', 'refunded'];
+  private readonly REVENUE_STATES = [...COMPLETED_SALE_STATES, 'refunded'];
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -118,17 +132,12 @@ export class FinancialAnalyticsService {
   }
 
   /**
-   * SINGLE rounding policy for every numeric value this service emits (amounts,
-   * percentages, rates): round-half-away-from-zero to 2 decimals. The
-   * `Number.EPSILON` nudge cancels binary-float artifacts (e.g. avoids
-   * `1234.5600000000003`), and the explicit sign handling keeps it symmetric for
-   * negative money (net_profit, cash difference) instead of `Math.round`'s
-   * toward-`+∞` bias.
+   * SINGLE rounding policy for every numeric value this service emits. Delegates
+   * to the contract's `round2` so the policy has ONE owner across analytics
+   * rather than a private copy per service.
    */
   private round2(value: number): number {
-    if (!Number.isFinite(value)) return 0;
-    const sign = value < 0 ? -1 : 1;
-    return (sign * Math.round((Math.abs(value) + Number.EPSILON) * 100)) / 100;
+    return roundMoney(value);
   }
 
   async getTaxSummary(query: AnalyticsQueryDto) {
@@ -365,7 +374,10 @@ export class FinancialAnalyticsService {
     // Tenant + period scoped key: store_id isolates the tenant; the date-range
     // inputs (preset/from/to) capture the period. Relative presets like "today"
     // keep a stable key and rely on the short TTL for freshness.
-    const cacheKey = `analytics:financial:profit-loss:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v2` = payload shape that carries operating_revenue / cost_coverage /
+    // comparison. Bumped with the shape so a rolling deploy cannot serve a
+    // v1-shaped object to a frontend that reads the new fields.
+    const cacheKey = `analytics:financial:profit-loss:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -377,48 +389,100 @@ export class FinancialAnalyticsService {
     return result;
   }
 
+  /**
+   * Order-level monetary aggregate for one window, over {@link REVENUE_STATES}.
+   */
+  private async aggregateRevenueOrders(startDate: Date, endDate: Date) {
+    return this.prisma.orders.aggregate({
+      where: {
+        state: { in: this.REVENUE_STATES },
+        created_at: { gte: startDate, lte: endDate },
+      },
+      _sum: {
+        subtotal_amount: true,
+        discount_amount: true,
+        tax_amount: true,
+        shipping_cost: true,
+        grand_total: true,
+      },
+      _count: {
+        id: true,
+      },
+    });
+  }
+
+  /**
+   * COGS for one window, plus the counters that make it auditable.
+   *
+   * Must be computed in SQL: `SUM(a) * SUM(b) != SUM(a * b)` — cost is multiplied
+   * per line before summing. `units_without_cost` rides along because
+   * `COALESCE(cost_price, 0)` turns "cost unknown" into "cost zero", which is
+   * indistinguishable from a real 100 % margin. `withoutScope()` is required
+   * ($queryRaw is not on the scoped client); `storeId` is validated by the caller
+   * and pinned in the WHERE clause, and the state list comes from the contract.
+   */
+  private async aggregateCogs(
+    storeId: number,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<{ cogs: number; coverage: CostCoverage }> {
+    const states = sqlStateList(this.REVENUE_STATES);
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ cogs: unknown; units: unknown; units_without_cost: unknown }>
+    >`
+      SELECT
+        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
+        COALESCE(SUM(oi.quantity), 0) AS units,
+        COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN (${states})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+    `;
+    const row = rows[0];
+    return {
+      cogs: Number(row?.cogs ?? 0),
+      coverage: buildCostCoverage(
+        Number(row?.units ?? 0),
+        Number(row?.units_without_cost ?? 0),
+      ),
+    };
+  }
+
   private async computeProfitLossSummary(
     query: AnalyticsQueryDto,
     storeId: number,
   ) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
+      startDate,
+      endDate,
+    );
+
+    // `expenses.expense_date` is a DATE-ONLY business date stored as naive
+    // midnight, so it needs the naive-space window — the timestamp window pushed
+    // every UI-created expense one day earlier, and month-boundary expenses into
+    // the previous month.
+    const expenseRange = resolveLocalDateOnlyRange(query, tz);
+    const previousExpenseRange = getPreviousPeriod(
+      expenseRange.startDate,
+      expenseRange.endDate,
+    );
 
     const [
       orderAggregates,
-      cogsRows,
+      cogsResult,
       refundAggregates,
       expenseAggregates,
+      previousOrderAggregates,
+      previousCogsResult,
+      previousExpenseAggregates,
     ] = await Promise.all([
-      this.prisma.orders.aggregate({
-        where: {
-          state: { in: this.REVENUE_STATES },
-          created_at: { gte: startDate, lte: endDate },
-        },
-        _sum: {
-          subtotal_amount: true,
-          discount_amount: true,
-          tax_amount: true,
-          shipping_cost: true,
-          grand_total: true,
-        },
-        _count: {
-          id: true,
-        },
-      }),
-      // COGS = SUM(cost_price * quantity) per line item.
-      // Must be computed in SQL: SUM(a)*SUM(b) != SUM(a*b).
-      // withoutScope() needed: $queryRaw is not available on the scoped client.
-      // storeId is validated above and used in the WHERE clause.
-      (this.prisma.withoutScope() as any).$queryRaw<Array<{ cogs: any }>>`
-        SELECT COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs
-        FROM order_items oi
-        INNER JOIN orders o ON o.id = oi.order_id
-        WHERE o.store_id = ${storeId}
-          AND o.state IN ('delivered', 'finished', 'refunded') -- keep in sync with REVENUE_STATES
-          AND o.created_at >= ${startDate}
-          AND o.created_at <= ${endDate}
-      `,
+      this.aggregateRevenueOrders(startDate, endDate),
+      this.aggregateCogs(storeId, startDate, endDate),
       this.prisma.refunds.aggregate({
         where: {
           state: { in: ['completed', 'approved'] },
@@ -431,33 +495,59 @@ export class FinancialAnalyticsService {
           shipping_refund: true,
         },
       }),
-      this.prisma.expenses.aggregate({
-        where: {
-          state: 'paid',
-          expense_date: { gte: startDate, lte: endDate },
-        },
-        _sum: {
-          amount: true,
-        },
-      }),
+      this.aggregateExpenses(expenseRange.startDate, expenseRange.endDate),
+      this.aggregateRevenueOrders(previousStartDate, previousEndDate),
+      this.aggregateCogs(storeId, previousStartDate, previousEndDate),
+      this.aggregateExpenses(
+        previousExpenseRange.previousStartDate,
+        previousExpenseRange.previousEndDate,
+      ),
     ]);
 
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
     const discounts = Number(orderAggregates._sum.discount_amount || 0);
     const netRevenue = revenue - discounts;
-    const totalCOGS = Number(cogsRows[0]?.cogs ?? 0);
-    const grossProfit = netRevenue - totalCOGS;
-    const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
     const taxCollected = Number(orderAggregates._sum.tax_amount || 0);
     const shippingRevenue = Number(orderAggregates._sum.shipping_cost || 0);
+
+    // OPERATING REVENUE — the single figure every "Ingresos" card shows:
+    // subtotal − discounts + freight charged, VAT excluded. It is also the ONE
+    // denominator for both margins, so the percentage and the amount on screen
+    // are computed off the same base (they previously were not: the panel showed
+    // `grand_total` while the margin divided by `net_revenue`).
+    const operatingRevenue = computeOperatingRevenue({
+      subtotal: revenue,
+      discounts,
+      shipping: shippingRevenue,
+      tax: taxCollected,
+    });
+
+    const totalCOGS = cogsResult.cogs;
+    const grossProfit = operatingRevenue - totalCOGS;
+    const grossMargin =
+      operatingRevenue > 0 ? (grossProfit / operatingRevenue) * 100 : 0;
     const refundAmount = Number(refundAggregates._sum.amount || 0);
     const refundSubtotal = Number(refundAggregates._sum.subtotal_refund || 0);
     const refundTax = Number(refundAggregates._sum.tax_refund || 0);
     const refundShipping = Number(refundAggregates._sum.shipping_refund || 0);
-    const operatingExpenses = Number(expenseAggregates._sum.amount || 0);
-    const netProfit =
-      grossProfit + shippingRevenue - refundSubtotal - operatingExpenses;
-    const netMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
+    const operatingExpenses = expenseAggregates;
+    const netProfit = grossProfit - refundSubtotal - operatingExpenses;
+    const netMargin =
+      operatingRevenue > 0 ? (netProfit / operatingRevenue) * 100 : 0;
+
+    // Previous period, on the SAME definitions, so the panel's growth badge is
+    // not computed off a different metric than the value it sits under.
+    const previousOperatingRevenue = computeOperatingRevenue({
+      subtotal: Number(previousOrderAggregates._sum.subtotal_amount || 0),
+      discounts: Number(previousOrderAggregates._sum.discount_amount || 0),
+      shipping: Number(previousOrderAggregates._sum.shipping_cost || 0),
+      tax: Number(previousOrderAggregates._sum.tax_amount || 0),
+    });
+    const previousNetProfit =
+      previousOperatingRevenue -
+      previousCogsResult.cogs -
+      previousExpenseAggregates;
+    const previousOrderCount = previousOrderAggregates._count.id || 0;
 
     // DATA-CELL-1: apply the SINGLE rounding policy (`round2`) to every emitted
     // number. Internal math above stays RAW so derived figures (margins,
@@ -474,12 +564,16 @@ export class FinancialAnalyticsService {
         discounts: this.round2(discounts),
         net_revenue: this.round2(netRevenue),
         shipping_revenue: this.round2(shippingRevenue),
+        /** Contract revenue: subtotal − discounts + freight, VAT excluded. */
+        operating_revenue: this.round2(operatingRevenue),
         tax_collected: this.round2(taxCollected),
       },
       costs: {
         cost_of_goods_sold: this.round2(totalCOGS),
         gross_profit: this.round2(grossProfit),
         gross_margin: this.round2(grossMargin),
+        /** Auditability of the COGS above — see `CostCoverage`. */
+        cost_coverage: cogsResult.coverage,
       },
       refunds: {
         total_refunds: this.round2(refundAmount),
@@ -493,7 +587,47 @@ export class FinancialAnalyticsService {
         net_margin: this.round2(netMargin),
         order_count: orderAggregates._count.id || 0,
       },
+      /**
+       * Previous equivalent period on identical definitions. `*_growth` is `null`
+       * when the previous period had no base — rendering that as "0 %" would
+       * assert "no change" about a period that had nothing.
+       */
+      comparison: {
+        operating_revenue: this.round2(previousOperatingRevenue),
+        net_profit: this.round2(previousNetProfit),
+        operating_expenses: this.round2(previousExpenseAggregates),
+        order_count: previousOrderCount,
+        revenue_growth: computeGrowth(operatingRevenue, previousOperatingRevenue),
+        net_profit_growth: computeGrowth(netProfit, previousNetProfit),
+        expenses_growth: computeGrowth(
+          operatingExpenses,
+          previousExpenseAggregates,
+        ),
+        orders_growth: computeGrowth(
+          orderAggregates._count.id || 0,
+          previousOrderCount,
+        ),
+      },
     };
+  }
+
+  /**
+   * Recognized expenses (accrual: `approved` + `paid`) for a naive-space window.
+   * `pending` is excluded by the contract — an unapproved capture is not yet an
+   * expense, and counting it let a mistyped draft hit the store's profit at once.
+   */
+  private async aggregateExpenses(
+    startDate: Date,
+    endDate: Date,
+  ): Promise<number> {
+    const result = await this.prisma.expenses.aggregate({
+      where: {
+        state: { in: [...RECOGNIZED_EXPENSE_STATES] },
+        expense_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
+      },
+      _sum: { amount: true },
+    });
+    return Number(result._sum.amount || 0);
   }
 
   async getRefundsSummary(query: AnalyticsQueryDto) {
@@ -607,11 +741,27 @@ export class FinancialAnalyticsService {
       money('revenue', 'discounts', profitLoss.revenue.discounts),
       money('revenue', 'net_revenue', profitLoss.revenue.net_revenue),
       money('revenue', 'shipping_revenue', profitLoss.revenue.shipping_revenue),
+      money('revenue', 'operating_revenue', profitLoss.revenue.operating_revenue),
       money('revenue', 'tax_collected', taxSummary.total_tax_collected),
       // Costs
       money('costs', 'cost_of_goods_sold', profitLoss.costs.cost_of_goods_sold),
       money('costs', 'gross_profit', profitLoss.costs.gross_profit),
       percent('costs', 'gross_margin', profitLoss.costs.gross_margin),
+      // Cost auditability: a COGS built on missing snapshots reads as a 100 %
+      // margin, so the file states the coverage next to the figure.
+      percent(
+        'costs',
+        'cost_coverage',
+        profitLoss.costs.cost_coverage.coverage_ratio * 100,
+      ),
+      {
+        section: 'costs',
+        metric: 'units_without_cost',
+        unit: 'count',
+        value: profitLoss.costs.cost_coverage.units_without_cost,
+        date: null,
+        text: null,
+      },
       // Refunds (split already computed by the P&L summary)
       money('refunds', 'total_refunds', profitLoss.refunds.total_refunds),
       money('refunds', 'subtotal_refunds', profitLoss.refunds.subtotal_refunds),

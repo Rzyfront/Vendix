@@ -365,6 +365,26 @@ export function localPeriodSql(
   return Prisma.sql`to_char(DATE_TRUNC(${Prisma.raw(`'${pgUnit}'`)}, ${localBucketSql(column, safeTz)}), ${Prisma.raw(`'${pgFormat}'`)})`;
 }
 
+/**
+ * Period label for a DATE-ONLY business column, whose value is ALREADY the local
+ * calendar date stored as naive midnight (`expenses.expense_date`, ...). Emits
+ * `to_char(DATE_TRUNC(unit, col), fmt)` with NO `AT TIME ZONE` conversion.
+ *
+ * Applying {@link localPeriodSql} here would shift an already-local date by the
+ * store offset and bucket it one day early — the chart counterpart of the range
+ * bug documented on {@link resolveLocalDateOnlyRange}. The labels this emits are
+ * byte-identical to {@link localPeriodSql}'s for the same calendar period, so a
+ * date-only series and a timestamp series can be merged key-by-key.
+ */
+export function dateOnlyPeriodSql(
+  column: string,
+  granularity: string,
+): Prisma.Sql {
+  const { pgUnit, pgFormat } = periodSpec(granularity);
+  // tz-audit:ignore — ALREADY-LOCAL business date: converting it would shift the bucket.
+  return Prisma.sql`to_char(DATE_TRUNC(${Prisma.raw(`'${pgUnit}'`)}, ${Prisma.raw(column)}), ${Prisma.raw(`'${pgFormat}'`)})`;
+}
+
 // ---------------------------------------------------------------------------
 // Local-calendar labeling & zero-fill (mirror of the SQL labels)
 // ---------------------------------------------------------------------------
@@ -538,38 +558,38 @@ function mondayOfCivil(c: CalendarDate): CalendarDate {
   };
 }
 
+/** The LOCAL calendar span a query selects, before it is turned into instants. */
+interface LocalCalendarRange {
+  start: CalendarDate;
+  end: CalendarDate;
+  /**
+   * True for the "current period" presets (today/thisWeek/thisMonth/thisYear),
+   * whose upper bound is `now` rather than the end of `end`. Timestamp ranges
+   * honour this (so growth compares "same time last period"); DATE-ONLY ranges
+   * ignore it, because a date-only value carries no time to compare against.
+   */
+  openEnd: boolean;
+}
+
 /**
- * TZ-aware date range. Interprets `date_from`/`date_to` as CALENDAR dates in the
- * store timezone, and computes presets against the store's LOCAL clock. Returns
- * UTC instants for the LOCAL boundaries:
- *   - bounded ranges: [local 00:00:00.000, local 23:59:59.999]
- *   - open/"current" presets (today/thisWeek/thisMonth/thisYear): end = now
- *     (preserves "vs same time in previous period" growth semantics).
- *
- * `date_preset` values match the analytics `DatePreset` enum
- * (today|yesterday|thisWeek|lastWeek|thisMonth|lastMonth|thisYear|lastYear|custom).
+ * Resolves the LOCAL calendar span a query selects. Single owner of the preset
+ * semantics, so the timestamp range and the date-only range can never drift
+ * apart on what "this month" means.
  */
-export function resolveLocalDateRange(
+function localCalendarRange(
   query: { date_from?: string; date_to?: string; date_preset?: string },
-  tz: string,
-): { startDate: Date; endDate: Date } {
-  const safeTz = assertSafeTimezone(tz);
-
-  const startOfDay = (c: CalendarDate) =>
-    zonedWallClockToUtc(c.year, c.month, c.day, 0, 0, 0, 0, safeTz);
-  const endOfDay = (c: CalendarDate) =>
-    zonedWallClockToUtc(c.year, c.month, c.day, 23, 59, 59, 999, safeTz);
-
+  safeTz: string,
+): LocalCalendarRange {
   // Explicit custom range — calendar dates in the store timezone.
   if (query.date_from && query.date_to) {
     return {
-      startDate: startOfDay(parseCalendarDate(query.date_from)),
-      endDate: endOfDay(parseCalendarDate(query.date_to)),
+      start: parseCalendarDate(query.date_from),
+      end: parseCalendarDate(query.date_to),
+      openEnd: false,
     };
   }
 
-  const now = new Date();
-  const todayParts = getTimeZoneParts(now, safeTz);
+  const todayParts = getTimeZoneParts(new Date(), safeTz);
   const today: CalendarDate = {
     year: todayParts.year,
     month: todayParts.month,
@@ -578,53 +598,136 @@ export function resolveLocalDateRange(
 
   switch (query.date_preset) {
     case 'today':
-      return { startDate: startOfDay(today), endDate: now };
+      return { start: today, end: today, openEnd: true };
     case 'yesterday': {
       const y = addCivilDays(today, -1);
-      return { startDate: startOfDay(y), endDate: endOfDay(y) };
+      return { start: y, end: y, openEnd: false };
     }
-    case 'thisWeek': {
-      const monday = mondayOfCivil(today);
-      return { startDate: startOfDay(monday), endDate: now };
-    }
+    case 'thisWeek':
+      return { start: mondayOfCivil(today), end: today, openEnd: true };
     case 'lastWeek': {
       const thisMonday = mondayOfCivil(today);
-      const lastMonday = addCivilDays(thisMonday, -7);
-      const lastSunday = addCivilDays(thisMonday, -1);
-      return { startDate: startOfDay(lastMonday), endDate: endOfDay(lastSunday) };
+      return {
+        start: addCivilDays(thisMonday, -7),
+        end: addCivilDays(thisMonday, -1),
+        openEnd: false,
+      };
     }
     case 'lastMonth': {
-      const firstOfThisMonth: CalendarDate = {
-        year: today.year,
-        month: today.month,
-        day: 1,
-      };
-      const lastMonthLastDay = addCivilDays(firstOfThisMonth, -1);
-      const lastMonthFirstDay: CalendarDate = {
-        year: lastMonthLastDay.year,
-        month: lastMonthLastDay.month,
-        day: 1,
-      };
+      const lastMonthLastDay = addCivilDays(
+        { year: today.year, month: today.month, day: 1 },
+        -1,
+      );
       return {
-        startDate: startOfDay(lastMonthFirstDay),
-        endDate: endOfDay(lastMonthLastDay),
+        start: {
+          year: lastMonthLastDay.year,
+          month: lastMonthLastDay.month,
+          day: 1,
+        },
+        end: lastMonthLastDay,
+        openEnd: false,
       };
     }
     case 'thisYear':
       return {
-        startDate: startOfDay({ year: today.year, month: 1, day: 1 }),
-        endDate: now,
+        start: { year: today.year, month: 1, day: 1 },
+        end: today,
+        openEnd: true,
       };
     case 'lastYear':
       return {
-        startDate: startOfDay({ year: today.year - 1, month: 1, day: 1 }),
-        endDate: endOfDay({ year: today.year - 1, month: 12, day: 31 }),
+        start: { year: today.year - 1, month: 1, day: 1 },
+        end: { year: today.year - 1, month: 12, day: 31 },
+        openEnd: false,
       };
     case 'thisMonth':
     default:
       return {
-        startDate: startOfDay({ year: today.year, month: today.month, day: 1 }),
-        endDate: now,
+        start: { year: today.year, month: today.month, day: 1 },
+        end: today,
+        openEnd: true,
       };
   }
+}
+
+/**
+ * TZ-aware date range for TIMESTAMP columns (orders.created_at, cart/review
+ * timestamps, cash_register_sessions.opened_at, ...). Interprets
+ * `date_from`/`date_to` as CALENDAR dates in the store timezone, and computes
+ * presets against the store's LOCAL clock. Returns UTC instants for the LOCAL
+ * boundaries:
+ *   - bounded ranges: [local 00:00:00.000, local 23:59:59.999]
+ *   - open/"current" presets (today/thisWeek/thisMonth/thisYear): end = now
+ *     (preserves "vs same time in previous period" growth semantics).
+ *
+ * `date_preset` values match the analytics `DatePreset` enum
+ * (today|yesterday|thisWeek|lastWeek|thisMonth|lastMonth|thisYear|lastYear|custom).
+ *
+ * DO NOT use this for a DATE-ONLY column — see
+ * {@link resolveLocalDateOnlyRange}.
+ */
+export function resolveLocalDateRange(
+  query: { date_from?: string; date_to?: string; date_preset?: string },
+  tz: string,
+): { startDate: Date; endDate: Date } {
+  const safeTz = assertSafeTimezone(tz);
+  const { start, end, openEnd } = localCalendarRange(query, safeTz);
+
+  return {
+    startDate: zonedWallClockToUtc(
+      start.year,
+      start.month,
+      start.day,
+      0,
+      0,
+      0,
+      0,
+      safeTz,
+    ),
+    endDate: openEnd
+      ? new Date()
+      : zonedWallClockToUtc(
+          end.year,
+          end.month,
+          end.day,
+          23,
+          59,
+          59,
+          999,
+          safeTz,
+        ),
+  };
+}
+
+/**
+ * Range for a DATE-ONLY business column — one whose value is already the local
+ * calendar date, stored as naive midnight (`expenses.expense_date`,
+ * `accounting_entries.entry_date`, `purchase_orders.supplier_invoice_date`).
+ *
+ * WHY THIS EXISTS. Such a column holds `2026-08-03 00:00:00`, and Prisma reads
+ * a naive timestamp as that same UTC wall-clock. Feeding it the
+ * {@link resolveLocalDateRange} window — which for Bogotá's Aug 3 is
+ * `[2026-08-03 05:00, 2026-08-04 04:59:59.999]` — puts the value BELOW the lower
+ * bound, so the record silently lands one day EARLIER (and, on the 1st of a
+ * month, one MONTH earlier). Measured before this fix: every expense created
+ * through the UI was off by exactly one day.
+ *
+ * The value carries no time and no offset, so the window must be built in the
+ * SAME naive space: `Date.UTC` of the local calendar boundaries, with no tz
+ * shift applied. `openEnd` is deliberately ignored — a date-only value has no
+ * clock to compare against `now`, so the selected last day is always whole.
+ */
+export function resolveLocalDateOnlyRange(
+  query: { date_from?: string; date_to?: string; date_preset?: string },
+  tz: string,
+): { startDate: Date; endDate: Date } {
+  const safeTz = assertSafeTimezone(tz);
+  const { start, end } = localCalendarRange(query, safeTz);
+
+  return {
+    // tz-audit:ignore — naive-space boundaries for an ALREADY-LOCAL business date.
+    startDate: new Date(Date.UTC(start.year, start.month - 1, start.day, 0, 0, 0, 0)),
+    // tz-audit:ignore — naive-space boundaries for an ALREADY-LOCAL business date.
+    endDate: new Date(Date.UTC(end.year, end.month - 1, end.day, 23, 59, 59, 999)),
+  };
 }

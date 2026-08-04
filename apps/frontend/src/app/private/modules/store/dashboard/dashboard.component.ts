@@ -17,7 +17,6 @@ import { toLocalDateString, getDefaultEndDate, formatChartPeriod } from '../../.
 import { AnalyticsService, ProfitLossSummary } from '../analytics/services/analytics.service';
 import { DateRangeFilter } from '../analytics/interfaces/analytics.interface';
 import {
-  SalesSummary,
   SalesTrend,
   SalesByChannel,
   SalesAnalyticsQueryDto,
@@ -63,12 +62,15 @@ const QUICK_LINKS: QuickLink[] = [
   ],
   template: `
     <div class="w-full space-y-4 pb-6">
-      <!-- 4 Stats Cards -->
+      <!-- 4 Stats Cards — ALL from the Profit & Loss endpoint, on purpose.
+           They used to mix two sources: "Ingresos" came from sales/summary
+           (grand_total, VAT included) while the margin under "Ganancias" divided
+           by the P&L net revenue. Same screen, two bases, no way to reconcile. -->
       <div class="stats-container">
         <app-stats
           title="Ingresos"
-          [value]="formatCurrency(summary()?.total_revenue || 0)"
-          [smallText]="getGrowthText(summary()?.revenue_growth)"
+          [value]="formatCurrency(profitLoss()?.revenue?.operating_revenue || 0)"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.revenue_growth)"
           iconName="dollar-sign"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
@@ -85,8 +87,8 @@ const QUICK_LINKS: QuickLink[] = [
         />
         <app-stats
           title="Órdenes"
-          [value]="summary()?.total_orders || 0"
-          [smallText]="getGrowthText(summary()?.orders_growth)"
+          [value]="profitLoss()?.bottom_line?.order_count || 0"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.orders_growth)"
           iconName="shopping-cart"
           iconBgColor="bg-secondary/10"
           iconColor="text-secondary"
@@ -95,13 +97,30 @@ const QUICK_LINKS: QuickLink[] = [
         <app-stats
           title="Gastos"
           [value]="formatCurrency(profitLoss()?.operating_expenses || 0)"
-          smallText="gastos operativos"
+          [smallText]="getGrowthText(profitLoss()?.comparison?.expenses_growth)"
           iconName="trending-down"
           iconBgColor="bg-error/10"
           iconColor="text-error"
           [loading]="loading()"
         />
       </div>
+
+      <!-- Cost coverage: a COGS built on missing snapshots reads as a 100 %
+           margin, which looks exactly like a real one. -->
+      @if (hasIncompleteCost()) {
+        <div
+          class="flex items-start gap-3 p-3 rounded-lg bg-warning-light border border-warning/30"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="16"
+            class="text-warning shrink-0 mt-0.5"
+          ></app-icon>
+          <p class="text-xs text-text-secondary leading-relaxed">
+            {{ incompleteCostText() }}
+          </p>
+        </div>
+      }
 
       <!-- Charts: Trend (2/3) + Channels (1/3) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -354,7 +373,6 @@ export class DashboardComponent {
   loadingAlerts = signal(true);
 
   // Data
-  summary = signal<SalesSummary | null>(null);
   profitLoss = signal<ProfitLossSummary | null>(null);
   trends = signal<SalesTrend[]>([]);
   trendGranularity = signal<'hour' | 'day'>('day');
@@ -424,28 +442,21 @@ export class DashboardComponent {
     this.loadingChannels.set(true);
     this.loadingAlerts.set(true);
 
-    // 1. Sales summary → stats cards
+    // 1. Profit & Loss → the FOUR money cards. Single source on purpose: revenue,
+    // cost, expenses, profit and their growth all come from one aggregation, so
+    // the numbers on this screen always reconcile with each other.
     this.analyticsService
-      .getSalesSummary(query)
+      .getProfitLossSummary(query)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.summary.set(response.data);
+          this.profitLoss.set(response.data);
           this.loading.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar el resumen');
           this.loading.set(false);
         },
-      });
-
-    // 1b. Profit & Loss → cards Ganancias + Gastos
-    this.analyticsService
-      .getProfitLossSummary(query)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => this.profitLoss.set(response.data),
-        error: () => { /* ganancias/gastos no críticos para el resto del dashboard */ },
       });
 
     // 2. Sales trends → trend chart (hourly when viewing "today", else daily)
@@ -661,16 +672,59 @@ export class DashboardComponent {
     return this.currencyService.formatCompact(value);
   }
 
-  getGrowthText(growth?: number): string {
-    if (growth === undefined || growth === null) return '';
+  /**
+   * The comparison label is DERIVED from the selected preset. It used to read
+   * "vs mes ant." for every preset — including "Hoy" and "Este Año", where the
+   * comparison being made was not a month at all.
+   *
+   * `null` growth means the previous period had no base; saying "0 %" there
+   * asserts "no change" about a period that had nothing.
+   */
+  getGrowthText(growth?: number | null): string {
+    if (growth === undefined || growth === null) return 'sin base de comparación';
     const sign = growth >= 0 ? '+' : '';
-    return `${sign}${growth.toFixed(1)}% vs mes ant.`;
+    return `${sign}${growth.toFixed(1)}% vs ${this.comparisonLabel()}`;
+  }
+
+  /** What the previous equivalent period is called, per selected preset. */
+  private comparisonLabel(): string {
+    switch (this.selectedPreset()) {
+      case 'today':
+        return 'ayer';
+      case 'yesterday':
+        return 'día ant.';
+      case 'thisWeek':
+      case 'lastWeek':
+        return 'semana ant.';
+      case 'thisMonth':
+      case 'lastMonth':
+        return 'mes ant.';
+      case 'thisYear':
+      case 'lastYear':
+        return 'año ant.';
+      default:
+        return 'período ant.';
+    }
   }
 
   getMarginText(margin?: number): string {
     if (margin === undefined || margin === null) return '';
     return `${margin.toFixed(1)}% margen`;
   }
+
+  /** True when some sold units have no cost snapshot, so profit is overstated. */
+  readonly hasIncompleteCost = computed(() => {
+    const coverage = this.profitLoss()?.costs?.cost_coverage;
+    return !!coverage && coverage.units_without_cost > 0;
+  });
+
+  /** Human sentence for the incomplete-cost warning. */
+  readonly incompleteCostText = computed(() => {
+    const coverage = this.profitLoss()?.costs?.cost_coverage;
+    if (!coverage || coverage.units_without_cost === 0) return '';
+    const pct = (coverage.coverage_ratio * 100).toFixed(0);
+    return `${coverage.units_without_cost} de ${coverage.units_total} unidades vendidas no tienen costo registrado (cobertura ${pct} %). La ganancia mostrada está sobreestimada hasta que se registre ese costo.`;
+  });
 
   navigateTo(path: string): void {
     // Handle paths with query params

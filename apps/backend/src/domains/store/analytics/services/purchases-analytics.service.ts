@@ -30,7 +30,7 @@ export class PurchasesAnalyticsService {
         suppliers: {
           store_id: storeId,
         },
-        order_date: {
+        order_date: { // tz-audit:ignore — INSTANTE real (guarda hora, p.ej. 20:51:46), no business-date a medianoche
           gte: startDate,
           lte: endDate,
         },
@@ -109,7 +109,7 @@ export class PurchasesAnalyticsService {
           where: {
             organization_id: organizationId,
             location: { store_id: storeId },
-            order_date: {
+            order_date: { // tz-audit:ignore — INSTANTE real (ver arriba)
               gte: startDate,
               lte: endDate,
             },
