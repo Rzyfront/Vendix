@@ -17,6 +17,7 @@ import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-r
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Icon } from '@/shared/components/icon/icon';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import {
   OptionsDropdown,
   type FilterConfig,
@@ -79,6 +80,19 @@ const DEFAULT_FILTERS = {
   to: '' as string | '',
 };
 type LocalFilters = typeof DEFAULT_FILTERS;
+
+/**
+ * Extrae un mensaje legible de un error de React Query. Evita repetir el
+ * `as any` cascade en cada EmptyState — narrowing sin perder tipado.
+ */
+function describeApiError(error: unknown): string {
+  if (error && typeof error === 'object') {
+    const e = error as { response?: { data?: { message?: string } }; message?: string };
+    return e.response?.data?.message || e.message || 'Error desconocido.';
+  }
+  if (typeof error === 'string') return error;
+  return 'Hubo un problema al consultar el servidor. Reintenta en unos segundos.';
+}
 
 function auditStatsItems(stats: AuditStats | null | undefined) {
   const combined = stats?.logs_by_action_and_resource ?? {};
@@ -155,6 +169,8 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
 interface ListHeaderProps {
   stats: AuditStats | null | undefined;
   count: number;
+  search: string;
+  onSearchChange: (v: string) => void;
   onActionsPress: () => void;
   filterConfigs: FilterConfig[];
   filterValues: FilterValues;
@@ -165,6 +181,8 @@ interface ListHeaderProps {
 function ListHeader({
   stats,
   count,
+  search,
+  onSearchChange,
   onActionsPress,
   filterConfigs,
   filterValues,
@@ -187,13 +205,19 @@ function ListHeader({
           </Text>
         </View>
 
-        {/* 2 icon-only triggers en UNA sola línea.
+        {/* Search + 2 icon-only triggers en UNA sola línea.
             Espejo del `<app-options-dropdown>` web mobile responsive
             (max-width: 1023px): cada trigger es 40x40, primary border,
-            primary icon. NO hay SearchBar — el backend audit.controller
-            no acepta @Query('search') y la web tampoco lo expone
-            (paridad 1:1 confirmada). */}
+            primary icon. */}
         <View style={styles.searchRow}>
+          <View style={{ flex: 1 }}>
+            <SearchBar
+              value={search}
+              onChangeText={onSearchChange}
+              placeholder="Buscar registros..."
+              style={styles.searchInput}
+            />
+          </View>
           {/* Actions trigger (+ button) — abre modal con Actualizar/Exportar */}
           <Pressable
             style={({ pressed }) => [styles.optionsTrigger, pressed && { opacity: 0.85 }]}
@@ -225,12 +249,16 @@ export default function AuditLogsScreen() {
   const queryClient = useQueryClient();
 
   const [filters, setFilters] = useState<LocalFilters>(DEFAULT_FILTERS);
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<AuditLog | null>(null);
   const [actionsModalOpen, setActionsModalOpen] = useState(false);
 
   // ───── Queries ───────────────────────────────────────────────────────────
+  // Nota: `search` NO se manda al backend (el endpoint `listLogs` no acepta
+  // `@Query('search')` aún). El filtrado por texto se hace client-side
+  // sobre los `logs` ya paginados (ver `filteredLogs` abajo).
   const queryParams: AuditQueryParams = useMemo(
     () => ({
       offset: (page - 1) * PAGE_SIZE,
@@ -243,12 +271,16 @@ export default function AuditLogsScreen() {
     [page, filters],
   );
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['org-audit-logs', queryParams],
     queryFn: () => OrgAuditService.listLogs(queryParams),
   });
 
-  const { data: stats } = useQuery({
+  const {
+    data: stats,
+    isError: isStatsError,
+    refetch: refetchStats,
+  } = useQuery({
     queryKey: ['org-audit-logs-stats'],
     queryFn: () => OrgAuditService.getStats(),
     staleTime: 60_000,
@@ -258,8 +290,29 @@ export default function AuditLogsScreen() {
   const total = data?.meta?.total ?? 0;
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // Filtro client-side por texto de búsqueda. El backend aún no acepta
+  // `search` (TODO: añadir `@Query('search')` a audit.controller.ts y filter
+  // en audit.service.ts). Mientras tanto, filtramos localmente sobre los
+  // campos visibles: action, resource, resource_id, usuario formateado e IP.
+  const filteredLogs = useMemo(() => {
+    if (!search.trim()) return logs;
+    const term = search.trim().toLowerCase();
+    return logs.filter((log) => {
+      const user = formatUser(log).toLowerCase();
+      return (
+        log.action?.toLowerCase().includes(term) ||
+        log.resource?.toLowerCase().includes(term) ||
+        String(log.resource_id ?? '').toLowerCase().includes(term) ||
+        user.includes(term) ||
+        log.ip_address?.toLowerCase().includes(term)
+      );
+    });
+  }, [logs, search]);
+
   const hasFilters =
-    !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
+    !!search || !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
+  // El shared `OptionsDropdown` pinta el badge de filtros activos sola;
+  // mantener un counter local era dead-code tras eliminar la prop.
 
   // ───── Filter configs (espejo del `filterConfigs` web) ─────────────────
   const filterConfigs = useMemo<FilterConfig[]>(
@@ -338,11 +391,21 @@ export default function AuditLogsScreen() {
       return OrgAuditService.exportLogsCsv(params);
     },
     onSuccess: async ({ filename, csv }) => {
+      const fileUri = `${FileSystem.cacheDirectory}${filename}`;
       try {
-        const fileUri = `${FileSystem.cacheDirectory}${filename}`;
+        // H4: separar write y share en try/catch distintos. Antes el mismo
+        // catch cubría ambos y mentía al usuario diciendo "el archivo quedó
+        // guardado" cuando en realidad el write era el que había fallado.
         await FileSystem.writeAsStringAsync(fileUri, csv, {
           encoding: FileSystem.EncodingType.UTF8,
         });
+      } catch (err: any) {
+        toastError(
+          `No se pudo escribir el archivo CSV: ${err?.message ?? 'error desconocido'}.`,
+        );
+        return;
+      }
+      try {
         const available = await Sharing.isAvailableAsync();
         if (available) {
           await Sharing.shareAsync(fileUri, {
@@ -355,10 +418,9 @@ export default function AuditLogsScreen() {
           toastSuccess(`${filename} generado (${(csv.length / 1024).toFixed(1)} KB)`);
         }
       } catch (err: any) {
-        const msg =
-          err?.message ||
-          'El archivo CSV se generó pero no se pudo abrir el diálogo de compartir.';
-        toastError(`${msg} (el archivo quedó guardado en caché).`);
+        toastError(
+          `El CSV se guardó en caché, pero no se pudo abrir el diálogo de compartir: ${err?.message ?? 'error desconocido'}.`,
+        );
       }
     },
     onError: () => toastError('No se pudo exportar el CSV'),
@@ -373,19 +435,27 @@ export default function AuditLogsScreen() {
     setRefreshing(false);
   };
 
+  const handleSearchChange = (v: string) => {
+    setSearch(v);
+    setPage(1);
+  };
+
   const handleClearAll = () => {
     handleClearAllFilters();
+    setSearch('');
   };
 
   return (
     <View style={styles.root}>
       <FlatList<AuditLog>
-        data={logs}
+        data={filteredLogs}
         keyExtractor={(l) => String(l.id)}
         ListHeaderComponent={
           <ListHeader
             stats={stats}
-            count={total}
+            count={search.trim() ? filteredLogs.length : total}
+            search={search}
+            onSearchChange={handleSearchChange}
             onActionsPress={() => setActionsModalOpen(true)}
             filterConfigs={filterConfigs}
             filterValues={filterValues}
@@ -398,6 +468,27 @@ export default function AuditLogsScreen() {
             <View style={styles.loading}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
+          ) : isError ? (
+            // H1: rama dedicada de error — antes un 500/403 se mostraba como
+            // "No hay registros". Ahora el usuario sabe que falló la carga.
+            <EmptyState
+              icon="alert-triangle"
+              title="No se pudieron cargar los registros"
+              description={describeApiError(error)}
+              actionLabel="Reintentar"
+              onAction={() => {
+                refetch();
+                refetchStats();
+              }}
+            />
+          ) : isStatsError ? (
+            <EmptyState
+              icon="alert-triangle"
+              title="No se pudieron cargar las estadísticas"
+              description="El resumen no está disponible, pero la lista sí debería mostrarse abajo."
+              actionLabel="Reintentar"
+              onAction={() => refetchStats()}
+            />
           ) : hasFilters ? (
             <EmptyState
               icon="filter"
@@ -498,7 +589,7 @@ export default function AuditLogsScreen() {
             }}
           >
             <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
-              <Icon name="refresh" size={16} color={colorScales.gray[700]} />
+              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
             </View>
             <View style={styles.actionsModalTextWrap}>
               <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
@@ -582,8 +673,15 @@ const styles = StyleSheet.create({
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
     gap: spacing[2],
+  },
+  searchInput: {
+    width: '100%',
+    height: 40,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
   },
   // Espejo del `.options-dropdown-trigger` web mobile responsive (40x40,
   // primary border, primary icon, 12px radius).

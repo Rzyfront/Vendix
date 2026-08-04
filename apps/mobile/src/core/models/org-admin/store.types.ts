@@ -1,6 +1,6 @@
 import type { ISODateString, Address } from './common.types';
 
-export type StoreType = 'PHYSICAL' | 'ONLINE' | 'HYBRID';
+export type StoreType = 'PHYSICAL' | 'ONLINE' | 'HYBRID' | 'POPUP' | 'KIOSKO';
 
 export interface StoreListItem {
   id: string;
@@ -28,9 +28,10 @@ export interface StoreDetail extends StoreListItem {
   email?: string;
   phone?: string;
   logo_url?: string;
-  description?: string;
   tax_id?: string;
   settings?: Record<string, unknown>;
+  /** Incluido en detalles por el backend (`organizations?: { name?: string }`). */
+  organizations?: { name?: string };
 }
 
 export interface CreateStoreInput {
@@ -39,8 +40,6 @@ export interface CreateStoreInput {
   store_code: string;
   store_type: StoreType;
   timezone?: string;
-  email?: string;
-  phone?: string;
   address?: Address;
   manager_user_id?: string;
 }
@@ -49,8 +48,6 @@ export interface UpdateStoreInput {
   name?: string;
   store_type?: StoreType;
   timezone?: string;
-  email?: string;
-  phone?: string;
   address?: Address;
   is_active?: boolean;
   manager_user_id?: string | null;
