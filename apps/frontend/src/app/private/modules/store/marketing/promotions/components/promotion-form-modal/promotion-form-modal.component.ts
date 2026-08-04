@@ -180,6 +180,49 @@ interface NormalizedTier {
         <!-- Quantity-tiered: editor -->
         @if (form.get('rule_type')?.value === 'quantity_tiered') {
           <div class="border border-border rounded-lg p-3 bg-background space-y-3">
+            <!-- Phase 2d: cómo se cuentan las unidades (per_product / cart_total) -->
+            <div class="rounded-md border border-border bg-surface p-2.5 space-y-1.5">
+              <div class="flex items-center gap-3">
+                <label class="text-xs font-semibold text-text-primary whitespace-nowrap">
+                  Modo de conteo
+                </label>
+                <div
+                  role="radiogroup"
+                  aria-label="Modo de conteo"
+                  class="inline-flex rounded-md border border-border overflow-hidden text-xs"
+                >
+                  @for (option of quantityGroupingOptions; track option.value) {
+                    <button
+                      type="button"
+                      role="radio"
+                      [attr.aria-checked]="form.get('quantity_grouping')?.value === option.value"
+                      class="px-3 py-1.5 transition-colors"
+                      [class.bg-primary]="form.get('quantity_grouping')?.value === option.value"
+                      [class.text-on-primary]="form.get('quantity_grouping')?.value === option.value"
+                      [class.bg-surface]="form.get('quantity_grouping')?.value !== option.value"
+                      [class.text-text-secondary]="form.get('quantity_grouping')?.value !== option.value"
+                      [class.hover:bg-primary-soft]="form.get('quantity_grouping')?.value !== option.value"
+                      (click)="form.get('quantity_grouping')?.setValue(option.value)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  }
+                </div>
+              </div>
+              <p class="text-[11px] text-text-secondary leading-snug">
+                @if (form.get('quantity_grouping')?.value === 'per_product') {
+                  <strong>Por producto:</strong> cada producto se evalúa por
+                  separado. El descuento se aplica SOLO a las unidades que
+                  individualmente alcanzan la escala. 3 productos distintos con
+                  1 und cada uno NO activan la promo; hace falta una segunda
+                  und de cualquiera de ellos.
+                } @else {
+                  <strong>Total carrito:</strong> suma unidades de cualquier
+                  producto de la promo, sin importar SKU. 3 productos
+                  distintos con 1 und cada uno SÍ cuentan como 3.
+                }
+              </p>
+            </div>
             <div class="flex items-center justify-between gap-3">
               <div>
                 <h4 class="text-sm font-semibold text-text-primary">Escalas por cantidad</h4>
@@ -517,6 +560,15 @@ export class PromotionFormModalComponent {
     { value: 'quantity_tiered', label: 'Escalas por cantidad' },
   ];
 
+  /**
+   * Phase 2d: opciones de `quantity_grouping` para el toggle button.
+   * Backend default = 'cart_total' (preserva comportamiento legacy).
+   */
+  quantityGroupingOptions: SelectorOption[] = [
+    { value: 'cart_total', label: 'Total carrito' },
+    { value: 'per_product', label: 'Por producto' },
+  ];
+
   constructor() {
     this.form = this.fb.group({
       name: ['', Validators.required],
@@ -526,6 +578,13 @@ export class PromotionFormModalComponent {
       type: ['percentage', Validators.required],
       value: [null, [Validators.required, Validators.min(0), Validators.max(100)]],
       scope: ['order'],
+      /**
+       * Phase 2d: cómo se cuentan las unidades para `quantity_tiered`.
+       * - 'cart_total' (default legacy): suma SKUs distintos de la promo.
+       * - 'per_product': exige N unidades del mismo product_id.
+       * Backend default = 'cart_total' si no se envía.
+       */
+      quantity_grouping: ['cart_total' as 'cart_total' | 'per_product'],
       start_date: ['', Validators.required],
       end_date: [''],
       min_purchase_amount: [null],
@@ -708,6 +767,11 @@ export class PromotionFormModalComponent {
       type: promotion?.type || 'percentage',
       value: promotion?.value ?? null,
       scope: promotion?.scope || 'order',
+      // Phase 2d: preselecciona el grouping guardado; default = 'cart_total'
+      // para promos nuevas o que no tienen el campo persistido (legacy).
+      quantity_grouping:
+        (promotion?.quantity_grouping as 'cart_total' | 'per_product' | undefined) ??
+        'cart_total',
       start_date: this.toDateInputValue(promotion?.start_date),
       end_date: this.toDateInputValue(promotion?.end_date),
       min_purchase_amount: promotion?.min_purchase_amount ?? null,
@@ -826,8 +890,10 @@ export class PromotionFormModalComponent {
       tiersCtrl?.setValidators([Validators.required, this.validateTiersOrder()]);
     } else {
       // Flat: existing required validators.
+      // Alineado con af0b07dea — backend acepta value=0 (@Min(0) en DTO),
+      // así que el form no debe bloquear ese caso con Min(0.01).
       const flatType = this.form.get('type')?.value ?? 'percentage';
-      const flatValidators: ValidatorFn[] = [Validators.required, Validators.min(0.01)];
+      const flatValidators: ValidatorFn[] = [Validators.required, Validators.min(0)];
       if (flatType === 'percentage') {
         flatValidators.push(Validators.max(100));
       }
