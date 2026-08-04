@@ -20,11 +20,15 @@ export enum FeeType {
 }
 
 export class CreatePaymentMethodDto {
+  // Sin @IsNotEmpty() un name=" " o name="" pasaba validación y ensuciaba
+  // la unicidad de la columna. UpdatePaymentMethodDto ya lo tiene.
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   name: string;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   display_name: string;
 
@@ -36,6 +40,7 @@ export class CreatePaymentMethodDto {
   type: payment_methods_type_enum;
 
   @IsString()
+  @IsNotEmpty()
   @MaxLength(100)
   provider: string;
 
