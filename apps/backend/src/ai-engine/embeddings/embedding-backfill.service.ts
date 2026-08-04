@@ -99,7 +99,12 @@ export class EmbeddingBackfillService {
         id: true,
         name: true,
         description: true,
-        categories: { select: { name: true } },
+        // Many-to-many through the join table: `products` has no `category_id`, so a
+        // product can carry several categories and all of them are worth indexing —
+        // people search by the category name as often as by the product's own.
+        product_categories: {
+          select: { categories: { select: { name: true } } },
+        },
       },
     });
 
@@ -107,16 +112,22 @@ export class EmbeddingBackfillService {
       storeId,
       organizationId,
       'product',
-      products.map((product) => ({
-        id: product.id,
-        content: [
-          product.name,
-          product.description ?? '',
-          product.categories?.name ? `Categoría ${product.categories.name}` : '',
-        ]
-          .filter(Boolean)
-          .join('. '),
-      })),
+      products.map((product) => {
+        const categories = product.product_categories
+          .map((link) => link.categories?.name)
+          .filter((name): name is string => Boolean(name));
+
+        return {
+          id: product.id,
+          content: [
+            product.name,
+            product.description ?? '',
+            categories.length ? `Categorías ${categories.join(', ')}` : '',
+          ]
+            .filter(Boolean)
+            .join('. '),
+        };
+      }),
     );
   }
 
