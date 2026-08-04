@@ -1,5 +1,9 @@
 import { createAction, props } from '@ngrx/store';
-import { AIConversation, AIMessage } from '../../services/vexi-api.service';
+import {
+  AIConversation,
+  AIMessage,
+  VexiTask,
+} from '../../services/vexi-api.service';
 
 /**
  * The diff a write tool computed, mirroring the backend `ToolPreview`. Same
@@ -74,7 +78,18 @@ export const loadMessagesSuccess = createAction(
 // Send message
 export const sendMessage = createAction(
   '[Vexi] Send Message',
-  props<{ conversationId: number; content: string }>(),
+  props<{
+    conversationId: number;
+    content: string;
+    /**
+     * Handles of documents this turn carries (`att_41`).
+     *
+     * Uploaded before dispatching, so the action stays serialisable and the effect
+     * has nothing to await: a `File` in an NgRx action would break the store's
+     * serialisability contract and the devtools timeline with it.
+     */
+    attachmentIds?: string[];
+  }>(),
 );
 
 /**
@@ -88,7 +103,7 @@ export const sendMessage = createAction(
  */
 export const startConversation = createAction(
   '[Vexi] Start Conversation',
-  props<{ content: string; appKey?: string }>(),
+  props<{ content: string; appKey?: string; attachmentIds?: string[] }>(),
 );
 
 export const sendMessageSuccess = createAction(
@@ -208,3 +223,32 @@ export const archiveConversationFailure = createAction(
 export const clearActiveConversation = createAction(
   '[Vexi] Clear Active Conversation',
 );
+
+// ─── Trabajos de fondo ──────────────────────────────────────────────────────
+
+/**
+ * Vexi dejó un trabajo corriendo en la cola.
+ *
+ * Se descubre leyendo el resultado de `queue_task` en el propio stream, no con un
+ * endpoint aparte: el trabajo se encola dentro del turno, así que el turno es el
+ * único momento en que se sabe con certeza cuál es el trabajo de ESTA persona en
+ * ESTA conversación. Un `GET /tasks` posterior traería también el trabajo que
+ * dejó corriendo ayer.
+ */
+export const taskQueued = createAction(
+  '[Vexi] Task Queued',
+  props<{ taskId: number; goal?: string }>(),
+);
+
+export const pollTaskSuccess = createAction(
+  '[Vexi] Poll Task Success',
+  props<{ task: VexiTask }>(),
+);
+
+export const pollTaskFailure = createAction(
+  '[Vexi] Poll Task Failure',
+  props<{ error: string }>(),
+);
+
+/** La persona cerró la tira del trabajo. No cancela el trabajo, solo lo oculta. */
+export const dismissTask = createAction('[Vexi] Dismiss Task');

@@ -3068,6 +3068,12 @@ enum notification_type_enum {
   appointment_checked_in
   appointment_queued
   appointment_no_show
+  /// A Vexi background task finished. Its own type because the bell click has to
+  /// route to the task result, and because the panel filters notifications by
+  /// type — folded into an existing label it would show up as an order or a
+  /// report and mislead the person who is looking for it.
+  vexi_task_completed
+  vexi_task_failed
 }
 
 model notifications {
@@ -4730,6 +4736,63 @@ model ai_messages {
 
   @@index([conversation_id])
   @@index([conversation_id, created_at])
+}
+
+/// Documento que el usuario le pasa a Vexi en una conversación.
+///
+/// Guarda la CLAVE S3, nunca una URL firmada (`vendix-s3-storage`). El par
+/// `linked_entity_type` / `linked_entity_id` se llena cuando la escritura que
+/// el documento originó queda aplicada: es lo que permite responder "¿con qué
+/// factura se registró este gasto?" y auditar al agente después.
+///
+/// Sin relación Prisma hacia la entidad ligada a propósito: el mismo campo
+/// apunta a órdenes de compra, gastos, ajustes de inventario o socios según el
+/// flujo, y modelar eso como FK exigiría una columna por dominio.
+model ai_attachments {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  organization_id     Int
+  user_id             Int
+  conversation_id     Int?
+  s3_key              String    @db.VarChar(500)
+  mime_type           String    @db.VarChar(100)
+  size_bytes          Int
+  original_name       String    @db.VarChar(255)
+  linked_entity_type  String?   @db.VarChar(60)
+  linked_entity_id    Int?
+  consumed_by_app_key String?   @db.VarChar(100)
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+  linked_at           DateTime? @db.Timestamp(6)
+
+  @@index([store_id])
+  @@index([store_id, user_id])
+  @@index([conversation_id])
+  @@index([linked_entity_type, linked_entity_id])
+}
+
+/// Trabajo de Vexi que no cabe en un turno de conversación.
+///
+/// `plan` conserva los pasos que el usuario aprobó antes de encolar, para que
+/// el resultado se pueda leer contra lo que se prometió. `job_id` apunta a la
+/// cola `ai-agent` de BullMQ (`AIQueueService.enqueueAgentTask`).
+model ai_agent_tasks {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  user_id         Int
+  conversation_id Int?
+  goal            String    @db.Text
+  plan            Json?
+  status          String    @default("queued") @db.VarChar(20)
+  job_id          String?   @db.VarChar(100)
+  result          Json?
+  error           String?   @db.Text
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  finished_at     DateTime? @db.Timestamp(6)
+
+  @@index([store_id])
+  @@index([store_id, status])
+  @@index([job_id])
 }
 
 model ai_embeddings {

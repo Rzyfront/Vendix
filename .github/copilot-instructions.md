@@ -35,11 +35,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-app-architecture` |
 | -- | `vendix-auto-entries` |
 | -- | `vendix-backend-auth` |
+| -- | `vendix-bulk-operations` |
 | -- | `vendix-business-analysis` |
 | -- | `vendix-core` |
 | -- | `vendix-currency-formatting` |
 | -- | `vendix-customer-auth` |
 | -- | `vendix-date-timezone` |
+| -- | `vendix-dispatch-routes` |
 | -- | `vendix-engram` |
 | -- | `vendix-error-handling` |
 | -- | `vendix-frontend` |
@@ -62,17 +64,27 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-saas-billing` |
 | -- | `vendix-settings-system` |
 | -- | `vendix-subscription-gate` |
+| -- | `vendix-vexi-agent` |
 | -- | `vendix-zoneless-signals` |
 | Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
+| Adding @ArrayMaxSize bulk DTOs and client-side chunking | `vendix-bulk-operations` |
 | Adding MCP resources or tools | `vendix-mcp-server` |
+| Adding a Vexi UI command or confirmation card | `vendix-ai-chat` |
+| Adding a background task on the ai-agent queue | `vendix-vexi-agent` |
+| Adding a clientSide tool the browser dispatches | `vendix-ai-agent-tools` |
+| Adding a document or photo flow that Vexi processes from the chat | `vendix-vexi-agent` |
 | Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
+| Adding a menu entry to the store module catalog | `vendix-panel-ui` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
+| Adding a stream-intent handshake to an SSE endpoint | `vendix-ai-streaming` |
+| Adding a write tool that needs user confirmation | `vendix-ai-agent-tools` |
 | Adding an exportEndpoint to the report registry | `vendix-report-xlsx` |
 | Adding backend permissions | `vendix-permissions` |
+| Adding bulk operations to a module (orders, purchases, products) | `vendix-bulk-operations` |
 | Adding chat features | `vendix-ai-chat` |
 | Adding dependencies to apps/mobile/package.json | `mobile-dev` |
 | Adding feature gates or paywalls backed by subscription state | `vendix-subscription-gate` |
@@ -83,11 +95,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding new DateTime fields to Prisma schema | `vendix-date-timezone` |
 | Adding new automatic journal entries | `vendix-auto-entries` |
 | Adding new entity types to embeddings | `vendix-ai-embeddings-rag` |
+| Adding new fields to dispatch_route_stop_history audit log | `vendix-dispatch-routes` |
 | Adding new mapping keys to accounting | `vendix-auto-entries` |
 | Adding new menu items to admin layouts | `vendix-panel-ui` |
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding new payment processors, modifying payment gateway logic, working with payment webhooks | `vendix-payment-processors` |
 | Adding new settings sections to stores or organizations | `vendix-settings-system` |
+| Adding new transitions to dispatch_route_status_enum | `vendix-dispatch-routes` |
 | Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes | `vendix-restaurant-ops` |
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
 | Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
@@ -104,12 +118,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Auditing web↔mobile feature parity or mobile coverage gaps | `mobile-parity-audit` |
+| Auditing what Vexi changed in a store | `vendix-vexi-agent` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
 | Building a customer-modal that captures address in crear-mode | `vendix-address-geocoding` |
 | Building a granular functional inventory of a web module for mobile replication | `mobile-parity-audit` |
 | Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
+| Bulk transitioning entity state by delegating to existing flow seams | `vendix-bulk-operations` |
+| Bulk-printing documents respecting store_settings.receipts format | `vendix-bulk-operations` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
@@ -138,6 +155,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring the Vendix Linear API key | `linear-connect` |
 | Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
+| Consuming tool_call or tool_result stream frames | `vendix-ai-streaming` |
 | Converting a client price list or product catalog into an official import template | `product-catalog-normalizer` |
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
@@ -150,6 +168,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Seeds | `vendix-prisma-seed` |
 | Creating a QA sprint report as a web presentation | `qa-report` |
 | Creating a bug in Linear for Vendix | `linear-issues` |
+| Creating a dedicated bulk controller separate from the CRUD controller | `vendix-bulk-operations` |
 | Creating a new downloadable report (backend export endpoint + frontend registry entry) | `vendix-report-xlsx` |
 | Creating a new skill | `skill-creator` |
 | Creating a ticket in Linear | `linear-issues` |
@@ -172,6 +191,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging AI request failures | `vendix-ai-platform-core` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
+| Debugging a Vexi answer that claims a UI change it never confirmed | `vendix-vexi-agent` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
@@ -206,6 +226,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing `tables.public_token`, mesa QR generation, or qr_code_url regeneration | `vendix-restaurant-table-qr` |
 | Editing backend ecommerce/geocoding proxy (Nominatim/Overpass) | `vendix-address-geocoding` |
 | Editing dispatch_note customer_address snapshot or PATCH /store/dispatch-notes/:id/address | `vendix-address-geocoding` |
+| Editing dispatch_routes or dispatch_route_stops schema or service | `vendix-dispatch-routes` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
 | Editing industry gating so that only `restaurant` stores see restaurant_ops | `vendix-restaurant-ops` |
 | Editing industry rules in INDUSTRY_HIDDEN_MODULES | `vendix-panel-ui` |
@@ -217,9 +238,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
+| Editing the route PDF builder (pdf-export.service.ts) | `vendix-dispatch-routes` |
+| Editing the route flow (dispatch, settle, release-stop, close, void) | `vendix-dispatch-routes` |
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
+| Explaining why a module is not visible to a user | `vendix-panel-ui` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Exposing a job-status poll endpoint that returns job.returnvalue | `vendix-ai-queue` |
+| Exposing a tool to the realtime voice surface | `vendix-ai-agent-tools` |
 | Extracting products from a PDF, image, Word or Excel product catalog | `product-catalog-normalizer` |
 | Filling a product import template from a supplier or client file | `product-catalog-normalizer` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
@@ -253,8 +278,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Integrating app-address-map-picker (MapLibre) into a form | `vendix-address-geocoding` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
+| Invoking an ai_engine_applications vision app as a sub-agent from the agent loop | `vendix-vexi-agent` |
 | Killing orphan ng serve, ng build, prerender or nest start processes | `buildcheck-dev` |
 | Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
+| Linking a Vexi attachment to the record it originated | `vendix-vexi-agent` |
 | Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
@@ -264,12 +291,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |
+| Modifying cash_variance or declared_cash logic | `vendix-dispatch-routes` |
 | Modifying package.json | `vendix-monorepo-workspaces` |
 | Modifying store_settings or organization_settings | `vendix-settings-system` |
-| Modifying the AI chat widget | `vendix-ai-chat` |
 | Modifying the POS for restaurant flow (fire, open table, split bill) | `vendix-restaurant-ops` |
 | Modifying the POS open-table flow that propagates an optional customer to the session and draft order | `vendix-restaurant-ops` |
 | Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning) | `vendix-restaurant-ops` |
+| Modifying the Vexi dock or panel | `vendix-ai-chat` |
+| Modifying the planillas-rutas frontend module | `vendix-dispatch-routes` |
 | Modifying the storefront's `?mesa=` deep-link, mesa token hydration, or localStorage mesaToken guard | `vendix-restaurant-table-qr` |
 | Moving a Linear issue to Code Review when opening a PR to dev | `git-workflow` |
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
@@ -292,6 +321,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
+| Registering a component as a VexiUiHost | `vendix-vexi-agent` |
 | Releasing to prod by merging dev into main and moving tickets to In Review | `git-workflow` |
 | Removing a frontend envelope unwrapper that reads success === false | `vendix-error-handling` |
 | Reporting QA results with charts and a critical/urgent section | `qa-report` |
@@ -302,6 +332,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reusing a fiscal predicate that also governs write enforcement | `vendix-fiscal-scope` |
 | Reusing app-address-form-fields shared component | `vendix-address-geocoding` |
+| Reusing the QUI-567 bulk-edit or QUI-599 bulk-operations pattern | `vendix-bulk-operations` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running a controlled E2E verification of a shipped ticket on www.vendix.online | `verify-ticket-prod` |
 | Running a production compilation check without leaving orphan processes | `buildcheck-dev` |
@@ -326,6 +357,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Tagging a Linear issue Requiere cambios after requesting changes on a PR | `pr-code-review` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
+| Turning Vexi off for a store | `vendix-ai-chat` |
 | Understanding AI cost tracking | `vendix-ai-platform-core` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
 | Understanding Vendix app environments or mobile boundary | `vendix-app-architecture` |
@@ -352,6 +384,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | When editing product schemas, pricing logic, or advanced product forms | `vendix-product-pricing` |
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |
 | When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations | `vendix-calculated-pricing` |
+| Widening Vexi's reach to a new module or domain | `vendix-vexi-agent` |
 | Wiring the KDS ticket detail modal (recipe + actions replica) | `vendix-restaurant-ops` |
 | Wiring the comensal SSE endpoint `/ecommerce/tables/{token}/stream?store_id=` | `vendix-restaurant-table-qr` |
 | Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
@@ -421,10 +454,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
 | Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend) | `vendix-report-xlsx` |
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
+| Working with withholding_breakdown per stop (retefuente/reteiva/reteica) | `vendix-dispatch-routes` |
 | Wrapping a controller handler in try/catch or calling responseService.error | `vendix-error-handling` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
 | Writing the Aprobado / Requiere cambios / Devuelto workflow labels on an issue | `linear-issues` |
+| Writing through write_endpoint to a multipart route (FileInterceptor) | `vendix-vexi-agent` |
 | analizar PR | `pr-code-review` |
 | changes with database migrations | `git-workflow` |
 | code review | `pr-code-review` |

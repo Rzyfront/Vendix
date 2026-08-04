@@ -17,6 +17,13 @@ import {
   type VexiPosCartSnapshot,
 } from '../../../../core/services/vexi-pos-bridge.service';
 import { VexiUiContextService } from '../../../../core/services/vexi-ui-context.service';
+import {
+  VexiUiHostRegistry,
+  type VexiUiAction,
+  type VexiUiActionResult,
+  type VexiUiHost,
+  type VexiUiScreen,
+} from '../../../../core/services/vexi-ui-host.registry';
 
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -1010,6 +1017,7 @@ export class PosComponent {
   );
   private customerService = inject(PosCustomerService);
   private vexiPos = inject(VexiPosBridgeService);
+  private vexiHosts = inject(VexiUiHostRegistry);
   private vexiUiContext = inject(VexiUiContextService);
   private paymentService = inject(PosPaymentService);
   private toastService = inject(ToastService);
@@ -1046,6 +1054,17 @@ export class PosComponent {
     // screen that is tearing down is silently lost.
     this.vexiPos.register(this);
     this.destroyRef.onDestroy(() => this.vexiPos.unregister(this));
+
+    // Registered on the generic registry too, through an adapter rather than by
+    // implementing the interface on the component. The POS already owns method
+    // names like `refresh`, and the adapter keeps the two contracts from
+    // colliding while still exposing what the generic commands need — chiefly
+    // `ui_read_screen`, so "cóbrame esto" has a referent while the person is
+    // looking at the cart.
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
 
     // The cart travels with every turn as prompt context, not as a tool result.
     // `ui_pos_read_cart` is a `clientSide` tool, so the browser runs it and the
@@ -2458,6 +2477,78 @@ export class PosComponent {
     const name =
       `${customers[0].first_name ?? ''} ${customers[0].last_name ?? ''}`.trim();
     return { status: 'ok', message: `Asigné la venta a ${name}.` };
+  }
+
+  // ── Host genérico de Vexi ───────────────────────────────────────────────
+  //
+  // El POS ya expone sus comandos propios (`ui_pos_*`), que son mejores que
+  // cualquier equivalente genérico: entienden variantes, peso y preparados. Se
+  // registra también como host genérico por una sola razón — que `ui_read_screen`
+  // funcione aquí. Sin eso, "cóbrame esto" en el POS no tiene referente y Vexi
+  // tiene que preguntar qué es "esto" mientras lo tiene delante.
+
+  /**
+   * The POS as the generic registry sees it.
+   *
+   * A stable object built once, not a getter: `unregister` compares by identity, so a
+   * fresh literal on every access would never match the registered one and the handle
+   * would leak past the component's destruction.
+   */
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'pos',
+    readScreen: () => this.vexiReadScreen(),
+    listActions: () => this.vexiListActions(),
+    runAction: (id) => this.vexiRunAction(id),
+  };
+
+  private vexiReadScreen(): VexiUiScreen {
+    const cart = this.vexiReadCart();
+
+    return {
+      module_key: 'pos',
+      title: 'Punto de Venta',
+      visible_count: cart.lines.length,
+      selection: cart.customer,
+      notes: cart.lines.length
+        ? `Carrito con ${cart.lines.length} línea(s), total ${cart.total}${
+            cart.customer ? `, cliente ${cart.customer}` : ', sin cliente'
+          }.`
+        : 'El carrito está vacío.',
+    };
+  }
+
+  private vexiListActions(): VexiUiAction[] {
+    return [
+      { id: 'cobrar', label: 'Cobrar la venta abierta', mutates: true },
+      { id: 'leer_carrito', label: 'Mostrar el detalle del carrito' },
+    ];
+  }
+
+  /**
+   * Delegates to the typed POS commands instead of reimplementing them.
+   *
+   * The generic path exists so `ui_click_action` works here at all; the typed
+   * `ui_pos_*` tools remain the right way in, because they understand variants,
+   * weight and prepared items and the generic ones cannot.
+   */
+  private async vexiRunAction(id: string): Promise<VexiUiActionResult> {
+    switch (id) {
+      case 'cobrar':
+        return this.vexiCheckout();
+      case 'leer_carrito': {
+        const cart = this.vexiReadCart();
+        return {
+          status: 'ok',
+          message: `El carrito lleva ${cart.lines.length} línea(s) por ${cart.total}.`,
+          detail: cart,
+        };
+      }
+      default:
+        return {
+          status: 'not_found',
+          message: `El Punto de Venta no tiene una acción "${id}".`,
+        };
+    }
   }
 
   vexiReadCart(): VexiPosCartSnapshot {

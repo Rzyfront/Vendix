@@ -77,6 +77,54 @@ export interface VexiStreamChunk {
   error?: string;
 }
 
+/**
+ * A document staged for Vexi, as the panel knows it.
+ *
+ * `attachment_id` is the opaque handle the turn carries; there is deliberately no URL
+ * here, because the panel shows the file the user just picked from their own `File`
+ * object and has no reason to fetch it back.
+ */
+export interface VexiAttachment {
+  attachment_id: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+}
+
+/** Background task Vexi left running, as the panel polls it. */
+export interface VexiTask {
+  id: number;
+  goal: string;
+  status: string;
+  job_id: string | null;
+  result: unknown;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+  live_status?: string;
+}
+
+/**
+ * One thing Vexi did, as the review screen shows it.
+ *
+ * Mirrors the backend `ActivityEntry`. `applied` is the field that matters: the feed
+ * lists proposals as well as writes, and a proposal the person rejected must not read
+ * as a change to the business.
+ */
+export interface VexiActivityEntry {
+  at: string;
+  conversation_id: number;
+  tool: string;
+  operation: string;
+  applied: boolean;
+  document?: {
+    attachment_id: string;
+    original_name: string;
+  };
+  linked_entity_type?: string;
+  linked_entity_id?: number;
+}
+
 export interface PaginatedConversations {
   data: AIConversation[];
   meta: {
@@ -169,13 +217,92 @@ export class VexiApiService {
     conversationId: number,
     content: string,
     uiContext?: VexiUiContext,
+    attachmentIds?: string[],
   ): Observable<string> {
     return this.http
       .post<{ data: { stream_id: string } }>(
         `${this.baseUrl}/conversations/${conversationId}/stream-intent`,
-        { content, ui_context: uiContext },
+        {
+          content,
+          ui_context: uiContext,
+          // Handles, never bytes: the files were uploaded ahead of the handshake
+          // so this body stays small enough to send synchronously before the
+          // EventSource opens.
+          attachment_ids: attachmentIds?.length ? attachmentIds : undefined,
+        },
       )
       .pipe(map((res) => res.data.stream_id));
+  }
+
+  /**
+   * Uploads a document Vexi can then hand to a vision application.
+   *
+   * Returns a handle (`att_41`), never a URL. What the model receives must not be
+   * something it can leak into a message, and the bytes stay in S3 behind the handle
+   * so the conversation never carries a document no matter how many pages it has.
+   */
+  uploadAttachment(
+    file: File,
+    conversationId?: number,
+  ): Observable<VexiAttachment> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    if (conversationId) {
+      form.append('conversation_id', String(conversationId));
+    }
+
+    return this.http
+      .post<{ data: VexiAttachment }>(
+        `${environment.apiUrl}/store/vexi/attachments`,
+        form,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Reports what a UI command actually did, back into the turn that asked.
+   *
+   * The return leg of the closed loop: the agent turn is suspended on this exact
+   * `(stream_id, tool_call_id)` pair, so without this call the loop waits out its
+   * timeout and Vexi can only speak in intention. Not routed through
+   * `/store/ai-chat` because the same channel serves the voice surface, which has no
+   * conversation.
+   */
+  postUiResult(
+    streamId: string,
+    toolCallId: string,
+    result: string,
+  ): Observable<void> {
+    return this.http
+      .post<{ data: unknown }>(`${environment.apiUrl}/store/vexi/ui-result`, {
+        stream_id: streamId,
+        tool_call_id: toolCallId,
+        result,
+      })
+      .pipe(map(() => undefined));
+  }
+
+  /** State of a background task, for the panel's task strip. */
+  getTask(id: number): Observable<VexiTask> {
+    return this.http
+      .get<{ data: VexiTask }>(`${environment.apiUrl}/store/vexi/tasks/${id}`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * What Vexi changed, for the review screen in Configuración.
+   *
+   * `data` is coerced to an array before it leaves here: the settings screen renders
+   * it directly, and a non-array payload would turn `@for` into a runtime error on a
+   * page whose whole purpose is reassuring the owner.
+   */
+  getActivity(limit = 50): Observable<VexiActivityEntry[]> {
+    return this.http
+      .get<{ data: VexiActivityEntry[] }>(
+        `${environment.apiUrl}/store/vexi/activity`,
+        { params: { limit: String(limit) } },
+      )
+      .pipe(map((res) => (Array.isArray(res.data) ? res.data : [])));
   }
 
   /**
@@ -188,11 +315,20 @@ export class VexiApiService {
     tool: string,
     args: Record<string, unknown>,
     confirmationToken: string,
+    conversationId?: number,
   ): Observable<{ tool: string; output: string }> {
     return this.http
       .post<{ data: { tool: string; output: string } }>(
         `${environment.apiUrl}/store/vexi/confirmations/apply`,
-        { tool, arguments: args, confirmation_token: confirmationToken },
+        {
+          tool,
+          arguments: args,
+          confirmation_token: confirmationToken,
+          // Sent so the applied change lands in the audit trail. The approval is a
+          // request of its own, outside the turn, so this is the only thing that
+          // ties the change back to what the person asked for.
+          ...(conversationId ? { conversation_id: conversationId } : {}),
+        },
       )
       .pipe(map((res) => res.data));
   }

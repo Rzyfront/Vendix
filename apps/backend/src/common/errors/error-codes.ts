@@ -2174,6 +2174,17 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Tool requires human confirmation',
   },
+  /**
+   * 409 and not 500: the turn expiring, the panel closing, or a `stream_id` that
+   * belongs to somebody else are all conditions of the CALLER's state, not server
+   * faults. Reported as 500 they would page whoever watches the error rate every time
+   * a person closed the panel mid-turn.
+   */
+  AI_AGENT_006: {
+    code: 'AI_AGENT_006',
+    httpStatus: 409,
+    devMessage: 'No agent turn is awaiting this UI result',
+  },
 
   // AI Embeddings
   AI_EMBED_001: {

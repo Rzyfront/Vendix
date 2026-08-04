@@ -15,6 +15,18 @@ import { EmbeddingModule } from './embeddings/embedding.module';
 import { EmbeddingService } from './embeddings/embedding.service';
 import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
 import { VexiConfirmationService } from '../domains/store/vexi/vexi-confirmation.service';
+import { VexiAttachmentsService } from '../domains/store/vexi/vexi-attachments.service';
+import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
+import { AiToolboxService } from './toolbox/ai-toolbox.service';
+import { createAiToolboxTools } from './tools/domains/ai-toolbox.tools';
+import { CapabilityRegistryService } from './tools/bridge/capability-registry.service';
+import { createCapabilityTools } from './tools/bridge/capability.tools';
+import { createPlanningTools } from './tools/domains/planning.tools';
+import { createReportTools } from './tools/domains/reports.tools';
+import { AIAgentProcessor } from './queue/processors/ai-agent.processor';
+import { S3Module } from '../common/services/s3.module';
+import { S3Service } from '../common/services/s3.service';
+import { StorePrismaService } from '../prisma/services/store-prisma.service';
 
 /**
  * Tool registration is decentralized: each domain module registers its own
@@ -37,6 +49,9 @@ import { VexiConfirmationService } from '../domains/store/vexi/vexi-confirmation
     SubscriptionsModule,
     // Needed by ApiCatalogService to walk the controller graph at boot.
     DiscoveryModule,
+    // Vexi's attachment store and the generated-image sink live on S3. This
+    // module only depends on ConfigModule, so importing it here cannot cycle.
+    S3Module,
   ],
   controllers: [AIStreamController],
   providers: [
@@ -50,7 +65,24 @@ import { VexiConfirmationService } from '../domains/store/vexi/vexi-confirmation
     // Its only dependency is the globally-provided Redis client, so it
     // resolves standalone.
     VexiConfirmationService,
+    // Same rule, same reason. The attachment store is needed by the api bridge
+    // (to rebuild a multipart request out of a stored document) and by the
+    // toolbox; the UI channel is needed by the agent loop to await a browser
+    // result. Both live under `domains/store/vexi` because that is the product
+    // surface they belong to, but neither can be reached through VexiModule
+    // from here without closing a cycle. Their dependencies —
+    // StorePrismaService, S3Service, the global Redis client — all resolve
+    // standalone.
+    VexiAttachmentsService,
+    VexiUiChannelService,
+    AiToolboxService,
     ApiCatalogService,
+    CapabilityRegistryService,
+    // The `ai-agent` queue was declared and never consumed, so `enqueueAgentTask`
+    // added jobs nothing ran. Registered here rather than in AIQueueModule because
+    // the worker needs `AIAgentService`, which lives in this module — the reverse
+    // import would close a cycle.
+    AIAgentProcessor,
   ],
   exports: [
     AIEngineService,
@@ -58,7 +90,11 @@ import { VexiConfirmationService } from '../domains/store/vexi/vexi-confirmation
     AIAgentService,
     AIToolRegistry,
     VexiConfirmationService,
+    VexiAttachmentsService,
+    VexiUiChannelService,
+    AiToolboxService,
     ApiCatalogService,
+    CapabilityRegistryService,
     AIQueueModule,
     EmbeddingModule,
   ],
@@ -68,6 +104,11 @@ export class AIEngineModule implements OnModuleInit {
     private readonly toolRegistry: AIToolRegistry,
     private readonly embeddingService: EmbeddingService,
     private readonly apiCatalog: ApiCatalogService,
+    private readonly capabilities: CapabilityRegistryService,
+    private readonly toolbox: AiToolboxService,
+    private readonly attachments: VexiAttachmentsService,
+    private readonly storePrisma: StorePrismaService,
+    private readonly s3: S3Service,
   ) {}
 
   onModuleInit() {
@@ -76,7 +117,23 @@ export class AIEngineModule implements OnModuleInit {
     );
     this.toolRegistry.registerMany(uiTools);
     this.toolRegistry.registerMany(
-      createApiBridgeTools({ catalog: this.apiCatalog }),
+      createApiBridgeTools({
+        catalog: this.apiCatalog,
+        attachments: this.attachments,
+      }),
     );
+    this.toolRegistry.registerMany(
+      createCapabilityTools({ capabilities: this.capabilities }),
+    );
+    this.toolRegistry.registerMany(
+      createAiToolboxTools({
+        toolbox: this.toolbox,
+        attachments: this.attachments,
+        prisma: this.storePrisma,
+        s3: this.s3,
+      }),
+    );
+    this.toolRegistry.registerMany(createPlanningTools());
+    this.toolRegistry.registerMany(createReportTools({ s3: this.s3 }));
   }
 }

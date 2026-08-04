@@ -13,6 +13,12 @@ import { RegisteredTool } from '../interfaces/tool.interface';
  * what a given user may actually reach is decided by the browser dispatcher
  * against the real visibility chain — the same one that paints the sidebar.
  * Duplicating that decision here would be a second source of truth that drifts.
+ *
+ * The agent loop now WAITS for each of these and receives the browser's real
+ * answer inside the same turn (`vexi-ui-channel.service.ts`), which is what makes
+ * the generic commands below usable at all: filling a form blind, with no way to
+ * learn whether the field existed, is a shot in the dark that the model would then
+ * narrate as a success.
  */
 export const uiTools: RegisteredTool[] = [
   {
@@ -174,6 +180,130 @@ export const uiTools: RegisteredTool[] = [
         },
       },
       required: ['domain'],
+    },
+  },
+
+  // ── Comandos genéricos ──────────────────────────────────────────────────
+  //
+  // Resueltos contra el host que el módulo en pantalla registró en
+  // `VexiUiHostRegistry`. Un módulo entra al alcance operativo de Vexi
+  // registrándose a sí mismo y declarando qué acciones expone; el agente no
+  // conoce componentes por nombre ni toca servicios internos, que es lo que
+  // impide armar estados que la propia pantalla rechazaría después.
+  {
+    name: 'ui_read_screen',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Lee lo que la persona tiene en pantalla ahora mismo: qué módulo es, qué filtros están aplicados, cuántos registros se ven y qué hay seleccionado. Úsala cuando la persona diga "esto", "este", "lo que estoy viendo", o cuando necesites saber el estado real de la vista antes de tocarla. No sirve para consultar datos del negocio: para eso están las herramientas de consulta.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'ui_list_actions',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Lista las acciones que el módulo en pantalla expone y que puedes disparar con ui_click_action. Llámala antes de intentar una acción que no hayas usado en esta conversación: cada módulo declara las suyas, así que adivinar el nombre falla.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'ui_fill_form',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Llena campos del formulario abierto en pantalla, SIN guardarlo. Deja el formulario listo para que la persona lo revise y confirme: es lo que se hace cuando ella quiere ver antes de guardar, o cuando falta una decisión que solo ella puede tomar. Pásale los campos con los nombres que devolvió ui_read_screen. Nunca digas que guardaste: llenar no es guardar.',
+    parameters: {
+      type: 'object',
+      properties: {
+        values: {
+          type: 'object',
+          description:
+            'Pares campo-valor a poner en el formulario, por ejemplo {"description":"Luz de agosto","amount":180000}.',
+        },
+      },
+      required: ['values'],
+    },
+  },
+  {
+    name: 'ui_set_filter',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Aplica filtros a la lista que la persona tiene en pantalla: fechas, estado, búsqueda, categoría. Úsala cuando pidan ver un subconjunto de lo que ya están viendo ("muéstrame solo los de agosto sin aprobar"). Te devuelve cuántos registros quedaron, así que puedes decírselo.',
+    parameters: {
+      type: 'object',
+      properties: {
+        values: {
+          type: 'object',
+          description:
+            'Pares filtro-valor, con los nombres que devolvió ui_read_screen.',
+        },
+      },
+      required: ['values'],
+    },
+  },
+  {
+    name: 'ui_click_action',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Dispara una acción del módulo en pantalla, de las que devuelve ui_list_actions. Si la acción modifica datos, la pantalla pedirá su propia confirmación: no la des por hecha. Úsala cuando la acción vive en la interfaz y no tiene equivalente por API, o cuando conducir la pantalla es lo que la persona pidió.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action_id: {
+          type: 'string',
+          description: 'Identificador de la acción, tal como lo devolvió ui_list_actions.',
+        },
+        args: {
+          type: 'object',
+          description: 'Argumentos que la acción declare necesitar.',
+        },
+      },
+      required: ['action_id'],
+    },
+  },
+  {
+    name: 'ui_open_modal',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Abre un formulario o diálogo del módulo en pantalla —crear, editar, filtrar— sin llenarlo ni guardarlo. Combínala con ui_fill_form cuando quieras dejarle el formulario preparado a la persona. Los nombres válidos los devuelve ui_list_actions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        modal_id: {
+          type: 'string',
+          description: 'Identificador del diálogo, de ui_list_actions.',
+        },
+        args: {
+          type: 'object',
+          description: 'Contexto que el diálogo necesite, por ejemplo el registro a editar.',
+        },
+      },
+      required: ['modal_id'],
+    },
+  },
+  {
+    name: 'ui_wait_for',
+    domain: 'ui',
+    clientSide: true,
+    description:
+      'Espera a que la pantalla termine de cargar antes de seguir. Úsala solo después de navegar o de disparar una acción que recarga datos, cuando el siguiente paso depende de lo que aparezca. No la uses "por si acaso": cada espera le cuesta tiempo a la persona.',
+    parameters: {
+      type: 'object',
+      properties: {
+        module_key: {
+          type: 'string',
+          description:
+            'Módulo que se espera tener en pantalla. Omítelo para esperar el que ya está.',
+        },
+        timeout_ms: {
+          type: 'number',
+          description: 'Tope de espera en milisegundos. Por defecto 5000, máximo 15000.',
+        },
+      },
+      required: [],
     },
   },
 ];

@@ -13,7 +13,12 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { VexiFacade } from '../../../core/store/vexi/vexi.facade';
+import {
+  VexiApiService,
+  VexiAttachment,
+} from '../../../core/services/vexi-api.service';
 import { markdownToHtml } from '../../utils/markdown.util';
 import { IconComponent } from '../icon/icon.component';
 import { VexiAvatarComponent } from './vexi-avatar.component';
@@ -244,7 +249,80 @@ const SUGGESTIONS: readonly string[] = [
         </div>
       </div>
 
+      <!-- Trabajo de fondo. Vive fuera del transcript porque sobrevive al turno
+           que lo lanzó: la conversación sigue, y la tira tiene que seguir
+           visible mientras el trabajo corre. -->
+      @if (activeTask(); as task) {
+        <div class="vexi-panel__task" role="status">
+          <!-- spin es un input del propio app-icon. Una clase con @keyframes
+               aquí no llegaría: el componente declara "class" como input
+               (alias de cls), así que la clase acabaría dentro del i-lucide y
+               no en el elemento animado. -->
+          <app-icon [name]="taskIcon()" [size]="14" [spin]="!taskIsDone()" />
+          <span class="vexi-panel__task-text">{{ taskLabel() }}</span>
+          <button
+            type="button"
+            class="vexi-panel__task-close"
+            (click)="dismissTask()"
+            aria-label="Ocultar el trabajo"
+            title="Ocultar. El trabajo sigue corriendo."
+          >
+            <app-icon name="x" [size]="12" />
+          </button>
+        </div>
+      }
+
+      <!-- Documentos ya subidos y esperando este turno. Se muestran ANTES de
+           enviar porque el archivo se sube al elegirlo: la persona tiene que
+           poder quitarlo si se equivocó, y ver que llegó antes de escribir. -->
+      @if (attachments().length) {
+        <ul class="vexi-panel__attachments" aria-label="Documentos adjuntos">
+          @for (item of attachments(); track item.attachment_id) {
+            <li class="vexi-panel__attachment">
+              <app-icon name="file-text" [size]="14" />
+              <span class="vexi-panel__attachment-name">{{
+                item.original_name
+              }}</span>
+              <button
+                type="button"
+                class="vexi-panel__attachment-remove"
+                (click)="removeAttachment(item.attachment_id)"
+                [attr.aria-label]="'Quitar ' + item.original_name"
+              >
+                <app-icon name="x" [size]="12" />
+              </button>
+            </li>
+          }
+        </ul>
+      }
+      @if (attachmentError()) {
+        <p class="vexi-panel__notice" role="status">{{ attachmentError() }}</p>
+      }
+
       <form class="vexi-panel__composer" (submit)="send($event)">
+        <!-- Un solo input de archivo para las dos vías. El atributo capture no se pone
+             aquí: en escritorio convierte el botón en una cámara inexistente y
+             el diálogo de archivos deja de abrirse. En móvil el propio selector
+             ofrece la cámara, que es el camino que la persona ya conoce. -->
+        <input
+          #filePicker
+          type="file"
+          class="vexi-panel__file-input"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
+          (change)="onFilePicked($event)"
+          aria-hidden="true"
+          tabindex="-1"
+        />
+        <button
+          type="button"
+          class="vexi-panel__attach"
+          [disabled]="isUploading()"
+          (click)="openFilePicker()"
+          aria-label="Adjuntar documento"
+          title="Adjuntar una factura, un recibo o una foto"
+        >
+          <app-icon [name]="isUploading() ? 'loader' : 'paperclip'" [size]="18" />
+        </button>
         <!-- Never disabled while sending. A disabled input cannot hold focus,
              so the browser blurs it the instant the flag flips and nothing
              hands the caret back when it re-enables — the cursor simply left
@@ -696,6 +774,113 @@ const SUGGESTIONS: readonly string[] = [
         cursor: not-allowed;
       }
 
+      /* ── Adjuntos ─────────────────────────────────────────────────────── */
+
+      /* The native control is hidden but NOT display:none and NOT removed from
+         the DOM: a detached or undisplayed input cannot be opened by a
+         programmatic click in Safari, which is where a phone camera capture
+         actually happens. */
+      .vexi-panel__file-input {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .vexi-panel__attach {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        flex-shrink: 0;
+        border: 0;
+        border-radius: 10px;
+        background: var(--color-surface-2, #f1f3f5);
+        color: var(--color-text-secondary, #6b7280);
+        cursor: pointer;
+      }
+
+      .vexi-panel__attach:disabled {
+        opacity: 0.5;
+        cursor: progress;
+      }
+
+      /* ── Trabajo de fondo ─────────────────────────────────────────────── */
+
+      .vexi-panel__task {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 8px 12px 0;
+        padding: 6px 6px 6px 10px;
+        border-radius: 10px;
+        background: var(--color-surface-2, #f1f3f5);
+        color: var(--color-text-secondary, #6b7280);
+        font-size: 0.74rem;
+      }
+
+      .vexi-panel__task-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .vexi-panel__task-close {
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+        border: 0;
+        padding: 2px;
+        border-radius: 999px;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
+      .vexi-panel__attachments {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0;
+        padding: 8px 12px 0;
+        list-style: none;
+      }
+
+      .vexi-panel__attachment {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 100%;
+        padding: 3px 6px 3px 8px;
+        border-radius: 999px;
+        background: var(--color-surface-2, #f1f3f5);
+        color: var(--color-text-secondary, #6b7280);
+        font-size: 0.72rem;
+      }
+
+      /* The name is the only part that can grow, so it is the only part that
+         truncates. Without min-width:0 the flex item refuses to shrink below its
+         text width and the chip overflows the panel. */
+      .vexi-panel__attachment-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .vexi-panel__attachment-remove {
+        display: grid;
+        place-items: center;
+        border: 0;
+        padding: 2px;
+        border-radius: 999px;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+      }
+
       /* ── Markdown produced by markdownToHtml ─────────────────────────── */
       /* innerHTML content never receives the emulated-encapsulation
          attribute, so scoped selectors alone would not reach it. */
@@ -774,6 +959,9 @@ export class VexiPanelComponent {
     viewChild.required<ElementRef<HTMLElement>>('scroller');
   private readonly composer =
     viewChild.required<ElementRef<HTMLInputElement>>('composer');
+  private readonly filePicker =
+    viewChild.required<ElementRef<HTMLInputElement>>('filePicker');
+  private readonly chatApi = inject(VexiApiService);
 
   /** Flips the panel origin when the dock is parked on the left edge. */
   readonly anchorLeft = input(false);
@@ -795,10 +983,89 @@ export class VexiPanelComponent {
   protected readonly error = this.facade.error;
   protected readonly toolSteps = this.facade.toolSteps;
   protected readonly pendingProposal = this.facade.pendingProposal;
+  protected readonly activeTask = this.facade.activeTask;
 
   protected readonly sidebarOpen = signal(false);
+
+  // ── Trabajo de fondo ────────────────────────────────────────────────────
+
+  /**
+   * Whether the job has settled.
+   *
+   * Reads `live_status` first: it comes from BullMQ and can report `completed`
+   * before the `vexi.task.finished` listener has written the row, so trusting only
+   * the persisted `status` would spin for one extra poll after the work was done.
+   */
+  protected readonly taskIsDone = computed(() => {
+    const task = this.activeTask();
+    if (!task) return false;
+    const state = task.live_status ?? task.status;
+    return state === 'completed' || state === 'failed' || state === 'cancelled';
+  });
+
+  protected readonly taskFailed = computed(() => {
+    const task = this.activeTask();
+    if (!task) return false;
+    const state = task.live_status ?? task.status;
+    return state === 'failed' || state === 'cancelled';
+  });
+
+  protected readonly taskIcon = computed(() =>
+    this.taskFailed()
+      ? 'alert-circle'
+      : this.taskIsDone()
+        ? 'check-circle'
+        : 'loader',
+  );
+
+  /**
+   * One line about the job, in the person's terms.
+   *
+   * The goal is truncated rather than wrapped: the strip sits above the composer and
+   * a three-line goal would push the input off a phone screen.
+   */
+  protected readonly taskLabel = computed(() => {
+    const task = this.activeTask();
+    if (!task) return '';
+
+    const goal = task.goal
+      ? task.goal.length > 70
+        ? `${task.goal.slice(0, 70).trimEnd()}…`
+        : task.goal
+      : 'el trabajo que dejé corriendo';
+
+    if (this.taskFailed()) {
+      return `No pude terminar ${goal}. ${task.error ?? ''}`.trim();
+    }
+    if (this.taskIsDone()) {
+      return `Terminé: ${goal}. Te lo cuento en la campana.`;
+    }
+    return `Trabajando en segundo plano: ${goal}`;
+  });
+
+  protected dismissTask(): void {
+    this.facade.dismissTask();
+  }
+
+  /**
+   * Documents staged for the next turn, already uploaded.
+   *
+   * Uploaded on pick rather than on send, for two reasons: the person sees
+   * immediately that a 4 MB photo arrived, and the send path stays synchronous — an
+   * `await` inside `send()` would let a second Enter fire a second turn while the
+   * first was still uploading.
+   */
+  protected readonly attachments = signal<VexiAttachment[]>([]);
+  protected readonly isUploading = signal(false);
+  protected readonly attachmentError = signal<string | null>(null);
+
   protected readonly canSend = computed(
-    () => !this.isSending() && this.draft().trim().length > 0,
+    () =>
+      !this.isSending() &&
+      !this.isUploading() &&
+      // A document with no words is a legitimate turn: handing over an invoice IS
+      // the message. Requiring text would force people to type "toma" first.
+      (this.draft().trim().length > 0 || this.attachments().length > 0),
   );
 
   // ── Muletillas de progreso ──────────────────────────────────────────────
@@ -946,20 +1213,96 @@ export class VexiPanelComponent {
     this.draft.set((event.target as HTMLInputElement).value);
   }
 
+  protected openFilePicker(): void {
+    this.attachmentError.set(null);
+    // Reset first: picking the same file twice in a row fires no `change` event
+    // if the value is still there, so the second attempt would look like nothing
+    // happened.
+    this.filePicker().nativeElement.value = '';
+    this.filePicker().nativeElement.click();
+  }
+
+  /**
+   * Uploads the picked document and stages its handle.
+   *
+   * Validation is deliberately left to the server. Mirroring the size and MIME rules
+   * here would put a second copy of them in the client, and the copies drift — the
+   * server's answer is the one that decides whether the vision application can read
+   * the file anyway.
+   */
+  protected onFilePicked(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    this.isUploading.set(true);
+    this.attachmentError.set(null);
+
+    this.chatApi
+      .uploadAttachment(file, this.activeConversationId() ?? undefined)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (attachment) => {
+          this.attachments.update((current) => [...current, attachment]);
+          this.isUploading.set(false);
+          this.composer().nativeElement.focus();
+        },
+        error: (error: unknown) => {
+          this.isUploading.set(false);
+          this.attachmentError.set(this.uploadFailureText(error));
+        },
+      });
+  }
+
+  protected removeAttachment(attachmentId: string): void {
+    this.attachments.update((current) =>
+      current.filter((item) => item.attachment_id !== attachmentId),
+    );
+  }
+
+  /**
+   * The server's own message when it wrote one for a person.
+   *
+   * The upload endpoint answers size and type problems with sentences aimed at the
+   * user ("pesa 14 MB y el máximo son 10"), so paraphrasing them would lose the
+   * number that makes them actionable. Anything else falls back to advice.
+   */
+  private uploadFailureText(error: unknown): string {
+    const message = (error as { error?: { message?: unknown } })?.error?.message;
+
+    return typeof message === 'string' && message.trim()
+      ? message
+      : 'No pude recibir el documento. Intenta con una foto más liviana o en otro formato.';
+  }
+
   protected send(event?: Event): void {
     event?.preventDefault();
 
     const content = this.draft().trim();
-    if (!content || this.isSending()) return;
+    const attachmentIds = this.attachments().map((item) => item.attachment_id);
+
+    if ((!content && !attachmentIds.length) || this.isSending()) return;
+
+    // A document with no words still needs a sentence in the transcript, otherwise
+    // the conversation shows an empty user bubble and the model gets an empty goal.
+    const message =
+      content ||
+      (attachmentIds.length === 1
+        ? 'Te paso este documento.'
+        : 'Te paso estos documentos.');
 
     const conversationId = this.activeConversationId();
     if (conversationId) {
-      this.facade.sendMessage(conversationId, content);
+      this.facade.sendMessage(conversationId, message, attachmentIds);
     } else {
-      this.facade.startConversation(content);
+      this.facade.startConversation(message, undefined, attachmentIds);
     }
 
     this.draft.set('');
+    // Cleared on send, not on response: the handles belong to that one turn, and
+    // leaving them staged would re-attach the same invoice to the next question.
+    this.attachments.set([]);
+    this.attachmentError.set(null);
 
     // Explicit, not just a side effect of staying enabled: the send button and
     // the suggestion chips are also entry points, and after clicking one the

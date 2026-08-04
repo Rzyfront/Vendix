@@ -31,34 +31,37 @@ import {
 import { DispatchNotesService } from '../../../domains/store/dispatch-notes/dispatch-notes.service';
 
 /**
- * Las SEIS escrituras que Vexi puede ejecutar. Ni una más.
+ * Las escrituras TIPADAS de Vexi: los seis dominios donde vale la pena una
+ * herramienta a mano en vez del puente genérico.
  *
- * ## Lista de VETO — lo que Vexi NO puede hacer nunca
+ * ## Esto ya NO es una lista de veto
  *
- * Ninguna de estas familias tiene, ni debe tener, herramienta aquí:
+ * Este bloque declaraba que Vexi no podía tocar fiscal, nómina, suscripción,
+ * cierres de caja, movimientos de dinero ni archivados, y que ante una petición de
+ * esas familias debía negarse. **Eso dejó de ser cierto.** El puente genérico
+ * (`api-bridge.tools.ts`) alcanza cualquier ruta que el catálogo de permisos
+ * autorice al usuario, incluidas todas esas, y el registro de capacidades
+ * (`capability-registry.service.ts`) las publica como capacidades reales. Un
+ * comentario que afirme lo contrario es peor que ninguno: el próximo desarrollador
+ * lo lee, cree que existe un veto que el código no aplica, y diseña sobre una
+ * garantía inexistente.
  *
- *  1. **Fiscal / DIAN** — emitir factura electrónica, anular, notas crédito o
- *     débito, documentos soporte, declaraciones. Una emisión es irreversible
- *     frente a la DIAN y su corrección exige una nota crédito con su propia
- *     numeración autorizada.
- *  2. **Nómina** — liquidaciones, novedades, PILA, nómina electrónica. Afecta
- *     obligaciones laborales y aportes de terceros.
- *  3. **Suscripción / plan** — cambiar plan, cancelar, activar. Cambia lo que
- *     el cliente paga por Vendix.
- *  4. **Cierres de caja y arqueos** — la cuadratura de caja es un acto de
- *     control con responsable humano; un cierre mal hecho no se deshace.
- *  5. **Movimientos de dinero** — registrar pagos, cobros, reembolsos,
- *     devoluciones, condonaciones. Mueven plata real y disparan asientos
- *     contables y afectaciones de cartera.
- *  6. **Cualquier borrado** — productos, clientes, órdenes, remisiones. El
- *     archivado y la anulación viven en sus módulos, con su propia traza.
+ * Lo que protege esos dominios hoy no es una lista de prohibiciones, son tres
+ * mecanismos que aplican a TODA escritura, tipada o no:
  *
- * Ante una petición de esa lista Vexi debe **decir por qué no puede** y
- * **derivar al módulo** correspondiente (Facturación, Nómina, Suscripción,
- * Caja, Pagos, o el detalle del registro), no intentar un rodeo con otra
- * herramienta. El prompt del agente lleva esta misma regla; este comentario es
- * la fuente para quien venga a agregar la séptima escritura: si cae en alguna
- * de las seis familias de arriba, la respuesta es no.
+ *  1. **Aprobación explícita, una por cambio.** Todo `requiresConfirmation` acuña
+ *     un token de un solo uso ligado a (usuario, herramienta, argumentos). Nada se
+ *     aplica sin que la persona haya visto ese diff exacto y dicho sí.
+ *  2. **Permisos reales del usuario.** El puente replica el token del llamante
+ *     sobre HTTP interno, así que atraviesa los mismos guards que el navegador. Si
+ *     la persona no puede liquidar nómina, Vexi tampoco.
+ *  3. **Advertencia de irreversibilidad.** `IRREVERSIBLE_DOMAINS` inyecta en la
+ *     tarjeta la frase que explica qué no se deshace —una emisión ante la DIAN, un
+ *     cierre de caja, un pago aplicado— antes de pedir el sí.
+ *
+ * La razón para escribir una herramienta tipada aquí sigue siendo válida, pero es
+ * otra: mejor `preview`, mejores mensajes de error y validación de dominio que el
+ * puente genérico no puede derivar del DTO. No es un permiso que el puente no tenga.
  *
  * ## Por qué cada herramienta tiene `preview` y `requiresConfirmation`
  *

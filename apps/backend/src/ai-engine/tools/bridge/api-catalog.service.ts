@@ -5,7 +5,11 @@ import {
   RequestMethod,
 } from '@nestjs/common';
 import { DiscoveryService, MetadataScanner, Reflector } from '@nestjs/core';
-import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
+import {
+  PATH_METADATA,
+  METHOD_METADATA,
+  INTERCEPTORS_METADATA,
+} from '@nestjs/common/constants';
 import { DECORATORS as SWAGGER_DECORATORS } from '@nestjs/swagger/dist/constants';
 import { getMetadataStorage } from 'class-validator';
 import { PERMISSIONS_KEY } from '../../../domains/auth/decorators/permissions.decorator';
@@ -48,6 +52,45 @@ export interface CatalogEntry {
    * Publishing the field names turns a guess into a lookup.
    */
   bodyFields?: string[];
+  /**
+   * Same fields as `bodyFields`, with the type, the obligation and the accepted
+   * values each one declares.
+   *
+   * Publishing only names left the model guessing at everything else, and it
+   * guessed the way a language model does: `"mil pesos"` for a `@IsNumber()`,
+   * `"aprobado"` for an enum whose members are `approved | rejected`, an ISO
+   * timestamp for a `@IsDateString()` that wants a plain date. Every one of those
+   * costs a rejected request AFTER the person approved the change, which is the
+   * worst possible moment to discover it. Read from class-validator rather than
+   * Swagger for the same reason `bodyFields` is: the validators are what
+   * actually decide whether the request is accepted.
+   */
+  bodySchema?: CatalogField[];
+  /**
+   * True when the handler is wrapped in a multer interceptor, so the request
+   * must be sent as `multipart/form-data` and not JSON.
+   *
+   * Every document-driven flow in the product is one of these — every
+   * `scan/confirm`, every bulk upload — so without this flag the bridge silently
+   * sends JSON to a route that only reads form fields, and the endpoint answers
+   * with a validation error about a body it never received.
+   */
+  multipart?: boolean;
+  /**
+   * The form field the file travels in. Resolved by `fileFieldFor`: `file` for the
+   * 33 routes that use it, `certificate` for the 3 DIAN certificate uploads. A
+   * documented default plus an override, not a discovered value — see
+   * `NON_DEFAULT_FILE_FIELDS`.
+   */
+  fileField?: string;
+}
+
+export interface CatalogField {
+  name: string;
+  /** `string | number | boolean | date | array | object | enum | unknown` */
+  type: string;
+  required: boolean;
+  enumValues?: string[];
 }
 
 const CATALOGUED_VERBS = new Map<number, CatalogMethod>([
@@ -57,6 +100,31 @@ const CATALOGUED_VERBS = new Map<number, CatalogMethod>([
   [RequestMethod.PUT, 'PUT'],
   [RequestMethod.DELETE, 'DELETE'],
 ]);
+
+/**
+ * Multipart routes whose file field is NOT `file`.
+ *
+ * The field name lives in the closure of Nest's `FileInterceptor` mixin and is not
+ * reachable by reflection at any compiler setting, so it cannot be discovered. It is
+ * declared instead of assumed: `rg "File(s)?Interceptor\('[^']+'"` over the backend
+ * returns 33 routes on `file` and 3 on `certificate`, and a wrong field name makes
+ * multer ignore the upload and the endpoint reject a body it never received.
+ *
+ * Matched by path suffix so the three DIAN certificate uploads (store, organization,
+ * superadmin) are covered by one entry each rather than by a controller-name list.
+ */
+const NON_DEFAULT_FILE_FIELDS: Array<{ suffix: string; field: string }> = [
+  { suffix: 'invoicing/dian-config/upload-certificate', field: 'certificate' },
+  { suffix: 'subscriptions/fiscal/certificate', field: 'certificate' },
+];
+
+/** The form field a multipart route reads its file from. */
+function fileFieldFor(path: string): string {
+  return (
+    NON_DEFAULT_FILE_FIELDS.find((entry) => path.endsWith(entry.suffix))
+      ?.field ?? 'file'
+  );
+}
 
 /**
  * Map of every endpoint the API exposes, built once at boot.
@@ -145,6 +213,13 @@ export class ApiCatalogService implements OnApplicationBootstrap {
             ? apiOperation.summary.trim()
             : undefined;
 
+        const bodySchema =
+          method === 'GET'
+            ? undefined
+            : this.bodySchemaOf(prototype, methodName);
+
+        const multipart = this.isMultipart(handler, wrapper.metatype);
+
         this.entries.push({
           path: fullPath,
           method,
@@ -154,10 +229,11 @@ export class ApiCatalogService implements OnApplicationBootstrap {
           handler: methodName,
           requiredPermissions: permissions,
           summary,
-          bodyFields:
-            method === 'GET'
-              ? undefined
-              : this.bodyFieldsOf(prototype, methodName),
+          bodyFields: bodySchema?.map((field) => field.name),
+          bodySchema,
+          ...(multipart
+            ? { multipart: true, fileField: fileFieldFor(fullPath) }
+            : {}),
         });
       }
     }
@@ -166,12 +242,45 @@ export class ApiCatalogService implements OnApplicationBootstrap {
       (acc, entry) => ({ ...acc, [entry.method]: (acc[entry.method] ?? 0) + 1 }),
       {},
     );
+    const multipartCount = this.entries.filter((e) => e.multipart).length;
     this.logger.log(
       `api-bridge: catalogued ${this.entries.length} endpoints (${Object.entries(
         byMethod,
       )
         .map(([verb, count]) => `${verb}:${count}`)
-        .join(' ')})`,
+        .join(' ')}) · multipart:${multipartCount}`,
+    );
+  }
+
+  /**
+   * Whether the handler expects `multipart/form-data`.
+   *
+   * Detected by the SOURCE of the interceptor class, never by its name. Nest's
+   * `FileInterceptor` / `FilesInterceptor` return an anonymous mixin declared as
+   * `class MixinInterceptor`, but SWC — which is what compiles this app in dev —
+   * mangles that identifier to a hash (`ab2937d75f6537ac79daa`). A `name ===
+   * 'MixinInterceptor'` gate therefore matched nothing at all and the catalog
+   * reported `multipart:0` with 36 multipart routes in the tree.
+   *
+   * The body is what stays stable across compilers: the mixin constructs `multer(...)`
+   * and its `intercept` calls `.single(fieldName)` or `.array(fieldName)`.
+   */
+  private isMultipart(handler: unknown, controller: unknown): boolean {
+    const interceptors: unknown[] = [
+      ...(this.reflector.get<unknown[]>(INTERCEPTORS_METADATA, handler as any) ??
+        []),
+      ...(this.reflector.get<unknown[]>(
+        INTERCEPTORS_METADATA,
+        controller as any,
+      ) ?? []),
+    ];
+
+    return interceptors.some(
+      (interceptor) =>
+        typeof interceptor === 'function' &&
+        /this\.multer\s*=\s*multer\(|\.single\(|\.array\(/.test(
+          String(interceptor),
+        ),
     );
   }
 
@@ -247,6 +356,24 @@ export class ApiCatalogService implements OnApplicationBootstrap {
     });
   }
 
+  /**
+   * Every permission name that at least one catalogued route requires.
+   *
+   * The complement of this against what a user actually holds is the honest
+   * answer to "what can I do that Vexi cannot reach": a permission with no route
+   * behind it is either UI-only or a gap, and either way the agent must say so
+   * instead of implying full coverage.
+   */
+  coveredPermissions(): Set<string> {
+    const covered = new Set<string>();
+    for (const entry of this.entries) {
+      for (const permission of entry.requiredPermissions) {
+        covered.add(permission);
+      }
+    }
+    return covered;
+  }
+
   /** Distinct `area/domain` pairs, for orienting the model cheaply. */
   domainsFor(scopes: string[], methods?: CatalogMethod[]): string[] {
     const seen = new Set<string>();
@@ -269,10 +396,10 @@ export class ApiCatalogService implements OnApplicationBootstrap {
    * parameter types. Best-effort by design: a handler with no DTO simply
    * publishes no fields, and the model falls back to asking the person.
    */
-  private bodyFieldsOf(
+  private bodySchemaOf(
     prototype: object,
     methodName: string,
-  ): string[] | undefined {
+  ): CatalogField[] | undefined {
     try {
       const paramTypes: unknown[] =
         Reflect.getMetadata('design:paramtypes', prototype, methodName) ?? [];
@@ -283,16 +410,90 @@ export class ApiCatalogService implements OnApplicationBootstrap {
       );
       if (!dto) return undefined;
 
-      const fields = getMetadataStorage()
-        .getTargetValidationMetadatas(dto, '', false, false)
-        .map((m) => m.propertyName);
+      const metadatas = getMetadataStorage().getTargetValidationMetadatas(
+        dto,
+        '',
+        false,
+        false,
+      );
 
-      const unique = Array.from(new Set(fields)).sort();
-      return unique.length ? unique : undefined;
+      const byProperty = new Map<
+        string,
+        { constraints: string[]; enumValues?: string[] }
+      >();
+
+      for (const metadata of metadatas) {
+        const property = metadata.propertyName;
+        if (!property) continue;
+
+        const entry = byProperty.get(property) ?? { constraints: [] };
+        const type = String((metadata as { type?: unknown }).type ?? '');
+        entry.constraints.push(type);
+
+        if (type.toLowerCase() === 'isenum') {
+          entry.enumValues = this.enumValuesOf(metadata);
+        }
+
+        byProperty.set(property, entry);
+      }
+
+      const fields = Array.from(byProperty.entries())
+        .map(([name, entry]) => ({
+          name,
+          type: this.inferFieldType(entry.constraints),
+          // `@IsOptional()` registers itself as a conditional validation, so its
+          // presence — not the absence of `@IsDefined()` — is what marks a field
+          // as optional. Reading it the other way round labelled every field of
+          // every DTO as optional.
+          required: !entry.constraints.some((constraint) =>
+            /conditionalValidation|isOptional/i.test(constraint),
+          ),
+          ...(entry.enumValues?.length ? { enumValues: entry.enumValues } : {}),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      return fields.length ? fields : undefined;
     } catch {
       // Never let catalog construction fail over an optional nicety.
       return undefined;
     }
+  }
+
+  /**
+   * The accepted members of an `@IsEnum()`.
+   *
+   * class-validator stores the enum object itself in `constraints[0]`. Numeric
+   * TypeScript enums produce a reverse mapping (`{0:'A', A:0}`), so numeric keys
+   * are dropped — publishing them would tell the model that `0` is a valid value
+   * for a field whose DTO only accepts `'A'`.
+   */
+  private enumValuesOf(metadata: unknown): string[] | undefined {
+    const constraints = (metadata as { constraints?: unknown[] }).constraints;
+    const target = constraints?.[0];
+
+    if (!target || typeof target !== 'object') return undefined;
+
+    const values = Object.entries(target as Record<string, unknown>)
+      .filter(([key]) => !/^\d+$/.test(key))
+      .map(([, value]) => String(value));
+
+    return values.length ? values.slice(0, 40) : undefined;
+  }
+
+  /** Coarse type from the validator names applied to a property. */
+  private inferFieldType(constraints: string[]): string {
+    const has = (pattern: RegExp) =>
+      constraints.some((constraint) => pattern.test(constraint));
+
+    if (has(/isEnum/i)) return 'enum';
+    if (has(/isBoolean/i)) return 'boolean';
+    if (has(/isInt/i)) return 'integer';
+    if (has(/isNumber|isDecimal|isPositive|min$|max$/i)) return 'number';
+    if (has(/isDate/i)) return 'date';
+    if (has(/isArray|arrayM(in|ax)Size|arrayNotEmpty/i)) return 'array';
+    if (has(/nestedValidation|isObject/i)) return 'object';
+    if (has(/isString|length|isEmail|matches/i)) return 'string';
+    return 'unknown';
   }
 
   private normalize(path: string): string {

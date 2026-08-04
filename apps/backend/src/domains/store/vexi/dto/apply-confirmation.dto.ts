@@ -1,4 +1,12 @@
-import { IsObject, IsString, Matches, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 
 /**
  * The user's approval of a write Vexi proposed.
@@ -23,4 +31,17 @@ export class ApplyConfirmationDto {
   @IsString()
   @MaxLength(80)
   confirmation_token!: string;
+
+  /**
+   * The conversation the approval came from, so the applied write lands in the
+   * audit trail.
+   *
+   * Optional because the voice surface has no conversation. Without it the write
+   * still applies — it just cannot be attributed to a thread, and the activity
+   * screen would show a change nobody could trace back to a request.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  conversation_id?: number;
 }

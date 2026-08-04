@@ -1,7 +1,11 @@
 import { createReducer, on } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
 import type { ToolStep, VexiProposal } from './vexi.actions';
-import { AIConversation, AIMessage } from '../../services/vexi-api.service';
+import {
+  AIConversation,
+  AIMessage,
+  VexiTask,
+} from '../../services/vexi-api.service';
 
 export interface VexiState {
   conversations: AIConversation[];
@@ -16,6 +20,16 @@ export interface VexiState {
   toolSteps: ToolStep[];
   /** A write awaiting the user's approval. Survives closing the panel. */
   pendingProposal: VexiProposal | null;
+  /**
+   * The background job Vexi left running, while it runs.
+   *
+   * Lives in the store for the same reason as `pendingProposal`: a task outlives the
+   * turn that started it and the panel gets closed, so keeping it in a component
+   * would lose the only handle the person has to its result.
+   */
+  activeTask: VexiTask | null;
+  /** Set the moment `queue_task` returns, before the first poll answers. */
+  activeTaskId: number | null;
 }
 
 export const initialVexiState: VexiState = {
@@ -29,6 +43,8 @@ export const initialVexiState: VexiState = {
   error: null,
   toolSteps: [],
   pendingProposal: null,
+  activeTask: null,
+  activeTaskId: null,
 };
 
 export const vexiReducer = createReducer(
@@ -282,5 +298,38 @@ export const vexiReducer = createReducer(
     messages: [],
     streamingContent: '',
     isStreaming: false,
+  })),
+
+  on(VexiActions.taskQueued, (state, { taskId, goal }) => ({
+    ...state,
+    activeTaskId: taskId,
+    // A placeholder rather than `null`: the strip has to appear the instant the
+    // task is queued, and the first poll is a network round-trip away.
+    activeTask: {
+      id: taskId,
+      goal: goal ?? '',
+      status: 'queued',
+      job_id: null,
+      result: null,
+      error: null,
+      created_at: new Date().toISOString(),
+      finished_at: null,
+    },
+  })),
+
+  on(VexiActions.pollTaskSuccess, (state, { task }) =>
+    // Guarded because a poll in flight can answer after the person dismissed the
+    // strip or a newer task replaced it; writing it back would resurrect the old one.
+    state.activeTaskId === task.id ? { ...state, activeTask: task } : state,
+  ),
+
+  // Deliberately does NOT clear the task: a failed poll means the network hiccuped,
+  // not that the job died. The strip keeps its last known state and the poller retries.
+  on(VexiActions.pollTaskFailure, (state) => state),
+
+  on(VexiActions.dismissTask, (state) => ({
+    ...state,
+    activeTask: null,
+    activeTaskId: null,
   })),
 );

@@ -33,6 +33,8 @@ export interface VexiStreamIntent {
   content: string;
   ui_context?: VexiUiContext;
   user_id?: number;
+  /** Handles of the documents this turn carries (`att_41`), never bytes. */
+  attachment_ids?: string[];
 }
 
 /**

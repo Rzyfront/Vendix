@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsNumber,
   IsObject,
@@ -81,4 +82,24 @@ export class StreamIntentDto {
   @ValidateNested()
   @Type(() => UiContextDto)
   ui_context?: UiContextDto;
+
+  /**
+   * Documents the person attached to this specific message.
+   *
+   * Handles only (`att_41`), never bytes: the file was uploaded beforehand to
+   * `POST /store/vexi/attachments`, which is what keeps the SSE handshake a small
+   * JSON body. Travels with the turn for the same reason `ui_context` does — a
+   * document sent out of band could attach itself to a message the person already
+   * moved past.
+   *
+   * Capped at five because the vision applications process one document per call
+   * and a person genuinely handing over more than five in one message is asking
+   * for a bulk upload, which has its own flow.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  attachment_ids?: string[];
 }

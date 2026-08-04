@@ -12,6 +12,10 @@ import { DialogService } from '../../../../shared/components/dialog/dialog.servi
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+} from '../../../../core/services/vexi-ui-host.registry';
 
 // Models
 import {
@@ -147,6 +151,7 @@ export class ProductsComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private destroyRef = inject(DestroyRef);
+  private vexiHosts = inject(VexiUiHostRegistry);
 
   readonly products = signal<Product[]>([]);
   readonly categories = signal<ProductCategory[]>([]);
@@ -198,6 +203,13 @@ export class ProductsComponent {
   constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+
+    // Vexi opera esta pantalla mientras esté montada. Se desregistra con
+    // `destroyRef` en vez de `ngOnDestroy` porque el componente ya usa ese
+    // camino para sus suscripciones, y un host registrado tras el teardown
+    // aceptaría comandos cuyo efecto nadie vería.
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() => this.vexiHosts.unregister(this.vexiHostAdapter));
 
     // Subscribe to queryParams for pagination persistence
     this.route.queryParams
@@ -297,6 +309,127 @@ export class ProductsComponent {
       .getBrands()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((brands) => this.brands.set(brands));
+  }
+
+  // ── Host de Vexi ────────────────────────────────────────────────────────
+  //
+  // Registrado como objeto adaptador y no implementando la interfaz en el
+  // componente: `loadProducts` y `onFilter` ya son la API de esta pantalla, y el
+  // adaptador las expone sin añadirle nombres genéricos que colisionen.
+
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'products',
+    readScreen: () => {
+      const pagination = this.pagination();
+
+      return {
+        module_key: 'products',
+        title: 'Productos',
+        visible_count: this.products().length,
+        filters: {
+          search: this.searchTerm || undefined,
+          ...this.currentFilters,
+        },
+        // Los dos números se nombran por separado a propósito: "61 productos" y
+        // "10 en pantalla" son cosas distintas, y una nota que solo diga el total
+        // hace que Vexi le diga a la persona que está viendo 61 filas.
+        notes: this.isLoading()
+          ? 'La lista todavía está cargando.'
+          : this.vexiOpenModalNote() ??
+            `En esta página se ven ${this.products().length}; hay ${pagination.total} en total ` +
+              `(página ${pagination.page} de ${pagination.totalPages || 1}).`,
+      };
+    },
+    listActions: () => [
+      { id: 'nuevo_producto', label: 'Abrir el formulario de nuevo producto' },
+      { id: 'carga_masiva', label: 'Abrir la carga masiva de productos' },
+      { id: 'carga_imagenes', label: 'Abrir la carga masiva de imágenes' },
+      { id: 'edicion_masiva', label: 'Ir a la edición masiva' },
+    ],
+    runAction: async (id) => {
+      switch (id) {
+        case 'nuevo_producto':
+          this.openCreateModal();
+          return {
+            status: 'needs_user_input' as const,
+            message:
+              'Abrí el formulario de nuevo producto, vacío y sin guardar. La persona tiene que completarlo.',
+          };
+        case 'carga_masiva':
+          this.openBulkUploadModal();
+          return {
+            status: 'needs_user_input' as const,
+            message: 'Abrí la carga masiva para que suba el archivo desde ahí.',
+          };
+        case 'carga_imagenes':
+          this.openBulkImageUploadModal();
+          return {
+            status: 'needs_user_input' as const,
+            message:
+              'Abrí la carga masiva de imágenes. El ZIP se sube desde ese modal, no por el chat.',
+          };
+        case 'edicion_masiva':
+          this.navigateToBulkEditPage();
+          return {
+            status: 'ok' as const,
+            message: 'Lo llevé a la edición masiva de productos.',
+          };
+        default:
+          return {
+            status: 'not_found' as const,
+            message: `La pantalla de Productos no tiene una acción "${id}".`,
+          };
+      }
+    },
+    setFilter: async (values) => {
+      // Delegated to `onSearch` / `onFilter`, the same handlers the list's own
+      // controls call. Setting `searchTerm` and reloading by hand would skip the
+      // page reset those do, so the person would land on page 4 of a filtered list
+      // that has one page.
+      const applied: string[] = [];
+
+      if (typeof values['search'] === 'string') {
+        this.onSearch(values['search']);
+        applied.push('búsqueda');
+      }
+
+      const rest = Object.fromEntries(
+        Object.entries(values).filter(([key]) => key !== 'search'),
+      );
+
+      if (Object.keys(rest).length) {
+        this.onFilter(rest as Partial<ProductQueryDto>);
+        applied.push(Object.keys(rest).join(', '));
+      }
+
+      // Deliberadamente SIN conteo. `onSearch` dispara un refetch asíncrono, así
+      // que `products()` acá todavía tiene la página anterior: devolver su
+      // longitud hacía que Vexi dijera "quedaron 10" sobre una lista que terminó
+      // en 2. Si el conteo importa, el modelo llama ui_read_screen después, que
+      // lee la lista ya asentada.
+      return applied.length
+        ? {
+            status: 'ok' as const,
+            message: `Filtré la lista por ${applied.join(' y ')}. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.`,
+          }
+        : {
+            status: 'not_found' as const,
+            message: 'No me pasaste ningún filtro que esta lista entienda.',
+          };
+    },
+    openModal: (id) => this.vexiHostAdapter.runAction!(id),
+    refresh: () => {
+      this.loadProducts();
+      return { status: 'ok' as const, message: 'Recargué la lista de productos.' };
+    },
+  };
+
+  /** Nombra el modal abierto, para que Vexi no actúe como si la pantalla estuviera libre. */
+  private vexiOpenModalNote(): string | undefined {
+    if (this.isCreateModalOpen) return 'Hay un formulario de nuevo producto abierto.';
+    if (this.isBulkUploadModalOpen) return 'La carga masiva está abierta.';
+    if (this.isBulkImageUploadModalOpen) return 'La carga de imágenes está abierta.';
+    return undefined;
   }
 
   // Event Handlers

@@ -4,6 +4,7 @@ import { SettingsService } from '../settings/settings.service';
 import { WeeklyReportService } from '../weekly-report/weekly-report.service';
 import { SubscriptionResolverService } from '../subscriptions/services/subscription-resolver.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VexiAttachmentsService } from './vexi-attachments.service';
 import type { VexiUiContext } from './vexi-stream-intent.service';
 
 /**
@@ -21,6 +22,7 @@ export const VEXI_SNAPSHOT_KEYS = [
   'user_identity',
   'current_datetime',
   'ui_context',
+  'turn_attachments',
 ] as const;
 
 export type VexiSnapshot = Record<(typeof VEXI_SNAPSHOT_KEYS)[number], string>;
@@ -44,6 +46,7 @@ export class VexiContextService {
     private readonly settings: SettingsService,
     private readonly weeklyReport: WeeklyReportService,
     private readonly subscriptions: SubscriptionResolverService,
+    private readonly attachments: VexiAttachmentsService,
   ) {}
 
   /**
@@ -58,6 +61,7 @@ export class VexiContextService {
    */
   async buildSnapshot(options?: {
     uiContext?: VexiUiContext;
+    attachmentIds?: string[];
   }): Promise<VexiSnapshot> {
     const [
       storeProfile,
@@ -65,12 +69,16 @@ export class VexiContextService {
       activeModules,
       subscriptionState,
       currentDatetime,
+      turnAttachments,
     ] = await Promise.all([
       this.section('store_profile', () => this.buildStoreProfile()),
       this.section('business_metrics', () => this.buildBusinessMetrics()),
       this.section('active_modules', () => this.buildActiveModules()),
       this.section('subscription_state', () => this.buildSubscriptionState()),
       this.section('current_datetime', () => this.buildCurrentDatetime()),
+      this.section('turn_attachments', () =>
+        this.buildTurnAttachments(options?.attachmentIds),
+      ),
     ]);
 
     return {
@@ -83,6 +91,7 @@ export class VexiContextService {
       user_identity: this.buildUserIdentity(),
       current_datetime: currentDatetime,
       ui_context: this.buildUiContext(options?.uiContext),
+      turn_attachments: turnAttachments,
     };
   }
 
@@ -279,6 +288,49 @@ export class VexiContextService {
     return lines.length
       ? lines.join('\n')
       : 'El cliente envió contexto de pantalla vacío.';
+  }
+
+  /**
+   * The documents the person attached to THIS message.
+   *
+   * In the prompt rather than behind a tool for the same reason as the screen
+   * context: the model has to know the document exists before it can decide to
+   * read it. Discovered through a tool call, an attached invoice would be found
+   * only if the model happened to go looking — and the observed failure is worse
+   * than that, because it answers the text ("¿registro este gasto?") as if the
+   * photo had never arrived.
+   *
+   * Only metadata is rendered. The bytes stay in S3 behind the handle, which is
+   * the whole point of the design: the orchestrating conversation never carries
+   * a document, no matter how many pages it has.
+   */
+  private async buildTurnAttachments(
+    attachmentIds?: string[],
+  ): Promise<string> {
+    if (!attachmentIds?.length) {
+      return 'La persona no adjuntó ningún documento en este mensaje. Si lo que pide necesita uno (una factura, un recibo, una planilla), pídeselo: no inventes datos ni asumas que ya lo tienes.';
+    }
+
+    const documents = await this.attachments.describeMany(attachmentIds);
+
+    if (!documents.length) {
+      return 'La persona intentó adjuntar un documento pero ya no está disponible. Pídele que lo vuelva a adjuntar.';
+    }
+
+    const lines = documents.map((document) => {
+      const size = `${Math.max(1, Math.round(document.size_bytes / 1024))} KB`;
+      const already = document.linked_entity_type
+        ? ` — YA se usó para crear un registro de tipo ${document.linked_entity_type}, no lo vuelvas a procesar sin que la persona lo pida`
+        : '';
+
+      return `- \`${document.attachment_id}\`: ${document.original_name} (${document.mime_type}, ${size})${already}`;
+    });
+
+    return [
+      'Documentos que la persona adjuntó en este mensaje:',
+      ...lines,
+      'Para leerlos usa `ai_extract_document` con su `attachment_id` y el tipo de documento que corresponda; nunca describas el contenido sin haberlo extraído. Después cruza lo extraído con `validate_extraction` antes de proponerle nada. Si vas a registrarlo en el sistema, pásale el mismo `attachment_id` a la operación de escritura para que el documento quede guardado junto al registro.',
+    ].join('\n');
   }
 
   private buildUserIdentity(): string {

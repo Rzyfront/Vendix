@@ -4,7 +4,11 @@ import { Store } from '@ngrx/store';
 import * as VexiActions from './vexi.actions';
 import type { ToolStep, VexiProposal } from './vexi.actions';
 import * as VexiSelectors from './vexi.selectors';
-import { AIConversation, AIMessage } from '../../services/vexi-api.service';
+import {
+  AIConversation,
+  AIMessage,
+  VexiTask,
+} from '../../services/vexi-api.service';
 
 @Injectable({ providedIn: 'root' })
 export class VexiFacade {
@@ -26,6 +30,7 @@ export class VexiFacade {
   readonly pendingProposal$ = this.store.select(
     VexiSelectors.selectPendingProposal,
   );
+  readonly activeTask$ = this.store.select(VexiSelectors.selectActiveTask);
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
   readonly conversations = toSignal(this.conversations$, {
@@ -48,6 +53,9 @@ export class VexiFacade {
   readonly pendingProposal = toSignal(this.pendingProposal$, {
     initialValue: null as VexiProposal | null,
   });
+  readonly activeTask = toSignal(this.activeTask$, {
+    initialValue: null as VexiTask | null,
+  });
 
   loadConversations(): void {
     this.store.dispatch(VexiActions.loadConversations());
@@ -63,15 +71,25 @@ export class VexiFacade {
     );
   }
 
-  sendMessage(conversationId: number, content: string): void {
+  sendMessage(
+    conversationId: number,
+    content: string,
+    attachmentIds?: string[],
+  ): void {
     this.store.dispatch(
-      VexiActions.sendMessage({ conversationId, content }),
+      VexiActions.sendMessage({ conversationId, content, attachmentIds }),
     );
   }
 
   /** Sends the first message when no conversation is active yet. */
-  startConversation(content: string, appKey?: string): void {
-    this.store.dispatch(VexiActions.startConversation({ content, appKey }));
+  startConversation(
+    content: string,
+    appKey?: string,
+    attachmentIds?: string[],
+  ): void {
+    this.store.dispatch(
+      VexiActions.startConversation({ content, appKey, attachmentIds }),
+    );
   }
 
   archiveConversation(conversationId: number): void {
@@ -91,5 +109,10 @@ export class VexiFacade {
 
   rejectProposal(): void {
     this.store.dispatch(VexiActions.rejectProposal());
+  }
+
+  /** Hides the background-task strip. The job keeps running. */
+  dismissTask(): void {
+    this.store.dispatch(VexiActions.dismissTask());
   }
 }

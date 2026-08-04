@@ -7,6 +7,7 @@ import { AIAgentService } from '../../../ai-engine/ai-agent.service';
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
 import { VexiContextService } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
+import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -46,6 +47,7 @@ export class AIChatService {
     private readonly eventEmitter: EventEmitter2,
     private readonly vexiContext: VexiContextService,
     private readonly streamIntents: VexiStreamIntentService,
+    private readonly uiChannel: VexiUiChannelService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -287,6 +289,7 @@ export class AIChatService {
       conversation_id: conversationId,
       content: dto.content,
       ui_context: dto.ui_context,
+      attachment_ids: dto.attachment_ids,
       user_id: RequestContextService.getContext()?.user_id,
     });
   }
@@ -329,6 +332,12 @@ export class AIChatService {
       },
     });
 
+    // Claims this stream id as the only channel allowed to answer this turn's UI
+    // commands. Without it a leaked `stream_id` would let any authenticated user
+    // feed fabricated screen results into somebody else's agent loop, and the
+    // model treats those results as ground truth.
+    await this.uiChannel.registerTurn(streamId, userId);
+
     const appKey = conversation.app_key || 'chat_assistant';
 
     const app = await this.aiEngine.getApplication(appKey).catch(() => null);
@@ -350,7 +359,12 @@ export class AIChatService {
         messages: this.buildContextWindow(conversation),
         variables: await this.vexiContext.buildSnapshot({
           uiContext: intent.ui_context,
+          attachmentIds: intent.attachment_ids,
         }),
+        // What lets the loop wait for the browser instead of assuming its UI
+        // commands worked. Only the chat surface passes it, because it is the only
+        // one with an open SSE channel to a page that can answer.
+        stream_id: streamId,
       });
 
       let step = await agentStream.next();
@@ -475,6 +489,12 @@ export class AIChatService {
       store_id: conversation.store_id,
       user_id: conversation.user_id,
     });
+
+    // Closes the UI channel for this turn so a late `POST ui-result` cannot land
+    // on the next one. Not in a `finally`: an early `return` above leaves the
+    // claim to expire on its own TTL, which is the safe direction — a stale claim
+    // rejects results, it never accepts a wrong one.
+    await this.uiChannel.releaseTurn(streamId);
   }
 
   async archiveConversation(id: number) {

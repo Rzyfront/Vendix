@@ -570,6 +570,7 @@ Submodule keys should follow `parent_child`, for example `orders_sales` or `sett
 - **Forgetting the `['retail']` defensive fallback**: if both `storeSettings.general.industries` and `authFacade.userIndustries()` are empty, the runtime must default to `['retail']` so the filter is always defined.
 - **Adding a hiding rule outside `diagnose()`**: the module disappears from the sidebar but `diagnoseModule()` still reports it visible, so Vexi tells the user to click something that is not there. Every layer belongs in the chain.
 - **Joining a new menu entry by its Spanish label**: ten labels already collide. Register the entry in `store-module-catalog.constant.ts` under its `panel_ui` key.
+- **A leaf entry with no `moduleKeyMap` mapping and no children is dropped**: `filterItemsRecursive` Case 3 only keeps unmapped items that have visible children, so a new settings leaf silently never renders. Meanwhile `diagnose()` skips the key-driven layers when `moduleKeys` is empty and reports it **visible** — the two paths disagree. If the entry is intentionally key-less (a store-wide capability, not a per-user module) mark it `alwaysVisible: true` and gate it in `passesAuthorizationGates()`; that is how `/admin/settings/vexi` works.
 - **Adding an authorization prefilter without extending `authorizationGates$`**: the item stays hidden until some unrelated emission re-runs `filterMenuItems`, which usually means "until the next navigation".
 
 ## Visibility vs Authorization

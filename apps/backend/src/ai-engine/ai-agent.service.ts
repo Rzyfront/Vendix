@@ -5,6 +5,8 @@ import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { RequestContextService } from '../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
+import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
+import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import {
   AIMessage,
   AIResponse,
@@ -16,6 +18,28 @@ import {
  * echoed to the UI, which shows a one-line trace, not the payload.
  */
 const TOOL_RESULT_SUMMARY_CHARS = 300;
+
+/**
+ * Iteration budget once a multi-step plan is on the table.
+ *
+ * A single question fits in ten rounds and that stays the default, because a
+ * wider budget on a one-shot question buys nothing and pays for it in latency
+ * and tokens. A declared plan is the opposite case: "crea el proveedor y
+ * regístrale la factura" is four to six rounds per step, and hitting the ceiling
+ * mid-chain used to end the turn with the work half done and no way for the model
+ * to say which half.
+ */
+const PLANNED_MAX_ITERATIONS = 25;
+
+/**
+ * Wall-clock budget for a planned turn.
+ *
+ * Iterations alone are not the binding constraint once the interface is in the
+ * loop: each `ui_*` command can block up to 25 s waiting for the browser, so a
+ * three-step plan can legitimately spend well past the one-minute default before
+ * the model has done anything wrong.
+ */
+const PLANNED_TIMEOUT_MS = 180_000;
 
 export interface AgentRunParams {
   goal: string;
@@ -37,6 +61,16 @@ export interface AgentRunParams {
    * the prompt comes from the database instead of the caller.
    */
   variables?: Record<string, string>;
+  /**
+   * Correlation id of the turn's SSE stream, when there is a browser on the
+   * other end.
+   *
+   * Present only on the chat surface. Its absence is what tells the loop that a
+   * `clientSide` command has nobody to execute it — the voice bridge and MCP both
+   * dispatch commands out of band — so the loop can be honest about it instead of
+   * waiting on a result that will never arrive.
+   */
+  stream_id?: string;
 }
 
 export interface AgentResult {
@@ -72,6 +106,7 @@ export class AIAgentService {
     private readonly aiLogging: AILoggingService,
     private readonly toolRegistry: AIToolRegistry,
     private readonly eventEmitter: EventEmitter2,
+    private readonly uiChannel: VexiUiChannelService,
   ) {}
 
   /**
@@ -192,8 +227,13 @@ export class AIAgentService {
     params: AgentRunParams,
   ): AsyncGenerator<AIStreamChunk, AgentResult> {
     const startTime = Date.now();
-    const maxIterations = params.max_iterations || this.DEFAULT_MAX_ITERATIONS;
-    const timeoutMs = params.timeout_ms || this.DEFAULT_TIMEOUT_MS;
+    // Not `const`: a declared plan widens it mid-turn (see PLANNED_MAX_ITERATIONS).
+    let maxIterations = params.max_iterations || this.DEFAULT_MAX_ITERATIONS;
+    // Widened alongside the iteration budget, and for a second reason: a turn
+    // that drives the interface now blocks up to 25 s per command waiting for the
+    // browser, so two UI steps alone can consume the whole one-minute default and
+    // abort a turn that was working correctly.
+    let timeoutMs = params.timeout_ms || this.DEFAULT_TIMEOUT_MS;
 
     const context = RequestContextService.getContext();
 
@@ -405,25 +445,54 @@ export class AIAgentService {
           // rejection still guards the surfaces that bypass this loop (voice
           // bridge, MCP), where a client that cannot dispatch must fail loudly.
           if (this.toolRegistry.isClientSide(toolName)) {
+            // With a browser on the line, the turn now WAITS for what actually
+            // happened on screen instead of assuming. This is the fix for the
+            // loop's worst honesty defect: the old code pushed
+            // `dispatched_to_client` and moved on, so the model's next thought
+            // was formed with no idea whether the command found the module, hit
+            // a variant picker, or failed outright — and it routinely narrated
+            // success it had never observed. Now `ui_add_to_cart` on a product
+            // with variants comes back `needs_user_input` and the same turn asks
+            // which variant, because the answer arrived before the model spoke.
+            const uiResult = params.stream_id
+              ? await this.uiChannel.awaitResult(params.stream_id, toolCall.id)
+              : null;
+
+            const resultPayload =
+              uiResult ??
+              JSON.stringify({
+                dispatched: true,
+                command: toolName,
+                result_unknown: true,
+                // Reached in two situations that share one honest answer: no
+                // browser is listening (voice, MCP), or the browser never
+                // answered within the window because the user closed the panel
+                // or navigated away. Either way the outcome is unobserved, and
+                // saying so is the only truthful option left.
+                note: `Se envió al navegador ÚNICAMENTE el comando "${toolName}" con esos argumentos y NO llegó respuesta, así que no sabes si funcionó. Habla en intención, no en hecho consumado ("te lo estoy agregando", no "ya quedó agregado"), y ofrécele verificarlo. Si tu objetivo necesita más pasos, pídelos uno por uno con su propia llamada. Nunca digas que hiciste algo cuyo resultado no viste.`,
+              });
+
             toolsUsed.push({
               name: toolName,
               args: toolArgs,
-              result: 'dispatched_to_client',
+              result: resultPayload,
             });
             messages.push({
               role: 'tool',
-              content: JSON.stringify({
-                dispatched: true,
-                command: toolName,
-                // Se nombra el comando y se acota el alcance porque la nota
-                // genérica ("asume que se ejecutó") licenciaba dar por hecho lo
-                // que nunca se pidió: tras un solo `ui_navigate`, el modelo
-                // afirmaba haber agregado dos productos al carrito que seguía
-                // vacío. Enviado ≠ hecho, y enviado uno ≠ enviados todos.
-                note: `Se envió al navegador ÚNICAMENTE el comando "${toolName}" con esos argumentos. No se ejecutó ningún otro, y NO sabes si funcionó: el resultado ocurre en la pantalla del usuario, no acá. Habla en intención, no en hecho consumado ("te lo estoy agregando", no "ya quedó agregado"); la pantalla y la traza le muestran el resultado real. Si tu objetivo necesita más pasos —cada producto, el cliente, el refresco— pídelos uno por uno con su propia llamada. Nunca digas que hiciste algo para lo que no llamaste la herramienta.`,
-              }),
+              content: resultPayload,
               tool_call_id: toolCall.id,
             });
+
+            // Emitted for the real result too, so the panel's trace shows what
+            // the screen answered and not just what was asked of it.
+            yield {
+              type: 'tool_result',
+              tool: {
+                id: toolCall.id,
+                name: toolName,
+                summary: resultPayload.slice(0, TOOL_RESULT_SUMMARY_CHARS),
+              },
+            };
             continue;
           }
 
@@ -438,6 +507,16 @@ export class AIAgentService {
               args: toolArgs,
               result,
             });
+
+            // A plan is a promise about the rest of the turn, so the turn is
+            // given room to keep it. Raised here rather than at the top because
+            // the model decides mid-turn whether the request is compound: a
+            // budget set before the first provider call would have to guess, and
+            // guessing high makes every simple question slower.
+            if (toolName === PROPOSE_PLAN_TOOL) {
+              maxIterations = Math.max(maxIterations, PLANNED_MAX_ITERATIONS);
+              timeoutMs = Math.max(timeoutMs, PLANNED_TIMEOUT_MS);
+            }
 
             messages.push({
               role: 'tool',

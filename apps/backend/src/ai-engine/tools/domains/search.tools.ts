@@ -1,5 +1,6 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
 import { EmbeddingService } from '../../embeddings/embedding.service';
+import { EMBEDDABLE_ENTITY_TYPES } from '../../embeddings/embedding-events.listener';
 
 export interface SearchToolDeps {
   embeddingService: EmbeddingService;
@@ -22,7 +23,7 @@ export function createSearchTools({
       domain: 'search',
       readOnly: true,
       description:
-        'Busca por significado, no por coincidencia exacta de texto: encuentra productos o clientes cuando el usuario los describe con sus propias palabras ("la bebida de naranja", "el cliente del restaurante de la 80"). Si conoces el nombre exacto, prefiere find_product o find_customer, que son más baratos y precisos.',
+        'Busca por significado, no por coincidencia exacta de texto: encuentra productos, clientes, órdenes, proveedores o gastos cuando la persona los describe con sus propias palabras ("la bebida de naranja", "el cliente del restaurante de la 80", "el pedido de las tres cajas de gaseosa", "el gasto del arriendo de agosto"). Si conoces el nombre exacto, prefiere find_product o find_customer, que son más baratos y precisos. Para dudas de cómo se usa la aplicación no sirve: eso está en `help-center/articles/search`.',
       parameters: {
         type: 'object',
         properties: {
@@ -32,7 +33,10 @@ export function createSearchTools({
           },
           entity_types: {
             type: 'array',
-            items: { type: 'string', enum: ['product', 'customer'] },
+            items: {
+              type: 'string',
+              enum: [...EMBEDDABLE_ENTITY_TYPES],
+            },
             description: 'Tipos de entidad a buscar. Por defecto, todos.',
           },
           limit: {
@@ -78,7 +82,7 @@ export function createSearchTools({
           return JSON.stringify({
             query: args.query,
             results: [],
-            note: 'Sin coincidencias. Solo los productos están indexados hoy; para clientes usa find_customer.',
+            note: 'Sin coincidencias por significado. La indexación es incremental: un registro creado hace un momento puede no estar indexado todavía, así que reintenta por nombre con find_product o find_customer antes de decirle que no existe.',
           });
         }
 

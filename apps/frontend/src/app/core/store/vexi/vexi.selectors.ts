@@ -52,3 +52,8 @@ export const selectPendingProposal = createSelector(
   selectVexiState,
   (state) => state.pendingProposal,
 );
+
+export const selectActiveTask = createSelector(
+  selectVexiState,
+  (state) => state.activeTask,
+);

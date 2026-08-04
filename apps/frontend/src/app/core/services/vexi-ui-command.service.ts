@@ -7,6 +7,10 @@ import {
   VexiPosActionResult,
 } from './vexi-pos-bridge.service';
 import {
+  VexiUiActionResult,
+  VexiUiHostRegistry,
+} from './vexi-ui-host.registry';
+import {
   STORE_MODULE_BY_KEY,
   STORE_MODULE_CATALOG,
   resolveStoreModule,
@@ -22,6 +26,10 @@ import { VEXI_REFRESH_ACTIONS } from '../store/vexi/vexi-refresh.map';
  * seguimos" and the turn ends cleanly.
  */
 const USER_INPUT_TIMEOUT_MS = 20000;
+
+/** `ui_wait_for` bounds, so a broken host cannot hold the turn open. */
+const DEFAULT_WAIT_MS = 5000;
+const MAX_WAIT_MS = 15000;
 
 /**
  * Executes Vexi's `ui_*` commands against the running application.
@@ -43,6 +51,7 @@ export class VexiUiCommandService {
   private router = inject(Router);
   private menuFilter = inject(MenuFilterService);
   private pos = inject(VexiPosBridgeService);
+  private hosts = inject(VexiUiHostRegistry);
   private store = inject(Store);
 
   /** True for names this service owns. Callers use it to intercept. */
@@ -82,7 +91,40 @@ export class VexiUiCommandService {
         case 'ui_pos_checkout':
           return await this.posCheckout();
         case 'ui_refresh':
-          return this.refresh(String(args['domain'] ?? ''));
+          return await this.refresh(String(args['domain'] ?? ''));
+        case 'ui_read_screen':
+          return this.readScreen();
+        case 'ui_list_actions':
+          return this.listActions();
+        case 'ui_fill_form':
+          return await this.hostAction('fillForm', (host) =>
+            host.fillForm!(
+              (args['values'] as Record<string, unknown>) ?? {},
+            ),
+          );
+        case 'ui_set_filter':
+          return await this.hostAction('setFilter', (host) =>
+            host.setFilter!(
+              (args['values'] as Record<string, unknown>) ?? {},
+            ),
+          );
+        case 'ui_click_action':
+          return await this.clickAction(
+            String(args['action_id'] ?? ''),
+            args['args'] as Record<string, unknown> | undefined,
+          );
+        case 'ui_open_modal':
+          return await this.hostAction('openModal', (host) =>
+            host.openModal!(
+              String(args['modal_id'] ?? ''),
+              args['args'] as Record<string, unknown> | undefined,
+            ),
+          );
+        case 'ui_wait_for':
+          return await this.waitFor(
+            args['module_key'] ? String(args['module_key']) : undefined,
+            Number(args['timeout_ms'] ?? 0),
+          );
         default:
           return JSON.stringify({
             error: `El comando de interfaz "${toolName}" no existe en este navegador.`,
@@ -318,17 +360,16 @@ export class VexiUiCommandService {
    * user can still finish it. Only Vexi's turn stops waiting, which is the
    * honest thing to report: the work is pending on them, not failed.
    */
-  private withUserInputTimeout(
-    action: Promise<VexiPosActionResult>,
-    pendingMessage: string,
-  ): Promise<VexiPosActionResult> {
-    return new Promise<VexiPosActionResult>((resolve) => {
+  private withUserInputTimeout<
+    T extends VexiPosActionResult | VexiUiActionResult,
+  >(action: Promise<T>, pendingMessage: string): Promise<T> {
+    return new Promise<T>((resolve) => {
       let settled = false;
 
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        resolve({ status: 'needs_user_input', message: pendingMessage });
+        resolve({ status: 'needs_user_input', message: pendingMessage } as T);
       }, USER_INPUT_TIMEOUT_MS);
 
       action
@@ -347,9 +388,203 @@ export class VexiUiCommandService {
             message:
               error instanceof Error
                 ? error.message
-                : 'La acción en el Punto de Venta falló.',
-          });
+                : 'La acción en la pantalla falló.',
+          } as T);
         });
+    });
+  }
+
+  // ── Comandos genéricos sobre el host registrado ─────────────────────────
+
+  /**
+   * Describes the screen so Vexi can resolve "esto" and "este".
+   *
+   * Falls back to the module catalog when the on-screen module never registered a
+   * host: naming the module and admitting it cannot be driven is far more useful
+   * than a bare error, because it lets Vexi offer the API route instead.
+   */
+  private readScreen(): string {
+    const host = this.hosts.current();
+
+    if (!host?.readScreen) {
+      const route = this.router.url;
+      return JSON.stringify({
+        status: 'no_host',
+        route,
+        next_step:
+          'Esta pantalla no expone su estado, así que no puedes leer lo que la persona tiene delante. Si necesitas el dato, consúltalo con las herramientas de datos; y si te pidió actuar "sobre esto", pídele que te diga sobre qué registro.',
+      });
+    }
+
+    return JSON.stringify({ status: 'ok', screen: host.readScreen() });
+  }
+
+  private listActions(): string {
+    const host = this.hosts.current();
+
+    if (!host?.listActions) {
+      return JSON.stringify({
+        status: 'no_host',
+        actions: [],
+        next_step:
+          'Esta pantalla no declara acciones que puedas disparar. Haz lo que te piden por la vía de datos, o llévalo al módulo y dile qué botón buscar.',
+      });
+    }
+
+    const actions = host.listActions();
+
+    return JSON.stringify({
+      status: 'ok',
+      module: host.vexiModuleKey,
+      actions,
+      next_step:
+        'Dispara una con ui_click_action pasando su `id`. Las marcadas `mutates` cambian datos: adviértelo y pide el sí antes.',
+    });
+  }
+
+  /**
+   * Runs a declared action, refusing an id the host never published.
+   *
+   * The check is what stops a hallucinated action id from being reported as "no
+   * pasó nada": the model gets the real list back and can retry with a valid one.
+   */
+  private async clickAction(
+    actionId: string,
+    args?: Record<string, unknown>,
+  ): Promise<string> {
+    const host = this.hosts.current();
+
+    if (!host?.runAction || !host.listActions) {
+      return this.noHost('disparar acciones');
+    }
+
+    const declared = host.listActions();
+    const match = declared.find((action) => action.id === actionId);
+
+    if (!match) {
+      return JSON.stringify({
+        status: 'unknown_action',
+        requested: actionId,
+        available: declared.map((action) => action.id),
+        next_step:
+          'Esa acción no existe en esta pantalla. Elige una de las disponibles o resuélvelo por la vía de datos.',
+      });
+    }
+
+    const result = await this.withUserInputTimeout(
+      host.runAction(actionId, args),
+      `Disparé "${match.label}" y la pantalla está esperando algo de la persona.`,
+    );
+
+    return JSON.stringify({
+      ...result,
+      action: match.label,
+      next_step:
+        result.status === 'ok'
+          ? 'Cuéntale en una frase qué quedó hecho.'
+          : 'Dile exactamente en qué quedó y qué falta de su parte.',
+    });
+  }
+
+  /**
+   * Shared shape for the host methods that take a values map.
+   *
+   * The `capability` string is the phrase the refusal uses, so a module that
+   * implements `setFilter` but not `fillForm` produces two different, accurate
+   * messages instead of one generic "no puedo".
+   */
+  private async hostAction(
+    capability: 'fillForm' | 'setFilter' | 'openModal',
+    run: (host: NonNullable<ReturnType<VexiUiHostRegistry['current']>>) => Promise<VexiUiActionResult>,
+  ): Promise<string> {
+    const host = this.hosts.current();
+
+    const phrase = {
+      fillForm: 'llenar formularios',
+      setFilter: 'aplicar filtros',
+      openModal: 'abrir formularios',
+    }[capability];
+
+    if (!host || typeof host[capability] !== 'function') {
+      return this.noHost(phrase);
+    }
+
+    const result = await this.withUserInputTimeout(
+      run(host),
+      'La pantalla está esperando algo de la persona.',
+    );
+
+    return JSON.stringify({
+      ...result,
+      next_step:
+        capability === 'fillForm'
+          ? 'Los campos quedaron puestos pero NADA se guardó. Dile qué dejaste listo y qué falta que revise o decida antes de guardar.'
+          : result.status === 'ok'
+            ? 'Cuéntale qué quedó en pantalla, con el número de registros si lo tienes.'
+            : 'Dile qué no se pudo y por qué.',
+    });
+  }
+
+  /**
+   * Waits for the module to finish loading, when it exposes a readiness signal.
+   *
+   * Capped hard: a host with a broken `whenReady` would otherwise hold the whole turn
+   * open, and the turn's own budget is what the person is waiting on.
+   */
+  private async waitFor(
+    moduleKey: string | undefined,
+    requestedTimeout: number,
+  ): Promise<string> {
+    const timeout = Math.min(
+      Math.max(requestedTimeout || DEFAULT_WAIT_MS, 500),
+      MAX_WAIT_MS,
+    );
+
+    const host = moduleKey
+      ? this.hosts.forModule(moduleKey)
+      : this.hosts.current();
+
+    if (!host) {
+      return JSON.stringify({
+        status: 'not_ready',
+        expected: moduleKey,
+        route: this.router.url,
+        next_step: moduleKey
+          ? `La pantalla de "${moduleKey}" no está montada. Llévalo con ui_navigate antes de intentar operar ahí.`
+          : 'No hay ninguna pantalla operable montada ahora mismo.',
+      });
+    }
+
+    if (!host.whenReady) {
+      return JSON.stringify({
+        status: 'ok',
+        module: host.vexiModuleKey,
+        note: 'La pantalla está montada. No expone señal de carga, así que asume que ya cargó.',
+      });
+    }
+
+    const ready = await Promise.race([
+      host.whenReady().then(() => true),
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(false), timeout),
+      ),
+    ]);
+
+    return JSON.stringify({
+      status: ready ? 'ok' : 'timeout',
+      module: host.vexiModuleKey,
+      next_step: ready
+        ? 'La pantalla ya cargó, puedes seguir.'
+        : 'La pantalla sigue cargando. No afirmes nada sobre lo que muestra; dile que está tardando.',
+    });
+  }
+
+  private noHost(capability: string): string {
+    return JSON.stringify({
+      status: 'no_host',
+      message: `La pantalla que la persona tiene abierta no permite ${capability} desde aquí.`,
+      next_step:
+        'Hazlo por la vía de datos si puedes, o llévalo al módulo correspondiente y dile qué hacer allí.',
     });
   }
 
@@ -364,23 +599,47 @@ export class VexiUiCommandService {
    * and a route reload would throw away filters, pagination and half-filled
    * forms.
    */
-  private refresh(domain: string): string {
-    const action = VEXI_REFRESH_ACTIONS[domain];
+  private async refresh(domain: string): Promise<string> {
+    const target = VEXI_REFRESH_ACTIONS[domain];
 
-    if (!action) {
+    // The route check is not defensive noise: these are lazily-loaded feature
+    // stores, so dispatching from a screen that never loaded the effect is a silent
+    // no-op that would still be reported as a successful refresh.
+    if (target && this.router.url.startsWith(target.routeFragment)) {
+      this.store.dispatch(target.action());
+
       return JSON.stringify({
-        status: 'no_refresh_available',
+        status: 'ok',
         domain,
-        next_step: `El cambio se aplicó, pero esta pantalla no sabe recargar "${domain}" sola. Dile que actualice la vista para verlo.`,
+        via: 'store',
+        message: 'La pantalla ya muestra el cambio.',
       });
     }
 
-    this.store.dispatch(action());
+    // Second rung of the cascade: a module with no NgRx state of its own can still
+    // reload itself. Reached for the long tail of domains that keep their data in
+    // component signals — without it, `ui_refresh` degraded to an apology on every
+    // module that was not one of the handful with a feature store.
+    const host = this.hosts.current();
+
+    if (host?.refresh) {
+      const result = await host.refresh();
+
+      return JSON.stringify({
+        status: result.status,
+        domain,
+        via: 'host',
+        message:
+          result.status === 'ok'
+            ? 'La pantalla ya muestra el cambio.'
+            : result.message,
+      });
+    }
 
     return JSON.stringify({
-      status: 'ok',
+      status: 'no_refresh_available',
       domain,
-      message: 'La pantalla ya muestra el cambio.',
+      next_step: `El cambio se aplicó, pero esta pantalla no sabe recargar "${domain}" sola. Dile que actualice la vista para verlo.`,
     });
   }
 

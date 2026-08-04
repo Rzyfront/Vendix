@@ -33,6 +33,24 @@ export interface AIAgentJob {
   timeout_ms?: number;
   /** See AIGenerationJob.request_id. */
   request_id?: string;
+  /**
+   * The requesting user's resolved permissions, carried into the worker.
+   *
+   * A background run has no HTTP request to derive them from, and the tool
+   * catalog is filtered by exactly this list — so omitting them does not fail
+   * loudly, it silently hands the agent an empty toolset and the task returns
+   * "no pude hacer nada". Snapshotted at enqueue time on purpose: the task must
+   * run with the authority the person had when they approved it, not with
+   * whatever their role became in the meantime.
+   */
+  permissions?: string[];
+  roles?: string[];
+  /** `ai_agent_tasks` row this job reports into. */
+  task_id?: number;
+  /** Conversation the task belongs to, for the closing notification. */
+  conversation_id?: number;
+  /** Application whose stored prompt drives the run. */
+  app_key?: string;
 }
 
 export type AIJobStatus =
