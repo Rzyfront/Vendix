@@ -743,6 +743,16 @@ export class ProductCreatePageComponent {
   aiDescriptionLimitReached = computed(() => this.aiDescriptionUsesLeft() <= 0);
   isEditMode = signal(false);
   /**
+   * Slug que el producto tenía en la base al cargarlo, ya normalizado — o sea
+   * exactamente lo que `loadProduct()` pone en el control.
+   *
+   * Existe para poder distinguir "el operador editó el slug" de "el slug lo
+   * normalizamos nosotros al cargar". Sin esa distinción, guardar cualquier
+   * otro campo de un producto viejo le reescribe el slug y le cambia la URL
+   * pública — ver `resolveSlugForSubmit()`.
+   */
+  private loadedSlugNormalized: string | null = null;
+  /**
    * En modo edición, false hasta que `loadProduct` patchea el form. El template
    * no renderiza el formulario hasta entonces para evitar el flash de secciones
    * dependientes del tipo (insumo): sin esto se ve un instante todo el UI de
@@ -1804,6 +1814,10 @@ export class ProductCreatePageComponent {
       .map((ta: any) => ta.tax_category_id)
       .filter((id) => id !== undefined);
 
+    this.loadedSlugNormalized = product.slug
+      ? ProductUtils.generateSlug(product.slug)
+      : '';
+
     this.productForm.patchValue({
       name: product.name,
       // QUI-504: normalizamos el slug heredado al cargar. Los productos
@@ -1813,6 +1827,10 @@ export class ProductCreatePageComponent {
       // inválido y `collectSaveRequirements()` lista "Slug (URL)" como
       // bloqueante, impidiendo guardar CUALQUIER otro campo del producto
       // hasta que el operador arregle el slug a mano.
+      //
+      // OJO: esta normalización es SOLO para desbloquear el formulario. El
+      // slug normalizado NO se persiste salvo que el operador lo edite a
+      // mano — ver `resolveSlugForSubmit()`.
       slug: product.slug ? ProductUtils.generateSlug(product.slug) : '',
       description: product.description,
       cost_price: product.cost_price || 0,
@@ -3444,6 +3462,51 @@ export class ProductCreatePageComponent {
     }
   }
 
+  /**
+   * Decide qué slug viaja en el payload.
+   *
+   * **Creación:** normaliza lo que el operador escribió; si quedó vacío manda
+   * `undefined` para que el backend autogenere desde el nombre.
+   *
+   * **Edición:** manda `undefined` mientras el control siga mostrando el mismo
+   * valor que `loadProduct()` puso ahí. Eso es lo que evita que guardar el
+   * precio de un producto viejo le reescriba la URL pública.
+   *
+   * El motivo: `loadProduct()` normaliza el slug heredado para desbloquear el
+   * formulario, pero esa normalización es presentacional. Si además se
+   * enviara, editar cualquier campo cambiaría el slug persistido — y
+   * `generateSlug` no translitera los acentos, los **borra**
+   * (`Ñandú` → `and`, `café-especial` → `caf-especial`). Dos efectos, los dos
+   * malos:
+   *
+   *  1. El detalle público resuelve por coincidencia exacta del slug
+   *     almacenado (`catalog.service.ts` → `getProductBySlug`), así que todo
+   *     enlace, QR impreso o página indexada con el slug viejo pasa a dar
+   *     "Producto no disponible" — el síntoma que QUI-504 vino a arreglar.
+   *  2. `products` tiene `@@unique([store_id, slug])`. Dos productos que solo
+   *     difieran en acentos colapsan al mismo slug y el segundo guardado
+   *     revienta con `PROD_DUP_001`.
+   *
+   * Omitir el campo es seguro: el `update()` del backend solo valida unicidad
+   * y escribe el slug dentro de `if (sanitizedDto.slug)`.
+   */
+  private resolveSlugForSubmit(
+    formSlug: string | null | undefined,
+  ): string | undefined {
+    const typed = formSlug?.trim();
+
+    if (!this.isEditMode()) {
+      return typed ? ProductUtils.generateSlug(typed) : undefined;
+    }
+
+    // Igual a lo que se cargó → el operador no lo tocó → no lo mandamos.
+    if (!typed || typed === this.loadedSlugNormalized) {
+      return undefined;
+    }
+
+    return ProductUtils.generateSlug(typed);
+  }
+
   onSubmit(): void {
     if (this.isSubmitting()) return;
     this.productForm.markAllAsTouched();
@@ -3472,6 +3535,9 @@ export class ProductCreatePageComponent {
       ? this.imagesTouched()
       : images.length > 0;
 
+    // El slug sigue el mismo criterio que las imágenes: en edición solo viaja
+    // si el operador lo tocó (ver `resolveSlugForSubmit`).
+
     const isServiceType = formValue.product_type === 'service';
 
     // Fase 1: pure-ingredient short-circuit. If the product is a pure
@@ -3485,14 +3551,7 @@ export class ProductCreatePageComponent {
     // Basic DTO
     const productData: CreateProductDto = {
       name: formValue.name,
-      // QUI-504: defense-in-depth — aunque el validador del form ya rechaza
-      // slugs con espacios/format raro, normalizamos el slug aquí también
-      // antes de enviarlo. Si viene vacío después del trim, mandamos
-      // undefined para que el backend autogenere (consistente con el patrón
-      // histórico).
-      slug: formValue.slug?.trim()
-        ? ProductUtils.generateSlug(formValue.slug)
-        : undefined,
+      slug: this.resolveSlugForSubmit(formValue.slug),
       description: formValue.description || undefined,
       cost_price: Number(formValue.cost_price),
       profit_margin: Number(formValue.profit_margin),
