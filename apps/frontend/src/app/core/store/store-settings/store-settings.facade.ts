@@ -75,14 +75,18 @@ export class StoreSettingsFacade {
   );
 
   /**
-   * Whether the Vexi assistant is on for this store.
+   * Whether this store switched the Vexi assistant on.
    *
-   * Absent block means enabled: Vexi ships on, and a settings row written
-   * before the switch existed must not silently lose the assistant. Only an
-   * explicit `false` turns it off, which mirrors `VexiEnabledGuard` on the
-   * backend — the two must agree or the dock renders against dead endpoints.
+   * Absent block means disabled. Vexi acts on the merchant's own data, so it
+   * only shows up where an owner or admin turned it on for that store — never
+   * because of a default the tenant never saw. Only an explicit `true` mounts
+   * the dock.
+   *
+   * Must apply the same rule as `VexiEnabledGuard` on the backend. If this side
+   * is the more permissive of the two, the dock renders against endpoints that
+   * refuse it and the assistant reads as broken rather than off.
    */
   readonly vexiEnabled = computed<boolean>(
-    () => this.settings()?.vexi?.enabled !== false,
+    () => this.settings()?.vexi?.enabled === true,
   );
 }

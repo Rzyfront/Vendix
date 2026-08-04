@@ -439,11 +439,18 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
-    // Vexi - on by default. It is a capability of the product, so a store
-    // that has never heard of the setting still gets the assistant; only an
-    // explicit `false` takes it away.
+    // Vexi — off by default, and this line is what actually decides it.
+    //
+    // Vexi writes into the commerce's own data with the operator's permissions, so
+    // turning it on is a decision an owner takes for their store, never a default
+    // they inherit. The guard and the dock both refuse anything that is not an
+    // explicit `true`, and this default is the third leg of that: the defaults are
+    // the BASE of `mergeStoreSettingsWithDefaults`, so `true` here would hand
+    // `vexi.enabled: true` to every store that never persisted the block — and
+    // `updateSettings` writes the merged object back, so saving an unrelated
+    // section (receipts, POS) would stamp it into the row permanently.
     vexi: {
-      enabled: true,
+      enabled: false,
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

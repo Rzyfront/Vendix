@@ -1279,10 +1279,13 @@ export class ReservationsSettingsDto {
 /**
  * Master switch for the Vexi assistant.
  *
- * Defaults to enabled: Vexi is a capability of the product, not an opt-in.
- * Turning it off is enforced in three places, not one — route guard, sidebar
- * entry, and the Vexi endpoints themselves — because a switch that only hides
- * the UI is bypassed by calling the API by hand.
+ * Defaults to disabled: Vexi writes into the commerce's own data, so each store
+ * turns it on deliberately instead of inheriting it. Only an explicit `true`
+ * enables it.
+ *
+ * The switch is enforced in three places, not one — route guard, sidebar entry, and
+ * the Vexi endpoints themselves — because one that only hides the UI is bypassed by
+ * calling the API by hand.
  */
 export class VexiSettingsDto {
   @ApiProperty({

@@ -23,6 +23,10 @@ import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
+// Read-only here: used solely to ask whether the store's plan enables the
+// conversational AI feature before mounting the Vexi dock. No banner, no
+// dispatch — the subscription state is hydrated by STORE_ADMIN (see S1.2 above).
+import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 
 import { map } from 'rxjs/operators';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -107,11 +111,10 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     <app-fiscal-gate-outlet />
 
     <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
-         Se respeta el mismo interruptor de tienda: sin contexto de tienda el
-         ajuste está ausente y vexiEnabled() devuelve true, así que el panel
-         de organización sólo pierde el dock cuando la tienda activa lo apagó
-         de verdad — que es exactamente cuando el backend lo rechazaría. -->
-    @if (vexiEnabled()) {
+         Tres condiciones deciden si llega a montarse (ver showVexiDock): un
+         dock presente contra endpoints que responden 403 o "plan sin IA" se
+         lee como una avería, no como un ajuste. -->
+    @if (showVexiDock()) {
       <app-vexi-dock />
     }
   `,
@@ -127,10 +130,58 @@ export class OrganizationAdminLayoutComponent {
   private readonly toastService = inject(ToastService);
   private readonly menuFilterService = inject(MenuFilterService);
   private readonly storeSettingsFacade = inject(StoreSettingsFacade);
-
-  /** Vexi's store-wide master switch. Absent means enabled. */
-  readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
+  private readonly subscriptionFacade = inject(SubscriptionFacade);
   private readonly configFacade = inject(ConfigFacade);
+
+  /**
+   * Vexi's store-wide master switch. Fails closed: the facade reads
+   * `vexi.enabled === true`, so an ABSENT setting means OFF, not on. The org
+   * panel has no store settings of its own, so this alone already keeps the
+   * dock out of here unless a real store snapshot travels with the session.
+   */
+  readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
+
+  /**
+   * Whether the Vexi dock is mounted at all. Same three conditions as
+   * STORE_ADMIN, because Vexi is store-scoped on both sides of the wire — the
+   * dock talks to `/store/ai-chat/*` and `/store/vexi/*` from here too, so the
+   * store's role gate and the store's plan gate are the ones that apply. When
+   * any condition fails the dock is simply not rendered: no message, no
+   * placeholder, no reserved space.
+   *
+   * 1. The store-wide master switch, EXPLICITLY on. Absence is off, so the
+   *    dock is never mounted on the mere lack of a setting.
+   *
+   * 2. Role owner/admin, mirroring `vexiSettingsGuard` and the backend
+   *    `@Roles(OWNER, ADMIN)`. In ORG_ADMIN the environment gate in
+   *    `auth.guard.ts` already admits only super_admin/admin/owner, so this is
+   *    near-tautological today — it is written anyway so the dock never
+   *    depends on a gate that lives in another file, and so the org panel and
+   *    the store panel state the same rule instead of two.
+   *
+   * 3. A plan with conversational AI (`streaming_chat`), which is what
+   *    `AiAccessGuard` enforces on the turn. Note the org panel has no live
+   *    store context: `SubscriptionFacade.featureMatrix` is only hydrated by
+   *    STORE_ADMIN (it is store-scoped by design — that is also why the
+   *    subscription banner was removed from this layout), so here the matrix
+   *    stays `{}` and the dock does not mount. That is the truthful outcome:
+   *    without a resolved store subscription there is nothing that guarantees
+   *    the turn would be accepted, and mounting on a guess is what produced
+   *    the 403/paywall-on-first-message bug in the first place.
+   */
+  readonly showVexiDock = computed<boolean>(
+    () =>
+      this.vexiEnabled() &&
+      (this.authFacade.isOwner() ||
+        this.authFacade.isAdmin() ||
+        this.authFacade.hasAnyRole([
+          'owner',
+          'admin',
+          'STORE_OWNER',
+          'ORG_OWNER',
+        ])) &&
+      this.subscriptionFacade.canUseFeature('streaming_chat'),
+  );
 
   // --- Signals from facade observables ---
   readonly organizationName = toSignal(this.authFacade.userOrganizationName$, {

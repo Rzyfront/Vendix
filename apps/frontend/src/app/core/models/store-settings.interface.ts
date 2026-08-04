@@ -42,9 +42,10 @@ export interface StoreSettings {
   /**
    * Master switch for the Vexi assistant. Mirrors backend `VexiSettings`.
    *
-   * Optional because stores whose settings row predates the switch never
-   * persisted it. Absent means enabled — read it through
-   * `StoreSettingsFacade.vexiEnabled()`, never as `settings.vexi!.enabled`.
+   * Optional because a store only carries this block once somebody turned Vexi
+   * on: the assistant ships off and is enabled per store. Absent means
+   * disabled — read it through `StoreSettingsFacade.vexiEnabled()`, never as
+   * `settings.vexi!.enabled`.
    */
   vexi?: VexiSettings;
 }

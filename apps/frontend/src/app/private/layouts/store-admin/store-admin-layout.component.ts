@@ -214,10 +214,10 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     <app-fiscal-gate-outlet />
 
     <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
-         El interruptor maestro de la tienda decide si llega a montarse: un
-         dock presente contra endpoints que responden "módulo deshabilitado"
-         se lee como una avería, no como un ajuste. -->
-    @if (vexiEnabled()) {
+         Tres condiciones deciden si llega a montarse (ver showVexiDock): un
+         dock presente contra endpoints que responden 403 o "plan sin IA" se
+         lee como una avería, no como un ajuste. -->
+    @if (showVexiDock()) {
       <app-vexi-dock />
     }
   `,
@@ -236,10 +236,52 @@ export class StoreAdminLayoutComponent {
   private destroyRef = inject(DestroyRef);
 
   /**
-   * Vexi's store-wide master switch. Absent means enabled (see the facade),
-   * so a store that never touched the setting keeps the assistant.
+   * Vexi's store-wide master switch. Fails closed: the facade reads
+   * `vexi.enabled === true`, so an ABSENT setting means OFF. A store only gets
+   * the assistant once someone turned it on on purpose.
    */
   readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
+
+  /**
+   * Whether the Vexi dock is mounted at all. Three conditions, every one of
+   * them necessary — when any fails the dock simply is not rendered: no
+   * message, no placeholder, no reserved space. A visible dock that answers
+   * 403 or "plan sin IA" on the first message reads as a broken product, not
+   * as a setting the store has not paid for.
+   *
+   * 1. The store-wide master switch, EXPLICITLY on. Absence is off, so the
+   *    dock is never mounted on the mere lack of a setting.
+   *
+   * 2. Role owner/admin. `VexiController` and the write side of
+   *    `AIChatController` are `@Roles(OWNER, ADMIN)`. This layout is shared by
+   *    every store user, so a cashier or salesperson used to see the dock and
+   *    get a 403 on everything it touched. The predicate mirrors
+   *    `vexiSettingsGuard` exactly (role-only, no permission fallback: the
+   *    assistant writes across the whole store, so a broad
+   *    `store:settings:update` must not buy access) which keeps one single
+   *    definition of "who commands Vexi" across guard, sidebar entry and dock.
+   *
+   * 3. A plan with conversational AI. The turn goes through `AiAccessGuard` +
+   *    `@RequireAIFeature('streaming_chat')`; on the `Starter` plan that flag
+   *    is `false`, so the dock would open only for the first message to die
+   *    with a paywall. `featureMatrix` starts as `{}` (the facade's
+   *    `initialValue`), so while the subscription request is still in flight
+   *    `canUseFeature` is false and the dock stays unmounted — it appears once
+   *    there is certainty and never flashes in the wrong direction.
+   */
+  readonly showVexiDock = computed<boolean>(
+    () =>
+      this.vexiEnabled() &&
+      (this.authFacade.isOwner() ||
+        this.authFacade.isAdmin() ||
+        this.authFacade.hasAnyRole([
+          'owner',
+          'admin',
+          'STORE_OWNER',
+          'ORG_OWNER',
+        ])) &&
+      this.subscriptionFacade.canUseFeature('streaming_chat'),
+  );
 
   /**
    * W4 — Ambient membership-access validation. Reads the store setting

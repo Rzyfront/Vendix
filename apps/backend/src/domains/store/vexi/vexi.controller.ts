@@ -18,6 +18,10 @@ import { CapabilityRegistryService } from '../../../ai-engine/tools/bridge/capab
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
+import {
+  AiAccessGuard,
+  RequireAIFeature,
+} from '../subscriptions/guards/ai-access.guard';
 import { ApplyConfirmationDto } from './dto/apply-confirmation.dto';
 import { UiResultDto, UploadAttachmentDto } from './dto/ui-result.dto';
 import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
@@ -34,6 +38,15 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
  *
  * Restricted to owner and admin for the same reason as the voice controller:
  * the snapshot carries revenue, plan state and module configuration.
+ *
+ * The AI subscription gate lives on individual handlers instead of the class,
+ * because only two endpoints here spend anything: `attachments` pays for S3 plus
+ * the vision run it exists to feed, and `embeddings/backfill` pays for one
+ * embedding per record. Everything else either reads this store's own state or
+ * closes a circuit an already-gated turn opened — gating those would take away a
+ * flow the user has paid for without saving a cent of provider spend. Each
+ * decision is argued at its handler so a later reader does not "fix" the
+ * omissions.
  */
 @Controller('store/vexi')
 @UseGuards(RolesGuard, VexiEnabledGuard)
@@ -72,6 +85,17 @@ export class VexiController {
    * tool still re-verifies its own preconditions. The token only proves *this
    * user saw this exact diff*, and it is consumed atomically, so a
    * double-clicked "Aprobar" applies once.
+   *
+   * Deliberately NOT behind `AiAccessGuard`. A confirmation token can only have
+   * been minted inside an agent turn, and that turn already passed the AI gate in
+   * `store/ai-chat` — the plan question was answered before this request could
+   * exist, and no provider call happens on this path. Re-asking it here would add
+   * a failure mode and no protection: a store that crossed its daily message cap
+   * or slid into `grace_hard` between the proposal and the "Aprobar" click would
+   * be locked out of a change it already reviewed and authorised, with the token
+   * expiring in its hand. What genuinely must not happen — writing into a
+   * terminal-state subscription — is already enforced on this POST by the global
+   * `StoreOperationsGuard`, which gates every write under `/api/store/**`.
    */
   @Post('confirmations/apply')
   async applyConfirmation(@Body() dto: ApplyConfirmationDto) {
@@ -108,8 +132,24 @@ export class VexiController {
    *
    * The response is a handle, never a URL: what the model receives must not be
    * something it can leak into a message.
+   *
+   * Gated on `text_generation` because that is the budget the document actually
+   * draws from: the upload exists to be handed to a vision application, and a
+   * vision application is an `AIEngineService.run()` call metered against
+   * `text_generation.monthly_tokens_cap`. Checking the key the downstream
+   * consumption bills to means the bucket is never paid for when the extraction
+   * behind it is impossible.
+   *
+   * `StoreOperationsGuard` does not cover this: it answers "is this subscription
+   * in a state that may write?", and an `active` store on a plan with every AI
+   * flag off passes it cleanly — it would still push megabytes into S3 for a run
+   * its plan can never make. The guard is declared before the interceptor for a
+   * reason beyond style: Nest runs guards ahead of interceptors, so a blocked
+   * request is rejected before Multer buffers the file at all.
    */
   @Post('attachments')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('text_generation')
   @UseInterceptors(FileInterceptor('file'))
   async uploadAttachment(
     @UploadedFile() file: Express.Multer.File,
@@ -130,6 +170,13 @@ export class VexiController {
    * A mismatched owner is rejected rather than ignored: a leaked `stream_id` would
    * otherwise let any authenticated user inject fabricated screen results into
    * somebody else's agent turn, and the model treats those as ground truth.
+   *
+   * Also deliberately NOT behind `AiAccessGuard`. Rejecting this call cannot save
+   * provider spend — the tokens were already spent when the agent emitted the
+   * `tool_call` — it can only strand a loop that is suspended on this exact
+   * `(stream_id, tool_call_id)` until it times out. The store would pay for the
+   * turn and receive "no pude confirmarlo" instead of an answer. The owner check
+   * below, not a plan check, is what protects this endpoint.
    */
   @Post('ui-result')
   async submitUiResult(@Body() dto: UiResultDto) {
@@ -200,8 +247,18 @@ export class VexiController {
    * `(store_id, entity_type, entity_id)`, so a second pass refreshes instead of
    * duplicating, which also makes it the way to re-index after changing how an
    * entity's searchable text is composed.
+   *
+   * Gated on `rag_embeddings`, the feature whose `indexed_docs_cap` budgets exactly
+   * this: one pass enqueues up to 500 records per entity type and every job is a
+   * paid embedding call. The check has to be here because there is nowhere else it
+   * could happen — this controller is the only caller of `backfillCurrentStore()`,
+   * and `EmbeddingService` calls the provider directly rather than through
+   * `AIEngineService`, so the inline gate that protects every other AI application
+   * never sees these jobs.
    */
   @Post('embeddings/backfill')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('rag_embeddings')
   async backfillEmbeddings() {
     const report = await this.embeddingBackfill.backfillCurrentStore();
     return this.responseService.success(report, 'Indexación encolada');

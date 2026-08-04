@@ -373,9 +373,12 @@ export interface StoreSettings {
 /**
  * Master switch for the Vexi assistant.
  *
- * Defaults to `true`: Vexi is a capability of the product, not an opt-in. A
- * store that turns it off gets no dock at all rather than a disabled one — an
- * assistant that appears and does not answer reads as a fault.
+ * Defaults to `false`: Vexi acts on the commerce's own data with the operator's
+ * permissions, so each store opts in deliberately. Anything other than an explicit
+ * `true` — absent block, absent settings row — reads as off.
+ *
+ * A store with it off gets no dock at all rather than a disabled one: an assistant
+ * that appears and does not answer reads as a fault.
  */
 export interface VexiSettings {
   enabled: boolean;

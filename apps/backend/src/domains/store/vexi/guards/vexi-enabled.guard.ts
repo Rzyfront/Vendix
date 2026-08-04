@@ -5,17 +5,23 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 /**
- * Refuses every Vexi endpoint when the store has the assistant switched off.
+ * Refuses every Vexi endpoint unless the store switched the assistant on.
  *
  * The switch is enforced here as well as in the router and the sidebar because
- * hiding a UI is not disabling a feature: without this, a store that turned
- * Vexi off could still be driven through it with a bare `curl`, spending the
- * store's own AI quota.
+ * hiding a UI is not disabling a feature: without this, a store that never
+ * enabled Vexi could still be driven through it with a bare `curl`, spending
+ * the store's own AI quota.
  *
- * Absent setting means enabled — Vexi ships on, and a tenant whose settings row
- * predates the switch must not silently lose the assistant. Same reason a store
- * with no settings row at all passes: the switch has to be turned off on
- * purpose, never by omission.
+ * Absent setting means DISABLED. Vexi writes to the merchant's own data —
+ * products, stock, customers, orders — so letting it answer has to be a
+ * decision an owner or admin took on purpose for this store, never something a
+ * tenant inherits from a default it was never shown. Only an explicit `true`
+ * opens the endpoints; a missing `vexi` block, a store with no settings row and
+ * an explicit `false` all fail closed and are indistinguishable from here.
+ *
+ * `StoreSettingsFacade.vexiEnabled()` has to apply this exact rule. If the
+ * frontend is the more permissive of the two, the dock mounts and then talks to
+ * endpoints that reject it — a broken assistant instead of an absent one.
  *
  * Reads the store id from `req.user` and queries with an explicit `store_id`
  * filter rather than going through `SettingsService`. Guards run *before* the
@@ -48,7 +54,7 @@ export class VexiEnabledGuard implements CanActivate {
 
     const settings = row?.settings as { vexi?: { enabled?: boolean } } | null;
 
-    if (settings?.vexi?.enabled === false) {
+    if (settings?.vexi?.enabled !== true) {
       throw new VendixHttpException(
         ErrorCodes.AI_AGENT_004,
         'Vexi está desactivado para esta tienda. Un propietario o administrador puede volver a activarlo en Configuración → Vexi.',

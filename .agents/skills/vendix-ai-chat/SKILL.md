@@ -138,9 +138,20 @@ The switch is `store_settings.vexi.enabled`, edited at `/admin/settings/vexi`
 3. `MenuFilterService.canConfigureVexi()` hides the submenu entry.
 4. `@if (vexiEnabled())` keeps the dock from mounting.
 
-**Absent means enabled.** A settings row written before the switch existed must not
-silently lose the assistant, so only an explicit `false` turns it off. Backend and
-frontend must agree on this or the dock renders against dead endpoints.
+**Absent means disabled.** Vexi acts on the commerce's own data with the operator's
+permissions, so a store opts in deliberately: only an explicit `true` enables it.
+
+Four places have to agree, and the fourth is the one that is easy to miss:
+
+- `VexiEnabledGuard` refuses anything that is not `true`.
+- `StoreSettingsFacade.vexiEnabled` returns `enabled === true`.
+- `default-store-settings.ts` ships `vexi: { enabled: false }`.
+- The defaults are the BASE of `mergeStoreSettingsWithDefaults`, and `updateSettings`
+  persists the merged object — so a `true` in the defaults hands the assistant to
+  every store that never persisted the block, and stamps it into the row the next
+  time anybody saves an unrelated section.
+
+Flipping the guard without flipping the default is a no-op that looks applied.
 
 ## Rules
 

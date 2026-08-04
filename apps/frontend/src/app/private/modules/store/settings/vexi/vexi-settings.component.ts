@@ -15,14 +15,17 @@ import {
 } from '../../../../../core/services/vexi-api.service';
 
 /**
- * Store-wide master switch for the Vexi assistant.
+ * Store-wide master switch for the Vexi assistant. Vexi ships OFF: this page is
+ * where each store opts in.
  *
- * Lives on its own settings page instead of as one more row inside
- * "General" because turning Vexi off is not a preference — it withdraws a
- * capability from every user of the store, and the page has to say what is
- * lost. The route is gated by `vexiSettingsGuard` (owner/admin) and the
- * backend re-checks with `VexiEnabledGuard`, so hiding this page is never the
- * only thing standing between a disabled store and the Vexi endpoints.
+ * Lives on its own settings page instead of as one more row inside "General"
+ * because flipping this switch is not a preference — it hands an agent that
+ * writes to the store's own data (products, stock, customers, orders) to every
+ * user of the store, so the page has to say what is being granted and show what
+ * the agent has already done. The route is gated by `vexiSettingsGuard`
+ * (owner/admin) and the backend re-checks with `VexiEnabledGuard`, so hiding
+ * this page is never the only thing standing between a store that never enabled
+ * Vexi and the Vexi endpoints.
  */
 @Component({
   selector: 'app-vexi-settings',
@@ -62,7 +65,7 @@ import {
               </li>
             </ul>
             <p class="mt-2">
-              Puedes volver a activarlo desde aquí en cualquier momento.
+              Puedes activarlo desde aquí cuando quieras.
             </p>
           </div>
         }
@@ -222,7 +225,9 @@ export class VexiSettingsComponent {
       // again — leaving it set would mask a later change made elsewhere.
       this.override.set(null);
       this.toast.success(
-        next ? 'Vexi está activo de nuevo.' : 'Vexi quedó desactivado.',
+        next
+          ? 'Vexi quedó activo en esta tienda.'
+          : 'Vexi quedó desactivado.',
       );
     } catch (error) {
       this.override.set(previous);
