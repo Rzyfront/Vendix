@@ -57,6 +57,10 @@ import {
   PopProductModalResult,
 } from './interfaces/pop-cart.interface';
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+} from '../../../../../core/services/vexi-ui-host.registry';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -236,6 +240,7 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
 })
 export class PopComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private vexiHosts = inject(VexiUiHostRegistry);
   private dispatchNotesService = inject(DispatchNotesService);
   /**
    * PASO 1 — Acción diferida. Cuando el usuario dispara guardar/crear/recibir
@@ -380,6 +385,87 @@ export class PopComponent implements OnInit, OnDestroy {
 
   private subscriptions: Subscription[] = [];
 
+  // ── Host de Vexi ────────────────────────────────────────────────────────
+  //
+  // El POP es el taller de la orden de compra, así que es lo que Vexi necesita
+  // poder leer y conducir cuando alguien le pide una. `runAction` NO expone
+  // "crear la orden": esa es la decisión del negocio y pasa por la tarjeta de
+  // aprobación del agente o por el botón de la persona, nunca por un comando de
+  // interfaz que dispara un POST sin que nadie lo haya visto.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'pop',
+    readScreen: () => {
+      const summary = this.cartSummary();
+      const supplier = this.selectedSupplierName();
+      const location = this.selectedLocationName();
+
+      const pending: string[] = [];
+      if (!supplier) pending.push('proveedor');
+      if (!location) pending.push('bodega');
+
+      return {
+        module_key: 'pop',
+        title: 'POP — Orden de compra',
+        visible_count: this.cartItemCount(),
+        selection: supplier || null,
+        notes:
+          `${this.cartItemCount()} línea(s) en el carrito` +
+          (summary?.total != null ? `, total ${summary.total}` : '') +
+          (supplier ? `, proveedor ${supplier}` : '') +
+          (location ? `, bodega ${location}` : '') +
+          (pending.length ? `. Falta elegir ${pending.join(' y ')}.` : '.') +
+          (this.showInvoiceScanner() ? ' El escáner de factura está abierto.' : ''),
+      };
+    },
+    listActions: () => [
+      { id: 'escanear_factura', label: 'Abrir el escáner de factura de proveedor' },
+      { id: 'elegir_proveedor', label: 'Abrir el selector de proveedor' },
+      { id: 'elegir_bodega', label: 'Abrir el selector de bodega' },
+      { id: 'guardar_borrador', label: 'Guardar la orden como borrador' },
+    ],
+    runAction: async (id) => {
+      switch (id) {
+        case 'escanear_factura':
+          this.showInvoiceScanner.set(true);
+          return {
+            status: 'needs_user_input' as const,
+            message:
+              'Abrí el escáner de factura. La persona sube el archivo desde ahí y revisa lo extraído antes de que entre al carrito.',
+          };
+        case 'elegir_proveedor':
+          this.supplierModalOpen.set(true);
+          return {
+            status: 'needs_user_input' as const,
+            message: 'Abrí el selector de proveedor.',
+          };
+        case 'elegir_bodega':
+          this.warehouseModalOpen.set(true);
+          return {
+            status: 'needs_user_input' as const,
+            message: 'Abrí el selector de bodega.',
+          };
+        case 'guardar_borrador':
+          if (!this.cartItemCount()) {
+            return {
+              status: 'error' as const,
+              message: 'El carrito está vacío: no hay nada que guardar como borrador.',
+            };
+          }
+          this.onSaveAsDraft();
+          return {
+            status: 'ok' as const,
+            message: 'Disparé el guardado como borrador.',
+          };
+        default:
+          return {
+            status: 'not_found' as const,
+            message: `El POP no tiene una acción "${id}".`,
+          };
+      }
+    },
+    openModal: (id) => this.vexiHostAdapter.runAction!(id),
+  };
+
   constructor(
     private popCartService: PopCartService,
     private purchaseOrdersService: PurchaseOrdersService,
@@ -392,6 +478,7 @@ export class PopComponent implements OnInit, OnDestroy {
   ) {}
 
   async ngOnInit(): Promise<void> {
+    this.vexiHosts.register(this.vexiHostAdapter);
     this.checkMobile();
 
     this.subscriptions.push(
@@ -414,6 +501,14 @@ export class PopComponent implements OnInit, OnDestroy {
     const productId = params['product_id'];
     if (productId) {
       this.autoAddProductById(Number(productId));
+    }
+
+    // `?scan=invoice` abre el escáner nativo de factura al entrar. Es la vía por
+    // la que otro módulo (o Vexi, desde Órdenes de compra) trae a la persona
+    // directo al escáner en vez de dejarla buscar el botón: el modal es el mismo
+    // que abre la barra de acciones, así que el flujo posterior no cambia.
+    if (params['scan'] === 'invoice') {
+      this.showInvoiceScanner.set(true);
     }
   }
 
@@ -656,6 +751,7 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.vexiHosts.unregister(this.vexiHostAdapter);
     this.subscriptions.forEach((sub) => sub.unsubscribe());
   }
 

@@ -355,6 +355,9 @@ export interface StoreSettings {
   // Membership - gym/membership suite behavior toggles
   membership?: MembershipSettings;
 
+  // Vexi - the AI assistant's master switch
+  vexi?: VexiSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -365,6 +368,20 @@ export interface StoreSettings {
 
   // Legacy: Mantener por compatibilidad temporal (redundante con branding)
   app?: AppSettings;
+}
+
+/**
+ * Master switch for the Vexi assistant.
+ *
+ * Defaults to `false`: Vexi acts on the commerce's own data with the operator's
+ * permissions, so each store opts in deliberately. Anything other than an explicit
+ * `true` — absent block, absent settings row — reads as off.
+ *
+ * A store with it off gets no dock at all rather than a disabled one: an assistant
+ * that appears and does not answer reads as a fault.
+ */
+export interface VexiSettings {
+  enabled: boolean;
 }
 
 export interface GeneralSettings {

@@ -1,9 +1,15 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { S3Module } from '../../../common/services/s3.module';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
+
+// Vexi (AI agent) — familia de herramientas contables de sólo lectura.
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createAccountingTools } from '../../../ai-engine/tools/domains/accounting.tools';
 
 // Chart of Accounts
 import { ChartOfAccountsController } from './chart-of-accounts/chart-of-accounts.controller';
@@ -158,4 +164,39 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     DepreciationCalculatorService,
   ],
 })
-export class AccountingModule {}
+export class AccountingModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly reportsService: AccountingReportsService,
+    private readonly fiscalPeriodsService: FiscalPeriodsService,
+    private readonly journalEntriesService: JournalEntriesService,
+    private readonly chartOfAccountsService: ChartOfAccountsService,
+    private readonly fiscalScopeService: FiscalScopeService,
+    private readonly prisma: StorePrismaService,
+  ) {}
+
+  /**
+   * Registra la familia contable de Vexi desde el dominio que posee los datos.
+   * `AIToolRegistry` se exporta desde el `@Global() AIEngineModule`, así que la
+   * dependencia apunta dominio → motor y no al revés: importar AccountingModule
+   * dentro de un módulo global sería un generador de ciclos.
+   *
+   * Se inyectan los servicios del dominio (no Prisma crudo) porque son ellos
+   * los que resuelven la entidad contable / `fiscal_scope` correcta. La única
+   * excepción es `StorePrismaService`, usado exclusivamente para leer la fila
+   * de `accounting_entities` con la que se etiqueta cada respuesta — y aun así
+   * pasa por el scoping multi-tenant.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createAccountingTools({
+        reportsService: this.reportsService,
+        fiscalPeriodsService: this.fiscalPeriodsService,
+        journalEntriesService: this.journalEntriesService,
+        chartOfAccountsService: this.chartOfAccountsService,
+        fiscalScopeService: this.fiscalScopeService,
+        prisma: this.prisma,
+      }),
+    );
+  }
+}

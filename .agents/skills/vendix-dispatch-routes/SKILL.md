@@ -52,7 +52,7 @@ settled, the route emits domain events that existing listeners already handle:
 | `payment.received` | `ar-events.listener`                                   | Updates accounts_receivable if applicable  |
 | `payment.received` | `commissions-events.listener`                          | Calculates commission                      |
 | `payment.received` | `notifications-events.listener`                        | Pushes notification                       |
-| `credit_sale.created` | `ar-events.listener`, `accounting-events.listener`   | Creates AR row, accounting entry           |
+| ~~`credit_sale.created`~~ | `ar-events.listener`, `accounting-events.listener`   | **La ruta ya NO lo emite** (sin crédito en ruta). El evento sigue vivo para otros dominios |
 | `refund.completed` | `accounting-events.listener`                           | Creates refund accounting entry            |
 | `cash_register.movement` | `accounting-events.listener`                       | Cash movement + auto-entry                |
 | `dispatch_route.closed` | (none — informational, used by listeners elsewhere) | Signals route settlement complete         |
@@ -70,7 +70,7 @@ do their job.
 |---|---|---|
 | `route_number` | `VARCHAR(50)` UNIQUE per store | Format `PLN{YYMMDD}{####}`, generated atomically |
 | `route_code` | `VARCHAR(20)` | External identifier (e.g. "RI02") |
-| `status` | enum | `draft` → `dispatched` → `in_transit` → `settling` → `closed` (or `voided` at any non-terminal point) |
+| `status` | enum | `draft` → `dispatched` → `in_transit` → `closed` (or `voided` at any non-terminal point). `close()` acepta `dispatched` o `in_transit`; **no existe `settling`** |
 | `vehicle_id` | FK → `vehicles` nullable | Set null on vehicle delete |
 | `driver_user_id` | FK → `users` nullable | OR `external_driver_*` (mutually exclusive or both allowed) |
 | `external_driver_name`, `external_driver_id_number` | VARCHAR nullable | External driver fallback |
@@ -91,8 +91,8 @@ do their job.
 | `route_id` | FK → `dispatch_routes` | CASCADE on parent delete |
 | `dispatch_note_id` | FK → `dispatch_notes` UNIQUE **partial** | `UNIQUE WHERE status != 'released'` — allows reassignment after release |
 | `stop_sequence` | INT | 1..N order of stops |
-| `status` | enum | `pending` → `in_progress` → (`delivered` \| `partial` \| `rejected`) or `released` |
-| `result` | enum | Final state, set when settled: `delivered`, `partial`, `rejected`, `released` |
+| `status` | enum | `pending` → `in_progress` → (`delivered` \| `rejected`) or `released`. El enum de Postgres aún contiene `partial` por filas históricas, pero ninguna liquidación puede producirlo |
+| `result` | enum | Final state, set when settled: `delivered`, `rejected`, `released`. `partial` es **solo lectura histórica** (ver Sin pago parcial) |
 | `is_extra_route` | BOOLEAN | Stop added outside the planned route (e.g. cliente adicional en ruta) |
 | `is_prepaid` | BOOLEAN | **Derived** from `dispatch_note.invoice.payment_date IS NOT NULL`. Excluded from `total_to_collect` and cash variance |
 | `collected_amount` | DECIMAL(14,2) | Cash collected in this stop (default 0) |
@@ -100,7 +100,7 @@ do their job.
 | `change_amount` | DECIMAL(14,2) | Cash given back to customer (recorded as `refund` with `source_type='dispatch_route_change'`) |
 | `withholding_amount` | DECIMAL(14,2) | Total fiscal withholding suffered (retefuente + reteiva + reteica) |
 | `withholding_breakdown` | JSONB nullable | `{retefuente?: number, reteiva?: number, reteica?: number}` — sum must equal `withholding_amount` |
-| `credit_amount` | DECIMAL(14,2) | Server-computed: `grand_total - collected - withholding` for `result='partial'` |
+| `credit_amount` | DECIMAL(14,2) | Columna preservada en el schema, **siempre 0**. No es input ni output del settle: la liquidación ya no la escribe y enviarla en el payload produce un 400 del `ValidationPipe` (`forbidNonWhitelisted`). Filas anteriores a la regla conservan su valor |
 | `payment_method` | VARCHAR(40) | `cash` (default), `transfer`, `card` |
 | `settled_at` / `released_at` | TIMESTAMP nullable | State-change timestamps |
 
@@ -124,34 +124,59 @@ referenced by a non-voided route — must be `is_active=false` instead.
             ┌──────────┐
             │  draft   │
             └────┬─────┘
-       dispatch  │      void (only in draft/dispatched/in_transit/settling)
+       dispatch  │      void (only in draft/dispatched/in_transit)
                  ▼
-       ┌────────────────┐         ┌──────────┐
-       │  dispatched    │ ──────► │  in_transit │  (auto on first stop start)
-       └────────┬───────┘         └──────┬───┘
-                │ start settling (manual) │
-                ▼                         ▼
-            ┌──────────┐
-            │ settling │
-            └────┬─────┘
-                 │ close (with declared_cash)
-                 ▼
-            ┌──────────┐
-            │  closed  │  (immutable, only via manual adjustment)
-            └──────────┘
+       ┌────────────────┐              ┌─────────────┐
+       │  dispatched    │ ───────────► │ in_transit  │  (auto on first stop start)
+       └────────┬───────┘              └──────┬──────┘
+                │  close (with declared_cash) │
+                └──────────────┬──────────────┘
+                               ▼
+                        ┌──────────┐
+                        │  closed  │  (immutable, only via manual adjustment)
+                        └──────────┘
 ```
+
+`dispatch_route_status_enum` = `draft | dispatched | in_transit | closed | voided`.
+**No existe un estado `settling`**: `close()` se invoca directamente desde
+`dispatched` o `in_transit` y cualquier otro estado devuelve 400.
 
 ### Stop state (`dispatch_route_stops.status`)
 
 ```
-pending → in_progress → delivered   (full payment, no withholding or credit)
-                       → partial    (credit and/or withholding applied)
-                       → rejected   (customer refused delivery)
+pending → in_progress → delivered   (pago TOTAL, o prepaga; retención permitida)
+                       → rejected   (el cliente no recibió o no pagó completo)
             any → released          (remisión freed for reassignment)
 ```
 
 Transitions are **forward-only** except `released` which can be reached from any
 non-terminal state and is the only "release valve" to free a dispatch_note.
+
+### Sin pago parcial (regla de negocio)
+
+Distinguir los dos niveles — confundirlos es el origen de QUI-491 y QUI-493:
+
+| Nivel | Regla |
+|---|---|
+| **Parada** | Binaria. Se entrega solo con pago **total** (o prepaga). `settleStop` rechaza `result='partial'` con `DISPATCH_ROUTE_PARTIAL_DISABLED` (400) y también rechaza `delivered` cuando `collected + anticipo + withholding < grand_total`. Sin cobro completo la parada va a `rejected`. |
+| **Ruta** | Parcial permitida. Una planilla cierra con normalidad mezclando paradas `delivered`, `rejected` y `released` — **no lograr entregar todo NO es un error**. Solo bloquea el cierre una parada no terminal (`pending` / `in_progress`), con 400 "Hay N parada(s) sin liquidar". |
+
+Consecuencias en código:
+
+- No hay venta a crédito en ruta: la liquidación nunca crea `accounts_receivable`
+  ni emite `credit_sale.created` (`emitCreditSale` fue eliminado).
+- `credit_amount` / `total_credit` no se escriben; toda fila nueva queda en 0.
+- Los valores `partial` de los enums y las columnas **se conservan** en el schema
+  (retirarlos exigiría una migración destructiva) y solo sobreviven en los
+  caminos de **lectura** — `SETTLED_RESULTS` en `utils/route-stop-calc.ts`, los
+  badges del detalle y el conteo `per_delivery` del settlement. Quitarlos de la
+  lectura volvería no-terminales las paradas liquidadas antes de la regla y
+  `close()` rechazaría cerrar sus rutas históricas.
+- El escáner de planillas nunca deriva `partial`: si la hoja dice entregada pero
+  el cobro es menor al neto, la parada sale en `skipped[]` con
+  `reason: 'short_payment_requires_decision'` (más `collected_amount` y `net`) y
+  **no se liquida** — reversar inventario ya despachado o asumir el faltante es
+  una decisión de caja del operador, no del sistema.
 
 ## Cash Settlement (`cash-settlement.service.ts`)
 
@@ -165,22 +190,18 @@ When `settleStop` is called, it dispatches (in this exact order):
    - Emits `payment.received` event with `source_type='dispatch_route'`,
      `source_id=route_id`, `stop_id`, `order_id=sales_order_id` (may be null),
      `withholding_breakdown` array for accounting listener.
-2. **`emitCreditSale`** — only if `result='partial'` and `credit_amount > 0`:
-   - Inserts `accounts_receivable` row with `source_type='dispatch_route'`,
-     `source_id=sales_order_id || dispatch_note_id`, `original_amount`,
-     `paid_amount=0`, `balance=original_amount`, `issue_date=now`,
-     `due_date=now+30 days`, `status='open'`.
-   - Emits `credit_sale.created` event.
-3. **`emitRefundCompleted`** — only if `change_amount > 0`:
+2. **`emitRefundCompleted`** — only if `change_amount > 0`:
    - If `sales_order_id` exists, inserts a `refunds` row with
      `state='completed'`, `refund_method='cash_on_route'`.
    - Always emits `refund.completed` event with
      `source_type='dispatch_route_change'`, `source_id=stop_id`.
 
 When the route is **closed** (`:id/close`), it computes totals and updates
-`total_collected`, `total_credit`, `total_withholdings`, `cash_variance` (=
-`declared_cash - cash_collected`), and emits `dispatch_route.closed` for
-downstream listeners.
+`total_collected`, `total_credit` (espejo denormalizado — 0 en toda ruta nueva),
+`total_withholdings`, `cash_variance` (= `declared_cash - cash_collected`), and
+emits `dispatch_route.closed` for downstream listeners. El cierre exige que
+**todas** las paradas estén en estado terminal, pero acepta cualquier mezcla de
+`delivered` / `rejected` / `released`.
 
 ## Capture Progressive Mobile
 
@@ -189,7 +210,7 @@ The mobile-first UI allows the conductor/admin to mark stops in real time:
 1. **Pre-dispatch** (`draft`): edit stops, add/remove, change driver/vehicle.
 2. **Pre-dispatch transition** (`dispatch`): locks stop list, sets
    `dispatch_started_at` and `dispatched_by_user_id`.
-3. **In route** (`in_transit`/`settling`): per stop, the conductor can:
+3. **In route** (`in_transit`): per stop, the conductor can:
    - **Start** (`POST /stops/:stopId/start`): pending → in_progress.
    - **Settle** (`POST /stops/:stopId/settle`): capture amounts + result.
    - **Release** (`POST /stops/:stopId/release`): pending/in_progress → released
@@ -232,7 +253,8 @@ access.
   table on `>=md`. Each card shows route number, status, driver, vehicle,
   stop count, and total to collect.
 - **Detail view** (`planilla-detail-page.component.ts`): stop cards with
-  left-border color (green if delivered/partial, red if released/rejected).
+  left-border color (green if delivered, red if released/rejected; `partial` se
+  sigue pintando verde solo para paradas históricas).
   Action buttons (`Liquidar`, `Liberar`) are large tap targets.
 - **Wizard** (`planilla-wizard.component.ts`): bottom-sheet style modal on
   mobile (`rounded-t-2xl md:rounded-2xl`), centered modal on desktop.

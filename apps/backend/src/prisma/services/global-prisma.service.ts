@@ -391,6 +391,17 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_embeddings;
   }
 
+  // Sin scoping: lo usa el worker de la cola `ai-agent`, que corre fuera de
+  // cualquier request y por tanto sin contexto ALS de tienda. El filtro por
+  // `store_id` lo pone explícitamente quien consulta desde ahí.
+  get ai_attachments() {
+    return this.baseClient.ai_attachments;
+  }
+
+  get ai_agent_tasks() {
+    return this.baseClient.ai_agent_tasks;
+  }
+
   // Help Center models (global - no scoping)
   get help_article_categories() {
     return this.baseClient.help_article_categories;

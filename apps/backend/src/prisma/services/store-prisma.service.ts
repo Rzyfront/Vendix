@@ -55,6 +55,12 @@ export class StorePrismaService extends BasePrismaService {
     'reviews',
     'ai_conversations',
     'ai_embeddings',
+    // Ambas tienen `store_id` propio. Sin registro, el getter devolvería un
+    // delegate SIN scoping y un adjunto o una tarea de otra tienda serían
+    // legibles por id — justo el dato que dice qué documento originó qué
+    // registro.
+    'ai_attachments',
+    'ai_agent_tasks',
     'dispatch_notes',
     'employee_stores',
     'accounts_receivable',
@@ -1421,6 +1427,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_embeddings() {
     return this.scoped_client.ai_embeddings;
+  }
+
+  get ai_attachments() {
+    return this.scoped_client.ai_attachments;
+  }
+
+  get ai_agent_tasks() {
+    return this.scoped_client.ai_agent_tasks;
   }
 
   // Order Installments

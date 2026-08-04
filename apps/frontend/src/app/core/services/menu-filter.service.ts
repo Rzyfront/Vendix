@@ -1,15 +1,49 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
+import { STORE_MODULE_BY_KEY } from '../../shared/constants/store-module-catalog.constant';
 import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
 } from '../models/organization.model';
 import type { FiscalArea } from '../models/fiscal-status.model';
+
+/**
+ * Why a module is not on screen. Ordered from structural (the store simply
+ * does not do this) to fixable (a toggle is off).
+ */
+export type ModuleBlockReason =
+  | 'fiscal_scope'
+  | 'fiscal_area'
+  | 'operating_scope'
+  | 'industry'
+  | 'store_panel_ui'
+  | 'store_type'
+  | 'user_panel_ui'
+  | 'subscription'
+  | 'permission'
+  | 'empty';
+
+/**
+ * Visibility verdict for one module, with a user-facing explanation.
+ *
+ * Vexi reads `detail` almost verbatim, so it is written in Spanish, in second
+ * person, and never names an internal field: "el módulo está desactivado para
+ * toda la tienda", not "store_settings.panel_ui.STORE_ADMIN.inventory=false".
+ */
+export interface ModuleVisibilityDiagnosis {
+  visible: boolean;
+  /** `null` when visible. */
+  blockedBy: ModuleBlockReason | null;
+  detail: string;
+  /** Route where the current user can lift the block, or `null` if they cannot. */
+  fixPath: string | null;
+}
 
 /**
  * Service for filtering menu items based on panel_ui configuration.
@@ -21,6 +55,28 @@ import type { FiscalArea } from '../models/fiscal-status.model';
 export class MenuFilterService {
   private authFacade = inject(AuthFacade);
   private subscriptionAccess = inject(SubscriptionAccessService);
+
+  /**
+   * True when the current store has at least one PQR. The store-admin layout
+   * hydrates this from the PQR stats endpoint; the service cannot fetch it
+   * itself, so it stays `null` (= unknown) until told. `diagnose()` refuses to
+   * blame this layer while unknown rather than assert a reason it cannot back.
+   */
+  readonly storeHasPqrs = signal<boolean | null>(null);
+
+  /**
+   * Emits whenever an authorization prefilter flips, so `filterMenuItems`
+   * re-runs. Its value is unused — the gates are read from the signals inside
+   * the filter; this exists purely to make the observable pass reactive to
+   * them, which is the bug the layout was working around with its own
+   * `combineLatest`.
+   */
+  private readonly authorizationGates$ = toObservable(
+    computed(
+      () =>
+        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.canConfigureVexi()}`,
+    ),
+  );
 
   /**
    * Modules hidden per store type.
@@ -231,6 +287,13 @@ export class MenuFilterService {
       this.authFacade.storeSettings$,
       this.authFacade.userOrganization$,
       this.authFacade.activeFiscalAreas$,
+      // Layers 7 and 8 (authorization prefilters) used to live in the
+      // store-admin layout, which spliced two entries out of the tree before
+      // calling this method. They are inputs to the filter, so they belong
+      // here — and they have to be part of the combineLatest, not read
+      // imperatively inside `map`, or the menu would not re-emit when the PQR
+      // count flips from zero.
+      this.authorizationGates$,
     ]).pipe(
       map(
         ([
@@ -408,6 +471,12 @@ export class MenuFilterService {
     activeFiscalAreas: FiscalArea[],
   ): MenuItem[] {
     return items.reduce((filtered: MenuItem[], item) => {
+      // Authorization prefilters, absorbed from the store-admin layout: two
+      // entries that carry no panel_ui key and were previously removed from
+      // the tree by the caller.
+      if (!this.passesAuthorizationGates(item)) {
+        return filtered;
+      }
       // Fiscal scope guard: the app that does not own the fiscal_scope must not
       // render fiscal items at all (hide outright, no locked state).
       if (!this.matchesFiscalScope(item, fiscalScope)) {
@@ -562,47 +631,283 @@ export class MenuFilterService {
    * Check if a specific menu item should be visible.
    * Synchronous version for immediate checks.
    *
+   * Kept as the boolean projection of `diagnose()` so there is exactly one
+   * implementation of the visibility rules. It used to be an independent
+   * re-statement that had drifted: it checked fiscal scope, fiscal area,
+   * operating scope, user panel_ui and subscription, but silently omitted
+   * industry, store-wide panel_ui and store_type — three layers the real
+   * `filterMenuItems` pass does apply. An item hidden by any of those
+   * reported `true` here.
+   *
    * @param menuItem - Menu item to check
    * @returns true if visible, false otherwise
    */
   isMenuItemVisible(menuItem: MenuItem): boolean {
-    // Fiscal guards short-circuit visibility (hide outright when the app does
-    // not own the fiscal_scope, or when the required fiscal area is not active).
+    return this.diagnose(menuItem).visible;
+  }
+
+  /**
+   * Full visibility verdict for a menu item, with the reason when hidden.
+   *
+   * The layers are evaluated in the same order the sidebar applies them, and
+   * the **first** blocker wins. Order matters for the answer quality, not just
+   * for correctness: telling an owner "tu plan no incluye este módulo" when the
+   * real cause is that the module is off for the whole store sends them to the
+   * wrong screen. Cheapest-to-fix layers are therefore reported last.
+   *
+   * `fixPath` is where the *current user* can act. It is `null` when the block
+   * is structural (industry, store type) or above their pay grade — Vexi then
+   * says who to ask instead of routing them to a page they cannot use.
+   */
+  diagnose(menuItem: MenuItem): ModuleVisibilityDiagnosis {
+    const settings = this.authFacade.storeSettings();
+    const moduleKeys = this.moduleKeysFor(menuItem);
+
+    // ─── 1. Fiscal scope ─────────────────────────────────────────────
+    // Binary ownership: the app that does not own the fiscal_scope hides
+    // fiscal items outright, with no locked state.
     if (!this.matchesFiscalScope(menuItem, this.authFacade.fiscalScope())) {
-      return false;
-    }
-    if (
-      !this.matchesFiscalArea(menuItem, this.authFacade.activeFiscalAreas())
-    ) {
-      return false;
+      return {
+        visible: false,
+        blockedBy: 'fiscal_scope',
+        detail:
+          menuItem.requiredFiscalScope === 'ORGANIZATION'
+            ? 'La facturación y contabilidad de esta organización se llevan a nivel de organización, así que este módulo se administra desde el panel de la organización y no desde la tienda.'
+            : 'La facturación y contabilidad se llevan por tienda, así que este módulo vive en el panel de cada tienda y no aquí.',
+        fixPath: null,
+      };
     }
 
-    // Operating scope guard short-circuits visibility:
-    //   - if scope mismatches and showLocked is true, the item still renders
-    //     (in locked state) so this method must report it as visible.
-    //   - if scope mismatches and showLocked is falsy, the item is hidden.
+    // ─── 2. Fiscal area activation ───────────────────────────────────
+    if (!this.matchesFiscalArea(menuItem, this.authFacade.activeFiscalAreas())) {
+      return {
+        visible: false,
+        blockedBy: 'fiscal_area',
+        detail:
+          'El manejo fiscal todavía no está activado para esta tienda. Al activarlo aparecerá este módulo.',
+        fixPath: '/admin/fiscal/activation',
+      };
+    }
+
+    // ─── 3. Operating scope ──────────────────────────────────────────
+    // 'lock' still renders the item (disabled), so it counts as visible.
     const scopeOutcome = this.resolveScopeOutcome(
       menuItem,
       this.authFacade.operatingScope(),
     );
     if (scopeOutcome === 'hide') {
+      return {
+        visible: false,
+        blockedBy: 'operating_scope',
+        detail:
+          menuItem.requiredOperatingScope === 'ORGANIZATION'
+            ? 'Este módulo solo aplica cuando el inventario y las compras se manejan de forma centralizada por la organización. Hoy esta organización opera por tienda.'
+            : 'Este módulo solo aplica cuando cada tienda opera de forma independiente. Hoy esta organización opera de forma centralizada.',
+        fixPath: '/admin/settings/general',
+      };
+    }
+
+    // Items with no panel_ui key (dynamic entries, group headers) skip every
+    // key-driven layer — there is nothing to look up.
+    if (moduleKeys.length) {
+      // ─── 4. Industry ───────────────────────────────────────────────
+      const industries: string[] = settings?.general?.industries?.length
+        ? settings.general.industries
+        : this.authFacade.userIndustries()?.length
+          ? this.authFacade.userIndustries()
+          : ['retail'];
+      const hiddenByIndustries = getModulesHiddenByIndustries(industries);
+      if (moduleKeys.every((key) => hiddenByIndustries.includes(key))) {
+        return {
+          visible: false,
+          blockedBy: 'industry',
+          detail: `Este módulo no aplica al giro de la tienda (${industries.join(', ')}). Se muestra solo en las industrias donde tiene sentido.`,
+          fixPath: '/admin/settings/general',
+        };
+      }
+
+      // ─── 5. Store-wide panel_ui ────────────────────────────────────
+      // A key explicitly `false` in store_settings.panel_ui.STORE_ADMIN is off
+      // for everyone in the store, regardless of the per-user map.
+      const storePanelMap: Record<string, boolean> | undefined =
+        settings?.panel_ui?.STORE_ADMIN;
+      if (
+        storePanelMap &&
+        moduleKeys.every((key) => storePanelMap[key] === false)
+      ) {
+        return {
+          visible: false,
+          blockedBy: 'store_panel_ui',
+          detail:
+            'El módulo está desactivado para toda la tienda en la configuración de módulos del panel. El propietario o un administrador puede volver a activarlo.',
+          fixPath: '/admin/settings/general',
+        };
+      }
+
+      // ─── 6. Store type (modalidad) ─────────────────────────────────
+      const storeType =
+        settings?.general?.store_type || this.authFacade.userStoreType();
+      const hiddenByStoreType =
+        this.storeTypeHiddenModules[storeType || ''] || [];
+      if (moduleKeys.every((key) => hiddenByStoreType.includes(key))) {
+        return {
+          visible: false,
+          blockedBy: 'store_type',
+          detail: `La tienda está configurada como "${storeType}", y en esa modalidad este módulo no se usa.`,
+          fixPath: '/admin/settings/general',
+        };
+      }
+
+      // ─── 7. Per-user panel_ui ──────────────────────────────────────
+      if (!moduleKeys.some((key) => this.authFacade.isModuleVisible(key))) {
+        return {
+          visible: false,
+          blockedBy: 'user_panel_ui',
+          detail:
+            'Tu usuario tiene este módulo oculto en su configuración de panel. Puedes activarlo tú mismo, o pedirle a un administrador que lo haga.',
+          fixPath: '/admin/settings/general',
+        };
+      }
+    }
+
+    // ─── 8. Subscription ─────────────────────────────────────────────
+    if (
+      menuItem.requiresFeature &&
+      !this.subscriptionAccess.canUseAI(menuItem.requiresFeature)()
+    ) {
+      return {
+        visible: false,
+        blockedBy: 'subscription',
+        detail:
+          'El plan actual de la tienda no incluye esta función. Se habilita al cambiar de plan.',
+        fixPath: '/admin/subscription',
+      };
+    }
+
+    // ─── 9. Authorization prefilters ─────────────────────────────────
+    // These two entries carry no panel_ui key of their own, so the layout used
+    // to strip them from the tree before filtering. Folding them in here keeps
+    // the reason available instead of the item just vanishing.
+    if (menuItem.route === '/admin/settings/users' && !this.canManageUsers()) {
+      return {
+        visible: false,
+        blockedBy: 'permission',
+        detail:
+          'Necesitas el permiso de gestión de usuarios (o ser propietario o administrador) para entrar aquí.',
+        fixPath: null,
+      };
+    }
+    if (menuItem.route === '/admin/pqrs' && this.storeHasPqrs() === false) {
+      return {
+        visible: false,
+        blockedBy: 'empty',
+        detail:
+          'La tienda todavía no tiene ninguna PQR, así que la sección permanece oculta. Aparecerá sola en cuanto llegue la primera.',
+        fixPath: null,
+      };
+    }
+    if (menuItem.route === '/admin/settings/vexi' && !this.canConfigureVexi()) {
+      return {
+        visible: false,
+        blockedBy: 'permission',
+        detail:
+          'Solo el propietario o un administrador puede activar o desactivar a Vexi.',
+        fixPath: null,
+      };
+    }
+
+    return {
+      visible: true,
+      blockedBy: null,
+      detail: 'El módulo está disponible.',
+      fixPath: null,
+    };
+  }
+
+  /**
+   * Same verdict, addressed by `panel_ui` key instead of by menu item.
+   *
+   * When `menuItems` is supplied the real item is located in the tree so the
+   * item-level layers (fiscal scope/area, operating scope, subscription) are
+   * evaluated too. Without it only the key-driven layers run — enough for
+   * "¿por qué no veo Inventario?", not enough for a fiscal module, so the
+   * caller should pass the tree whenever it has one.
+   */
+  diagnoseModule(
+    moduleKey: string,
+    menuItems?: MenuItem[],
+  ): ModuleVisibilityDiagnosis {
+    const item = menuItems ? this.findItemByModuleKey(menuItems, moduleKey) : null;
+    if (item) return this.diagnose(item);
+
+    const catalogEntry = STORE_MODULE_BY_KEY[moduleKey];
+    return this.diagnose({
+      label: catalogEntry?.label ?? moduleKey,
+      route: catalogEntry?.route,
+      icon: '',
+    } as MenuItem);
+  }
+
+  /**
+   * The two authorization prefilters as a boolean pair. Shared by the
+   * observable pass (`filterMenuItems`) and the synchronous one (`diagnose`).
+   */
+  private passesAuthorizationGates(item: MenuItem): boolean {
+    if (item.route === '/admin/settings/users' && !this.canManageUsers()) {
       return false;
     }
-
-    const moduleKey = this.moduleKeyMap[menuItem.label];
-    let isVisible = true;
-    if (!moduleKey) {
-      isVisible = true;
-    } else if (Array.isArray(moduleKey)) {
-      isVisible = moduleKey.some((key) => this.authFacade.isModuleVisible(key));
-    } else {
-      isVisible = this.authFacade.isModuleVisible(moduleKey);
+    // `null` means "not hydrated yet". Hiding on unknown is the pre-existing
+    // behavior (the layout's signal defaulted to `false`) and is the right
+    // default: better a late-appearing entry than an empty mailbox flashing at
+    // a brand-new store.
+    if (item.route === '/admin/pqrs' && this.storeHasPqrs() !== true) {
+      return false;
     }
-
-    if (isVisible && menuItem.requiresFeature) {
-      isVisible = this.subscriptionAccess.canUseAI(menuItem.requiresFeature)();
+    if (item.route === '/admin/settings/vexi' && !this.canConfigureVexi()) {
+      return false;
     }
+    return true;
+  }
 
-    return isVisible;
+  /** Depth-first lookup of the menu item whose label maps to `moduleKey`. */
+  findItemByModuleKey(items: MenuItem[], moduleKey: string): MenuItem | null {
+    for (const item of items) {
+      if (this.moduleKeysFor(item).includes(moduleKey)) return item;
+      if (item.children?.length) {
+        const found = this.findItemByModuleKey(item.children, moduleKey);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */
+  private moduleKeysFor(item: MenuItem): string[] {
+    const mapped = this.moduleKeyMap[item.label];
+    if (!mapped) return [];
+    return Array.isArray(mapped) ? mapped : [mapped];
+  }
+
+  /**
+   * Authorization of the logged-in user over the users module. Mirrors
+   * `manageUsersGuard`; derived here from AuthFacade so `diagnose()` can
+   * explain the "Usuarios" entry without the layout having to pass it in.
+   */
+  private canManageUsers(): boolean {
+    return (
+      this.authFacade.hasPermission('store:users:update') ||
+      this.authFacade.isOwner() ||
+      this.authFacade.isAdmin()
+    );
+  }
+
+  /**
+   * Authorization over the Vexi master switch. Mirrors `vexiSettingsGuard`:
+   * role-only and deliberately narrower than `canManageUsers`, because the
+   * switch withdraws the assistant from every user of the store, not just
+   * from the person flipping it. No permission fallback on purpose.
+   */
+  private canConfigureVexi(): boolean {
+    return this.authFacade.isOwner() || this.authFacade.isAdmin();
   }
 }

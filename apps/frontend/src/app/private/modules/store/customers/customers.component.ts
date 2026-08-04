@@ -15,6 +15,10 @@ import {
 import { ToastService, DialogService, type AddressPayload } from '../../../../shared/components';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+} from '../../../../core/services/vexi-ui-host.registry';
 
 @Component({
   selector: 'app-customers',
@@ -109,6 +113,7 @@ export class CustomersComponent {
   private dialogService = inject(DialogService);
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
+  private vexiHosts = inject(VexiUiHostRegistry);
 
   stats = signal<CustomerStats | null>(null);
   customers = signal<Customer[]>([]);
@@ -141,9 +146,90 @@ export class CustomersComponent {
   // Bulk Upload Modal
   isBulkUploadModalOpen = signal(false);
 
+  // ── Host de Vexi ────────────────────────────────────────────────────────
+  //
+  // Adaptador y no `implements VexiUiHost`: esta clase ya define
+  // `openModal(customer?: Customer)`, y la interfaz declara `openModal(id: string)`.
+  // Implementarla en el componente obligaría a renombrar el método que usa la
+  // plantilla, así que el adaptador traduce entre los dos contratos.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'customers',
+    readScreen: () => ({
+      module_key: 'customers',
+      title: 'Clientes',
+      visible_count: this.customers().length,
+      selection: this.selectedCustomer()
+        ? `${this.selectedCustomer()!.first_name} ${this.selectedCustomer()!.last_name}`.trim()
+        : null,
+      filters: { search: this.searchQuery() || undefined },
+      notes: this.loading()
+        ? 'La lista todavía está cargando.'
+        : this.isModalOpen()
+          ? 'Hay una ficha de cliente abierta.'
+          : this.isBulkUploadModalOpen()
+            ? 'La carga masiva de clientes está abierta.'
+            : `En esta página se ven ${this.customers().length}; hay ${this.totalItems()} en total (página ${this.page()}).`,
+    }),
+    listActions: () => [
+      { id: 'nuevo_cliente', label: 'Abrir el formulario de nuevo cliente' },
+      { id: 'carga_masiva', label: 'Abrir la carga masiva de clientes' },
+    ],
+    runAction: async (id) => {
+      switch (id) {
+        case 'nuevo_cliente':
+          this.openCreateModal();
+          return {
+            status: 'needs_user_input' as const,
+            message:
+              'Abrí el formulario de nuevo cliente, vacío y sin guardar. La persona tiene que completarlo.',
+          };
+        case 'carga_masiva':
+          this.openBulkUploadModal();
+          return {
+            status: 'needs_user_input' as const,
+            message: 'Abrí la carga masiva de clientes para que suba el archivo desde ahí.',
+          };
+        default:
+          return {
+            status: 'not_found' as const,
+            message: `La pantalla de Clientes no tiene una acción "${id}".`,
+          };
+      }
+    },
+    setFilter: async (values) => {
+      if (typeof values['search'] !== 'string') {
+        return {
+          status: 'not_found' as const,
+          message:
+            'La lista de Clientes solo filtra por búsqueda. Pasame el texto a buscar.',
+        };
+      }
+
+      // `onSearch` resetea la página; escribir el signal a mano dejaría a la
+      // persona en la página 4 de un resultado que tiene una sola.
+      this.onSearch(values['search']);
+      // Sin conteo: `onSearch` recarga de forma asíncrona, así que `customers()`
+      // acá sigue siendo la página anterior. Prometer un número que no se ha
+      // leído es exactamente lo que el lazo cerrado viene a evitar.
+      return {
+        status: 'ok' as const,
+        message: `Busqué "${values['search']}" en clientes. La lista se está recargando; si necesitas el conteo, léelo de la pantalla después.`,
+      };
+    },
+    openModal: (id) => this.vexiHostAdapter.runAction!(id),
+    refresh: () => {
+      this.loadCustomers();
+      this.loadStats();
+      return { status: 'ok' as const, message: 'Recargué la lista de clientes.' };
+    },
+  };
+
   constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() => this.vexiHosts.unregister(this.vexiHostAdapter));
 
     // Subscribe to userStore$ observable to get the store ID
     this.authFacade.userStore$

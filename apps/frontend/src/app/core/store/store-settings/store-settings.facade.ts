@@ -8,6 +8,7 @@ import {
   PosSettings,
   NotificationsSettings,
   ReceiptsSettings,
+  VexiSettings,
 } from '../../models/store-settings.interface';
 
 /**
@@ -66,5 +67,26 @@ export class StoreSettingsFacade {
 
   readonly modules = computed<Record<string, any> | null>(
     () => this.settings()?.module_flows ?? null,
+  );
+
+  /** Raw Vexi block. `null` when the store never persisted the switch. */
+  readonly vexi = computed<VexiSettings | null>(
+    () => this.settings()?.vexi ?? null,
+  );
+
+  /**
+   * Whether this store switched the Vexi assistant on.
+   *
+   * Absent block means disabled. Vexi acts on the merchant's own data, so it
+   * only shows up where an owner or admin turned it on for that store — never
+   * because of a default the tenant never saw. Only an explicit `true` mounts
+   * the dock.
+   *
+   * Must apply the same rule as `VexiEnabledGuard` on the backend. If this side
+   * is the more permissive of the two, the dock renders against endpoints that
+   * refuse it and the assistant reads as broken rather than off.
+   */
+  readonly vexiEnabled = computed<boolean>(
+    () => this.settings()?.vexi?.enabled === true,
   );
 }

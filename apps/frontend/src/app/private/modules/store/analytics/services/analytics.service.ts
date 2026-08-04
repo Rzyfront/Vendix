@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   ApiResponse,
   AnalyticsResponse,
@@ -43,6 +44,7 @@ import {
   OverviewSummary,
   OverviewTrend,
   OverviewAnalyticsQueryDto,
+  CostCoverage,
 } from '../interfaces/overview-analytics.interface';
 import {
   CustomersSummary,
@@ -106,12 +108,19 @@ export interface ProfitLossSummary {
     discounts: number;
     net_revenue: number;
     shipping_revenue: number;
+    /**
+     * CONTRACT revenue: subtotal − discounts + freight charged, VAT excluded.
+     * This is the figure every "Ingresos" card must show, and the denominator of
+     * both margins below — so the amount and the percentage share one base.
+     */
+    operating_revenue: number;
     tax_collected: number;
   };
   costs: {
     cost_of_goods_sold: number;
     gross_profit: number;
     gross_margin: number;
+    cost_coverage: CostCoverage;
   };
   refunds: {
     total_refunds: number;
@@ -124,6 +133,21 @@ export interface ProfitLossSummary {
     net_profit: number;
     net_margin: number;
     order_count: number;
+  };
+  /**
+   * Previous equivalent period on IDENTICAL definitions, so a growth badge is
+   * never computed off a different metric than the value it sits under.
+   * `*_growth` is `null` when the previous period had no base to compare against.
+   */
+  comparison: {
+    operating_revenue: number;
+    net_profit: number;
+    operating_expenses: number;
+    order_count: number;
+    revenue_growth: number | null;
+    net_profit_growth: number | null;
+    expenses_growth: number | null;
+    orders_growth: number | null;
   };
 }
 
@@ -156,14 +180,27 @@ interface CacheEntry<T> {
   lastFetch: number;
 }
 
-// Static cache
+/**
+ * Process-wide analytics cache.
+ *
+ * Module-level ON PURPOSE (it must survive component re-creation while the user
+ * navigates between analytics views), which is exactly why the key MUST carry the
+ * store scope: the backend derives the tenant from the session, so two stores ask
+ * the same URL with the same params. Before the scope prefix existed, a
+ * multi-store admin switching stores within the 60 s TTL was served the previous
+ * store's numbers.
+ */
 const analyticsCache = new Map<string, CacheEntry<Observable<any>>>();
+
+/** Store scope the cache currently holds; a change wipes it (see `withCache`). */
+let lastCachedScope: string | null = null;
 
 @Injectable({
   providedIn: 'root',
 })
 export class AnalyticsService {
   private http = inject(HttpClient);
+  private readonly authFacade = inject(AuthFacade);
   private readonly CACHE_TTL = 60000; // 60 seconds for analytics
 
   private getApiUrl(endpoint: string): string {
@@ -192,12 +229,33 @@ export class AnalyticsService {
     return params;
   }
 
+  /**
+   * Store scope of the current session. The backend resolves the tenant from the
+   * session, so the URL alone does NOT identify whose numbers a response holds —
+   * the cache key has to say it.
+   */
+  private storeScopeKey(): string {
+    const id = (this.authFacade.userStore() as any)?.id;
+    return id != null ? `s${id}` : 's_';
+  }
+
   private withCache<T>(
     key: string,
     factory: () => Observable<T>,
   ): Observable<T> {
+    const scope = this.storeScopeKey();
+
+    // A store switch invalidates EVERYTHING cached for the previous tenant. The
+    // scope prefix alone would already make those entries unreachable; dropping
+    // them also keeps the module-level Map from growing per visited store.
+    if (scope !== lastCachedScope) {
+      analyticsCache.clear();
+      lastCachedScope = scope;
+    }
+
+    const scopedKey = `${scope}|${key}`;
     const now = Date.now();
-    const cached = analyticsCache.get(key);
+    const cached = analyticsCache.get(scopedKey);
 
     if (cached && now - cached.lastFetch < this.CACHE_TTL) {
       return cached.observable as Observable<T>;
@@ -206,12 +264,12 @@ export class AnalyticsService {
     const observable$ = factory().pipe(
       shareReplay({ bufferSize: 1, refCount: false }),
       tap(() => {
-        const entry = analyticsCache.get(key);
+        const entry = analyticsCache.get(scopedKey);
         if (entry) entry.lastFetch = Date.now();
       }),
     );
 
-    analyticsCache.set(key, { observable: observable$, lastFetch: now });
+    analyticsCache.set(scopedKey, { observable: observable$, lastFetch: now });
     return observable$;
   }
 

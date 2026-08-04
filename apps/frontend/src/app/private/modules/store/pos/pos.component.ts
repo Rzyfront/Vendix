@@ -10,6 +10,20 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
+import {
+  VexiPosBridgeService,
+  type VexiPosActionResult,
+  type VexiPosCartSnapshot,
+} from '../../../../core/services/vexi-pos-bridge.service';
+import { VexiUiContextService } from '../../../../core/services/vexi-ui-context.service';
+import {
+  VexiUiHostRegistry,
+  type VexiUiAction,
+  type VexiUiActionResult,
+  type VexiUiHost,
+  type VexiUiScreen,
+} from '../../../../core/services/vexi-ui-host.registry';
 
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -1002,6 +1016,9 @@ export class PosComponent {
     PosProductSelectionComponent,
   );
   private customerService = inject(PosCustomerService);
+  private vexiPos = inject(VexiPosBridgeService);
+  private vexiHosts = inject(VexiUiHostRegistry);
+  private vexiUiContext = inject(VexiUiContextService);
   private paymentService = inject(PosPaymentService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -1030,6 +1047,49 @@ export class PosComponent {
   );
 
   constructor() {
+    // Vexi reaches the POS through this handle while the screen is mounted.
+    // Registering here rather than letting the command service query the URL
+    // means "is the POS open" is answered by the component's own lifetime —
+    // the two disagree during a route transition, and an item added to a
+    // screen that is tearing down is silently lost.
+    this.vexiPos.register(this);
+    this.destroyRef.onDestroy(() => this.vexiPos.unregister(this));
+
+    // Registered on the generic registry too, through an adapter rather than by
+    // implementing the interface on the component. The POS already owns method
+    // names like `refresh`, and the adapter keeps the two contracts from
+    // colliding while still exposing what the generic commands need — chiefly
+    // `ui_read_screen`, so "cóbrame esto" has a referent while the person is
+    // looking at the cart.
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() =>
+      this.vexiHosts.unregister(this.vexiHostAdapter),
+    );
+
+    // The cart travels with every turn as prompt context, not as a tool result.
+    // `ui_pos_read_cart` is a `clientSide` tool, so the browser runs it and the
+    // server never learns the answer — for a *read* that is the whole point of
+    // the call, which left Vexi asked "¿qué llevo?" with nothing to say. The
+    // context channel and its backend renderer (`buildUiContext`) already
+    // existed and simply had no producer; this is it. Pushed from an effect so
+    // the snapshot is current at send time, and cleared on destroy because a
+    // cart reported from a screen the user already left is worse than none.
+    effect(() => {
+      const summary = this.cartSummary();
+      const customer = this.selectedCustomer();
+      this.vexiUiContext.contribute('pos', {
+        pos: {
+          item_count: this.cartItems().length,
+          total: summary.total,
+          customer: customer
+            ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
+              null
+            : null,
+        },
+      });
+    });
+    this.destroyRef.onDestroy(() => this.vexiUiContext.clear('pos'));
+
     this.checkMobile();
     this.setupSubscriptions();
     this.loadStoreSettings();
@@ -2200,6 +2260,422 @@ export class PosComponent {
           );
         },
       });
+  }
+
+  // ── Vexi: API pública del POS ───────────────────────────────────────────
+  //
+  // Same doctrine as `handleBarcodeScan`: every add goes through the
+  // product-selection child's own `onAddToCart` / `onVariantSelected`, so
+  // stock validation, variant mapping, the prepared-vs-KDS decision and the
+  // toasts stay identical to a manual tap. Vexi never touches `PosCartService`
+  // directly — carts built that way are the ones checkout later rejects.
+  //
+  // Decisions the product reserves for a human — variant, weight,
+  // prepared-vs-stock, reservation, and payment — are NOT made here. They
+  // return `needs_user_input` and Vexi asks.
+
+  /**
+   * Resolves a product by free text and adds it, or reports what a human has
+   * to decide. Registered with `VexiPosBridgeService` while the POS is mounted.
+   */
+  async vexiAddProductByName(
+    query: string,
+    quantity: number,
+  ): Promise<VexiPosActionResult> {
+    const child = this.productSelectionList()[0];
+    if (!child) {
+      return {
+        status: 'error',
+        message: 'El selector de productos aún no está listo en pantalla.',
+      };
+    }
+
+    const results = await firstValueFrom(
+      this.productService.searchProducts({ query } as any, 1, 8),
+    ).catch(() => null);
+
+    const products: Product[] = (results as any)?.products ?? [];
+
+    if (!products.length) {
+      return {
+        status: 'not_found',
+        message: `No encontré ningún producto que coincida con "${query}".`,
+      };
+    }
+
+    // More than one match is a decision, not a problem to solve by guessing:
+    // adding the wrong item to a live sale is worse than one more question.
+    const exact = products.filter(
+      (p) => p.name?.trim().toLowerCase() === query.trim().toLowerCase(),
+    );
+    const candidates = exact.length === 1 ? exact : products;
+
+    if (candidates.length > 1) {
+      return {
+        status: 'needs_user_input',
+        message: `Hay ${candidates.length} productos que coinciden con "${query}".`,
+        detail: candidates.slice(0, 5).map((p) => p.name),
+      };
+    }
+
+    const product = candidates[0];
+
+    if ((product.product_variants ?? []).length > 0) {
+      // Opens the child's variant modal. The promise below does not wait for
+      // the click — the command service caps the wait and reports it as
+      // pending on the user.
+      void child.onAddToCart(product);
+      return {
+        status: 'needs_user_input',
+        message: `"${product.name}" tiene variantes. Le abrí el selector para que elija.`,
+      };
+    }
+
+    // `onAddToCart` takes no quantity — it adds one unit and the cart merges
+    // repeats into a single line. Looping reuses that exact path instead of
+    // reaching past it to set a quantity directly, which would skip the stock
+    // check it runs per unit.
+    const units = Math.max(1, Math.min(Math.trunc(quantity) || 1, 99));
+    const before = this.vexiCartUnits();
+
+    // One shared deadline rather than one per unit: `withUserInputTimeout`
+    // cuts the whole command off at 20s, so a per-unit budget would let a
+    // large quantity sail past that cap and get reported as "pending on the
+    // user" when it is really a stall.
+    const deadline = Date.now() + 12000;
+
+    for (let i = 0; i < units; i++) {
+      await child.onAddToCart(product);
+      // Verified unit by unit, and sequentially: the cart merges repeats into
+      // a single line, so firing all N and checking once cannot tell "3 went
+      // in" from "1 went in three times over the same line".
+      const target = before + i + 1;
+      if ((await this.vexiWaitForCartUnits(target, deadline)) < target) break;
+    }
+
+    // `onAddToCart` returns nothing and swallows its own refusals: out of
+    // stock, not sellable, a modal it opened and is waiting on. Reporting `ok`
+    // on the strength of having called it made Vexi tell the user "agregué el
+    // café" over an empty cart. The cart itself is the only honest witness.
+    const added = this.vexiCartUnits() - before;
+
+    if (added <= 0) {
+      return {
+        status: 'error',
+        message: `Pedí agregar "${product.name}" pero el carrito no lo aceptó. Puede estar sin stock, no ser vendible, o el punto de venta puede estar esperando un dato en pantalla.`,
+      };
+    }
+
+    if (added < units) {
+      return {
+        status: 'needs_user_input',
+        message: `De ${units} unidades de ${product.name} solo entraron ${added}. Revisa el stock disponible en pantalla.`,
+      };
+    }
+
+    return {
+      status: 'ok',
+      message: `Agregué ${units > 1 ? `${units} × ` : ''}${product.name} al carrito.`,
+    };
+  }
+
+  /**
+   * Total units in the cart, used to tell a real add from a silent refusal.
+   *
+   * Units and not line count: adding a second unit of something already in the
+   * cart merges into the existing line, so counting lines would read that as
+   * nothing having happened.
+   */
+  private vexiCartUnits(): number {
+    return this.cartItems().reduce(
+      (total, item) => total + (Number(item.quantity) || 0),
+      0,
+    );
+  }
+
+  /**
+   * Waits until the cart reports at least `target` units, or the deadline hits.
+   *
+   * The cart is the only honest witness to an add, but it has to be given time
+   * to answer. `onAddToCart` resolves *before* the cart does: it subscribes to
+   * `cartService.addToCart()` and returns without awaiting the round trip
+   * (`pos-product-selection.component.ts:1511`). Reading the count the instant
+   * that call returns therefore reads the value from before the add, which
+   * reported every single successful add as a refusal.
+   *
+   * Resolves with whatever the count is when it stops waiting — never throws,
+   * because the caller decides what a short count means.
+   */
+  private vexiWaitForCartUnits(
+    target: number,
+    deadline: number,
+  ): Promise<number> {
+    return new Promise<number>((resolve) => {
+      const poll = () => {
+        const units = this.vexiCartUnits();
+        if (units >= target || Date.now() >= deadline) {
+          resolve(units);
+          return;
+        }
+        setTimeout(poll, 80);
+      };
+      poll();
+    });
+  }
+
+  async vexiRemoveLineByName(query: string): Promise<VexiPosActionResult> {
+    const needle = query.trim().toLowerCase();
+    const matches = this.cartItems().filter((item) =>
+      (item.product?.name ?? item.description ?? '').toLowerCase().includes(needle),
+    );
+
+    if (!matches.length) {
+      return {
+        status: 'not_found',
+        message: `No hay ninguna línea que coincida con "${query}" en el carrito.`,
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        status: 'needs_user_input',
+        message: `Hay ${matches.length} líneas que coinciden con "${query}". Dime cuál quitar.`,
+        detail: matches.map((m) => m.product?.name ?? m.description),
+      };
+    }
+
+    await firstValueFrom(this.cartService.removeFromCart(matches[0].id));
+    return {
+      status: 'ok',
+      message: `Quité ${matches[0].product?.name ?? matches[0].description} del carrito.`,
+    };
+  }
+
+  async vexiSetCustomerByQuery(query: string): Promise<VexiPosActionResult> {
+    const response = await firstValueFrom(
+      this.customerService.searchCustomers({ query, limit: 5 }),
+    ).catch(() => null);
+
+    const customers = (response as any)?.data ?? [];
+
+    if (!customers.length) {
+      return {
+        status: 'not_found',
+        message: `No encontré ningún cliente que coincida con "${query}".`,
+      };
+    }
+    if (customers.length > 1) {
+      return {
+        status: 'needs_user_input',
+        message: `Hay ${customers.length} clientes que coinciden con "${query}".`,
+        detail: customers.map(
+          (c: PosCustomer) => `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(),
+        ),
+      };
+    }
+
+    this.customerService.selectCustomer(customers[0]);
+    const name =
+      `${customers[0].first_name ?? ''} ${customers[0].last_name ?? ''}`.trim();
+    return { status: 'ok', message: `Asigné la venta a ${name}.` };
+  }
+
+  // ── Host genérico de Vexi ───────────────────────────────────────────────
+  //
+  // El POS ya expone sus comandos propios (`ui_pos_*`), que son mejores que
+  // cualquier equivalente genérico: entienden variantes, peso y preparados. Se
+  // registra también como host genérico por una sola razón — que `ui_read_screen`
+  // funcione aquí. Sin eso, "cóbrame esto" en el POS no tiene referente y Vexi
+  // tiene que preguntar qué es "esto" mientras lo tiene delante.
+
+  /**
+   * The POS as the generic registry sees it.
+   *
+   * A stable object built once, not a getter: `unregister` compares by identity, so a
+   * fresh literal on every access would never match the registered one and the handle
+   * would leak past the component's destruction.
+   */
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'pos',
+    readScreen: () => this.vexiReadScreen(),
+    listActions: () => this.vexiListActions(),
+    runAction: (id) => this.vexiRunAction(id),
+  };
+
+  private vexiReadScreen(): VexiUiScreen {
+    const cart = this.vexiReadCart();
+
+    return {
+      module_key: 'pos',
+      title: 'Punto de Venta',
+      visible_count: cart.lines.length,
+      selection: cart.customer,
+      notes: cart.lines.length
+        ? `Carrito con ${cart.lines.length} línea(s), total ${cart.total}${
+            cart.customer ? `, cliente ${cart.customer}` : ', sin cliente'
+          }.`
+        : 'El carrito está vacío.',
+    };
+  }
+
+  private vexiListActions(): VexiUiAction[] {
+    return [
+      { id: 'cobrar', label: 'Cobrar la venta abierta', mutates: true },
+      { id: 'leer_carrito', label: 'Mostrar el detalle del carrito' },
+    ];
+  }
+
+  /**
+   * Delegates to the typed POS commands instead of reimplementing them.
+   *
+   * The generic path exists so `ui_click_action` works here at all; the typed
+   * `ui_pos_*` tools remain the right way in, because they understand variants,
+   * weight and prepared items and the generic ones cannot.
+   */
+  private async vexiRunAction(id: string): Promise<VexiUiActionResult> {
+    switch (id) {
+      case 'cobrar':
+        return this.vexiCheckout();
+      case 'leer_carrito': {
+        const cart = this.vexiReadCart();
+        return {
+          status: 'ok',
+          message: `El carrito lleva ${cart.lines.length} línea(s) por ${cart.total}.`,
+          detail: cart,
+        };
+      }
+      default:
+        return {
+          status: 'not_found',
+          message: `El Punto de Venta no tiene una acción "${id}".`,
+        };
+    }
+  }
+
+  vexiReadCart(): VexiPosCartSnapshot {
+    const summary = this.cartSummary();
+    const customer = this.selectedCustomer();
+
+    return {
+      lines: this.cartItems().map((item) => ({
+        name: item.product?.name ?? item.description ?? 'Línea sin nombre',
+        quantity: item.quantity ?? 0,
+        unit_price: Number(item.unitPrice ?? 0),
+        total: Number(item.totalPrice ?? 0),
+      })),
+      subtotal: Number(summary?.subtotal ?? 0),
+      total: Number(summary?.total ?? 0),
+      customer: customer
+        ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim()
+        : null,
+    };
+  }
+
+  /**
+   * Charges the open sale, and reports what actually happened.
+   *
+   * Deliberately drives `onCheckout()` — the very method the cashier's button
+   * calls — instead of assembling a payment of its own. The checkout shell is
+   * where fulfillment, table, payment method, cash received and change are
+   * decided, and where the backend fires the KDS inside the payment
+   * transaction. A second payment path written for Vexi would be a second set
+   * of accounting and inventory consequences, subtly out of step with the
+   * first.
+   *
+   * The outcome is read from the screen's own witnesses rather than from a
+   * callback: the shell has three separate exits (payment completed, closed by
+   * the user, closed programmatically), so a hook per exit would silently miss
+   * the fourth one somebody adds later. Watching state covers all of them.
+   */
+  async vexiCheckout(): Promise<VexiPosActionResult> {
+    if (this.isEmpty) {
+      return {
+        status: 'error',
+        message: 'El carrito está vacío, así que no hay nada que cobrar.',
+      };
+    }
+
+    if (this.isEditMode()) {
+      return {
+        status: 'error',
+        message:
+          'Esta venta está en modo edición de una orden existente, no en una venta nueva.',
+      };
+    }
+
+    const cart = this.vexiReadCart();
+    const orderBefore = this.currentOrderNumber();
+
+    this.onCheckout();
+
+    // Not opening at all means a guard inside `onCheckout` refused (no cart
+    // state). Reporting "waiting on the user" there would be a lie.
+    if (!this.showCheckoutModal()) {
+      return {
+        status: 'error',
+        message: 'No pude abrir el cobro para esta venta.',
+      };
+    }
+
+    const settled = await this.vexiWaitForCheckoutOutcome(orderBefore);
+
+    if (settled === 'paid') {
+      return {
+        status: 'ok',
+        message: `Venta cobrada por ${cart.total}. Orden ${
+          this.currentOrderNumber() ?? 'creada'
+        }.`,
+        detail: { order_number: this.currentOrderNumber(), total: cart.total },
+      };
+    }
+
+    if (settled === 'abandoned') {
+      return {
+        status: 'needs_user_input',
+        message: 'Se cerró el cobro sin completar el pago.',
+      };
+    }
+
+    return {
+      status: 'needs_user_input',
+      message:
+        'Le abrí el cobro y está eligiendo el medio de pago. La venta todavía no está cobrada.',
+    };
+  }
+
+  /**
+   * Resolves once the checkout shell settles: `paid` when a new order number
+   * appears, `abandoned` when the shell closes without one, `pending` on
+   * timeout — which is not a failure, only the end of Vexi's turn.
+   */
+  private vexiWaitForCheckoutOutcome(
+    orderBefore: string | null,
+  ): Promise<'paid' | 'abandoned' | 'pending'> {
+    // Longer than the 20s cap on other POS commands on purpose: choosing a
+    // payment method and counting cash is slower than picking a variant.
+    const deadline = Date.now() + 90000;
+
+    return new Promise((resolve) => {
+      const poll = () => {
+        const orderNow = this.currentOrderNumber();
+        if (orderNow && orderNow !== orderBefore) {
+          resolve('paid');
+          return;
+        }
+        // Checked after the order number, not before: the success path closes
+        // the shell and sets the order in the same handler, and the opposite
+        // order would report a completed sale as abandoned.
+        if (!this.showCheckoutModal()) {
+          resolve('abandoned');
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve('pending');
+          return;
+        }
+        setTimeout(poll, 150);
+      };
+      poll();
+    });
   }
 
   onCartItemRemoved(itemId: string): void {

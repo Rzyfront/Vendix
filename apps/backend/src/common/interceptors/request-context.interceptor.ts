@@ -45,11 +45,32 @@ export class RequestContextInterceptor implements NestInterceptor {
       contextObj.store_id = user.store_id;
       contextObj.app_type = user.app_type; // ✅ Del JWT — DomainScopeGuard
       contextObj.roles = effectiveRoles;
-      contextObj.permissions = user.permissions || [];
+      contextObj.permissions = this.normalizePermissions(user.permissions);
       contextObj.is_super_admin =
         user.is_super_admin || effectiveRoles.includes('super_admin');
       contextObj.is_owner = user.is_owner || effectiveRoles.includes('owner');
       contextObj.email = user.email;
+
+      // Only captured for authenticated requests. The AI api-bridge replays
+      // requests as this user over internal HTTP; that is the whole reason the
+      // token has to survive past the guard layer.
+      //
+      // Both sources are read, in the same order as `JwtStrategy`'s
+      // `fromExtractors([fromAuthHeaderAsBearerToken, fromUrlQueryParameter])`.
+      // Reading only the header made this silently asymmetric: `EventSource`
+      // cannot send headers, so the SSE chat endpoint authenticates via
+      // `?token=` and lands inside this `if (user)` block with no token
+      // captured. Every bridge call during an agent turn then failed with "no
+      // hay credencial", which reads like a permissions problem and is really
+      // this branch. If the two extractor lists ever diverge again, the same
+      // class of bug comes back.
+      const authHeader = req.headers?.authorization;
+      const queryToken = req.query?.token;
+      if (typeof authHeader === 'string' && /^Bearer /i.test(authHeader)) {
+        contextObj.access_token = authHeader.slice(7);
+      } else if (typeof queryToken === 'string' && queryToken) {
+        contextObj.access_token = queryToken;
+      }
     }
 
     // In ecommerce routes, the DomainResolverMiddleware might have found a store_id
@@ -71,5 +92,31 @@ export class RequestContextInterceptor implements NestInterceptor {
     return RequestContextService.asyncLocalStorage.run(contextObj, () => {
       return next.handle();
     });
+  }
+
+  /**
+   * `JwtStrategy` hydrates `req.user.permissions` as row objects
+   * (`{ name, path, method, status }`) because `PermissionsGuard` matches on
+   * path + method. `RequestContext.permissions` is declared `string[]` and
+   * every ALS consumer calls `.includes('store:...')` on it, so the objects
+   * have to be flattened to names here — otherwise the comparison is
+   * string-vs-object and silently never matches.
+   *
+   * Inactive permission rows are dropped so a revoked grant cannot satisfy a
+   * name check, mirroring the `status === 'active'` filter in the guard.
+   */
+  private normalizePermissions(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((p) => {
+        if (typeof p === 'string') return p;
+        if (p && typeof p === 'object') {
+          const row = p as { name?: unknown; status?: unknown };
+          if (row.status !== undefined && row.status !== 'active') return '';
+          return typeof row.name === 'string' ? row.name : '';
+        }
+        return '';
+      })
+      .filter((name): name is string => name.length > 0);
   }
 }

@@ -27,6 +27,14 @@
 #      día corrido. Ese valor alimenta el CUFE/CUNE y la DIAN lo acepta sin
 #      quejarse porque parsea perfecto. Usa localTimeString()/localOffsetString():
 #      el desfase se DERIVA de la misma conversión que produjo el reloj.
+#   6. COLUMNA DE FECHA SIN CLASIFICAR: un `*_date: {` en un servicio de analytics
+#      que no declara en su línea si es una BUSINESS-DATE (`tz-audit:date-only`,
+#      que exige resolveLocalDateOnlyRange) o un INSTANTE real (`tz-audit:ignore`).
+#      Una business-date guardada como medianoche naive, comparada contra la
+#      ventana local (05:00 en Bogotá), cae un día antes — y el día 1, un mes antes.
+#   7. COGS SIN COBERTURA: `COALESCE(cost_price, 0)` sin emitir `units_without_cost`.
+#      Convierte "no sé el costo" en "el costo fue cero", que se ve idéntico a un
+#      margen real del 100 %. La cifra tiene que viajar con su auditoría.
 #
 # Se ignoran: comentarios, archivos *.spec.ts (describen el patrón en strings de
 # test) y líneas marcadas con `tz-audit:ignore` (escape hatch documentado para
@@ -58,7 +66,7 @@ report() { # $1 = título, $2 = hits (multilínea)
   fi
 }
 
-echo "== tz-audit (1/5): DATE_TRUNC literal fuera del primitivo =="
+echo "== tz-audit (1/7): DATE_TRUNC literal fuera del primitivo =="
 HITS="$(grep -rnE "DATE_TRUNC[[:space:]]*\(" "$BACKEND_SRC" --include="*.ts" 2>/dev/null \
   | grep -vE "$NOT_COMMENT" \
   | grep -vE "$SKIP_TESTS" \
@@ -66,7 +74,7 @@ HITS="$(grep -rnE "DATE_TRUNC[[:space:]]*\(" "$BACKEND_SRC" --include="*.ts" 2>/
   | grep -vF "$ALLOW_UTIL" || true)"
 report "usa localPeriodSql() en vez de DATE_TRUNC crudo" "$HITS"
 
-echo "== tz-audit (2/5): EXTRACT(... FROM tabla.columna) sin conversión de TZ =="
+echo "== tz-audit (2/7): EXTRACT(... FROM tabla.columna) sin conversión de TZ =="
 HITS="$(grep -rnE "EXTRACT[[:space:]]*\([A-Za-z_]+[[:space:]]+FROM[[:space:]]+[a-z_]+\.[a-z_]+[[:space:]]*\)" "$BACKEND_SRC" --include="*.ts" 2>/dev/null \
   | grep -vE "$NOT_COMMENT" \
   | grep -vE "$SKIP_TESTS" \
@@ -74,14 +82,14 @@ HITS="$(grep -rnE "EXTRACT[[:space:]]*\([A-Za-z_]+[[:space:]]+FROM[[:space:]]+[a
   | grep -vF "$ALLOW_UTIL" || true)"
 report "envuelve la columna en localBucketSql() antes de EXTRACT (o marca la business-date con tz-audit:ignore)" "$HITS"
 
-echo "== tz-audit (3/5): setUTCHours/Date.UTC en servicios de analytics =="
+echo "== tz-audit (3/7): setUTCHours/Date.UTC en servicios de analytics =="
 HITS="$(grep -rnE "setUTCHours|Date\.UTC" "$ANALYTICS_SERVICES" --include="*.service.ts" 2>/dev/null \
   | grep -vE "$NOT_COMMENT" \
   | grep -vE "$SKIP_TESTS" \
   | grep -vE "$IGNORE_MARK" || true)"
 report "resuelve el rango con parseDateRange(query, tz), no con aritmética UTC" "$HITS"
 
-echo "== tz-audit (4/5): fan-out SUM(columna-de-orden) sobre JOIN order_items plano =="
+echo "== tz-audit (4/7): fan-out SUM(columna-de-orden) sobre JOIN order_items plano =="
 # El bug es una relación entre DOS líneas dentro de un mismo query: un JOIN PLANO a
 # order_items (que multiplica la fila-orden por nº de ítems) cerca de un SUM de una
 # columna a NIVEL-ORDEN (grand_total/tax_amount/subtotal_amount/discount_amount).
@@ -111,7 +119,7 @@ if [ -n "$FANOUT_FILES" ]; then
 fi
 report "pre-agrega order_items por order_id (subquery) antes de SUM de columnas de orden — evita fan-out" "$HITS"
 
-echo "== tz-audit (5/5): desfase ±HH:MM literal dentro de un string/template =="
+echo "== tz-audit (5/7): desfase ±HH:MM literal dentro de un string/template =="
 # Solo marca el desfase cuando vive DENTRO de comillas (simples, dobles o backtick),
 # que es la forma en que se concatena a un reloj UTC. Un `// UTC-05:00` al final de
 # una línea de código, o un `const COLOMBIA_OFFSET_MINUTES = -5 * 60`, no llevan
@@ -122,6 +130,57 @@ HITS="$(grep -rnE "['\"\`][^'\"\`]*[-+][0-9]{2}:[0-9]{2}" "$BACKEND_SRC" --inclu
   | grep -vE "$IGNORE_MARK" \
   | grep -vF "$ALLOW_UTIL" || true)"
 report "deriva el desfase con localTimeString()/localOffsetString(), no lo concatenes a un reloj UTC" "$HITS"
+
+echo "== tz-audit (6/7): columna de fecha sin clasificar en un servicio de analytics =="
+# El bug: una BUSINESS-DATE (expenses.expense_date, accounting_entries.entry_date, ...)
+# guarda la fecha local del negocio como medianoche NAIVE. Compararla contra la ventana
+# de resolveLocalDateRange —que para Bogotá empieza a las 05:00— deja el valor DEBAJO
+# del límite inferior, así que el registro cae un día ANTES (y el día 1, un MES antes).
+# Medido antes del fix: todo gasto creado por la UI salía corrido exactamente un día.
+#
+# La causa raíz fue que NADIE clasificaba la columna. Así que cada `*_date: {` en un
+# servicio de analytics debe declarar en su propia línea de qué tipo es:
+#   `tz-audit:ignore`     → es un INSTANTE real (guarda hora), va con la ventana de
+#                           timestamps de parseDateRange().
+#   `tz-audit:date-only`  → es una BUSINESS-DATE; el archivo DEBE entonces usar
+#                           resolveLocalDateOnlyRange(), o la declaración es falsa.
+# La marca va en la línea, no en un comentario cercano: un chequeo por archivo se
+# saltaba con solo nombrar el helper en prosa.
+DATE_HITS="$(grep -rnE "[a-z_]+_date:[[:space:]]*\{" "$ANALYTICS_SERVICES" --include="*.service.ts" 2>/dev/null \
+  | grep -vE "$NOT_COMMENT" \
+  | grep -vE "$SKIP_TESTS" || true)"
+HITS=""
+if [ -n "$DATE_HITS" ]; then
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    f="${hit%%:*}"
+    case "$hit" in
+      *"$IGNORE_MARK"*) continue ;;
+      *tz-audit:date-only*)
+        grep -q "resolveLocalDateOnlyRange" "$f" \
+          || HITS="$HITS$hit  <-- declarada date-only pero el archivo no usa resolveLocalDateOnlyRange"$'\n'
+        ;;
+      *)
+        HITS="$HITS$hit  <-- sin clasificar"$'\n'
+        ;;
+    esac
+  done <<< "$DATE_HITS"
+fi
+report "clasifica la columna en su propia línea: tz-audit:date-only (business-date, exige resolveLocalDateOnlyRange) o tz-audit:ignore (instante real)" "$HITS"
+
+echo "== tz-audit (7/7): COGS con COALESCE(cost_price, 0) sin contador de cobertura =="
+# `COALESCE(cost_price, 0)` convierte "no sé el costo" en "el costo fue cero", y eso se
+# ve EXACTAMENTE igual que un margen del 100 %. Medido: 116 de 449 líneas vendidas no
+# tenían snapshot de costo. La suma puede seguir tratándolo como 0, pero la respuesta
+# tiene que viajar con `units_without_cost` para que la cifra sea auditable.
+COGS_FILES="$(grep -rlE "COALESCE\([a-z_.]*cost_price,[[:space:]]*0\)" "$ANALYTICS_SERVICES" --include="*.service.ts" 2>/dev/null || true)"
+HITS=""
+if [ -n "$COGS_FILES" ]; then
+  for f in $COGS_FILES; do
+    grep -q "units_without_cost" "$f" || HITS="$HITS$f: COGS sin units_without_cost"$'\n'
+  done
+fi
+report "emite units_without_cost junto al COGS (ver analytics-metrics.contract.ts / CostCoverage)" "$HITS"
 
 if [ "$FAIL" -ne 0 ]; then
   echo ""

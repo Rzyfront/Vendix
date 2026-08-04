@@ -10,6 +10,10 @@ import { OrderStatsComponent } from '../components/order-stats';
 import { ExtendedOrderStats } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  VexiUiHost,
+  VexiUiHostRegistry,
+} from '../../../../../core/services/vexi-ui-host.registry';
 
 @Component({
   selector: 'app-orders',
@@ -23,6 +27,7 @@ export class OrdersComponent {
   private ordersService = inject(StoreOrdersService);
   private destroyRef = inject(DestroyRef);
   private authFacade = inject(AuthFacade);
+  private vexiHosts = inject(VexiUiHostRegistry);
 
   /**
    * QUI-599: gate del item "Operaciones masivas" del dropdown del listado —
@@ -63,7 +68,78 @@ export class OrdersComponent {
    */
   reloadTick = signal(0);
 
+  // ── Host de Vexi ────────────────────────────────────────────────────────
+  //
+  // Deliberadamente NO declara `setFilter`: los filtros de este módulo viven
+  // dentro de `OrdersListComponent`, no acá. Declararlos y no aplicarlos haría
+  // que Vexi dijera "ya filtré" sobre una lista intacta, que es exactamente el
+  // defecto de honestidad que el registro de hosts viene a cerrar.
+  private readonly vexiHostAdapter: VexiUiHost = {
+    vexiModuleKey: 'orders',
+    readScreen: () => {
+      const stats = this.orderStats();
+
+      return {
+        module_key: 'orders',
+        title: 'Ventas',
+        notes:
+          `${stats.total_orders} orden(es) en total, ${stats.pending_orders} pendiente(s), ` +
+          `${stats.completed_orders} completada(s).`,
+      };
+    },
+    listActions: () => {
+      const actions = [
+        { id: 'nueva_venta', label: 'Ir al POS para registrar una venta' },
+      ];
+
+      if (this.canBulkOrderOperations()) {
+        actions.push({
+          id: 'operaciones_masivas',
+          label: 'Abrir las operaciones masivas de órdenes',
+        });
+      }
+
+      return actions;
+    },
+    runAction: async (id) => {
+      switch (id) {
+        case 'nueva_venta':
+          this.createNewOrder();
+          return {
+            status: 'ok' as const,
+            message: 'Te llevé al POS para registrar la venta.',
+          };
+        case 'operaciones_masivas':
+          // El gate de permiso se repite acá: `listActions` solo oculta la
+          // afordancia, y el modelo puede pedir un id que no listamos.
+          if (!this.canBulkOrderOperations()) {
+            return {
+              status: 'error' as const,
+              message: 'Esta cuenta no tiene permiso para operaciones masivas de órdenes.',
+            };
+          }
+          this.router.navigate(['/admin/orders/bulk']);
+          return {
+            status: 'ok' as const,
+            message: 'Te llevé a las operaciones masivas de órdenes.',
+          };
+        default:
+          return {
+            status: 'not_found' as const,
+            message: `La pantalla de Ventas no tiene una acción "${id}".`,
+          };
+      }
+    },
+    refresh: () => {
+      this.refreshOrders();
+      return { status: 'ok' as const, message: 'Recargué las ventas y sus totales.' };
+    },
+  };
+
   constructor() {
+    this.vexiHosts.register(this.vexiHostAdapter);
+    this.destroyRef.onDestroy(() => this.vexiHosts.unregister(this.vexiHostAdapter));
+
     this.loadOrderStats();
     this.router.events
       .pipe(takeUntilDestroyed(this.destroyRef))

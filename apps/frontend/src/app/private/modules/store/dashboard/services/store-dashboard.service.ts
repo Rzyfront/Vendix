@@ -1,8 +1,9 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError, map } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 export interface StoreDashboardStats {
   recentOrders: RecentOrder[];
@@ -60,11 +61,25 @@ const storeProductsStatsCache = new Map<string, CacheEntry<Observable<any>>>();
 export class StoreDashboardService {
   private readonly apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
+  private readonly authFacade = inject(AuthFacade);
 
   constructor(private http: HttpClient) {}
 
+  /**
+   * Store scope of the current session. The endpoint below is store-scoped by the
+   * session, not by a path param, so the URL does NOT identify whose stats a
+   * response holds — the cache key has to. The key used to be the constant
+   * `'dashboard'`, so a store switch inside the 30 s TTL served the previous
+   * store's alerts; and `invalidateCache(storeId)` deleted the key `storeId`,
+   * which never existed, so the entry was never actually invalidated.
+   */
+  private storeScopeKey(): string {
+    const id = (this.authFacade.userStore() as any)?.id;
+    return id != null ? `dashboard:s${id}` : 'dashboard:s_';
+  }
+
   getDashboardStats(): Observable<StoreDashboardStats> {
-    const cacheKey = 'dashboard';
+    const cacheKey = this.storeScopeKey();
     const now = Date.now();
     const cached = storeDashboardCache.get(cacheKey);
 

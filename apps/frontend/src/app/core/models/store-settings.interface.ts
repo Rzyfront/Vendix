@@ -39,6 +39,23 @@ export interface StoreSettings {
    * `DEFAULT_ALLOW_DIRECT_RESCHEDULE` constant.
    */
   reservations?: ReservationsSettings;
+  /**
+   * Master switch for the Vexi assistant. Mirrors backend `VexiSettings`.
+   *
+   * Optional because a store only carries this block once somebody turned Vexi
+   * on: the assistant ships off and is enabled per store. Absent means
+   * disabled — read it through `StoreSettingsFacade.vexiEnabled()`, never as
+   * `settings.vexi!.enabled`.
+   */
+  vexi?: VexiSettings;
+}
+
+/**
+ * Master switch for the Vexi assistant. Mirrors backend `VexiSettings` in
+ * `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`.
+ */
+export interface VexiSettings {
+  enabled: boolean;
 }
 
 /**

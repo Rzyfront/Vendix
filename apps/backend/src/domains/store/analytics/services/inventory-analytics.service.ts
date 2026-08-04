@@ -752,7 +752,7 @@ export class InventoryAnalyticsService {
     const batches = await this.prisma.inventory_batches.findMany({
       where: {
         quantity: { gt: 0 },
-        expiration_date: {
+        expiration_date: { // tz-audit:ignore — umbral de vencimiento futuro, no ventana de período
           not: null,
           lte: thresholdDate,
         },

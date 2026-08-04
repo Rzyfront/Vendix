@@ -34,6 +34,15 @@
       ></app-stats>
 
       <app-stats
+        title="Costo de Ventas"
+        [value]="summary()?.cost_of_goods_sold | currency"
+        smallText="costo de la mercancía vendida"
+        iconName="package"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
+
+      <app-stats
         title="Gastos Totales"
         [value]="summary()?.total_expenses | currency"
         [smallText]="getGrowthText(summary()?.expenses_growth)"
@@ -60,6 +69,23 @@
         iconColor="text-purple-600"
       ></app-stats>
     </div>
+
+    <!-- Cost coverage: a COGS built on missing snapshots reads as a 100 % margin,
+         which looks exactly like a real one. State it instead of hiding it. -->
+    @if (hasIncompleteCost()) {
+      <div
+        class="flex items-start gap-3 p-3 mx-1 mb-4 rounded-lg bg-warning-light border border-warning/30"
+      >
+        <app-icon
+          name="alert-triangle"
+          [size]="16"
+          class="text-warning shrink-0 mt-0.5"
+        ></app-icon>
+        <p class="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+          {{ incompleteCostText() }}
+        </p>
+      </div>
+    }
   }
 
   <!-- Filter Bar -->

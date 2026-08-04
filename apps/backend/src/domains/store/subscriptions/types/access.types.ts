@@ -11,7 +11,8 @@ export type AIFeatureKey =
   | 'conversations'
   | 'tool_agents'
   | 'rag_embeddings'
-  | 'async_queue';
+  | 'async_queue'
+  | 'realtime_voice';
 
 export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
   'text_generation',
@@ -20,6 +21,7 @@ export const AI_FEATURE_KEYS: readonly AIFeatureKey[] = [
   'tool_agents',
   'rag_embeddings',
   'async_queue',
+  'realtime_voice',
 ] as const;
 
 export function isAIFeatureKey(value: unknown): value is AIFeatureKey {
@@ -38,6 +40,12 @@ export interface FeatureConfig {
   tools_allowed?: string[];
   indexed_docs_cap?: number;
   monthly_jobs_cap?: number;
+  /**
+   * Realtime voice budget, metered in seconds of open session rather than
+   * sessions. Push-to-talk turns run 5-20s, so a per-session cap would burn
+   * the budget several times faster than actual provider cost.
+   */
+  monthly_voice_seconds_cap?: number;
   period?: 'daily' | 'monthly';
 }
 
@@ -72,7 +80,12 @@ export interface AccessCheckResult {
   plan_id: number | null;
   /** Whether a `store_subscriptions` row exists for this store. */
   has_record: boolean;
-  remaining?: { tokens?: number; messages?: number; jobs?: number };
+  remaining?: {
+    tokens?: number;
+    messages?: number;
+    jobs?: number;
+    voice_seconds?: number;
+  };
 }
 
 /**
@@ -88,4 +101,8 @@ export const FEATURE_QUOTA_CONFIG: Record<
   tool_agents: null, // gated by tools_allowed list, not numeric cap
   rag_embeddings: { capField: 'indexed_docs_cap', period: 'monthly' },
   async_queue: { capField: 'monthly_jobs_cap', period: 'monthly' },
+  realtime_voice: {
+    capField: 'monthly_voice_seconds_cap',
+    period: 'monthly',
+  },
 };

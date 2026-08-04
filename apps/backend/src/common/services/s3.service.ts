@@ -255,6 +255,42 @@ export class S3Service {
   }
 
   /**
+   * Reads an object back as a Buffer.
+   *
+   * Needed by anything that has to hand the bytes to something else in-process
+   * — Vexi's vision tools re-read the document the user attached, and the API
+   * bridge rebuilds a `multipart/form-data` request out of it. Signing a URL
+   * and fetching it would work but pays a network round trip through the public
+   * edge for a file this process can read directly.
+   *
+   * `validateS3Key` runs first for the same reason it does in `getPresignedUrl`:
+   * the key can originate from a database row, and a traversal-shaped key must
+   * never reach the client.
+   */
+  async downloadFile(key: string): Promise<Buffer> {
+    this.validateS3Key(key);
+
+    try {
+      const response = await this.s3Client.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+
+      const body = response.Body as
+        | { transformToByteArray?: () => Promise<Uint8Array> }
+        | undefined;
+
+      if (!body?.transformToByteArray) {
+        throw new Error('S3 response body is not readable');
+      }
+
+      return Buffer.from(await body.transformToByteArray());
+    } catch (error: any) {
+      this.logger.error(`Error downloading ${key} from S3: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
    * Generates a presigned URL for viewing/downloading the file
    * @param key Path of the file in S3
    * @param expiresIn Expiration time in seconds (default 1 hour)

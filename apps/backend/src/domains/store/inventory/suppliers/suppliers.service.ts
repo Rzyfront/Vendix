@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { supplier_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreateInventorySupplierDto } from './dto/create-supplier.dto';
@@ -19,6 +20,7 @@ export class SuppliersService {
   constructor(
     private prisma: StorePrismaService,
     private readonly operatingScopeService: OperatingScopeService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   private async getSupplierScopeWhere() {
@@ -49,7 +51,7 @@ export class SuppliersService {
     }
     const scopeWhere = await this.getSupplierScopeWhere();
 
-    return this.prisma.suppliers.create({
+    const supplier = await this.prisma.suppliers.create({
       data: {
         ...createSupplierDto,
         organization_id: context.organization_id,
@@ -64,6 +66,20 @@ export class SuppliersService {
         },
       },
     });
+
+    // Makes the supplier findable by description ("el proveedor de gaseosas del
+    // sur") rather than only by exact name. Emitted only when the supplier belongs
+    // to a store: `ai_embeddings` rows are store-scoped, and an organization-wide
+    // supplier has no single store to attach one to — those are covered by the
+    // backfill, which fans them out across the organization's stores.
+    if (supplier.store_id) {
+      this.eventEmitter.emit('supplier.created', {
+        store_id: supplier.store_id,
+        supplier_id: supplier.id,
+      });
+    }
+
+    return supplier;
   }
 
   async findAll(query: SupplierQueryDto) {

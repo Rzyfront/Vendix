@@ -86,8 +86,25 @@ export interface AIResponse {
 }
 
 export interface AIStreamChunk {
-  type: 'text' | 'done' | 'error';
+  /**
+   * `tool_call` and `tool_result` exist so the UI can narrate an agent turn
+   * instead of showing a spinner for 30-40s. They are emitted by the agent
+   * loop; a plain completion only ever produces `text` / `done` / `error`.
+   */
+  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error';
   content?: string;
+  /** Present on `tool_call` and `tool_result`. */
+  tool?: {
+    /** Correlates the `tool_call` with its later `tool_result`. */
+    id: string;
+    name: string;
+    /** Arguments the model chose. Only on `tool_call`. */
+    arguments?: Record<string, any>;
+    /** Truncated for display. Only on `tool_result`. */
+    summary?: string;
+    /** Only on `tool_result`: the tool threw and the model was told so. */
+    failed?: boolean;
+  };
   usage?: {
     promptTokens: number;
     completionTokens: number;

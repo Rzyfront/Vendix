@@ -10,7 +10,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.4"
+  version: "1.5"
   scope: [root]
   auto_invoke:
     - "Adding modules or submodules to the sidebar"
@@ -19,6 +19,8 @@ metadata:
     - "Adding new menu items to admin layouts"
     - "Editing industry rules in INDUSTRY_HIDDEN_MODULES"
     - "Adding or editing per-industry module rules"
+    - "Explaining why a module is not visible to a user"
+    - "Adding a menu entry to the store module catalog"
 ---
 
 # Vendix Panel UI
@@ -238,6 +240,72 @@ a module that an earlier step has hidden.** The chain is AND across all steps.
 This order matters: industry caps what the store card can toggle, the store card
 caps what the user can toggle, the user choice is the final on/off. Existing layers
 (store_type / flows / scopes / subscription) layer on top and remain unchanged.
+
+## Diagnosis — Why A Module Is Not Visible
+
+`isMenuItemVisible()` is now `return this.diagnose(menuItem).visible;`. The chain
+above is implemented once, in `diagnose()`, which returns **which layer blocked** it
+instead of a bare boolean:
+
+```typescript
+interface ModuleVisibilityDiagnosis {
+  visible: boolean;
+  blockedBy: ModuleBlockReason | null;   // 'fiscal_scope' | 'fiscal_area' |
+                                         // 'operating_scope' | 'industry' |
+                                         // 'store_panel_ui' | 'store_type' |
+                                         // 'user_panel_ui' | 'subscription' |
+                                         // 'permission' | 'empty'
+  detail: string;                        // Spanish, user-facing
+  fixPath: string | null;                // where to go to unblock it
+}
+```
+
+**First blocker wins** — the layers are evaluated in chain order and it returns on
+the first one that hides the item, so `detail` names the *root* cause rather than the
+last check that happened to fail.
+
+`diagnoseModule(key, menuItems?)` addresses the same verdict by `panel_ui` key. Pass
+the menu tree whenever you have one: without it only the key-driven layers run, which
+is enough for "¿por qué no veo Inventario?" but not for a fiscal module.
+
+This is what backs Vexi's `ui_why_hidden` command. Any new hiding rule must be added
+inside `diagnose()`, not as a separate `if` in a consumer — otherwise the module
+vanishes and the assistant says it is available.
+
+### Authorization prefilters
+
+Entries with no `panel_ui` key of their own (`/admin/settings/users`, `/admin/pqrs`,
+`/admin/settings/vexi`) used to be stripped by the layout before filtering. They are
+now folded into `passesAuthorizationGates()` — shared by the observable pass
+(`filterMenuItems`) and the synchronous one (`diagnose`) — so the reason survives.
+
+Their inputs must be listed in the `authorizationGates$` computed key, or the
+observable pass will not re-run when the role or the data hydrates.
+
+## The Module Catalog — Key, Not Label
+
+`apps/frontend/src/app/shared/constants/store-module-catalog.constant.ts` maps every
+`panel_ui` key to its canonical absolute route (`STORE_MODULE_BY_KEY`,
+`resolveStoreModule()`).
+
+It exists because the sidebar joins `allMenuItems` ↔ `APP_MODULES` ↔
+`PANEL_UI_FALLBACK` **by Spanish label**, and that join is already broken in
+production: "Inventario", "Productos", "Clientes", "Reseñas", "Compras", "Ventas",
+"Resumen", "Financiero", "Contabilidad" and "Nómina" each name two different entries.
+
+`resolveStoreModule()` resolves in this order — exact key → exact label (single hit)
+→ single substring hit → `null` when ambiguous. **Returning `null` on ambiguity is
+the point**: navigating to the wrong "Inventario" is worse than asking.
+
+Two orphan tests in `menu-filter.service.spec.ts` gate the catalog both ways
+(`MODULE_ROUTES` ⊆ `APP_MODULES` and vice versa), and
+`default-panel-ui.service.spec.ts` parses the backend defaults and the frontend
+constant off disk with `readFileSync` (a cross-app import is impossible and karma has
+no `fs`) to catch backend/frontend drift. That test already caught `payroll_novelties`
+and `payroll_pila` missing from the backend fallback.
+
+**New menu entries should declare their module key explicitly rather than rely on the
+visible text.** Every label collision above is a latent mis-join.
 
 ## Render Único — `app-panel-ui-modules-editor`
 
@@ -500,6 +568,10 @@ Submodule keys should follow `parent_child`, for example `orders_sales` or `sett
 - **Empty `panel_ui` settings JSON treated as "hide everything"**: absent = allowed is the contract. The runtime must use `panel_ui?.[key] === false` (strict) — never `!panel_ui?.[key]` (which would treat absent as hidden).
 - **Empty industries array as a "no-op"**: the DTO's `@ArrayMinSize(1)` is the safety net. An empty array is an explicit 400 — never a silent no-op, or the JSON/column will drift.
 - **Forgetting the `['retail']` defensive fallback**: if both `storeSettings.general.industries` and `authFacade.userIndustries()` are empty, the runtime must default to `['retail']` so the filter is always defined.
+- **Adding a hiding rule outside `diagnose()`**: the module disappears from the sidebar but `diagnoseModule()` still reports it visible, so Vexi tells the user to click something that is not there. Every layer belongs in the chain.
+- **Joining a new menu entry by its Spanish label**: ten labels already collide. Register the entry in `store-module-catalog.constant.ts` under its `panel_ui` key.
+- **A leaf entry with no `moduleKeyMap` mapping and no children is dropped**: `filterItemsRecursive` Case 3 only keeps unmapped items that have visible children, so a new settings leaf silently never renders. Meanwhile `diagnose()` skips the key-driven layers when `moduleKeys` is empty and reports it **visible** — the two paths disagree. If the entry is intentionally key-less (a store-wide capability, not a per-user module) mark it `alwaysVisible: true` and gate it in `passesAuthorizationGates()`; that is how `/admin/settings/vexi` works.
+- **Adding an authorization prefilter without extending `authorizationGates$`**: the item stays hidden until some unrelated emission re-runs `filterMenuItems`, which usually means "until the next navigation".
 
 ## Visibility vs Authorization
 

@@ -6,6 +6,7 @@ import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard
 import { onboardingGuard } from '../../core/guards/onboarding.guard';
 import { subscriptionManagementGuard } from '../../core/guards/subscription-management.guard';
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
+import { vexiSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
@@ -563,6 +564,14 @@ export const storeAdminRoutes: Routes = [
             loadComponent: () =>
               import('../../private/modules/store/settings/security/security-settings.component').then(
                 (c) => c.SecuritySettingsComponent,
+              ),
+          },
+          {
+            path: 'vexi',
+            canActivate: [vexiSettingsGuard],
+            loadComponent: () =>
+              import('../../private/modules/store/settings/vexi/vexi-settings.component').then(
+                (c) => c.VexiSettingsComponent,
               ),
           },
           {

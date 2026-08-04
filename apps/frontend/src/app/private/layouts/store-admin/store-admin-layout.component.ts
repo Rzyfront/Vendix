@@ -27,9 +27,11 @@ import { TourModalComponent } from '../../../shared/components/tour/tour-modal/t
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-dock.component';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
 import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
@@ -59,6 +61,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
     ArrivalBannerComponent,
+    VexiDockComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -209,6 +212,14 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
     <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
     <app-fiscal-gate-outlet />
+
+    <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
+         Tres condiciones deciden si llega a montarse (ver showVexiDock): un
+         dock presente contra endpoints que responden 403 o "plan sin IA" se
+         lee como una avería, no como un ajuste. -->
+    @if (showVexiDock()) {
+      <app-vexi-dock />
+    }
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
@@ -221,7 +232,56 @@ export class StoreAdminLayoutComponent {
   private menuFilterService = inject(MenuFilterService);
   private subscriptionFacade = inject(SubscriptionFacade);
   private ambientAccess = inject(MembershipAmbientAccessService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
   private destroyRef = inject(DestroyRef);
+
+  /**
+   * Vexi's store-wide master switch. Fails closed: the facade reads
+   * `vexi.enabled === true`, so an ABSENT setting means OFF. A store only gets
+   * the assistant once someone turned it on on purpose.
+   */
+  readonly vexiEnabled = this.storeSettingsFacade.vexiEnabled;
+
+  /**
+   * Whether the Vexi dock is mounted at all. Three conditions, every one of
+   * them necessary — when any fails the dock simply is not rendered: no
+   * message, no placeholder, no reserved space. A visible dock that answers
+   * 403 or "plan sin IA" on the first message reads as a broken product, not
+   * as a setting the store has not paid for.
+   *
+   * 1. The store-wide master switch, EXPLICITLY on. Absence is off, so the
+   *    dock is never mounted on the mere lack of a setting.
+   *
+   * 2. Role owner/admin. `VexiController` and the write side of
+   *    `AIChatController` are `@Roles(OWNER, ADMIN)`. This layout is shared by
+   *    every store user, so a cashier or salesperson used to see the dock and
+   *    get a 403 on everything it touched. The predicate mirrors
+   *    `vexiSettingsGuard` exactly (role-only, no permission fallback: the
+   *    assistant writes across the whole store, so a broad
+   *    `store:settings:update` must not buy access) which keeps one single
+   *    definition of "who commands Vexi" across guard, sidebar entry and dock.
+   *
+   * 3. A plan with conversational AI. The turn goes through `AiAccessGuard` +
+   *    `@RequireAIFeature('streaming_chat')`; on the `Starter` plan that flag
+   *    is `false`, so the dock would open only for the first message to die
+   *    with a paywall. `featureMatrix` starts as `{}` (the facade's
+   *    `initialValue`), so while the subscription request is still in flight
+   *    `canUseFeature` is false and the dock stays unmounted — it appears once
+   *    there is certainty and never flashes in the wrong direction.
+   */
+  readonly showVexiDock = computed<boolean>(
+    () =>
+      this.vexiEnabled() &&
+      (this.authFacade.isOwner() ||
+        this.authFacade.isAdmin() ||
+        this.authFacade.hasAnyRole([
+          'owner',
+          'admin',
+          'STORE_OWNER',
+          'ORG_OWNER',
+        ])) &&
+      this.subscriptionFacade.canUseFeature('streaming_chat'),
+  );
 
   /**
    * W4 — Ambient membership-access validation. Reads the store setting
@@ -839,6 +899,18 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/security',
         },
         {
+          // `alwaysVisible` because Vexi deliberately has NO `panel_ui` key:
+          // the assistant is not a module an admin curates per user, it is a
+          // store-wide capability. Without this flag the entry falls into the
+          // filter's "no mapping, no children" branch and is dropped outright.
+          // Its real gate is `passesAuthorizationGates` (owner/admin), which
+          // runs before every case.
+          label: 'Vexi',
+          icon: 'circle',
+          route: '/admin/settings/vexi',
+          alwaysVisible: true,
+        },
+        {
           label: 'Dominios',
           icon: 'circle',
           route: '/admin/settings/domains',
@@ -893,73 +965,23 @@ export class StoreAdminLayoutComponent {
    * True when the current store has at least one PQR. Drives the
    * visibility of the "PQRS" sidebar entry — we hide it for stores with
    * zero PQRs (and re-show it as soon as the count goes above zero). Fed
-   * by an HTTP fetch on store-context activation. Safe default `false`
-   * so the entry stays hidden until we know otherwise; better to hide
-   * than to flash a brand-new store with an empty mailbox.
+   * by an HTTP fetch on store-context activation.
+   *
+   * The layout owns the *fetch*; `MenuFilterService` owns the *rule*. The
+   * value is pushed into the service (see the PQR stats effect below) so both
+   * the sidebar filter and Vexi's visibility diagnostic read one source — the
+   * layout used to splice the entry out of the tree itself, which made the
+   * item simply vanish with no explanation available to anyone downstream.
    */
   readonly hasStorePqrs = signal<boolean>(false);
 
-  // Reactive menu items as signal via toSignal.
-  // Reacts to BOTH `canManageUsers` (Usuarios gate) and `hasStorePqrs`
-  // (PQRS gate) — combineLatest emits only after both signals have
-  // produced at least one value, so the menu tree stabilizes immediately
-  // and updates on either condition flip.
+  // Reactive menu items as signal via toSignal. Both authorization gates
+  // ("Usuarios" by permission, "PQRS" by count) now live inside
+  // `filterMenuItems`, which re-emits on its own when either flips.
   readonly filteredMenuItems = toSignal(
-    combineLatest([
-      toObservable(this.canManageUsers),
-      toObservable(this.hasStorePqrs),
-    ]).pipe(
-      switchMap(([canManageUsers, hasStorePqrs]) =>
-        this.menuFilterService.filterMenuItems(
-          this.getBaseMenuItems(canManageUsers, hasStorePqrs),
-        ),
-      ),
-    ),
+    this.menuFilterService.filterMenuItems(this.allMenuItems),
     { initialValue: [] as MenuItem[] },
   );
-
-  /**
-   * Returns the base menu tree with two authorizacion-driven entry
-   * removals applied:
-   *   - "Usuarios" hidden when the logged-in user cannot manage users.
-   *   - "PQRS" hidden when the store has no PQRs.
-   *
-   * Both checks are visibility-only — the route guards
-   * (`manageUsersGuard`, the PQR list's own existence) are the real
-   * security boundary. Filters run BEFORE panel_ui/scope/fiscal so they
-   * stay scoped to this layout.
-   */
-  private getBaseMenuItems(
-    canManageUsers: boolean,
-    hasStorePqrs: boolean,
-  ): MenuItem[] {
-    let items = this.allMenuItems;
-    if (!canManageUsers) {
-      items = items.map((item) =>
-        item.children
-          ? {
-              ...item,
-              children: item.children.filter(
-                (child) => child.route !== '/admin/settings/users',
-              ),
-            }
-          : item,
-      );
-    }
-    if (!hasStorePqrs) {
-      items = items.map((item) =>
-        item.children
-          ? {
-              ...item,
-              children: item.children.filter(
-                (child) => child.route !== '/admin/pqrs',
-              ),
-            }
-          : item,
-      );
-    }
-    return items;
-  }
 
   readonly posTourConfig = POS_TOUR_CONFIG;
 
@@ -1043,11 +1065,13 @@ export class StoreAdminLayoutComponent {
           next: (res) => {
             const total = res?.data?.total ?? 0;
             this.hasStorePqrs.set(total > 0);
+            this.menuFilterService.storeHasPqrs.set(total > 0);
           },
           error: () => {
             // Safe default: leave the entry hidden. Better to require
             // an explicit refresh than to show a broken inbox.
             this.hasStorePqrs.set(false);
+            this.menuFilterService.storeHasPqrs.set(false);
           },
         });
     });

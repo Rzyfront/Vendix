@@ -46,10 +46,13 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
         </div>
       } @else if (data()) {
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+          <!-- Operating revenue, NOT net_revenue: it is the base the margins below
+               divide by, so the chain on screen closes
+               (ingresos − COGS = ganancia bruta). -->
           <app-stats
-            title="Ingresos Netos"
-            [value]="data()?.revenue?.net_revenue | currency"
-            smallText="Ingresos después de descuentos"
+            title="Ingresos Operacionales"
+            [value]="data()?.revenue?.operating_revenue | currency"
+            smallText="Sin IVA, incluye envío cobrado"
             iconName="trending-up"
             iconBgColor="bg-green-100"
             iconColor="text-green-600"
@@ -301,11 +304,16 @@ export class ProfitLossComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
+      // The bars are the ACTUAL chain behind net_profit:
+      // operating_revenue − COGS − subtotal_refunds − operating_expenses.
+      // They used to start at `gross_revenue` (before discounts) and subtract
+      // `total_refunds` (tax and freight included), so the bars never added up to
+      // the bottom line printed above them.
       series: [
         {
           name: 'Ingresos',
           type: 'bar',
-          data: [d.revenue?.gross_revenue || 0],
+          data: [d.revenue?.operating_revenue || 0],
           itemStyle: { color: '#22c55e' },
         },
         {
@@ -317,7 +325,7 @@ export class ProfitLossComponent implements OnInit {
         {
           name: 'Reembolsos',
           type: 'bar',
-          data: [-(d.refunds?.total_refunds || 0)],
+          data: [-(d.refunds?.subtotal_refunds || 0)],
           itemStyle: { color: '#f59e0b' },
         },
         {

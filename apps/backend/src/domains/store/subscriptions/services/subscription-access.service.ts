@@ -766,6 +766,8 @@ export class SubscriptionAccessService {
     if (feature === 'text_generation') remaining.tokens = remainingUnits;
     else if (feature === 'streaming_chat') remaining.messages = remainingUnits;
     else if (feature === 'async_queue') remaining.jobs = remainingUnits;
+    else if (feature === 'realtime_voice')
+      remaining.voice_seconds = remainingUnits;
 
     return {
       exceeded: safeCurrent >= cap,

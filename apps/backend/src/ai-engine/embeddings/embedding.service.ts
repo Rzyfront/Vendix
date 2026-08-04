@@ -58,6 +58,18 @@ export class EmbeddingService {
     }
   }
 
+  /**
+   * Whether embeddings can actually run in this environment.
+   *
+   * Exposed so callers can decide not to offer a capability instead of
+   * offering one that always fails: the agent picks tools from their
+   * descriptions, and a semantic search that throws burns the iteration it
+   * would have spent on a search that works.
+   */
+  isAvailable(): boolean {
+    return this.openai !== null;
+  }
+
   async generateEmbedding(text: string): Promise<number[]> {
     if (!this.openai) {
       throw new VendixHttpException(

@@ -25,7 +25,14 @@ export class EmbeddingSyncJob {
     this.logger.log('Starting daily embedding sync');
 
     try {
-      // Find products without embeddings
+      // Find products without embeddings.
+      //
+      // Two columns here did not exist, so this job failed with 42703 every single
+      // night and the daily backfill never ran once — which is why `semantic_search`
+      // only ever saw products created while the event listener happened to be up:
+      //
+      //   `p.organization_id` → products is scoped by store; the org comes from `stores`.
+      //   `p.is_active`       → the products table carries `state` ('active' | 'inactive' | 'archived').
       const productsWithoutEmbeddings = await this.prisma.$queryRawUnsafe<
         Array<{
           id: number;
@@ -35,14 +42,15 @@ export class EmbeddingSyncJob {
           description: string | null;
         }>
       >(`
-        SELECT p.id, p.store_id, p.organization_id, p.name, p.description
+        SELECT p.id, p.store_id, s.organization_id, p.name, p.description
         FROM products p
+        JOIN stores s ON s.id = p.store_id
         LEFT JOIN ai_embeddings e
           ON e.store_id = p.store_id
           AND e.entity_type = 'product'
           AND e.entity_id = p.id
         WHERE e.id IS NULL
-          AND p.is_active = true
+          AND p.state = 'active'
         LIMIT 500
       `);
 

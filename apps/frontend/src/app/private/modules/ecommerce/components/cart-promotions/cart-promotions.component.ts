@@ -94,13 +94,31 @@ import {
             </div>
 
             @for (promo of appliedPromotions(); track promo.promotion_id) {
-              <div class="flex items-center justify-between gap-2">
-                <div class="flex min-w-0 items-center gap-1.5">
+              <div class="flex flex-col gap-0.5">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="flex min-w-0 flex-1 items-baseline gap-1.5 flex-wrap">
+                    <span
+                      class="text-text-secondary"
+                      [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
+                      [title]="promo.name"
+                      >{{ promo.name }}</span
+                    >
+                    @if (promo.affectedLabel) {
+                      <span
+                        class="text-text-muted"
+                        [ngClass]="compact() ? 'text-[10px]' : 'text-xs'"
+                        [title]="'Aplicada a: ' + promo.affectedLabel"
+                        >({{ promo.affectedLabel }})</span
+                      >
+                    }
+                  </div>
                   <span
-                    class="truncate text-text-secondary"
+                    class="shrink-0 font-semibold text-green-600"
                     [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                    >{{ promo.name }}</span
+                    >-{{ promo.discount_amount | currency }}</span
                   >
+                </div>
+                <div class="flex items-center gap-1.5">
                   <app-badge
                     [variant]="promo.typeVariant"
                     size="xs"
@@ -117,11 +135,6 @@ import {
                     Aplicada
                   </app-badge>
                 </div>
-                <span
-                  class="shrink-0 font-semibold text-green-600"
-                  [ngClass]="compact() ? 'text-[11px]' : 'text-sm'"
-                  >-{{ promo.discount_amount | currency }}</span
-                >
               </div>
             }
           </div>
@@ -198,6 +211,11 @@ export class CartPromotionsComponent {
    * Per-promotion applied-discount view. Reuses the EXACT classification logic
    * from the cart page (`cart.component.ts`): percentage → Porcentaje/success,
    * fixed_amount → Monto fijo/primary, otherwise → Promoción/success.
+   *
+   * `affectedLabel` (when present) renders the product(s) or category(ies) the
+   * discount was applied to, e.g. "(Guanabana, Mango)". Backend omits the
+   * field for `scope: 'order'` promos so the label is `''` and the template
+   * hides the parenthetical.
    */
   readonly appliedPromotions = computed<
     Array<{
@@ -206,6 +224,7 @@ export class CartPromotionsComponent {
       discount_amount: number;
       typeLabel: string;
       typeVariant: BadgeVariant;
+      affectedLabel: string;
     }>
   >(() =>
     (this.cart()?.applied_promotions ?? []).map((promo) => ({
@@ -219,8 +238,32 @@ export class CartPromotionsComponent {
             ? 'Monto fijo'
             : 'Promoción',
       typeVariant: promo.type === 'fixed_amount' ? 'primary' : 'success',
+      affectedLabel: this.formatAffectedLabel(promo.applicable_descriptions),
     })),
   );
+
+  /**
+   * Compress the list of applicable products/categories into a compact
+   * parenthetical label:
+   *   [] / undefined → '' (whole-order scope, no suffix)
+   *   ['Guanabana']  → 'Guanabana'
+   *   ['A', 'B']     → 'A, B'
+   *   ['A', 'B', 'C'] → 'A, B +1'
+   * Empty strings are filtered out as a safety net for malformed backend
+   * payloads (e.g. cart cart_items joined to a product that was deleted).
+   */
+  private formatAffectedLabel(
+    descriptions: ReadonlyArray<{ label: string; kind: 'product' | 'category' }> | undefined,
+  ): string {
+    if (!descriptions || descriptions.length === 0) return '';
+    const labels = descriptions
+      .map((d) => d.label.trim())
+      .filter((label) => label.length > 0);
+    if (labels.length === 0) return '';
+    if (labels.length === 1) return labels[0];
+    if (labels.length === 2) return `${labels[0]}, ${labels[1]}`;
+    return `${labels[0]}, ${labels[1]} +${labels.length - 2}`;
+  }
 
   /**
    * Next-tier nudge view. `benefitLabel` mirrors the POS `formatTierBenefit`:
