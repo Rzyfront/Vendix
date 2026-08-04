@@ -26,6 +26,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-ai-platform-core` |
 | -- | `vendix-ai-queue` |
 | -- | `vendix-ai-streaming` |
+| -- | `vendix-analytics-metrics` |
 | -- | `vendix-angular-forms` |
 | -- | `vendix-app-architecture` |
 | -- | `vendix-auto-entries` |
@@ -99,6 +100,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding new transitions to dispatch_route_status_enum | `vendix-dispatch-routes` |
 | Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes | `vendix-restaurant-ops` |
 | Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
+| Adding or changing a frontend analytics cache key | `vendix-analytics-metrics` |
 | Adding or changing report columns, headers, number formats or totals | `vendix-report-xlsx` |
 | Adding or changing the 4 `qr_scan_behavior` modes (only_view, mark_occupied, open_tab, require_waiter) | `vendix-restaurant-table-qr` |
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
@@ -140,6 +142,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
+| Computing revenue, COGS, gross/net profit, margin or break-even | `vendix-analytics-metrics` |
 | Configuring AI providers or applications | `vendix-ai-engine` |
 | Configuring AI providers or applications | `vendix-ai-platform-core` |
 | Configuring AI rate limiting | `vendix-ai-platform-core` |
@@ -164,6 +167,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating a QA sprint report as a web presentation | `qa-report` |
 | Creating a bug in Linear for Vendix | `linear-issues` |
 | Creating a dedicated bulk controller separate from the CRUD controller | `vendix-bulk-operations` |
+| Creating a new analytics endpoint, KPI, stat card or chart series | `vendix-analytics-metrics` |
 | Creating a new downloadable report (backend export endpoint + frontend registry entry) | `vendix-report-xlsx` |
 | Creating a new skill | `skill-creator` |
 | Creating a ticket in Linear | `linear-issues` |
@@ -187,6 +191,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
 | Debugging a Vexi answer that claims a UI change it never confirmed | `vendix-vexi-agent` |
+| Debugging a metric that disagrees between two screens | `vendix-analytics-metrics` |
+| Debugging a profit or margin that looks too high | `vendix-analytics-metrics` |
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
@@ -194,9 +200,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
 | Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
+| Debugging records that appear one day or one month off in analytics | `vendix-analytics-metrics` |
 | Debugging route-map unlocated stops or resolveStopCoordinates cascade | `vendix-address-geocoding` |
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
+| Deciding which order or expense states count for a period | `vendix-analytics-metrics` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
 | Deriving a mobile implementation plan/backlog from an existing web module | `mobile-parity-audit` |
@@ -235,6 +243,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
 | Editing the route PDF builder (pdf-export.service.ts) | `vendix-dispatch-routes` |
 | Editing the route flow (dispatch, settle, release-stop, close, void) | `vendix-dispatch-routes` |
+| Editing, fixing or improving an existing analytics view or dashboard card | `vendix-analytics-metrics` |
 | Editing, fixing or improving an existing report | `vendix-report-xlsx` |
 | Explaining why a module is not visible to a user | `vendix-panel-ui` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
@@ -310,6 +319,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
 | Protecting store write operations behind a subscription | `vendix-subscription-gate` |
 | Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
+| Querying analytics by date range or bucketing a time series | `vendix-analytics-metrics` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
@@ -334,6 +344,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running backend jest tests without exhausting dev machine memory | `buildcheck-dev` |
+| Running npm run tz:audit or fixing one of its 7 rules | `vendix-analytics-metrics` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
@@ -425,6 +436,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
 | Working with SubscriptionAccessService or SubscriptionResolverService | `vendix-subscription-gate` |
 | Working with SubscriptionBillingService or SubscriptionPaymentService | `vendix-saas-billing` |
+| Working with analytics-metrics.contract.ts, COMPLETED_SALE_STATES or RECOGNIZED_EXPENSE_STATES | `vendix-analytics-metrics` |
 | Working with backend auth guards or decorators | `vendix-backend-auth` |
 | Working with country, timezone, department, or city selectors in frontend | `vendix-frontend-country-api` |
 | Working with date.util.ts utilities | `vendix-date-timezone` |
@@ -445,6 +457,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with permissions-roles seed | `vendix-permissions` |
 | Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags | `vendix-restaurant-ops` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
+| Working with resolveLocalDateOnlyRange, dateOnlyPeriodSql or CostCoverage | `vendix-analytics-metrics` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
 | Working with the reports export flow (exportReport action, exportReport$ effect, exportFromBackend) | `vendix-report-xlsx` |
