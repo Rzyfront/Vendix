@@ -85,8 +85,62 @@ export class MenusService {
     return this.http
       .post<ApiResponse<Menu>>(`${this.apiUrl}${this.basePath}`, dto)
       .pipe(
-        map((res) => res.data),
-        catchError(this.handleError),
+        map((res) => {
+          // Defensa contra el patrón "controller devuelve 200 con
+          // success:false en el body": si el backend indica fallo aunque
+          // el HTTP sea 200, lo enviamos al canal de error para que el
+          // subscribe.error del componente padre muestre el toast correcto
+          // en lugar de "Carta creada" falsamente. Aunque ya refactorizamos
+          // el controller para propagar HTTP 409 nativo, este guard
+          // cubre race conditions donde un futuro controller vuelva al
+          // patrón viejo de responseService.error() sin try/catch.
+          if (res?.success === false) {
+            // Cast a `any` porque ApiResponse<Menu> no declara error_code
+            // ni statusCode — esos campos vienen cuando success:false pero
+            // la interface tipada solo modela el camino feliz.
+            const failure = res as any;
+            throw {
+              error_code: failure.error_code,
+              message: failure.message,
+              statusCode: failure.statusCode,
+              isBusinessError: true,
+            };
+          }
+          return res.data;
+        }),
+        catchError((err) => {
+          // Si es un error de negocio (éxito=false en body), propagar
+          // la estructura para que el componente pueda inspeccionar
+          // error_code. Si es un HttpErrorResponse real, manejar con
+          // handleError como antes.
+          if (err?.isBusinessError) {
+            return throwError(() => err);
+          }
+          // QUI-533: el controller ahora propaga un 409 nativo, y ese camino
+          // NO puede pasar por `handleError` porque éste termina en
+          // `throwError(() => message)` — devuelve un STRING plano y con eso
+          // se pierden `status` y `error_code`. El componente quedaba sin
+          // forma de distinguir el duplicado y nunca pintaba el input en
+          // rojo. `AllExceptionsFilter` pone `error_code` en la RAÍZ del
+          // body, así que dentro de un HttpErrorResponse vive en
+          // `err.error.error_code`. Normalizamos SOLO este caso a la misma
+          // forma que ya espera el componente; el resto de los errores sigue
+          // por `handleError`, que devuelve string y es lo que consumen los
+          // otros métodos del service.
+          const errorCode = err?.error?.error_code;
+          if (err?.status === 409 || errorCode === 'MENU_DUP_NAME') {
+            return throwError(() => ({
+              error_code: errorCode ?? 'MENU_DUP_NAME',
+              message:
+                typeof err?.error?.message === 'string'
+                  ? err.error.message
+                  : 'Ya existe una carta con este nombre',
+              statusCode: err?.status ?? 409,
+              isBusinessError: true,
+            }));
+          }
+          return this.handleError(err);
+        }),
       );
   }
 
