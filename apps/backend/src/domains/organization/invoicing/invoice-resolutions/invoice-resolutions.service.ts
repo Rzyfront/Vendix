@@ -77,19 +77,37 @@ export class OrgInvoiceResolutionsService {
         store_id,
       });
 
-    const existing = await this.prisma.invoice_resolutions.findFirst({
-      where: {
-        organization_id,
-        accounting_entity_id: accounting_entity.id,
-        document_type: dto.document_type || 'sales_invoice',
-        prefix: dto.prefix,
-      },
-      select: { id: true },
-    });
+    // Mismo eje que el índice único de la base
+    // (`invoice_resolutions_entity_prefix_uidx` sobre
+    // `accounting_entity_id, prefix`) y con el mismo cliente que hace el create:
+    // `withoutScope()`. Antes el chequeo miraba `document_type` —que el índice no
+    // mira— y usaba el cliente scopeado mientras el create usa el sin scope, así
+    // que podía no ver la fila con la que iba a colisionar y el duplicado salía
+    // como P2002 crudo.
+    const existing = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          accounting_entity_id: accounting_entity.id,
+          prefix: dto.prefix,
+        },
+        select: {
+          id: true,
+          resolution_number: true,
+          document_type: true,
+          is_active: true,
+        },
+      });
 
     if (existing) {
       throw new ConflictException(
-        'An invoice resolution with this prefix already exists for the fiscal entity',
+        `Ya existe una resolución con prefijo "${dto.prefix}" para ${
+          existing.document_type === 'sales_invoice'
+            ? 'factura de venta'
+            : existing.document_type
+        } (número ${existing.resolution_number}${
+          existing.is_active ? '' : ', desactivada'
+        }) en esta entidad fiscal. La DIAN autoriza el prefijo por NIT, así que no puede repetirse.`,
       );
     }
 

@@ -394,20 +394,16 @@ export class VendorSupportFiscalService {
   }): Promise<number> {
     const client = this.prisma.withoutScope();
 
-    const existing = await client.dian_configurations.findFirst({
-      where: {
-        organization_id: platform.organization_id,
-        accounting_entity_id: platform.accounting_entity_id,
-        configuration_type: 'support_document',
-      },
-      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
-    });
-    if (existing) return existing.id;
-
+    // Las dos búsquedas se miden por el eje del índice parcial que las restringe
+    // —`dian_configurations_org_scope_uq` sobre
+    // `(organization_id, nit, configuration_type) WHERE store_id IS NULL`— y no
+    // por la entidad contable. Filtrar por entidad dejaba invisible una fila que
+    // la restricción sí veía: el clon concluía "no existe", intentaba crear, y
+    // Postgres respondía P2002 que sale al cliente como un 500 opaco.
     const salesInvoiceConfig = await client.dian_configurations.findFirst({
       where: {
         organization_id: platform.organization_id,
-        accounting_entity_id: platform.accounting_entity_id,
+        store_id: null,
         configuration_type: 'invoicing',
       },
       orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
@@ -419,11 +415,41 @@ export class VendorSupportFiscalService {
       );
     }
 
+    const existing = await client.dian_configurations.findFirst({
+      where: {
+        organization_id: platform.organization_id,
+        store_id: null,
+        nit: salesInvoiceConfig.nit,
+        configuration_type: 'support_document',
+      },
+      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
+    });
+    if (existing) {
+      if (existing.accounting_entity_id !== platform.accounting_entity_id) {
+        await client.dian_configurations.update({
+          where: { id: existing.id },
+          data: {
+            accounting_entity: {
+              connect: { id: platform.accounting_entity_id },
+            },
+            updated_at: new Date(),
+          },
+        });
+        this.logger.warn(
+          `La configuración de documento soporte ${existing.id} colgaba de la entidad contable ${existing.accounting_entity_id} y era invisible para el cliente scopeado. Se realinea a ${platform.accounting_entity_id}.`,
+        );
+      }
+      return existing.id;
+    }
+
     const cloned = await client.dian_configurations.create({
       data: {
         organization_id: salesInvoiceConfig.organization_id,
         store_id: null,
-        accounting_entity_id: salesInvoiceConfig.accounting_entity_id,
+        // La entidad se toma de la identidad derivada, NO de la fila origen: si
+        // la de facturación quedó colgada de otra entidad, clonarla propagaría el
+        // desajuste a la fila nueva.
+        accounting_entity_id: platform.accounting_entity_id,
         name: `${salesInvoiceConfig.name} (Documento Soporte)`,
         nit: salesInvoiceConfig.nit,
         nit_dv: salesInvoiceConfig.nit_dv,
