@@ -5,6 +5,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateResolutionDto } from './dto/create-resolution.dto';
 import { UpdateResolutionDto } from './dto/update-resolution.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { parsePlausibleFiscalDate } from '@common/utils/fiscal-date.util';
 
 @Injectable()
 export class ResolutionsService {
@@ -92,13 +93,19 @@ export class ResolutionsService {
         accounting_entity_id: accounting_entity.id,
         document_type: dto.document_type || 'sales_invoice',
         resolution_number: dto.resolution_number,
-        resolution_date: new Date(dto.resolution_date),
+        // Validadas, no solo convertidas: el escáner por IA de este mismo módulo
+        // y un año a medio teclear en `<input type="date">` producen fechas ISO
+        // válidas pero imposibles, que después viajan al XML del documento.
+        resolution_date: parsePlausibleFiscalDate(
+          'fecha de resolución',
+          dto.resolution_date,
+        ),
         prefix: dto.prefix,
         range_from: dto.range_from,
         range_to: dto.range_to,
         current_number: dto.range_from - 1, // Start just before range_from
-        valid_from: new Date(dto.valid_from),
-        valid_to: new Date(dto.valid_to),
+        valid_from: parsePlausibleFiscalDate('válida desde', dto.valid_from),
+        valid_to: parsePlausibleFiscalDate('válida hasta', dto.valid_to),
         is_active: dto.is_active ?? true,
         technical_key: dto.technical_key,
       },
@@ -118,14 +125,21 @@ export class ResolutionsService {
         resolution_number: dto.resolution_number,
       }),
       ...(dto.resolution_date && {
-        resolution_date: new Date(dto.resolution_date),
+        resolution_date: parsePlausibleFiscalDate(
+          'fecha de resolución',
+          dto.resolution_date,
+        ),
       }),
       ...(dto.prefix && { prefix: dto.prefix }),
       ...(dto.document_type && { document_type: dto.document_type }),
       ...(dto.range_from !== undefined && { range_from: dto.range_from }),
       ...(dto.range_to !== undefined && { range_to: dto.range_to }),
-      ...(dto.valid_from && { valid_from: new Date(dto.valid_from) }),
-      ...(dto.valid_to && { valid_to: new Date(dto.valid_to) }),
+      ...(dto.valid_from && {
+        valid_from: parsePlausibleFiscalDate('válida desde', dto.valid_from),
+      }),
+      ...(dto.valid_to && {
+        valid_to: parsePlausibleFiscalDate('válida hasta', dto.valid_to),
+      }),
       ...(dto.is_active !== undefined && { is_active: dto.is_active }),
       ...(dto.technical_key !== undefined && {
         technical_key: dto.technical_key,
