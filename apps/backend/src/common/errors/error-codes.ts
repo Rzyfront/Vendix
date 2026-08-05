@@ -1392,6 +1392,12 @@ export const ErrorCodes = {
     devMessage:
       'Platform fiscal identity has no active accounting entity; a resolution cannot be scoped without one',
   },
+  INVOICING_RESOLUTION_007: {
+    code: 'INVOICING_RESOLUTION_007',
+    httpStatus: 409,
+    devMessage:
+      'An active resolution with the same prefix and document type already exists for this accounting entity',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
