@@ -58,6 +58,6 @@ export const selectMostProfitableByMargin = createSelector(
   selectProfitabilityProducts,
   (products) =>
     [...products]
-      .filter((p) => p.margin > 0)
-      .sort((a, b) => b.margin - a.margin)[0] || null,
+      .filter((p) => p.margin != null && p.margin > 0)
+      .sort((a, b) => (b.margin ?? 0) - (a.margin ?? 0))[0] || null,
 );
