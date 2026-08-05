@@ -12,6 +12,9 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
 
 import {
   CardComponent,
+  ConfirmationModalComponent,
+  DianResolutionScanResult,
+  DianResolutionScannerModalComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
@@ -37,6 +40,8 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
   standalone: true,
   imports: [
     CardComponent,
+    ConfirmationModalComponent,
+    DianResolutionScannerModalComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -139,7 +144,30 @@ type ResolutionStatus = 'expired' | 'exhausted' | 'expiring' | 'active' | 'inact
       <vendix-resolution-create
         [(isOpen)]="is_create_modal_open"
         [resolution]="selected_resolution()"
+        [prefill]="scan_prefill()"
       ></vendix-resolution-create>
+
+      <!-- Escáner IA: puerta de entrada a la creación, no un modal anidado -->
+      <app-dian-resolution-scanner-modal
+        [isOpen]="scanner_open()"
+        [scope]="'store'"
+        (isOpenChange)="scanner_open.set($event)"
+        (confirmed)="applyScan($event)"
+      ></app-dian-resolution-scanner-modal>
+
+      <!-- Delete confirmation -->
+      @if (pending_delete(); as row) {
+        <app-confirmation-modal
+          [isOpen]="true"
+          title="Eliminar resolución"
+          [message]="deleteMessage(row)"
+          confirmText="Eliminar"
+          cancelText="Cancelar"
+          confirmVariant="danger"
+          (confirm)="confirmDelete(row)"
+          (cancel)="cancelDelete()"
+        ></app-confirmation-modal>
+      }
     </div>
   `,
 })
@@ -158,6 +186,9 @@ export class ResolutionsPageComponent {
   readonly search_term = signal('');
   readonly is_create_modal_open = signal(false);
   readonly selected_resolution = signal<InvoiceResolution | null>(null);
+  readonly pending_delete = signal<InvoiceResolution | null>(null);
+  readonly scanner_open = signal(false);
+  readonly scan_prefill = signal<DianResolutionScanResult | null>(null);
 
   // Derivados
   readonly filteredResolutions = computed(() => {
@@ -217,6 +248,11 @@ export class ResolutionsPageComponent {
       icon: 'plus',
       action: 'create',
       variant: 'primary',
+    },
+    {
+      label: 'Escanear con IA',
+      icon: 'sparkles',
+      action: 'scan',
     },
   ];
 
@@ -290,7 +326,7 @@ export class ResolutionsPageComponent {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
-      action: (row: InvoiceResolution) => this.onDeleteResolution(row.id),
+      action: (row: InvoiceResolution) => this.askDelete(row),
     },
   ];
 
@@ -343,17 +379,63 @@ export class ResolutionsPageComponent {
   onActionClick(action: string): void {
     if (action === 'create') {
       this.selected_resolution.set(null);
+      // Se limpia para que "Nueva resolución" no reciba lo del escaneo anterior.
+      this.scan_prefill.set(null);
       this.is_create_modal_open.set(true);
+      return;
     }
+    if (action === 'scan') {
+      this.is_create_modal_open.set(false);
+      this.scanner_open.set(true);
+    }
+  }
+
+  /**
+   * El escáner solo precarga: entrega el resultado al modal de creación y el
+   * usuario sigue teniendo que pulsar Crear. Ningún dato llega a la tabla de
+   * numeración sin ese clic.
+   */
+  applyScan(scan: DianResolutionScanResult): void {
+    this.selected_resolution.set(null);
+    this.scan_prefill.set(scan);
+    this.is_create_modal_open.set(true);
   }
 
   editResolution(resolution: InvoiceResolution): void {
     this.selected_resolution.set(resolution);
+    this.scan_prefill.set(null);
     this.is_create_modal_open.set(true);
   }
 
-  onDeleteResolution(id: number): void {
-    this.store.dispatch(InvoicingActions.deleteResolution({ id }));
+  /**
+   * Borrar una resolución es irreversible y el backend lo rechaza cuando ya
+   * numeró documentos. Se confirma primero para que el rechazo (o el borrado)
+   * sea una decisión, no un clic accidental en la fila equivocada.
+   */
+  askDelete(row: InvoiceResolution): void {
+    this.pending_delete.set(row);
+  }
+
+  cancelDelete(): void {
+    this.pending_delete.set(null);
+  }
+
+  confirmDelete(row: InvoiceResolution): void {
+    this.pending_delete.set(null);
+    this.store.dispatch(InvoicingActions.deleteResolution({ id: row.id }));
+  }
+
+  /**
+   * Anticipa el rechazo del backend: una resolución que ya consumió numeración
+   * ante la DIAN es evidencia fiscal y no se puede borrar. Decirlo aquí evita
+   * que el usuario confirme algo que va a fallar.
+   */
+  deleteMessage(row: InvoiceResolution): string {
+    const consumed = (row.current_number ?? 0) >= (row.range_from ?? 0);
+    const identity = `${row.prefix} · ${row.resolution_number}`;
+    return consumed
+      ? `${identity} ya consumió numeración ante la DIAN (va en ${row.current_number}). No se puede borrar: desactívala desde Editar para retirarla del uso.`
+      : `Se eliminará la resolución ${identity} (rango ${row.range_from} – ${row.range_to}). No ha numerado ningún documento, así que no hay evidencia fiscal que preservar.`;
   }
 
   private getResolutionStatus(

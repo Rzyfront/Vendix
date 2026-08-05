@@ -9,6 +9,7 @@ import {
   ProviderInvoiceData,
   ProviderResponse,
 } from '../providers/invoice-provider.interface';
+import { dianAmount, dianRate } from '../utils/dian-money.util';
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
@@ -278,11 +279,20 @@ export class InvoiceFlowService {
   }
 
   private configurationType(invoice_type: string) {
-    return invoice_type === 'purchase_invoice' ||
+    if (
+      invoice_type === 'purchase_invoice' ||
       invoice_type === 'support_document' ||
       invoice_type === 'support_adjustment_note'
-      ? 'support_document'
-      : 'invoicing';
+    ) {
+      return 'support_document';
+    }
+    // The DIAN habilita the software per document type, each with its own set de
+    // pruebas and its own `enablement_status`. Falling back to 'invoicing' here
+    // would let a store habilitado only for FEV appear ready to emit DE.
+    if (this.isEquivalentDocumentType(invoice_type)) {
+      return 'equivalent_document';
+    }
+    return 'invoicing';
   }
 
   private isSupportDocumentType(invoice_type: string): boolean {
@@ -290,6 +300,13 @@ export class InvoiceFlowService {
       invoice_type === 'purchase_invoice' ||
       invoice_type === 'support_document' ||
       invoice_type === 'support_adjustment_note'
+    );
+  }
+
+  private isEquivalentDocumentType(invoice_type: string): boolean {
+    return (
+      invoice_type === 'pos_equivalent_document' ||
+      invoice_type === 'equivalent_adjustment_note'
     );
   }
 
@@ -336,6 +353,31 @@ export class InvoiceFlowService {
       throw new VendixHttpException(
         ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
         'The resolved fiscal provider cannot send support adjustment notes.',
+        { invoice_type },
+      );
+    }
+
+    // Refused BEFORE a consecutive is spent: a DE number the provider cannot
+    // transmit is a hole in an authorized range that the DIAN never lets us
+    // reuse. Cheaper to fail loudly here than to burn the number.
+    if (
+      invoice_type === 'pos_equivalent_document' &&
+      typeof provider.sendEquivalentDocument !== 'function'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+        'The resolved fiscal provider cannot send POS equivalent documents.',
+        { invoice_type },
+      );
+    }
+
+    if (
+      invoice_type === 'equivalent_adjustment_note' &&
+      typeof provider.sendEquivalentAdjustmentNote !== 'function'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+        'The resolved fiscal provider cannot send equivalent adjustment notes.',
         { invoice_type },
       );
     }
@@ -542,25 +584,35 @@ export class InvoiceFlowService {
         invoice.customer_tax_id || invoice.supplier?.tax_id || undefined,
       customer_address:
         invoice.customer_address || invoice.supplier?.addresses || undefined,
-      subtotal_amount: invoice.subtotal_amount.toString(),
-      discount_amount: invoice.discount_amount.toString(),
-      tax_amount: invoice.tax_amount.toString(),
-      withholding_amount: invoice.withholding_amount.toString(),
-      total_amount: invoice.total_amount.toString(),
+      // Anexo §12.2: a document re-sent after contingency must keep its prefix and
+      // number and declare InvoiceTypeCode 04, not 01. Absent on a first send.
+      contingency_type: invoice.contingency_type ?? undefined,
+      // dianAmount, not `.toString()`: Prisma.Decimal drops trailing zeros, so
+      // a Decimal(12,2) holding 1000.00 serializes as '1000'. The CUFE hashed
+      // that bare '1000' while the UBL XML emitted '1000.00', and the DIAN —
+      // which recomputes the hash from the XML — rejected every invoice landing
+      // on whole pesos. See utils/dian-money.util.ts for the full account.
+      subtotal_amount: dianAmount(invoice.subtotal_amount),
+      discount_amount: dianAmount(invoice.discount_amount),
+      tax_amount: dianAmount(invoice.tax_amount),
+      withholding_amount: dianAmount(invoice.withholding_amount),
+      total_amount: dianAmount(invoice.total_amount),
       currency: invoice.currency || undefined,
       items: (invoice.invoice_items || []).map((item: any) => ({
         description: item.description,
+        // Quantity keeps its own scale: UBL InvoicedQuantity is not a monetary
+        // value and fractional units (1.5 kg) must survive.
         quantity: item.quantity.toString(),
-        unit_price: item.unit_price.toString(),
-        discount_amount: item.discount_amount.toString(),
-        tax_amount: item.tax_amount.toString(),
-        total_amount: item.total_amount.toString(),
+        unit_price: dianAmount(item.unit_price),
+        discount_amount: dianAmount(item.discount_amount),
+        tax_amount: dianAmount(item.tax_amount),
+        total_amount: dianAmount(item.total_amount),
       })),
       taxes: (invoice.invoice_taxes || []).map((tax: any) => ({
         tax_name: tax.tax_name,
-        tax_rate: tax.tax_rate.toString(),
-        taxable_amount: tax.taxable_amount.toString(),
-        tax_amount: tax.tax_amount.toString(),
+        tax_rate: dianRate(tax.tax_rate),
+        taxable_amount: dianAmount(tax.taxable_amount),
+        tax_amount: dianAmount(tax.tax_amount),
         tax_type: tax.tax_type ?? undefined,
       })),
       resolution_number: invoice.resolution?.resolution_number,
@@ -629,6 +681,12 @@ export class InvoiceFlowService {
       } else if (invoice.invoice_type === 'support_adjustment_note') {
         provider_response =
           await provider.sendSupportAdjustmentNote!(provider_data);
+      } else if (invoice.invoice_type === 'pos_equivalent_document') {
+        provider_response =
+          await provider.sendEquivalentDocument!(provider_data);
+      } else if (invoice.invoice_type === 'equivalent_adjustment_note') {
+        provider_response =
+          await provider.sendEquivalentAdjustmentNote!(provider_data);
       } else {
         provider_response = await provider.sendInvoice(provider_data);
       }
@@ -659,6 +717,21 @@ export class InvoiceFlowService {
 
       await this.fiscal_ledger.markError(transmission.id, error);
       throw new VendixHttpException(ErrorCodes.INVOICING_PROVIDER_001);
+    }
+
+    // A DIAN OUTAGE IS NOT A REJECTION. Anexo Técnico 1.9 §12.2: when the
+    // validation service is unavailable, the document is expedited under
+    // contingency Type 04 — it keeps its prefix and number, is delivered to the
+    // acquirer without prior validation, and owes the DIAN a transmission within
+    // 48 h. Falling through to the rejection branch below (the previous
+    // behaviour) stamped `status: rejected` + `accounting_status: blocked` on a
+    // perfectly valid invoice, a terminal state that no retry could undo.
+    if (!provider_response.success && provider_response.contingency_eligible) {
+      await this.handleContingency(id, invoice, transmission.id, provider_response);
+      return this.prisma.invoices.findFirstOrThrow({
+        where: { id },
+        include: INVOICE_INCLUDE,
+      });
     }
 
     if (!provider_response.success) {
@@ -977,6 +1050,60 @@ export class InvoiceFlowService {
    * and therefore eligible for retry.
    * Non-transient: certificate expiry, validation errors, missing config.
    */
+  /**
+   * Records a document expedited under DIAN contingency (Anexo §12.2, Type 04).
+   *
+   * State choice, and why each one: `transmission_status: 'contingency'` (not
+   * `rejected`, not `error`) because the document is valid and deliverable;
+   * `dian_status: 'pending'` because the DIAN has not judged it and still must;
+   * `accounting_status` is left untouched because a contingency invoice is a real
+   * sale that must post — blocking it would create an accounting hole for the
+   * duration of a DIAN outage.
+   *
+   * The retry queue keeps ownership of the 48 h retransmission: this method
+   * declares the state and enqueues, it never gives up on the document.
+   */
+  private async handleContingency(
+    id: number,
+    invoice: { organization_id: number; store_id: number },
+    transmission_id: number,
+    provider_response: ProviderResponse,
+  ): Promise<void> {
+    const reason =
+      provider_response.message ||
+      `La DIAN no respondió (${provider_response.failure_class ?? 'dian_error'})`;
+
+    await this.fiscal_ledger.markError(transmission_id, new Error(reason));
+
+    await this.prisma.invoices.update({
+      where: { id },
+      data: {
+        transmission_status: 'contingency',
+        dian_status: 'pending',
+        send_status: 'sent_error',
+        sent_at: new Date(),
+        xml_document: provider_response.xml_document,
+        provider_response: this.toProviderEvidence(provider_response),
+      },
+    });
+
+    // Sets contingency_type/declared_at/deadline idempotently — the 48 h run from
+    // the FIRST declaration, so a later retry must not push the deadline forward.
+    await this.retry_queue.declareContingency(id, reason);
+
+    await this.retry_queue
+      .enqueue(id, invoice.organization_id, invoice.store_id, reason)
+      .catch((e) =>
+        this.logger.error(
+          `Failed to enqueue contingency invoice #${id} for retry: ${e.message}`,
+        ),
+      );
+
+    this.logger.warn(
+      `Invoice #${id} expedited under DIAN contingency (Type 04): ${reason}`,
+    );
+  }
+
   private isTransientError(error: any): boolean {
     const message = (error.message || '').toLowerCase();
 

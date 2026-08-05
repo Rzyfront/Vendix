@@ -1239,6 +1239,15 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'AI application is disabled',
   },
+  // A vision app with a NULL config_id silently falls through to the default
+  // text config, which answers without seeing the image. For fiscal scanners a
+  // plausible invented value is worse than a failure, so it is refused up front.
+  AI_VISION_001: {
+    code: 'AI_VISION_001',
+    httpStatus: 409,
+    devMessage:
+      'This scanner has no vision model linked; link one in the AI panel before scanning documents',
+  },
   AI_APP_004: {
     code: 'AI_APP_004',
     httpStatus: 429,
@@ -1359,6 +1368,30 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Resolution range exhausted',
   },
+  INVOICING_RESOLUTION_003: {
+    code: 'INVOICING_RESOLUTION_003',
+    httpStatus: 409,
+    devMessage:
+      'Resolution has issued documents and cannot be deleted; deactivate it instead',
+  },
+  INVOICING_RESOLUTION_004: {
+    code: 'INVOICING_RESOLUTION_004',
+    httpStatus: 409,
+    devMessage:
+      'Resolution is referenced by the active fiscal configuration; point the configuration elsewhere first',
+  },
+  INVOICING_RESOLUTION_005: {
+    code: 'INVOICING_RESOLUTION_005',
+    httpStatus: 400,
+    devMessage:
+      'Resolution field is immutable once DIAN numbers have been consumed',
+  },
+  INVOICING_RESOLUTION_006: {
+    code: 'INVOICING_RESOLUTION_006',
+    httpStatus: 409,
+    devMessage:
+      'Platform fiscal identity has no active accounting entity; a resolution cannot be scoped without one',
+  },
   INVOICING_DUP_001: {
     code: 'INVOICING_DUP_001',
     httpStatus: 409,
@@ -1435,6 +1468,39 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage:
       'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
+  },
+  /**
+   * Art. 616-1 ET / Res. 000165 de 2023: the POS electronic equivalent document
+   * only supports sales up to 5 UVT. Above that the electronic sales invoice is
+   * mandatory, which requires an identified buyer — so an anonymous sale over the
+   * limit must be stopped BEFORE it commits, not corrected afterwards with a
+   * credit note.
+   *
+   * `details` carries `uvt_value`, `limit_cop`, `total_amount` and `channel` so
+   * the UI can tell the cashier exactly how far over the limit the sale is.
+   */
+  FISCAL_UVT_INVOICE_REQUIRED: {
+    code: 'FISCAL_UVT_INVOICE_REQUIRED',
+    httpStatus: 412,
+    devMessage:
+      'Anonymous sale exceeds the 5 UVT limit for a POS equivalent document; an identified buyer is required to issue the electronic invoice',
+  },
+
+  /**
+   * Raised by `EncryptionService.encrypt()` when running with NODE_ENV=production
+   * and no `DIAN_ENCRYPTION_KEY`. Without it the service would derive its key
+   * from a source checked into the repository, so the DIAN Software-PIN and the
+   * certificate password would be stored recoverable by anyone with the repo.
+   *
+   * Reads are deliberately NOT blocked: an environment that already ran without
+   * the variable must keep opening its old ciphertext. Only NEW secrets are
+   * refused, which is the narrowest control that still prevents the leak.
+   */
+  FISCAL_ENCRYPTION_KEY_MISSING: {
+    code: 'FISCAL_ENCRYPTION_KEY_MISSING',
+    httpStatus: 500,
+    devMessage:
+      'DIAN_ENCRYPTION_KEY is not set: refusing to encrypt a new secret with the repository-visible fallback key in production',
   },
 
   // Payroll
@@ -1713,7 +1779,7 @@ export const ErrorCodes = {
     code: 'DIAN_TEST_SET_003',
     httpStatus: 412,
     devMessage:
-      'The numbering resolution does not have enough remaining numbers for the 50-document test set',
+      'The numbering resolution does not have enough remaining numbers for the test set required by this operation mode',
   },
   /**
    * There is no submitted batch to act upon: no ZipKey was ever persisted for
@@ -1735,6 +1801,76 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage:
       'The stored test set predates per-document evidence; re-send it to obtain diagnosable document keys',
+  },
+  /**
+   * The test set must be emitted against a HABILITACIÓN resolution. Running it
+   * against a production resolution burns real fiscal consecutives that can never
+   * be reused, and stamps `TipoAmbiente=2` documents onto production numbering.
+   */
+  DIAN_TEST_SET_006: {
+    code: 'DIAN_TEST_SET_006',
+    httpStatus: 409,
+    devMessage:
+      'The test set requires a habilitación numbering resolution; the one provided belongs to production',
+  },
+  /**
+   * A RADIAN event references a document that DIAN never accepted. Events attach
+   * to an existing electronic document by CUFE, so registering one against a
+   * draft, rejected or not-yet-transmitted invoice would reference a key that does
+   * not exist in the DIAN catalogue.
+   */
+  DIAN_EVENT_001: {
+    code: 'DIAN_EVENT_001',
+    httpStatus: 409,
+    devMessage:
+      'The referenced document is not accepted by DIAN or has no CUFE; a RADIAN event cannot reference it',
+  },
+  /**
+   * Only the 030–034 event family is implemented. The endorsement/factoring range
+   * (035–051) lives in the external `Tablas Referenciadas.xlsx`, so accepting an
+   * arbitrary code would transmit an invented value that RADIAN rejects.
+   */
+  DIAN_EVENT_002: {
+    code: 'DIAN_EVENT_002',
+    httpStatus: 400,
+    devMessage:
+      'Unsupported RADIAN event code; only the 030-034 family is implemented',
+  },
+  /**
+   * The event was already accepted by RADIAN for this document and code. Sending
+   * it twice is a duplicate registration, not an update.
+   */
+  DIAN_EVENT_003: {
+    code: 'DIAN_EVENT_003',
+    httpStatus: 409,
+    devMessage:
+      'This RADIAN event code was already accepted for the referenced document',
+  },
+  /**
+   * Events are only transmissible through the direct DIAN integration (software
+   * propio). A third-party or mock provider has no `SendEventUpdateStatus`.
+   */
+  DIAN_EVENT_004: {
+    code: 'DIAN_EVENT_004',
+    httpStatus: 412,
+    devMessage:
+      'RADIAN events require the direct DIAN provider (software propio) to be active for this store',
+  },
+  /**
+   * The negotiable-instrument events (035–051) carry data the reception family
+   * does not: the operation type of numeral 14.1.2, the endorsement's `@listID`,
+   * and the amounts of `InformacionNegociacion`.
+   *
+   * Raised BEFORE transmitting, on purpose. An incomplete event is rejected by
+   * RADIAN against a consecutive already spent, and the DIAN's message names an
+   * XPath rather than the field a merchant can fill. Refusing here with the
+   * missing field named is both cheaper and recoverable.
+   */
+  DIAN_EVENT_005: {
+    code: 'DIAN_EVENT_005',
+    httpStatus: 422,
+    devMessage:
+      'RADIAN event is missing data the annex requires for its code (operation type, endorsement listID or negotiation amounts)',
   },
   DIAN_ENABLEMENT_001: {
     code: 'DIAN_ENABLEMENT_001',
@@ -2583,6 +2719,28 @@ export const ErrorCodes = {
   },
   RUT_SCAN_INVALID_FILE: {
     code: 'RUT_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+
+  // DIAN Resolution Scanner (numbering resolution extraction)
+  RESOLUTION_SCAN_AI_FAIL: {
+    code: 'RESOLUTION_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI DIAN resolution extraction failed',
+  },
+  RESOLUTION_SCAN_PARSE_FAIL: {
+    code: 'RESOLUTION_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI DIAN resolution response as valid JSON',
+  },
+  RESOLUTION_SCAN_NO_FILE: {
+    code: 'RESOLUTION_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No DIAN resolution file provided',
+  },
+  RESOLUTION_SCAN_INVALID_FILE: {
+    code: 'RESOLUTION_SCAN_INVALID_FILE',
     httpStatus: 400,
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },

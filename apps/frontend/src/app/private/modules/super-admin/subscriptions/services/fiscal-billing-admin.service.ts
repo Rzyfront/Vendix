@@ -15,6 +15,7 @@ import {
   SubscriptionFiscalQuery,
   SubscriptionFiscalStatus,
   SubscriptionFiscalTransmission,
+  UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
   VendorSupportFiscalConfig,
   VendorSupportFiscalQuery,
@@ -169,6 +170,26 @@ export class FiscalBillingAdminService {
       .post<ApiEnvelope<PlatformResolution>>(
         `${this.base}/resolutions`,
         dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  updateResolution(
+    id: number,
+    dto: UpdatePlatformResolutionDto,
+  ): Observable<PlatformResolution> {
+    return this.http
+      .patch<ApiEnvelope<PlatformResolution>>(
+        `${this.base}/resolutions/${id}`,
+        dto,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  deleteResolution(id: number): Observable<{ id: number; deleted: boolean }> {
+    return this.http
+      .delete<ApiEnvelope<{ id: number; deleted: boolean }>>(
+        `${this.base}/resolutions/${id}`,
       )
       .pipe(map((res) => res.data));
   }

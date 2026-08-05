@@ -519,6 +519,36 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
   DIAN_CERT_004: 'El certificado no coincide con el NIT de la entidad fiscal.',
   DIAN_ENABLEMENT_001: 'Faltan requisitos para habilitar DIAN en produccion.',
+
+  // Set de pruebas de habilitación. Los mensajes distinguen "espera" de "error":
+  // reenviar un lote que la DIAN aún está validando quema un segundo bloque de
+  // consecutivos que nunca se recupera.
+  DIAN_TEST_SET_001:
+    'Necesitas la evidencia del set de pruebas aprobado antes de pasar a producción.',
+  DIAN_TEST_SET_002:
+    'Ya hay un set de pruebas en curso ante la DIAN. Consulta su estado en lugar de reenviarlo: un reenvío consume otro bloque de números.',
+  DIAN_TEST_SET_003:
+    'A la resolución de numeración no le quedan suficientes números para el set de pruebas de tu modo de operación.',
+  DIAN_TEST_SET_004:
+    'Esta configuración no tiene ningún set de pruebas enviado que se pueda revisar o descartar.',
+  DIAN_TEST_SET_005:
+    'El set guardado es anterior al registro de claves por documento. Reenvíalo para poder diagnosticarlo factura por factura.',
+  DIAN_TEST_SET_006:
+    'El set de pruebas debe emitirse contra una resolución de habilitación. La resolución seleccionada es de producción y sus consecutivos son reales.',
+
+  // Eventos RADIAN (Res. 000085/2022)
+  DIAN_EVENT_001:
+    'La factura no está aceptada por la DIAN o no tiene CUFE: no se puede registrar un evento RADIAN sobre ella.',
+  DIAN_EVENT_002:
+    'Ese código de evento RADIAN no está soportado. Solo están disponibles los eventos 030 a 034.',
+  DIAN_EVENT_003:
+    'Ese evento ya fue aceptado por la DIAN para esta factura. Registrarlo otra vez sería un duplicado.',
+  DIAN_EVENT_004:
+    'Los eventos RADIAN requieren la integración directa con la DIAN (software propio) activa en esta tienda.',
+
+  // Umbral 5 UVT (Art. 616-1 ET / Res. 000165 de 2023)
+  FISCAL_UVT_INVOICE_REQUIRED:
+    'Esta venta supera 5 UVT y requiere factura electrónica: identifica al comprador (documento y nombre) antes de cerrarla. El tiquete POS solo cubre ventas por debajo del tope.',
   FISCAL_CONFIG_INCOMPLETE:
     'La configuracion fiscal de esta entidad esta incompleta.',
   FISCAL_STATUS_INCOMPLETE:
@@ -570,6 +600,29 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No hay una resolucion activa para numerar facturas. Configura una en Resoluciones.',
   INVOICING_RESOLUTION_002:
     'La resolucion se agoto. Crea una nueva resolucion para seguir facturando.',
+  // Una resolución que ya numeró documentos es evidencia fiscal: se desactiva,
+  // no se borra. El backend manda el detalle (cuántos documentos, en qué número
+  // va), así que estos textos son el respaldo cuando ese detalle no llega.
+  INVOICING_RESOLUTION_003:
+    'La resolución ya emitió documentos o consumió numeración ante la DIAN. Desactívala en vez de borrarla.',
+  INVOICING_RESOLUTION_004:
+    'La configuración fiscal activa apunta a esta resolución. Reasígnala antes de borrarla o desactivarla.',
+  INVOICING_RESOLUTION_005:
+    'El prefijo, el tipo de documento y el rango inicial quedan fijos una vez la resolución consumió numeración. Crea una resolución nueva.',
+  // Escáner IA de resoluciones DIAN. Nada se guarda al escanear, así que estos
+  // errores solo significan "no pude leerla": el usuario siempre puede seguir
+  // escribiendo la resolución a mano.
+  RESOLUTION_SCAN_NO_FILE: 'Sube una foto o un PDF de la resolución DIAN.',
+  RESOLUTION_SCAN_INVALID_FILE:
+    'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  // El backend manda el nombre de la app en el detalle; este texto es el
+  // respaldo cuando ese detalle no llega.
+  AI_VISION_001:
+    'Este escáner no tiene un modelo de visión enlazado. Regístralo en super-admin → IA → Configuraciones; mientras tanto, escribe los datos a mano.',
+  RESOLUTION_SCAN_AI_FAIL:
+    'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
+  RESOLUTION_SCAN_PARSE_FAIL:
+    'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',

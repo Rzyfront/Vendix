@@ -54,6 +54,21 @@ export class PlatformInvoicingStore {
 
   readonly settings = computed(() => this._status()?.settings ?? null);
   readonly dianConfig = computed(() => this._status()?.dian_config ?? null);
+  /**
+   * Estado del lote de habilitación tal como lo lee el backend. Vive en el store
+   * y no en la página para que la pestaña se abra ya sabiendo si hay un lote en
+   * curso: antes solo se enteraba después de pulsar un botón, y un lote en cola
+   * era indistinguible de "no hay nada".
+   */
+  readonly testSet = computed(() => this._status()?.test_set ?? null);
+
+  /**
+   * Requisitos pendientes para poder enviar el set de habilitación. Separa lo que
+   * falta por hacer de lo que falta porque la DIAN aún no lo emite.
+   */
+  readonly habilitationReadiness = computed(
+    () => this._status()?.habilitation_readiness ?? null,
+  );
 
   /**
    * Resoluciones activas del tipo y ambiente pedidos, en formato de selector.

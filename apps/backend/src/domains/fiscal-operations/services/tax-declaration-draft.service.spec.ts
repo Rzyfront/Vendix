@@ -109,11 +109,22 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
       }),
     };
     const exogenousGenerator = {
+      // One entry per DIAN exogenous format the service dispatches. A missing
+      // one does not fail loudly at wiring time — it explodes inside the
+      // generator loop as "is not a function", so the list must stay complete.
       generateFormat1001: jest.fn().mockResolvedValue([]),
       generateFormat1003: jest.fn().mockResolvedValue([]),
       generateFormat1005: jest.fn().mockResolvedValue([]),
+      generateFormat1006: jest.fn().mockResolvedValue([]),
       generateFormat1007: jest.fn().mockResolvedValue([]),
+      generateFormat1008: jest.fn().mockResolvedValue([]),
+      generateFormat1009: jest.fn().mockResolvedValue([]),
+      generateFormat2276: jest.fn().mockResolvedValue([]),
     };
+
+    // The service emits domain events on draft transitions; positional
+    // construction means the emitter must be passed even when unasserted.
+    const eventEmitter = { emit: jest.fn(), emitAsync: jest.fn() };
 
     return {
       service: new TaxDeclarationDraftService(
@@ -121,6 +132,7 @@ describe('TaxDeclarationDraftService VAT calculation', () => {
         audit as any,
         exogenousGenerator as any,
         fiscalRules as any,
+        eventEmitter as any,
       ),
       prisma,
       tx,
@@ -259,11 +271,22 @@ describe('TaxDeclarationDraftService withholding calculation (purchases + payrol
       }),
     };
     const exogenousGenerator = {
+      // One entry per DIAN exogenous format the service dispatches. A missing
+      // one does not fail loudly at wiring time — it explodes inside the
+      // generator loop as "is not a function", so the list must stay complete.
       generateFormat1001: jest.fn().mockResolvedValue([]),
       generateFormat1003: jest.fn().mockResolvedValue([]),
       generateFormat1005: jest.fn().mockResolvedValue([]),
+      generateFormat1006: jest.fn().mockResolvedValue([]),
       generateFormat1007: jest.fn().mockResolvedValue([]),
+      generateFormat1008: jest.fn().mockResolvedValue([]),
+      generateFormat1009: jest.fn().mockResolvedValue([]),
+      generateFormat2276: jest.fn().mockResolvedValue([]),
     };
+
+    // The service emits domain events on draft transitions; positional
+    // construction means the emitter must be passed even when unasserted.
+    const eventEmitter = { emit: jest.fn(), emitAsync: jest.fn() };
 
     return {
       service: new TaxDeclarationDraftService(
@@ -271,6 +294,7 @@ describe('TaxDeclarationDraftService withholding calculation (purchases + payrol
         audit as any,
         exogenousGenerator as any,
         fiscalRules as any,
+        eventEmitter as any,
       ),
       prisma,
       getDraftData: () => draftData,
@@ -413,7 +437,18 @@ describe('TaxDeclarationDraftService exogenous calculation (generator delegation
           withholding_amount: 0,
         },
       ]),
+      // Formats this case does not assert, but which the service still
+      // dispatches. Empty results keep them out of the materialized lines while
+      // preventing an "is not a function" crash mid-loop.
+      generateFormat1006: jest.fn().mockResolvedValue([]),
+      generateFormat1008: jest.fn().mockResolvedValue([]),
+      generateFormat1009: jest.fn().mockResolvedValue([]),
+      generateFormat2276: jest.fn().mockResolvedValue([]),
     };
+
+    // The service emits domain events on draft transitions; positional
+    // construction means the emitter must be passed even when unasserted.
+    const eventEmitter = { emit: jest.fn(), emitAsync: jest.fn() };
 
     return {
       service: new TaxDeclarationDraftService(
@@ -421,6 +456,7 @@ describe('TaxDeclarationDraftService exogenous calculation (generator delegation
         audit as any,
         exogenousGenerator as any,
         fiscalRules as any,
+        eventEmitter as any,
       ),
       exogenousGenerator,
       getDraftData: () => draftData,
@@ -567,14 +603,25 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
     };
     const audit = { logForResource: jest.fn() };
     const exogenousGenerator = {
+      // One entry per DIAN exogenous format the service dispatches. A missing
+      // one does not fail loudly at wiring time — it explodes inside the
+      // generator loop as "is not a function", so the list must stay complete.
       generateFormat1001: jest.fn().mockResolvedValue([]),
       generateFormat1003: jest.fn().mockResolvedValue([]),
       generateFormat1005: jest.fn().mockResolvedValue([]),
+      generateFormat1006: jest.fn().mockResolvedValue([]),
       generateFormat1007: jest.fn().mockResolvedValue([]),
+      generateFormat1008: jest.fn().mockResolvedValue([]),
+      generateFormat1009: jest.fn().mockResolvedValue([]),
+      generateFormat2276: jest.fn().mockResolvedValue([]),
     };
     const fiscalRules = {
       resolveEffectiveRules: jest.fn().mockResolvedValue(rules),
     };
+
+    // The service emits domain events on draft transitions; positional
+    // construction means the emitter must be passed even when unasserted.
+    const eventEmitter = { emit: jest.fn(), emitAsync: jest.fn() };
 
     return {
       service: new TaxDeclarationDraftService(
@@ -582,6 +629,7 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
         audit as any,
         exogenousGenerator as any,
         fiscalRules as any,
+        eventEmitter as any,
       ),
       prisma,
       fiscalRules,
@@ -835,11 +883,22 @@ describe('TaxDeclarationDraftService ICA calculation (multi-store, multi-municip
     const audit = { logForResource: jest.fn() };
     const fiscalRules = { resolveEffectiveRules: jest.fn() };
     const exogenousGenerator = {
+      // One entry per DIAN exogenous format the service dispatches. A missing
+      // one does not fail loudly at wiring time — it explodes inside the
+      // generator loop as "is not a function", so the list must stay complete.
       generateFormat1001: jest.fn().mockResolvedValue([]),
       generateFormat1003: jest.fn().mockResolvedValue([]),
       generateFormat1005: jest.fn().mockResolvedValue([]),
+      generateFormat1006: jest.fn().mockResolvedValue([]),
       generateFormat1007: jest.fn().mockResolvedValue([]),
+      generateFormat1008: jest.fn().mockResolvedValue([]),
+      generateFormat1009: jest.fn().mockResolvedValue([]),
+      generateFormat2276: jest.fn().mockResolvedValue([]),
     };
+
+    // The service emits domain events on draft transitions; positional
+    // construction means the emitter must be passed even when unasserted.
+    const eventEmitter = { emit: jest.fn(), emitAsync: jest.fn() };
 
     return {
       service: new TaxDeclarationDraftService(
@@ -847,6 +906,7 @@ describe('TaxDeclarationDraftService ICA calculation (multi-store, multi-municip
         audit as any,
         exogenousGenerator as any,
         fiscalRules as any,
+        eventEmitter as any,
       ),
       prisma,
       getDraftData: () => draftData,

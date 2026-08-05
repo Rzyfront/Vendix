@@ -34,6 +34,27 @@ export interface InvoiceProviderAdapter {
   ): Promise<ProviderResponse>;
 
   /**
+   * Sends a POS electronic equivalent document (Res. 000165/2023).
+   *
+   * Optional on purpose: a provider that is only habilitado for the factura
+   * electrónica de venta must be *detectably* unable to emit a DE, so the flow
+   * refuses before consuming a consecutive from the DE range. A mandatory method
+   * would force every adapter to fake support it does not have.
+   */
+  sendEquivalentDocument?(
+    documentData: ProviderInvoiceData,
+    options?: { document_type_code?: string },
+  ): Promise<ProviderResponse>;
+
+  /**
+   * Sends an adjustment note ('93' débito / '94' crédito) to an equivalent
+   * document. The DE has no credit/debit note of its own.
+   */
+  sendEquivalentAdjustmentNote?(
+    adjustmentData: ProviderInvoiceData,
+  ): Promise<ProviderResponse>;
+
+  /**
    * Checks the status of a previously sent document.
    */
   checkStatus(trackingId: string): Promise<StatusResponse>;
@@ -53,6 +74,13 @@ export interface ProviderInvoiceData {
   customer_name?: string;
   customer_tax_id?: string;
   customer_address?: any;
+  /**
+   * Set when the document is being (re)transmitted after having been expedited
+   * under contingency. Drives `cbc:InvoiceTypeCode`: '04' for DIAN
+   * unavailability, '03' for a transcribed paper contingency invoice. Absent on a
+   * normal transmission, which keeps emitting '01'.
+   */
+  contingency_type?: string;
   subtotal_amount: string;
   discount_amount: string;
   tax_amount: string;
@@ -125,6 +153,19 @@ export interface ProviderResponse {
   pdf_url?: string;
   message?: string;
   provider_data?: any;
+  /**
+   * True when the failure is the DIAN being unavailable rather than the document
+   * being invalid (Anexo Técnico 1.9 §12.2).
+   *
+   * This distinction is load-bearing: an unavailability used to be treated the
+   * same as a validation rejection, so an outage marked perfectly valid invoices
+   * `rejected` with `accounting_status: blocked` — a terminal state the Anexo
+   * never intended. When this flag is set, the document must go to contingency
+   * (Type 04) instead: valid, deliverable, and owing a transmission within 48 h.
+   */
+  contingency_eligible?: boolean;
+  /** Anexo §12 failure class, when the failure was a transport/availability one. */
+  failure_class?: 'dian_error' | 'timeout' | 'non_retriable';
 }
 
 export interface StatusResponse {

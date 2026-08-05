@@ -10,9 +10,26 @@ import {
   METHOD_METADATA,
   INTERCEPTORS_METADATA,
 } from '@nestjs/common/constants';
-import { DECORATORS as SWAGGER_DECORATORS } from '@nestjs/swagger/dist/constants';
 import { getMetadataStorage } from 'class-validator';
 import { PERMISSIONS_KEY } from '../../../domains/auth/decorators/permissions.decorator';
+
+/**
+ * Metadata key that `@ApiOperation` writes on the handler.
+ *
+ * NO importar `@nestjs/swagger/dist/constants`: desde 11.4.x el paquete declara
+ * un mapa `exports` que solo expone `.` y `./plugin`, así que ese subpath deja
+ * de resolver y `require` explota con `ERR_PACKAGE_PATH_NOT_EXPORTED` — en
+ * arranque, porque `ApiCatalogService` es provider de `AiEngineModule`. Y no se
+ * ve venir: `tsc` con `moduleResolution: node` ignora `exports`, así que el
+ * build queda verde y el fallo aparece al levantar la imagen.
+ *
+ * El literal es estable por contrato: es la clave que `@ApiOperation` graba en
+ * Reflect y que Swagger tiene que seguir leyendo, así que cambiarla rompería
+ * cualquier documento OpenAPI ya generado. `resolveSummary` abajo tolera que
+ * falte, de modo que un cambio de clave degrada a "sin summary" en vez de
+ * tumbar el catálogo.
+ */
+const SWAGGER_API_OPERATION_METADATA = 'swagger/apiOperation';
 
 /** Verbs the bridge can execute. Anything else is not catalogued. */
 export type CatalogMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -204,7 +221,7 @@ export class ApiCatalogService implements OnApplicationBootstrap {
         // `@ApiOperation` metadata is a plain object on the handler. Read
         // defensively: it is optional, and the shape belongs to Swagger.
         const apiOperation = this.reflector.get<{ summary?: string }>(
-          SWAGGER_DECORATORS.API_OPERATION,
+          SWAGGER_API_OPERATION_METADATA,
           handler,
         );
         const summary =

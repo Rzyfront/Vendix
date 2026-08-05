@@ -80,13 +80,17 @@ export class CreateInvoiceDto {
     'export_invoice',
     'support_document',
     'support_adjustment_note',
+    'pos_equivalent_document',
+    'equivalent_adjustment_note',
   ])
   invoice_type:
     | 'sales_invoice'
     | 'purchase_invoice'
     | 'export_invoice'
     | 'support_document'
-    | 'support_adjustment_note';
+    | 'support_adjustment_note'
+    | 'pos_equivalent_document'
+    | 'equivalent_adjustment_note';
 
   @IsOptional()
   @IsNumber()

@@ -1,4 +1,4 @@
-import { JsonPipe, DatePipe } from '@angular/common';
+import { JsonPipe, DatePipe, NgClass } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import {
   Component,
@@ -23,6 +23,7 @@ import {
   IconComponent,
   InputComponent,
   SelectorComponent,
+  StatsComponent,
   ToastService,
   ToggleComponent,
 } from '../../../../../../../shared/components';
@@ -65,6 +66,14 @@ interface FiscalConfigFormControls {
   confirm_production: FormControl<boolean>;
 }
 
+/** Estados de `dian_configurations.enablement_status`, en palabras. */
+const ENABLEMENT_LABELS: Record<string, string> = {
+  not_started: 'No iniciada',
+  testing: 'En pruebas',
+  enabled: 'Habilitada',
+  suspended: 'Suspendida',
+};
+
 /** Etiqueta legible por control, para decir QUÉ falta en vez de "revisa el formulario". */
 const REQUIRED_LABELS: Record<string, string> = {
   platform_organization_id: 'ID organización plataforma',
@@ -88,12 +97,14 @@ const REQUIRED_LABELS: Record<string, string> = {
     ReactiveFormsModule,
     DatePipe,
     JsonPipe,
+    NgClass,
     RouterLink,
     ButtonComponent,
     FileUploadDropzoneComponent,
     IconComponent,
     InputComponent,
     SelectorComponent,
+    StatsComponent,
     ToggleComponent,
     PlatformDianGuideComponent,
   ],
@@ -174,11 +185,120 @@ export class PlatformDianConfigComponent {
     () => this.store.settings()?.last_tested_at ?? null,
   );
 
+  /** Solo los requisitos incumplidos: la lista completa es ruido cuando falta uno. */
+  private readonly unsatisfiedChecks = computed(
+    () =>
+      this.store
+        .habilitationReadiness()
+        ?.checks.filter((check) => !check.satisfied) ?? [],
+  );
+
+  /**
+   * Requisitos que BLOQUEAN el envío del set. Excluye las alertas anticipadas
+   * (`severity: 'warning'`): un certificado que vence en 20 días todavía firma,
+   * así que contarlo aquí bloquearía la habilitación por un problema futuro.
+   */
+  readonly pendingChecks = computed(() =>
+    this.unsatisfiedChecks().filter((check) => check.severity !== 'warning'),
+  );
+
+  /** Alertas anticipadas: mismo contrato y mismos umbrales que en la tienda. */
+  readonly readinessWarnings = computed(() =>
+    this.unsatisfiedChecks().filter((check) => check.severity === 'warning'),
+  );
+
+  /** Lectura acotada de la espera del lote, calculada por el backend. */
+  readonly testSetWait = computed(() => this.store.testSet()?.wait ?? null);
+
+  readonly testSetStalled = computed(
+    () => this.testSetWait()?.stalled === true,
+  );
+
+  /**
+   * Los lotes enviados antes de que se persistieran las claves de documento no
+   * se pueden consultar por CUFE: ofrecer el botón solo produciría un 412.
+   */
+  readonly canDiagnoseDocuments = computed(
+    () => this.testSetWait()?.diagnosable !== false,
+  );
+
+  /** Un lote en curso o estancado bloquea un reenvío: primero hay que descartarlo. */
+  readonly testSetBlocksResend = computed(() => {
+    const state = this.testSetWait()?.state;
+    return state === 'processing' || state === 'stalled';
+  });
+
+  readonly testSetStateLabel = computed(() => {
+    switch (this.testSetWait()?.state) {
+      case 'processing':
+        return 'En validación en la DIAN';
+      case 'stalled':
+        return 'Sin veredicto de la DIAN';
+      case 'passed':
+        return 'Aprobado por la DIAN';
+      case 'rejected':
+        return 'Rechazado por la DIAN';
+      case 'abandoned':
+        return 'Lote descartado';
+      default:
+        return 'Sin enviar';
+    }
+  });
+
   readonly certificateReady = computed(
     () =>
       !!this.selectedCertificate() &&
       this.certificatePasswordFilled() &&
       !this.uploadingCertificate(),
+  );
+
+  // ── Semáforo de habilitación ────────────────────────────────────────────
+  // Las mismas cuatro tarjetas que abre el módulo DIAN del admin de tienda. La
+  // página era un formulario largo sin estado visible: había que leer los seis
+  // bloques para saber en qué punto de la habilitación estaba la plataforma.
+
+  readonly enablementStateLabel = computed(() => {
+    if (!this.store.configured()) return 'Sin configurar';
+    const status = this.store.dianConfig()?.enablement_status ?? 'not_started';
+    return ENABLEMENT_LABELS[status] ?? status;
+  });
+
+  readonly certificateStateLabel = computed(() => {
+    const config = this.store.dianConfig();
+    if (!config?.has_certificate) return 'Sin cargar';
+    if (!config.certificate_expiry) return 'Cargado';
+    const expiry = new Date(config.certificate_expiry).getTime();
+    if (Number.isNaN(expiry)) return 'Cargado';
+    return expiry < Date.now() ? 'Vencido' : 'Vigente';
+  });
+
+  /**
+   * Consecutivo consumido sobre el rango autorizado. Es la cifra que dice si la
+   * numeración se va a agotar, y vivía enterrada en la pestaña de resoluciones.
+   */
+  readonly resolutionStateLabel = computed(() => {
+    const resolution = this.store.status()?.resolution ?? null;
+    if (!resolution) return 'Sin asignar';
+    return `${resolution.prefix} · ${resolution.current_number}/${resolution.range_to}`;
+  });
+
+  readonly issuanceStateLabel = computed(() => {
+    const settings = this.store.settings();
+    if (!settings?.is_enabled) return 'Inactiva';
+    return settings.auto_issue ? 'Automática' : 'Manual';
+  });
+
+  // Cada paso marca su propio cierre: así el número de la sección deja de ser
+  // decoración y dice si ya está resuelto.
+  readonly stepCredentialsDone = computed(() => this.store.configured());
+  readonly stepCertificateDone = computed(
+    () => this.store.dianConfig()?.has_certificate === true,
+  );
+  readonly stepTestSetDone = computed(
+    () => this.store.dianConfig()?.enablement_status === 'enabled',
+  );
+  readonly stepIssuanceDone = computed(
+    () => this.store.settings()?.is_enabled === true,
   );
 
   /**

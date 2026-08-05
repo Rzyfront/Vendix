@@ -106,7 +106,7 @@ export class ResolutionsService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
+    const resolution = await this.findOne(id);
 
     // Check if resolution has been used
     const usage_count = await this.prisma.invoices.count({
@@ -115,8 +115,21 @@ export class ResolutionsService {
 
     if (usage_count > 0) {
       throw new VendixHttpException(
-        ErrorCodes.INVOICING_VALIDATE_001,
-        'Cannot delete resolution with associated invoices. Deactivate it instead.',
+        ErrorCodes.INVOICING_RESOLUTION_003,
+        `La resolución tiene ${usage_count} documento(s) emitido(s). Desactívala en vez de borrarla.`,
+        { resolution_id: id, issued_invoices: usage_count },
+      );
+    }
+
+    // `current_number` starts at range_from - 1. Reaching range_from means the
+    // DIAN already saw a consecutive from this range — for instance a habilitación
+    // test set, which burns numbers without writing rows in `invoices`. Deleting
+    // the row would erase the only record of which numbers were consumed.
+    if (resolution.current_number >= resolution.range_from) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_003,
+        `La resolución ya consumió numeración ante la DIAN (va en ${resolution.current_number}). Desactívala en vez de borrarla.`,
+        { resolution_id: id, current_number: resolution.current_number },
       );
     }
 

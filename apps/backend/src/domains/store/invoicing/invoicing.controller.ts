@@ -21,6 +21,7 @@ import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
+import { DianEventsService } from './services/dian-events.service';
 import {
   PRINT_FORMATS,
   PrintFormat,
@@ -34,6 +35,7 @@ import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
 } from './credit-notes/dto/create-credit-note.dto';
+import { RegisterDianEventDto } from './dto/register-dian-event.dto';
 
 @Controller('store/invoicing')
 @UseGuards(ModuleFlowGuard)
@@ -44,6 +46,7 @@ export class InvoicingController {
     private readonly invoice_flow_service: InvoiceFlowService,
     private readonly credit_notes_service: CreditNotesService,
     private readonly invoice_pdf_service: InvoicePdfService,
+    private readonly dian_events_service: DianEventsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -68,6 +71,20 @@ export class InvoicingController {
     @Query('date_to') date_to?: string,
   ) {
     const result = await this.invoicing_service.getStats(date_from, date_to);
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Límite 5 UVT vigente para el documento equivalente POS (Art. 616-1 ET).
+   *
+   * El POS lo consulta para AVISAR antes de que el cajero llegue al tope; el
+   * bloqueo real vive en la transacción de venta, así que este endpoint es una
+   * ayuda de UI y no una autorización.
+   */
+  @Get('uvt-threshold')
+  @Permissions('invoicing:read')
+  async getUvtThreshold() {
+    const result = await this.invoicing_service.getPosUvtThreshold();
     return this.response_service.success(result);
   }
 
@@ -170,6 +187,31 @@ export class InvoicingController {
   async regenerateInvoicePdf(@Param('id') id: string) {
     const result = await this.invoice_pdf_service.generatePdf(+id);
     return this.response_service.success(result, 'Invoice PDF regenerated');
+  }
+
+  /**
+   * RADIAN document events (Res. 000085/2022). Registered against an invoice
+   * DIAN already accepted; they never move the invoice's own state machine.
+   */
+  @Get(':id/events')
+  @Permissions('invoicing:read')
+  async listDianEvents(@Param('id') id: string) {
+    const result = await this.dian_events_service.findByInvoice(+id);
+    return this.response_service.success(result);
+  }
+
+  @Post(':id/events')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async registerDianEvent(
+    @Param('id') id: string,
+    @Body() dto: RegisterDianEventDto,
+  ) {
+    const result = await this.dian_events_service.register(+id, dto);
+    return this.response_service.success(
+      result,
+      `Evento RADIAN ${dto.event_code} procesado`,
+    );
   }
 
   @Get(':id')

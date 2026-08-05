@@ -332,6 +332,26 @@ import {
                 <span>Estimación. El total final se confirma al cobrar.</span>
               </div>
             }
+
+            <!--
+              Aviso 5 UVT (Art. 616-1 ET / Res. 000165 de 2023). Aparece ANTES de
+              cobrar para que el cajero pida el documento con el cliente delante:
+              el backend rechaza la venta anónima por encima del tope, y descubrirlo
+              al pulsar «Cobrar» obliga a rehacer el cierre.
+            -->
+            @if (invoiceRequiredByUvt()) {
+              <div
+                class="mt-2 flex items-start gap-2 rounded-md border border-warning bg-warning-light px-2 py-1.5 text-[11px] text-text-primary"
+              >
+                <app-icon name="alert-triangle" [size]="12" class="text-warning mt-0.5 shrink-0"></app-icon>
+                <span>
+                  Esta venta supera
+                  {{ formatCurrency(uvtLimitCop()) }}
+                  ({{ uvtThreshold()!.uvt_limit }} UVT) y requiere factura
+                  electrónica: identifica al cliente antes de cobrar.
+                </span>
+              </div>
+            }
           </div>
 
           <!-- Checkout Actions -->
@@ -986,6 +1006,16 @@ private cartService = inject(PosCartService);
     const total = Number(this.summary()?.total ?? 0) || 0;
     return Math.max(0, total - this.withholdingAmount());
   });
+
+  /**
+   * Aviso 5 UVT resuelto por `PosCartService` (único dueño del umbral, para que
+   * el carrito y el cierre de venta no puedan discrepar).
+   */
+  readonly uvtThreshold = this.cartService.uvtThreshold;
+  readonly invoiceRequiredByUvt = this.cartService.invoiceRequiredByUvt;
+  readonly uvtLimitCop = computed(
+    () => this.cartService.uvtThreshold()?.limit_cop ?? 0,
+  );
   readonly taxCategories = signal<TaxCategory[]>([]);
   readonly customItemModalOpen = signal(false);
   readonly customItemDraft = signal({

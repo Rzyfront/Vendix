@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import AdmZip = require('adm-zip');
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { DianSecretEnvelopeService } from '../../../../common/services/dian-secret-envelope.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -33,6 +34,12 @@ import {
   buildDianZipFileName,
   DianDocumentKind,
 } from '../utils/dian-file-naming.util';
+import { analyzeTestSetWait } from './test-set-wait.util';
+import {
+  describeComposition,
+  resolveTestSetComposition,
+  testSetSize,
+} from './dian-test-set-composition';
 
 /** One GetStatusZip poll attempt recorded in last_test_result for diagnostics. */
 export interface TestSetPollAttempt {
@@ -53,6 +60,7 @@ export class DianTestService {
     private readonly response_parser: DianResponseParserService,
     private readonly s3_service: S3Service,
     private readonly xml_signer: DianXmlSignerService,
+    private readonly secret_envelope: DianSecretEnvelopeService,
   ) {}
 
   private async getConfigById(config_id: number) {
@@ -75,6 +83,8 @@ export class DianTestService {
   private async loadWsCredentials(config: {
     certificate_s3_key: string | null;
     certificate_password_encrypted: string | null;
+    /** Non-exportable custody, when the entity has migrated its key to an HSM. */
+    certificate_kms_key_id?: string | null;
   }): Promise<WsSecurityCredentials | undefined> {
     if (!config.certificate_s3_key || !config.certificate_password_encrypted) {
       return undefined;
@@ -86,14 +96,11 @@ export class DianTestService {
       const p12_buffer = await this.s3_service.downloadImage(
         config.certificate_s3_key,
       );
-      const creds = this.xml_signer.extractCredentials(
+      return this.xml_signer.buildWsCredentials(
         p12_buffer,
         cert_password,
+        config.certificate_kms_key_id,
       );
-      return {
-        private_key_pem: creds.private_key_pem,
-        certificate_der_base64: creds.certificate_der_base64,
-      };
     } catch (error) {
       this.logger.warn(
         `Failed to extract WS-Security credentials, continuing without: ${error.message}`,
@@ -119,14 +126,11 @@ export class DianTestService {
         const p12_buffer = await this.s3_service.downloadImage(
           config.certificate_s3_key,
         );
-        const creds = this.xml_signer.extractCredentials(
+        ws_credentials = this.xml_signer.buildWsCredentials(
           p12_buffer,
           cert_password,
+          config.certificate_kms_key_id,
         );
-        ws_credentials = {
-          private_key_pem: creds.private_key_pem,
-          certificate_der_base64: creds.certificate_der_base64,
-        };
       } catch (error) {
         this.logger.warn(
           `Failed to extract WS-Security credentials for connection test, continuing without: ${error.message}`,
@@ -188,7 +192,8 @@ export class DianTestService {
 
   /**
    * Runs the DIAN test set for a specific configuration.
-   * Generates 50 UBL XML documents (30 invoices + 10 debit notes + 10 credit notes),
+   * Generates the UBL XML documents required by the tenant's mode of operation
+   * (software propio: 2 FV + 1 NC + 1 ND; proveedor tecnológico: 6 FV + 2 NC + 2 ND),
    * signs them with the .p12 certificate, packages them in a single ZIP,
    * and sends to DIAN via SendTestSetAsync.
    */
@@ -204,7 +209,7 @@ export class DianTestService {
     }
 
     // Guard against a second submission while DIAN still owes us a verdict for
-    // the previous ZipKey. Re-sending consumes another 50 resolution numbers and
+    // the previous ZipKey. Re-sending consumes another block of resolution numbers and
     // DIAN rejects the batch as duplicated, which is unrecoverable from the UI.
     const previous_result = (config.last_test_result ?? {}) as Record<
       string,
@@ -226,6 +231,13 @@ export class DianTestService {
       ? this.encryption.decrypt(config.certificate_password_encrypted)
       : null;
 
+    // Best moment to retire a weaker envelope: the habilitación flow holds the
+    // plaintext and runs long before any production consecutive is at stake.
+    await this.secret_envelope.upgradeInPlace(config.id, config, {
+      software_pin,
+      certificate_password: cert_password,
+    });
+
     // 2. Load resolution
     const resolution = await this.prisma.invoice_resolutions.findFirst({
       where: { id: resolution_id },
@@ -237,11 +249,44 @@ export class DianTestService {
       );
     }
 
-    // The 50 documents must consume FRESH numbers. Starting at `range_from`
+    // The test set is a HABILITACIÓN artifact. Two provable guards keep it from
+    // consuming production numbering, which can never be recovered:
+    //
+    // (a) A configuration already in `production` has nothing left to enable, and
+    //     the resolutions attached to it are production ranges.
+    // (b) A resolution that has already issued real `invoices` rows is a live
+    //     range. Test sets never persist invoices, so a habilitación resolution
+    //     stays at zero no matter how many times the set is re-sent — the
+    //     condition therefore never blocks a legitimate retry.
+    if (environment !== 'test') {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La configuración ya está en ambiente de producción: el set de pruebas solo se envía en ambiente de habilitación.',
+        { dian_configuration_id: config_id, environment },
+      );
+    }
+    const issued_invoices = await this.prisma.invoices.count({
+      where: { resolution_id },
+    });
+    if (issued_invoices > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        `La resolución ${resolution.prefix}${resolution.resolution_number} ya emitió ${issued_invoices} documento(s) reales, así que es una resolución de producción. Usa la resolución de habilitación que generó el portal DIAN.`,
+        { resolution_id, issued_invoices },
+      );
+    }
+
+    // Composition comes from the tenant's declared mode of operation. It used to
+    // be a hardcoded 50 (30 FV + 10 ND + 10 NC) — the legacy 2019 habilitación
+    // layout, which matches neither software propio (2+1+1) nor proveedor
+    // tecnológico (6+2+2) under Res. 000165/2023, and burned 50 consecutives.
+    const composition = resolveTestSetComposition(config.operation_mode);
+    const TEST_SET_SIZE = testSetSize(composition);
+
+    // The documents must consume FRESH numbers. Starting at `range_from`
     // (the old behaviour) meant a second run re-emitted the exact same numbers
     // and CUFEs, which DIAN rejects as duplicates. `current_number` is the last
     // number actually used, so the batch starts right after it.
-    const TEST_SET_SIZE = 50;
     const next_number = Math.max(
       resolution.range_from,
       (resolution.current_number ?? 0) + 1,
@@ -249,7 +294,7 @@ export class DianTestService {
     if (next_number + TEST_SET_SIZE - 1 > resolution.range_to) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_TEST_SET_003,
-        `La resolución ${resolution.prefix}${resolution.resolution_number} solo tiene ${Math.max(0, resolution.range_to - next_number + 1)} números disponibles y el set de pruebas requiere ${TEST_SET_SIZE}.`,
+        `La resolución ${resolution.prefix}${resolution.resolution_number} solo tiene ${Math.max(0, resolution.range_to - next_number + 1)} números disponibles y el set de pruebas requiere ${TEST_SET_SIZE} (${describeComposition(composition)}).`,
         { resolution_id, next_number, range_to: resolution.range_to },
       );
     }
@@ -354,14 +399,11 @@ export class DianTestService {
     let ws_credentials: WsSecurityCredentials | undefined;
     if (p12_buffer && cert_password) {
       try {
-        const creds = this.xml_signer.extractCredentials(
+        ws_credentials = this.xml_signer.buildWsCredentials(
           p12_buffer,
           cert_password,
+          config.certificate_kms_key_id,
         );
-        ws_credentials = {
-          private_key_pem: creds.private_key_pem,
-          certificate_der_base64: creds.certificate_der_base64,
-        };
       } catch (error) {
         this.logger.warn(
           `Failed to extract WS-Security credentials, continuing without: ${error.message}`,
@@ -375,7 +417,7 @@ export class DianTestService {
       data: { enablement_status: 'testing' },
     });
 
-    // 6. Generate 50 documents
+    // 6. Generate the documents
     const files: { name: string; content: string }[] = [];
     const invoice_cufes: { number: string; cufe: string; date: string }[] = [];
     // Evidence persisted alongside the batch. Without the document key there is
@@ -400,8 +442,14 @@ export class DianTestService {
     const today = localDateString(issued_at, timezone);
     const time_now = localTimeString(issued_at, timezone);
 
-    // 6a. Generate 30 invoices
-    for (let i = 0; i < 30; i++) {
+    // Numbering blocks: invoices first, then debit notes, then credit notes.
+    // Derived from the composition so the three loops cannot overlap when the
+    // mode changes the counts.
+    const debit_note_offset = composition.invoices;
+    const credit_note_offset = composition.invoices + composition.debit_notes;
+
+    // 6a. Generate the invoices required by the mode
+    for (let i = 0; i < composition.invoices; i++) {
       const invoice_number = `${resolution.prefix}${next_number + i}`;
       const subtotal = (100000 + i * 15000).toFixed(2);
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
@@ -495,10 +543,13 @@ export class DianTestService {
       });
     }
 
-    // 6b. Generate 10 debit notes (referencing invoices 0-9)
-    for (let i = 0; i < 10; i++) {
-      const note_number = `${resolution.prefix}${next_number + 30 + i}`;
-      const ref_invoice = invoice_cufes[i];
+    // 6b. Generate the debit notes, each referencing an invoice of this same set
+    for (let i = 0; i < composition.debit_notes; i++) {
+      const note_number = `${resolution.prefix}${next_number + debit_note_offset + i}`;
+      // Modulo, not a fixed index: with 2 invoices and 1 note the old `[i]`
+      // happened to work, but any mode with more notes than invoices would read
+      // `undefined` and emit a note with no BillingReference.
+      const ref_invoice = invoice_cufes[i % invoice_cufes.length];
       const subtotal = (50000 + i * 5000).toFixed(2);
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
       const total = (parseFloat(subtotal) + parseFloat(tax)).toFixed(2);
@@ -580,7 +631,7 @@ export class DianTestService {
       const debit_file = buildDianXmlFileName(
         'debit_note',
         config.nit,
-        next_number + 30 + i,
+        next_number + debit_note_offset + i,
       );
       files.push({ name: debit_file, content: xml });
       documents.push({
@@ -593,10 +644,15 @@ export class DianTestService {
       });
     }
 
-    // 6c. Generate 10 credit notes (referencing invoices 10-19)
-    for (let i = 0; i < 10; i++) {
-      const note_number = `${resolution.prefix}${next_number + 40 + i}`;
-      const ref_invoice = invoice_cufes[10 + i];
+    // 6c. Generate the credit notes, each referencing an invoice of this same set
+    for (let i = 0; i < composition.credit_notes; i++) {
+      const note_number = `${resolution.prefix}${next_number + credit_note_offset + i}`;
+      // Offset by the debit notes so credit and debit notes do not both reference
+      // the same invoice when the set is small.
+      const ref_invoice =
+        invoice_cufes[
+          (composition.debit_notes + i) % invoice_cufes.length
+        ];
       const subtotal = (50000 + i * 5000).toFixed(2);
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
       const total = (parseFloat(subtotal) + parseFloat(tax)).toFixed(2);
@@ -678,7 +734,7 @@ export class DianTestService {
       const credit_file = buildDianXmlFileName(
         'credit_note',
         config.nit,
-        next_number + 40 + i,
+        next_number + credit_note_offset + i,
       );
       files.push({ name: credit_file, content: xml });
       documents.push({
@@ -743,6 +799,10 @@ export class DianTestService {
       resolution_id,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
+      // The mode and composition the batch was built for. Without them, a
+      // rejected set cannot be told apart from one sent with the wrong layout.
+      operation_mode: config.operation_mode,
+      composition,
       // Per-document evidence: number, document key, kind and the exact civil
       // timestamp used to derive the key. This is what makes GetStatus-by-CUFE
       // possible after the fact.
@@ -815,6 +875,7 @@ export class DianTestService {
       zip_key,
       pending: still_processing,
       rejected,
+      wait: analyzeTestSetWait(result_data),
       executed_at: result_data.executed_at,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
@@ -888,13 +949,15 @@ export class DianTestService {
       },
     });
 
+    const wait = analyzeTestSetWait(result_data);
+
     await this.createAuditLog(config.id, {
       action: 'check_test_set_status',
       status: success ? 'success' : still_processing ? 'pending' : 'error',
       error_message: success
         ? null
         : still_processing
-          ? `Aún en validación en la DIAN (ZipKey ${zip_key}).`
+          ? wait.reason ?? `Aún en validación en la DIAN (ZipKey ${zip_key}).`
           : verdict.error_messages?.join(' | ') || verdict.status_message,
       duration_ms: Date.now() - started_at,
     });
@@ -918,10 +981,15 @@ export class DianTestService {
       credit_notes_count: previous.credit_notes ?? null,
       environment,
       enablement_status: success ? 'test_set_passed' : config.enablement_status,
+      // Bounded reading of the wait, so the UI can stop offering "vuelve a
+      // consultar" once that has demonstrably stopped working.
+      wait,
       message: success
         ? 'La DIAN validó el set de pruebas. La habilitación quedó aprobada.'
         : still_processing
-          ? 'La DIAN sigue validando el set de pruebas. Vuelve a consultar en unos minutos.'
+          ? wait.stalled
+            ? 'La DIAN recibió el lote pero no emite veredicto. Seguir consultando no lo va a resolver: diagnostica por documento o descarta el lote y reenvía.'
+            : 'La DIAN sigue validando el set de pruebas. Vuelve a consultar en unos minutos.'
           : `La DIAN rechazó el set de pruebas: ${verdict.status_message}`,
     };
   }
@@ -1172,6 +1240,9 @@ export class DianTestService {
       environment: config.environment,
       test_set_id: config.test_set_id,
       last_result: config.last_test_result,
+      // Derived on read, never stored: `pending` + `executed_at` are the facts,
+      // and a persisted "stalled" flag would go stale the moment DIAN answers.
+      wait: analyzeTestSetWait(config.last_test_result),
     };
   }
 

@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import {
+  FiscalInvoiceThresholdService,
+  POS_EQUIVALENT_DOCUMENT_UVT_LIMIT,
+} from '@common/services/fiscal-invoice-threshold.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
@@ -82,7 +86,56 @@ export class InvoicingService {
     private readonly fiscalScope: FiscalScopeService,
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscalGate: FiscalGateService,
+    private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
   ) {}
+
+  /**
+   * Estado del límite 5 UVT para el documento equivalente POS en la tienda
+   * actual (Art. 616-1 ET / Res. 000165 de 2023).
+   *
+   * Devuelve `enforced: false` cuando el área fiscal de facturación está
+   * inactiva o cuando no hay UVT configurada para el año: son exactamente los
+   * dos casos en que la venta de la transacción tampoco se bloquea, así que el
+   * aviso del POS y el bloqueo real no pueden desalinearse.
+   */
+  async getPosUvtThreshold(): Promise<{
+    enforced: boolean;
+    uvt_value: number | null;
+    uvt_limit: number;
+    limit_cop: number | null;
+    year: number;
+  }> {
+    const context = RequestContextService.getContext();
+    const organization_id = Number(context?.organization_id ?? 0);
+    const year = new Date().getFullYear();
+
+    if (!organization_id) {
+      return {
+        enforced: false,
+        uvt_value: null,
+        uvt_limit: POS_EQUIVALENT_DOCUMENT_UVT_LIMIT,
+        limit_cop: null,
+        year,
+      };
+    }
+
+    const evaluation = await this.fiscalInvoiceThreshold.evaluate({
+      organization_id,
+      store_id: context?.store_id ?? null,
+      // Amount 0 with no customer: we only want the resolved limit, not a verdict.
+      total_amount: 0,
+      has_customer: false,
+      year,
+    });
+
+    return {
+      enforced: evaluation.enforced,
+      uvt_value: evaluation.uvt_value,
+      uvt_limit: POS_EQUIVALENT_DOCUMENT_UVT_LIMIT,
+      limit_cop: evaluation.limit_cop,
+      year: evaluation.year,
+    };
+  }
 
   /**
    * Defensa en profundidad del gate fiscal de FACTURACIÓN a nivel servicio.

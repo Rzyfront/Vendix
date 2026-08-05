@@ -45,6 +45,7 @@
     "@aws-sdk/client-acm": "^3.956.0",
     "@aws-sdk/client-cloudfront": "^3.956.0",
     "@aws-sdk/client-cloudwatch": "^3.1024.0",
+    "@aws-sdk/client-kms": "^3.1103.0",
     "@aws-sdk/client-rds": "^3.1024.0",
     "@aws-sdk/client-s3": "^3.956.0",
     "@aws-sdk/client-secrets-manager": "^3.958.0",

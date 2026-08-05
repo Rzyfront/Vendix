@@ -1,4 +1,4 @@
-import { Component, DestroyRef, inject, input, output, signal, effect } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, output, signal, effect } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -15,6 +15,10 @@ import {
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import {
+  DianResolutionScanResult,
+  RESOLUTION_SCAN_FIELD_LABELS,
+} from '../../../../../../../shared/components/dian-resolution-scanner/interfaces/resolution-scan-result.interface';
 
 @Component({
   selector: 'vendix-resolution-create',
@@ -35,6 +39,26 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
     >
       <div class="p-4">
         <form [formGroup]="resolutionForm" (ngSubmit)="onSubmit()" class="space-y-4">
+
+          @if (unverifiedFields().length > 0) {
+            <!-- La IA precargó estos campos pero no pudo verificarlos (o los leyó
+                 con baja confianza). Se listan porque la resolución autoriza
+                 numeración legal: un dígito mal leído se descubre cuando la DIAN
+                 rechaza la primera factura. -->
+            <div
+              class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary"
+              role="note"
+            >
+              <p class="font-semibold mb-1">
+                Verifica estos campos precargados por IA
+              </p>
+              <ul class="list-disc pl-5 space-y-0.5">
+                @for (key of unverifiedFields(); track key) {
+                  <li>{{ scanFieldLabel(key) }}</li>
+                }
+              </ul>
+            </div>
+          }
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -134,9 +158,19 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
 export class ResolutionCreateComponent {
   readonly isOpen = input<boolean>(false);
   readonly resolution = input<InvoiceResolution | null>(null);
+  /**
+   * Resultado de un escaneo IA con el que precargar el formulario. Entra como
+   * input (y no como una llamada del padre) porque el padre no tiene acceso al
+   * FormGroup: así el modal sigue siendo el único dueño de su formulario.
+   */
+  readonly prefill = input<DianResolutionScanResult | null>(null);
   readonly isOpenChange = output<boolean>();
 
   readonly submitting = signal(false);
+  /** Campos que el escáner marcó para confirmación manual. */
+  readonly unverifiedFields = computed(
+    () => this.prefill()?.requires_manual_confirmation ?? [],
+  );
   resolutionForm: FormGroup;
 
   private fb = inject(FormBuilder);
@@ -174,6 +208,39 @@ export class ResolutionCreateComponent {
       } else {
         this.resolutionForm.reset();
       }
+    });
+
+    // Declarado DESPUÉS del efecto de `resolution` a propósito: cuando el padre
+    // abre el modal en modo creación y precarga en el mismo flush, el reset de
+    // arriba corre primero y este patch queda encima. Al revés, el reset borraría
+    // lo escaneado.
+    effect(() => {
+      const scan = this.prefill();
+      if (!scan) return;
+
+      // Solo se copia lo que tiene valor: un campo que la IA no leyó se queda
+      // vacío para que el usuario lo escriba, en vez de recibir un cero o una
+      // fecha inventada.
+      const patch: Record<string, string | number> = {};
+      if (scan.resolution_number.value) {
+        patch['resolution_number'] = scan.resolution_number.value;
+      }
+      if (scan.prefix.value) patch['prefix'] = scan.prefix.value;
+      if (scan.range_from.value !== null) {
+        patch['range_from'] = scan.range_from.value;
+      }
+      if (scan.range_to.value !== null) patch['range_to'] = scan.range_to.value;
+      if (scan.resolution_date.value) {
+        patch['resolution_date'] = scan.resolution_date.value;
+      }
+      if (scan.valid_from.value) patch['valid_from'] = scan.valid_from.value;
+      if (scan.valid_to.value) patch['valid_to'] = scan.valid_to.value;
+      if (scan.technical_key.value) {
+        patch['technical_key'] = scan.technical_key.value;
+      }
+
+      this.resolutionForm.patchValue(patch);
+      this.resolutionForm.markAllAsTouched();
     });
 
     this.actions$
@@ -232,5 +299,12 @@ export class ResolutionCreateComponent {
 
   onClose(): void {
     this.isOpenChange.emit(false);
+  }
+
+  /** Etiqueta legible de un campo señalado por el escáner. */
+  scanFieldLabel(key: string): string {
+    return (
+      (RESOLUTION_SCAN_FIELD_LABELS as Record<string, string>)[key] ?? key
+    );
   }
 }

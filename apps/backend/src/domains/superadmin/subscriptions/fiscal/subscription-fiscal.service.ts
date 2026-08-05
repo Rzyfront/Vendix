@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { dianAmount } from '../../../store/invoicing/utils/dian-money.util';
 import { createHash } from 'crypto';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -32,6 +33,31 @@ import {
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
+import { analyzeTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
+import {
+  FiscalProductionReadinessService,
+  ProductionReadinessCheck,
+} from '../../../store/invoicing/providers/fiscal-production-readiness.service';
+
+/**
+ * A platform habilitación check. Same fields as the tenant
+ * `ProductionReadinessCheck` so both surfaces render from ONE contract, plus
+ * `issued_by_dian` kept as a derived mirror of `blocked_by` for the superadmin UI
+ * that predates the unification.
+ */
+export interface PlatformHabilitationCheck {
+  key: string;
+  label: string;
+  satisfied: boolean;
+  action: string;
+  /** Derived: `blocked_by === 'dian'`. */
+  issued_by_dian: boolean;
+  severity: 'blocking' | 'warning';
+  owner: 'tenant' | 'platform';
+  blocked_by: 'vendix' | 'dian';
+  days_remaining?: number;
+  percent_remaining?: number;
+}
 import {
   CreatePlatformResolutionDto,
   ListPlatformResolutionsQueryDto,
@@ -39,10 +65,19 @@ import {
   PlatformResolutionDocumentType,
   SubscriptionFiscalEnvironment,
   SubscriptionFiscalQueryDto,
+  UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
 
 const SETTINGS_KEY = PLATFORM_FISCAL_SETTINGS_KEY;
+/**
+ * The vendor documento-soporte switch lives in its own `platform_settings` row
+ * and can also point at a resolution. Destructive resolution changes must check
+ * both, otherwise deleting a resolution would break documento soporte with no
+ * warning. Kept local to avoid importing the whole vendor-support service just
+ * for a string.
+ */
+const VENDOR_SUPPORT_SETTINGS_KEY = 'vendor_support_fiscal';
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const PLATFORM_ORGANIZATION_ID = 1;
@@ -140,6 +175,9 @@ export class SubscriptionFiscalService {
     private readonly certificateAdapter: ManualCertificateIssuerAdapter,
     private readonly dianTestService: DianTestService,
     private readonly platformOrg: PlatformOrgService,
+    // Reused so the platform checklist raises the SAME early alerts, with the
+    // same thresholds and copy, as the tenant one.
+    private readonly readiness: FiscalProductionReadinessService,
   ) {}
 
   async getStatus() {
@@ -167,6 +205,222 @@ export class SubscriptionFiscalService {
       resolution,
       stats: { accepted, errors, pending },
       suggested: await this.buildSuggestedConfig(),
+      // Bounded reading of the habilitación batch, so the page shows the current
+      // state on load instead of only after the superadmin presses a button.
+      // Without it a queued batch is invisible and the habilitación looks hung.
+      test_set: config
+        ? {
+            enablement_status: config.enablement_status,
+            test_set_id: config.test_set_id,
+            environment: config.environment,
+            last_test_result: config.last_test_result,
+            wait: analyzeTestSetWait(config.last_test_result),
+          }
+        : null,
+      habilitation_readiness: this.buildHabilitationReadiness(
+        settings,
+        config,
+        resolution,
+      ),
+    };
+  }
+
+  /**
+   * What is still missing before the platform can submit its habilitación set.
+   *
+   * The production-readiness report answers "can I go live?"; this answers the
+   * earlier question "can I even start?". Without it a superadmin faces a page
+   * whose only feedback is a 412 after pressing a button, with no way to see that
+   * the blocker is, say, a `software_id` the DIAN has not issued yet — data no
+   * amount of code can invent.
+   */
+  private buildHabilitationReadiness(
+    settings: SubscriptionFiscalSettings,
+    config: {
+      software_id: string | null;
+      software_pin_encrypted: string | null;
+      test_set_id: string | null;
+      certificate_s3_key: string | null;
+      certificate_password_encrypted: string | null;
+      certificate_expiry: Date | null;
+      nit: string | null;
+    } | null,
+    resolution: {
+      id: number;
+      prefix: string | null;
+      range_from: number;
+      range_to: number;
+      current_number: number;
+    } | null,
+  ): {
+    ready: boolean;
+    checks: PlatformHabilitationCheck[];
+    /** Blocking, actionable now (Vendix operations can supply the value). */
+    actionable: PlatformHabilitationCheck[];
+    /** Blocking, waiting on the DIAN to issue or rule. */
+    waiting_on_dian: PlatformHabilitationCheck[];
+    /** Early alerts. Never affect `ready`. */
+    warnings: PlatformHabilitationCheck[];
+  } {
+    // 'PENDING' is what the platform seed writes as a placeholder. Treating it as
+    // present would make the checklist claim a software_id Vendix does not have.
+    const placeholder = (value: string | null | undefined) =>
+      !value || value.trim().toUpperCase() === 'PENDING';
+
+    const certificateValid =
+      !!config?.certificate_expiry &&
+      config.certificate_expiry.getTime() > Date.now();
+
+    const checks = [
+      {
+        key: 'settings_configured',
+        label: 'Identidad fiscal de la plataforma registrada',
+        satisfied:
+          !!settings.platform_organization_id && !!settings.accounting_entity_id,
+        action:
+          'Guarda la configuración con la organización plataforma y su entidad contable.',
+        issued_by_dian: false,
+      },
+      {
+        key: 'dian_configuration',
+        label: 'Configuración DIAN de facturación creada',
+        satisfied: !!settings.dian_configuration_id && !!config,
+        action: 'Guarda la configuración DIAN de la plataforma.',
+        issued_by_dian: false,
+      },
+      {
+        key: 'software_id',
+        label: 'Software ID emitido por la DIAN',
+        satisfied: !placeholder(config?.software_id),
+        action:
+          'Registra el Software ID que la DIAN entrega al inscribir el software de facturación.',
+        issued_by_dian: true,
+      },
+      {
+        key: 'software_pin',
+        label: 'PIN del software guardado',
+        satisfied: !!config?.software_pin_encrypted,
+        action: 'Registra el PIN que definiste al inscribir el software en la DIAN.',
+        issued_by_dian: true,
+      },
+      {
+        key: 'test_set_id',
+        label: 'Test Set ID de habilitación',
+        satisfied: !placeholder(config?.test_set_id),
+        action:
+          'Registra el TestSetId que la DIAN asigna al solicitar el set de pruebas.',
+        issued_by_dian: true,
+      },
+      {
+        key: 'certificate',
+        label: 'Certificado de firma digital cargado',
+        satisfied: !!config?.certificate_s3_key,
+        action: 'Sube el archivo .p12 del certificado de firma.',
+        issued_by_dian: false,
+      },
+      {
+        key: 'certificate_password',
+        label: 'Contraseña del certificado guardada',
+        satisfied: !!config?.certificate_password_encrypted,
+        action: 'Vuelve a subir el certificado indicando su contraseña.',
+        issued_by_dian: false,
+      },
+      {
+        key: 'certificate_valid',
+        label: 'Certificado vigente',
+        satisfied: certificateValid,
+        action:
+          'El certificado está vencido o sin fecha de expiración: sube uno vigente.',
+        issued_by_dian: false,
+      },
+      {
+        key: 'invoice_resolution',
+        label: 'Resolución de numeración asignada',
+        satisfied: !!settings.invoice_resolution_id && !!resolution,
+        action:
+          'Crea la resolución de factura de venta y apúntala en la configuración.',
+        issued_by_dian: false,
+      },
+      {
+        key: 'resolution_cursor',
+        label: 'Numeración dentro del rango autorizado',
+        // A cursor below the floor emits numbers outside the authorized range and
+        // the DIAN rejects every one of them, so it belongs in the checklist even
+        // though nothing about it is "missing".
+        satisfied:
+          !resolution || resolution.current_number >= resolution.range_from - 1,
+        action:
+          'El consecutivo de la resolución quedó por debajo de su rango: se corrige al emitir, pero revísalo antes de enviar el set.',
+        issued_by_dian: false,
+      },
+    ];
+
+    // Same two early alerts the tenant checklist raises, from the same helpers:
+    // a platform certificate 5 days from expiry or a platform range at 3% is the
+    // identical outage, and duplicating the thresholds here is how the two
+    // surfaces end up warning on different days.
+    const warning_checks: PlatformHabilitationCheck[] = [
+      this.toPlatformCheck(
+        this.readiness.buildCertificateExpiryWarning(
+          config?.certificate_expiry ?? null,
+        ),
+      ),
+      ...(resolution
+        ? [
+            this.toPlatformCheck(
+              this.readiness.buildResolutionRangeWarning(resolution),
+            ),
+          ]
+        : []),
+    ];
+
+    const all_checks: PlatformHabilitationCheck[] = [
+      ...checks.map((check) => ({
+        ...check,
+        severity: 'blocking' as const,
+        owner: 'platform' as const,
+        blocked_by: check.issued_by_dian
+          ? ('dian' as const)
+          : ('vendix' as const),
+      })),
+      ...warning_checks,
+    ];
+
+    const unsatisfied = all_checks.filter((c) => !c.satisfied);
+    const blocking = unsatisfied.filter((c) => c.severity !== 'warning');
+
+    return {
+      // `ready` counts BLOCKING checks only: an expiring certificate still signs
+      // today, so it must not stop the habilitación from being submitted.
+      ready: blocking.length === 0,
+      checks: all_checks,
+      actionable: blocking.filter((c) => c.blocked_by !== 'dian'),
+      waiting_on_dian: blocking.filter((c) => c.blocked_by === 'dian'),
+      warnings: unsatisfied.filter((c) => c.severity === 'warning'),
+    };
+  }
+
+  /**
+   * Adapts a tenant-shaped `ProductionReadinessCheck` to the platform checklist.
+   *
+   * `issued_by_dian` is kept as a derived mirror of `blocked_by` so the existing
+   * superadmin UI keeps compiling while it migrates to the unified field.
+   */
+  private toPlatformCheck(
+    check: ProductionReadinessCheck,
+  ): PlatformHabilitationCheck {
+    const blocked_by = check.blocked_by ?? 'vendix';
+    return {
+      key: check.key,
+      label: check.label,
+      satisfied: check.satisfied,
+      action: check.action,
+      issued_by_dian: blocked_by === 'dian',
+      severity: check.severity ?? 'blocking',
+      owner: 'platform',
+      blocked_by,
+      days_remaining: check.days_remaining,
+      percent_remaining: check.percent_remaining,
     };
   }
 
@@ -184,6 +438,42 @@ export class SubscriptionFiscalService {
    * Best-effort por diseño: una plataforma a medio bootstrapear devuelve nulls,
    * nunca rompe la carga de la página.
    */
+  /**
+   * Entidad contable a la que se adscribe una resolución de plataforma.
+   *
+   * Precedencia: lo guardado en `platform_settings` primero; si aún no existe
+   * esa fila, el contexto de plataforma, que resuelve la entidad contable activa
+   * de la organización 1.
+   *
+   * El respaldo existe porque exigir `platform_settings` creaba un bloqueo
+   * circular real: esa fila solo la escribe `PATCH /config`, que a su vez exige
+   * `software_id` y `software_pin` — datos que **emite la DIAN**. Resultado: no
+   * se podía registrar una resolución de numeración hasta tener credenciales de
+   * software, cuando la entidad contable es un hecho propio de Vendix (qué
+   * persona jurídica es dueña del NIT) y no depende de la DIAN en absoluto.
+   */
+  private async resolvePlatformAccountingEntityId(): Promise<number> {
+    const settings = await this.getSettings();
+    if (settings.accounting_entity_id) return settings.accounting_entity_id;
+
+    let platformContext: PlatformOrgContext | null = null;
+    try {
+      platformContext = await this.platformOrg.getPlatformContext();
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo resolver la entidad contable de plataforma: ${(err as Error).message}`,
+      );
+    }
+
+    if (!platformContext?.accounting_entity_id) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_006,
+        'La organización plataforma no tiene una entidad contable activa. Regístrala en Identidad fiscal antes de crear resoluciones de numeración.',
+      );
+    }
+    return platformContext.accounting_entity_id;
+  }
+
   private async buildSuggestedConfig(): Promise<{
     platform_organization_id: number | null;
     accounting_entity_id: number | null;
@@ -439,11 +729,11 @@ export class SubscriptionFiscalService {
         config.certificate_password_encrypted,
       );
       const p12Buffer = await this.s3Service.downloadImage(config.certificate_s3_key);
-      const creds = this.dianXmlSigner.extractCredentials(p12Buffer, certPassword);
-      wsCredentials = {
-        private_key_pem: creds.private_key_pem,
-        certificate_der_base64: creds.certificate_der_base64,
-      };
+      wsCredentials = this.dianXmlSigner.buildWsCredentials(
+        p12Buffer,
+        certPassword,
+        config.certificate_kms_key_id,
+      );
     }
 
     const response = await this.dianSoapClient.getStatus(
@@ -820,12 +1110,7 @@ export class SubscriptionFiscalService {
       );
     }
 
-    const settings = await this.getSettings();
-    if (!settings.accounting_entity_id) {
-      throw new BadRequestException(
-        'Configure the platform fiscal accounting entity before creating resolutions',
-      );
-    }
+    const accountingEntityId = await this.resolvePlatformAccountingEntityId();
 
     // Manual uniqueness check: (organization_id, store_id IS NULL, document_type, prefix).
     // Environment is not on the model — for now uniqueness ignores it because
@@ -861,7 +1146,7 @@ export class SubscriptionFiscalService {
       data: {
         organization_id: PLATFORM_ORGANIZATION_ID,
         store_id: null,
-        accounting_entity_id: settings.accounting_entity_id,
+        accounting_entity_id: accountingEntityId,
         document_type: dto.document_type as PlatformResolutionDocumentType,
         resolution_number: dto.resolution_number ?? `PLATFORM-${dto.prefix}-${Date.now()}`,
         resolution_date: resolutionDate,
@@ -880,6 +1165,237 @@ export class SubscriptionFiscalService {
       ...created,
       environment: dto.environment,
     };
+  }
+
+  /**
+   * Partial update of a platform resolution.
+   *
+   * The DIAN-authorized identity of a resolution is the triple
+   * (prefix, document_type, range_from). Once a number has been consumed under
+   * that triple, changing it would retroactively re-label documents already
+   * reported to the DIAN, so those fields become immutable. Everything else
+   * (upper range, validity window, technical key, active flag) stays editable
+   * because a real resolution does get extended and re-keyed over its life.
+   */
+  async updateResolution(id: number, dto: UpdatePlatformResolutionDto) {
+    const current = await this.findPlatformResolution(id);
+    const issued = current._count.invoices;
+    // `current_number` starts at range_from - 1, so reaching range_from means
+    // at least one number left the building.
+    const consumedNumbers = current.current_number >= current.range_from;
+    const locked = consumedNumbers || issued > 0;
+
+    if (locked) {
+      const immutable: string[] = [];
+      if (dto.prefix !== undefined && dto.prefix !== current.prefix) {
+        immutable.push('prefix');
+      }
+      if (
+        dto.document_type !== undefined &&
+        dto.document_type !== current.document_type
+      ) {
+        immutable.push('document_type');
+      }
+      if (
+        dto.rango_inicial !== undefined &&
+        dto.rango_inicial !== current.range_from
+      ) {
+        immutable.push('rango_inicial');
+      }
+      if (immutable.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_RESOLUTION_005,
+          `La resolución ya consumió numeración ante la DIAN: ${immutable.join(', ')} no se puede cambiar. Crea una resolución nueva.`,
+          {
+            resolution_id: id,
+            immutable_fields: immutable,
+            issued_invoices: issued,
+            current_number: current.current_number,
+          },
+        );
+      }
+    }
+
+    const nextPrefix = dto.prefix ?? current.prefix;
+    const nextDocumentType = (dto.document_type ??
+      current.document_type) as PlatformResolutionDocumentType;
+    const nextRangeFrom = dto.rango_inicial ?? current.range_from;
+    const nextRangeTo = dto.rango_final ?? current.range_to;
+
+    if (nextRangeTo <= nextRangeFrom) {
+      throw new BadRequestException(
+        'rango_final must be strictly greater than rango_inicial',
+      );
+    }
+    // Shrinking the ceiling below what DIAN already saw would make the next
+    // allocation reuse a number that is already in a reported document.
+    if (consumedNumbers && nextRangeTo < current.current_number) {
+      throw new BadRequestException(
+        `rango_final no puede quedar por debajo del último número consumido (${current.current_number})`,
+      );
+    }
+
+    if (
+      nextPrefix !== current.prefix ||
+      nextDocumentType !== current.document_type
+    ) {
+      const duplicate = await this.prisma
+        .withoutScope()
+        .invoice_resolutions.findFirst({
+          where: {
+            id: { not: id },
+            organization_id: PLATFORM_ORGANIZATION_ID,
+            store_id: null,
+            document_type: nextDocumentType,
+            prefix: nextPrefix,
+            is_active: true,
+          },
+          select: { id: true },
+        });
+      if (duplicate) {
+        throw new BadRequestException(
+          `A platform resolution with prefix "${nextPrefix}" already exists for ${nextDocumentType}`,
+        );
+      }
+    }
+
+    // Deactivating the resolution the active configuration points at breaks
+    // SaaS billing silently on the next invoice, so it is refused up front.
+    if (dto.is_active === false && current.is_active) {
+      await this.assertResolutionNotWired(id, 'desactivar');
+    }
+
+    const data: Prisma.invoice_resolutionsUpdateInput = {};
+    if (dto.prefix !== undefined) data.prefix = dto.prefix;
+    if (dto.document_type !== undefined) {
+      data.document_type = dto.document_type as PlatformResolutionDocumentType;
+    }
+    if (dto.rango_inicial !== undefined) data.range_from = dto.rango_inicial;
+    if (dto.rango_final !== undefined) data.range_to = dto.rango_final;
+    if (dto.resolution_number !== undefined) {
+      data.resolution_number = dto.resolution_number;
+    }
+    if (dto.resolution_date !== undefined) {
+      data.resolution_date = new Date(dto.resolution_date);
+    }
+    if (dto.valid_from !== undefined) {
+      data.valid_from = new Date(dto.valid_from);
+    }
+    if (dto.valid_to !== undefined) data.valid_to = new Date(dto.valid_to);
+    if (dto.technical_key !== undefined) {
+      data.technical_key = dto.technical_key;
+    }
+    if (dto.is_active !== undefined) data.is_active = dto.is_active;
+
+    // While pristine, the cursor must follow the lower bound; otherwise the
+    // first allocation would jump straight past the authorized start.
+    if (!locked && nextRangeFrom !== current.range_from) {
+      data.current_number = nextRangeFrom - 1;
+    }
+
+    const updated = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.update({ where: { id }, data });
+
+    const settings = await this.getSettings();
+    this.logger.log(
+      `Platform resolution ${id} updated (${Object.keys(data).join(', ') || 'no-op'})`,
+    );
+
+    return { ...updated, environment: settings.environment };
+  }
+
+  /**
+   * Delete a platform resolution, but only while it is pristine.
+   *
+   * A resolution that already numbered a document is fiscal evidence: deleting
+   * it would orphan the trail of which numbers were reported under which DIAN
+   * authorization. Those get deactivated, never removed.
+   */
+  async deleteResolution(id: number) {
+    const current = await this.findPlatformResolution(id);
+
+    if (current._count.invoices > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_003,
+        `La resolución tiene ${current._count.invoices} documento(s) emitido(s). Desactívala en vez de borrarla.`,
+        { resolution_id: id, issued_invoices: current._count.invoices },
+      );
+    }
+    if (current.current_number >= current.range_from) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_003,
+        `La resolución ya consumió numeración ante la DIAN (va en ${current.current_number}). Desactívala en vez de borrarla.`,
+        { resolution_id: id, current_number: current.current_number },
+      );
+    }
+
+    await this.assertResolutionNotWired(id, 'borrar');
+
+    await this.prisma.withoutScope().invoice_resolutions.delete({
+      where: { id },
+    });
+
+    this.logger.log(`Platform resolution ${id} deleted`);
+    return { id, deleted: true };
+  }
+
+  /**
+   * Loads a resolution that really belongs to the platform scope
+   * (org=1, store_id=NULL). Anything else is a 404 rather than a 403 so this
+   * endpoint cannot be used to probe which tenant resolution ids exist.
+   */
+  private async findPlatformResolution(id: number) {
+    const resolution = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          id,
+          organization_id: PLATFORM_ORGANIZATION_ID,
+          store_id: null,
+        },
+        include: { _count: { select: { invoices: true } } },
+      });
+
+    if (!resolution) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_FIND_002,
+        'La resolución no existe en el alcance de la plataforma',
+        { resolution_id: id },
+      );
+    }
+
+    return resolution;
+  }
+
+  /**
+   * Refuses a destructive change on the resolution a live platform flow is
+   * wired to. Both platform fiscal switches can point at a resolution:
+   * subscription invoicing and the vendor documento soporte.
+   */
+  private async assertResolutionNotWired(
+    id: number,
+    action: 'borrar' | 'desactivar',
+  ): Promise<void> {
+    const rows = await this.prisma.withoutScope().platform_settings.findMany({
+      where: { key: { in: [SETTINGS_KEY, VENDOR_SUPPORT_SETTINGS_KEY] } },
+    });
+
+    const wiredTo = rows
+      .filter(
+        (row) =>
+          ((row.value ?? {}) as { invoice_resolution_id?: number | null })
+            .invoice_resolution_id === id,
+      )
+      .map((row) => row.key);
+
+    if (wiredTo.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_004,
+        `No se puede ${action}: la configuración fiscal activa (${wiredTo.join(', ')}) apunta a esta resolución. Reasígnala primero.`,
+        { resolution_id: id, wired_to: wiredTo },
+      );
+    }
   }
 
   private async getSettings(): Promise<SubscriptionFiscalSettings> {
@@ -1542,8 +2058,13 @@ export class SubscriptionFiscalService {
     };
   }
 
+  /**
+   * Anexo Técnico 1.9 §11.2 requires amounts TRUNCATED to 2 decimals, not
+   * rounded — `toFixed(2)` alone turns 1000.005 into '1000.01' and can diverge
+   * a cent from the DIAN's own recomputation of the CUFE.
+   */
   private money(value: Prisma.Decimal.Value | null | undefined): string {
-    return new Prisma.Decimal(value ?? 0).toFixed(2);
+    return dianAmount(value ?? 0);
   }
 
   private onlyDigits(value?: string | null): string | undefined {

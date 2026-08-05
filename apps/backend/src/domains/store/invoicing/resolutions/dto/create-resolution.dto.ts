@@ -21,13 +21,22 @@ export class CreateResolutionDto {
     'debit_note',
     'support_document',
     'support_adjustment_note',
+    'pos_equivalent_document',
+    'equivalent_adjustment_note',
   ])
   document_type?:
     | 'sales_invoice'
     | 'credit_note'
     | 'debit_note'
     | 'support_document'
-    | 'support_adjustment_note';
+    | 'support_adjustment_note'
+    /**
+     * Rango autorizado propio del documento equivalente POS. Sin este valor la
+     * resolución del DE no se puede registrar y el POS terminaría consumiendo
+     * consecutivos de la factura de venta — irreversible una vez la DIAN acepta.
+     */
+    | 'pos_equivalent_document'
+    | 'equivalent_adjustment_note';
 
   @IsDateString()
   resolution_date: string;

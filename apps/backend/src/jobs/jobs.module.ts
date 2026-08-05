@@ -10,6 +10,8 @@ import { DataRetentionJob } from './data-retention.job';
 import { CertificateExpiryAlertJob } from './certificate-expiry-alert.job';
 import { DomainProvisioningJob } from './domain-provisioning.job';
 import { InvoiceRetryJob } from './invoice-retry.job';
+import { DianTestSetRepollJob } from './dian-test-set-repoll.job';
+import { InvoicingModule } from '../domains/store/invoicing/invoicing.module';
 import { BookingRemindersJob } from './booking-reminders.job';
 import { BookingConfirmationJob } from './booking-confirmation.job';
 import { BookingProximityJob } from './booking-proximity.job';
@@ -75,6 +77,8 @@ import { ResponseModule } from '../common/responses/response.module';
     NotificationsModule,
     MembershipAccessModule,
     SettingsModule,
+    // Brings DianTestService for the habilitación batch re-poll job.
+    InvoicingModule,
     BullModule.registerQueue(
       { name: 'ai-embedding' },
       { name: 'subscription-payment-retry' },
@@ -92,6 +96,7 @@ import { ResponseModule } from '../common/responses/response.module';
     CertificateExpiryAlertJob,
     DomainProvisioningJob,
     InvoiceRetryJob,
+    DianTestSetRepollJob,
     BookingRemindersJob,
     BookingConfirmationJob,
     BookingProximityJob,

@@ -327,9 +327,100 @@ describe('DianXmlSignerService (XAdES-EPES)', () => {
     ).rejects.toThrow(/Failed to sign XML document/);
   });
 
-  it('exposes XadesEpesBuilder for direct use', () => {
+  /**
+   * Under HSM custody the `.p12` private key must never be read. Asserting on the
+   * KMS key-id reaching the client is the only way to see that from outside: a
+   * regression that silently fell back to the local key would still produce a
+   * valid-looking signed document.
+   */
+  describe('KMS custody', () => {
+    it('signs through KMS and never touches the local private key', async () => {
+      const captured: Record<string, unknown>[] = [];
+      class FakeSignCommand {
+        constructor(public readonly input: Record<string, unknown>) {}
+      }
+      const DIGEST_INFO_SHA256 = Buffer.from(
+        '3031300d060960864801650304020105000420',
+        'hex',
+      );
+
+      // Inject the fake client through the private cache the lazy loader fills,
+      // which is what lets this run with no AWS credentials and no network.
+      (service as any).kms_client = {
+        send: async (command: any) => {
+          captured.push(command.input);
+          return {
+            Signature: new Uint8Array(
+              crypto.privateEncrypt(
+                {
+                  key: crypto.createPrivateKey(material.privateKeyPem),
+                  padding: crypto.constants.RSA_PKCS1_PADDING,
+                },
+                Buffer.concat([
+                  DIGEST_INFO_SHA256,
+                  command.input.Message as Buffer,
+                ]),
+              ),
+            ),
+          };
+        },
+      };
+      (service as any).kms_sign_command = FakeSignCommand;
+
+      const extractSpy = jest.spyOn(service as any, 'extractFromP12');
+
+      const signed = await service.sign(
+        UNSIGNED_INVOICE,
+        material.p12Buffer,
+        password,
+        'arn:aws:kms:us-east-1:1:key/abc',
+      );
+
+      expect(signed).toContain('ds:SignatureValue');
+      expect(signed).toContain('xades:SignedProperties');
+      // The certificate is still published — it is public material.
+      expect(signed).toContain('ds:X509Certificate');
+      expect(captured[0]?.KeyId).toBe('arn:aws:kms:us-east-1:1:key/abc');
+      // The .p12 private key was never extracted.
+      expect(extractSpy).not.toHaveBeenCalled();
+    });
+
+    it('builds WS-Security credentials backed by a non-exportable signer', () => {
+      (service as any).kms_client = { send: async () => ({}) };
+      (service as any).kms_sign_command = class {
+        constructor(public readonly input: Record<string, unknown>) {}
+      };
+
+      const creds = service.buildWsCredentials(
+        material.p12Buffer,
+        password,
+        'arn:aws:kms:us-east-1:1:key/abc',
+      );
+
+      // The transport signature must move with the document signature, otherwise
+      // the private key would still have to exist in this process.
+      expect(creds.signer.is_exportable).toBe(false);
+      expect(creds.certificate_der_base64).toEqual(expect.any(String));
+      expect(creds.certificate_der_base64.length).toBeGreaterThan(100);
+    });
+
+    it('keeps the in-process custody when no KMS key is configured', () => {
+      const creds = service.buildWsCredentials(
+        material.p12Buffer,
+        password,
+      );
+      expect(creds.signer.is_exportable).toBe(true);
+    });
+  });
+
+  /**
+   * `sign` is async since the signature can be produced by a remote HSM. A PEM
+   * string is still accepted and wrapped in `LocalPemSigner`, which is what keeps
+   * this call site — and every other existing caller — working unchanged.
+   */
+  it('exposes XadesEpesBuilder for direct use', async () => {
     const builder = new XadesEpesBuilder();
-    const signed = builder.sign(
+    const signed = await builder.sign(
       UNSIGNED_INVOICE,
       material.privateKeyPem,
       material.certificatePem,

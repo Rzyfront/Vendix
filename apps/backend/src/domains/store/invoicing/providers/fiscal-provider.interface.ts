@@ -13,7 +13,9 @@ export type FiscalDocumentType =
   | 'support_document'
   | 'support_adjustment_note'
   | 'payroll'
-  | 'payroll_adjustment';
+  | 'payroll_adjustment'
+  | 'pos_equivalent_document'
+  | 'equivalent_adjustment_note';
 
 export type FiscalProviderEnvironment = 'test' | 'production';
 

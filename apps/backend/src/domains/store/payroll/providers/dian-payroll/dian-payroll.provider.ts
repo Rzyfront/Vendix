@@ -5,6 +5,7 @@ import {
   PayrollProviderResponse,
   PayrollStatusResponse,
 } from '../payroll-provider.interface';
+import { DianSecretEnvelopeService } from '../../../../../common/services/dian-secret-envelope.service';
 import { EncryptionService } from '../../../../../common/services/encryption.service';
 import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
@@ -68,6 +69,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     private readonly xml_signer: DianXmlSignerService,
     private readonly fiscalScope: FiscalScopeService,
     private readonly readiness: FiscalProductionReadinessService,
+    private readonly secret_envelope: DianSecretEnvelopeService,
   ) {}
 
   async sendPayroll(payroll_data: {
@@ -561,6 +563,19 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       );
     }
 
+    const software_pin = this.encryption.decrypt(config.software_pin_encrypted);
+    const certificate_password = config.certificate_password_encrypted
+      ? this.encryption.decrypt(config.certificate_password_encrypted)
+      : null;
+
+    // Opportunistic hardening at the only point that holds the plaintext. Never
+    // throws, so a payroll transmission cannot fail because of it.
+    await this.secret_envelope.upgradeInPlace(
+      config.id,
+      config,
+      { software_pin, certificate_password },
+    );
+
     return {
       id: config.id,
       organization_id: config.organization_id,
@@ -569,11 +584,10 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       nit: config.nit,
       nit_dv: config.nit_dv,
       software_id: config.software_id,
-      software_pin: this.encryption.decrypt(config.software_pin_encrypted),
+      software_pin,
       certificate_s3_key: config.certificate_s3_key,
-      certificate_password: config.certificate_password_encrypted
-        ? this.encryption.decrypt(config.certificate_password_encrypted)
-        : null,
+      certificate_password,
+      certificate_kms_key_id: config.certificate_kms_key_id,
       certificate_expiry: config.certificate_expiry,
       environment: config.environment as 'test' | 'production',
       enablement_status: config.enablement_status,
@@ -668,14 +682,11 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     const p12_buffer = await this.s3_service.downloadImage(
       config.certificate_s3_key,
     );
-    const creds = this.xml_signer.extractCredentials(
+    return this.xml_signer.buildWsCredentials(
       p12_buffer,
-      config.certificate_password,
+      config.certificate_password || '',
+      config.certificate_kms_key_id,
     );
-    return {
-      private_key_pem: creds.private_key_pem,
-      certificate_der_base64: creds.certificate_der_base64,
-    };
   }
 
   /**

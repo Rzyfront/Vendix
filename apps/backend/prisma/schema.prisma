@@ -522,6 +522,7 @@ model organizations {
   payroll_runs                  payroll_runs[]
   payroll_novelties             payroll_novelties[]
   dian_configurations           dian_configurations[]
+  dian_document_events          dian_document_events[]
   fiscal_transmissions          fiscal_transmissions[]
   fiscal_evidences              fiscal_evidences[]
   fiscal_obligations            fiscal_obligations[]
@@ -778,6 +779,7 @@ model stores {
   payroll_runs                payroll_runs[]
   payroll_novelties           payroll_novelties[]
   dian_configurations         dian_configurations[]
+  dian_document_events        dian_document_events[]
   fiscal_transmissions        fiscal_transmissions[]
   fiscal_evidences            fiscal_evidences[]
   fiscal_obligations          fiscal_obligations[]
@@ -4039,6 +4041,13 @@ enum invoice_type_enum {
   export_invoice
   support_document
   support_adjustment_note
+  /// Documento equivalente electrónico del tiquete POS (Res. 000165/2023,
+  /// InvoiceTypeCode '20'). NOT a sales_invoice: its unique code is a CUDE built
+  /// with the Software-PIN, never a CUFE built with the ClTec of a FEV range.
+  pos_equivalent_document
+  /// Nota de ajuste al documento equivalente ('93' débito / '94' crédito,
+  /// numeral 16.3). The DE has no credit/debit note of its own — only these.
+  equivalent_adjustment_note
 }
 
 enum document_send_status_enum {
@@ -4057,6 +4066,10 @@ enum fiscal_document_type_enum {
   support_adjustment_note
   payroll
   payroll_adjustment
+  /// Own authorized numbering range for the POS equivalent document. Sharing the
+  /// sales-invoice range would burn FEV consecutives on POS tickets.
+  pos_equivalent_document
+  equivalent_adjustment_note
 }
 
 enum fiscal_transmission_status_enum {
@@ -4070,6 +4083,9 @@ enum fiscal_transmission_status_enum {
   error
   retrying
   cancelled
+  /// Expedido bajo contingencia (Anexo 1.9 §12): entregado al adquiriente sin
+  /// validación previa; aún debe transmitirse a la DIAN dentro de 48 h.
+  contingency
 }
 
 enum dian_document_status_enum {
@@ -4925,6 +4941,12 @@ model invoices {
   xml_document         String?
   pdf_url              String?
   send_status          document_send_status_enum       @default(not_applicable)
+  /// '03' = contingencia del facturador, '04' = indisponibilidad DIAN.
+  contingency_type        String?                      @db.VarChar(2)
+  contingency_declared_at DateTime?                    @db.Timestamp(6)
+  /// Vencimiento del plazo de 48 h para transmitir el documento a la DIAN.
+  contingency_deadline    DateTime?                    @db.Timestamp(6)
+  contingency_reason      String?
   provider_response    Json?
   sent_at              DateTime?                       @db.Timestamp(6)
   accepted_at          DateTime?                       @db.Timestamp(6)
@@ -4954,6 +4976,7 @@ model invoices {
   invoice_taxes            invoice_taxes[]
   withholding_calculations withholding_calculations[]
   invoice_retry_queue      invoice_retry_queue[]
+  dian_document_events     dian_document_events[]
   dispatch_notes           dispatch_notes[]
 
   @@unique([accounting_entity_id, invoice_type, invoice_number])
@@ -5537,6 +5560,11 @@ enum dian_configuration_type_enum {
   invoicing
   support_document
   payroll
+  /// Habilitación del software para documento equivalente electrónico
+  /// (Res. 000165/2023). Separate from `invoicing` because the DIAN authorizes it
+  /// with its own set de pruebas and its own enablement_status — one status must
+  /// not speak for two independent authorizations.
+  equivalent_document
 }
 
 enum dian_operation_mode_enum {
@@ -5580,6 +5608,12 @@ model dian_configurations {
   software_pin_encrypted         String                       @db.Text
   certificate_s3_key             String?                      @db.Text
   certificate_password_encrypted String?                      @db.Text
+  /// ARN (or key-id) of the AWS KMS asymmetric RSA key holding the certificate's
+  /// private half, non-exportable inside the HSM. When set, the XAdES signature is
+  /// produced by KMS and the `.p12` private key is never touched. NULL keeps the
+  /// historical custody: private key read from the `.p12` in process memory.
+  /// Per-entity on purpose — a platform migrates one fiscal entity at a time.
+  certificate_kms_key_id         String?                      @db.Text
   certificate_expiry             DateTime?                    @db.Timestamp(6)
   certificate_fingerprint        String?                      @db.VarChar(128)
   certificate_subject            String?                      @db.Text
@@ -5628,6 +5662,40 @@ model dian_audit_logs {
   @@index([dian_configuration_id])
   @@index([action])
   @@index([created_at])
+}
+
+/// RADIAN / DIAN document events transmitted as `ApplicationResponse` through
+/// `SendEventUpdateStatus`. One row per event emitted for a document:
+/// 030 acuse de recibo, 031 reclamo, 032 recibo del bien/servicio,
+/// 033 aceptación expresa, 034 aceptación tácita.
+model dian_document_events {
+  id                    Int       @id @default(autoincrement())
+  organization_id       Int
+  store_id              Int?
+  invoice_id            Int
+  dian_configuration_id Int?
+  event_code            String    @db.VarChar(3)
+  event_number          String?   @db.VarChar(50)
+  /// CUDE of the ApplicationResponse itself.
+  cude                  String?   @db.VarChar(255)
+  /// CUFE of the referenced invoice, denormalized so the event stays diagnosable.
+  referenced_cufe       String?   @db.VarChar(255)
+  status                String    @default("pending") @db.VarChar(20)
+  dian_status_code      String?   @db.VarChar(20)
+  dian_status_message   String?
+  request_xml           String?
+  response_xml          String?
+  issued_at             DateTime? @db.Timestamp(6)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  invoice      invoices       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  organization organizations  @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?        @relation(fields: [store_id], references: [id], onDelete: SetNull)
+
+  @@index([invoice_id, event_code])
+  @@index([status, created_at])
+  @@index([organization_id, store_id])
 }
 
 model fiscal_transmissions {

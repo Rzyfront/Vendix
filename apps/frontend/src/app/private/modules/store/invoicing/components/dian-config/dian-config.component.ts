@@ -9,6 +9,7 @@ import { DianConfig, DianNitType } from '../../interfaces/invoice.interface';
 
 import {
   CardComponent,
+  ConfirmationModalComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
@@ -50,6 +51,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
   imports: [
     NgClass,
     CardComponent,
+    ConfirmationModalComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -199,6 +201,22 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
           (cancelled)="onWizardCancelled()"
         ></vendix-dian-config-wizard>
       </app-modal>
+
+      <!-- Borrado con el modal compartido: el confirm nativo del navegador no se
+           puede estilar, no respeta el tema y en móvil aparece como un diálogo
+           ajeno al resto del panel. -->
+      @if (pendingDelete(); as cfg) {
+        <app-confirmation-modal
+          [isOpen]="true"
+          title="Eliminar configuración DIAN"
+          [message]="deleteMessage(cfg)"
+          confirmText="Eliminar"
+          cancelText="Cancelar"
+          confirmVariant="danger"
+          (confirm)="confirmDelete(cfg)"
+          (cancel)="cancelDelete()"
+        ></app-confirmation-modal>
+      }
     </div>
   `,
 })
@@ -213,6 +231,7 @@ export class DianConfigComponent {
   readonly searchTerm = signal('');
   readonly envFilter = signal<EnvironmentFilter>('all');
   readonly deletingId = signal<number | null>(null);
+  readonly pendingDelete = signal<DianConfig | null>(null);
 
   // Wizard
   readonly isWizardOpen = signal(false);
@@ -364,7 +383,7 @@ export class DianConfigComponent {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
-      action: (item: DianConfig) => this.confirmDelete(item),
+      action: (item: DianConfig) => this.askDelete(item),
     },
   ];
 
@@ -476,9 +495,23 @@ export class DianConfigComponent {
       });
   }
 
-  confirmDelete(cfg: DianConfig): void {
-    if (!confirm(`Eliminar la configuracion "${cfg.name}"? Esta accion no se puede deshacer.`)) return;
+  askDelete(cfg: DianConfig): void {
+    this.pendingDelete.set(cfg);
+  }
 
+  cancelDelete(): void {
+    this.pendingDelete.set(null);
+  }
+
+  deleteMessage(cfg: DianConfig): string {
+    const base = `Se eliminará la configuración "${cfg.name}" (${this.nitTypeLabel(cfg.nit_type)} ${cfg.nit}). Esta acción no se puede deshacer.`;
+    return cfg.enablement_status === 'enabled'
+      ? `${base} Está habilitada ante la DIAN: al borrarla, las facturas electrónicas dejarán de emitirse con esta identidad.`
+      : base;
+  }
+
+  confirmDelete(cfg: DianConfig): void {
+    this.pendingDelete.set(null);
     this.deletingId.set(cfg.id);
     this.invoicingService
       .deleteDianConfig(cfg.id)

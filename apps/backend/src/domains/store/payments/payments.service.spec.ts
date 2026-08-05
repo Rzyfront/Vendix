@@ -18,6 +18,15 @@ import { PaymentEncryptionService } from './services/payment-encryption.service'
 import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
 import { WompiClientFactory } from './processors/wompi/wompi.factory';
 import { WompiProcessor } from './processors/wompi/wompi.processor';
+import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
+import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { PriceResolverService } from '../products/services/price-resolver.service';
+import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { TableSessionsService } from '../tables/table-sessions.service';
+import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
+import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -144,6 +153,45 @@ describe('PaymentsService', () => {
         {
           provide: WompiProcessor,
           useValue: {},
+        },
+        {
+          provide: FiscalInvoiceThresholdService,
+          useValue: { assertInvoiceNotRequired: jest.fn(), evaluate: jest.fn() },
+        },
+        // The canonical stock-commit seam: these cases assert payment behavior,
+        // not inventory commitment, so a no-op commit keeps them focused.
+        {
+          provide: OrderStockCommitService,
+          useValue: { commitOrderDelivery: jest.fn() },
+        },
+        // Collaborators the POS sale path injects but this suite does not
+        // exercise (stock spreading, restaurant fire, serial pools). Stubbed so
+        // the module compiles; a suite that asserts their behavior must widen
+        // these instead of relying on the empty shape.
+        {
+          provide: SellableStockAllocator,
+          useValue: { allocateForOrderItem: jest.fn() },
+        },
+        {
+          provide: PriceResolverService,
+          useValue: { resolveEffectivePrice: jest.fn() },
+        },
+        {
+          provide: WithholdingFlowService,
+          useValue: { applyToOrder: jest.fn() },
+        },
+        { provide: KitchenFireService, useValue: { fireOrder: jest.fn() } },
+        {
+          provide: TableSessionsService,
+          useValue: { emitSessionClosed: jest.fn() },
+        },
+        {
+          provide: SerialNumberEnforcementService,
+          useValue: { assertSerialsForSale: jest.fn() },
+        },
+        {
+          provide: InventorySerialNumbersService,
+          useValue: { consumeForOrder: jest.fn() },
         },
       ],
     }).compile();

@@ -84,7 +84,20 @@ export class SecretsManagerService implements OnModuleInit {
 
   private async loadSecrets(): Promise<void> {
     const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
-    const secretCategories = ['database', 'jwt', 'email', 'aws', 'app'];
+    // `fiscal` holds DIAN key material (DIAN_ENCRYPTION_KEY, which in turn opens
+    // every stored Software-PIN and certificate password). It is a separate
+    // secret from `app` so it can carry its own IAM policy and rotation
+    // schedule instead of being readable by anything that reads app config.
+    // A category with no secret yet only logs a warning (ResourceNotFoundException
+    // below), so adding it here is safe before ops creates it.
+    const secretCategories = [
+      'database',
+      'jwt',
+      'email',
+      'aws',
+      'app',
+      'fiscal',
+    ];
 
     for (const category of secretCategories) {
       try {

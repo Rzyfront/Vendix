@@ -44,13 +44,43 @@ export class InvoiceRetryListener {
     private readonly retry_queue: InvoiceRetryQueueService,
   ) {}
 
+  /**
+   * Whether the document already carries a contingency declaration.
+   *
+   * Read inside the store context so the scoped client applies tenant isolation.
+   * Degrades to `false` on any failure: treating an unknown as non-contingency is
+   * the conservative choice, because it never invents a 48 h obligation that the
+   * tenant does not actually have.
+   */
+  private async isUnderContingency(
+    invoice_id: number,
+    store_id: number,
+  ): Promise<boolean> {
+    try {
+      return await this.context_runner.runInStoreContext(store_id, async () => {
+        const row = await this.prisma.invoices.findFirst({
+          where: { id: invoice_id },
+          select: { contingency_type: true },
+        });
+        return Boolean(row?.contingency_type);
+      });
+    } catch {
+      return false;
+    }
+  }
+
   @OnEvent('invoice.retry')
   async handleInvoiceRetry(event: InvoiceRetryEvent): Promise<void> {
     try {
       await this.context_runner.runInStoreContext(event.store_id, async () => {
         const invoice = await this.prisma.invoices.findFirst({
           where: { id: event.invoice_id },
-          select: { id: true, status: true, invoice_number: true },
+          select: {
+            id: true,
+            status: true,
+            invoice_number: true,
+            contingency_type: true,
+          },
         });
 
         if (!invoice) {
@@ -92,7 +122,19 @@ export class InvoiceRetryListener {
         `Retry attempt ${event.attempt}/${event.max_attempts} failed for invoice #${event.invoice_id}: ${message}`,
       );
       try {
-        await this.retry_queue.markFailed(event.retry_queue_id, message);
+        // A document ALREADY under contingency stays contingency-eligible when
+        // its retries run out: it was expedited legitimately under Anexo §12.2 and
+        // must not be downgraded to `failed`, which would strip the 48 h
+        // obligation the tenant still owes the DIAN.
+        const under_contingency = await this.isUnderContingency(
+          event.invoice_id,
+          event.store_id,
+        );
+        await this.retry_queue.markFailed(
+          event.retry_queue_id,
+          message,
+          under_contingency,
+        );
       } catch (mark_error) {
         // Last line of defense: the listener must never bring the process down.
         this.logger.error(

@@ -2,6 +2,15 @@
 export { AiReviewAckComponent } from './ai-review-ack/ai-review-ack.component';
 export { AlertBannerComponent } from './alert-banner/alert-banner.component';
 export { ConfirmationModalComponent } from './confirmation-modal/confirmation-modal.component';
+export { DianResolutionScannerModalComponent } from './dian-resolution-scanner/dian-resolution-scanner-modal.component';
+export { RESOLUTION_SCAN_FIELD_LABELS } from './dian-resolution-scanner/interfaces/resolution-scan-result.interface';
+export type {
+  DianResolutionScanResult,
+  ResolutionScanField,
+  ResolutionScannerScope,
+  ScannedResolutionDocumentType,
+  ScannedResolutionEnvironment,
+} from './dian-resolution-scanner/interfaces/resolution-scan-result.interface';
 export { PromptModalComponent } from './prompt-modal/prompt-modal.component';
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';

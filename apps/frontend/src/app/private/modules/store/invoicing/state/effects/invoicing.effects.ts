@@ -460,17 +460,25 @@ export class InvoicingEffects {
   );
 
   // Delete resolution
+  //
+  // Sin los toasts, un rechazo legítimo del backend (409: la resolución ya
+  // numeró documentos) se veía exactamente igual que no hacer nada: la fila se
+  // quedaba y el usuario concluía que borrar está roto. `extractApiErrorMessage`
+  // es lo que trae el motivo real, igual que en los effects hermanos.
   deleteResolution$ = createEffect(() =>
     this.actions$.pipe(
       ofType(InvoicingActions.deleteResolution),
       switchMap(({ id }) =>
         this.invoicingService.deleteResolution(id).pipe(
-          map(() => InvoicingActions.deleteResolutionSuccess({ id })),
-          catchError((error) =>
-            of(InvoicingActions.deleteResolutionFailure({
-              error: error.error?.message || error.message || 'Error deleting resolution'
-            }))
-          )
+          map(() => {
+            this.toastService.success('Resolución eliminada');
+            return InvoicingActions.deleteResolutionSuccess({ id });
+          }),
+          catchError((error) => {
+            const msg = extractApiErrorMessage(error);
+            this.toastService.error(msg);
+            return of(InvoicingActions.deleteResolutionFailure({ error: msg }));
+          })
         )
       )
     )

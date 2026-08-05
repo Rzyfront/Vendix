@@ -2,8 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { certificateNitMatches } from '../dian-config/certificates/nit-match.util';
+import { EncryptionService } from '@common/services/encryption.service';
 
-type DianConfigurationType = 'invoicing' | 'support_document' | 'payroll';
+type DianConfigurationType =
+  | 'invoicing'
+  | 'support_document'
+  | 'payroll'
+  | 'equivalent_document';
 type ReadinessDocumentType =
   | 'sales_invoice'
   | 'credit_note'
@@ -11,7 +16,9 @@ type ReadinessDocumentType =
   | 'support_document'
   | 'support_adjustment_note'
   | 'payroll'
-  | 'payroll_adjustment';
+  | 'payroll_adjustment'
+  | 'pos_equivalent_document'
+  | 'equivalent_adjustment_note';
 
 /** One unmet prerequisite, phrased for the merchant (not for a log line). */
 export interface ProductionReadinessCheck {
@@ -25,7 +32,57 @@ export interface ProductionReadinessCheck {
    * `platform` = only Vendix operations can fix it (e.g. a missing env var).
    */
   owner: 'tenant' | 'platform';
+  /**
+   * `blocking` (default when absent) keeps the historical meaning: an unsatisfied
+   * check makes the configuration NOT ready.
+   *
+   * `warning` is an early alert — something that still works today but will stop
+   * working on a known date (a certificate about to expire, a numbering range
+   * about to run out). It must NEVER flip `ready` to false: an alert that blocks
+   * emission the moment it fires is not an alert, it is the outage it was meant
+   * to prevent.
+   */
+  severity?: 'blocking' | 'warning';
+  /**
+   * WHO the check is waiting on — orthogonal to `owner`, which says who can fix
+   * it.
+   *
+   * `vendix` = the ball is on our side of the net (the merchant in the panel, or
+   * Vendix operations for `owner: 'platform'`). Actionable right now.
+   * `dian` = we already did our part and the DIAN has not ruled. NOT actionable:
+   * showing "sube el certificado"-style copy for these is what makes merchants
+   * re-send a test set that is still under review and burn a second block of
+   * consecutives.
+   *
+   * Defaults to `vendix` when absent.
+   */
+  blocked_by?: 'vendix' | 'dian';
+  /** Days left, on the time-based warnings. */
+  days_remaining?: number;
+  /** Percentage of the numbering range still available, on range warnings. */
+  percent_remaining?: number;
 }
+
+/** A check counts against `ready` only when it is blocking. */
+export function isBlockingCheck(check: ProductionReadinessCheck): boolean {
+  return (check.severity ?? 'blocking') === 'blocking';
+}
+
+/** True when the merchant (or Vendix) can still act on the check. */
+export function isActionableCheck(check: ProductionReadinessCheck): boolean {
+  return (check.blocked_by ?? 'vendix') === 'vendix';
+}
+
+/**
+ * Escalation ladder for the certificate expiry alert, in days. The tiers are the
+ * ones a Colombian certificate renewal realistically needs: a .p12 reissue by an
+ * entidad de certificación digital takes days, not minutes, so a single alert on
+ * the last day would arrive too late to act on.
+ */
+export const CERTIFICATE_EXPIRY_ALERT_DAYS = [30, 15, 7] as const;
+
+/** Below this share of remaining numbers the resolution is flagged. */
+export const RESOLUTION_RANGE_WARNING_PERCENT = 10;
 
 export interface ProductionReadinessReport {
   ready: boolean;
@@ -34,6 +91,20 @@ export interface ProductionReadinessReport {
   enablement_status: string;
   checks: ProductionReadinessCheck[];
   missing: string[];
+  /**
+   * Unsatisfied `warning` checks. Separate from `missing` on purpose: the UI
+   * shows them in a different register ("esto va a romperse") and the promotion
+   * gate must not read them as blockers.
+   */
+  warnings: ProductionReadinessCheck[];
+  /** Blocking checks the merchant or Vendix can still act on. */
+  actionable: ProductionReadinessCheck[];
+  /**
+   * Blocking checks where our part is done and the DIAN has not ruled. Split out
+   * so the UI can say "esperando a la DIAN" instead of handing the merchant a
+   * to-do they cannot complete.
+   */
+  waiting_on_dian: ProductionReadinessCheck[];
 }
 
 /** Shape `assertProductionReady` / `evaluateProductionReadiness` need. */
@@ -46,6 +117,8 @@ type ReadinessConfig = {
   software_pin_encrypted: string | null;
   certificate_s3_key: string | null;
   certificate_password_encrypted: string | null;
+  /** Optional so existing callers that build this shape by hand keep compiling. */
+  certificate_kms_key_id?: string | null;
   certificate_expiry: Date | null;
   certificate_fingerprint?: string | null;
   certificate_nit?: string | null;
@@ -68,7 +141,216 @@ interface ResolveConfigParams {
 
 @Injectable()
 export class FiscalProductionReadinessService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly encryption: EncryptionService,
+  ) {}
+
+  /**
+   * Whole days from now until `date`, floored. Negative when already past.
+   *
+   * Floored on purpose: with 6.9 days left the merchant must read "6", not "7" —
+   * rounding up an expiry countdown is how a renewal gets scheduled for the day
+   * after the certificate dies.
+   */
+  private daysUntil(date: Date, now: Date = new Date()): number {
+    const ms = date.getTime() - now.getTime();
+    return Math.floor(ms / 86_400_000);
+  }
+
+  /**
+   * Alert for secrets still stored under a weaker envelope — the platform-wide
+   * static scrypt salt, or a master key that is no longer the active one.
+   *
+   * WARNING, never blocking. These values decrypt correctly today; the weakness is
+   * that one scrypt run per master key used to precompute the derived key for
+   * every secret in the platform. Blocking emission over it would convert a
+   * hardening item into an outage, which is exactly what `severity: 'warning'`
+   * exists to prevent.
+   *
+   * It also self-heals: the next emission or habilitación test rewrites the row
+   * (see `DianSecretEnvelopeService`), so the warning disappears without anyone
+   * running a migration — which is impossible here anyway, since only the
+   * application can decrypt these columns.
+   */
+  buildSecretsEnvelopeWarning(
+    config: Pick<
+      ReadinessConfig,
+      'software_pin_encrypted' | 'certificate_password_encrypted'
+    >,
+  ): ProductionReadinessCheck {
+    const base = {
+      key: 'secrets_envelope',
+      label: 'Secretos DIAN cifrados con salt por registro',
+      owner: 'platform' as const,
+      severity: 'warning' as const,
+    };
+
+    // With no real key configured there is nothing better to rewrite under, and
+    // the blocking `DIAN_ENCRYPTION_KEY` check already reports that situation.
+    // Raising this warning too would just duplicate it.
+    if (this.encryption.isUsingFallbackKey()) {
+      return { ...base, satisfied: true, action: '' };
+    }
+
+    const pending = [
+      config.software_pin_encrypted,
+      config.certificate_password_encrypted,
+    ].some((value) => !!value && this.encryption.needsReencryption(value));
+
+    if (!pending) return { ...base, satisfied: true, action: '' };
+
+    return {
+      ...base,
+      satisfied: false,
+      action:
+        'Los secretos DIAN de esta configuración siguen cifrados con el formato anterior ' +
+        '(salt compartido o llave previa). Se re-cifran automáticamente en la próxima emisión ' +
+        'o prueba de habilitación; no requiere ninguna acción manual.',
+    };
+  }
+
+  /**
+   * Reports the custody of the certificate's private key.
+   *
+   * `warning`, never blocking, and the reason matters: an exportable key in an
+   * encrypted `.p12` is a **legitimate, legal** configuration — the DIAN requires
+   * a certificate, not an HSM. Turning weaker-but-valid custody into a blocker
+   * would stop a merchant from invoicing over a hardening they never agreed to,
+   * which is the outage the alert exists to prevent.
+   *
+   * It stays visible while the key is exportable so the merchant can decide, and
+   * goes quiet the moment `certificate_kms_key_id` is set — at which point BOTH
+   * the XAdES document signature and the WS-Security envelope signature are
+   * produced inside the HSM (see `DianXmlSignerService.buildWsCredentials`: moving
+   * only one of the two would leave the private key in this process anyway and the
+   * hardening would be cosmetic).
+   */
+  buildPrivateKeyCustodyWarning(
+    config: Pick<ReadinessConfig, 'certificate_kms_key_id'>,
+  ): ProductionReadinessCheck {
+    const base = {
+      key: 'private_key_custody',
+      label: 'Llave privada del certificado en HSM (no exportable)',
+      owner: 'platform' as const,
+      severity: 'warning' as const,
+    };
+
+    if (config.certificate_kms_key_id) {
+      return { ...base, satisfied: true, action: '' };
+    }
+
+    return {
+      ...base,
+      satisfied: false,
+      action:
+        'La llave privada del certificado se lee del .p12 en memoria del proceso. ' +
+        'Para custodia no exportable, crear una clave asimétrica RSA en AWS KMS ' +
+        '(Origin: AWS_KMS, KeyUsage: SIGN_VERIFY) y registrar su ARN en ' +
+        'certificate_kms_key_id. La firma pasa a producirse dentro del HSM sin ' +
+        'ningún otro cambio: el certificado sigue siendo público y se lee de S3.',
+    };
+  }
+
+  /**
+   * Early alert for a certificate that is still valid but about to expire.
+   *
+   * `satisfied: true` means "no alert" — either there is no expiry date to judge
+   * (that case is already a BLOCKING `certificate_expiry` failure, so raising a
+   * second warning about it would only duplicate noise) or there is more runway
+   * than the widest tier.
+   */
+  buildCertificateExpiryWarning(
+    certificate_expiry: Date | null,
+    now: Date = new Date(),
+  ): ProductionReadinessCheck {
+    const base = {
+      key: 'certificate_expiry_soon',
+      label: 'Certificado digital próximo a vencer',
+      owner: 'tenant' as const,
+      severity: 'warning' as const,
+    };
+
+    if (!certificate_expiry || certificate_expiry <= now) {
+      return { ...base, satisfied: true, action: '' };
+    }
+
+    const days = this.daysUntil(certificate_expiry, now);
+    const widest = Math.max(...CERTIFICATE_EXPIRY_ALERT_DAYS);
+    if (days > widest) {
+      return { ...base, satisfied: true, action: '', days_remaining: days };
+    }
+
+    // NARROWEST matching tier, not the first one that matches: the tiers are
+    // declared widest-first, so `find(t => days <= t)` would return 30 for a
+    // certificate with 4 days left and the merchant would read "agenda la
+    // renovación" on the day the certificate is about to die.
+    const tier = Math.min(
+      ...CERTIFICATE_EXPIRY_ALERT_DAYS.filter((t) => days <= t),
+    );
+    const urgency =
+      tier <= 7
+        ? 'Renueva el certificado digital YA'
+        : tier <= 15
+          ? 'Renueva el certificado digital esta semana'
+          : 'Agenda la renovación del certificado digital';
+
+    return {
+      ...base,
+      satisfied: false,
+      days_remaining: days,
+      action: `${urgency}: vence en ${days} ${
+        days === 1 ? 'día' : 'días'
+      } (${certificate_expiry.toISOString().slice(0, 10)}). Sin certificado vigente la DIAN rechaza toda emisión.`,
+    };
+  }
+
+  /**
+   * Early alert for a numbering resolution running out of consecutives.
+   *
+   * Measured against the AUTHORIZED range, not against what is left from the
+   * current number: a resolution authorised for 1000 numbers with 80 left is at
+   * 8% regardless of how fast the tenant burned the first 920.
+   */
+  buildResolutionRangeWarning(resolution: {
+    prefix: string | null;
+    range_from: number;
+    range_to: number;
+    current_number: number;
+  }): ProductionReadinessCheck {
+    const base = {
+      key: 'resolution_range_low',
+      label: 'Rango de numeración por agotarse',
+      owner: 'tenant' as const,
+      severity: 'warning' as const,
+    };
+
+    const total = resolution.range_to - resolution.range_from + 1;
+    if (total <= 0) return { ...base, satisfied: true, action: '' };
+
+    const remaining = Math.max(0, resolution.range_to - resolution.current_number);
+    const percent = (remaining / total) * 100;
+
+    if (percent > RESOLUTION_RANGE_WARNING_PERCENT) {
+      return {
+        ...base,
+        satisfied: true,
+        action: '',
+        percent_remaining: Math.round(percent * 10) / 10,
+      };
+    }
+
+    return {
+      ...base,
+      satisfied: false,
+      percent_remaining: Math.round(percent * 10) / 10,
+      action: `Solicita una nueva Autorización de Numeración en Muisca: al prefijo ${
+        resolution.prefix ?? '(sin prefijo)'
+      } le quedan ${remaining} números (${
+        Math.round(percent * 10) / 10
+      }% del rango). Al agotarse, la facturación se detiene.`,
+    };
+  }
 
   isProductionRuntime(): boolean {
     return process.env.NODE_ENV === 'production';
@@ -158,6 +440,7 @@ export class FiscalProductionReadinessService {
         satisfied: this.hasPassedTestSet(config.last_test_result),
         action: 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
         owner: 'tenant',
+        blocked_by: 'dian',
       },
       {
         key: 'enablement_evidence',
@@ -166,6 +449,7 @@ export class FiscalProductionReadinessService {
         action:
           'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',
         owner: 'tenant',
+        blocked_by: 'dian',
       },
       {
         key: 'enablement_status',
@@ -249,14 +533,27 @@ export class FiscalProductionReadinessService {
       {
         key: 'DIAN_ENCRYPTION_KEY',
         label: 'Llave de cifrado de secretos configurada',
-        satisfied: !!process.env.DIAN_ENCRYPTION_KEY,
+        // Asked of the EncryptionService instead of re-reading the env var: the
+        // service is what actually decided which key it encrypts with, and it
+        // falls back to a repository-visible key when none is configured. Reading
+        // `process.env` here could report "configured" for a key the service
+        // rejected (wrong length, unusable value) while every DIAN secret on disk
+        // is encrypted with the public fallback.
+        satisfied: !this.encryption.isUsingFallbackKey(),
         action:
-          'Vendix debe definir DIAN_ENCRYPTION_KEY en el entorno del servidor.',
+          'Vendix debe definir DIAN_ENCRYPTION_KEY en el entorno del servidor: ' +
+          'los secretos DIAN están cifrados con la llave de respaldo visible en el repositorio.',
         owner: 'platform',
       },
+      this.buildSecretsEnvelopeWarning(config),
+      this.buildPrivateKeyCustodyWarning(config),
+      this.buildCertificateExpiryWarning(config.certificate_expiry),
     ];
 
-    const missing = checks.filter((c) => !c.satisfied).map((c) => c.key);
+    const unsatisfied = checks.filter((c) => !c.satisfied);
+    const missing = unsatisfied.filter(isBlockingCheck).map((c) => c.key);
+    const warnings = unsatisfied.filter((c) => !isBlockingCheck(c));
+    const blocking = unsatisfied.filter(isBlockingCheck);
 
     return {
       ready: missing.length === 0,
@@ -265,6 +562,9 @@ export class FiscalProductionReadinessService {
       enablement_status: config.enablement_status,
       checks,
       missing,
+      warnings,
+      actionable: blocking.filter(isActionableCheck),
+      waiting_on_dian: blocking.filter((c) => !isActionableCheck(c)),
     };
   }
 
@@ -370,6 +670,11 @@ export class FiscalProductionReadinessService {
   ): ReadinessDocumentType {
     if (configuration_type === 'support_document') return 'support_document';
     if (configuration_type === 'payroll') return 'payroll';
+    // Its own authorized range — checking `sales_invoice` here would report a DE
+    // configuration ready on the strength of a range it must never consume.
+    if (configuration_type === 'equivalent_document') {
+      return 'pos_equivalent_document';
+    }
     return 'sales_invoice';
   }
 

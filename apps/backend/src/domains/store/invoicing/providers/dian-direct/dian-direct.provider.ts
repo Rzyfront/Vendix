@@ -6,12 +6,18 @@ import {
   ProviderResponse,
   StatusResponse,
 } from '../invoice-provider.interface';
+import { DianSecretEnvelopeService } from '../../../../../common/services/dian-secret-envelope.service';
 import { EncryptionService } from '../../../../../common/services/encryption.service';
 import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CufeCalculator } from '../../utils/cufe-calculator';
+import {
+  dianLineExtensionTotal,
+  dianSum,
+} from '../../utils/dian-money.util';
+import { onlyDigits } from '../../../../../common/utils/nit.util';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
 import { DianResponseParserService } from './dian-response-parser.service';
@@ -19,20 +25,36 @@ import { UblInvoiceBuilder } from './xml/ubl-invoice.builder';
 import { UblCreditNoteBuilder } from './xml/ubl-credit-note.builder';
 import { UblDebitNoteBuilder } from './xml/ubl-debit-note.builder';
 import { UblSupportDocumentBuilder } from './xml/ubl-support-document.builder';
+import { UblEquivalentDocumentBuilder } from './xml/ubl-equivalent-document.builder';
 import { UblCommonBuilder } from './xml/ubl-common.builder';
-import { DIAN_ID_TYPES } from './constants/dian-document-types';
+import {
+  UblApplicationResponseBuilder,
+  DianEventParty,
+} from './xml/ubl-application-response.builder';
+import {
+  DIAN_DOCUMENT_TYPES,
+  DIAN_ID_TYPES,
+} from './constants/dian-document-types';
 import {
   DianConfigDecrypted,
   DianIssuerData,
   DianCustomerData,
 } from './interfaces/dian-config.interface';
+import {
+  DianDocumentEventRequest,
+  DianDocumentEventResult,
+} from './interfaces/dian-event.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   DEFAULT_STORE_TIMEZONE,
   localOffsetString,
 } from '../../../../../common/utils/store-timezone.util';
 
-type DianConfigurationType = 'invoicing' | 'support_document' | 'payroll';
+type DianConfigurationType =
+  | 'invoicing'
+  | 'support_document'
+  | 'payroll'
+  | 'equivalent_document';
 
 /**
  * DIAN Direct Provider — connects directly to DIAN web services
@@ -59,6 +81,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     private readonly xml_signer: DianXmlSignerService,
     private readonly response_parser: DianResponseParserService,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly secret_envelope: DianSecretEnvelopeService,
   ) {}
 
   async sendInvoice(
@@ -103,15 +126,12 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           t.tax_name.toUpperCase().includes('CONSUMO'),
       );
 
-      const iva_amount = iva_taxes
-        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-        .toFixed(2);
-      const ica_amount = ica_taxes
-        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-        .toFixed(2);
-      const inc_amount = inc_taxes
-        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-        .toFixed(2);
+      // dianSum, not float reduce + toFixed: the CUFE is a hash, so a cent of
+      // float drift or a rounded half-cent changes it and the DIAN rejects the
+      // document. Summing in Decimal space with truncation matches Anexo §11.2.
+      const iva_amount = dianSum(iva_taxes.map((t) => t.tax_amount));
+      const ica_amount = dianSum(ica_taxes.map((t) => t.tax_amount));
+      const inc_amount = dianSum(inc_taxes.map((t) => t.tax_amount));
 
       // La clave técnica (ClTec) entregada por la DIAN con la resolución de
       // numeración de habilitación alimenta el CUFE de la factura electrónica de
@@ -137,23 +157,36 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         );
       }
 
+      // ValFac must be the SAME number the XML publishes as
+      // `LegalMonetaryTotal/LineExtensionAmount`, because the DIAN recomputes the
+      // CUFE from the XML. Both come from `dianLineExtensionTotal` so they cannot
+      // drift: passing `subtotal_amount` here would hash the GROSS subtotal while
+      // the document declares the NET one on any invoice carrying a discount.
+      const line_extension_total = dianLineExtensionTotal(invoice_data.items);
+
       // Calculate CUFE
       const cufe = CufeCalculator.generate({
         invoice_number: invoice_data.invoice_number,
         issue_date: invoice_data.issue_date,
         issue_time: this.issueTime(invoice_data),
-        total_before_tax: invoice_data.subtotal_amount,
+        total_before_tax: line_extension_total,
         tax_iva: iva_amount,
         tax_inc: inc_amount,
         tax_ica: ica_amount,
         total_amount: invoice_data.total_amount,
-        issuer_nit: config.nit,
-        customer_nit: invoice_data.customer_tax_id || '222222222222',
+        // Anexo §11.2: NitOFE and NumAdq carry no dots, dashes or DV. A customer
+        // document typed as `900.123.456-7` otherwise yields a CUFE the DIAN
+        // cannot reproduce. `CufeCalculator` sanitizes defensively too; doing it
+        // here keeps the XML and the hash reading the same string.
+        issuer_nit: onlyDigits(config.nit),
+        customer_nit: onlyDigits(invoice_data.customer_tax_id) || '222222222222',
         technical_key,
         environment: config.environment === 'production' ? '1' : '2',
       });
 
-      // Build UBL XML
+      // Build UBL XML. `invoice_type_code` carries contingency through: a
+      // document expedited under DIAN unavailability must declare '04' on its
+      // later transmission, keeping the same prefix and number (Anexo §12.2).
       const xml = UblInvoiceBuilder.build({
         invoice_data,
         issuer,
@@ -161,6 +194,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cufe,
         environment: config.environment,
+        invoice_type_code: invoice_data.contingency_type
+          ? DIAN_DOCUMENT_TYPES.CONTINGENCY_DIAN_INVOICE
+          : undefined,
       });
 
       // Sign XML with certificate
@@ -214,7 +250,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Documento aceptado por la DIAN'
-          : `Documento rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+          : dian_response.contingency_eligible
+            ? `La DIAN no está disponible: ${dian_response.status_message}`
+            : `Documento rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        // Carried up so the flow can tell "the DIAN is down" (→ contingency Type
+        // 04) apart from "the document is invalid" (→ rejected). Without this the
+        // flow marked an outage as a rejection and blocked the accounting entry.
+        contingency_eligible: dian_response.contingency_eligible,
+        failure_class: dian_response.failure_class,
         provider_data: {
           dian_status_code: parsed.status_code,
           dian_status_description: parsed.status_description,
@@ -276,28 +319,30 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           t.tax_name.toUpperCase().includes('CONSUMO'),
       );
 
-      const cn_iva_amount = cn_iva_taxes
-        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-        .toFixed(2);
-      const cn_ica_amount = cn_ica_taxes
-        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-        .toFixed(2);
-      const cn_inc_amount = cn_inc_taxes
-        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-        .toFixed(2);
+      const cn_iva_amount = dianSum(cn_iva_taxes.map((t) => t.tax_amount));
+      const cn_ica_amount = dianSum(cn_ica_taxes.map((t) => t.tax_amount));
+      const cn_inc_amount = dianSum(cn_inc_taxes.map((t) => t.tax_amount));
 
-      // For credit notes, generate CUDE (same algorithm as CUFE)
+      // Same rule as the invoice: the hashed base must equal the base the XML
+      // declares, so both derive from `dianLineExtensionTotal`.
+      const cn_line_extension_total = dianLineExtensionTotal(
+        credit_note_data.items,
+      );
+
+      // For credit notes, generate CUDE (same algorithm as CUFE, ClTec replaced
+      // by the software PIN per Anexo §11.4)
       const cude = CufeCalculator.generate({
         invoice_number: credit_note_data.invoice_number,
         issue_date: credit_note_data.issue_date,
         issue_time: this.issueTime(credit_note_data),
-        total_before_tax: credit_note_data.subtotal_amount,
+        total_before_tax: cn_line_extension_total,
         tax_iva: cn_iva_amount,
         tax_inc: cn_inc_amount,
         tax_ica: cn_ica_amount,
         total_amount: credit_note_data.total_amount,
-        issuer_nit: config.nit,
-        customer_nit: credit_note_data.customer_tax_id || '222222222222',
+        issuer_nit: onlyDigits(config.nit),
+        customer_nit:
+          onlyDigits(credit_note_data.customer_tax_id) || '222222222222',
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -417,19 +462,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         invoice_number: debit_note_data.invoice_number,
         issue_date: debit_note_data.issue_date,
         issue_time: this.issueTime(debit_note_data),
-        total_before_tax: debit_note_data.subtotal_amount,
-        tax_iva: iva_taxes
-          .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-          .toFixed(2),
-        tax_inc: inc_taxes
-          .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-          .toFixed(2),
-        tax_ica: ica_taxes
-          .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
-          .toFixed(2),
+        total_before_tax: dianLineExtensionTotal(debit_note_data.items),
+        tax_iva: dianSum(iva_taxes.map((t) => t.tax_amount)),
+        tax_inc: dianSum(inc_taxes.map((t) => t.tax_amount)),
+        tax_ica: dianSum(ica_taxes.map((t) => t.tax_amount)),
         total_amount: debit_note_data.total_amount,
-        issuer_nit: config.nit,
-        customer_nit: debit_note_data.customer_tax_id || '222222222222',
+        issuer_nit: onlyDigits(config.nit),
+        customer_nit:
+          onlyDigits(debit_note_data.customer_tax_id) || '222222222222',
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -530,13 +570,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         invoice_number: support_document_data.invoice_number,
         issue_date: support_document_data.issue_date,
         issue_time: this.issueTime(support_document_data),
-        total_before_tax: support_document_data.subtotal_amount,
+        total_before_tax: dianLineExtensionTotal(support_document_data.items),
         tax_iva: taxes.iva,
         tax_inc: taxes.inc,
         tax_ica: taxes.ica,
         total_amount: support_document_data.total_amount,
-        issuer_nit: config.nit,
-        customer_nit: support_document_data.customer_tax_id || '222222222222',
+        issuer_nit: onlyDigits(config.nit),
+        customer_nit:
+          onlyDigits(support_document_data.customer_tax_id) || '222222222222',
         technical_key:
           support_document_data.technical_key || config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
@@ -632,13 +673,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         invoice_number: support_adjustment_data.invoice_number,
         issue_date: support_adjustment_data.issue_date,
         issue_time: this.issueTime(support_adjustment_data),
-        total_before_tax: support_adjustment_data.subtotal_amount,
+        total_before_tax: dianLineExtensionTotal(support_adjustment_data.items),
         tax_iva: taxes.iva,
         tax_inc: taxes.inc,
         tax_ica: taxes.ica,
         total_amount: support_adjustment_data.total_amount,
-        issuer_nit: config.nit,
-        customer_nit: support_adjustment_data.customer_tax_id || '222222222222',
+        issuer_nit: onlyDigits(config.nit),
+        customer_nit:
+          onlyDigits(support_adjustment_data.customer_tax_id) ||
+          '222222222222',
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -724,6 +767,168 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     }
   }
 
+  /**
+   * Transmits the **documento equivalente electrónico del tiquete POS**
+   * (Res. 000165/2023, Anexo Técnico DE v1.0) or one of its adjustment notes.
+   *
+   * Three differences from `sendInvoice` that are the whole reason this is a
+   * separate method rather than a flag:
+   *
+   * 1. **Configuration.** It loads `equivalent_document`, not `invoicing`. The
+   *    DIAN habilita the software per document type with its own set de pruebas,
+   *    so a store enabled for FEV is NOT thereby enabled to emit DE. Reusing the
+   *    invoicing row would let an unauthorized emission look authorized.
+   * 2. **Unique code.** CUDE with the **Software-PIN** in the 14th position
+   *    (§14.1.2), never a CUFE with the ClTec. `sendInvoice` hard-fails without a
+   *    `technical_key` precisely because that assert must not apply here.
+   * 3. **Numbering.** Its own authorized range
+   *    (`fiscal_document_type_enum.pos_equivalent_document`), so a POS ticket
+   *    never burns a sales-invoice consecutive.
+   *
+   * The transport is identical (`SendBillSync`), which is why nothing below is
+   * duplicated beyond what those three differences force.
+   */
+  async sendEquivalentDocument(
+    document_data: ProviderInvoiceData,
+    options: { document_type_code?: string } = {},
+  ): Promise<ProviderResponse> {
+    const start_time = Date.now();
+    const config = await this.loadConfig('equivalent_document');
+    this.validateCertificateExpiry(config);
+
+    const is_adjustment_note = !!options.document_type_code;
+    const action = is_adjustment_note
+      ? 'send_equivalent_adjustment_note'
+      : 'send_equivalent_document';
+    const document_type = is_adjustment_note
+      ? 'equivalent_adjustment_note'
+      : 'pos_equivalent_document';
+
+    try {
+      const issuer = await this.loadIssuerData(config);
+      const customer = this.buildCustomerData(document_data);
+      const software_security = this.buildSoftwareSecurity(
+        config,
+        document_data.invoice_number,
+      );
+      const taxes = this.calculateTaxAmounts(document_data);
+
+      // ValFac must be the number the XML publishes as `LineExtensionAmount`, the
+      // same invariant `sendInvoice` documents: the DIAN recomputes the key from
+      // the XML, so hashing `subtotal_amount` would diverge on any discount.
+      const cude = CufeCalculator.generateEquivalentDocumentCude({
+        invoice_number: document_data.invoice_number,
+        issue_date: document_data.issue_date,
+        issue_time: this.issueTime(document_data),
+        total_before_tax: dianLineExtensionTotal(document_data.items),
+        tax_iva: taxes.iva,
+        tax_inc: taxes.inc,
+        tax_ica: taxes.ica,
+        total_amount: document_data.total_amount,
+        issuer_nit: onlyDigits(config.nit),
+        customer_nit: onlyDigits(document_data.customer_tax_id) || '222222222222',
+        environment: config.environment === 'production' ? '1' : '2',
+        software_pin: config.software_pin,
+      });
+
+      const xml = UblEquivalentDocumentBuilder.build({
+        invoice_data: document_data,
+        issuer,
+        customer,
+        software_security,
+        cude,
+        environment: config.environment,
+        document_type_code: options.document_type_code,
+      });
+
+      const signed_xml = await this.signXml(xml, config);
+      const zip_base64 = await this.compressToZipBase64(
+        signed_xml,
+        `${document_data.invoice_number}.xml`,
+      );
+      const ws_credentials = await this.loadWsCredentials(config);
+      const dian_response = await this.soap_client.sendBillSync(
+        zip_base64,
+        `${document_data.invoice_number}.zip`,
+        config.environment,
+        ws_credentials,
+      );
+      const parsed = this.response_parser.parseApplicationResponse(
+        dian_response.raw_response,
+      );
+
+      await this.createAuditLog(config.id, {
+        action,
+        document_type,
+        document_number: document_data.invoice_number,
+        request_xml: signed_xml,
+        response_xml: dian_response.raw_response,
+        status: parsed.is_valid ? 'success' : 'error',
+        error_message: parsed.is_valid
+          ? null
+          : parsed.errors.map((e) => e.message).join('; '),
+        cufe: cude,
+        duration_ms: Date.now() - start_time,
+      });
+
+      return {
+        success: parsed.is_valid,
+        tracking_id: parsed.document_key || cude,
+        cude: parsed.document_key || cude,
+        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
+        xml_document: signed_xml,
+        message: parsed.is_valid
+          ? 'Documento equivalente aceptado por la DIAN'
+          : dian_response.contingency_eligible
+            ? `La DIAN no está disponible: ${dian_response.status_message}`
+            : `Documento equivalente rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        // Same distinction the invoice path carries: an outage is not a rejection.
+        // A POS ticket handed to the customer during a DIAN outage is valid and
+        // owes a transmission, so it must not land in a terminal `rejected`.
+        contingency_eligible: dian_response.contingency_eligible,
+        failure_class: dian_response.failure_class,
+        provider_data: {
+          dian_status_code: parsed.status_code,
+          dian_status_description: parsed.status_description,
+          dian_errors: parsed.errors,
+          environment: config.environment,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to send equivalent document to DIAN: ${error.message}`,
+      );
+
+      await this.createAuditLog(config.id, {
+        action,
+        document_type,
+        document_number: document_data.invoice_number,
+        status: 'error',
+        error_message: error.message,
+        duration_ms: Date.now() - start_time,
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Nota de ajuste al documento equivalente — '94' crédito (default) or '93'
+   * débito (numeral 16.3). The DE has no credit/debit note of its own, so this is
+   * the only way to correct one, and it rides the same builder to keep the two
+   * from drifting apart.
+   */
+  async sendEquivalentAdjustmentNote(
+    adjustment_data: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    const is_debit = adjustment_data.invoice_type === 'debit_note';
+    return this.sendEquivalentDocument(adjustment_data, {
+      document_type_code: is_debit
+        ? DIAN_DOCUMENT_TYPES.EQUIVALENT_DEBIT_ADJUSTMENT_NOTE
+        : DIAN_DOCUMENT_TYPES.EQUIVALENT_CREDIT_ADJUSTMENT_NOTE,
+    });
+  }
+
   async checkStatus(tracking_id: string): Promise<StatusResponse> {
     const config = await this.loadConfig();
 
@@ -771,6 +976,175 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
+  /**
+   * Registers a RADIAN document event (`ApplicationResponse`) against an
+   * already-accepted document.
+   *
+   * Differences from a document transmission that are easy to get wrong:
+   * - The key is a CUDE derived from the EVENT fields, not from amounts
+   *   (`CufeCalculator.generateEventCude`).
+   * - The SOAP operation is `SendEventUpdateStatus`, not `SendBillSync`.
+   * - There is no contingency scheme: Anexo §12 covers documents, not events, so
+   *   a DIAN outage means "retry later", never "declare contingency".
+   * - No numbering resolution applies, so `sts:InvoiceControl` is omitted.
+   */
+  async sendDocumentEvent(
+    event: DianDocumentEventRequest,
+  ): Promise<DianDocumentEventResult> {
+    const start_time = Date.now();
+    const config = await this.loadConfig();
+
+    this.validateCertificateExpiry(config);
+
+    const issuer = await this.loadIssuerData(config);
+
+    const issuer_party: DianEventParty = {
+      document_type: issuer.document_type || DIAN_ID_TYPES.NIT,
+      document_number: onlyDigits(issuer.nit),
+      document_dv: issuer.nit_dv,
+      legal_name: issuer.legal_name,
+    };
+    const customer_party: DianEventParty = {
+      ...event.customer,
+      document_number: onlyDigits(event.customer.document_number),
+    };
+
+    // 030/031/032/033 travel adquiriente → emisor; 034 travels the other way.
+    const sender =
+      event.generated_by === 'issuer' ? issuer_party : customer_party;
+    const receiver =
+      event.generated_by === 'issuer' ? customer_party : issuer_party;
+
+    const issue_time =
+      event.issue_time ||
+      `00:00:00${localOffsetString(
+        new Date(`${event.issue_date}T12:00:00.000Z`),
+        DEFAULT_STORE_TIMEZONE,
+      )}`;
+
+    // The CUDE always binds the emisor NIT and the adquiriente document of the
+    // REFERENCED invoice, regardless of which side generated the event.
+    // NitFE/DocAdq are the GENERATOR and the RECEIVER of the event — not the
+    // emisor/adquiriente of the referenced invoice. On a 030 the buyer generates,
+    // so NitFE is the buyer; getting this from the invoice instead of from the
+    // event's own parties yields a key the DIAN cannot reproduce.
+    const cude = CufeCalculator.generateEventCude({
+      event_number: event.event_number,
+      issue_date: event.issue_date,
+      issue_time,
+      event_code: event.event_code,
+      issuer_nit: sender.document_number,
+      customer_nit: receiver.document_number || '222222222222',
+      referenced_document_number: event.referenced_document_number,
+      referenced_document_type_code: event.referenced_document_type_code,
+      software_pin: config.software_pin,
+    });
+
+    const xml = UblApplicationResponseBuilder.build({
+      event_number: event.event_number,
+      event_code: event.event_code,
+      operation_code: event.operation_code,
+      details: event.details,
+      cude,
+      issue_date: event.issue_date,
+      issue_time,
+      sender,
+      receiver,
+      referenced_document_number: event.referenced_document_number,
+      referenced_document_key: event.referenced_document_key,
+      referenced_document_date: event.referenced_document_date,
+      referenced_document_type_code: event.referenced_document_type_code,
+      software_security: this.buildSoftwareSecurity(config, event.event_number),
+      environment: config.environment,
+      description: event.description,
+    });
+
+    const file_base = `ev${event.event_code}${event.event_number}`;
+    let signed_xml = xml;
+
+    try {
+      signed_xml = await this.signXml(xml, config);
+      const zip_base64 = await this.compressToZipBase64(
+        signed_xml,
+        `${file_base}.xml`,
+      );
+
+      const ws_credentials = await this.loadWsCredentials(config);
+
+      const dian_response = await this.soap_client.sendEventUpdateStatus(
+        zip_base64,
+        `${file_base}.zip`,
+        config.environment,
+        ws_credentials,
+      );
+
+      const parsed = this.response_parser.parseApplicationResponse(
+        dian_response.raw_response,
+      );
+
+      await this.createAuditLog(config.id, {
+        action: 'send_document_event',
+        document_type: `event_${event.event_code}`,
+        document_number: event.event_number,
+        request_xml: signed_xml,
+        response_xml: dian_response.raw_response,
+        status: parsed.is_valid ? 'success' : 'error',
+        error_message: parsed.is_valid
+          ? null
+          : parsed.errors.map((e) => e.message).join('; '),
+        cufe: cude,
+        duration_ms: Date.now() - start_time,
+      });
+
+      return {
+        success: parsed.is_valid,
+        event_code: event.event_code,
+        dian_configuration_id: config.id,
+        cude,
+        tracking_id: parsed.document_key || cude,
+        status_code: parsed.status_code,
+        message: parsed.is_valid
+          ? `Evento ${event.event_code} registrado en RADIAN`
+          : `Evento ${event.event_code} rechazado: ${parsed.errors
+              .map((e) => e.message)
+              .join(', ')}`,
+        request_xml: signed_xml,
+        response_xml: dian_response.raw_response,
+        errors: parsed.errors.map((e) => ({
+          code: e.code,
+          message: e.message,
+        })),
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? 'unknown');
+      this.logger.error(`Failed to send DIAN event: ${message}`);
+
+      await this.createAuditLog(config.id, {
+        action: 'send_document_event',
+        document_type: `event_${event.event_code}`,
+        document_number: event.event_number,
+        request_xml: signed_xml,
+        status: 'error',
+        error_message: message,
+        cufe: cude,
+        duration_ms: Date.now() - start_time,
+      });
+
+      // Returned rather than rethrown: the caller persists the failed event row
+      // so a retry reuses the same consecutive instead of burning a new one.
+      return {
+        success: false,
+        event_code: event.event_code,
+        dian_configuration_id: config.id,
+        cude,
+        message,
+        request_xml: signed_xml,
+        errors: [{ message }],
+      };
+    }
+  }
+
   // ─── Private Helpers ───────────────────────────────────────
 
   /**
@@ -806,14 +1180,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     const p12_buffer = await this.s3_service.downloadImage(
       config.certificate_s3_key,
     );
-    const creds = this.xml_signer.extractCredentials(
+    return this.xml_signer.buildWsCredentials(
       p12_buffer,
-      config.certificate_password,
+      config.certificate_password || '',
+      config.certificate_kms_key_id,
     );
-    return {
-      private_key_pem: creds.private_key_pem,
-      certificate_der_base64: creds.certificate_der_base64,
-    };
   }
 
   /**
@@ -851,6 +1222,21 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       );
     }
 
+    const software_pin = this.encryption.decrypt(config.software_pin_encrypted);
+    const certificate_password = config.certificate_password_encrypted
+      ? this.encryption.decrypt(config.certificate_password_encrypted)
+      : null;
+
+    // Only place the plaintext exists, so the only place a weaker envelope can be
+    // retired. Awaited rather than fire-and-forget so the write stays inside the
+    // request's tenant context (the scoped Prisma client reads it from ALS), and
+    // it never throws — see DianSecretEnvelopeService.
+    await this.secret_envelope.upgradeInPlace(
+      config.id,
+      config,
+      { software_pin, certificate_password },
+    );
+
     return {
       id: config.id,
       organization_id: config.organization_id,
@@ -859,11 +1245,10 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       nit: config.nit,
       nit_dv: config.nit_dv,
       software_id: config.software_id,
-      software_pin: this.encryption.decrypt(config.software_pin_encrypted),
+      software_pin,
       certificate_s3_key: config.certificate_s3_key,
-      certificate_password: config.certificate_password_encrypted
-        ? this.encryption.decrypt(config.certificate_password_encrypted)
-        : null,
+      certificate_password,
+      certificate_kms_key_id: config.certificate_kms_key_id,
       certificate_expiry: config.certificate_expiry,
       environment: config.environment as 'test' | 'production',
       enablement_status: config.enablement_status,
@@ -909,10 +1294,10 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         const name = tax.tax_name.toUpperCase();
         return tokens.some((token) => name.includes(token));
       });
+    // Decimal-space sum with truncation: these three values are hashed into the
+    // CUFE/CUDE/CUDS, so float drift or a rounded half-cent invalidates the key.
     const total = (taxes: typeof document_data.taxes) =>
-      taxes
-        .reduce((sum, tax) => sum + parseFloat(tax.tax_amount || '0'), 0)
-        .toFixed(2);
+      dianSum(taxes.map((tax) => tax.tax_amount));
 
     return {
       iva: total(filter(['IVA', 'VAT'])),
@@ -1170,7 +1555,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     xml: string,
     config: DianConfigDecrypted,
   ): Promise<string> {
-    if (!config.certificate_s3_key || !config.certificate_password) {
+    // Under HSM custody the container may legitimately hold no private key, so a
+    // missing password is NOT a missing certificate. Requiring one would make the
+    // stronger custody look unconfigured and silently ship unsigned XML in dev.
+    const has_certificate =
+      !!config.certificate_s3_key &&
+      (!!config.certificate_password || !!config.certificate_kms_key_id);
+
+    if (!has_certificate) {
       if (config.environment === 'production') {
         throw new Error(
           'A valid certificate is required to sign DIAN production documents.',
@@ -1181,9 +1573,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     }
 
     const p12_buffer = await this.s3_service.downloadImage(
-      config.certificate_s3_key,
+      config.certificate_s3_key!,
     );
-    return this.xml_signer.sign(xml, p12_buffer, config.certificate_password);
+    return this.xml_signer.sign(
+      xml,
+      p12_buffer,
+      config.certificate_password || '',
+      config.certificate_kms_key_id,
+    );
   }
 
   /**

@@ -272,6 +272,10 @@ export class StorePrismaService extends BasePrismaService {
       // readable and writable across tenants.
       'dian_configurations',
       'dian_audit_logs', // Relational
+      // RADIAN events. Scoped RELATIONALLY through the invoice rather than by
+      // its own nullable `store_id`: the invoice is the tenant anchor, so a row
+      // written with a wrong store_id still cannot be read across tenants.
+      'dian_document_events', // Relational
       'fiscal_transmissions', // Fiscal entity scoped
       'fiscal_evidences', // Fiscal entity scoped
       'accounting_entry_lines', // Relational
@@ -464,6 +468,7 @@ export class StorePrismaService extends BasePrismaService {
           OR: [{ store_id: context.store_id }, { store_id: null }],
         },
       },
+      dian_document_events: { invoice: { store_id: context.store_id } },
       accounting_entry_lines: {
         entry: { organization_id: context.organization_id },
       },
@@ -1135,6 +1140,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get dian_audit_logs() {
     return this.scoped_client.dian_audit_logs;
+  }
+
+  get dian_document_events() {
+    return this.scoped_client.dian_document_events;
   }
 
   get fiscal_transmissions() {

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -16,8 +17,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
+import { ResolutionScannerService } from '../../../store/invoicing/resolutions/resolution-scanner.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -28,9 +31,18 @@ import {
   ListPlatformResolutionsQueryDto,
   RetrySubscriptionFiscalDto,
   SubscriptionFiscalQueryDto,
+  UpdatePlatformResolutionDto,
   UpsertSubscriptionFiscalConfigDto,
 } from './dto/subscription-fiscal.dto';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
+
+/** Accepted by the resolution scanner; anything else is rejected before the AI. */
+const SCAN_ALLOWED_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+];
 
 @ApiTags('Superadmin Subscriptions - Fiscal Billing')
 @Controller('superadmin/subscriptions/fiscal')
@@ -40,6 +52,7 @@ export class SubscriptionFiscalController {
   constructor(
     private readonly fiscalService: SubscriptionFiscalService,
     private readonly responseService: ResponseService,
+    private readonly resolutionScanner: ResolutionScannerService,
   ) {}
 
   @Get('status')
@@ -188,6 +201,33 @@ export class SubscriptionFiscalController {
     return this.responseService.success(data, 'Platform resolutions retrieved');
   }
 
+  /**
+   * Reads a resolution document and answers the extracted fields. Persists
+   * nothing: the super-admin reviews the result and then calls
+   * `POST resolutions` or `PATCH resolutions/:id`, so an OCR slip can never
+   * reach the platform numbering by itself.
+   */
+  @Post('resolutions/scan')
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({
+    summary:
+      'Extract DIAN resolution fields from a photo/PDF (returns data, persists nothing)',
+  })
+  async scanResolution(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<any> {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_NO_FILE);
+    }
+    if (!SCAN_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_INVALID_FILE);
+    }
+
+    const result = await this.resolutionScanner.scanResolutionDocument(file);
+    return this.responseService.success(result, 'Platform resolution scanned');
+  }
+
   @Post('resolutions')
   @HttpCode(HttpStatus.CREATED)
   @Permissions('superadmin:subscriptions:fiscal:write')
@@ -197,5 +237,28 @@ export class SubscriptionFiscalController {
   ): Promise<any> {
     const result = await this.fiscalService.createResolution(dto);
     return this.responseService.created(result, 'Platform resolution created');
+  }
+
+  @Patch('resolutions/:id')
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({ summary: 'Update a platform DIAN invoice resolution' })
+  async updateResolution(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePlatformResolutionDto,
+  ): Promise<any> {
+    const result = await this.fiscalService.updateResolution(id, dto);
+    return this.responseService.updated(result, 'Platform resolution updated');
+  }
+
+  @Delete('resolutions/:id')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({
+    summary:
+      'Delete a pristine platform DIAN resolution (used ones must be deactivated)',
+  })
+  async deleteResolution(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const result = await this.fiscalService.deleteResolution(id);
+    return this.responseService.success(result, 'Platform resolution deleted');
   }
 }

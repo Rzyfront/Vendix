@@ -16,6 +16,7 @@ import {
   InvoiceListResponse,
   ApiResponse,
   DianEmissionStatus,
+  PosUvtThreshold,
 } from '../interfaces/invoice.interface';
 
 @Injectable({
@@ -38,6 +39,17 @@ export class InvoicingService {
       }
     }
     return this.http.get<InvoiceListResponse>(this.getApiUrl(''), { params });
+  }
+
+  /**
+   * 5 UVT ceiling for the POS equivalent document. Read once per POS session:
+   * the value only changes when the DIAN publishes a new UVT (yearly) or the
+   * merchant activates electronic invoicing.
+   */
+  getPosUvtThreshold(): Observable<ApiResponse<PosUvtThreshold>> {
+    return this.http.get<ApiResponse<PosUvtThreshold>>(
+      this.getApiUrl('uvt-threshold'),
+    );
   }
 
   getInvoice(id: number): Observable<ApiResponse<Invoice>> {

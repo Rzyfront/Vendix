@@ -122,6 +122,18 @@ describe('InvoicingService support adjustment notes', () => {
         fiscalScope as any,
         retryQueue as any,
         fiscalGate as any,
+        // El umbral 5 UVT no participa en ninguno de estos flujos; se pasa
+        // desactivado para que el constructor quede completo sin alterarlos.
+        {
+          evaluate: jest.fn().mockResolvedValue({
+            enforced: false,
+            uvt_value: null,
+            limit_cop: null,
+            exceeds: false,
+            year: new Date().getFullYear(),
+          }),
+          assertInvoiceNotRequired: jest.fn(),
+        } as any,
       ),
       prisma,
       generator,

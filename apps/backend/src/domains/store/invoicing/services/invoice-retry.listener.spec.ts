@@ -78,11 +78,46 @@ describe('InvoiceRetryListener', () => {
     await expect(listener.handleInvoiceRetry(event)).resolves.toBeUndefined();
 
     expect(invoice_flow.send).toHaveBeenCalledWith(55);
+    // Third argument = "keep it contingency-eligible". False here: the invoice was
+    // never expedited under contingency, so exhausting its retries means `failed`.
     expect(retry_queue.markFailed).toHaveBeenCalledWith(
       10,
       'ETIMEDOUT contacting DIAN',
+      false,
     );
     expect(retry_queue.markSuccess).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A document already expedited under contingency (Anexo Técnico §12.2) must NOT
+   * be downgraded to `failed` when its retries run out: it was issued legitimately
+   * and the tenant still owes the DIAN the transmission within 48 h. Losing that
+   * flag loses the obligation.
+   */
+  it('preserves contingency eligibility when the invoice was expedited under contingency', async () => {
+    const { listener, retry_queue } = createListener({
+      prisma: {
+        invoices: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 55,
+            status: 'validated',
+            invoice_number: 'FE100',
+            contingency_type: '03',
+          }),
+        },
+      },
+      invoice_flow: {
+        send: jest.fn().mockRejectedValue(new Error('ETIMEDOUT contacting DIAN')),
+      },
+    });
+
+    await listener.handleInvoiceRetry(event);
+
+    expect(retry_queue.markFailed).toHaveBeenCalledWith(
+      10,
+      'ETIMEDOUT contacting DIAN',
+      true,
+    );
   });
 
   it('closes the queue item without re-sending when the invoice is already accepted', async () => {

@@ -7,8 +7,19 @@ export const DIAN_DOCUMENT_TYPES = {
   INVOICE: '01',
   /** Factura de exportación */
   EXPORT_INVOICE: '02',
-  /** Factura por contingencia facturador */
+  /**
+   * Factura por contingencia DEL FACTURADOR (Anexo 1.9 §12.1): se facturó en
+   * talonario o papel durante la falla y luego se transcribe cada documento con
+   * este código, contra la numeración DE CONTINGENCIA, dentro de 48 h.
+   */
   CONTINGENCY_INVOICE: '03',
+  /**
+   * Factura por contingencia DE LA DIAN (Anexo 1.9 §12.2): el servicio de
+   * validación previa no está disponible. Se expide con el MISMO prefijo y número
+   * de la numeración normal, re-firmada, y se entrega al adquiriente dentro de un
+   * `AttachedDocument` SIN `ApplicationResponse`. Debe transmitirse en 48 h.
+   */
+  CONTINGENCY_DIAN_INVOICE: '04',
   /** Nota crédito */
   CREDIT_NOTE: '91',
   /** Nota débito */
@@ -17,6 +28,21 @@ export const DIAN_DOCUMENT_TYPES = {
   SUPPORT_DOCUMENT: '05',
   /** Nota de ajuste al documento soporte */
   SUPPORT_ADJUSTMENT_NOTE: '95',
+  /**
+   * Documento equivalente electrónico del tiquete de máquina registradora con
+   * sistema P.O.S.
+   *
+   * Res. 000165/2023, Anexo Técnico de documento equivalente electrónico v1.0,
+   * numeral 16.3. Note the collision hazard: '20' is ALSO
+   * `DIAN_OPERATION_TYPES.EXPORT_INVOICE`, a `CustomizationID` value. They live in
+   * different elements and different tables — this one is the
+   * `cbc:InvoiceTypeCode` of an equivalent document.
+   */
+  POS_EQUIVALENT_DOCUMENT: '20',
+  /** Nota de ajuste de tipo débito al documento equivalente (numeral 16.3). */
+  EQUIVALENT_DEBIT_ADJUSTMENT_NOTE: '93',
+  /** Nota de ajuste de tipo crédito al documento equivalente (numeral 16.3). */
+  EQUIVALENT_CREDIT_ADJUSTMENT_NOTE: '94',
 } as const;
 
 /**
@@ -45,6 +71,12 @@ export const DIAN_OPERATION_TYPES = {
   SUPPORT_DOCUMENT_RESIDENT_SELLER: '10',
   /** Documento soporte: vendedor no residente fiscal colombiano */
   SUPPORT_DOCUMENT_NON_RESIDENT_SELLER: '11',
+  /**
+   * Documento equivalente electrónico con UN solo modo de operación — which is the
+   * case for the POS ticket (numeral 16.4.1 lists code '10' as the shared value for
+   * document types 20, 25, 35, 40, 45 and 50).
+   */
+  EQUIVALENT_DOCUMENT_SINGLE_MODE: '10',
 } as const;
 
 /**

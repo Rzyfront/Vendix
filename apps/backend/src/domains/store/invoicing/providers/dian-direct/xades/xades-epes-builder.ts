@@ -6,6 +6,7 @@ import {
   localDateString,
   localTimeString,
 } from '../../../../../../common/utils/store-timezone.util';
+import { XadesSigner, toXadesSigner } from './xades-signer';
 
 // node-forge is imported via require to stay consistent with the rest of the
 // dian-direct provider (see dian-xml-signer.service.ts).
@@ -88,20 +89,25 @@ export class XadesEpesBuilder {
    * Signs the given unsigned UBL XML string and returns the signed XML.
    *
    * @param xml_content - Unsigned UBL XML (with an empty second ExtensionContent).
-   * @param private_key_pem - Signer private key in PEM format.
-   * @param certificate_pem - Signer certificate in PEM format.
+   * @param signer - Either a PEM private key (in-process custody, wrapped in
+   *   `LocalPemSigner`) or an `XadesSigner` — which is how a non-exportable HSM
+   *   key participates without a PEM ever existing. The XAdES construction is
+   *   identical either way; only the final RSA operation differs.
+   * @param certificate_pem - Signer certificate in PEM format. Public material:
+   *   it comes from the same place regardless of where the private key lives.
    * @param signing_date - Instant used for `xades:SigningTime` (defaults to now).
    * @param signer_role - `xades:SignerRole` value. DIAN Anexo Técnico 10.12:
    *   `supplier` when the invoice is signed by the "Obligado a Facturar",
    *   `third party` when signed by an authorized technology provider.
    */
-  sign(
+  async sign(
     xml_content: string,
-    private_key_pem: string,
+    signer: XadesSigner | string,
     certificate_pem: string,
     signing_date: Date = new Date(),
     signer_role: string = 'supplier',
-  ): string {
+  ): Promise<string> {
+    const xades_signer = toXadesSigner(signer);
     const cert_info = this.buildCertificateInfo(certificate_pem);
 
     // Preserve the original XML declaration (C14N ignores it, but DIAN's ZIP
@@ -250,15 +256,18 @@ export class XadesEpesBuilder {
     signature_node.insertBefore(signed_info_node, signature_node.firstChild);
 
     // 6. Canonicalize SignedInfo (in place) and RSA-SHA256 sign it.
+    //    The canonical form is produced HERE, once, and handed to whichever
+    //    custody holds the key — an in-process PEM or a non-exportable HSM key.
+    //    Both sign the same bytes, so the DIAN verifies both identically.
     const canonical_signed_info = this.c14n
       .process(signed_info_node, {
         ancestorNamespaces: this.collectAncestorNamespaces(signed_info_node),
       } as any)
       .toString();
 
-    const signer = crypto.createSign('RSA-SHA256');
-    signer.update(canonical_signed_info, 'utf8');
-    const signature_value = signer.sign(private_key_pem, 'base64');
+    const signature_value = await xades_signer.sign(
+      Buffer.from(canonical_signed_info, 'utf8'),
+    );
 
     // 7. Insert SignatureValue between SignedInfo and KeyInfo.
     const signature_value_xml =
