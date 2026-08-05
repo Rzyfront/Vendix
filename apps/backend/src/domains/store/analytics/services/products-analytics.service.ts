@@ -96,7 +96,7 @@ export class ProductsAnalyticsService {
     const currentItems = await this.prisma.order_items.aggregate({
       where: {
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
       },
@@ -110,7 +110,7 @@ export class ProductsAnalyticsService {
     const previousItems = await this.prisma.order_items.aggregate({
       where: {
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
           created_at: { gte: previousStartDate, lte: previousEndDate },
         },
       },
@@ -154,7 +154,7 @@ export class ProductsAnalyticsService {
       by: ['product_id'],
       where: {
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
         ...(query.category_id && {
@@ -302,7 +302,7 @@ export class ProductsAnalyticsService {
       where: {
         product_id: { in: productIds },
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
       },
@@ -321,7 +321,7 @@ export class ProductsAnalyticsService {
       where: {
         product_id: { in: productIds },
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
         },
       },
       _max: {
@@ -429,7 +429,7 @@ export class ProductsAnalyticsService {
       where: {
         product_id: { in: productIds },
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
       },
@@ -545,7 +545,7 @@ export class ProductsAnalyticsService {
       by: ['product_id'],
       where: {
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: COMPLETED_SALE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
         product_id: { not: null },
