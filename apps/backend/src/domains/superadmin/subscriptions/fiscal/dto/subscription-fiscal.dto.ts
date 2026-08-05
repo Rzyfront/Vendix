@@ -28,15 +28,33 @@ export type PlatformResolutionDocumentType =
   (typeof PLATFORM_RESOLUTION_DOCUMENT_TYPES)[number];
 
 export class UpsertSubscriptionFiscalConfigDto {
+  /**
+   * IGNORADO. Se conserva para no romper clientes que aún lo envíen: el servicio
+   * lo sobrescribe con el id derivado de `organizations.is_platform`.
+   *
+   * Dejó de ser obligatorio porque no es una preferencia — es un hecho. Pedirlo
+   * como id forzaba a acertar el valor que el resolutor ya calcula, y un valor
+   * distinto no fallaba al guardar: fallaba después, con un 404 sobre filas que
+   * existían.
+   */
   @Type(() => Number)
+  @IsOptional()
   @IsInt()
   @Min(1)
-  platform_organization_id!: number;
+  platform_organization_id?: number;
 
+  /**
+   * IGNORADO, por la misma razón y con una consecuencia peor: el cliente Prisma
+   * scopeado deriva la entidad fiscal de `organizations.fiscal_scope` en cada
+   * consulta y no consulta este ajuste. Un valor que no coincida deja la
+   * configuración de plataforma apuntando a filas que ninguna lectura scopeada
+   * puede ver. El servicio lo sobrescribe con la entidad derivada.
+   */
   @Type(() => Number)
+  @IsOptional()
   @IsInt()
   @Min(1)
-  accounting_entity_id!: number;
+  accounting_entity_id?: number;
 
   @Type(() => Number)
   @IsOptional()

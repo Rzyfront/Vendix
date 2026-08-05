@@ -1224,6 +1224,14 @@
       "sessions": 1,
       "memories": 15,
       "prompts": 0
+    },
+    {
+      "id": "68739aca",
+      "created_by": "rzy",
+      "created_at": "2026-08-05T07:36:40Z",
+      "sessions": 2,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }

@@ -153,10 +153,18 @@ export interface SubscriptionFiscalStatus {
 }
 
 export interface UpsertSubscriptionFiscalConfigDto {
-  platform_organization_id: number;
-  accounting_entity_id: number;
-  invoice_resolution_id?: number;
+  /**
+   * Los tres ids de identidad los DERIVA el backend y los ignora si llegan. Se
+   * mantienen opcionales solo por compatibilidad con clientes viejos: la
+   * plataforma es una sola persona jurídica con una sola entidad fiscal, y el
+   * cliente Prisma scopeado deriva esa entidad en cada consulta — un valor
+   * distinto no fallaba al guardar, fallaba después con un 404 sobre filas que
+   * existían.
+   */
+  platform_organization_id?: number;
+  accounting_entity_id?: number;
   dian_configuration_id?: number;
+  invoice_resolution_id?: number;
   name: string;
   nit: string;
   nit_dv?: string;

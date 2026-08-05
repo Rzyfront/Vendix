@@ -82,8 +82,8 @@ export class PlatformOrgService {
         operating_scope: true,
         accounting_entities: {
           where: { is_active: true },
-          select: { id: true },
-          take: 1,
+          select: { id: true, store_id: true, scope: true, fiscal_scope: true },
+          orderBy: { id: 'asc' },
         },
       },
     });
@@ -95,18 +95,17 @@ export class PlatformOrgService {
       return null;
     }
 
-    const accounting_entity = org.accounting_entities[0];
-    if (!accounting_entity) {
-      throw new Error(
-        `Platform org id=${organization_id} has no active accounting_entity. ` +
-          `Run the vendix-platform-org seed to bootstrap.`,
-      );
-    }
+    const fiscal_scope = org.fiscal_scope as 'STORE' | 'ORGANIZATION';
+    const accounting_entity_id = this.selectFiscalEntityId(
+      organization_id,
+      fiscal_scope,
+      org.accounting_entities,
+    );
 
     const context: PlatformOrgContext = {
       organization_id: org.id,
-      accounting_entity_id: accounting_entity.id,
-      fiscal_scope: org.fiscal_scope as 'STORE' | 'ORGANIZATION',
+      accounting_entity_id,
+      fiscal_scope,
       operating_scope: org.operating_scope as 'STORE' | 'ORGANIZATION',
     };
 
@@ -116,6 +115,85 @@ export class PlatformOrgService {
     });
 
     return context;
+  }
+
+  /**
+   * Picks the entity that the SCOPED Prisma client will also resolve for this
+   * organization, instead of "the first active one".
+   *
+   * ## The defect this closes
+   *
+   * This method used to be `accounting_entities.where(is_active).take(1)` with no
+   * ordering and no scope filter. `StorePrismaService`, which is what actually
+   * filters every query, derives the fiscal entity from `organizations.fiscal_scope`:
+   * `ORGANIZATION` demands `store_id IS NULL AND scope = ORGANIZATION`, `STORE`
+   * demands the entity of the store in context.
+   *
+   * For the Vendix platform org — `fiscal_scope = ORGANIZATION`, with one
+   * ORGANIZATION entity plus one STORE entity per platform store — the two
+   * resolvers disagreed: this one returned a STORE entity, the scope only ever
+   * saw the ORGANIZATION one. Everything written under the first (platform DIAN
+   * config, the habilitación numbering resolution) became invisible to every
+   * scoped read, surfacing as `404 Resolution not found` on a row that plainly
+   * exists — a failure no value the operator types can fix, because the two
+   * sides never agree.
+   *
+   * `invoice_resolutions` carries `accounting_entity_id` as NOT NULL and is
+   * registered as fiscal-entity scoped, so the mismatch is total: the scope
+   * injects `accounting_entity_id = <derived>` and no `where: { id }` can escape it.
+   */
+  private selectFiscalEntityId(
+    organization_id: number,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
+    entities: Array<{
+      id: number;
+      store_id: number | null;
+      scope: string;
+      fiscal_scope: string;
+    }>,
+  ): number {
+    if (!entities.length) {
+      throw new Error(
+        `Platform org id=${organization_id} has no active accounting_entity. ` +
+          `Run the vendix-platform-org seed to bootstrap.`,
+      );
+    }
+
+    if (fiscal_scope === 'ORGANIZATION') {
+      const consolidated = entities.find(
+        (entity) =>
+          entity.store_id === null &&
+          entity.scope === 'ORGANIZATION' &&
+          entity.fiscal_scope === 'ORGANIZATION',
+      );
+      if (consolidated) return consolidated.id;
+
+      // Deliberately a hard failure rather than falling back to a store entity.
+      // A store entity here is what produced the invisible-row bug, and it would
+      // reappear the moment anything is written under it.
+      throw new Error(
+        `Platform org id=${organization_id} has fiscal_scope=ORGANIZATION but no active ` +
+          `consolidated accounting_entity (store_id NULL, scope ORGANIZATION). ` +
+          `The scoped Prisma client resolves that exact row, so fiscal writes would be ` +
+          `invisible to every read. Create it in Identidad fiscal or run the ` +
+          `vendix-platform-org seed.`,
+      );
+    }
+
+    // fiscal_scope = STORE: mirror the scoped client, which requires a store in
+    // context. Ordered by id so the answer is deterministic across calls.
+    const store_entity = entities.find(
+      (entity) =>
+        entity.store_id !== null &&
+        entity.scope === 'STORE' &&
+        entity.fiscal_scope === 'STORE',
+    );
+    if (store_entity) return store_entity.id;
+
+    throw new Error(
+      `Platform org id=${organization_id} has fiscal_scope=STORE but no active ` +
+        `store-scoped accounting_entity.`,
+    );
   }
 
   /**

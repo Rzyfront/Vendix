@@ -106,39 +106,45 @@
             </div>
           }
 
-          <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <app-input
-              label="ID organización plataforma"
-              type="number"
-              formControlName="platform_organization_id"
-              [control]="form.get('platform_organization_id')"
-              [required]="true"
-              helperText="Organización legal que emite la factura"
-            ></app-input>
+          <!--
+            La entidad emisora NO se elige: Vendix es una sola persona jurídica y
+            el backend la deriva de la organización marcada como plataforma. Aquí
+            solo se muestra, para que se vea CONTRA QUIÉN se factura sin teclear
+            ningún id. Se corrige en Identidad fiscal, que es su dueño.
+          -->
+          <div class="rounded-card border border-border bg-background px-3 py-2.5">
+            <div class="flex items-baseline justify-between gap-3 flex-wrap">
+              <div class="min-w-0">
+                <p class="text-[11px] uppercase tracking-wide text-text-secondary">
+                  Emite como
+                </p>
+                <p class="text-sm font-medium text-text-primary truncate">
+                  {{ form.get('name')?.value || 'Sin identidad fiscal registrada' }}
+                </p>
+              </div>
+              <p class="text-xs text-text-secondary">
+                NIT
+                <span class="font-medium text-text-primary">
+                  {{ form.get('nit')?.value || '—' }}{{
+                    form.get('nit_dv')?.value ? '-' + form.get('nit_dv')?.value : ''
+                  }}
+                </span>
+              </p>
+              <a
+                routerLink="/super-admin/fiscal/identity"
+                class="text-xs text-primary-600 underline underline-offset-2 shrink-0"
+                >Cambiar en Identidad fiscal</a
+              >
+            </div>
+          </div>
 
-            <app-input
-              label="ID entidad contable"
-              type="number"
-              formControlName="accounting_entity_id"
-              [control]="form.get('accounting_entity_id')"
-              [required]="true"
-              helperText="Entidad fiscal dueña del NIT"
-            ></app-input>
-
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-selector
-              label="Resolución activa (factura)"
+              label="Resolución de numeración"
               formControlName="invoice_resolution_id"
               [options]="salesInvoiceResolutionOptions()"
-              helperText="Resoluciones tipo factura del ambiente seleccionado"
+              helperText="Solo resoluciones de factura activas de la entidad de plataforma"
             ></app-selector>
-
-            <app-input
-              label="ID config DIAN"
-              type="number"
-              formControlName="dian_configuration_id"
-              [control]="form.get('dian_configuration_id')"
-              helperText="Opcional: reutiliza una configuración existente"
-            ></app-input>
           </div>
         </div>
 
@@ -659,10 +665,22 @@
         </div>
 
         @if (testSetResult(); as result) {
-          <pre
-            class="text-[11px] leading-relaxed bg-background border border-border rounded-lg p-3 overflow-x-auto text-text-secondary"
-            >{{ result | json }}</pre
-          >
+          <!--
+            La respuesta cruda de la DIAN es diagnóstico, no información de
+            pantalla: por defecto va plegada. El veredicto legible ya lo muestran
+            las tarjetas de estado del set de pruebas.
+          -->
+          <details class="rounded-lg border border-border bg-background">
+            <summary
+              class="cursor-pointer px-3 py-2 text-xs font-medium text-text-secondary select-none"
+            >
+              Ver respuesta técnica de la DIAN
+            </summary>
+            <pre
+              class="text-[11px] leading-relaxed px-3 pb-3 overflow-x-auto text-text-secondary"
+              >{{ result | json }}</pre
+            >
+          </details>
         }
       </div>
     </div>
