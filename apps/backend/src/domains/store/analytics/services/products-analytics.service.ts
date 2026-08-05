@@ -65,6 +65,8 @@ interface ProductProfitabilityVM {
 export class ProductsAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
+  private readonly COMPLETED_STATES = COMPLETED_SALE_STATES;
+
   /**
    * Resolves the current request's store timezone (single source of truth).
    * Falls back to the default when there is no store context (the scoped
