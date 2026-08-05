@@ -265,7 +265,17 @@ export class DianTestService {
         { dian_configuration_id: config_id, environment },
       );
     }
-    const issued_invoices = await this.prisma.invoices.count({
+    // `invoices` está en `store_scoped_models`, así que el cliente scopeado exige
+    // `store_id` en contexto y lanza 403 "store context required". La plataforma
+    // corre este mismo flujo con `store_id: undefined` a propósito
+    // (SubscriptionFiscalService.runInPlatformContext): su identidad fiscal es la
+    // organización, no una tienda. Con el cliente scopeado, el guard hacía
+    // inalcanzable la habilitación de plataforma en vez de protegerla.
+    //
+    // Contar sin scope es seguro aquí: `resolution_id` ya viene de la resolución
+    // leída arriba CON scope, así que la fila está probada como propia del
+    // llamador. El conteo no abre ninguna lectura que el scope no permitiera.
+    const issued_invoices = await this.prisma.withoutScope().invoices.count({
       where: { resolution_id },
     });
     if (issued_invoices > 0) {
