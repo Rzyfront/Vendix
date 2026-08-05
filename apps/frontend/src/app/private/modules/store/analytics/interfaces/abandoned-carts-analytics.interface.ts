@@ -25,11 +25,17 @@ export interface AbandonedCartTrend {
   period: string;
   abandoned_carts: number;
   recovered_carts: number;
+  cart_value: number;
   abandonment_rate: number;
   recovery_rate: number;
 }
 
 export interface AbandonedCartByReason {
+  /**
+   * QUI-628: the label is intentionally "hora del día" (when the cart was
+   * last active), NOT a cause of abandonment. Frontends must render it as
+   * "Abandono por hora del día — <bucket>" until a real cause signal exists.
+   */
   reason: string;
   count: number;
   percentage: number;
