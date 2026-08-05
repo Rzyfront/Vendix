@@ -329,15 +329,11 @@ export class AnalyticsController {
   async getProductProfitability(@Query() query: ProductsAnalyticsQueryDto) {
     const result =
       await this.products_analytics_service.getProductProfitability(query);
-    if ((result as any).products) {
-      return this.response_service.success(result);
-    }
-    return this.response_service.paginated(
-      (result as any).data,
-      (result as any).meta.pagination.total,
-      (result as any).meta.pagination.page,
-      (result as any).meta.pagination.limit,
-    );
+    // The new response shape carries `summary` (period aggregate + cost
+    // coverage) alongside the page rows; `response_service.paginated` would
+    // strip it, so we wrap the full result with `success` to preserve the
+    // extra fields the frontend's aviso de cobertura depends on.
+    return this.response_service.success(result);
   }
 
   @Get('products/performance/export')

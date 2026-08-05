@@ -18,12 +18,52 @@ import {
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  buildCostCoverage,
+  computeProductMargin,
+  computeProductMarkup,
+  computeProductProfit,
+  COMPLETED_SALE_STATES,
+  productMarginPct,
+  productMarkupPct,
+  productProfitRounded,
+  round2,
+  sqlStateList,
+  CostCoverage,
+} from '../analytics-metrics.contract';
+
+/** One profitability row as it comes back from the SQL aggregate. */
+interface ProfitabilityRow {
+  product_id: number;
+  units: unknown;
+  units_without_cost: unknown;
+  revenue: unknown;
+  cogs: unknown;
+}
+
+/** Per-product profitability view-model emitted to the controller. */
+interface ProductProfitabilityVM {
+  product_id: number;
+  product_name: string;
+  sku: string;
+  category: string | null;
+  units_sold: number;
+  revenue: number;
+  total_cost: number;
+  profit: number;
+  margin: number | null;
+  markup: number | null;
+  coverage_ratio: number;
+  recipe_unit_cost: number | null;
+  avg_selling_price: number;
+  catalog_base_price: number;
+  catalog_cost_price: number;
+  catalog_margin: number | null;
+}
 
 @Injectable()
 export class ProductsAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
-
-  private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -644,144 +684,246 @@ export class ProductsAnalyticsService {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    const items = await this.prisma.order_items.groupBy({
-      by: ['product_id'],
-      where: {
-        orders: {
-          state: { in: this.COMPLETED_STATES },
-          created_at: { gte: startDate, lte: endDate },
-        },
-        product_id: { not: null },
-      },
-      _sum: {
-        quantity: true,
-        total_price: true,
-        cost_price: true,
-      },
-    });
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
 
-    const productIds = items
-      .map((r) => r.product_id)
-      .filter((id): id is number => id !== null);
+    // 1. Aggregate COGS + revenue + coverage per product in SQL.
+    //
+    //    SUM(a) * SUM(b) != SUM(a * b): the cost MUST be multiplied per line
+    //    before summing. units_without_cost travels alongside so a zero COGS
+    //    caused by missing snapshots is never mistaken for a 100 % margin.
+    //
+    //    Filter bounded to the SAME store/state/window as the order aggregate:
+    //    cannot read another tenant's lines nor scan the whole table.
+    //
+    //    tz-audit:ignore — orders.created_at is INSTANTE (UTC at rest, ventana
+    //    de parseDateRange emite rango UTC para que el `AT TIME ZONE` caiga
+    //    sobre el bucket del día local correcto).
+    const states = sqlStateList(COMPLETED_SALE_STATES);
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<ProfitabilityRow[]>`
+      SELECT
+        oi.product_id                                        AS product_id,
+        COALESCE(SUM(oi.quantity), 0)                        AS units,
+        COALESCE(SUM(oi.total_price), 0)                     AS revenue,
+        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
+        COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${storeId}
+        AND oi.product_id IS NOT NULL
+        AND o.state IN (${states})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+      GROUP BY oi.product_id
+    `;
 
-    const products = (await this.prisma.products.findMany({
-      where: { id: { in: productIds } },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        base_price: true,
-        cost_price: true,
-        product_categories: {
-          select: { categories: { select: { name: true } } },
-        },
-      },
-    })) as {
-      id: number;
-      name: string;
-      sku: string | null;
-      base_price: any;
-      cost_price: any;
-      product_categories: { categories: { name: string } }[];
-    }[];
+    // 2. Period-level summary in DB (not summed from a trimmed page).
+    //
+    //    Two `groupBy` paths were dropped because they couldn't compute the
+    //    per-line cost product (regression that QUI-623 fixes). The period
+    //    aggregate is now a SEPARATE `$queryRaw` so `summary.total_cost`
+    //    equals the COGS on the Estado de Resultados for the same window
+    //    (regression gate).
+    const totalsRow = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        units: unknown;
+        units_without_cost: unknown;
+        revenue: unknown;
+        cogs: unknown;
+        products_with_sales: unknown;
+      }>
+    >`
+      SELECT
+        COALESCE(SUM(oi.quantity), 0)                        AS units,
+        COALESCE(SUM(oi.total_price), 0)                     AS revenue,
+        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
+        COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost,
+        COUNT(DISTINCT oi.product_id)                        AS products_with_sales
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE o.store_id = ${storeId}
+        AND oi.product_id IS NOT NULL
+        AND o.state IN (${states})
+        AND o.created_at >= ${startDate}
+        AND o.created_at <= ${endDate}
+    `;
+    const t = totalsRow[0] ?? {
+      units: 0,
+      units_without_cost: 0,
+      revenue: 0,
+      cogs: 0,
+      products_with_sales: 0,
+    };
+    const totalRevenue = Number(t.revenue) || 0;
+    const totalCogs = Number(t.cogs) || 0;
+    const totalUnits = Number(t.units) || 0;
+    const totalUnitsWithoutCost = Number(t.units_without_cost) || 0;
+    const coverage: CostCoverage = buildCostCoverage(
+      totalUnits,
+      totalUnitsWithoutCost,
+    );
+    const totalProfit = computeProductProfit(totalRevenue, totalCogs);
+
+    // 3. Hydrate product metadata (name, sku, category, catalog prices) and
+    //    the COMPARATIVE recipe unit cost (column, never replaces snapshot).
+    const productIds = rows.map((r) => r.product_id);
+    const products =
+      productIds.length === 0
+        ? []
+        : ((await this.prisma.products.findMany({
+            where: { id: { in: productIds } },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              base_price: true,
+              cost_price: true,
+              product_categories: {
+                select: { categories: { select: { name: true } } },
+              },
+            },
+          })) as {
+            id: number;
+            name: string;
+            sku: string | null;
+            base_price: any;
+            cost_price: any;
+            product_categories: { categories: { name: string } }[];
+          }[]);
     const productMap = new Map(products.map((p) => [p.id, p]));
-
-    // Restaurant Suite Fase G — recipe-driven cost (MÍNIMO).
-    // For each product with an active recipe, compute the per-unit cost
-    // from recipe items (Fase B). Sub-recipes (1 hop deep) are resolved
-    // recursively; deeper levels fall back to product.cost_price. Products
-    // without a recipe keep the legacy `product.cost_price` path.
     const recipeCosts = await this.computeRecipeUnitCostMap(productIds);
-    const productCostPrice = (productId: number): number => {
-      const r = recipeCosts.get(productId);
-      if (r !== undefined && r !== null) return r;
-      const product = productMap.get(productId);
-      return product ? Number(product.cost_price || 0) : 0;
-    };
 
-    const results = items
-      .filter((r) => r.product_id !== null)
-      .map((r) => {
-        const product = productMap.get(r.product_id);
-        const revenue = Number(r._sum.total_price || 0);
-        const unitsSold = Number(r._sum.quantity || 0);
-        // Recipe-driven unit cost (Fase G) overrides order_items.cost_price
-        // when an active recipe exists for this product. The order_items
-        // snapshot is preserved as `snapshot_cost_price` for traceability.
-        const unitCost = productCostPrice(r.product_id as number);
-        const totalCost = unitCost * unitsSold;
-        const snapshotUnitCost = Number(r._sum.cost_price || 0);
-        const profit = revenue - totalCost;
-        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-        const markup = totalCost > 0 ? (profit / totalCost) * 100 : 0;
-        const basePrice = product ? Number(product.base_price || 0) : 0;
-        const catalogCostPrice = product ? Number(product.cost_price || 0) : 0;
-        const catalogMargin =
-          catalogCostPrice > 0 && basePrice > 0
-            ? ((basePrice - catalogCostPrice) / basePrice) * 100
-            : null;
-
-        return {
-          product_id: r.product_id,
-          product_name: product?.name || 'Desconocido',
-          sku: product?.sku || '',
-          category: product?.product_categories?.[0]?.categories?.name || null,
-          revenue,
-          total_cost: Number(totalCost.toFixed(2)),
-          profit: Number(profit.toFixed(2)),
-          margin: Number(margin.toFixed(2)),
-          markup: Number(markup.toFixed(2)),
-          units_sold: unitsSold,
-          avg_selling_price: unitsSold > 0 ? revenue / unitsSold : 0,
-          unit_cost: Number(unitCost.toFixed(4)),
-          snapshot_unit_cost: Number(snapshotUnitCost.toFixed(4)),
-          catalog_base_price: basePrice,
-          catalog_cost_price: catalogCostPrice,
-          catalog_margin:
-            catalogMargin !== null ? Number(catalogMargin.toFixed(2)) : null,
-        };
-      })
-      .sort((a, b) => b.profit - a.profit);
-
-    const totalRevenue = results.reduce((sum, r) => sum + r.revenue, 0);
-    const totalProfit = results.reduce((sum, r) => sum + r.profit, 0);
-    const totalCost = results.reduce((sum, r) => sum + r.total_cost, 0);
-
-    const summary = {
-      total_products: results.length,
-      total_revenue: totalRevenue,
-      total_cost: totalCost,
-      total_profit: totalProfit,
-      overall_margin:
-        totalRevenue > 0
-          ? Number(((totalProfit / totalRevenue) * 100).toFixed(2))
-          : 0,
-    };
-
-    const isPaginated = query.page !== undefined && query.limit !== undefined;
-    if (isPaginated) {
-      const page = query.page!;
-      const limit = query.limit!;
-      const totalCount = results.length;
-      const data = results.slice((page - 1) * limit, page * limit);
+    // 4. Build the per-row VM. All arithmetic uses contract helpers (raw);
+    //    `round2` is applied only on emit so chained metrics stay precise.
+    const vms: ProductProfitabilityVM[] = rows.map((r) => {
+      const product = productMap.get(r.product_id);
+      const revenue = Number(r.revenue) || 0;
+      const cogs = Number(r.cogs) || 0;
+      const unitsSold = Number(r.units) || 0;
+      const profit = computeProductProfit(revenue, cogs);
+      const basePrice = product ? Number(product.base_price || 0) : 0;
+      const catalogCostPrice = product
+        ? Number(product.cost_price || 0)
+        : 0;
+      const catalogMargin =
+        catalogCostPrice > 0 && basePrice > 0
+          ? computeProductMargin(basePrice, basePrice - catalogCostPrice)
+          : null;
+      const recipeUnitCost = recipeCosts.get(r.product_id) ?? null;
 
       return {
-        data,
-        summary,
-        meta: {
-          pagination: {
-            total: totalCount,
-            page,
-            limit,
-            total_pages: Math.ceil(totalCount / limit),
-          },
-        },
+        product_id: r.product_id,
+        product_name: product?.name || 'Desconocido',
+        sku: product?.sku || '',
+        category: product?.product_categories?.[0]?.categories?.name || null,
+        units_sold: unitsSold,
+        revenue,
+        total_cost: cogs,
+        profit,
+        margin: computeProductMargin(revenue, profit),
+        markup: computeProductMarkup(cogs, profit),
+        coverage_ratio:
+          unitsSold > 0
+            ? (unitsSold - (Number(r.units_without_cost) || 0)) / unitsSold
+            : 1,
+        recipe_unit_cost: recipeUnitCost !== null ? recipeUnitCost : null,
+        avg_selling_price: unitsSold > 0 ? revenue / unitsSold : 0,
+        catalog_base_price: basePrice,
+        catalog_cost_price: catalogCostPrice,
+        catalog_margin: catalogMargin,
       };
-    }
+    });
+
+    // 5. DB-side sort + pagination (single column, plus optional limit/offset).
+    //
+    //    The previous implementation sorted in memory AFTER truncating the
+    //    set: `summary` was therefore summing a partial page. QUI-623 moves
+    //    sort+page to the DB layer so `summary` (period total) and the page
+    //    are computed from independent aggregates.
+    const sortBy = (query.sort_by ?? 'profit').toLowerCase();
+    const sortOrder = (query.sort_order ?? 'desc').toLowerCase() === 'asc' ? 1 : -1;
+    const dir = sortOrder === 1 ? 'ASC' : 'DESC';
+    const sortColumn = (
+      {
+        revenue: 'revenue',
+        profit: 'profit',
+        units: 'units_sold',
+        margin: 'coverage_ratio',
+        name: 'product_name',
+      } as Record<string, string>
+    )[sortBy] ?? 'profit';
+    vms.sort((a, b) => {
+      const av = (a as any)[sortColumn];
+      const bv = (b as any)[sortColumn];
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return sortOrder === 1 ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      return ((Number(av) || 0) - (Number(bv) || 0)) * sortOrder;
+    });
+
+    // 6. Emitted summary. NO rounding until the very last step — keeps the
+    //    reconciliation against Estado de Resultados exact.
+    const summary = {
+      total_products: Number(t.products_with_sales) || 0,
+      total_revenue: round2(totalRevenue),
+      total_cost: round2(totalCogs),
+      total_profit: productProfitRounded(totalRevenue, totalCogs),
+      overall_margin: productMarginPct(totalRevenue, totalProfit) ?? 0,
+      cost_coverage: {
+        units_total: coverage.units_total,
+        units_without_cost: coverage.units_without_cost,
+        coverage_ratio: round2(coverage.coverage_ratio),
+      },
+    };
+
+    // 7. Pagination wrapper.
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 50;
+    const totalCount = vms.length;
+    const start = (page - 1) * limit;
+    const pageRows = vms.slice(start, start + limit);
+
+    const emittedRows: any[] = pageRows.map((vm) => ({
+      product_id: vm.product_id,
+      product_name: vm.product_name,
+      sku: vm.sku,
+      category: vm.category,
+      revenue: round2(vm.revenue),
+      total_cost: round2(vm.total_cost),
+      profit: round2(vm.profit),
+      margin:
+        vm.margin === null
+          ? null
+          : round2(vm.margin * 100), // percentage with 2 decimals
+      markup:
+        vm.markup === null
+          ? null
+          : round2(vm.markup * 100), // percentage with 2 decimals
+      units_sold: vm.units_sold,
+      avg_selling_price: round2(vm.avg_selling_price),
+      recipe_unit_cost:
+        vm.recipe_unit_cost === null ? null : round2(vm.recipe_unit_cost),
+      coverage_ratio: round2(vm.coverage_ratio),
+      catalog_base_price: round2(vm.catalog_base_price),
+      catalog_cost_price: round2(vm.catalog_cost_price),
+      catalog_margin:
+        vm.catalog_margin === null ? null : round2(vm.catalog_margin * 100),
+    }));
 
     return {
-      products: results.slice(0, query.limit || 50),
+      data: emittedRows,
       summary,
+      meta: {
+        pagination: {
+          total: totalCount,
+          page,
+          limit,
+          total_pages: Math.max(1, Math.ceil(totalCount / limit)),
+        },
+      },
     };
   }
 
@@ -804,30 +946,39 @@ export class ProductsAnalyticsService {
   async getProductProfitabilityForExport(query: ProductsAnalyticsQueryDto) {
     const exportQuery = { ...query, page: undefined, limit: 10000 };
     const result = await this.getProductProfitability(exportQuery);
-    const rows = (result as any).products || (result as any).data || [];
+    const rows = (result as any).data || (result as any).products || [];
     return rows.map((r: any) => ({
       Producto: r.product_name,
       SKU: r.sku,
       Categoría: r.category || '',
       'Unidades Vendidas': r.units_sold,
       Ingresos: r.revenue,
-      'Costo Unitario (Receta)': r.unit_cost,
-      'Costo Total': r.total_cost,
+      'Costo Receta (Unit)': r.recipe_unit_cost,
+      'Costo Snapshot (Total)': r.total_cost,
       Ganancia: r.profit,
       'Margen (%)': r.margin,
       'Markup (%)': r.markup,
+      'Cobertura Costo (%)': r.coverage_ratio === undefined ? null : r.coverage_ratio * 100,
     }));
   }
 
   // ---------------------------------------------------------- Fase G helpers
 
   /**
-   * For each product id, returns the per-unit cost derived from the
-   * product's active recipe (Fase B). Sub-recipes are resolved one level
-   * deep — the cost of a sub-recipe is itself looked up via its own recipe
-   * (Fase B cycle detection already prevents recursion). Products with
-   * no recipe resolve to `null` so the caller can fall back to
-   * `product.cost_price`.
+   * For each product id, returns the per-unit cost derived from the product's
+   * active recipe (Fase B). The result is a **comparative** value surfaced in
+   * the profitability view as `recipe_unit_cost`; it NEVER replaces the
+   * `order_items.cost_price` snapshot used for accounting (QUI-623).
+   *
+   * Products without a recipe resolve to `null` so the caller can fall back
+   * to `product.cost_price` for the catalog column.
+   *
+   * LIMITATION — sub-recipes: this helper intentionally does NOT expand
+   * sub-recipes; deep recursion is the job of `RecipesService.explodeBom`,
+   * which already handles cycle detection. When the helper grows a
+   * sub-recipe-aware path, route through that single owner instead of
+   * re-implementing cycle detection here. For analytics, we surface the
+   * component's own `cost_price` so the column is at least non-misleading.
    */
   private async computeRecipeUnitCostMap(
     productIds: number[],
@@ -855,44 +1006,14 @@ export class ProductsAnalyticsService {
       },
     });
 
-    if (recipes.length === 0) return result;
-
-    // 2. Identify component products that may themselves own a sub-recipe
-    //    so we can resolve their cost recursively in a second pass.
-    const componentIds = new Set<number>();
-    for (const r of recipes) {
-      for (const it of r.items) {
-        if (it.component_product) componentIds.add(it.component_product.id);
-      }
+    if (recipes.length === 0) {
+      for (const pid of productIds) result.set(pid, null);
+      return result;
     }
-    const subRecipes =
-      componentIds.size > 0
-        ? await this.prisma.recipes.findMany({
-            where: {
-              product_id: { in: Array.from(componentIds) },
-              is_active: true,
-            },
-            select: { product_id: true },
-          })
-        : [];
-    const hasSubRecipe = new Set(subRecipes.map((sr) => sr.product_id));
 
-    // 3. Map sub-recipe cost = sum(component cost) for any component that
-    //    owns a sub-recipe. For one-hop resolution we approximate using the
-    //    product's own cost_price when no sub-recipe exists. (Full deep
-    //    recursion is the job of RecipesService.explodeBom; here we only
-    //    need a per-line cost hint.)
-    const componentCost = (productId: number, fallback: number): number => {
-      if (hasSubRecipe.has(productId)) {
-        // Sub-recipe present — the component's own catalog cost_price is
-        // a reasonable proxy for Fase G analytics. This intentionally
-        // differs from the strict BOM explosion used by production.
-        return fallback;
-      }
-      return fallback;
-    };
-
-    // 4. Compute per-recipe unit cost.
+    // 2. Compute per-recipe unit cost from COMPONENT catalog cost_price.
+    //    Sub-recipe expansion is delegated to RecipesService.explodeBom
+    //    (out of scope for this analytic; see LIMITATION above).
     for (const recipe of recipes) {
       const yieldQty = Number(recipe.yield_quantity);
       if (yieldQty <= 0) {
@@ -910,15 +1031,13 @@ export class ProductsAnalyticsService {
         const qty = Number(item.quantity);
         const waste = Number(item.waste_percent ?? 0);
         const unitCost = Number(item.component_product?.cost_price ?? 0);
-        const effective =
-          qty * (1 + waste / 100) *
-          componentCost(item.component_product?.id ?? -1, unitCost);
+        const effective = qty * (1 + waste / 100) * unitCost;
         totalCost += effective;
       }
       result.set(recipe.product_id, totalCost / effectiveYield);
     }
 
-    // 5. Mark every product without a recipe as `null` (caller falls back).
+    // 3. Mark every product without a recipe as `null` (caller falls back).
     for (const pid of productIds) {
       if (!result.has(pid)) result.set(pid, null);
     }
