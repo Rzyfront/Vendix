@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SystemPaymentMethodsService } from '../services/system-payment-methods.service';
+import { S3Service } from '@common/services/s3.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreateSystemPaymentMethodDto } from '../dto/system-payment-method.dto';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -48,6 +49,11 @@ describe('SystemPaymentMethodsService', () => {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    // `remove` refuses to delete a system method still enabled by any store, so
+    // the guard's counter must exist. 0 = unused, deletion allowed.
+    store_payment_methods: {
+      count: jest.fn().mockResolvedValue(0),
+    },
     // Mock baseClient getter
     get baseClient() {
       return {
@@ -63,6 +69,12 @@ describe('SystemPaymentMethodsService', () => {
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
+        },
+        // signUrl echoes its input: the S3 pre-signing contract is S3Service's
+        // own, and a fake signature would only make assertions harder to read.
+        {
+          provide: S3Service,
+          useValue: { signUrl: jest.fn((url) => url) },
         },
       ],
     }).compile();

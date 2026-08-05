@@ -2,10 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { WebhookEvent } from './interfaces';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { StoreContextRunner } from '@common/context/store-context-runner.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
+import { TableSessionsService } from '../tables/table-sessions.service';
 
 describe('WebhookHandlerService', () => {
   let service: WebhookHandlerService;
   let prisma: StorePrismaService;
+  let orderFlow: { confirmPayment: jest.Mock; cancelOrder: jest.Mock };
 
   const mockStripeEvent: WebhookEvent = {
     processor: 'stripe',
@@ -29,16 +34,38 @@ describe('WebhookHandlerService', () => {
   };
 
   beforeEach(async () => {
-    const mockPrismaService = {
+    const mockPrismaService: any = {
       payments: {
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
       orders: {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      order_items: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      // Dedup guard: 1 inserted row = this event has not been seen. Returning 0
+      // would make every test below exit early as a duplicate.
+      $executeRaw: jest.fn().mockResolvedValue(1),
     };
+    // updatePaymentStatus wraps lookup + compare-and-swap + order transition in
+    // ONE transaction. Handing the same object back as `tx` keeps the tests'
+    // spies authoritative inside the transaction too.
+    mockPrismaService.$transaction = jest.fn((cb: any) => cb(mockPrismaService));
+    // A gateway webhook carries no tenant, so the handler reads through
+    // `withoutScope()`. Returning the same object keeps every `jest.spyOn(
+    // prisma.payments, ...)` in these tests effective — a separate unscoped
+    // double would silently ignore them and the assertions would go vacuous.
+    mockPrismaService.withoutScope = jest.fn(() => mockPrismaService);
+    // count: 1 = this transaction won the compare-and-swap. With 0 the handler
+    // concludes a concurrent webhook already finalized the row and bails out.
+    mockPrismaService.payments.updateMany.mockResolvedValue({ count: 1 });
+
+    orderFlow = { confirmPayment: jest.fn(), cancelOrder: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -46,6 +73,26 @@ describe('WebhookHandlerService', () => {
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
+        },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        // The handler re-enters a store context before delegating. The stub runs
+        // the callback inline: these tests assert webhook parsing, not context
+        // propagation (owned by StoreContextRunner's own tests).
+        {
+          provide: StoreContextRunner,
+          useValue: {
+            runInStoreContext: jest.fn(
+              (_storeId: number, cb: () => unknown) => cb(),
+            ),
+          },
+        },
+        {
+          provide: OrderFlowService,
+          useValue: orderFlow,
+        },
+        {
+          provide: TableSessionsService,
+          useValue: { closeSession: jest.fn() },
         },
       ],
     }).compile();
@@ -73,11 +120,7 @@ describe('WebhookHandlerService', () => {
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
 
-      try {
-        await service.handleWebhook(mockStripeEvent);
-      } catch (error) {
-        fail('Should not have thrown an error');
-      }
+      await expect(service.handleWebhook(mockStripeEvent)).resolves.not.toThrow();
     });
 
     it('should handle PayPal payment capture completed', async () => {
@@ -94,11 +137,7 @@ describe('WebhookHandlerService', () => {
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
 
-      try {
-        await service.handleWebhook(mockPaypalEvent);
-      } catch (error) {
-        fail('Should not have thrown an error');
-      }
+      await expect(service.handleWebhook(mockPaypalEvent)).resolves.not.toThrow();
     });
 
     it('should handle unknown processor gracefully', async () => {
@@ -109,21 +148,13 @@ describe('WebhookHandlerService', () => {
         rawBody: '{}',
       };
 
-      try {
-        await service.handleWebhook(unknownEvent);
-      } catch (error) {
-        fail('Should not have thrown an error');
-      }
+      await expect(service.handleWebhook(unknownEvent)).resolves.not.toThrow();
     });
 
     it('should handle payment not found gracefully', async () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(null);
 
-      try {
-        await service.handleWebhook(mockStripeEvent);
-      } catch (error) {
-        fail('Should not have thrown an error');
-      }
+      await expect(service.handleWebhook(mockStripeEvent)).resolves.not.toThrow();
     });
 
     it('should handle errors gracefully', async () => {
@@ -131,12 +162,11 @@ describe('WebhookHandlerService', () => {
         .spyOn(prisma.payments, 'findFirst')
         .mockRejectedValue(new Error('Database error'));
 
-      try {
-        await service.handleWebhook(mockStripeEvent);
-        fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).toBe('Database error');
-      }
+      // jest-circus dropped the jasmine `fail` global; a rejects assertion
+      // also reports a failure when the call unexpectedly resolves.
+      await expect(service.handleWebhook(mockStripeEvent)).rejects.toThrow(
+        'Database error',
+      );
     });
   });
 
@@ -155,11 +185,7 @@ describe('WebhookHandlerService', () => {
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
 
-      try {
-        await service['updatePaymentStatus']('pi_1234567890', 'succeeded', {});
-      } catch (error) {
-        fail('Should not have thrown an error');
-      }
+      await expect(service['updatePaymentStatus']('pi_1234567890', 'succeeded', {})).resolves.not.toThrow();
     });
 
     it('should set paid_at when status is succeeded', async () => {
@@ -168,14 +194,38 @@ describe('WebhookHandlerService', () => {
         order_id: 1,
       };
 
-      const updateSpy = jest
-        .spyOn(prisma.payments, 'update')
-        .mockResolvedValue({});
+      const casSpy = (prisma as any).payments.updateMany as jest.Mock;
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
 
       await service['updatePaymentStatus']('pi_1234567890', 'succeeded', {});
 
-      expect(updateSpy).toHaveBeenCalledWith((expect as any).any(Object));
+      // The write is a compare-and-swap: the WHERE excludes terminal states so
+      // a second concurrent webhook cannot overwrite a finalized payment.
+      expect(casSpy).toHaveBeenCalledTimes(1);
+      const args = casSpy.mock.calls[0][0];
+      expect(args.where.id).toBe(1);
+      expect(args.where.state.notIn).toContain('succeeded');
+      expect(args.data.state).toBe('succeeded');
+      expect(args.data.paid_at).toBeInstanceOf(Date);
+    });
+
+    it('does NOT touch the order when the compare-and-swap loses', async () => {
+      jest
+        .spyOn(prisma.payments, 'findFirst')
+        .mockResolvedValue({ id: 1, order_id: 1, state: 'pending' });
+      (prisma as any).payments.updateMany.mockResolvedValue({ count: 0 });
+
+      const result = await service['updatePaymentStatus'](
+        'pi_1234567890',
+        'succeeded',
+        {},
+      );
+
+      // count 0 means another transaction already finalized the row and owns the
+      // order transition — driving it twice is what double-confirms an order.
+      expect(result.transitioned).toBe(false);
+      expect(result.shouldConfirmOrder).toBe(false);
+      expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
     });
   });
 
@@ -183,6 +233,7 @@ describe('WebhookHandlerService', () => {
     it('should update order status when fully paid', async () => {
       const mockOrder = {
         id: 1,
+        store_id: 7,
         state: 'pending_payment',
         grand_total: 100.0,
         payments: [
@@ -193,14 +244,13 @@ describe('WebhookHandlerService', () => {
         ],
       };
 
-      const updateSpy = jest
-        .spyOn(prisma.orders, 'update')
-        .mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue(mockOrder);
 
       await service['updateOrderStatus'](1);
 
-      expect(updateSpy).toHaveBeenCalledWith((expect as any).any(Object));
+      // The order transition is NOT a direct orders.update: it delegates to
+      // OrderFlowService, which owns the audit trail and the stock side-effects.
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
     });
 
     it('should not update order status if already processing', async () => {
@@ -216,14 +266,11 @@ describe('WebhookHandlerService', () => {
         ],
       };
 
-      const updateSpy = jest
-        .spyOn(prisma.orders, 'update')
-        .mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue(mockOrder);
 
       await service['updateOrderStatus'](1);
 
-      expect(updateSpy).not.toHaveBeenCalled();
+      expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
     });
   });
 });

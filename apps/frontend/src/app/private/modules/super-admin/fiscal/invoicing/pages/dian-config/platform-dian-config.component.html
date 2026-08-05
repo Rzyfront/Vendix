@@ -12,6 +12,50 @@
     </div>
   </div>
 } @else {
+  <!-- Semáforo de habilitación: mismo encabezado de 4 tarjetas que abre el
+       módulo DIAN del admin de tienda. Antes había que leer los cinco bloques
+       del formulario para saber en qué punto estaba la plataforma. -->
+  <div
+    class="stats-container mb-4 md:mb-6"
+  >
+    <app-stats
+      title="Habilitación DIAN"
+      [value]="enablementStateLabel()"
+      smallText="Estado ante la DIAN"
+      iconName="shield"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+      [clickable]="false"
+    ></app-stats>
+    <app-stats
+      title="Certificado"
+      [value]="certificateStateLabel()"
+      smallText="Firma digital .p12"
+      iconName="key"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+      [clickable]="false"
+    ></app-stats>
+    <app-stats
+      title="Resolución activa"
+      [value]="resolutionStateLabel()"
+      smallText="Consecutivo sobre el rango"
+      iconName="file-stack"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+      [clickable]="false"
+    ></app-stats>
+    <app-stats
+      title="Emisión"
+      [value]="issuanceStateLabel()"
+      smallText="Facturación de suscripciones"
+      iconName="zap"
+      iconBgColor="bg-emerald-100"
+      iconColor="text-emerald-600"
+      [clickable]="false"
+    ></app-stats>
+  </div>
+
   <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-6">
     <div class="space-y-6 min-w-0">
       <form [formGroup]="form" (ngSubmit)="onSave()" class="space-y-6">
@@ -19,13 +63,29 @@
         <div
           class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
         >
-          <div class="flex items-center gap-2">
-            <app-icon name="building-2" [size]="18" class="text-text-primary"></app-icon>
-            <h2
-              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <app-icon name="building-2" [size]="18" class="text-text-primary"></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                1 · Entidad emisora Vendix
+              </h2>
+            </div>
+            <span
+              class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+              [class]="
+                stepCredentialsDone()
+                  ? 'border-success bg-success-light text-success'
+                  : 'border-border bg-background text-text-secondary'
+              "
             >
-              Entidad emisora Vendix
-            </h2>
+              <app-icon
+                [name]="stepCredentialsDone() ? 'check-circle' : 'circle'"
+                [size]="12"
+              ></app-icon>
+              {{ stepCredentialsDone() ? 'Listo' : 'Pendiente' }}
+            </span>
           </div>
 
           @if (identityPrefillApplied()) {
@@ -86,13 +146,18 @@
         <div
           class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
         >
-          <div class="flex items-center gap-2">
-            <app-icon name="shield-check" [size]="18" class="text-text-primary"></app-icon>
-            <h2
-              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
-            >
-              Credenciales DIAN
-            </h2>
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <app-icon name="shield-check" [size]="18" class="text-text-primary"></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                2 · Credenciales DIAN
+              </h2>
+            </div>
+            <span class="text-[11px] text-text-secondary">
+              Software ID, PIN y Test Set los emite la DIAN
+            </span>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -162,19 +227,37 @@
         <div
           class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
         >
-          <div class="flex items-center gap-2">
-            <app-icon name="settings" [size]="18" class="text-text-primary"></app-icon>
-            <h2
-              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <app-icon name="settings" [size]="18" class="text-text-primary"></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                3 · Flujo de emisión
+              </h2>
+            </div>
+            <span
+              class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+              [class]="
+                stepIssuanceDone()
+                  ? 'border-success bg-success-light text-success'
+                  : 'border-border bg-background text-text-secondary'
+              "
             >
-              Flujo de emisión
-            </h2>
+              <app-icon
+                [name]="stepIssuanceDone() ? 'check-circle' : 'circle'"
+                [size]="12"
+              ></app-icon>
+              {{ stepIssuanceDone() ? 'Activa' : 'Inactiva' }}
+            </span>
           </div>
 
           <p class="text-sm text-text-secondary max-w-3xl">
             La emisión DIAN es independiente del cobro. Si está inactiva o falla,
             la venta de planes continúa y el cliente conserva su factura SaaS
-            normal.
+            normal. Activar <strong>producción</strong> exige un test exitoso
+            reciente, así que el orden real es: certificado (4) → set de pruebas
+            (5) → producción aquí.
           </p>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
@@ -307,13 +390,29 @@
       <div
         class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
       >
-        <div class="flex items-center gap-2">
-          <app-icon name="shield" [size]="18" class="text-text-primary"></app-icon>
-          <h2
-            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <app-icon name="shield" [size]="18" class="text-text-primary"></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              4 · Certificado P12
+            </h2>
+          </div>
+          <span
+            class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+            [class]="
+              stepCertificateDone()
+                ? 'border-success bg-success-light text-success'
+                : 'border-border bg-background text-text-secondary'
+            "
           >
-            Certificado P12
-          </h2>
+            <app-icon
+              [name]="stepCertificateDone() ? 'check-circle' : 'circle'"
+              [size]="12"
+            ></app-icon>
+            {{ certificateStateLabel() }}
+          </span>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-[1fr_280px_auto] gap-4 items-end">
@@ -364,13 +463,29 @@
       <div
         class="bg-[var(--color-surface)] rounded-card border border-border p-4 md:p-6 space-y-4"
       >
-        <div class="flex items-center gap-2">
-          <app-icon name="clipboard-check" [size]="18" class="text-text-primary"></app-icon>
-          <h2
-            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <app-icon name="clipboard-check" [size]="18" class="text-text-primary"></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              5 · Set de pruebas DIAN
+            </h2>
+          </div>
+          <span
+            class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+            [class]="
+              stepTestSetDone()
+                ? 'border-success bg-success-light text-success'
+                : 'border-border bg-background text-text-secondary'
+            "
           >
-            Set de pruebas DIAN
-          </h2>
+            <app-icon
+              [name]="stepTestSetDone() ? 'check-circle' : 'circle'"
+              [size]="12"
+            ></app-icon>
+            {{ testSetStateLabel() }}
+          </span>
         </div>
 
         <p class="text-xs text-text-secondary leading-relaxed">
@@ -380,41 +495,161 @@
           el envío para intentar con un TestSetId nuevo.
         </p>
 
+        <!-- Requisitos de habilitación: lo que falta, con la diferencia explícita
+             entre "nos toca a nosotros" y "lo tiene que emitir la DIAN". Sin esto
+             el único feedback era un 412 al pulsar «Enviar set de pruebas». -->
+        <!-- Alertas anticipadas: no bloquean el envío del set, pero avisan del
+             corte que viene (certificado por vencer, rango por agotarse). Mismo
+             contrato y mismos umbrales que el checklist de tienda. -->
+        @if (readinessWarnings().length) {
+          <div class="rounded-lg border border-warning bg-warning-light p-3 space-y-2">
+            <div class="flex items-center gap-2">
+              <app-icon name="alert-triangle" [size]="16" class="text-warning"></app-icon>
+              <span class="text-xs font-semibold text-text-primary">
+                Avisos ({{ readinessWarnings().length }})
+              </span>
+            </div>
+            <ul class="space-y-1.5">
+              @for (check of readinessWarnings(); track check.key) {
+                <li class="flex items-start gap-2 text-xs">
+                  <app-icon name="clock" [size]="14" class="text-warning mt-0.5 shrink-0"></app-icon>
+                  <span class="min-w-0">
+                    <span class="font-medium text-text-primary">{{ check.label }}</span>
+                    <span class="block text-text-secondary">{{ check.action }}</span>
+                  </span>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+
+        @if (store.habilitationReadiness(); as readiness) {
+          @if (!readiness.ready) {
+            <div class="rounded-lg border border-border bg-background p-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <app-icon name="list-checks" [size]="16" class="text-text-primary"></app-icon>
+                <span class="text-xs font-semibold text-text-primary">
+                  Falta para poder enviar el set ({{ pendingChecks().length }})
+                </span>
+              </div>
+              <ul class="space-y-1.5">
+                @for (check of pendingChecks(); track check.key) {
+                  <li class="flex items-start gap-2 text-xs">
+                    <app-icon
+                      [name]="check.issued_by_dian ? 'clock' : 'circle-alert'"
+                      [size]="14"
+                      [class]="check.issued_by_dian ? 'text-warning mt-0.5 shrink-0' : 'text-error mt-0.5 shrink-0'"
+                    ></app-icon>
+                    <span class="min-w-0">
+                      <span class="font-medium text-text-primary">{{ check.label }}</span>
+                      @if (check.issued_by_dian) {
+                        <span class="text-warning"> · lo emite la DIAN</span>
+                      }
+                      <span class="block text-text-secondary">{{ check.action }}</span>
+                    </span>
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <div
+              class="rounded-lg border border-success bg-success-light p-3 text-xs text-text-primary flex items-center gap-2"
+            >
+              <app-icon name="check-circle" [size]="16" class="text-success"></app-icon>
+              Todos los requisitos están cubiertos: puedes enviar el set de pruebas.
+            </div>
+          }
+        }
+
+        <!-- Estado actual del lote, resuelto al cargar la página.
+             Antes esta pestaña solo mostraba algo después de pulsar un botón: un
+             lote en cola era indistinguible de "no hay nada enviado", y de ahí
+             venía la sensación de espera sin fin. -->
+        @if (store.testSet(); as testSet) {
+          <div
+            class="rounded-lg border p-3 space-y-2"
+            [ngClass]="{
+              'border-warning bg-warning-light': testSetWait()?.state === 'stalled',
+              'border-[var(--color-info)] bg-[var(--color-info-light)]':
+                testSetWait()?.state === 'processing',
+              'border-success bg-success-light': testSetWait()?.state === 'passed',
+              'border-error bg-error-light': testSetWait()?.state === 'rejected',
+              'border-border bg-background':
+                testSetWait()?.state === 'idle' ||
+                testSetWait()?.state === 'abandoned'
+            }"
+          >
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="text-xs font-semibold text-text-primary">
+                {{ testSetStateLabel() }}
+              </span>
+              @if (testSet.test_set_id) {
+                <span class="text-[11px] text-text-secondary font-mono break-all">
+                  TestSetId: {{ testSet.test_set_id }}
+                </span>
+              }
+            </div>
+
+            @if (testSetWait()?.reason) {
+              <p class="text-xs text-text-secondary leading-relaxed">
+                {{ testSetWait()?.reason }}
+              </p>
+            }
+
+            @if (!canDiagnoseDocuments() && testSetStalled()) {
+              <p class="text-xs text-text-secondary leading-relaxed">
+                No se puede diagnosticar por CUFE: descarta el lote y reenvía.
+              </p>
+            }
+          </div>
+        }
+
         <div class="flex flex-col md:flex-row gap-2 md:flex-wrap">
+          <!-- Reenviar con un lote vivo quemaría un segundo bloque de numeración
+               sin resolver el primero: hay que descartarlo antes. -->
           <app-button
             type="button"
             variant="primary"
             [loading]="testSetBusy()"
-            [disabled]="!store.configured() || testSetBusy()"
+            [disabled]="!store.configured() || testSetBusy() || testSetBlocksResend()"
+            [title]="
+              testSetBlocksResend()
+                ? 'Hay un lote sin resolver: descártalo antes de enviar uno nuevo'
+                : 'Enviar los 50 documentos de habilitación'
+            "
             (clicked)="onRunTestSet()"
           >
             <app-icon slot="icon" name="upload-cloud" [size]="16"></app-icon>
             Enviar set de pruebas
           </app-button>
 
-          <app-button
-            type="button"
-            variant="outline"
-            [disabled]="!store.configured() || testSetBusy()"
-            (clicked)="onCheckTestSet()"
-          >
-            <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
-            Consultar estado
-          </app-button>
+          @if (!testSetStalled()) {
+            <app-button
+              type="button"
+              variant="outline"
+              [disabled]="!store.configured() || testSetBusy()"
+              (clicked)="onCheckTestSet()"
+            >
+              <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
+              Consultar estado
+            </app-button>
+          }
+
+          @if (canDiagnoseDocuments()) {
+            <app-button
+              type="button"
+              variant="outline"
+              [disabled]="!store.configured() || testSetBusy()"
+              (clicked)="onDiagnoseTestSet()"
+            >
+              <app-icon slot="icon" name="stethoscope" [size]="16"></app-icon>
+              Diagnosticar documentos
+            </app-button>
+          }
 
           <app-button
             type="button"
-            variant="outline"
-            [disabled]="!store.configured() || testSetBusy()"
-            (clicked)="onDiagnoseTestSet()"
-          >
-            <app-icon slot="icon" name="stethoscope" [size]="16"></app-icon>
-            Diagnosticar documentos
-          </app-button>
-
-          <app-button
-            type="button"
-            variant="ghost"
+            [variant]="testSetStalled() ? 'primary' : 'ghost'"
             [disabled]="!store.configured() || testSetBusy()"
             (clicked)="onAbandonTestSet()"
           >

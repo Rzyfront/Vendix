@@ -60,6 +60,10 @@ export class RutScannerService {
       `[RutScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
 
+    // Sin modelo de visión enlazado, `run()` cae al config de texto por defecto
+    // y devuelve una identidad fiscal inventada con pinta de válida.
+    await this.aiEngine.assertVisionModelLinked('rut_scanner');
+
     const { base64, mimeType } = await this.preprocessImage(file);
     const dataUri = `data:${mimeType};base64,${base64}`;
 
@@ -93,7 +97,15 @@ export class RutScannerService {
 
     if (!response.success || !response.content) {
       this.logger.error(`AI RUT extraction failed: ${response.error}`);
-      throw new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL);
+      // Se propaga el error del proveedor: "la foto está ilegible" y "el modelo
+      // enlazado a esta app no acepta imágenes" son causas distintas y la
+      // segunda no se arregla tomando otra foto.
+      throw new VendixHttpException(
+        ErrorCodes.RUT_SCAN_AI_FAIL,
+        response.error
+          ? `La IA no pudo leer el RUT: ${response.error}`
+          : undefined,
+      );
     }
 
     try {

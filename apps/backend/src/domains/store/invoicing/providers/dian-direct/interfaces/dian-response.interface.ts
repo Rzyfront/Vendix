@@ -41,6 +41,19 @@ export interface DianSendBillResponse {
   /** Whether the response is a SOAP Fault (e.g., InvalidSecurity) */
   is_soap_fault?: boolean;
   /**
+   * Anexo Técnico 1.9 §12 failure class, set only on transport/availability
+   * failures. `'timeout'` and `'dian_error'` carry different reglamented retry
+   * cadences; `'non_retriable'` means the fault is ours, not the DIAN's.
+   */
+  failure_class?: 'dian_error' | 'timeout' | 'non_retriable';
+  /**
+   * True when the failure is a DIAN availability problem and therefore authorizes
+   * expediting the document under contingency Type 04 (Anexo §12.2). NEVER true
+   * for a validation rejection or a Vendix-side defect — contingency is not an
+   * escape hatch for a malformed document.
+   */
+  contingency_eligible?: boolean;
+  /**
    * True when DIAN actually filled `<b:StatusCode>` with a value. A queued batch
    * comes back with a self-closing `<b:StatusCode/>` and `<b:ErrorMessage
    * i:nil="true"/>`, which means "no verdict yet" — NOT a rejection. Callers

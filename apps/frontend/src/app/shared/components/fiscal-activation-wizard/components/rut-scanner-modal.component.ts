@@ -743,9 +743,16 @@ export class RutScannerModalComponent {
     return file?.type?.startsWith('image/') ?? false;
   });
 
+  /**
+   * El backend ya normaliza `confidence` a 0-100 (`normalizeRutResponse` la
+   * acota con `Math.min(100, ...)`). El cálculo anterior asumía 0-1 y hacía
+   * `min(value, 1) * 100`, así que cualquier confianza real ≥ 1 se aplastaba a
+   * 1 y el badge marcaba **100%** siempre — justo lo contrario de avisar que la
+   * lectura fue dudosa.
+   */
   readonly confidencePercent = computed(() => {
     const value = this.result()?.confidence ?? 0;
-    return Math.round(Math.min(Math.max(value, 0), 1) * 100);
+    return Math.round(Math.min(Math.max(value, 0), 100));
   });
 
   readonly confidenceVariant = computed<'success' | 'warning' | 'error'>(() => {

@@ -108,7 +108,10 @@ describe('VendorSupportFiscalService', () => {
     };
 
     const tx = {
-      $queryRawUnsafe: jest.fn().mockResolvedValue(undefined),
+      // The advisory lock runs through $executeRawUnsafe, not $queryRawUnsafe:
+      // Prisma 7.4.1's driver adapter cannot map pg_advisory_xact_lock's void
+      // result column and throws P2010 on the query variant.
+      $executeRawUnsafe: jest.fn().mockResolvedValue(0),
       invoice_resolutions: invoiceResolutions,
       fiscal_transmissions: fiscalTransmissions,
     };
@@ -265,7 +268,7 @@ describe('VendorSupportFiscalService', () => {
       expect(providerArg.customer_tax_id).toBe('900123456');
 
       // advisory lock was taken
-      expect(mocks.tx.$queryRawUnsafe).toHaveBeenCalledWith(
+      expect(mocks.tx.$executeRawUnsafe).toHaveBeenCalledWith(
         'SELECT pg_advisory_xact_lock(hashtext($1))',
         `vendor_support_fiscal_resolution:${PLATFORM_ACCOUNTING_ENTITY_ID}:${RESOLUTION_ID}`,
       );

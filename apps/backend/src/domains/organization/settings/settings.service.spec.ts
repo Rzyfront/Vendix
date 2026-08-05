@@ -4,6 +4,7 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import { RequestContextService } from '@common/context/request-context.service';
 import { NotFoundException } from '@nestjs/common';
 import { AuditService } from '@common/audit/audit.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { S3Service } from '@common/services/s3.service';
 
 describe('SettingsService', () => {
@@ -35,6 +36,17 @@ describe('SettingsService', () => {
         {
           provide: AuditService,
           useValue: mockAuditService,
+        },
+        {
+          // Los ajustes fiscales se resuelven por accounting_entity, no por
+          // tienda: requireFiscalScope es lo que decide si el NIT es de la
+          // organización o de la tienda antes de leer/escribir.
+          provide: FiscalScopeService,
+          useValue: {
+            requireFiscalScope: jest
+              .fn()
+              .mockResolvedValue({ accounting_entity_id: 1, scope: 'ORGANIZATION' }),
+          },
         },
         {
           provide: S3Service,

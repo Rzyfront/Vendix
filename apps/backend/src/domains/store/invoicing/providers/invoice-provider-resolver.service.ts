@@ -36,7 +36,12 @@ export class InvoiceProviderResolver {
    * Falls back to MockInvoiceProvider only outside production.
    */
   async resolve(params?: {
-    configuration_type?: 'invoicing' | 'support_document' | 'payroll';
+    configuration_type?:
+      | 'invoicing'
+      | 'support_document'
+      | 'payroll'
+      /** Habilitación propia del documento equivalente POS (Res. 000165/2023). */
+      | 'equivalent_document';
   }): Promise<InvoiceProviderAdapter> {
     const context = RequestContextService.getContext();
     const configuration_type = params?.configuration_type ?? 'invoicing';

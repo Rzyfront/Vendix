@@ -47,6 +47,13 @@ export class UblInvoiceBuilder {
      * compile; the orchestrator populates it from the invoice_resolutions row.
      */
     control?: DianInvoiceControl;
+    /**
+     * `cbc:InvoiceTypeCode`. Defaults to `'01'` (factura nacional). Callers pass
+     * `'04'` when the document is expedited under DIAN contingency (Anexo §12.2)
+     * and `'03'` when transcribing a paper contingency invoice (§12.1). It used to
+     * be hardcoded to `'01'`, which made contingency unrepresentable.
+     */
+    invoice_type_code?: string;
   }): string {
     const {
       invoice_data,
@@ -56,6 +63,7 @@ export class UblInvoiceBuilder {
       cufe,
       environment,
       control,
+      invoice_type_code,
     } = params;
 
     const currency = invoice_data.currency || UBL_CONSTANTS.DEFAULT_CURRENCY;
@@ -110,7 +118,7 @@ export class UblInvoiceBuilder {
 
     doc
       .ele(UBL_NAMESPACES.CBC, 'InvoiceTypeCode')
-      .txt(DIAN_DOCUMENT_TYPES.INVOICE);
+      .txt(invoice_type_code || DIAN_DOCUMENT_TYPES.INVOICE);
 
     if (invoice_data.notes) {
       doc.ele(UBL_NAMESPACES.CBC, 'Note').txt(invoice_data.notes);
@@ -147,38 +155,19 @@ export class UblInvoiceBuilder {
       .ele(UBL_NAMESPACES.CBC, 'PaymentDueDate')
       .txt(invoice_data.due_date || invoice_data.issue_date);
 
-    // 7. Tax totals
+    // 7. Document-level allowance (only when a footer discount exists that the
+    // lines do not already carry). UBL fixes the order
+    // PaymentTerms → AllowanceCharge → TaxTotal → LegalMonetaryTotal, so this
+    // must precede the tax totals.
+    UblCommonBuilder.buildDocumentAllowanceCharge(doc, invoice_data, currency);
+
+    // 8. Tax totals
     UblCommonBuilder.buildTaxTotals(doc, invoice_data.taxes, currency);
 
-    // 8. Legal monetary total
-    const monetary = doc.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(invoice_data.subtotal_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'TaxExclusiveAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(invoice_data.subtotal_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'TaxInclusiveAmount')
-      .att('currencyID', currency)
-      .txt(
-        (
-          parseFloat(invoice_data.subtotal_amount) +
-          parseFloat(invoice_data.tax_amount)
-        ).toFixed(2),
-      );
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'AllowanceTotalAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(invoice_data.discount_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'PayableAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(invoice_data.total_amount).toFixed(2));
+    // 9. Legal monetary total
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, invoice_data, currency);
 
-    // 9. Invoice lines
+    // 10. Invoice lines
     UblCommonBuilder.buildInvoiceLines(
       doc,
       invoice_data.items,

@@ -43,12 +43,42 @@ export class UpdateDianConfigDto {
   is_default?: boolean;
 
   @IsOptional()
-  @IsEnum(['invoicing', 'support_document', 'payroll'])
-  configuration_type?: 'invoicing' | 'support_document' | 'payroll';
+  @IsEnum(['invoicing', 'support_document', 'payroll', 'equivalent_document'])
+  configuration_type?:
+    | 'invoicing'
+    | 'support_document'
+    | 'payroll'
+    /** Documento equivalente electrónico POS — habilitación propia (Res. 000165/2023). */
+    | 'equivalent_document';
 
   @IsOptional()
   @IsEnum(['own_software', 'technological_provider'])
   operation_mode?: 'own_software' | 'technological_provider';
+  /**
+   * ARN (o key-id) de la clave asimétrica RSA de AWS KMS que custodia la mitad
+   * privada del certificado. Al registrarlo, la firma XAdES del documento **y** la
+   * firma WS-Security del sobre SOAP se producen dentro del HSM, y la clave privada
+   * del `.p12` deja de leerse.
+   *
+   * Cadena vacía → `null`: es la forma de VOLVER a la custodia en proceso. Sin ese
+   * mapeo, una configuración migrada por error a KMS quedaría atrapada, porque un
+   * ARN inválido hace fallar toda emisión y no habría manera de retirarlo.
+   *
+   * No es secreto (es un identificador de recurso), así que no pasa por el sobre de
+   * cifrado; se guarda en claro junto al `certificate_s3_key`.
+   */
+  @IsOptional()
+  @TrimString()
+  @IsString()
+  @MaxLength(2048)
+  @Matches(
+    /^$|^(arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:key\/[A-Za-z0-9-]+|arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:alias\/[\w/_-]+|alias\/[\w/_-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/,
+    {
+      message:
+        'certificate_kms_key_id must be a KMS key ARN, alias ARN, alias, or key UUID',
+    },
+  )
+  certificate_kms_key_id?: string;
 
   // Same contract as CreateDianConfigDto: these are DIAN-issued UUIDs pasted by
   // hand, so they are trimmed and shape-checked. Values such as "9547" reached

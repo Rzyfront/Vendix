@@ -11,6 +11,7 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalStatusResolverService } from '@common/services/fiscal-status-resolver.service';
 import { FiscalStatusMigrationService } from '@common/services/fiscal-status-migration.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
+import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 
 @Module({
@@ -27,6 +28,7 @@ import { UserRoleAssignmentService } from '@common/services/user-role-assignment
     FiscalStatusResolverService,
     FiscalStatusMigrationService,
     FiscalGateService,
+    FiscalInvoiceThresholdService,
     UserRoleAssignmentService,
   ],
   exports: [
@@ -42,6 +44,7 @@ import { UserRoleAssignmentService } from '@common/services/user-role-assignment
     FiscalStatusResolverService,
     FiscalStatusMigrationService,
     FiscalGateService,
+    FiscalInvoiceThresholdService,
     UserRoleAssignmentService,
   ],
 })

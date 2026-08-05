@@ -1,4 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+// The products domain throws typed VendixHttpException (PROD_*): the HTTP status
+// travels in the error code, not the exception class.
+import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../common/errors/error-codes';
 import { ProductsService, MAX_PRODUCT_IDS } from './products.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductVariantService } from './services/product-variant.service';
@@ -24,13 +28,21 @@ import {
   ProductState,
   StockByLocationDto,
 } from './dto';
-import {
-  ConflictException,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
 
 describe('ProductsService', () => {
+
+  // RequestContextService is consumed STATICALLY (RequestContextService.getContext()),
+  // so registering it as a Nest provider has no effect — the static must be spied.
+  // Without it every write dies on STORE_CONTEXT_001 before reaching its rule.
+  beforeEach(() => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1, organization_id: 1, user_id: 1 } as any);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(1);
+    jest
+      .spyOn(RequestContextService, 'getOrganizationId')
+      .mockReturnValue(1 as any);
+  });
   let service: ProductsService;
   let prismaService: StorePrismaService;
   let variantService: ProductVariantService;
@@ -142,9 +154,11 @@ describe('ProductsService', () => {
   };
 
   const mockVariantService = {
-    create: jest.fn(),
-    update: jest.fn(),
-    remove: jest.fn(),
+    // ProductVariantService exposes *Variant-suffixed methods; the bare
+    // create/update/remove names below are legacy and never called.
+    createVariant: jest.fn(),
+    updateVariant: jest.fn(),
+    removeVariant: jest.fn(),
     findByProductId: jest.fn(),
     checkSkuAvailability: jest.fn(),
   };
@@ -280,6 +294,12 @@ describe('ProductsService', () => {
     mockPrismaService.store_settings.findFirst.mockResolvedValue({
       settings: { inventory: { low_stock_threshold: 10 } },
     });
+    // `products.findFirst` serves three roles: the duplicate-name guard, the
+    // duplicate-SKU guard and every scoped read. Its default has to be "nothing
+    // found" — `jest.clearAllMocks()` wipes call history but keeps the
+    // implementation, so a row left behind by one test makes the next `create`
+    // die on PROD_DUP_001 in a completely unrelated describe.
+    mockPrismaService.products.findFirst.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -343,7 +363,6 @@ describe('ProductsService', () => {
           sku: createProductDto.sku,
           description: createProductDto.description,
           store_id: createProductDto.store_id,
-          state: ProductState.ACTIVE,
         }),
       });
     });
@@ -399,7 +418,7 @@ describe('ProductsService', () => {
       });
 
       await expect(service.create(createProductDto)).rejects.toThrow(
-        ConflictException,
+        VendixHttpException,
       );
     });
 
@@ -414,9 +433,22 @@ describe('ProductsService', () => {
         id: 1,
         ...productWithCategories,
         state: ProductState.ACTIVE,
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
       };
 
       mockPrismaService.products.create.mockResolvedValue(expectedProduct);
+      mockPrismaService.products.findUnique.mockResolvedValue(expectedProduct);
+      // Existence pre-check for the tax categories: create() compares the rows
+      // it found against the requested ids and names the missing ones, so an
+      // unmocked findMany makes it fail on `.length` of undefined before ever
+      // reaching product_tax_assignments.createMany.
+      mockPrismaService.tax_categories.findMany.mockResolvedValue([
+        { id: 3 },
+        { id: 4 },
+      ]);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
       });
@@ -457,12 +489,16 @@ describe('ProductsService', () => {
           name: 'Test Product 1',
           base_price: 99.99,
           state: ProductState.ACTIVE,
+          // findAll enriches every row with aggregated stock; the enricher
+          // reduces over stock_levels, so the array must exist.
+          stock_levels: [],
         },
         {
           id: 2,
           name: 'Test Product 2',
           base_price: 149.99,
           state: ProductState.ACTIVE,
+          stock_levels: [],
         },
       ];
 
@@ -471,7 +507,25 @@ describe('ProductsService', () => {
 
       const result = await service.findAll(query);
 
-      expect(result.data).toEqual(mockProducts);
+      // findAll returns a projection, not the Prisma row: it flattens brand and
+      // categories, resolves the active promotion, and derives final_price /
+      // available_stock. Asserting deep equality against the fixture would pin
+      // all ~40 projected keys and break on any column addition, so the contract
+      // checked here is identity + the derived fields this suite cares about.
+      expect(result.data).toHaveLength(2);
+      expect(result.data[0]).toEqual(
+        expect.objectContaining({
+          id: 1,
+          name: 'Test Product 1',
+          base_price: 99.99,
+          state: ProductState.ACTIVE,
+          final_price: 99.99,
+          active_promotion: null,
+        }),
+      );
+      expect(result.data[1]).toEqual(
+        expect.objectContaining({ id: 2, name: 'Test Product 2' }),
+      );
       expect(result.meta).toEqual({
         total: 2,
         page: 1,
@@ -514,12 +568,15 @@ describe('ProductsService', () => {
         limit: 10,
       };
 
+      // Both the Prisma relation and the projected key are `product_variants`;
+      // `variants` is not part of the contract on either side.
       const mockProduct = {
         id: 1,
         name: 'Test Product',
-        variants: [
-          { id: 1, sku: 'VAR-001', price_override: 109.99 },
-          { id: 2, sku: 'VAR-002', price_override: 119.99 },
+        stock_levels: [],
+        product_variants: [
+          { id: 1, sku: 'VAR-001', price_override: 109.99, stock_levels: [] },
+          { id: 2, sku: 'VAR-002', price_override: 119.99, stock_levels: [] },
         ],
       };
 
@@ -528,38 +585,61 @@ describe('ProductsService', () => {
 
       const result = await service.findAll(variantsQuery);
 
-      expect(result.data[0].variants).toBeDefined();
-      expect(result.data[0].variants).toHaveLength(2);
+      expect(result.data[0].product_variants).toBeDefined();
+      expect(result.data[0].product_variants).toHaveLength(2);
+      // has_variants is derived from the mapped array, and only appears when
+      // include_variants was requested — that flag is what the admin grid reads.
+      expect(result.data[0].has_variants).toBe(true);
     });
   });
 
   describe('findOne', () => {
     it('should return a product by ID', async () => {
-      const expectedProduct = {
+      const storedProduct = {
         id: 1,
+        store_id: 1,
         name: 'Test Product',
         base_price: 99.99,
         state: ProductState.ACTIVE,
-        variants: [],
-        images: [],
-        categories: [],
+        // The reader reduces over stock_levels to derive the stock totals, so
+        // the relation must exist even when empty.
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        product_categories: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
       };
 
-      mockPrismaService.products.findUnique.mockResolvedValue(expectedProduct);
+      // findFirst, not findUnique: the read carries `state: { not: archived }`
+      // alongside the id, which findUnique cannot express.
+      mockPrismaService.products.findFirst.mockResolvedValue(storedProduct);
 
       const result = await service.findOne(1);
 
-      expect(result).toEqual(expectedProduct);
-      expect(mockPrismaService.products.findUnique).toHaveBeenCalledWith({
-        where: { id: 1 },
+      // Doble cinturón de tenant: el cliente Prisma ya inyecta store_id, y
+      // findOne lo vuelve a poner desde el contexto ALS salvo super admin —
+      // un super admin sale del scope del cliente, así que la cláusula
+      // explícita es la que impide leer productos de otra tienda.
+      expect(mockPrismaService.products.findFirst).toHaveBeenCalledWith({
+        where: { id: 1, state: { not: ProductState.ARCHIVED }, store_id: 1 },
         include: expect.any(Object),
       });
+      // findOne returns an enriched projection: identity plus derived stock.
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 1,
+          name: 'Test Product',
+          base_price: 99.99,
+          total_stock_available: 0,
+          total_stock_reserved: 0,
+        }),
+      );
     });
 
-    it('should throw NotFoundException if product not found', async () => {
-      mockPrismaService.products.findUnique.mockResolvedValue(null);
+    it('should throw VendixHttpException if product not found', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
 
-      await expect(service.findOne(999)).rejects.toThrow(NotFoundException);
+      await expect(service.findOne(999)).rejects.toThrow(VendixHttpException);
     });
   });
 
@@ -570,11 +650,19 @@ describe('ProductsService', () => {
     };
 
     it('should update a product successfully', async () => {
+      // update() cierra devolviendo findOne(id): la misma fila se lee dos veces
+      // (guard de existencia + relectura enriquecida), así que la fixture debe
+      // traer las relaciones que el enriquecedor recorre.
       const existingProduct = {
         id: 1,
+        store_id: 1,
         name: 'Original Product',
         base_price: 99.99,
         state: ProductState.ACTIVE,
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
       };
 
       const updatedProduct = {
@@ -582,7 +670,7 @@ describe('ProductsService', () => {
         ...updateDto,
       };
 
-      mockPrismaService.products.findUnique.mockResolvedValue(existingProduct);
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
       });
@@ -590,7 +678,8 @@ describe('ProductsService', () => {
 
       const result = await service.update(1, updateDto);
 
-      expect(result).toEqual(updatedProduct);
+      // Lo que vuelve es la proyección de findOne, no la fila de products.update.
+      expect(result).toEqual(expect.objectContaining({ id: 1 }));
       expect(mockPrismaService.products.update).toHaveBeenCalledWith({
         where: { id: 1 },
         data: expect.objectContaining({
@@ -600,11 +689,11 @@ describe('ProductsService', () => {
       });
     });
 
-    it('should throw NotFoundException if product to update not found', async () => {
-      mockPrismaService.products.findUnique.mockResolvedValue(null);
+    it('should throw VendixHttpException if product to update not found', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
 
       await expect(service.update(999, updateDto)).rejects.toThrow(
-        NotFoundException,
+        VendixHttpException,
       );
     });
 
@@ -616,14 +705,24 @@ describe('ProductsService', () => {
 
       const existingProduct = {
         id: 1,
+        store_id: 1,
         name: 'Original Product',
         slug: 'original-product',
         state: ProductState.ACTIVE,
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
       };
 
-      mockPrismaService.products.findUnique
+      // 1ª llamada: el producto a actualizar. 2ª: el chequeo de unicidad del
+      // slug dentro de la tienda (null = libre). 3ª: la relectura de findOne
+      // con la que update() cierra. Todas son findFirst — findUnique no puede
+      // expresar el filtro de estado ni el scope de tienda.
+      mockPrismaService.products.findFirst
         .mockResolvedValueOnce(existingProduct)
-        .mockResolvedValueOnce(null); // Slug uniqueness check
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
       });
@@ -647,7 +746,7 @@ describe('ProductsService', () => {
         state: ProductState.ACTIVE,
       };
 
-      mockPrismaService.products.findUnique.mockResolvedValue(existingProduct);
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
       mockPrismaService.products.update.mockResolvedValue({
         ...existingProduct,
         state: ProductState.INACTIVE,
@@ -657,44 +756,66 @@ describe('ProductsService', () => {
 
       expect(mockPrismaService.products.update).toHaveBeenCalledWith({
         where: { id: 1 },
-        data: { state: ProductState.INACTIVE },
+        data: { state: ProductState.INACTIVE, updated_at: expect.any(Date) },
       });
     });
 
-    it('should throw NotFoundException if product not found', async () => {
-      mockPrismaService.products.findUnique.mockResolvedValue(null);
+    it('should throw VendixHttpException if product not found', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
 
-      await expect(service.deactivate(999)).rejects.toThrow(NotFoundException);
+      await expect(service.deactivate(999)).rejects.toThrow(VendixHttpException);
     });
   });
 
   describe('remove', () => {
-    it('should delete a product successfully (hard delete)', async () => {
+    // `remove` is a LOGICAL delete: it archives. A product is referenced by
+    // order_items, invoice_items and inventory_transactions, so physically
+    // deleting the row would orphan historical documents. Hard deletion lives
+    // behind a separate `admin_delete` path with its own permission.
+    it('should archive the product instead of deleting the row', async () => {
       const existingProduct = {
         id: 1,
+        store_id: 1,
         name: 'Test Product',
         state: ProductState.ACTIVE,
+        stock_levels: [],
+        product_variants: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
       };
 
-      mockPrismaService.products.findUnique.mockResolvedValue(existingProduct);
+      // remove() delegates existence checking to findOne(), which reads through
+      // findFirst and enriches with stock — hence the relations above.
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
+      });
+      mockPrismaService.products.update.mockResolvedValue({
+        ...existingProduct,
+        state: 'archived',
       });
 
       await service.remove(1);
 
-      expect(mockPrismaService.products.delete).toHaveBeenCalledWith({
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
         where: { id: 1 },
+        data: { state: 'archived', updated_at: expect.any(Date) },
       });
+      expect(mockPrismaService.products.delete).not.toHaveBeenCalled();
     });
 
-    it('should throw NotFoundException if product to delete not found', async () => {
-      mockPrismaService.products.findUnique.mockResolvedValue(null);
+    it('should throw VendixHttpException if product to delete not found', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
 
-      await expect(service.remove(999)).rejects.toThrow(NotFoundException);
+      await expect(service.remove(999)).rejects.toThrow(VendixHttpException);
     });
   });
 
+  // Variant CRUD moved out of ProductsService: these three methods are pure
+  // delegations to ProductVariantService, which owns SKU uniqueness, the
+  // attribute matrix and the stock_levels rows. The contract to protect here is
+  // therefore the delegation itself (right collaborator, right arguments, value
+  // passed through untouched) — asserting `product_variants.create` again would
+  // duplicate ProductVariantService's own spec and break on every refactor there.
   describe('VARIANTS OPERATIONS', () => {
     const createVariantDto: CreateProductVariantDto = {
       sku: 'TEST-VAR-001',
@@ -704,91 +825,65 @@ describe('ProductsService', () => {
       attributes: { color: 'red', size: 'L' },
     };
 
-    it('should create a variant for a product', async () => {
+    it('should delegate variant creation and return the variant', async () => {
       const expectedVariant = {
         id: 1,
         product_id: 1,
         ...createVariantDto,
       };
 
-      const existingProduct = {
-        id: 1,
-        name: 'Test Product',
-        state: ProductState.ACTIVE,
-      };
-
-      mockPrismaService.products.findUnique.mockResolvedValue(existingProduct);
-      mockPrismaService.product_variants.findUnique.mockResolvedValue(null);
-      mockPrismaService.$transaction.mockImplementation((callback) => {
-        return callback(mockPrismaService);
-      });
-      mockPrismaService.product_variants.create.mockResolvedValue(
-        expectedVariant,
-      );
+      mockVariantService.createVariant.mockResolvedValue(expectedVariant);
 
       const result = await service.createVariant(1, createVariantDto);
 
       expect(result).toEqual(expectedVariant);
-      expect(mockPrismaService.product_variants.create).toHaveBeenCalled();
+      expect(mockVariantService.createVariant).toHaveBeenCalledWith(
+        1,
+        createVariantDto,
+      );
     });
 
-    it('should throw NotFoundException if product not found when creating variant', async () => {
-      mockPrismaService.products.findUnique.mockResolvedValue(null);
+    it('should propagate the collaborator rejection when the product does not exist', async () => {
+      // Product existence is validated inside ProductVariantService, so the
+      // failure surfaces here as a rejection travelling through the delegation.
+      mockVariantService.createVariant.mockRejectedValue(
+        new VendixHttpException(ErrorCodes.PROD_FIND_001),
+      );
 
       await expect(
         service.createVariant(999, createVariantDto),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(VendixHttpException);
     });
 
-    it('should update a variant', async () => {
+    it('should delegate variant update and return the updated variant', async () => {
       const updateVariantDto: UpdateProductVariantDto = {
         price_override: 119.99,
         stock_quantity: 45,
       };
 
-      const existingVariant = {
+      const updatedVariant = {
         id: 1,
         sku: 'TEST-VAR-001',
-        price_override: 109.99,
-        stock_quantity: 50,
-      };
-
-      const updatedVariant = {
-        ...existingVariant,
         ...updateVariantDto,
       };
 
-      mockPrismaService.product_variants.findUnique.mockResolvedValue(
-        existingVariant,
-      );
-      mockPrismaService.product_variants.update.mockResolvedValue(
-        updatedVariant,
-      );
+      mockVariantService.updateVariant.mockResolvedValue(updatedVariant);
 
       const result = await service.updateVariant(1, updateVariantDto);
 
       expect(result).toEqual(updatedVariant);
-      expect(mockPrismaService.product_variants.update).toHaveBeenCalled();
+      expect(mockVariantService.updateVariant).toHaveBeenCalledWith(
+        1,
+        updateVariantDto,
+      );
     });
 
-    it('should remove a variant', async () => {
-      const existingVariant = {
-        id: 1,
-        sku: 'TEST-VAR-001',
-      };
-
-      mockPrismaService.product_variants.findUnique.mockResolvedValue(
-        existingVariant,
-      );
-      mockPrismaService.product_variants.delete.mockResolvedValue(
-        existingVariant,
-      );
+    it('should delegate variant removal', async () => {
+      mockVariantService.removeVariant.mockResolvedValue({ id: 1 });
 
       await service.removeVariant(1);
 
-      expect(mockPrismaService.product_variants.delete).toHaveBeenCalledWith({
-        where: { id: 1 },
-      });
+      expect(mockVariantService.removeVariant).toHaveBeenCalledWith(1);
     });
   });
 
@@ -811,7 +906,7 @@ describe('ProductsService', () => {
         name: 'Test Product',
       };
 
-      mockPrismaService.products.findUnique.mockResolvedValue(existingProduct);
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
       });
@@ -826,7 +921,6 @@ describe('ProductsService', () => {
           image_url: imageDto.image_url,
           is_main: imageDto.is_main,
           alt_text: imageDto.alt_text,
-          sort_order: 0,
         },
       });
     });
@@ -842,7 +936,7 @@ describe('ProductsService', () => {
         name: 'Test Product',
       };
 
-      mockPrismaService.products.findUnique.mockResolvedValue(existingProduct);
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
       });
@@ -966,21 +1060,53 @@ describe('ProductsService', () => {
         id: 1,
         ...productWithStock,
         state: ProductState.ACTIVE,
+        // create() reloads the row inside the same transaction to compute the
+        // stock totals and resolve the main image, so the reload must carry
+        // both relations.
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
       };
 
       mockPrismaService.products.create.mockResolvedValue(expectedProduct);
+      mockPrismaService.products.findUnique.mockResolvedValue(expectedProduct);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
       });
 
       await service.create(productWithStock);
 
-      expect(mockPrismaService.stock_levels.createMany).toHaveBeenCalledWith({
-        data: [
-          { location_id: 1, quantity: 50, product_id: 1 },
-          { location_id: 2, quantity: 25, product_id: 1 },
-        ],
-      });
+      // El stock inicial NO se escribe con stock_levels.createMany: pasa por
+      // StockLevelManager una vez por ubicación, dentro de la misma transacción.
+      // La diferencia no es cosmética — createMany crearía saldo sin fila en
+      // inventory_transactions, y el libro de movimientos quedaría en desacuerdo
+      // con el saldo desde el primer segundo de vida del producto. De ahí que
+      // `create_movement: true` sea obligatorio en cada llamada.
+      expect(mockPrismaService.stock_levels.createMany).not.toHaveBeenCalled();
+      expect(mockStockLevelManager.updateStock).toHaveBeenCalledTimes(2);
+      expect(mockStockLevelManager.updateStock).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          product_id: 1,
+          location_id: 1,
+          quantity_change: 50,
+          movement_type: 'initial',
+          create_movement: true,
+          validate_availability: false,
+        }),
+        mockPrismaService,
+      );
+      expect(mockStockLevelManager.updateStock).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          product_id: 1,
+          location_id: 2,
+          quantity_change: 25,
+          movement_type: 'initial',
+        }),
+        mockPrismaService,
+      );
     });
 
     it('should handle complex filtering with multiple criteria', async () => {
@@ -999,22 +1125,21 @@ describe('ProductsService', () => {
 
       await service.findAll(complexQuery);
 
+      // The filters are siblings in a flat `where`, not entries of an `AND`
+      // array: Prisma already ANDs sibling keys, and flattening keeps the query
+      // planner able to use the per-column indexes. `category_id` in particular
+      // travels through the product_categories join — a product belongs to many
+      // categories, so there is no category_id column on products.
       expect(mockPrismaService.products.findMany).toHaveBeenCalledWith({
         where: expect.objectContaining({
-          AND: [
-            {
-              OR: [
-                { name: { contains: 'smartphone', mode: 'insensitive' } },
-                {
-                  description: { contains: 'smartphone', mode: 'insensitive' },
-                },
-                { sku: { contains: 'smartphone', mode: 'insensitive' } },
-              ],
-            },
-            { state: ProductState.ACTIVE },
-            { category_id: 1 },
-            { brand_id: 2 },
+          OR: [
+            { name: { contains: 'smartphone', mode: 'insensitive' } },
+            { description: { contains: 'smartphone', mode: 'insensitive' } },
+            { sku: { contains: 'smartphone', mode: 'insensitive' } },
           ],
+          state: ProductState.ACTIVE,
+          brand_id: 2,
+          product_categories: { some: { category_id: 1 } },
         }),
         include: expect.any(Object),
         skip: 0,

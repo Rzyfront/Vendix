@@ -59,6 +59,7 @@ import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
+import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -116,6 +117,9 @@ export class PaymentsService {
     // products, so they can be invoked unconditionally on the sale path).
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
+    // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT entre documento
+    // equivalente POS y factura electrónica nominativa.
+    private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -705,6 +709,26 @@ export class PaymentsService {
         // poder forzar su delivery_type) y reutilizado aquí en el gate de
         // inventario (paso 3) y la máquina de estados (`deferToFulfillment`).
         const hasSerialized = orderCreation.hasSerialized;
+
+        // Frontera 5 UVT (Art. 616-1 ET / Res. 000165 de 2023): una venta
+        // anónima por encima de 5 UVT no puede soportarse con el documento
+        // equivalente POS — exige factura electrónica, y para emitirla hay que
+        // identificar al adquiriente.
+        //
+        // Se evalúa AQUÍ, dentro de la transacción y contra el `grand_total`
+        // recalculado por el servidor, por dos razones: (1) el total del DTO es
+        // sugerido y el backend lo recalcula con promociones/cupones, así que
+        // validar el del cliente permitiría declarar menos para pasar el umbral;
+        // (2) un throw en este punto revierte la transacción completa, mientras
+        // que validar después del commit dejaría la venta cerrada y sólo
+        // corregible con nota crédito.
+        await this.fiscalInvoiceThreshold.assertInvoiceNotRequired({
+          organization_id: order.organization_id,
+          store_id: order.store_id ?? createPosPaymentDto.store_id ?? null,
+          total_amount: order.grand_total ?? 0,
+          has_customer: Boolean(createPosPaymentDto.customer_id),
+          channel: 'pos',
+        });
 
         // Plan KDS fire-flows (B5): the auto-fire result captured inside
         // the larger payment $transaction. Defaults to null when the store

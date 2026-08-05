@@ -14,7 +14,27 @@ describe('ProductsBulkController', () => {
   const mockProductsBulkService = {
     uploadProducts: jest.fn(),
     validateBulkProducts: jest.fn(),
+    // La plantilla dejó de ser CSV armado en el controller: es un XLSX que el
+    // servicio construye (`generateExcelTemplate`) y el controller solo
+    // streamea. `getBulkUploadTemplate` quedó como stub deprecado sin ruta.
+    generateExcelTemplate: jest.fn(),
     getBulkUploadTemplate: jest.fn(),
+    // `parseFile` es síncrono: convierte el buffer subido en filas antes de
+    // cualquier validación.
+    parseFile: jest.fn(),
+  };
+
+  // `downloadTemplate` y `export` responden con @Res(): escriben cabeceras y
+  // cierran el stream ellos mismos, así que no devuelven un envelope. El doble
+  // registra qué se escribió.
+  const makeResponseDouble = () => {
+    const res: any = {
+      set: jest.fn(() => res),
+      end: jest.fn(() => res),
+      json: jest.fn(() => res),
+    };
+    res.status = jest.fn(() => res);
+    return res;
   };
 
   const mockResponseService = {
@@ -111,7 +131,7 @@ describe('ProductsBulkController', () => {
 
       const expectedResponse = {
         data: uploadResult,
-        message: 'Carga masiva de productos completada exitosamente',
+        message: 'Carga masiva completada exitosamente',
       };
 
       mockProductsBulkService.uploadProducts.mockResolvedValue(uploadResult);
@@ -129,7 +149,7 @@ describe('ProductsBulkController', () => {
       );
       expect(mockResponseService.created).toHaveBeenCalledWith(
         uploadResult,
-        'Carga masiva de productos completada exitosamente',
+        'Carga masiva completada exitosamente',
       );
     });
 
@@ -177,7 +197,7 @@ describe('ProductsBulkController', () => {
 
       const expectedResponse = {
         data: uploadResult,
-        message: 'Carga masiva de productos completada con algunos errores',
+        message: 'Carga masiva completada con algunos errores',
       };
 
       mockProductsBulkService.uploadProducts.mockResolvedValue(uploadResult);
@@ -191,7 +211,7 @@ describe('ProductsBulkController', () => {
       expect(result).toEqual(expectedResponse);
       expect(mockResponseService.created).toHaveBeenCalledWith(
         uploadResult,
-        'Carga masiva de productos completada con algunos errores',
+        'Carga masiva completada con algunos errores',
       );
     });
 
@@ -278,7 +298,7 @@ describe('ProductsBulkController', () => {
 
       const expectedResponse = {
         data: uploadResult,
-        message: 'Carga masiva de productos completada exitosamente',
+        message: 'Carga masiva completada exitosamente',
       };
 
       mockProductsBulkService.uploadProducts.mockResolvedValue(uploadResult);
@@ -292,12 +312,20 @@ describe('ProductsBulkController', () => {
       expect(result).toEqual(expectedResponse);
       expect(mockResponseService.created).toHaveBeenCalledWith(
         uploadResult,
-        'Carga masiva de productos completada exitosamente',
+        'Carga masiva completada exitosamente',
       );
     });
   });
 
-  describe('validateProducts', () => {
+  // NOTE (deriva detectada, NO bendecida): estas dos rutas HTTP ya no existen en
+  // `products-bulk.controller.ts`. Sus superficies actuales son `POST upload`,
+  // `POST upload/file`, `POST analyze`, `POST upload-session`, `GET
+  // template/download`, `GET export` y `DELETE session/:id`. Los métodos de
+  // servicio `validateBulkProducts` y `getBulkUploadTemplate` siguen vivos en
+  // `products-bulk.service.ts` pero ya no tienen consumidor: o son código
+  // muerto a eliminar, o falta reexponerlos. Los bloques quedan en `skip` (no
+  // borrados) hasta que se decida cuál de las dos cosas es.
+  describe.skip('validateProducts', () => {
     it('should validate products successfully', async () => {
       const bulkUploadDto: BulkProductUploadDto = {
         products: [
@@ -420,7 +448,15 @@ describe('ProductsBulkController', () => {
     });
   });
 
-  describe('getTemplate', () => {
+  // NOTE (deriva detectada, NO bendecida): estas dos rutas HTTP ya no existen en
+  // `products-bulk.controller.ts`. Sus superficies actuales son `POST upload`,
+  // `POST upload/file`, `POST analyze`, `POST upload-session`, `GET
+  // template/download`, `GET export` y `DELETE session/:id`. Los métodos de
+  // servicio `validateBulkProducts` y `getBulkUploadTemplate` siguen vivos en
+  // `products-bulk.service.ts` pero ya no tienen consumidor: o son código
+  // muerto a eliminar, o falta reexponerlos. Los bloques quedan en `skip` (no
+  // borrados) hasta que se decida cuál de las dos cosas es.
+  describe.skip('getTemplate', () => {
     it('should return bulk upload template', async () => {
       const templateData = {
         headers: [
@@ -489,53 +525,58 @@ describe('ProductsBulkController', () => {
   });
 
   describe('downloadTemplate', () => {
-    it('should return CSV template download', async () => {
-      const templateData = {
-        headers: ['name', 'base_price', 'sku'],
-        sample_data: [
-          {
-            name: 'Sample Product',
-            base_price: '99.99',
-            sku: 'SAMPLE-001',
-          },
-        ],
-        instructions: 'Use this template to upload products in bulk',
-      };
+    it('streams the XLSX template with attachment headers', async () => {
+      const buffer = Buffer.from('fake-xlsx');
+      mockProductsBulkService.generateExcelTemplate.mockResolvedValue(buffer);
+      const res = makeResponseDouble();
 
-      const expectedCsvContent = `name,base_price,sku\nSample Product,99.99,SAMPLE-001`;
+      await controller.downloadTemplate('products', res);
 
-      mockProductsBulkService.getBulkUploadTemplate.mockResolvedValue(
-        templateData,
+      expect(mockProductsBulkService.generateExcelTemplate).toHaveBeenCalledWith(
+        'products',
       );
-
-      const result = await (controller as any).downloadTemplate();
-
-      expect(result).toHaveProperty('csv');
-      expect((result as any).csv).toContain('name,base_price,sku');
-      expect((result as any).csv).toContain('Sample Product,99.99,SAMPLE-001');
-      expect((result as any).filename).toContain('product-bulk-template');
-      expect((result as any).filename).toContain('.csv');
+      const headers = res.set.mock.calls[0][0];
+      expect(headers['Content-Type']).toBe(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      // El Content-Disposition decide el nombre con que el archivo cae en la
+      // máquina del usuario; sin él el navegador lo abre en vez de bajarlo.
+      expect(headers['Content-Disposition']).toMatch(
+        /attachment; filename="plantilla_productos_\d{4}-\d{2}-\d{2}\.xlsx"/,
+      );
+      expect(headers['Content-Length']).toBe(buffer.length);
+      expect(res.end).toHaveBeenCalledWith(buffer);
     });
 
-    it('should handle template generation errors', async () => {
-      const error = new Error('Template generation error');
-      const expectedErrorResponse = {
-        error: 'Template generation error',
-        message: 'Template generation error',
-        statusCode: 500,
-      };
-
-      mockProductsBulkService.getBulkUploadTemplate.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await (controller as any).downloadTemplate();
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Template generation error',
-        'Template generation error',
-        500,
+    it('names the file after the services variant when type=services', async () => {
+      mockProductsBulkService.generateExcelTemplate.mockResolvedValue(
+        Buffer.from('x'),
       );
+      const res = makeResponseDouble();
+
+      await controller.downloadTemplate('services', res);
+
+      expect(res.set.mock.calls[0][0]['Content-Disposition']).toContain(
+        'plantilla_servicios_',
+      );
+    });
+
+    it('answers 500 through res, not through the envelope', async () => {
+      mockProductsBulkService.generateExcelTemplate.mockRejectedValue(
+        new Error('Template generation error'),
+      );
+      const res = makeResponseDouble();
+
+      await controller.downloadTemplate('products', res);
+
+      // Una ruta @Res() no puede delegar en ResponseService: ya tomó control del
+      // stream, así que el error viaja como body JSON con status explícito.
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: { message: 'Template generation error' },
+      });
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -572,7 +613,11 @@ describe('ProductsBulkController', () => {
         message: 'Archivo procesado exitosamente',
       };
 
-      // Mock CSV parsing and service call
+      // parseFile es lo primero que corre: sin él el controller cae en el catch
+      // con "parseFile is not a function" y toda la aserción se vuelve vacua.
+      mockProductsBulkService.parseFile.mockReturnValue([
+        { name: 'Product 1', base_price: 99.99, sku: 'PROD-001' },
+      ]);
       mockProductsBulkService.validateBulkProducts.mockResolvedValue({
         isValid: true,
         errors: [],
@@ -593,95 +638,88 @@ describe('ProductsBulkController', () => {
       );
 
       expect(result).toEqual(expectedResponse);
-      expect(mockProductsBulkService.uploadProducts).toHaveBeenCalled();
+      expect(mockProductsBulkService.parseFile).toHaveBeenCalledWith(
+        mockFile.buffer,
+      );
+      // Solo las filas que la pre-validación aprobó llegan a la carga.
+      expect(mockProductsBulkService.uploadProducts).toHaveBeenCalledWith(
+        { products: [{ name: 'Product 1', base_price: 99.99, sku: 'PROD-001' }] },
+        mockUser,
+      );
       expect(mockResponseService.created).toHaveBeenCalledWith(
         uploadResult,
         'Archivo procesado exitosamente',
       );
     });
 
-    it('should handle unsupported file types', async () => {
+    // El controller ya no valida mime type ni vaciedad ni formato CSV por su
+    // cuenta: el tamaño lo corta `ParseFilePipe` (5MB) antes del handler, y el
+    // parseo/estructura los resuelve `parseFile` + `validateBulkProducts`. Las
+    // tres pruebas que exigían mensajes propios del controller ("Solo se
+    // permiten archivos CSV", "El archivo está vacío", "Formato de archivo CSV
+    // inválido") describían una superficie que ya no existe. Lo que sí sigue
+    // siendo contrato del controller es CÓMO propaga el fallo del parser y qué
+    // hace cuando la pre-validación rechaza el archivo.
+    it('propagates a parser failure as an error envelope with its status', async () => {
       const mockFile = {
-        buffer: Buffer.from('test content'),
-        originalname: 'products.txt',
-        mimetype: 'text/plain',
-      };
-
-      const expectedErrorResponse = {
-        error: 'Tipo de archivo no soportado',
-        message: 'Solo se permiten archivos CSV',
-        statusCode: 400,
-      };
-
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.uploadProductsFromFile(
-        mockFile as any,
-        mockRequest as any,
-      );
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Solo se permiten archivos CSV',
-        'Solo se permiten archivos CSV',
-        400,
-      );
-    });
-
-    it('should handle empty file upload', async () => {
-      const mockFile = {
-        buffer: Buffer.from(''),
-        originalname: 'empty.csv',
-        mimetype: 'text/csv',
-      };
-
-      const expectedErrorResponse = {
-        error: 'Archivo vacío',
-        message: 'El archivo está vacío',
-        statusCode: 400,
-      };
-
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.uploadProductsFromFile(
-        mockFile as any,
-        mockRequest as any,
-      );
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'El archivo está vacío',
-        'El archivo está vacío',
-        400,
-      );
-    });
-
-    it('should handle CSV parsing errors', async () => {
-      const mockFile = {
-        buffer: Buffer.from('invalid,csv,content'),
+        buffer: Buffer.from('invalid'),
         originalname: 'invalid.csv',
         mimetype: 'text/csv',
       };
 
-      const expectedErrorResponse = {
-        error: 'Error al procesar el archivo CSV',
-        message: 'Formato de archivo CSV inválido',
-        statusCode: 400,
-      };
+      mockProductsBulkService.parseFile.mockImplementation(() => {
+        throw Object.assign(
+          new Error(
+            'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
+          ),
+          { status: 400 },
+        );
+      });
+      mockResponseService.error.mockReturnValue({ success: false });
 
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.uploadProductsFromFile(
+      await controller.uploadProductsFromFile(
         mockFile as any,
         mockRequest as any,
       );
 
-      expect(result).toEqual(expectedErrorResponse);
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Error al procesar el archivo CSV: El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
-        'Error al procesar el archivo CSV: El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
+        'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
+        'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
         400,
       );
+      expect(mockProductsBulkService.uploadProducts).not.toHaveBeenCalled();
+    });
+
+    it('returns the validation report WITHOUT uploading when the file is invalid', async () => {
+      const mockFile = {
+        buffer: Buffer.from('x'),
+        originalname: 'products.csv',
+        mimetype: 'text/csv',
+      };
+      const validationResult = {
+        isValid: false,
+        errors: ['Fila 1: Faltan datos obligatorios (Nombre, SKU o Precio)'],
+        validProducts: [],
+      };
+
+      mockProductsBulkService.parseFile.mockReturnValue([{ name: '' }]);
+      mockProductsBulkService.validateBulkProducts.mockResolvedValue(
+        validationResult,
+      );
+      mockResponseService.success.mockReturnValue({ success: true });
+
+      await controller.uploadProductsFromFile(
+        mockFile as any,
+        mockRequest as any,
+      );
+
+      // 200 con el informe, no un error: el usuario necesita la lista completa
+      // de filas malas para corregir su Excel de una sola pasada.
+      expect(mockResponseService.success).toHaveBeenCalledWith(
+        validationResult,
+        'Se encontraron errores en el archivo',
+      );
+      expect(mockProductsBulkService.uploadProducts).not.toHaveBeenCalled();
     });
   });
 });

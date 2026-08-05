@@ -13,6 +13,13 @@ export interface DianConfigDecrypted {
   software_pin: string; // Decrypted
   certificate_s3_key: string | null;
   certificate_password: string | null; // Decrypted
+  /**
+   * KMS key holding the certificate's private half (non-exportable). When set the
+   * signature is produced inside the HSM and no PEM private key ever exists in
+   * this process. NOT a secret — it is an ARN, so it is carried in the clear
+   * alongside the S3 key rather than through the encryption envelope.
+   */
+  certificate_kms_key_id: string | null;
   certificate_expiry: Date | null;
   environment: 'test' | 'production';
   enablement_status:

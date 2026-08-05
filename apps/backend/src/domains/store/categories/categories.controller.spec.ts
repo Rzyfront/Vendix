@@ -124,19 +124,16 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.create.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.create(
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.create(
         createCategoryDto,
         mockRequest as any,
-      );
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Category slug already exists',
-        'Category slug already exists',
-        409,
-      );
+      ),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -227,16 +224,13 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.findAll.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.findAll(query);
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Database connection failed',
-        'Database connection failed',
-        400,
-      );
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.findAll(query),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -324,16 +318,13 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.findAll.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.search(query);
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Search failed',
-        'Search failed',
-        400,
-      );
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.search(query),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -404,16 +395,13 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.findOne.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.findOne(categoryId);
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Category not found',
-        'Category not found',
-        404,
-      );
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.findOne(categoryId),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -474,20 +462,17 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.update.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.update(
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.update(
         categoryId,
         updateCategoryDto,
         mockRequest as any,
-      );
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Category slug already exists',
-        'Category slug already exists',
-        409,
-      );
+      ),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -551,7 +536,9 @@ describe('CategoriesController', () => {
       const result = await controller.remove(categoryId, mockRequest as any);
 
       expect(result).toEqual(expectedResponse);
-      expect(mockCategoriesService.remove).toHaveBeenCalledWith(1, mockUser);
+      expect(mockCategoriesService.remove).toHaveBeenCalledWith(1, mockUser, {
+        force: false,
+      });
       expect(mockResponseService.deleted).toHaveBeenCalledWith(
         'Categoría eliminada exitosamente',
       );
@@ -570,16 +557,13 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.remove.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.remove(categoryId, mockRequest as any);
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Cannot delete category with assigned products',
-        'Cannot delete category with assigned products',
-        400,
-      );
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.remove(categoryId, mockRequest as any),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
 
     it('should handle NotFoundException when category not found for deletion', async () => {
@@ -593,16 +577,13 @@ describe('CategoriesController', () => {
       };
 
       mockCategoriesService.remove.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
-
-      const result = await controller.remove(categoryId, mockRequest as any);
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Category not found',
-        'Category not found',
-        404,
-      );
+      // The categories controller has no try/catch: the error propagates to
+      // the global exception filter. Converting it to a 200 with an error body
+      // here is the anti-pattern vendix-error-handling exists to prevent.
+      await expect(
+        controller.remove(categoryId, mockRequest as any),
+      ).rejects.toThrow();
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
   });
 });

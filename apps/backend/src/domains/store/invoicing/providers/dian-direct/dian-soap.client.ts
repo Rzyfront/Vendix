@@ -6,9 +6,20 @@ import { ExclusiveCanonicalization } from 'xml-crypto';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { DIAN_ENDPOINTS, DIAN_SOAP_ACTIONS } from './constants/dian-endpoints';
 import { DianSendBillResponse } from './interfaces/dian-response.interface';
+import { XadesSigner } from './xades/xades-signer';
 
 export interface WsSecurityCredentials {
-  private_key_pem: string;
+  /**
+   * Produces the RSA-SHA256 signature over the canonical `ds:SignedInfo` of the
+   * WS-Security header.
+   *
+   * An `XadesSigner` rather than a PEM because DIAN's WCF binding signs the SOAP
+   * envelope with the SAME certificate that signs the document. Keeping a PEM here
+   * would force the private key to exist in this process even under HSM custody,
+   * which is precisely the exposure the HSM removes — the document signature would
+   * be hardened and the transport would not.
+   */
+  signer: XadesSigner;
   certificate_der_base64: string;
 }
 
@@ -33,11 +44,38 @@ const NS = {
  * Supports optional WS-Security (X.509 signed) when credentials are provided.
  * Uses xml-crypto's ExclusiveCanonicalization for proper C14N digest computation.
  */
+/**
+ * Why the transmission failed, in the two classes Anexo Técnico 1.9 §12.2/§12.4
+ * distinguishes — because each carries a DIFFERENT reglamented retry cadence and
+ * the old single 1s/2s/4s backoff matched neither.
+ *
+ * - `dian_error`: the DIAN answered an error or refused the connection.
+ *   Anexo: retransmit at 5 s, then 2 more every 5 s (3 attempts, ~15 s). Cheap
+ *   enough to run inline, so this client owns it.
+ * - `timeout`: no answer within a minute. Anexo: retry at 2 min, then 4 more
+ *   every 2 min (5 attempts, ~10 min). Running that inline would freeze a POS
+ *   sale for ten minutes, so this client returns immediately and the async
+ *   `invoice_retry_queue` owns the cadence.
+ *
+ * Either class, once exhausted, is what authorizes contingency Type 04.
+ */
+export type DianFailureClass = 'dian_error' | 'timeout' | 'non_retriable';
+
+/** Anexo §12.2: DIAN error → 3 attempts, 5 s apart. */
+const DIAN_ERROR_RETRIES = 3;
+const DIAN_ERROR_DELAY_MS = 5_000;
+
+/**
+ * Anexo §12.4 treats a response slower than one minute as a "demora".
+ * The previous 30 s abort declared a timeout the Anexo would still call healthy.
+ */
+const DIAN_TIMEOUT_MS = 60_000;
+
 @Injectable()
 export class DianSoapClient {
   private readonly logger = new Logger(DianSoapClient.name);
-  private readonly max_retries = 3;
-  private readonly base_timeout_ms = 30_000;
+  private readonly max_retries = DIAN_ERROR_RETRIES;
+  private readonly base_timeout_ms = DIAN_TIMEOUT_MS;
 
   /**
    * Sends a signed ZIP file to DIAN via SendBillSync.
@@ -51,7 +89,7 @@ export class DianSoapClient {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.SendBillSync;
 
-    const soap_body = this.buildSendBillSyncEnvelope(
+    const soap_body = await this.buildSendBillSyncEnvelope(
       zip_base64,
       file_name,
       endpoint,
@@ -75,10 +113,40 @@ export class DianSoapClient {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.SendTestSetAsync;
 
-    const soap_body = this.buildSendTestSetEnvelope(
+    const soap_body = await this.buildSendTestSetEnvelope(
       zip_base64,
       file_name,
       test_set_id,
+      endpoint,
+      soap_action,
+      credentials,
+    );
+
+    return this.executeWithRetry(endpoint, soap_action, soap_body);
+  }
+
+  /**
+   * Transmits a RADIAN / document event (`ApplicationResponse`) via
+   * `SendEventUpdateStatus`.
+   *
+   * Same transport contract as `SendBillSync`: the signed `ApplicationResponse`
+   * XML goes ZIP -> Base64 in `contentFile`. Events are only transmissible while
+   * the DIAN service is normal — Anexo §12.4 gives `ApplicationResponse` no
+   * contingency scheme — which is why a failure here surfaces as a plain error
+   * rather than something the caller can expedite.
+   */
+  async sendEventUpdateStatus(
+    zip_base64: string,
+    file_name: string,
+    environment: 'test' | 'production',
+    credentials?: WsSecurityCredentials,
+  ): Promise<DianSendBillResponse> {
+    const endpoint = DIAN_ENDPOINTS[environment].url;
+    const soap_action = DIAN_SOAP_ACTIONS.SendEventUpdateStatus;
+
+    const soap_body = await this.buildSendEventEnvelope(
+      zip_base64,
+      file_name,
       endpoint,
       soap_action,
       credentials,
@@ -98,7 +166,7 @@ export class DianSoapClient {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.GetStatus;
 
-    const soap_body = this.buildGetStatusEnvelope(
+    const soap_body = await this.buildGetStatusEnvelope(
       tracking_id,
       endpoint,
       soap_action,
@@ -122,7 +190,7 @@ export class DianSoapClient {
     const endpoint = DIAN_ENDPOINTS[environment].url;
     const soap_action = DIAN_SOAP_ACTIONS.GetStatusZip;
 
-    const soap_body = this.buildGetStatusZipEnvelope(
+    const soap_body = await this.buildGetStatusZipEnvelope(
       zip_key,
       endpoint,
       soap_action,
@@ -205,40 +273,99 @@ export class DianSoapClient {
       } catch (error) {
         const duration_ms = Date.now() - start_time;
         last_error = error as Error;
+        const failure_class = DianSoapClient.classifyFailure(error);
 
-        // Only retry on network errors/timeouts, not on validation failures
-        if (
-          error.name === 'AbortError' ||
-          error.code === 'ECONNRESET' ||
-          error.code === 'ECONNREFUSED'
-        ) {
-          const delay_ms = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
-          this.logger.warn(
-            `DIAN request attempt ${attempt}/${this.max_retries} failed (${error.message}). Retrying in ${delay_ms}ms...`,
-          );
-          await new Promise((resolve) => setTimeout(resolve, delay_ms));
-          continue;
+        // A timeout is NOT retried here. Anexo §12.4 prescribes 2 min × 5 for a
+        // "demora", which is ten minutes — unacceptable inline in a POS sale.
+        // The async retry queue owns that cadence, so we return immediately and
+        // let it schedule. Retrying inline on the fast cadence would also burn
+        // the DIAN's own reglamented window before the queue ever sees it.
+        if (failure_class === 'timeout') {
+          return {
+            success: false,
+            status_code: 'TIMEOUT',
+            status_message: `Sin respuesta de la DIAN en ${Math.round(this.base_timeout_ms / 1000)}s: ${error.message}`,
+            raw_response: '',
+            duration_ms,
+            failure_class,
+            contingency_eligible: true,
+          };
         }
 
-        // Non-retriable error
+        // Anexo §12.2: DIAN error → fixed 5 s cadence, 3 attempts. Fixed, not
+        // exponential: the Anexo states an interval, not a doubling.
+        if (failure_class === 'dian_error') {
+          if (attempt < this.max_retries) {
+            this.logger.warn(
+              `DIAN request attempt ${attempt}/${this.max_retries} failed (${error.message}). Retrying in ${DIAN_ERROR_DELAY_MS}ms...`,
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, DIAN_ERROR_DELAY_MS),
+            );
+            continue;
+          }
+          break;
+        }
+
+        // Non-retriable error — no contingency either, because the fault is ours
+        // (malformed request, bad credentials), not the DIAN's availability.
         return {
           success: false,
           status_code: 'NETWORK_ERROR',
           status_message: error.message,
           raw_response: '',
           duration_ms,
+          failure_class,
+          contingency_eligible: false,
         };
       }
     }
 
-    // All retries exhausted
+    // Reglamented DIAN-error retries exhausted → the service is unavailable, which
+    // is exactly the condition that authorizes contingency Type 04.
     return {
       success: false,
-      status_code: 'TIMEOUT',
-      status_message: `All ${this.max_retries} attempts failed: ${last_error?.message}`,
+      status_code: 'DIAN_UNAVAILABLE',
+      status_message: `La DIAN no respondió tras ${this.max_retries} intentos separados por ${DIAN_ERROR_DELAY_MS / 1000}s: ${last_error?.message}`,
       raw_response: '',
       duration_ms: 0,
+      failure_class: 'dian_error',
+      contingency_eligible: true,
     };
+  }
+
+  /**
+   * Maps a transport error onto the Anexo's two failure classes.
+   *
+   * `AbortError` is our own timeout firing, so it is the "demora" case. Refused
+   * or reset connections and DNS failures mean the DIAN endpoint is unreachable —
+   * the "error DIAN" case. Anything else (a serialization bug, a bad certificate)
+   * is ours to fix and must not masquerade as DIAN unavailability, because that
+   * would let a Vendix defect expedite documents under contingency.
+   */
+  private static classifyFailure(error: any): DianFailureClass {
+    if (error?.name === 'AbortError' || error?.name === 'TimeoutError') {
+      return 'timeout';
+    }
+    const network_codes = new Set([
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'ETIMEDOUT',
+      'EPIPE',
+      'UND_ERR_SOCKET',
+      'UND_ERR_CONNECT_TIMEOUT',
+    ]);
+    if (
+      network_codes.has(error?.code) ||
+      network_codes.has(error?.cause?.code)
+    ) {
+      return 'dian_error';
+    }
+    return 'non_retriable';
   }
 
   /**
@@ -352,12 +479,12 @@ export class DianSoapClient {
    *
    * When credentials are provided, includes WS-Security with X.509 signature.
    */
-  private wrapEnvelope(
+  private async wrapEnvelope(
     endpoint: string,
     soap_action: string,
     body_content: string,
     credentials?: WsSecurityCredentials,
-  ): string {
+  ): Promise<string> {
     if (credentials) {
       return this.buildSignedEnvelope(
         endpoint,
@@ -394,12 +521,12 @@ export class DianSoapClient {
    * 6. RSA-SHA256 sign the canonical SignedInfo
    * 7. Insert <ds:Signature> into the Security header and serialize
    */
-  private buildSignedEnvelope(
+  private async buildSignedEnvelope(
     endpoint: string,
     soap_action: string,
     body_content: string,
     credentials: WsSecurityCredentials,
-  ): string {
+  ): Promise<string> {
     const hash = crypto.randomBytes(8).toString('hex');
     const to_id = `id-${hash}`;
     const ts_id = `TS-${hash}`;
@@ -513,10 +640,11 @@ export class DianSoapClient {
 
     this.logger.debug(`Canonical SignedInfo: ${canonical_si_str}`);
 
-    // g) RSA-SHA256 sign the canonical SignedInfo
-    const signer = crypto.createSign('RSA-SHA256');
-    signer.update(canonical_si_str);
-    const signature_value = signer.sign(credentials.private_key_pem, 'base64');
+    // g) RSA-SHA256 sign the canonical SignedInfo. Delegated so the same bytes
+    //    can be signed by an in-process PEM or by a non-exportable HSM key.
+    const signature_value = await credentials.signer.sign(
+      Buffer.from(canonical_si_str, 'utf8'),
+    );
 
     // h) Build the complete signed envelope as a string (avoid DOM serialization
     //    which adds redundant namespace declarations to child elements)
@@ -544,13 +672,13 @@ export class DianSoapClient {
   /**
    * Builds the SOAP envelope for SendBillSync.
    */
-  private buildSendBillSyncEnvelope(
+  private async buildSendBillSyncEnvelope(
     zip_base64: string,
     file_name: string,
     endpoint: string,
     soap_action: string,
     credentials?: WsSecurityCredentials,
-  ): string {
+  ): Promise<string> {
     return this.wrapEnvelope(
       endpoint,
       soap_action,
@@ -563,16 +691,37 @@ export class DianSoapClient {
   }
 
   /**
+   * Builds the SOAP envelope for SendEventUpdateStatus.
+   */
+  private async buildSendEventEnvelope(
+    zip_base64: string,
+    file_name: string,
+    endpoint: string,
+    soap_action: string,
+    credentials?: WsSecurityCredentials,
+  ): Promise<string> {
+    return this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:SendEventUpdateStatus>
+      <wcf:fileName>${file_name}</wcf:fileName>
+      <wcf:contentFile>${zip_base64}</wcf:contentFile>
+    </wcf:SendEventUpdateStatus>`,
+      credentials,
+    );
+  }
+
+  /**
    * Builds the SOAP envelope for SendTestSetAsync.
    */
-  private buildSendTestSetEnvelope(
+  private async buildSendTestSetEnvelope(
     zip_base64: string,
     file_name: string,
     test_set_id: string,
     endpoint: string,
     soap_action: string,
     credentials?: WsSecurityCredentials,
-  ): string {
+  ): Promise<string> {
     return this.wrapEnvelope(
       endpoint,
       soap_action,
@@ -588,12 +737,12 @@ export class DianSoapClient {
   /**
    * Builds the SOAP envelope for GetStatus.
    */
-  private buildGetStatusEnvelope(
+  private async buildGetStatusEnvelope(
     tracking_id: string,
     endpoint: string,
     soap_action: string,
     credentials?: WsSecurityCredentials,
-  ): string {
+  ): Promise<string> {
     return this.wrapEnvelope(
       endpoint,
       soap_action,
@@ -608,12 +757,12 @@ export class DianSoapClient {
    * Builds the SOAP envelope for GetStatusZip (async test-set polling).
    * DIAN expects the ZipKey acknowledgement as the trackId.
    */
-  private buildGetStatusZipEnvelope(
+  private async buildGetStatusZipEnvelope(
     zip_key: string,
     endpoint: string,
     soap_action: string,
     credentials?: WsSecurityCredentials,
-  ): string {
+  ): Promise<string> {
     return this.wrapEnvelope(
       endpoint,
       soap_action,

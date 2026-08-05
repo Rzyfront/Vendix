@@ -165,6 +165,57 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     };
   }
 
+  /**
+   * The mock stands in for a habilitated DE emitter in dev. It computes a real
+   * CUDE shape (Software-PIN in the ClTec position) rather than a random string so
+   * a dev flow that later verifies the key against the XML behaves like production.
+   */
+  async sendEquivalentDocument(
+    documentData: ProviderInvoiceData,
+    options: { document_type_code?: string } = {},
+  ): Promise<ProviderResponse> {
+    this.assertNonProduction();
+    this.logger.log(
+      `[MOCK] Sending POS equivalent document ${documentData.invoice_number}` +
+        `${options.document_type_code ? ` (tipo ${options.document_type_code})` : ''}`,
+    );
+
+    const tracking_id = randomUUID();
+    const cude = CufeCalculator.generateEquivalentDocumentCude({
+      invoice_number: documentData.invoice_number,
+      issue_date: documentData.issue_date,
+      issue_time:
+        documentData.issue_time ||
+        localTimeString(new Date(), DEFAULT_STORE_TIMEZONE),
+      total_before_tax: documentData.subtotal_amount,
+      tax_iva: documentData.tax_amount,
+      total_amount: documentData.total_amount,
+      issuer_nit: documentData.issuer_nit || '000000000',
+      customer_nit: documentData.customer_tax_id || '222222222222',
+      environment: '2',
+      software_pin: 'mock-software-pin',
+    });
+
+    return {
+      success: true,
+      tracking_id,
+      cude,
+      qr_code: CufeCalculator.generateQrUrl(cude),
+      xml_document: `<mock-equivalent-document>${documentData.invoice_number}</mock-equivalent-document>`,
+      message: 'Documento equivalente aceptado por el proveedor mock',
+      provider_data: { mock: true, timestamp: new Date().toISOString() },
+    };
+  }
+
+  async sendEquivalentAdjustmentNote(
+    adjustmentData: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    return this.sendEquivalentDocument(adjustmentData, {
+      document_type_code:
+        adjustmentData.invoice_type === 'debit_note' ? '93' : '94',
+    });
+  }
+
   async checkStatus(trackingId: string): Promise<StatusResponse> {
     this.assertNonProduction();
     this.logger.log(`[MOCK] Checking status for tracking ID: ${trackingId}`);

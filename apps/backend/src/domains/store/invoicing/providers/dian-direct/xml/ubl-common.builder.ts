@@ -12,6 +12,15 @@ import {
   ProviderInvoiceItem,
 } from '../../invoice-provider.interface';
 import { createHash } from 'crypto';
+import {
+  dianAmount,
+  dianArithmetic,
+  dianLineExtension,
+  dianLineExtensionTotal,
+  dianRate,
+  dianSum,
+  toDecimal,
+} from '../../../utils/dian-money.util';
 
 /**
  * Shared UBL 2.1 element builders for Colombian electronic invoicing.
@@ -46,6 +55,13 @@ export class UblCommonBuilder {
       issuer_nit?: string;
       issuer_nit_dv?: string;
       qr_code?: string;
+      /**
+       * `Name`/`Value` pairs for the RADIAN `InformacionNegociacion` block. Emitted
+       * as its OWN `ext:UBLExtension`, between the DIAN extension and the signature
+       * placeholder, because that is where the annex's XPath puts it:
+       * `ext:UBLExtension/ext:ExtensionContent/CustomTagGeneral/InformacionNegociacion`.
+       */
+      negotiation_info?: ReadonlyArray<{ name: string; value: string }>;
     },
   ): void {
     const agency_name = UblCommonBuilder.DIAN_SCHEME_AGENCY_NAME;
@@ -141,12 +157,39 @@ export class UblCommonBuilder {
       dian.ele(UBL_NAMESPACES.STS, 'QRCode').txt(options.qr_code);
     }
 
-    // Second UBLExtension: placeholder ExtensionContent for the XAdES signature.
     // dian → .up() ExtensionContent → .up() UBLExtension → .up() UBLExtensions
-    dian
+    const extensions = dian
       .up() // → ExtensionContent
       .up() // → UBLExtension (first)
-      .up() // → UBLExtensions
+      .up(); // → UBLExtensions
+
+    // Optional UBLExtension: RADIAN negotiation data. Goes BEFORE the signature
+    // placeholder so the signature stays the last extension — the signer replaces
+    // the last empty ExtensionContent, and inserting after it would leave the
+    // negotiation block unsigned.
+    const negotiation_info = options?.negotiation_info;
+    if (negotiation_info?.length) {
+      // NO namespace, matching the annex XPath
+      // (`.../ext:ExtensionContent/CustomTagGeneral/InformacionNegociacion`: the
+      // last two segments carry no prefix while every DIAN element around them
+      // does). The explicit `null` is load-bearing — `ele('CustomTagGeneral')`
+      // INHERITS the parent's `ext:` prefix in xmlbuilder2, which silently emits
+      // `<ext:CustomTagGeneral>` and no longer matches the XPath the annex
+      // validates. Passing null undeclares the namespace instead.
+      const negotiation = extensions
+        .ele(UBL_NAMESPACES.EXT, 'UBLExtension')
+        .ele(UBL_NAMESPACES.EXT, 'ExtensionContent')
+        .ele(null, 'CustomTagGeneral')
+        .ele(null, 'InformacionNegociacion');
+
+      for (const { name, value } of negotiation_info) {
+        negotiation.ele(null, 'Name').txt(name);
+        negotiation.ele(null, 'Value').txt(value);
+      }
+    }
+
+    // Last UBLExtension: placeholder ExtensionContent for the XAdES signature.
+    extensions
       .ele(UBL_NAMESPACES.EXT, 'UBLExtension')
       .ele(UBL_NAMESPACES.EXT, 'ExtensionContent');
   }
@@ -411,51 +454,163 @@ export class UblCommonBuilder {
       tax_groups.get(code)!.push(tax);
     }
 
-    // Calculate total tax amount
-    const total_tax = taxes.reduce(
-      (sum, t) => sum + parseFloat(t.tax_amount),
-      0,
-    );
-
     const tax_total = parent.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
     tax_total
       .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
       .att('currencyID', currency)
-      .txt(total_tax.toFixed(2));
+      .txt(dianSum(taxes.map((t) => t.tax_amount)));
 
     for (const [code, group_taxes] of tax_groups) {
-      const group_amount = group_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount),
-        0,
-      );
-      const group_taxable = group_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.taxable_amount),
-        0,
-      );
-
       const subtotal = tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
       subtotal
         .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
         .att('currencyID', currency)
-        .txt(group_taxable.toFixed(2));
+        .txt(dianSum(group_taxes.map((t) => t.taxable_amount)));
       subtotal
         .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
         .att('currencyID', currency)
-        .txt(group_amount.toFixed(2));
+        .txt(dianSum(group_taxes.map((t) => t.tax_amount)));
 
       const tax_category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
 
-      // ICA rates are stored in "per mil" (‰) — convert to percentage for UBL
+      // ICA rates are stored in "per mil" (‰) — convert to percentage for UBL.
+      // ICA keeps 4 decimals because a 7‰ rate is 0.7000 %, which 2 decimals
+      // would flatten; every other scheme uses the DIAN 2-decimal contract.
       const tax_percent =
         code === DIAN_TAX_CODES.ICA
-          ? (parseFloat(group_taxes[0].tax_rate) / 10).toFixed(4)
-          : group_taxes[0].tax_rate;
+          ? toDecimal(group_taxes[0].tax_rate).dividedBy(10).toFixed(4)
+          : dianRate(group_taxes[0].tax_rate);
       tax_category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(tax_percent);
 
       const scheme = tax_category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
       scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
       scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
     }
+  }
+
+  /**
+   * Document-level discount not already represented on the lines.
+   *
+   * Vendix originates discounts per line (`order_items.discount_amount`), so in
+   * the normal case this is zero. It is non-zero only when the document carries a
+   * footer discount that no line accounts for — e.g. a conditional discount
+   * (Anexo §13.2.8.8) — and that is the only case where a document-level
+   * `cac:AllowanceCharge` is legitimate.
+   */
+  private static documentDiscount(data: {
+    discount_amount: string;
+    items: ProviderInvoiceItem[];
+  }): string {
+    const line_discounts = dianSum(
+      data.items.map((item) => item.discount_amount),
+    );
+    const remainder = toDecimal(data.discount_amount).minus(
+      toDecimal(line_discounts),
+    );
+    // A negative remainder means the lines already discount more than the
+    // document total claims — never emit a negative allowance, which the DIAN
+    // rejects; the line-level truth wins.
+    return remainder.isNegative() ? dianAmount(0) : dianAmount(remainder);
+  }
+
+  /**
+   * Emits the document-level `cac:AllowanceCharge` backing
+   * `AllowanceTotalAmount`, and only when there is something to back.
+   *
+   * The Anexo requires every document allowance to be supported by an
+   * `AllowanceCharge`; emitting `AllowanceTotalAmount` alone (which is what this
+   * codebase used to do) leaves an unsupported allowance. Must be called BEFORE
+   * `buildTaxTotals` because UBL fixes the element order
+   * `PaymentTerms → AllowanceCharge → TaxTotal → LegalMonetaryTotal`.
+   */
+  static buildDocumentAllowanceCharge(
+    parent: any,
+    data: { discount_amount: string; items: ProviderInvoiceItem[] },
+    currency: string,
+  ): void {
+    const discount = UblCommonBuilder.documentDiscount(data);
+    if (toDecimal(discount).isZero()) return;
+
+    const line_extension = dianLineExtensionTotal(data.items);
+    const allowance = parent.ele(UBL_NAMESPACES.CAC, 'AllowanceCharge');
+    allowance.ele(UBL_NAMESPACES.CBC, 'ID').txt('1');
+    // false = allowance (discount); true would make it a charge.
+    allowance.ele(UBL_NAMESPACES.CBC, 'ChargeIndicator').txt('false');
+    allowance
+      .ele(UBL_NAMESPACES.CBC, 'AllowanceChargeReason')
+      .txt('Descuento a nivel de documento');
+    allowance
+      .ele(UBL_NAMESPACES.CBC, 'Amount')
+      .att('currencyID', currency)
+      .txt(discount);
+    allowance
+      .ele(UBL_NAMESPACES.CBC, 'BaseAmount')
+      .att('currencyID', currency)
+      .txt(line_extension);
+  }
+
+  /**
+   * Builds `cac:LegalMonetaryTotal` so it satisfies the DIAN arithmetic rules.
+   *
+   * The defect this replaces: the header published the GROSS subtotal as
+   * `LineExtensionAmount` while every line published its NET amount
+   * (`qty × price − discount`), so any invoice carrying a discount broke rule
+   * `FAU14` (header ≠ Σ lines) and was rejected. `TaxExclusiveAmount` carried the
+   * same gross value even though the taxable base is net, and
+   * `AllowanceTotalAmount` restated a discount the lines had already applied.
+   *
+   * Invariants enforced here:
+   * - `LineExtensionAmount` = Σ line `LineExtensionAmount` (same function, so
+   *   the two cannot drift) — rule `FAU14`.
+   * - `TaxExclusiveAmount` = net taxable base.
+   * - `TaxInclusiveAmount` = net base + taxes.
+   * - `PayableAmount` = `TaxInclusiveAmount − AllowanceTotalAmount`, computed
+   *   rather than copied, so the identity holds by construction.
+   *
+   * Shared by invoice, credit note, debit note and support document — the block
+   * was duplicated four times and drifted independently.
+   */
+  static buildLegalMonetaryTotal(
+    parent: any,
+    data: {
+      discount_amount: string;
+      tax_amount: string;
+      items: ProviderInvoiceItem[];
+    },
+    currency: string,
+  ): void {
+    const line_extension = dianLineExtensionTotal(data.items);
+    const document_discount = UblCommonBuilder.documentDiscount(data);
+    const tax_inclusive = dianArithmetic([
+      { value: line_extension, sign: 1 },
+      { value: data.tax_amount, sign: 1 },
+    ]);
+    const payable = dianArithmetic([
+      { value: tax_inclusive, sign: 1 },
+      { value: document_discount, sign: -1 },
+    ]);
+
+    const monetary = parent.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
+    monetary
+      .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
+      .att('currencyID', currency)
+      .txt(line_extension);
+    monetary
+      .ele(UBL_NAMESPACES.CBC, 'TaxExclusiveAmount')
+      .att('currencyID', currency)
+      .txt(line_extension);
+    monetary
+      .ele(UBL_NAMESPACES.CBC, 'TaxInclusiveAmount')
+      .att('currencyID', currency)
+      .txt(tax_inclusive);
+    monetary
+      .ele(UBL_NAMESPACES.CBC, 'AllowanceTotalAmount')
+      .att('currencyID', currency)
+      .txt(document_discount);
+    monetary
+      .ele(UBL_NAMESPACES.CBC, 'PayableAmount')
+      .att('currencyID', currency)
+      .txt(payable);
   }
 
   /**
@@ -476,33 +631,37 @@ export class UblCommonBuilder {
         .att('unitCode', 'EA') // Each (unit)
         .txt(item.quantity);
 
+      // Same function the header uses, so header and lines cannot disagree.
       line
         .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
         .att('currencyID', currency)
-        .txt(
-          (
-            parseFloat(item.quantity) * parseFloat(item.unit_price) -
-            parseFloat(item.discount_amount)
-          ).toFixed(2),
-        );
+        .txt(dianLineExtension(item));
 
       // Allowance/charge for discount
-      if (parseFloat(item.discount_amount) > 0) {
+      if (!toDecimal(item.discount_amount).isZero()) {
         const allowance = line.ele(UBL_NAMESPACES.CAC, 'AllowanceCharge');
         allowance.ele(UBL_NAMESPACES.CBC, 'ChargeIndicator').txt('false');
         allowance
           .ele(UBL_NAMESPACES.CBC, 'Amount')
           .att('currencyID', currency)
-          .txt(parseFloat(item.discount_amount).toFixed(2));
+          .txt(dianAmount(item.discount_amount));
+        // BaseAmount is what the allowance was computed on — the gross line.
+        allowance
+          .ele(UBL_NAMESPACES.CBC, 'BaseAmount')
+          .att('currencyID', currency)
+          .txt(
+            dianAmount(
+              toDecimal(item.quantity).times(toDecimal(item.unit_price)),
+            ),
+          );
       }
 
       // Tax total for line
-      const line_tax = parseFloat(item.tax_amount);
       const line_tax_total = line.ele(UBL_NAMESPACES.CAC, 'TaxTotal');
       line_tax_total
         .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
         .att('currencyID', currency)
-        .txt(line_tax.toFixed(2));
+        .txt(dianAmount(item.tax_amount));
 
       // Line-level tax code/rate. invoice_taxes is header-level (not persisted
       // per item), so a line inherits the invoice's primary tax. The code is
@@ -519,19 +678,16 @@ export class UblCommonBuilder {
       subtotal
         .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
         .att('currencyID', currency)
-        .txt(
-          (
-            parseFloat(item.quantity) * parseFloat(item.unit_price) -
-            parseFloat(item.discount_amount)
-          ).toFixed(2),
-        );
+        .txt(dianLineExtension(item));
       subtotal
         .ele(UBL_NAMESPACES.CBC, 'TaxAmount')
         .att('currencyID', currency)
-        .txt(line_tax.toFixed(2));
+        .txt(dianAmount(item.tax_amount));
 
       const category = subtotal.ele(UBL_NAMESPACES.CAC, 'TaxCategory');
-      category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(tax_rate);
+      // dianRate, not the raw string: tax_rate arrives from a Decimal(5,2), so
+      // 19.00 serialized as '19' and reached the XML without decimals.
+      category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(dianRate(tax_rate));
       category
         .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
         .ele(UBL_NAMESPACES.CBC, 'ID')
@@ -546,7 +702,7 @@ export class UblCommonBuilder {
       price
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
-        .txt(parseFloat(item.unit_price).toFixed(2));
+        .txt(dianAmount(item.unit_price));
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
         .att('unitCode', 'EA')

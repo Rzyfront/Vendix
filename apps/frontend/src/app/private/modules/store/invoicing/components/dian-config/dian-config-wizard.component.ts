@@ -521,19 +521,22 @@ interface PersistedTestResult {
                   }
 
                   @if (readiness()) {
-                    <div class="space-y-1.5">
-                      @for (check of readiness()!.checks; track check.key) {
-                        <div class="flex items-start gap-2 text-xs">
-                          <app-icon
-                            [name]="check.satisfied ? 'check-circle' : 'alert-circle'"
-                            [size]="14"
-                            [class]="check.satisfied ? 'text-success mt-0.5' : 'text-warning mt-0.5'"
-                          ></app-icon>
-                          <div>
-                            <span [class]="check.satisfied ? 'text-text-secondary' : 'text-text-primary font-medium'">
-                              {{ check.label }}
-                            </span>
-                            @if (!check.satisfied) {
+                    <!--
+                      Tres grupos, no una lista plana: lo que el comercio puede
+                      hacer hoy, lo que solo la DIAN puede resolver, y las alertas
+                      que todavía no bloquean. Mezclarlos hace que un veredicto
+                      pendiente de la DIAN se lea como una tarea del comercio.
+                    -->
+                    @if (actionableBlockers().length) {
+                      <div class="space-y-1.5">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                          Te falta hacer ({{ actionableBlockers().length }})
+                        </p>
+                        @for (check of actionableBlockers(); track check.key) {
+                          <div class="flex items-start gap-2 text-xs">
+                            <app-icon name="alert-circle" [size]="14" class="text-warning mt-0.5"></app-icon>
+                            <div>
+                              <span class="text-text-primary font-medium">{{ check.label }}</span>
                               <div class="text-text-secondary mt-0.5">
                                 {{ check.action }}
                                 @if (check.owner === 'platform') {
@@ -542,11 +545,59 @@ interface PersistedTestResult {
                                   </span>
                                 }
                               </div>
-                            }
+                            </div>
                           </div>
-                        </div>
-                      }
-                    </div>
+                        }
+                      </div>
+                    }
+
+                    @if (dianPendingChecks().length) {
+                      <div class="space-y-1.5">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                          Esperando a la DIAN ({{ dianPendingChecks().length }})
+                        </p>
+                        @for (check of dianPendingChecks(); track check.key) {
+                          <div class="flex items-start gap-2 text-xs">
+                            <app-icon name="clock" [size]="14" class="text-info mt-0.5"></app-icon>
+                            <div>
+                              <span class="text-text-primary font-medium">{{ check.label }}</span>
+                              <div class="text-text-secondary mt-0.5">{{ check.action }}</div>
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    @if (readinessWarnings().length) {
+                      <div class="space-y-1.5">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-warning">
+                          Avisos ({{ readinessWarnings().length }})
+                        </p>
+                        @for (check of readinessWarnings(); track check.key) {
+                          <div class="flex items-start gap-2 text-xs">
+                            <app-icon name="alert-triangle" [size]="14" class="text-warning mt-0.5"></app-icon>
+                            <div>
+                              <span class="text-text-primary font-medium">{{ check.label }}</span>
+                              <div class="text-text-secondary mt-0.5">{{ check.action }}</div>
+                            </div>
+                          </div>
+                        }
+                      </div>
+                    }
+
+                    @if (satisfiedChecks().length) {
+                      <div class="space-y-1.5">
+                        <p class="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                          Listo ({{ satisfiedChecks().length }})
+                        </p>
+                        @for (check of satisfiedChecks(); track check.key) {
+                          <div class="flex items-start gap-2 text-xs">
+                            <app-icon name="check-circle" [size]="14" class="text-success mt-0.5"></app-icon>
+                            <span class="text-text-secondary">{{ check.label }}</span>
+                          </div>
+                        }
+                      </div>
+                    }
                   } @else if (!loadingReadiness()) {
                     <p class="text-xs text-text-secondary">
                       Verifica los requisitos para saber si ya puedes emitir facturas reales.
@@ -684,25 +735,46 @@ interface PersistedTestResult {
                   </div>
                 </div>
               }
-              <!-- ══ Waiting state: DIAN acknowledged the batch, no verdict yet ══ -->
+              <!-- ══ Waiting state: DIAN acknowledged the batch, no verdict yet ══
+                   El contenedor cambia de "informativo" a "advertencia" cuando el
+                   backend declara el lote estancado: un spinner azul eterno es
+                   exactamente lo que hace creer que el proceso está colgado. -->
               @if (testSetState() === 'running' || testSetState() === 'pending') {
-                <div class="p-4 rounded-lg border border-[var(--color-info)] bg-[var(--color-info-light)] space-y-4">
+                <div
+                  class="p-4 rounded-lg border space-y-4"
+                  [ngClass]="
+                    testSetStalled()
+                      ? 'border-warning bg-warning-light'
+                      : 'border-[var(--color-info)] bg-[var(--color-info-light)]'
+                  "
+                >
                   <div class="flex items-start gap-3">
                     <div class="mt-0.5 shrink-0">
-                      <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--color-info)]"></div>
+                      @if (testSetStalled()) {
+                        <app-icon name="alert-triangle" [size]="20" class="text-warning"></app-icon>
+                      } @else {
+                        <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-[var(--color-info)]"></div>
+                      }
                     </div>
                     <div class="min-w-0">
-                      <p class="text-sm font-medium text-[var(--color-info)]">
+                      <p
+                        class="text-sm font-medium"
+                        [class]="testSetStalled() ? 'text-warning' : 'text-[var(--color-info)]'"
+                      >
                         {{ testSetState() === 'running'
                           ? 'Generando, firmando y enviando los 50 documentos…'
-                          : 'La DIAN está validando tu set de pruebas' }}
+                          : testSetStalled()
+                            ? 'La DIAN no está emitiendo veredicto para este lote'
+                            : 'La DIAN está validando tu set de pruebas' }}
                       </p>
                       <p class="text-xs text-text-secondary mt-1">
                         {{ testSetState() === 'running'
                           ? 'No cierres esta ventana: el envío puede tardar hasta un minuto.'
-                          : 'El envío ya se completó. Ahora esperamos el veredicto, que la DIAN entrega de forma asíncrona.' }}
+                          : testSetStalled()
+                            ? (testSetWait()?.reason ?? 'Seguir consultando no lo va a resolver: hay que diagnosticar o reenviar.')
+                            : 'El envío ya se completó. Ahora esperamos el veredicto, que la DIAN entrega de forma asíncrona.' }}
                       </p>
-                      @if (testSetState() === 'pending' && waitingSinceLabel()) {
+                      @if (testSetState() === 'pending' && !testSetStalled() && waitingSinceLabel()) {
                         <!--
                           The status line must derive from the polling signals, never
                           assert activity on its own: a batch left three days in this
@@ -716,16 +788,20 @@ interface PersistedTestResult {
                     </div>
                   </div>
 
-                  <!-- Fiscal tips: turn dead wait time into something useful. -->
-                  <div class="p-3 rounded-lg bg-[var(--color-surface)] border border-border">
-                    <div class="flex items-start gap-2">
-                      <app-icon name="lightbulb" [size]="16" class="text-primary mt-0.5 shrink-0"></app-icon>
-                      <div class="min-w-0">
-                        <p class="text-xs font-semibold text-text-primary">{{ currentTip().title }}</p>
-                        <p class="text-xs text-text-secondary mt-0.5">{{ currentTip().body }}</p>
+                  <!-- Fiscal tips: turn dead wait time into something useful.
+                       Se ocultan cuando el lote está estancado: ahí el usuario no
+                       necesita entretenimiento, necesita decidir. -->
+                  @if (!testSetStalled()) {
+                    <div class="p-3 rounded-lg bg-[var(--color-surface)] border border-border">
+                      <div class="flex items-start gap-2">
+                        <app-icon name="lightbulb" [size]="16" class="text-primary mt-0.5 shrink-0"></app-icon>
+                        <div class="min-w-0">
+                          <p class="text-xs font-semibold text-text-primary">{{ currentTip().title }}</p>
+                          <p class="text-xs text-text-secondary mt-0.5">{{ currentTip().body }}</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  }
 
                   @if (testSetResult()?.zip_key) {
                     <div class="text-xs text-text-secondary">
@@ -733,8 +809,10 @@ interface PersistedTestResult {
                     </div>
                   }
 
-                  <!-- Long wait: stop the timer and tell them it is fine to leave. -->
-                  @if (pollExhausted()) {
+                  <!-- Long wait: stop the timer and tell them it is fine to leave.
+                       No aplica a un lote estancado: ahí "seguir consultando" es
+                       precisamente lo que ya se demostró inútil. -->
+                  @if (pollExhausted() && !testSetStalled()) {
                     <div class="p-3 rounded-lg bg-warning-light border border-warning text-xs text-warning space-y-2">
                       <div class="flex items-start gap-2">
                         <app-icon name="clock" [size]="14" class="mt-0.5 shrink-0"></app-icon>
@@ -765,18 +843,27 @@ interface PersistedTestResult {
                     did not, the batch can be discarded and re-sent.
                   -->
                   @if (testSetState() === 'pending' && testSetResult()?.zip_key) {
+                    @if (!canDiagnoseDocuments()) {
+                      <p class="text-xs text-text-secondary">
+                        Este lote se envió antes de que se guardaran las claves de
+                        documento, así que no se puede consultar por CUFE. La única
+                        salida es descartarlo y reenviar el set.
+                      </p>
+                    }
                     <div class="flex flex-wrap gap-2 justify-end">
+                      @if (canDiagnoseDocuments()) {
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          (clicked)="diagnoseDocuments()"
+                          [loading]="diagnosing()"
+                        >
+                          <app-icon slot="icon" name="stethoscope" [size]="14"></app-icon>
+                          Diagnosticar documentos
+                        </app-button>
+                      }
                       <app-button
-                        variant="outline"
-                        size="sm"
-                        (clicked)="diagnoseDocuments()"
-                        [loading]="diagnosing()"
-                      >
-                        <app-icon slot="icon" name="stethoscope" [size]="14"></app-icon>
-                        Diagnosticar documentos
-                      </app-button>
-                      <app-button
-                        variant="outline"
+                        [variant]="testSetStalled() ? 'primary' : 'outline'"
                         size="sm"
                         (clicked)="abandonBatch()"
                         [loading]="abandoning()"
@@ -1168,6 +1255,26 @@ export class DianConfigWizardComponent {
   );
 
   /**
+   * Backend reading of the wait. The frontend must not re-derive "stalled" from
+   * its own clock: the browser timer resets on every navigation, while the
+   * backend measures from `executed_at`, which is the only stable origin.
+   */
+  readonly testSetWait = computed(() => this.testSetResult()?.wait ?? null);
+
+  /** True once waiting has stopped being a strategy for this batch. */
+  readonly testSetStalled = computed(
+    () => this.testSetWait()?.stalled === true,
+  );
+
+  /**
+   * Batches submitted before per-document keys were persisted cannot be asked
+   * about by CUFE — offering the button would only produce a 412.
+   */
+  readonly canDiagnoseDocuments = computed(
+    () => this.testSetWait()?.diagnosable !== false,
+  );
+
+  /**
    * Ticks while the UI is waiting, so the elapsed-time label stays live. A
    * `computed` reading `Date.now()` alone would never re-evaluate: the signal
    * graph has no idea the clock moved.
@@ -1204,6 +1311,37 @@ export class DianConfigWizardComponent {
 
   readonly readinessBlockers = computed(
     () => this.readiness()?.checks.filter((c) => !c.satisfied) ?? [],
+  );
+
+  /**
+   * Los tres cortes del checklist. Se derivan de `checks` en vez de leer los
+   * arrays `actionable` / `waiting_on_dian` / `warnings` del backend para que la
+   * pantalla siga funcionando contra un backend que aún no los envía — el
+   * criterio es exactamente el mismo (`severity` y `blocked_by`, con los mismos
+   * valores por defecto).
+   */
+  private readonly unsatisfiedChecks = computed(
+    () => this.readiness()?.checks.filter((c) => !c.satisfied) ?? [],
+  );
+
+  readonly readinessWarnings = computed(() =>
+    this.unsatisfiedChecks().filter((c) => c.severity === 'warning'),
+  );
+
+  readonly actionableBlockers = computed(() =>
+    this.unsatisfiedChecks().filter(
+      (c) => c.severity !== 'warning' && (c.blocked_by ?? 'vendix') === 'vendix',
+    ),
+  );
+
+  readonly dianPendingChecks = computed(() =>
+    this.unsatisfiedChecks().filter(
+      (c) => c.severity !== 'warning' && c.blocked_by === 'dian',
+    ),
+  );
+
+  readonly satisfiedChecks = computed(
+    () => this.readiness()?.checks.filter((c) => c.satisfied) ?? [],
   );
 
   private pollHandle: ReturnType<typeof setInterval> | null = null;
@@ -1691,6 +1829,21 @@ export class DianConfigWizardComponent {
           : result.message || 'La DIAN rechazó el set de pruebas.',
       );
       this.refreshConfig();
+      return;
+    }
+
+    // Pending, but the backend already decided the wait is no longer productive.
+    // Polling a stalled batch can only ever repeat "en proceso", so the browser
+    // timer stops and the card switches to the decision it actually needs.
+    if (result.wait?.stalled) {
+      this.stopPolling();
+      this.pollExhausted.set(true);
+      if (!silent) {
+        this.toast.warning(
+          result.wait.reason ??
+            'La DIAN no emite veredicto para este lote. Diagnostica los documentos o descártalo y reenvía.',
+        );
+      }
       return;
     }
 

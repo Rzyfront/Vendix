@@ -1,0 +1,244 @@
+import { create } from 'xmlbuilder2';
+import { UblCommonBuilder } from './ubl-common.builder';
+import { UBL_NAMESPACES } from './xml-namespaces';
+import { ProviderInvoiceItem } from '../../invoice-provider.interface';
+import { toDecimal } from '../../../utils/dian-money.util';
+
+/**
+ * Regression suite for the FAU14 defect.
+ *
+ * `LegalMonetaryTotal/LineExtensionAmount` used to publish the GROSS subtotal
+ * while every `InvoiceLine/LineExtensionAmount` published its NET amount
+ * (`qty × price − discount`). Any invoice carrying a discount therefore declared
+ * a header that did not equal the sum of its lines, which the DIAN rejects
+ * (`FAU14`). `TaxExclusiveAmount` repeated the gross value even though the
+ * taxable base is net, and `AllowanceTotalAmount` restated a discount the lines
+ * had already applied — with no document-level `AllowanceCharge` backing it.
+ */
+describe('UblCommonBuilder monetary totals', () => {
+  function createRoot(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  function item(overrides: Partial<ProviderInvoiceItem>): ProviderInvoiceItem {
+    return {
+      description: 'Producto',
+      quantity: '1',
+      unit_price: '1000.00',
+      discount_amount: '0.00',
+      tax_amount: '190.00',
+      total_amount: '1190.00',
+      ...overrides,
+    };
+  }
+
+  /** Reads the text of every `cbc:<name>` under the given `cac:<parent>`. */
+  function readValues(xml: string, name: string): string[] {
+    const matches = xml.matchAll(
+      new RegExp(`<cbc:${name}[^>]*>([^<]*)</cbc:${name}>`, 'g'),
+    );
+    return [...matches].map((m) => m[1]);
+  }
+
+  function buildTotals(data: {
+    discount_amount: string;
+    tax_amount: string;
+    items: ProviderInvoiceItem[];
+  }): string {
+    const doc = createRoot();
+    UblCommonBuilder.buildDocumentAllowanceCharge(doc, data, 'COP');
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, data, 'COP');
+    return doc.end({ prettyPrint: false });
+  }
+
+  function buildLines(items: ProviderInvoiceItem[]): string {
+    const doc = createRoot();
+    UblCommonBuilder.buildInvoiceLines(
+      doc,
+      items,
+      [{ tax_name: 'IVA', tax_rate: '19.00', taxable_amount: '0', tax_amount: '0' }],
+      'COP',
+    );
+    return doc.end({ prettyPrint: false });
+  }
+
+  describe('rule FAU14 — header equals the sum of the lines', () => {
+    it('holds when lines carry discounts', () => {
+      const items = [
+        item({ quantity: '2', unit_price: '1000.00', discount_amount: '150.00' }),
+        item({ quantity: '1', unit_price: '500.00', discount_amount: '50.00' }),
+      ];
+      // Gross would be 2500.00; net is 2500 - 200 = 2300.00.
+      const totals = buildTotals({
+        discount_amount: '200.00',
+        tax_amount: '437.00',
+        items,
+      });
+      const lines = buildLines(items);
+
+      const header = readValues(totals, 'LineExtensionAmount')[0];
+      const line_amounts = readValues(lines, 'LineExtensionAmount');
+      const line_sum = line_amounts.reduce(
+        (acc, v) => acc.plus(toDecimal(v)),
+        toDecimal(0),
+      );
+
+      expect(header).toBe('2300.00');
+      expect(line_sum.toFixed(2)).toBe(header);
+    });
+
+    it('holds on a clean invoice with no discount', () => {
+      const items = [item({ quantity: '3', unit_price: '1000.00' })];
+      const totals = buildTotals({
+        discount_amount: '0.00',
+        tax_amount: '570.00',
+        items,
+      });
+      const lines = buildLines(items);
+
+      const header = readValues(totals, 'LineExtensionAmount')[0];
+      expect(header).toBe('3000.00');
+      expect(readValues(lines, 'LineExtensionAmount')[0]).toBe('3000.00');
+    });
+  });
+
+  describe('TaxExclusiveAmount is the NET taxable base', () => {
+    it('subtracts the line discounts instead of publishing the gross subtotal', () => {
+      const totals = buildTotals({
+        discount_amount: '150.00',
+        tax_amount: '161.50',
+        items: [
+          item({
+            quantity: '1',
+            unit_price: '1000.00',
+            discount_amount: '150.00',
+          }),
+        ],
+      });
+      expect(readValues(totals, 'TaxExclusiveAmount')[0]).toBe('850.00');
+    });
+  });
+
+  describe('PayableAmount identity', () => {
+    it('equals TaxInclusiveAmount minus AllowanceTotalAmount', () => {
+      const totals = buildTotals({
+        discount_amount: '200.00',
+        tax_amount: '437.00',
+        items: [
+          item({
+            quantity: '2',
+            unit_price: '1000.00',
+            discount_amount: '150.00',
+          }),
+          item({ quantity: '1', unit_price: '500.00', discount_amount: '50.00' }),
+        ],
+      });
+
+      const inclusive = toDecimal(readValues(totals, 'TaxInclusiveAmount')[0]);
+      const allowance = toDecimal(readValues(totals, 'AllowanceTotalAmount')[0]);
+      const payable = readValues(totals, 'PayableAmount')[0];
+
+      expect(inclusive.minus(allowance).toFixed(2)).toBe(payable);
+      // 2300 net + 437 tax = 2737; no document-level discount remains.
+      expect(payable).toBe('2737.00');
+    });
+  });
+
+  describe('document-level allowance', () => {
+    it('is not emitted when the lines already carry the whole discount', () => {
+      const totals = buildTotals({
+        discount_amount: '150.00',
+        tax_amount: '161.50',
+        items: [
+          item({
+            quantity: '1',
+            unit_price: '1000.00',
+            discount_amount: '150.00',
+          }),
+        ],
+      });
+      expect(totals).not.toContain('AllowanceChargeReason');
+      expect(readValues(totals, 'AllowanceTotalAmount')[0]).toBe('0.00');
+    });
+
+    it('is emitted with a backing AllowanceCharge for a footer-only discount', () => {
+      // 100.00 of the document discount is not attributable to any line.
+      const totals = buildTotals({
+        discount_amount: '100.00',
+        tax_amount: '190.00',
+        items: [item({ quantity: '1', unit_price: '1000.00' })],
+      });
+
+      expect(totals).toContain('AllowanceChargeReason');
+      expect(totals).toContain('<cbc:ChargeIndicator>false</cbc:ChargeIndicator>');
+      expect(readValues(totals, 'AllowanceTotalAmount')[0]).toBe('100.00');
+      // 1000 net + 190 tax - 100 footer discount.
+      expect(readValues(totals, 'PayableAmount')[0]).toBe('1090.00');
+      // BaseAmount is the net line extension the allowance applies to.
+      expect(readValues(totals, 'BaseAmount')[0]).toBe('1000.00');
+    });
+
+    it('never emits a negative allowance when lines over-discount', () => {
+      const totals = buildTotals({
+        discount_amount: '50.00',
+        tax_amount: '161.50',
+        items: [
+          item({
+            quantity: '1',
+            unit_price: '1000.00',
+            discount_amount: '150.00',
+          }),
+        ],
+      });
+      expect(readValues(totals, 'AllowanceTotalAmount')[0]).toBe('0.00');
+      expect(totals).not.toContain('AllowanceChargeReason');
+    });
+  });
+
+  describe('scale of every emitted amount', () => {
+    it('pads unscaled inputs to two decimals', () => {
+      const totals = buildTotals({
+        discount_amount: '0',
+        tax_amount: '190',
+        items: [item({ quantity: '1', unit_price: '1000', tax_amount: '190' })],
+      });
+      for (const name of [
+        'LineExtensionAmount',
+        'TaxExclusiveAmount',
+        'TaxInclusiveAmount',
+        'AllowanceTotalAmount',
+        'PayableAmount',
+      ]) {
+        expect(readValues(totals, name)[0]).toMatch(/^-?\d+\.\d{2}$/);
+      }
+    });
+
+    it('pads the line tax percent to two decimals', () => {
+      const doc = createRoot();
+      UblCommonBuilder.buildInvoiceLines(
+        doc,
+        [item({})],
+        // '19' is what a Decimal(5,2) holding 19.00 used to serialize as.
+        [
+          {
+            tax_name: 'IVA',
+            tax_rate: '19',
+            taxable_amount: '1000',
+            tax_amount: '190',
+          },
+        ],
+        'COP',
+      );
+      const xml = doc.end({ prettyPrint: false });
+      expect(readValues(xml, 'Percent')[0]).toBe('19.00');
+    });
+  });
+});

@@ -67,6 +67,77 @@ export interface SubscriptionFiscalSuggestion {
   nit_dv: string | null;
 }
 
+export type PlatformTestSetWaitState =
+  | 'idle'
+  | 'processing'
+  | 'stalled'
+  | 'passed'
+  | 'rejected'
+  | 'abandoned';
+
+export type PlatformTestSetNextAction =
+  | 'run_test_set'
+  | 'recheck'
+  | 'diagnose_documents'
+  | 'abandon_and_resend';
+
+/**
+ * Bounded reading of the habilitación batch. `stalled` is what stops the page
+ * from rendering an unbounded "en proceso": DIAN acknowledged the ZipKey but has
+ * demonstrably stopped answering, and the next step is a decision, not a wait.
+ */
+export interface PlatformTestSetWait {
+  state: PlatformTestSetWaitState;
+  waiting_ms: number | null;
+  stalled: boolean;
+  /** False for legacy batches whose per-document keys were never persisted. */
+  diagnosable: boolean;
+  reason: string | null;
+  next_actions: PlatformTestSetNextAction[];
+}
+
+export interface PlatformTestSetStatus {
+  enablement_status: string | null;
+  test_set_id: string | null;
+  environment: SubscriptionFiscalEnvironment | string | null;
+  last_test_result: Record<string, unknown> | null;
+  wait: PlatformTestSetWait;
+}
+
+/**
+ * One prerequisite for submitting the platform habilitación set.
+ * `issued_by_dian` separates "we still have to do this" from "we are waiting on
+ * the DIAN to issue it" — the second kind cannot be fixed from the app.
+ */
+export interface PlatformHabilitationCheck {
+  key: string;
+  label: string;
+  satisfied: boolean;
+  action: string;
+  /** Derived mirror of `blocked_by === 'dian'`. */
+  issued_by_dian: boolean;
+  /**
+   * Same contract as the tenant checklist: `warning` is an early alert that must
+   * NOT be rendered as a blocker nor counted against `ready`.
+   */
+  severity?: 'blocking' | 'warning';
+  owner?: 'tenant' | 'platform';
+  blocked_by?: 'vendix' | 'dian';
+  days_remaining?: number;
+  percent_remaining?: number;
+}
+
+export interface PlatformHabilitationReadiness {
+  ready: boolean;
+  checks: PlatformHabilitationCheck[];
+  /** Blocking and actionable by Vendix operations right now. */
+  actionable?: PlatformHabilitationCheck[];
+  /** Blocking, pending a DIAN issuance or verdict. */
+  waiting_on_dian?: PlatformHabilitationCheck[];
+  /** Early alerts. Never affect `ready`. */
+  warnings?: PlatformHabilitationCheck[];
+}
+
 export interface SubscriptionFiscalStatus {
   settings: SubscriptionFiscalSettings;
   dian_config: MaskedDianConfiguration | null;
@@ -77,6 +148,8 @@ export interface SubscriptionFiscalStatus {
     pending: number;
   };
   suggested?: SubscriptionFiscalSuggestion | null;
+  test_set?: PlatformTestSetStatus | null;
+  habilitation_readiness?: PlatformHabilitationReadiness | null;
 }
 
 export interface UpsertSubscriptionFiscalConfigDto {
@@ -201,6 +274,24 @@ export interface CreatePlatformResolutionDto {
   resolution_date?: string;
   valid_from?: string;
   valid_to?: string;
+}
+
+/**
+ * Partial update. `prefix` / `document_type` / `rango_inicial` are the
+ * DIAN-authorized identity of the resolution: the backend rejects changing them
+ * once numbering was consumed, so the form disables them in that state.
+ */
+export interface UpdatePlatformResolutionDto {
+  prefix?: string;
+  document_type?: PlatformResolutionDocumentType;
+  rango_inicial?: number;
+  rango_final?: number;
+  technical_key?: string;
+  resolution_number?: string;
+  resolution_date?: string;
+  valid_from?: string;
+  valid_to?: string;
+  is_active?: boolean;
 }
 
 export interface ListPlatformResolutionsQuery {

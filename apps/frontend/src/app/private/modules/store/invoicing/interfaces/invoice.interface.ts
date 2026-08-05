@@ -304,6 +304,54 @@ export interface DianTestResult {
     status_message: string;
     success: boolean;
   }>;
+  /**
+   * Bounded reading of the wait, computed by the backend from `pending` +
+   * `executed_at`. Without it the UI can only say "pending", which after a few
+   * hours reads as an infinite loop: `stalled` is the state that turns waiting
+   * into a decision, and `diagnosable` says whether asking DIAN per document is
+   * even possible for this batch.
+   */
+  wait?: DianTestSetWait;
+}
+
+export type DianTestSetWaitState =
+  | 'idle'
+  | 'processing'
+  | 'stalled'
+  | 'passed'
+  | 'rejected'
+  | 'abandoned';
+
+export type DianTestSetNextAction =
+  | 'run_test_set'
+  | 'recheck'
+  | 'diagnose_documents'
+  | 'abandon_and_resend';
+
+export interface DianTestSetWait {
+  state: DianTestSetWaitState;
+  waiting_ms: number | null;
+  stalled: boolean;
+  diagnosable: boolean;
+  reason: string | null;
+  next_actions: DianTestSetNextAction[];
+}
+
+/**
+ * Answer of `GET /store/invoicing/uvt-threshold`: the 5 UVT ceiling for the POS
+ * equivalent document (Art. 616-1 ET / Res. 000165 de 2023).
+ *
+ * `enforced: false` means the limit does not apply right now — electronic
+ * invoicing is inactive for the store, or no UVT is configured for the year. It
+ * mirrors exactly when the sale transaction also lets an anonymous sale through,
+ * so the POS hint and the server gate cannot disagree.
+ */
+export interface PosUvtThreshold {
+  enforced: boolean;
+  uvt_value: number | null;
+  uvt_limit: number;
+  limit_cop: number | null;
+  year: number;
 }
 
 /** One prerequisite in `GET dian-config/:id/production-readiness`. */
@@ -313,6 +361,21 @@ export interface DianReadinessCheck {
   satisfied: boolean;
   action: string;
   owner: 'tenant' | 'platform';
+  /**
+   * `warning` = early alert; it still works today and must NOT be rendered as a
+   * blocker. Absent means `blocking` (the historical behavior).
+   */
+  severity?: 'blocking' | 'warning';
+  /**
+   * `dian` = our part is done and the DIAN has not ruled. Rendered as "esperando
+   * a la DIAN", never as a to-do: presenting it as actionable is what makes a
+   * merchant re-send a test set that is still under review. Absent means `vendix`.
+   */
+  blocked_by?: 'vendix' | 'dian';
+  /** Days left, on the certificate-expiry alert. */
+  days_remaining?: number;
+  /** Share of the numbering range still available, on the range alert. */
+  percent_remaining?: number;
 }
 
 export interface DianProductionReadiness {
@@ -322,6 +385,12 @@ export interface DianProductionReadiness {
   enablement_status: string;
   checks: DianReadinessCheck[];
   missing: string[];
+  /** Early alerts. Never affect `ready`. */
+  warnings: DianReadinessCheck[];
+  /** Blocking and actionable now. */
+  actionable: DianReadinessCheck[];
+  /** Blocking, pending a DIAN verdict. */
+  waiting_on_dian: DianReadinessCheck[];
   resolutions: Array<{
     id: number;
     prefix: string;
@@ -371,11 +440,11 @@ export interface DianEmissionStatus {
    * and `owner` says whether they can do it at all (`platform` means only
    * Vendix operations can).
    */
-  blockers: Array<{
-    key: string;
-    label: string;
-    satisfied: boolean;
-    action: string;
-    owner: 'tenant' | 'platform';
-  }>;
+  blockers: DianReadinessCheck[];
+  /** Early alerts that do NOT stop emission (certificate/range about to run out). */
+  warnings: DianReadinessCheck[];
+  /** Blockers the merchant or Vendix can act on right now. */
+  actionable: DianReadinessCheck[];
+  /** Blockers waiting on a DIAN verdict. */
+  waiting_on_dian: DianReadinessCheck[];
 }

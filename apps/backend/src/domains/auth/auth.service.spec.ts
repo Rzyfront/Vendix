@@ -6,6 +6,11 @@ import { ConfigService } from '@nestjs/config';
 import { EmailService } from '../../email/email.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
+import { EmailBrandingService } from '../../email/services/email-branding.service';
+import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
+import { CustomersService } from '../store/customers/customers.service';
+import { S3Service } from '@common/services/s3.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
@@ -15,6 +20,11 @@ describe('AuthService Login Flow', () => {
 
   const mockPrismaService = {
     users: {
+      // `login` entra por findUserAccountsByEmail, que lee con findMany: un
+      // mismo email puede tener cuenta en varias organizaciones, así que primero
+      // se resuelven las candidatas y solo después se elige una. findFirst
+      // sigue declarado porque otros caminos del servicio lo usan.
+      findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
@@ -28,13 +38,20 @@ describe('AuthService Login Flow', () => {
     },
     stores: {
       findUnique: jest.fn(),
+      // `login` resuelve la organización a partir del store_slug cuando el
+      // cliente no manda organization_slug, y esa lectura es findFirst: el slug
+      // de tienda solo es único DENTRO de la organización, no globalmente.
+      findFirst: jest.fn(),
     },
     store_users: {
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       create: jest.fn(),
     },
     refresh_tokens: {
       create: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
     },
     login_attempts: {
       create: jest.fn(),
@@ -55,6 +72,50 @@ describe('AuthService Login Flow', () => {
     logAuth: jest.fn(),
   };
   const mockOnboardingService = {};
+  // El login firma el snapshot de sesión: resuelve branding, genera el panel_ui
+  // por defecto para el app_type y firma las URLs de avatar/logo. Sin estos
+  // dobles el módulo no compila y ninguna aserción de login corre.
+  const mockEmailBrandingService = {
+    getStoreBranding: jest.fn().mockResolvedValue({}),
+    getOrganizationBranding: jest.fn().mockResolvedValue({}),
+    getStoreEcommerceUrl: jest.fn().mockResolvedValue('https://tienda.test'),
+  };
+  const mockDefaultPanelUIService = {
+    generatePanelUI: jest.fn().mockReturnValue({}),
+  };
+  // signUrl devuelve la entrada: la firma de S3 es contrato de S3Service y
+  // tiene sus propios tests; una firma falsa solo ensuciaría las aserciones.
+  const mockS3Service = {
+    signUrl: jest.fn((url) => url),
+    sanitizeForStorage: jest.fn((url) => url),
+  };
+  const mockEventEmitter = { emit: jest.fn() };
+
+
+  /**
+   * Fila de `users` tal como la trae findUserAccountsByEmail: con la
+   * organización embebida y `user_roles.roles.role_permissions.permissions`,
+   * porque login() deriva los permisos planos desde esa misma consulta en vez de
+   * hacer un segundo fetch.
+   */
+  function accountRow(overrides: Record<string, any> = {}) {
+    return {
+      id: 1,
+      email: 'test@test.com',
+      password: 'hashed',
+      organization_id: 1,
+      state: 'active',
+      failed_login_attempts: 0,
+      organizations: {
+        id: 1,
+        name: 'Org A',
+        slug: 'org-a',
+        logo_url: null,
+      },
+      user_roles: [],
+      ...overrides,
+    };
+  }
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -66,6 +127,15 @@ describe('AuthService Login Flow', () => {
         { provide: EmailService, useValue: mockEmailService },
         { provide: AuditService, useValue: mockAuditService },
         { provide: OnboardingService, useValue: mockOnboardingService },
+        { provide: EmailBrandingService, useValue: mockEmailBrandingService },
+        {
+          provide: DefaultPanelUIService,
+          useValue: mockDefaultPanelUIService,
+        },
+        { provide: S3Service, useValue: mockS3Service },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
+        // DEPENDENCIA MUERTA: inyectada en AuthService y nunca usada.
+        { provide: CustomersService, useValue: {} },
       ],
     }).compile();
 
@@ -74,7 +144,7 @@ describe('AuthService Login Flow', () => {
   });
 
   it('should throw UnauthorizedException if user does not exist (Invalid Email)', async () => {
-    mockPrismaService.users.findFirst.mockResolvedValue(null);
+    mockPrismaService.users.findMany.mockResolvedValue([]);
 
     try {
       await service.login({ email: 'wrong@email.com', password: '123' });
@@ -85,14 +155,8 @@ describe('AuthService Login Flow', () => {
   });
 
   it('should throw UnauthorizedException if organization slug does not match user organization', async () => {
-    const user = {
-      id: 1,
-      email: 'test@test.com',
-      password: 'hashed',
-      organization_id: 1,
-      user_roles: [],
-    };
-    mockPrismaService.users.findFirst.mockResolvedValue(user);
+    // La única cuenta del email vive en org-a; el cliente pide entrar por org-b.
+    mockPrismaService.users.findMany.mockResolvedValue([accountRow()]);
     mockPrismaService.user_settings.findUnique.mockResolvedValue({
       config: {},
     });
@@ -114,21 +178,23 @@ describe('AuthService Login Flow', () => {
   });
 
   it('should throw UnauthorizedException if store belongs to different organization', async () => {
-    const user = {
-      id: 1,
-      email: 'test@test.com',
-      password: 'hashed',
-      organization_id: 1,
-      user_roles: [],
-    };
-    mockPrismaService.users.findFirst.mockResolvedValue(user);
+    mockPrismaService.users.findMany.mockResolvedValue([accountRow()]);
     mockPrismaService.user_settings.findUnique.mockResolvedValue({
       config: {},
+    });
+    // Cuando llega store_slug sin organization_slug, el servicio resuelve la
+    // organización desde la tienda con findFirst (el slug de tienda solo es
+    // único dentro de su organización).
+    mockPrismaService.stores.findFirst.mockResolvedValue({
+      id: 10,
+      slug: 'store-b',
+      organization_id: 2, // Different Org ID
+      organizations: { slug: 'org-b' },
     });
     mockPrismaService.stores.findUnique.mockResolvedValue({
       id: 10,
       slug: 'store-b',
-      organization_id: 2, // Different Org ID
+      organization_id: 2,
     });
 
     try {
@@ -144,15 +210,18 @@ describe('AuthService Login Flow', () => {
   });
 
   it('should allow High Privilege user to access store in same organization without direct link', async () => {
-    const user = {
-      id: 1,
+    const user = accountRow({
       email: 'owner@test.com',
       password: await bcrypt.hash('123', 10),
+      user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+    });
+    mockPrismaService.users.findMany.mockResolvedValue([user]);
+    mockPrismaService.stores.findFirst.mockResolvedValue({
+      id: 10,
+      slug: 'store-a',
       organization_id: 1,
-      user_roles: [{ roles: { name: 'owner' } }],
-      failed_login_attempts: 0,
-    };
-    mockPrismaService.users.findFirst.mockResolvedValue(user);
+      organizations: { slug: 'org-a' },
+    });
     mockPrismaService.user_settings.findUnique.mockResolvedValue({
       config: {},
     });
@@ -188,14 +257,18 @@ describe('AuthService Login Flow', () => {
   });
 
   it('should throw UnauthorizedException for Low Privilege user accessing store without direct link', async () => {
-    const user = {
+    const user = accountRow({
       id: 2,
       email: 'staff@test.com',
-      password: 'hashed',
+      user_roles: [{ roles: { name: 'employee', role_permissions: [] } }],
+    });
+    mockPrismaService.users.findMany.mockResolvedValue([user]);
+    mockPrismaService.stores.findFirst.mockResolvedValue({
+      id: 10,
+      slug: 'store-a',
       organization_id: 1,
-      user_roles: [{ roles: { name: 'employee' } }],
-    };
-    mockPrismaService.users.findFirst.mockResolvedValue(user);
+      organizations: { slug: 'org-a' },
+    });
     mockPrismaService.user_settings.findUnique.mockResolvedValue({
       config: {},
     });

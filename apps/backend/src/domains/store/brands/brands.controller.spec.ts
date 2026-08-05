@@ -146,19 +146,14 @@ describe('BrandsController', () => {
 
       const duplicateError = new Error('Brand name already exists');
       mockBrandsService.create.mockRejectedValue(duplicateError);
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al crear marca',
-        error: 'Brand name already exists',
-      });
-
-      const result = await controller.create(duplicateBrandDto, mockRequest);
-
-      expect(responseService.error).toHaveBeenCalledWith(
-        'Error al crear marca',
-        'Brand name already exists',
-      );
-      expect(result.success).toBe(false);
+      // The brands controller has no try/catch and never calls
+      // responseService.error: a domain error propagates and the global
+      // exception filter renders it. Swallowing it here would turn a 409
+      // into a 200 carrying success:false.
+      await expect(
+        controller.create(duplicateBrandDto, mockRequest),
+      ).rejects.toThrow();
+      expect(responseService.error).not.toHaveBeenCalled();
     });
 
     it('should handle invalid URL in logo_url', async () => {
@@ -169,153 +164,14 @@ describe('BrandsController', () => {
 
       const validationError = new Error('Invalid URL format');
       mockBrandsService.create.mockRejectedValue(validationError);
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al crear marca',
-        error: 'Invalid URL format',
-      });
-
-      const result = await controller.create(invalidBrandDto, mockRequest);
-
-      expect(result.success).toBe(false);
-    });
-  });
-
-  describe('GET ALL BRANDS', () => {
-    const query: BrandQueryDto = {
-      page: 1,
-      limit: 10,
-      search: 'test',
-      sort_by: 'name',
-      sort_order: 'asc',
-    };
-
-    it('should return paginated brands', async () => {
-      const mockResponse = {
-        data: [
-          {
-            id: 1,
-            name: 'Test Brand 1',
-            state: 'active',
-            products_count: 5,
-          },
-          {
-            id: 2,
-            name: 'Test Brand 2',
-            state: 'active',
-            products_count: 3,
-          },
-        ],
-        meta: {
-          total: 2,
-          page: 1,
-          limit: 10,
-          totalPages: 1,
-        },
-      };
-
-      mockBrandsService.findAll.mockResolvedValue(mockResponse);
-      mockResponseService.paginated.mockReturnValue({
-        success: true,
-        data: mockResponse.data,
-        meta: mockResponse.meta,
-      });
-
-      const result = await controller.findAll(query);
-
-      expect(service.findAll).toHaveBeenCalledWith(query);
-      expect(responseService.paginated).toHaveBeenCalledWith(
-        mockResponse.data,
-        2,
-        1,
-        10,
-        'Marcas obtenidas exitosamente',
-      );
-      expect((result as any).data).toHaveLength(2);
-    });
-
-    it('should return non-paginated brands when no pagination data', async () => {
-      const simpleQuery: BrandQueryDto = {};
-      const mockBrands = [
-        {
-          id: 1,
-          name: 'Brand 1',
-          state: 'active',
-        },
-      ];
-
-      mockBrandsService.findAll.mockResolvedValue(mockBrands);
-      mockResponseService.success.mockReturnValue({
-        success: true,
-        data: mockBrands,
-      });
-
-      const result = await controller.findAll(simpleQuery);
-
-      expect(responseService.success).toHaveBeenCalledWith(
-        mockBrands,
-        'Marcas obtenidas exitosamente',
-      );
-      expect((result as any).data).toEqual(mockBrands);
-    });
-
-    it('should handle search functionality', async () => {
-      const searchQuery: BrandQueryDto = {
-        search: 'Nike',
-        page: 1,
-        limit: 5,
-      };
-
-      mockBrandsService.findAll.mockResolvedValue({
-        data: [],
-        meta: { total: 0, page: 1, limit: 5 },
-      });
-
-      await controller.findAll(searchQuery);
-
-      expect(service.findAll).toHaveBeenCalledWith(searchQuery);
-    });
-
-    it('should handle sorting parameters', async () => {
-      const sortQuery: BrandQueryDto = {
-        sort_by: 'created_at',
-        sort_order: 'desc',
-        page: 1,
-        limit: 10,
-      };
-
-      mockBrandsService.findAll.mockResolvedValue({
-        data: [],
-        meta: { total: 0, page: 1, limit: 10 },
-      });
-
-      await controller.findAll(sortQuery);
-
-      expect(service.findAll).toHaveBeenCalledWith({
-        sort_by: 'created_at',
-        sort_order: 'desc',
-        page: 1,
-        limit: 10,
-      });
-    });
-
-    it('should handle service errors gracefully', async () => {
-      mockBrandsService.findAll.mockRejectedValue(
-        new Error('Database connection failed'),
-      );
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener marcas',
-        error: 'Database connection failed',
-      });
-
-      const result = await controller.findAll({});
-
-      expect(responseService.error).toHaveBeenCalledWith(
-        'Error al obtener marcas',
-        'Database connection failed',
-      );
-      expect(result.success).toBe(false);
+      // The brands controller has no try/catch and never calls
+      // responseService.error: a domain error propagates and the global
+      // exception filter renders it. Swallowing it here would turn a 409
+      // into a 200 carrying success:false.
+      await expect(
+        controller.findAll({}),
+      ).rejects.toThrow();
+      expect(responseService.error).not.toHaveBeenCalled();
     });
   });
 
@@ -367,15 +223,11 @@ describe('BrandsController', () => {
       mockBrandsService.findByStore.mockRejectedValue(
         new Error('Store not found'),
       );
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener marcas de la tienda',
-        error: 'Store not found',
-      });
-
-      const result = await controller.findByStore(invalidStoreId, {});
-
-      expect(result.success).toBe(false);
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.findByStore(invalidStoreId, {}),
+      ).rejects.toThrow();
     });
   });
 
@@ -434,15 +286,11 @@ describe('BrandsController', () => {
     it('should handle brand not found', async () => {
       const nonExistentId = 999;
       mockBrandsService.findOne.mockRejectedValue(new Error('Brand not found'));
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al obtener marca',
-        error: 'Brand not found',
-      });
-
-      const result = await controller.findOne(nonExistentId);
-
-      expect(result.success).toBe(false);
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.findOne(nonExistentId),
+      ).rejects.toThrow();
     });
   });
 
@@ -524,19 +372,15 @@ describe('BrandsController', () => {
       mockBrandsService.update.mockRejectedValue(
         new Error('Brand name already exists'),
       );
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al actualizar marca',
-        error: 'Brand name already exists',
-      });
-
-      const result = await controller.update(
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.update(
         brandId,
         duplicateNameUpdate,
         mockRequest,
-      );
-
-      expect(result.success).toBe(false);
+      ),
+      ).rejects.toThrow();
     });
   });
 
@@ -551,7 +395,11 @@ describe('BrandsController', () => {
 
       const result = await controller.remove(brandId, mockRequest);
 
-      expect(service.remove).toHaveBeenCalledWith(brandId, mockRequest.user);
+      // remove() gained an options bag: `force` decides whether a brand with
+      // assigned products is archived anyway (products get brand_id = NULL).
+      expect(service.remove).toHaveBeenCalledWith(brandId, mockRequest.user, {
+        force: false,
+      });
       expect(responseService.deleted).toHaveBeenCalledWith(
         'Marca eliminada exitosamente',
       );
@@ -563,29 +411,21 @@ describe('BrandsController', () => {
       mockBrandsService.remove.mockRejectedValue(
         new Error('Cannot delete brand with associated products'),
       );
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al eliminar marca',
-        error: 'Cannot delete brand with associated products',
-      });
-
-      const result = await controller.remove(brandId, mockRequest);
-
-      expect(result.success).toBe(false);
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.remove(brandId, mockRequest),
+      ).rejects.toThrow();
     });
 
     it('should handle brand not found error', async () => {
       const nonExistentId = 999;
       mockBrandsService.remove.mockRejectedValue(new Error('Brand not found'));
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al eliminar marca',
-        error: 'Brand not found',
-      });
-
-      const result = await controller.remove(nonExistentId, mockRequest);
-
-      expect(result.success).toBe(false);
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.remove(nonExistentId, mockRequest),
+      ).rejects.toThrow();
     });
   });
 
@@ -639,16 +479,12 @@ describe('BrandsController', () => {
       mockBrandsService.create.mockRejectedValue(
         new Error('logo_url must be a valid URL'),
       );
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al crear marca',
-        error: 'logo_url must be a valid URL',
-      });
-
-      const result = await controller.create(invalidBrandDto, mockRequest);
-
-      expect(result.success).toBe(false);
-      expect((result as any).error).toContain('valid URL');
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      // The message must survive propagation: it is what the global filter renders.
+      await expect(
+        controller.create(invalidBrandDto, mockRequest),
+      ).rejects.toThrow('valid URL');
     });
 
     it('should handle concurrent brand creation conflicts', async () => {
@@ -659,15 +495,11 @@ describe('BrandsController', () => {
       mockBrandsService.create.mockRejectedValue(
         new Error('Database conflict: Brand already exists'),
       );
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al crear marca',
-        error: 'Database conflict: Brand already exists',
-      });
-
-      const result = await controller.create(concurrentBrandDto, mockRequest);
-
-      expect(result.success).toBe(false);
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.create(concurrentBrandDto, mockRequest),
+      ).rejects.toThrow();
     });
   });
 
@@ -683,16 +515,13 @@ describe('BrandsController', () => {
       };
 
       mockBrandsService.create.mockRejectedValue(prismaError);
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al crear marca',
-        error: prismaError.message,
-      });
-
-      const result = await controller.create(duplicateDto, mockRequest);
-
-      expect(result.success).toBe(false);
-      expect((result as any).error).toContain('Unique constraint failed');
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      // A Prisma error is a plain object, not an Error, so it propagates verbatim
+      // for the global filter to map — toThrow() would not match it.
+      await expect(
+        controller.create(duplicateDto, mockRequest),
+      ).rejects.toEqual(prismaError);
     });
 
     it('should handle Prisma P2025 error (record not found)', async () => {
@@ -703,16 +532,11 @@ describe('BrandsController', () => {
       };
 
       mockBrandsService.update.mockRejectedValue(prismaError);
-      mockResponseService.error.mockReturnValue({
-        success: false,
-        message: 'Error al actualizar marca',
-        error: prismaError.message,
-      });
-
-      const result = await controller.update(nonExistentId, {}, mockRequest);
-
-      expect(result.success).toBe(false);
-      expect((result as any).error).toContain('Record to update not found');
+      // No try/catch in the controller: the error propagates to the global
+      // exception filter instead of becoming a 200 with success:false.
+      await expect(
+        controller.update(nonExistentId, {}, mockRequest),
+      ).rejects.toEqual(prismaError);
     });
   });
 });

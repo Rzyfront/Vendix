@@ -11,6 +11,8 @@ import { certificateNitMatches } from './certificates/nit-match.util';
 import {
   FiscalProductionReadinessService,
   ProductionReadinessCheck,
+  isBlockingCheck,
+  isActionableCheck,
 } from '../providers/fiscal-production-readiness.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
 
@@ -285,6 +287,7 @@ export class DianConfigService {
         environment: dto.environment || 'test',
         enablement_status: 'not_started',
         test_set_id: dto.test_set_id,
+        certificate_kms_key_id: dto.certificate_kms_key_id || null,
       },
     });
 
@@ -340,6 +343,13 @@ export class DianConfigService {
       update_data.environment = dto.environment;
     if (dto.test_set_id !== undefined)
       update_data.test_set_id = dto.test_set_id;
+    // Empty string means "go back to in-process custody", so it must reach the
+    // column as NULL rather than as `''`. An empty-string ARN would make KMS
+    // reject every signature with no way to withdraw it from the panel.
+    if (dto.certificate_kms_key_id !== undefined) {
+      update_data.certificate_kms_key_id =
+        dto.certificate_kms_key_id === '' ? null : dto.certificate_kms_key_id;
+    }
     if (
       dto.nit !== undefined ||
       dto.nit_type !== undefined ||
@@ -525,6 +535,9 @@ export class DianConfigService {
         reason:
           'Esta tienda todavía no tiene configuración de facturación electrónica.',
         blockers: [] as ProductionReadinessCheck[],
+        warnings: [] as ProductionReadinessCheck[],
+        actionable: [] as ProductionReadinessCheck[],
+        waiting_on_dian: [] as ProductionReadinessCheck[],
       };
     }
 
@@ -548,7 +561,22 @@ export class DianConfigService {
           : config.enablement_status === 'testing'
             ? 'El set de pruebas está en curso ante la DIAN.'
             : 'La configuración DIAN aún no está habilitada para producción.',
-      blockers: (readiness?.checks ?? []).filter((c) => !c.satisfied),
+      // Solo lo que realmente bloquea: una alerta anticipada (certificado por
+      // vencer, rango por agotarse) NO es un blocker — hoy se puede emitir.
+      blockers: (readiness?.checks ?? []).filter(
+        (c) => !c.satisfied && isBlockingCheck(c),
+      ),
+      warnings: (readiness?.checks ?? []).filter(
+        (c) => !c.satisfied && !isBlockingCheck(c),
+      ),
+      // Mismo corte que el checklist de producción: lo que el comercio puede
+      // hacer hoy, separado de lo que solo la DIAN puede resolver.
+      actionable: (readiness?.checks ?? []).filter(
+        (c) => !c.satisfied && isBlockingCheck(c) && isActionableCheck(c),
+      ),
+      waiting_on_dian: (readiness?.checks ?? []).filter(
+        (c) => !c.satisfied && isBlockingCheck(c) && !isActionableCheck(c),
+      ),
     };
   }
 
@@ -607,11 +635,33 @@ export class DianConfigService {
       owner: 'tenant',
     };
 
-    const checks = [...report.checks, resolution_check];
-    const missing = checks.filter((c) => !c.satisfied).map((c) => c.key);
+    // Alerta de rango: se mide sobre la resolución de producción vigente con MÁS
+    // recorrido restante. Avisar por la más agotada produciría una alerta
+    // permanente en cuanto el tenant tuviera dos rangos y uno quedara casi
+    // vacío, aunque el otro cubriera meses de facturación.
+    const range_warning = production_resolutions.length
+      ? production_resolutions
+          .map((r) => this.readiness.buildResolutionRangeWarning(r))
+          .sort(
+            (a, b) => (b.percent_remaining ?? 0) - (a.percent_remaining ?? 0),
+          )[0]
+      : null;
+
+    const checks = [
+      ...report.checks,
+      resolution_check,
+      ...(range_warning ? [range_warning] : []),
+    ];
+    const unsatisfied = checks.filter((c) => !c.satisfied);
+    const missing = unsatisfied.filter(isBlockingCheck).map((c) => c.key);
+    const warnings = unsatisfied.filter((c) => !isBlockingCheck(c));
+    const blocking = unsatisfied.filter(isBlockingCheck);
 
     return {
       ...report,
+      warnings,
+      actionable: blocking.filter(isActionableCheck),
+      waiting_on_dian: blocking.filter((c) => !isActionableCheck(c)),
       // Report the CURRENT state, not the hypothetical one used to evaluate.
       environment: config.environment,
       enablement_status: config.enablement_status,

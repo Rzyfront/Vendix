@@ -44,6 +44,19 @@ describe('SubscriptionResolverService', () => {
   });
 
   function makeSubscription(overrides: any = {}) {
+    // RNC-39 split the feature source by state: a PAID state reads `paid_plan`,
+    // `trial` reads `plan`. The fixture carries the same plan in both slots so
+    // these cases assert the merge rules (partner override, promo overlay)
+    // rather than accidentally testing which slot the resolver picked.
+    const plan = {
+      id: 1,
+      code: 'core-free',
+      ai_feature_flags: baseAIFlags,
+      grace_period_soft_days: 5,
+      grace_period_hard_days: 10,
+      updated_at: new Date('2026-04-01T00:00:00Z'),
+    };
+
     return {
       id: 1,
       store_id: 10,
@@ -51,14 +64,8 @@ describe('SubscriptionResolverService', () => {
       resolved_at: new Date('2026-04-23T10:00:00Z'),
       current_period_end: new Date('2026-05-23T10:00:00Z'),
       promotional_applied_at: null,
-      plan: {
-        id: 1,
-        code: 'core-free',
-        ai_feature_flags: baseAIFlags,
-        grace_period_soft_days: 5,
-        grace_period_hard_days: 10,
-        updated_at: new Date('2026-04-01T00:00:00Z'),
-      },
+      plan,
+      paid_plan: plan,
       partner_override: null,
       promotional_plan: null,
       ...overrides,

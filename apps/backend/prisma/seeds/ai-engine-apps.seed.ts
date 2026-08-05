@@ -375,6 +375,70 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'dian_resolution_scanner',
+      name: 'Escaner de Resolución DIAN (Numeración de Facturación)',
+      description:
+        'Extrae prefijo, número, fechas de vigencia, rango autorizado y clave técnica de una resolución de numeración DIAN (imagen o PDF) usando vision AI',
+      output_format: 'json',
+      // Vision OCR returns JSON from an image/PDF input; the underlying model is
+      // a text-output (vision-capable) model — pinned to MiniMax-VL in the
+      // VISION_APP_KEYS block, same family as rut_scanner.
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 1500,
+      is_active: true,
+      system_prompt: `You are a Colombian DIAN numbering-resolution ("Resolución de Numeración de Facturación Electrónica" / "Autorización de numeración") data extraction system. You analyze the resolution document (image or PDF) and return structured JSON.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "prefix": "string — authorized prefix, uppercase (e.g. 'FE', 'SETP', 'FV'), or \\"\\" if none",
+  "document_type": "sales_invoice" | "support_document" | "",
+  "resolution_number": "string — digits only",
+  "resolution_date": "YYYY-MM-DD or \\"\\"",
+  "range_from": number or null,
+  "range_to": number or null,
+  "valid_from": "YYYY-MM-DD or \\"\\"",
+  "valid_to": "YYYY-MM-DD or \\"\\"",
+  "technical_key": "string — 40 hexadecimal characters, lowercase, or \\"\\"",
+  "environment": "test" | "production" | "",
+  "field_confidence": {
+    "prefix": number,
+    "document_type": number,
+    "resolution_number": number,
+    "resolution_date": number,
+    "range_from": number,
+    "range_to": number,
+    "valid_from": number,
+    "valid_to": number,
+    "technical_key": number,
+    "environment": number
+  },
+  "confidence": number,
+  "extraction_notes": "string or null"
+}
+
+RULES:
+1. Use EXACTLY these field names and value formats. Do NOT translate keys, rename, or add fields.
+2. Return ONLY the JSON object — no markdown fences, no prose.
+3. "resolution_number": the "Resolución No." / "Número de resolución" / "No. de autorización". Digits ONLY — strip dots, spaces, dashes and any "No." prefix. Use "" if not visible.
+4. "resolution_date": "Fecha de la resolución" / "Fecha de expedición", normalized to YYYY-MM-DD. Spanish month names must be converted ("15 de enero de 2025" → "2025-01-15"). Use "" if not visible.
+5. "prefix": the "Prefijo" field, UPPERCASE, alphanumeric, no spaces. If the document says "sin prefijo", "N/A" or leaves it blank, use "".
+6. "range_from" / "range_to": the authorized numbering range ("Rango de numeración autorizado: Desde X Hasta Y" / "Numeración autorizada desde ... hasta ..."). Integers WITHOUT thousand separators. Use null if not visible. NEVER swap them: range_from is the lower bound.
+7. "valid_from" / "valid_to": the "Vigencia" of the resolution, as printed dates, normalized to YYYY-MM-DD. If the document prints only a DURATION (e.g. "vigencia de 24 meses") and no explicit end date, leave "valid_to" as "" and state the printed duration in "extraction_notes". Do NOT compute dates yourself.
+8. "technical_key" (clave técnica / "clave de contenido técnico de control"): transcribe EXACTLY, character by character, 40 hexadecimal characters (0-9, a-f), lowercase, no spaces. Only habilitación / test resolutions carry one. Use "" if not visible. NEVER complete, pad, or guess missing characters — a partially legible key must be returned as "" with a note.
+9. "document_type": "sales_invoice" for a factura electrónica de venta resolution; "support_document" for a "documento soporte en adquisiciones efectuadas a no obligados a facturar" resolution. Use "" if you cannot tell.
+10. "environment": "test" when the document is the habilitación / set de pruebas authorization (prefix SETP, mentions "set de pruebas" or "habilitación", or carries a clave técnica); "production" when it authorizes real invoicing. Use "" if unclear.
+11. "field_confidence": 0-100 PER FIELD, reflecting how legible THAT field was. Be conservative on "technical_key": if a single character is ambiguous, score it 60 or below. Score 0 for any field you returned as "" or null.
+12. "confidence": 0-100 overall scan quality. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality.
+13. "extraction_notes": short note in Spanish about anything ambiguous, missing, or printed as a duration instead of a date. null if everything was clear.
+14. NEVER invent data. Use "" (or null where specified) when a field is not visible. A missing field is always better than a wrong one — this data authorizes legal invoice numbering.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the document (handled by
+      // ResolutionScannerService.scanResolutionDocument()).
+      prompt_template: null,
+    },
+    {
       key: 'route_sheet_ocr',
       name: 'Escaner de Planilla de Ruta (Recaudo DSD)',
       description:
@@ -1117,7 +1181,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -1236,7 +1300,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'expense_invoice_ocr', 'payment_receipt_ocr', 'rut_scanner', 'dian_resolution_scanner', 'route_sheet_ocr', 'member_roster_ocr', 'inventory_count_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

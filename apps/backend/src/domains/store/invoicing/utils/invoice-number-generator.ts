@@ -11,7 +11,9 @@ type FiscalDocumentType =
   | 'support_document'
   | 'support_adjustment_note'
   | 'payroll'
-  | 'payroll_adjustment';
+  | 'payroll_adjustment'
+  | 'pos_equivalent_document'
+  | 'equivalent_adjustment_note';
 
 type GenerateNextNumberOptions =
   | number
@@ -97,13 +99,33 @@ export class InvoiceNumberGenerator {
         throw new VendixHttpException(ErrorCodes.FISCAL_RESOLUTION_MISSING);
       }
 
+      // The cursor must never sit below the authorized floor. A blind
+      // `increment: 1` on a resolution whose `current_number` drifted to 0 emits
+      // numbers starting at 1 — outside the range the DIAN authorized — and the
+      // DIAN rejects every single one of them. Flooring here (under the advisory
+      // lock that already serializes allocation) makes the first number of a
+      // pristine or drifted resolution be exactly `range_from`.
+      const floor = resolution.range_from - 1;
+      const cursor =
+        resolution.current_number < floor ? floor : resolution.current_number;
+
+      if (cursor !== resolution.current_number) {
+        this.logger.warn(
+          `Resolution #${resolution.id} cursor ${resolution.current_number} was below its authorized floor ${floor}; ` +
+            `allocating from ${resolution.range_from} instead of emitting out-of-range numbering`,
+        );
+      }
+
       const result = await tx.invoice_resolutions.updateMany({
         where: {
           id: resolution.id,
           current_number: { lt: resolution.range_to },
         },
+        // Absolute assignment rather than `increment`, because the floored value
+        // is what must land. Safe under the advisory lock: no concurrent
+        // allocation can slip between the read and this write.
         data: {
-          current_number: { increment: 1 },
+          current_number: cursor + 1,
         },
       });
 

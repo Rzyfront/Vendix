@@ -176,6 +176,62 @@ export class CreatePlatformResolutionDto {
   valid_to?: string;
 }
 
+/**
+ * Partial update of a platform DIAN resolution.
+ *
+ * Every field is optional so the caller can send only what changed. What is
+ * *legal* to change depends on whether DIAN numbers have already been consumed
+ * — that rule lives in the service, not here, because it needs the stored row.
+ */
+export class UpdatePlatformResolutionDto {
+  @IsOptional()
+  @IsString()
+  @Length(1, 4)
+  prefix?: string;
+
+  @IsOptional()
+  @IsIn(PLATFORM_RESOLUTION_DOCUMENT_TYPES as unknown as string[])
+  document_type?: PlatformResolutionDocumentType;
+
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  rango_inicial?: number;
+
+  @Type(() => Number)
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  rango_final?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  technical_key?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  resolution_number?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  resolution_date?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  valid_from?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  valid_to?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+}
+
 export class ListPlatformResolutionsQueryDto {
   @IsOptional()
   @IsIn(PLATFORM_RESOLUTION_DOCUMENT_TYPES as unknown as string[])

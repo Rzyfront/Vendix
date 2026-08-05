@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { dianAmount } from '../../../store/invoicing/utils/dian-money.util';
 import { createHash } from 'crypto';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -841,8 +842,13 @@ export class VendorSupportFiscalService {
     };
   }
 
+  /**
+   * Anexo Técnico 1.9 §11.2 requires amounts TRUNCATED to 2 decimals, not
+   * rounded. Routed through the canonical formatter so the CUDS of a support
+   * document is derived exactly like the CUFE of an invoice.
+   */
   private money(value: Prisma.Decimal.Value | null | undefined): string {
-    return new Prisma.Decimal(value ?? 0).toFixed(2);
+    return dianAmount(value ?? 0);
   }
 
   private onlyDigits(value?: string | null): string | undefined {

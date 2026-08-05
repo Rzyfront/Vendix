@@ -2,6 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { AuditService } from '../../../common/audit/audit.service';
+import { S3Service } from '@common/services/s3.service';
+import { DefaultPanelUIService } from '@common/services/default-panel-ui.service';
+import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
+import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { EmailService } from '../../../email/email.service';
 import {
   ConflictException,
@@ -64,6 +68,34 @@ describe('UsersService', () => {
         {
           provide: AuditService,
           useValue: mockAuditService,
+        },
+        {
+          provide: S3Service,
+          useValue: { signUrl: jest.fn((url) => url) },
+        },
+        {
+          provide: DefaultPanelUIService,
+          useValue: { generatePanelUI: jest.fn().mockReturnValue({}) },
+        },
+        {
+          // Alta de personal: el alcance de tienda y la unicidad del email de
+          // staff salieron de UsersService a un servicio compartido, porque la
+          // misma regla la aplican el panel de organización y el de tienda.
+          provide: StaffProvisioningService,
+          useValue: {
+            assertEmailAvailableForStaff: jest.fn(),
+            provisionStaffMembership: jest.fn(),
+          },
+        },
+        {
+          // La asignación de roles también se centralizó: es la que respeta el
+          // unique compuesto (rol, organización) del bug QUI-473.
+          provide: UserRoleAssignmentService,
+          useValue: {
+            assign: jest.fn(),
+            remove: jest.fn(),
+            listUserRoles: jest.fn().mockResolvedValue([]),
+          },
         },
         {
           provide: EmailService,

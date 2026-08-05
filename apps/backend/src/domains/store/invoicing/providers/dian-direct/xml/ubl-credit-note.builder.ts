@@ -2,6 +2,10 @@ import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
 import {
+  dianAmount,
+  dianLineExtension,
+} from '../../../utils/dian-money.util';
+import {
   DIAN_DOCUMENT_TYPES,
   DIAN_OPERATION_TYPES,
 } from '../constants/dian-document-types';
@@ -158,32 +162,7 @@ export class UblCreditNoteBuilder {
     UblCommonBuilder.buildTaxTotals(doc, credit_note_data.taxes, currency);
 
     // Legal monetary total
-    const monetary = doc.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(credit_note_data.subtotal_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'TaxExclusiveAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(credit_note_data.subtotal_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'TaxInclusiveAmount')
-      .att('currencyID', currency)
-      .txt(
-        (
-          parseFloat(credit_note_data.subtotal_amount) +
-          parseFloat(credit_note_data.tax_amount)
-        ).toFixed(2),
-      );
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'AllowanceTotalAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(credit_note_data.discount_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'PayableAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(credit_note_data.total_amount).toFixed(2));
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, credit_note_data, currency);
 
     // Credit note lines (similar to invoice lines but with CreditNoteLine)
     credit_note_data.items.forEach((item, index) => {
@@ -196,12 +175,7 @@ export class UblCreditNoteBuilder {
       line
         .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
         .att('currencyID', currency)
-        .txt(
-          (
-            parseFloat(item.quantity) * parseFloat(item.unit_price) -
-            parseFloat(item.discount_amount)
-          ).toFixed(2),
-        );
+        .txt(dianLineExtension(item));
 
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
@@ -210,7 +184,7 @@ export class UblCreditNoteBuilder {
       price
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
-        .txt(parseFloat(item.unit_price).toFixed(2));
+        .txt(dianAmount(item.unit_price));
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
         .att('unitCode', 'EA')

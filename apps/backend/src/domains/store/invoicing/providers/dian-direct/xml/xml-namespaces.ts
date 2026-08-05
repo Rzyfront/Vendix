@@ -9,6 +9,14 @@ export const UBL_NAMESPACES = {
   CREDIT_NOTE: 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2',
   /** Debit note namespace */
   DEBIT_NOTE: 'urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2',
+  /**
+   * ApplicationResponse namespace — the envelope RADIAN uses for document
+   * events (acuse de recibo 030, reclamo 031, recibo del bien 032,
+   * aceptación 033/034). It is the same element DIAN returns to us when it
+   * validates a document, used here in the opposite direction.
+   */
+  APPLICATION_RESPONSE:
+    'urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2',
   /** Common Aggregate Components */
   CAC: 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
   /** Common Basic Components */
@@ -39,6 +47,34 @@ export const UBL_CONSTANTS = {
    */
   /** Profile ID for standard invoicing */
   PROFILE_ID: 'DIAN 2.1: Factura Electrónica de Venta',
+  /**
+   * `cbc:ProfileID` of the POS electronic equivalent document.
+   *
+   * ✅ CONFIRMED against **Anexo Técnico de documento equivalente electrónico v1.0
+   * (Res. 000165/2023), rule DEAD03**: the literal is `"DIAN 2.1: Documento
+   * Equivalente + Nombre Documento"`, and the annex's own Ejemplo 1 spells the POS
+   * case out as `"DIAN 2.1: Documento Equivalente POS"`.
+   */
+  PROFILE_ID_POS_EQUIVALENT: 'DIAN 2.1: Documento Equivalente POS',
+  /**
+   * `cbc:ProfileID` of every RADIAN `ApplicationResponse` (events 030–051).
+   *
+   * ✅ CONFIRMED against **Anexo Técnico RADIAN v1.1 (Res. 000085/2022), rule
+   * AAD03**, which states: *"Rechazo: si este elemento no contiene el literal
+   * «DIAN 2.1: ApplicationResponse de Factura Electrónica de Venta»"* and declares
+   * `Tam = 61`. Two independent confirmations: the verbatim literal in the rule
+   * text, and the declared length — 61 characters matches this string exactly,
+   * while the plausible variant with "de **la** Factura" is 64. That arithmetic is
+   * what settles which of the two readings is right.
+   *
+   * The previous value, `'DIAN 2.1: Nodo Radian'`, was taken from public examples
+   * and is NOT what the annex demands — AAD03 is a hard rejection rule, so every
+   * event emitted with it was rejected by RADIAN regardless of the rest of the
+   * document. Fixing it here fixes the whole 030–034 family too, which shipped
+   * before the annex could be read.
+   */
+  PROFILE_ID_EVENT:
+    'DIAN 2.1: ApplicationResponse de Factura Electrónica de Venta',
   /** Profile execution ID: 1=Production, 2=Test */
   PROFILE_EXECUTION_ID_TEST: '2',
   PROFILE_EXECUTION_ID_PROD: '1',

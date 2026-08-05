@@ -23,6 +23,8 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { CustomersService } from '../../store/customers/customers.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../../store/coupons/coupons.service';
+import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
+import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
@@ -52,6 +54,11 @@ const PRODUCT_BASE = {
   product_type: 'physical',
   requires_shipping: false,
   track_inventory: false,
+  // checkout() rejects any line whose product is not explicitly sellable
+  // (`is_sellable !== true`), mirroring the add-to-cart gate. The fixture must
+  // opt in or every promotion case dies on ECOM_PRODUCT_002 before reaching
+  // the pricing logic these tests exist to cover.
+  is_sellable: true,
   product_tax_assignments: [],
 };
 
@@ -275,6 +282,19 @@ describe('CheckoutService - promotions and coupons', () => {
         },
         { provide: PromotionEngineService, useValue: promotionEngine },
         { provide: CouponsService, useValue: couponsService },
+        {
+          provide: FiscalInvoiceThresholdService,
+          useValue: { assertInvoiceNotRequired: jest.fn(), evaluate: jest.fn() },
+        },
+        // Returns an empty Set: nothing blocked by a menu availability window,
+        // so these promotion/coupon cases exercise the path they were written
+        // for instead of dying on MENU_ITEM_NOT_AVAILABLE_NOW.
+        {
+          provide: MenuAvailabilityCheckerService,
+          useValue: {
+            getBlockedProductIds: jest.fn().mockResolvedValue(new Set<number>()),
+          },
+        },
       ],
     }).compile();
 

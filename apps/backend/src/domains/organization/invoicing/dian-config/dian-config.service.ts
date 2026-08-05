@@ -209,6 +209,14 @@ export class OrgDianConfigService {
       );
     if (dto.environment !== undefined) update_data.environment = dto.environment;
     if (dto.test_set_id !== undefined) update_data.test_set_id = dto.test_set_id;
+    // Same contract as the store-level service: '' withdraws the key and returns
+    // the configuration to in-process custody. With `fiscal_scope=ORGANIZATION`
+    // this is the ONLY path that can register the ARN, since store-level creation
+    // is refused for those organizations.
+    if (dto.certificate_kms_key_id !== undefined) {
+      update_data.certificate_kms_key_id =
+        dto.certificate_kms_key_id === '' ? null : dto.certificate_kms_key_id;
+    }
 
     if (
       dto.nit !== undefined ||

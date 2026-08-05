@@ -2,6 +2,10 @@ import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
 import {
+  dianAmount,
+  dianLineExtension,
+} from '../../../utils/dian-money.util';
+import {
   DIAN_DOCUMENT_TYPES,
   DIAN_OPERATION_TYPES,
 } from '../constants/dian-document-types';
@@ -302,31 +306,7 @@ export class UblSupportDocumentBuilder {
     data: ProviderInvoiceData,
     currency: string,
   ): void {
-    const monetary = doc.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(data.subtotal_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'TaxExclusiveAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(data.subtotal_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'TaxInclusiveAmount')
-      .att('currencyID', currency)
-      .txt(
-        (
-          parseFloat(data.subtotal_amount) + parseFloat(data.tax_amount)
-        ).toFixed(2),
-      );
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'AllowanceTotalAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(data.discount_amount).toFixed(2));
-    monetary
-      .ele(UBL_NAMESPACES.CBC, 'PayableAmount')
-      .att('currencyID', currency)
-      .txt(parseFloat(data.total_amount).toFixed(2));
+    UblCommonBuilder.buildLegalMonetaryTotal(doc, data, currency);
   }
 
   private static buildCreditNoteLines(
@@ -344,19 +324,14 @@ export class UblSupportDocumentBuilder {
       line
         .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
         .att('currencyID', currency)
-        .txt(
-          (
-            parseFloat(item.quantity) * parseFloat(item.unit_price) -
-            parseFloat(item.discount_amount)
-          ).toFixed(2),
-        );
+        .txt(dianLineExtension(item));
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
       ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
       price
         .ele(UBL_NAMESPACES.CBC, 'PriceAmount')
         .att('currencyID', currency)
-        .txt(parseFloat(item.unit_price).toFixed(2));
+        .txt(dianAmount(item.unit_price));
       price
         .ele(UBL_NAMESPACES.CBC, 'BaseQuantity')
         .att('unitCode', 'EA')

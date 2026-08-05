@@ -11,10 +11,12 @@ import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
 import { ResolutionsService } from './resolutions/resolutions.service';
+import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { DianConfigService } from './dian-config/dian-config.service';
 import { DianTestService } from './dian-config/dian-test.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
+import { DianEventsService } from './services/dian-events.service';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 import { InvoiceRetryListener } from './services/invoice-retry.listener';
 import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-ledger.service';
@@ -41,10 +43,12 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     InvoiceFlowService,
     CreditNotesService,
     ResolutionsService,
+    ResolutionScannerService,
     InvoiceNumberGenerator,
     DianConfigService,
     DianTestService,
     InvoicePdfService,
+    DianEventsService,
     InvoiceRetryQueueService,
     InvoiceRetryListener,
     FiscalTransmissionLedgerService,
@@ -56,8 +60,13 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     InvoiceFlowService,
     CreditNotesService,
     InvoicePdfService,
+    DianEventsService,
     InvoiceRetryQueueService,
     FiscalTransmissionLedgerService,
+    // Exported so `DianTestSetRepollJob` can re-poll DIAN for a pending
+    // habilitación batch without a second copy of the WS-Security credential
+    // loading and the persistence rules.
+    DianTestService,
   ],
 })
 export class InvoicingModule {}

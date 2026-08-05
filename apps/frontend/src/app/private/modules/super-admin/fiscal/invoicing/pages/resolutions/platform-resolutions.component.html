@@ -19,10 +19,27 @@
         activo de su tipo y ambiente.
       </p>
     </div>
-    <app-button type="button" variant="primary" size="sm" (clicked)="openModal()">
-      <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-      Nueva resolución
-    </app-button>
+    <div class="flex items-center gap-2">
+      <app-button
+        type="button"
+        variant="outline"
+        size="sm"
+        title="Leer los datos desde una foto o PDF de la resolución"
+        (clicked)="openScanner()"
+      >
+        <app-icon slot="icon" name="sparkles" [size]="14"></app-icon>
+        Escanear con IA
+      </app-button>
+      <app-button
+        type="button"
+        variant="primary"
+        size="sm"
+        (clicked)="openModal()"
+      >
+        <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+        Nueva resolución
+      </app-button>
+    </div>
   </div>
 
   @if (store.loadingResolutions()) {
@@ -48,7 +65,8 @@
             <th class="py-2 pr-4 font-medium">Rango</th>
             <th class="py-2 pr-4 font-medium">Vigencia</th>
             <th class="py-2 pr-4 font-medium text-right">Actual</th>
-            <th class="py-2 font-medium text-center">Estado</th>
+            <th class="py-2 pr-4 font-medium text-center">Estado</th>
+            <th class="py-2 font-medium text-right">Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -79,7 +97,7 @@
               <td class="py-2 pr-4 text-right font-medium text-text-primary">
                 {{ row.current_number }}
               </td>
-              <td class="py-2 text-center">
+              <td class="py-2 pr-4 text-center">
                 <span
                   class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
                   [class]="
@@ -91,6 +109,62 @@
                   {{ row.is_active ? 'Activa' : 'Inactiva' }}
                 </span>
               </td>
+              <td class="py-2">
+                <div class="flex items-center justify-end gap-1">
+                  <app-button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    title="Editar resolución"
+                    (clicked)="openEdit(row)"
+                  >
+                    <app-icon slot="icon" name="edit" [size]="14"></app-icon>
+                  </app-button>
+
+                  <app-button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    [loading]="togglingId() === row.id"
+                    [disabled]="togglingId() !== null"
+                    [title]="
+                      row.is_active
+                        ? 'Desactivar resolución'
+                        : 'Activar resolución'
+                    "
+                    (clicked)="toggleActive(row)"
+                  >
+                    <app-icon
+                      slot="icon"
+                      [name]="row.is_active ? 'pause' : 'play'"
+                      [size]="14"
+                    ></app-icon>
+                  </app-button>
+
+                  <!-- Una resolución que ya numeró documentos es evidencia
+                       fiscal: el backend rechaza borrarla, así que el botón se
+                       deshabilita en vez de ofrecer una acción que va a fallar. -->
+                  <app-button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    [disabled]="isLocked(row)"
+                    [title]="
+                      isLocked(row)
+                        ? 'Ya consumió numeración DIAN: desactívala en vez de borrarla'
+                        : 'Eliminar resolución'
+                    "
+                    (clicked)="askDelete(row)"
+                  >
+                    <app-icon
+                      slot="icon"
+                      name="trash-2"
+                      [size]="14"
+                      [class]="isLocked(row) ? '' : 'text-error'"
+                    ></app-icon>
+                  </app-button>
+                </div>
+              </td>
             </tr>
           }
         </tbody>
@@ -101,12 +175,45 @@
 
 <app-modal
   [isOpen]="modalOpen()"
-  title="Nueva resolución DIAN"
+  [title]="editing() ? 'Editar resolución DIAN' : 'Nueva resolución DIAN'"
   subtitle="Plataforma Vendix · alcance organización"
   size="md"
   (closed)="closeModal()"
 >
   <form [formGroup]="form" class="space-y-4">
+    @if (editing(); as current) {
+      @if (isLocked(current)) {
+        <div
+          class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary"
+          role="note"
+        >
+          Esta resolución ya consumió numeración ante la DIAN (va en
+          <strong>{{ current.current_number }}</strong
+          >). El prefijo, el tipo de documento y el rango inicial quedan fijos:
+          cambiarlos re-etiquetaría documentos ya reportados. Para cambiarlos,
+          crea una resolución nueva.
+        </div>
+      }
+    }
+
+    @if (scanUnverified().length > 0) {
+      <!-- La IA precargó, pero estos campos no pasaron su validación o los leyó
+           con baja confianza. Se listan aquí porque la resolución autoriza
+           numeración legal: un dígito mal leído se descubre cuando la DIAN
+           rechaza la primera factura. -->
+      <div
+        class="rounded-lg border border-warning-300 bg-warning-light px-3 py-2 text-xs text-text-primary"
+        role="note"
+      >
+        <p class="font-semibold mb-1">Verifica estos campos precargados por IA</p>
+        <ul class="list-disc pl-5 space-y-0.5">
+          @for (key of scanUnverified(); track key) {
+            <li>{{ scanFieldLabel(key) }}</li>
+          }
+        </ul>
+      </div>
+    }
+
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <app-input
         label="Prefijo"
@@ -206,10 +313,30 @@
       variant="primary"
       [loading]="saving()"
       [disabled]="saving() || formInvalid()"
-      (clicked)="onCreate()"
+      (clicked)="onSubmit()"
     >
       <app-icon slot="icon" name="save" [size]="16"></app-icon>
-      Crear resolución
+      {{ editing() ? 'Guardar cambios' : 'Crear resolución' }}
     </app-button>
   </div>
 </app-modal>
+
+<app-dian-resolution-scanner-modal
+  [isOpen]="scannerOpen()"
+  [scope]="'platform'"
+  (isOpenChange)="scannerOpen.set($event)"
+  (confirmed)="applyScan($event)"
+></app-dian-resolution-scanner-modal>
+
+@if (pendingDelete(); as row) {
+  <app-confirmation-modal
+    [isOpen]="true"
+    title="Eliminar resolución DIAN"
+    [message]="deleteMessage(row)"
+    confirmText="Eliminar"
+    cancelText="Cancelar"
+    confirmVariant="danger"
+    (confirm)="confirmDelete()"
+    (cancel)="cancelDelete()"
+  ></app-confirmation-modal>
+}

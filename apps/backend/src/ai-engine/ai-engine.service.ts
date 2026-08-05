@@ -236,6 +236,46 @@ export class AIEngineService implements OnModuleInit {
     return this.providers.size > 0;
   }
 
+  /**
+   * Refuses to scan when the app has no vision model pinned.
+   *
+   * `run()` falls back to the default provider when `config_id` is NULL, and
+   * that path does **not** error: a text-only model happily answers a prompt
+   * whose image it never received, returning perfectly-shaped JSON with
+   * invented values. For a fiscal scanner — a RUT, a DIAN numbering resolution —
+   * an invented value is far worse than a failure: it looks verified and it is
+   * not. So the misconfiguration is refused up front with something the operator
+   * can act on, instead of a silent hallucination downstream.
+   *
+   * Only callers that send an image should use this. Text apps legitimately run
+   * on the default config.
+   */
+  async assertVisionModelLinked(appKey: string): Promise<void> {
+    const app = await this.prisma.ai_engine_applications.findUnique({
+      where: { key: appKey },
+      select: { config_id: true, is_active: true, name: true },
+    });
+
+    if (!app) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_001);
+    }
+    if (!app.is_active) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_003);
+    }
+    if (app.config_id == null) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_VISION_001,
+        `"${app.name}" no tiene un modelo de visión enlazado. Regístralo en el panel de IA (super-admin → IA → Configuraciones) y vuelve a intentarlo; hasta entonces la lectura por foto no está disponible.`,
+      );
+    }
+    if (!this.providers.get(app.config_id)) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_CONFIG_001,
+        `El modelo enlazado a "${app.name}" no está activo o no cargó. Revísalo en el panel de IA.`,
+      );
+    }
+  }
+
   // --- Application-level API ---
 
   /**

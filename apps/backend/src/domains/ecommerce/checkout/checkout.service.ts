@@ -37,6 +37,7 @@ import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
+import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 
 @Injectable()
 export class CheckoutService {
@@ -76,6 +77,35 @@ export class CheckoutService {
     assertCanChargeVat(fiscalData, 'sale');
   }
 
+  /**
+   * Frontera 5 UVT en el storefront (Art. 616-1 ET / Res. 000165 de 2023).
+   *
+   * Se llama ANTES de `orders.create`, no después: una vez creada la orden el
+   * pedido ya existe para el cliente y el comercio, y "corregirlo" implicaría
+   * anularlo. Aquí el rechazo es simplemente un checkout que no procede, con el
+   * detalle que el frontend necesita para pedir el documento del comprador.
+   *
+   * `identified` es TRUE cuando hay un `customer_id` resuelto o cuando el
+   * invitado entregó su número de documento: cualquiera de los dos permite emitir
+   * la factura electrónica nominativa, que es lo único que el umbral exige.
+   */
+  private async assertCheckoutInvoiceThreshold(params: {
+    grand_total: number;
+    identified: boolean;
+    channel: string;
+  }): Promise<void> {
+    const organization_id = RequestContextService.getOrganizationId();
+    if (!organization_id) return;
+
+    await this.fiscalInvoiceThreshold.assertInvoiceNotRequired({
+      organization_id,
+      store_id: RequestContextService.getStoreId() ?? null,
+      total_amount: params.grand_total,
+      has_customer: params.identified,
+      channel: params.channel,
+    });
+  }
+
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly store_prisma: StorePrismaService,
@@ -101,6 +131,9 @@ export class CheckoutService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
+    // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT documento equivalente
+    // vs factura electrónica nominativa (compartida con el POS).
+    private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
   ) {}
 
   /**
@@ -1028,6 +1061,14 @@ export class CheckoutService {
       ),
     );
 
+    await this.assertCheckoutInvoiceThreshold({
+      grand_total,
+      identified: Boolean(
+        resolved_customer_id || guest_customer?.document_number,
+      ),
+      channel: 'ecommerce',
+    });
+
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
@@ -1592,6 +1633,14 @@ export class CheckoutService {
         subtotal + total_tax - discountResult.total_discount + wa_shipping_cost,
       ),
     );
+
+    await this.assertCheckoutInvoiceThreshold({
+      grand_total,
+      identified: Boolean(
+        resolved_customer_id || guest_customer?.document_number,
+      ),
+      channel: 'whatsapp',
+    });
 
     const order = await this.prisma.orders.create({
       data: {
