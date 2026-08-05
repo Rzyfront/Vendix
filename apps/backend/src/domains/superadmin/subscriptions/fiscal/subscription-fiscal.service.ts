@@ -1182,24 +1182,38 @@ export class SubscriptionFiscalService {
 
     const accountingEntityId = await this.resolvePlatformAccountingEntityId();
 
-    // Manual uniqueness check: (organization_id, store_id IS NULL, document_type, prefix).
-    // Environment is not on the model — for now uniqueness ignores it because
-    // the platform uses a single DIAN config / environment at a time.
+    // Unicidad manual por (organización, store_id NULL, ENTIDAD CONTABLE, tipo de
+    // documento, prefijo). El `environment` no está en el modelo y se ignora: la
+    // plataforma usa una sola configuración DIAN a la vez.
+    //
+    // La entidad contable es parte del eje a propósito. Sin ella, una fila escrita
+    // bajo otra entidad — invisible para toda lectura scopeada y por tanto
+    // inservible en cualquier flujo — bloqueaba la creación de la única resolución
+    // utilizable, con un mensaje que nombraba un prefijo que el operador no podía
+    // encontrar en ninguna pantalla. El eje de unicidad tiene que ser el mismo eje
+    // de visibilidad; si no, se prohíbe crear lo que no se puede ver.
     const duplicate = await this.prisma
       .withoutScope()
       .invoice_resolutions.findFirst({
         where: {
           organization_id: await this.resolvePlatformOrganizationId(),
           store_id: null,
+          accounting_entity_id: accountingEntityId,
           document_type: dto.document_type as PlatformResolutionDocumentType,
           prefix: dto.prefix,
           is_active: true,
         },
-        select: { id: true },
+        select: { id: true, resolution_number: true },
       });
     if (duplicate) {
-      throw new BadRequestException(
-        `A platform resolution with prefix "${dto.prefix}" already exists for ${dto.document_type}`,
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_007,
+        `Ya existe una resolución activa con prefijo "${dto.prefix}" para ${
+          dto.document_type === 'sales_invoice'
+            ? 'factura de venta'
+            : 'documento soporte'
+        } (número ${duplicate.resolution_number}). Desactívala o edita su rango en vez de crear otra.`,
+        { resolution_id: duplicate.id, prefix: dto.prefix },
       );
     }
 
@@ -1309,6 +1323,9 @@ export class SubscriptionFiscalService {
       nextPrefix !== current.prefix ||
       nextDocumentType !== current.document_type
     ) {
+      // Mismo eje que en `createResolution`: incluye la entidad contable de la
+      // fila que se está editando. Comparar contra otras entidades rechazaría el
+      // cambio por una colisión con una fila que ningún flujo puede alcanzar.
       const duplicate = await this.prisma
         .withoutScope()
         .invoice_resolutions.findFirst({
@@ -1316,15 +1333,22 @@ export class SubscriptionFiscalService {
             id: { not: id },
             organization_id: await this.resolvePlatformOrganizationId(),
             store_id: null,
+            accounting_entity_id: current.accounting_entity_id,
             document_type: nextDocumentType,
             prefix: nextPrefix,
             is_active: true,
           },
-          select: { id: true },
+          select: { id: true, resolution_number: true },
         });
       if (duplicate) {
-        throw new BadRequestException(
-          `A platform resolution with prefix "${nextPrefix}" already exists for ${nextDocumentType}`,
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_RESOLUTION_007,
+          `Ya existe una resolución activa con prefijo "${nextPrefix}" para ${
+            nextDocumentType === 'sales_invoice'
+              ? 'factura de venta'
+              : 'documento soporte'
+          } (número ${duplicate.resolution_number}).`,
+          { resolution_id: duplicate.id, prefix: nextPrefix },
         );
       }
     }
