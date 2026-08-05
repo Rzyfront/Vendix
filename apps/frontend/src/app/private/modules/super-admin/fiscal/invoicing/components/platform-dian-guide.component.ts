@@ -70,8 +70,9 @@ interface ChecklistItem {
       >
         La DIAN exige aprobar el set de habilitación con el NIT propio antes de
         habilitar producción. Guardar credenciales no habilita: el veredicto lo
-        da la DIAN sobre el set enviado. La cantidad de documentos depende del
-        modo de operación declarado y la indica la pantalla de configuración.
+        da la DIAN sobre el set enviado. La cantidad exacta de documentos la fija
+        la DIAN por set y la muestra su portal en «Total de documentos
+        requeridos».
       </p>
     </aside>
   `,

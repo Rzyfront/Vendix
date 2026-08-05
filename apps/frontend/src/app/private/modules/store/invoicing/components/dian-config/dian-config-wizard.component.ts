@@ -81,8 +81,8 @@ const TIP_ROTATION_MS = 9_000;
  */
 const DIAN_TIPS: ReadonlyArray<{ title: string; body: string }> = [
   {
-    title: 'El set de pruebas depende de tu modo de operación',
-    body: 'Con software propio son 2 facturas de venta, 1 nota crédito y 1 nota débito (art. 28, Res. 000165/2023); como proveedor tecnológico son 6, 2 y 2. La DIAN los valida en bloque: o aprueba el conjunto, o reporta los errores de cada documento.',
+    title: 'La DIAN define cuántos documentos exige tu set',
+    body: 'Hoy son 50: 30 facturas de venta, 10 notas débito y 10 notas crédito. La cifra exacta la muestra el portal de habilitación en «Total de documentos requeridos» — es el único dato válido. La DIAN los valida en bloque: o aprueba el conjunto, o reporta los errores de cada documento.',
   },
   {
     title: 'La validación es asíncrona',
