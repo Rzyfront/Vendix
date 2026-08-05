@@ -139,7 +139,9 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   getGrowthText(growth?: number): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
-    return `${sign}${growth.toFixed(1)}% vs período anterior`;
+    // QUI-628: derive the comparison label from the active preset (was the
+    // hardcoded "vs período anterior" — defect C9 in the ticket catalog).
+    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset)}`;
   }
 
   getAbandonmentRate(): string {

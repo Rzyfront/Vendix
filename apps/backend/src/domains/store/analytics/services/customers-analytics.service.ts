@@ -1,4 +1,5 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -18,6 +19,8 @@ import {
   localPeriodSql,
   localBucketSql,
 } from '@common/utils/store-timezone.util';
+import { computeGrowth } from '../analytics-metrics.contract';
+import { round2 as roundMoney } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -25,6 +28,11 @@ export class CustomersAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
+
+  /** Single rounding policy — delegates to the contract. */
+  private round2(value: number): number {
+    return roundMoney(value);
+  }
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -478,81 +486,101 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Abandoned carts: carts created in period
-    // Using a proxy: count carts created and calculate based on cart interactions
-    const abandonedCarts = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint; total_value: number }>>`
+    // Operational definition (QUI-628):
+    //   abandoned = cart with items + no converted_order_id + last_activity_at
+    //               older than the threshold (default 60 min). The threshold is
+    //               defined relative to the moment the query runs (NOW()), not
+    //               relative to endDate, because the question being answered is
+    //               "right now, how many carts are abandoned?" — a cart whose
+    //               last activity was 5 minutes ago is NOT abandoned yet, even
+    //               if its last activity falls inside the period window.
+    //   recovered = cart with state='converted' AND converted_at in the period.
+    //
+    // Time dimension is one column per side:
+    //   abandoned -> carts.last_activity_at (the moment the user stopped being
+    //                active; created_at would never move)
+    //   recovered -> carts.converted_at (the moment the order was placed from
+    //                this cart — set by the checkout hook + backfill)
+    const rawClient = (this.prisma as any).withoutScope() as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+
+    const abandonedRows = await rawClient.$queryRaw<
+      Array<{ count: bigint; total_value: string | number }>
+    >(Prisma.sql`
       SELECT
-        COUNT(c.id) as count,
-        COALESCE(SUM(c.subtotal), 0) as total_value
+        COUNT(*) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${startDate}
-        AND c.created_at <= ${endDate}
-    `;
+        AND c.last_activity_at >= ${startDate}
+        AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < (NOW() - INTERVAL '60 minutes')
+        AND c.converted_order_id IS NULL
+        AND EXISTS (SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id)
+    `);
 
-    const abandonedCount = Number(abandonedCarts[0]?.count || 0);
-    const totalAbandonedValue = Number(abandonedCarts[0]?.total_value || 0);
-
-    // For recovery, we count orders created from carts in period
-    // Using EXTRACT to match carts by user and approximate time window
-    const recoveredCarts = await this.prisma.orders.count({
-      where: {
-        store_id: storeId,
-        created_at: { gte: startDate, lte: endDate },
-        // Orders that appear to be from carts (using a heuristic: created within 24h of a cart)
-      },
-    });
-
-    // Previous period for growth calculation
-    const previousAbandoned = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(c.id) as count
+    const recoveredRows = await rawClient.$queryRaw<
+      Array<{ count: bigint; total_value: string | number }>
+    >(Prisma.sql`
+      SELECT
+        COUNT(*) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${previousStartDate}
-        AND c.created_at <= ${previousEndDate}
-    `;
+        AND c.state = 'converted'
+        AND c.converted_at >= ${startDate}
+        AND c.converted_at <= ${endDate}
+    `);
 
-    const previousAbandonedCount = Number(previousAbandoned[0]?.count || 0);
+    const abandonedCount = Number(abandonedRows[0]?.count ?? 0);
+    const totalAbandonedValue = Number(abandonedRows[0]?.total_value ?? 0);
+    const recoveredCount = Number(recoveredRows[0]?.count ?? 0);
+    const totalRecoveredValue = Number(recoveredRows[0]?.total_value ?? 0);
 
-    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(o.id) as count
-      FROM orders o
-      WHERE o.store_id = ${storeId}
-        AND o.placed_at >= ${startDate}
-        AND o.placed_at <= ${endDate}
-        AND o.state IN ('delivered', 'finished')
-    `;
-    const orderCount = Number(completedOrders[0]?.count || 0);
+    // Previous period for growth: same definition, previous window.
+    const previousAbandonedRows = await rawClient.$queryRaw<
+      Array<{ count: bigint }>
+    >(Prisma.sql`
+      SELECT COUNT(*) AS count
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.last_activity_at >= ${previousStartDate}
+        AND c.last_activity_at <= ${previousEndDate}
+        AND c.last_activity_at < (NOW() - INTERVAL '60 minutes')
+        AND c.converted_order_id IS NULL
+        AND EXISTS (SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id)
+    `);
+    const previousAbandonedCount = Number(
+      previousAbandonedRows[0]?.count ?? 0,
+    );
 
-    let recoveryRate: number;
-    if (abandonedCount > 0 && orderCount > 0) {
-      const calculatedRate = (orderCount / abandonedCount) * 100;
-      recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-    } else if (abandonedCount === 0) {
-      recoveryRate = 0;
-    } else {
-      recoveryRate = 0;
-    }
+    const totalObserved = abandonedCount + recoveredCount;
+    // Real metrics — same denominator family (abandoned + recovered). Both
+    // sides are now derived from carts, so the rate is internally consistent.
+    // The OLD code mixed orders / carts and topped to 100, which made the
+    // number look authoritative while being a fabrication.
+    const abandonmentRate =
+      totalObserved > 0 ? (abandonedCount / totalObserved) * 100 : 0;
+    const recoveryRate =
+      totalObserved > 0 ? (recoveredCount / totalObserved) * 100 : 0;
 
-    const abandonmentRate = abandonedCount > 0 ? 100 - recoveryRate : 0;
-
-    const abandonmentRateGrowth =
-      previousAbandonedCount > 0
-        ? ((abandonedCount - previousAbandonedCount) / previousAbandonedCount) * 100
-        : 0;
+    // `computeGrowth` returns `null` when the previous base is 0; the UI must
+    // render that as "sin base de comparación", not as 0 % (contract requirement).
+    const abandonmentRateGrowth = computeGrowth(abandonedCount, previousAbandonedCount);
 
     return {
       total_abandoned_carts: abandonedCount,
       total_abandoned_value: totalAbandonedValue,
-      abandonment_rate: abandonmentRate,
-      abandonment_rate_growth: abandonmentRateGrowth,
-      recovered_carts: Math.floor(abandonedCount * (recoveryRate / 100)),
-      recovered_value: totalAbandonedValue * (recoveryRate / 100),
-      recovery_rate: recoveryRate,
-      recovery_rate_growth: 0,
+      abandonment_rate: this.round2(abandonmentRate),
+      abandonment_rate_growth:
+        abandonmentRateGrowth === null ? null : this.round2(abandonmentRateGrowth),
+      recovered_carts: recoveredCount,
+      recovered_value: totalRecoveredValue,
+      recovery_rate: this.round2(recoveryRate),
+      recovery_rate_growth: null, // previous recovered set was fabricated; null until both periods use the new schema
       average_cart_value:
         abandonedCount > 0 ? totalAbandonedValue / abandonedCount : 0,
-      potential_recovery_value: totalAbandonedValue * (recoveryRate / 100),
     };
   }
 

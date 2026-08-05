@@ -1243,6 +1243,10 @@ export class CheckoutService {
       : null;
 
     if (!is_guest) {
+      // QUI-628: stamp the cart as converted BEFORE clearCart so the cart row
+      // preserves the conversion link. clearCart wipes the items + subtotal
+      // but leaves the cart row, so converted_order_id survives.
+      await this.cart_service.markCartConverted(resolved_customer_id, order.id);
       // store_id y user_id se resuelven automáticamente
       await this.cart_service.clearCart();
     }
@@ -1744,6 +1748,9 @@ export class CheckoutService {
 
     // Only clear backend cart for authenticated users
     if (!is_guest) {
+      // QUI-628: stamp the cart as converted BEFORE clearCart so the cart
+      // row preserves the conversion link (see ecommerce flow above).
+      await this.cart_service.markCartConverted(resolved_customer_id, order.id);
       await this.cart_service.clearCart();
     }
 
