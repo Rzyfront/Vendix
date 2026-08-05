@@ -510,7 +510,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // DIAN Electronic Invoicing
   DIAN_CONFIG_001: 'No se encontro la configuracion DIAN para esta tienda.',
-  DIAN_CONFIG_002: 'Ya existe una configuracion DIAN para esta tienda.',
+  DIAN_CONFIG_002:
+    'Ya existe una configuración DIAN con ese NIT y tipo de documento en este alcance. Edita la existente en lugar de crear otra.',
   DIAN_CERT_001: 'El archivo de certificado es invalido.',
   DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
   DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',

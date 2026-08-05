@@ -5033,6 +5033,26 @@ model invoice_taxes {
   @@index([invoice_id])
 }
 
+/// Uniqueness lives in DB partial unique indexes that Prisma cannot express as
+/// @@unique (migration 20260511190000_close_fiscal_scope_gaps_phase2):
+///   - invoice_resolutions_entity_prefix_uidx
+///     (accounting_entity_id, prefix) WHERE accounting_entity_id IS NOT NULL
+///   - invoice_resolutions_store_prefix_no_entity_uidx
+///     (organization_id, store_id, prefix) WHERE accounting_entity_id IS NULL
+///                                           AND store_id IS NOT NULL
+///   - invoice_resolutions_org_prefix_no_store_no_entity_uidx
+///     (organization_id, prefix) WHERE accounting_entity_id IS NULL
+///                                AND store_id IS NULL
+/// Since 20260522150000_enforce_fiscal_accounting_entity_not_null made
+/// accounting_entity_id NOT NULL, only the FIRST index is ever in effect: one
+/// prefix per accounting entity, full stop. It deliberately excludes
+/// document_type and is_active, matching how DIAN authorizes a prefix — per NIT,
+/// not per document type.
+///
+/// CONSEQUENCE FOR CALLERS: a pre-create duplicate check must key on exactly
+/// (accounting_entity_id, prefix). Adding document_type or is_active:true makes
+/// the check MORE PERMISSIVE than the DB, and the duplicate then surfaces as a
+/// raw P2002 — an opaque 500 instead of a 409 naming the offending row.
 model invoice_resolutions {
   id                   Int                       @id @default(autoincrement())
   organization_id      Int
@@ -5592,6 +5612,15 @@ enum certificate_source_enum {
 /// 20260511160000_relax_dian_store_id_for_org_scope (original shape) and
 /// 20260612120000_dian_configurations_uq_per_configuration_type
 /// (configuration_type added to the key).
+///
+/// CONSEQUENCE FOR CALLERS: any "does this config already exist?" lookup made
+/// before a create MUST filter by the same axis as the index above — never by
+/// accounting_entity_id, which is narrower. A row written under a different
+/// accounting entity stays invisible to an entity-filtered read while remaining
+/// visible to the index: the caller concludes "does not exist", creates, and
+/// Postgres answers P2002, which reaches the client as an opaque 500. This bit
+/// all four create paths (platform upsert, vendor-support clone, store create,
+/// org create) before 2026-08-05.
 model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int

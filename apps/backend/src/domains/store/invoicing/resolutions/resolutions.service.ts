@@ -49,6 +49,42 @@ export class ResolutionsService {
         store_id: context.store_id ?? null,
       });
 
+    // La base restringe la tabla con `invoice_resolutions_entity_prefix_uidx`
+    // sobre `(accounting_entity_id, prefix)` — sin `document_type` y sin
+    // `is_active`. Un prefijo pertenece a UNA fila por entidad contable, que es
+    // como la DIAN lo autoriza: por NIT. Sin este pre-chequeo el duplicado
+    // llegaba a Postgres y volvía como P2002 crudo, o sea un 500 sin pista.
+    const duplicate = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          accounting_entity_id: accounting_entity.id,
+          prefix: dto.prefix,
+        },
+        select: {
+          id: true,
+          resolution_number: true,
+          document_type: true,
+          is_active: true,
+        },
+      });
+    if (duplicate) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_RESOLUTION_007,
+        `Ya existe una resolución con prefijo "${dto.prefix}" (número ${
+          duplicate.resolution_number
+        }${
+          duplicate.is_active ? '' : ', desactivada'
+        }). La DIAN autoriza el prefijo por NIT, así que no puede repetirse: edita esa resolución o usa otro prefijo.`,
+        {
+          resolution_id: duplicate.id,
+          prefix: dto.prefix,
+          document_type: duplicate.document_type,
+          is_active: duplicate.is_active,
+        },
+      );
+    }
+
     const resolution = await this.prisma.invoice_resolutions.create({
       data: {
         organization_id: context.organization_id,

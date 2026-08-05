@@ -635,23 +635,12 @@ export class SubscriptionFiscalService {
       await this.assertResolution(dto.invoice_resolution_id, accounting_entity_id);
     }
 
-    const existingConfig = dto.dian_configuration_id
-      ? await this.prisma.withoutScope().dian_configurations.findFirst({
-          where: {
-            id: dto.dian_configuration_id,
-            organization_id: platform_organization_id,
-            accounting_entity_id,
-          },
-        })
-      : previous.dian_configuration_id
-        ? await this.prisma.withoutScope().dian_configurations.findFirst({
-            where: {
-              id: previous.dian_configuration_id,
-              organization_id: platform_organization_id,
-              accounting_entity_id,
-            },
-          })
-        : null;
+    const existingConfig = await this.findPlatformInvoicingConfig({
+      organization_id: platform_organization_id,
+      nit: dto.nit,
+      preferred_id:
+        dto.dian_configuration_id ?? previous.dian_configuration_id ?? null,
+    });
 
     if (!existingConfig && !dto.software_pin) {
       throw new BadRequestException(
@@ -660,7 +649,16 @@ export class SubscriptionFiscalService {
     }
 
     const config = existingConfig
-      ? await this.updateDianConfig(existingConfig.id, dto)
+      ? await this.updateDianConfig(existingConfig.id, dto, {
+          // Si la fila quedó colgada de otra entidad contable, se realinea en la
+          // escritura que el operador ya está haciendo. Normalizar al escribir
+          // evita una migración de datos para un desajuste que solo existe
+          // mientras nadie vuelve a guardar.
+          realign_accounting_entity_id:
+            existingConfig.accounting_entity_id === accounting_entity_id
+              ? null
+              : accounting_entity_id,
+        })
       : await this.createDianConfig(dto, {
           organization_id: platform_organization_id,
           accounting_entity_id,
@@ -1182,38 +1180,49 @@ export class SubscriptionFiscalService {
 
     const accountingEntityId = await this.resolvePlatformAccountingEntityId();
 
-    // Unicidad manual por (organización, store_id NULL, ENTIDAD CONTABLE, tipo de
-    // documento, prefijo). El `environment` no está en el modelo y se ignora: la
-    // plataforma usa una sola configuración DIAN a la vez.
+    // El eje es exactamente el del índice único que restringe la tabla en base:
+    // `invoice_resolutions_entity_prefix_uidx (accounting_entity_id, prefix)
+    // WHERE accounting_entity_id IS NOT NULL` — y esa columna es NOT NULL desde
+    // 20260522150000, así que el índice aplica siempre.
     //
-    // La entidad contable es parte del eje a propósito. Sin ella, una fila escrita
-    // bajo otra entidad — invisible para toda lectura scopeada y por tanto
-    // inservible en cualquier flujo — bloqueaba la creación de la única resolución
-    // utilizable, con un mensaje que nombraba un prefijo que el operador no podía
-    // encontrar en ninguna pantalla. El eje de unicidad tiene que ser el mismo eje
-    // de visibilidad; si no, se prohíbe crear lo que no se puede ver.
+    // Deliberadamente NO se filtra por `document_type` ni por `is_active`: el
+    // índice tampoco los mira. Un prefijo pertenece a UNA fila por entidad,
+    // aunque la otra sea de otro tipo de documento o esté desactivada. Filtrar
+    // por esas dos columnas hacía el chequeo más permisivo que la base, y el
+    // duplicado terminaba saliendo como P2002 crudo, es decir un 500 opaco.
+    //
+    // Coincide con la realidad DIAN: el prefijo se autoriza por NIT, no por tipo
+    // de documento.
     const duplicate = await this.prisma
       .withoutScope()
       .invoice_resolutions.findFirst({
         where: {
-          organization_id: await this.resolvePlatformOrganizationId(),
-          store_id: null,
           accounting_entity_id: accountingEntityId,
-          document_type: dto.document_type as PlatformResolutionDocumentType,
           prefix: dto.prefix,
+        },
+        select: {
+          id: true,
+          resolution_number: true,
+          document_type: true,
           is_active: true,
         },
-        select: { id: true, resolution_number: true },
       });
     if (duplicate) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_RESOLUTION_007,
-        `Ya existe una resolución activa con prefijo "${dto.prefix}" para ${
-          dto.document_type === 'sales_invoice'
+        `Ya existe una resolución con prefijo "${dto.prefix}" para ${
+          duplicate.document_type === 'sales_invoice'
             ? 'factura de venta'
             : 'documento soporte'
-        } (número ${duplicate.resolution_number}). Desactívala o edita su rango en vez de crear otra.`,
-        { resolution_id: duplicate.id, prefix: dto.prefix },
+        } (número ${duplicate.resolution_number}${
+          duplicate.is_active ? '' : ', desactivada'
+        }). La DIAN autoriza el prefijo por NIT, así que no puede repetirse: edita esa resolución o usa otro prefijo.`,
+        {
+          resolution_id: duplicate.id,
+          prefix: dto.prefix,
+          document_type: duplicate.document_type,
+          is_active: duplicate.is_active,
+        },
       );
     }
 
@@ -1301,8 +1310,6 @@ export class SubscriptionFiscalService {
     }
 
     const nextPrefix = dto.prefix ?? current.prefix;
-    const nextDocumentType = (dto.document_type ??
-      current.document_type) as PlatformResolutionDocumentType;
     const nextRangeFrom = dto.rango_inicial ?? current.range_from;
     const nextRangeTo = dto.rango_final ?? current.range_to;
 
@@ -1319,36 +1326,43 @@ export class SubscriptionFiscalService {
       );
     }
 
-    if (
-      nextPrefix !== current.prefix ||
-      nextDocumentType !== current.document_type
-    ) {
-      // Mismo eje que en `createResolution`: incluye la entidad contable de la
-      // fila que se está editando. Comparar contra otras entidades rechazaría el
-      // cambio por una colisión con una fila que ningún flujo puede alcanzar.
+    // Solo el prefijo puede colisionar: el índice único es
+    // `(accounting_entity_id, prefix)`, sin `document_type`. Cambiar únicamente el
+    // tipo de documento no puede chocar con nada.
+    if (nextPrefix !== current.prefix) {
+      // Mismo eje que en `createResolution` y que el índice de la base: entidad
+      // contable + prefijo, sin filtrar por tipo de documento ni por `is_active`.
       const duplicate = await this.prisma
         .withoutScope()
         .invoice_resolutions.findFirst({
           where: {
             id: { not: id },
-            organization_id: await this.resolvePlatformOrganizationId(),
-            store_id: null,
             accounting_entity_id: current.accounting_entity_id,
-            document_type: nextDocumentType,
             prefix: nextPrefix,
+          },
+          select: {
+            id: true,
+            resolution_number: true,
+            document_type: true,
             is_active: true,
           },
-          select: { id: true, resolution_number: true },
         });
       if (duplicate) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_RESOLUTION_007,
-          `Ya existe una resolución activa con prefijo "${nextPrefix}" para ${
-            nextDocumentType === 'sales_invoice'
+          `Ya existe una resolución con prefijo "${nextPrefix}" para ${
+            duplicate.document_type === 'sales_invoice'
               ? 'factura de venta'
               : 'documento soporte'
-          } (número ${duplicate.resolution_number}).`,
-          { resolution_id: duplicate.id, prefix: nextPrefix },
+          } (número ${duplicate.resolution_number}${
+            duplicate.is_active ? '' : ', desactivada'
+          }). El prefijo se autoriza por NIT y no puede repetirse.`,
+          {
+            resolution_id: duplicate.id,
+            prefix: nextPrefix,
+            document_type: duplicate.document_type,
+            is_active: duplicate.is_active,
+          },
         );
       }
     }
@@ -1593,6 +1607,73 @@ export class SubscriptionFiscalService {
   }
 
   /**
+   * Busca la configuración DIAN de plataforma por el MISMO eje que la restringe
+   * en base: el índice parcial `dian_configurations_org_scope_uq`
+   * `(organization_id, nit, configuration_type) WHERE store_id IS NULL`.
+   *
+   * Antes se buscaba filtrando por la entidad contable derivada, un eje más
+   * estrecho que el del índice. Una fila escrita bajo otra entidad quedaba
+   * invisible para la lectura pero seguía siendo visible para la restricción: el
+   * upsert concluía "no existe", intentaba crear, y Postgres contestaba P2002.
+   * Al cliente eso llega como un 500 sin ninguna pista de qué fila estorba.
+   *
+   * Regla general: el eje con el que se decide "existe o no existe" tiene que ser
+   * el mismo con el que la base decide "es la misma fila".
+   */
+  private async findPlatformInvoicingConfig(params: {
+    organization_id: number;
+    nit: string;
+    preferred_id: number | null;
+  }) {
+    const client = this.prisma.withoutScope();
+
+    if (params.preferred_id) {
+      const byId = await client.dian_configurations.findFirst({
+        where: {
+          id: params.preferred_id,
+          organization_id: params.organization_id,
+          store_id: null,
+          configuration_type: 'invoicing',
+        },
+      });
+      if (byId) {
+        // Cambiar el NIT de la config apuntada colisiona con la fila que ya lo
+        // tenga. Eso es un 409 explicable, no un P2002 crudo.
+        if (byId.nit !== params.nit) {
+          const holder = await client.dian_configurations.findFirst({
+            where: {
+              organization_id: params.organization_id,
+              store_id: null,
+              nit: params.nit,
+              configuration_type: 'invoicing',
+              id: { not: byId.id },
+            },
+            select: { id: true, name: true },
+          });
+          if (holder) {
+            throw new VendixHttpException(
+              ErrorCodes.DIAN_CONFIG_002,
+              `Ya existe otra configuración DIAN de plataforma con el NIT ${params.nit} ("${holder.name}"). Edita esa configuración en vez de reasignarle el NIT a esta.`,
+              { conflicting_configuration_id: holder.id, nit: params.nit },
+            );
+          }
+        }
+        return byId;
+      }
+    }
+
+    return client.dian_configurations.findFirst({
+      where: {
+        organization_id: params.organization_id,
+        store_id: null,
+        nit: params.nit,
+        configuration_type: 'invoicing',
+      },
+      orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+    });
+  }
+
+  /**
    * La identidad llega como parámetro explícito, no leída del DTO: los campos del
    * DTO son opcionales e ignorados, y depender de que el llamador los haya
    * sobrescrito antes es exactamente el acoplamiento que produjo el desajuste.
@@ -1622,7 +1703,11 @@ export class SubscriptionFiscalService {
     });
   }
 
-  private async updateDianConfig(id: number, dto: UpsertSubscriptionFiscalConfigDto) {
+  private async updateDianConfig(
+    id: number,
+    dto: UpsertSubscriptionFiscalConfigDto,
+    options?: { realign_accounting_entity_id?: number | null },
+  ) {
     const data: Prisma.dian_configurationsUpdateInput = {
       name: dto.name,
       nit: dto.nit,
@@ -1635,6 +1720,13 @@ export class SubscriptionFiscalService {
     };
     if (dto.software_pin && dto.software_pin !== '****') {
       data.software_pin_encrypted = this.encryption.encrypt(dto.software_pin);
+    }
+    const realign = options?.realign_accounting_entity_id ?? null;
+    if (realign !== null) {
+      data.accounting_entity = { connect: { id: realign } };
+      this.logger.warn(
+        `La configuración DIAN ${id} colgaba de otra entidad contable y era invisible para el cliente scopeado. Se realinea a accounting_entity_id=${realign} en este guardado.`,
+      );
     }
     return this.prisma.withoutScope().dian_configurations.update({
       where: { id },

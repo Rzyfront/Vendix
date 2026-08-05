@@ -128,6 +128,35 @@ export class OrgDianConfigService {
     const configuration_type = dto.configuration_type || 'invoicing';
     const operation_mode = dto.operation_mode || 'own_software';
 
+    // Mismo eje que los índices parciales que restringen la tabla:
+    // `(organization_id, nit, configuration_type) WHERE store_id IS NULL` para
+    // las filas de organización y `(store_id, nit, configuration_type)
+    // WHERE store_id IS NOT NULL` para las de tienda. Sin el pre-chequeo el
+    // duplicado sale como P2002 crudo, es decir un 500 sin explicación.
+    const duplicate = await this.prisma
+      .withoutScope()
+      .dian_configurations.findFirst({
+        where: {
+          nit: dto.nit,
+          configuration_type,
+          ...(resolved_store_id === null
+            ? { organization_id, store_id: null }
+            : { store_id: resolved_store_id }),
+        },
+        select: { id: true, name: true },
+      });
+    if (duplicate) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_002,
+        `Ya existe una configuración DIAN con el NIT ${dto.nit} para ${
+          configuration_type === 'invoicing'
+            ? 'facturación electrónica'
+            : configuration_type
+        } en este alcance ("${duplicate.name}"). Edítala en vez de crear otra.`,
+        { configuration_id: duplicate.id, nit: dto.nit, configuration_type },
+      );
+    }
+
     const existing_count = await this.prisma
       .withoutScope()
       .dian_configurations.count({

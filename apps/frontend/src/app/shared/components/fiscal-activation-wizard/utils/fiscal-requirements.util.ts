@@ -247,7 +247,7 @@ export const FISCAL_RESTRICTION_MAP: Record<string, FiscalRestriction> = {
   DIAN_CONFIG_002: {
     label: 'La configuración DIAN ya existe',
     reason:
-      'Ya existe una configuración DIAN para esta tienda. Edita la existente en lugar de crear otra.',
+      'Ya existe una configuración DIAN con ese NIT y tipo de documento en este alcance. Edita la existente en lugar de crear otra.',
     area: 'invoicing',
     severity: 'required',
     action: { label: 'Volver a DIAN', navigate: 'dian_config' },
