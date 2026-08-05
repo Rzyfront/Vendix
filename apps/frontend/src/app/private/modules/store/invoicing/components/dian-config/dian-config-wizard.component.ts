@@ -81,8 +81,8 @@ const TIP_ROTATION_MS = 9_000;
  */
 const DIAN_TIPS: ReadonlyArray<{ title: string; body: string }> = [
   {
-    title: 'El set de pruebas son 50 documentos',
-    body: '30 facturas de venta, 10 notas débito y 10 notas crédito. La DIAN los valida en bloque: o aprueba el conjunto, o reporta los errores de cada documento.',
+    title: 'El set de pruebas depende de tu modo de operación',
+    body: 'Con software propio son 2 facturas de venta, 1 nota crédito y 1 nota débito (art. 28, Res. 000165/2023); como proveedor tecnológico son 6, 2 y 2. La DIAN los valida en bloque: o aprueba el conjunto, o reporta los errores de cada documento.',
   },
   {
     title: 'La validación es asíncrona',
@@ -762,7 +762,7 @@ interface PersistedTestResult {
                         [class]="testSetStalled() ? 'text-warning' : 'text-[var(--color-info)]'"
                       >
                         {{ testSetState() === 'running'
-                          ? 'Generando, firmando y enviando los 50 documentos…'
+                          ? 'Generando, firmando y enviando el set de habilitación…'
                           : testSetStalled()
                             ? 'La DIAN no está emitiendo veredicto para este lote'
                             : 'La DIAN está validando tu set de pruebas' }}
@@ -1265,6 +1265,18 @@ export class DianConfigWizardComponent {
   readonly testSetStalled = computed(
     () => this.testSetWait()?.stalled === true,
   );
+
+  /**
+   * Cuántos documentos lleva el lote, según lo que el backend realmente envió.
+   * La copia decía "50 documentos" —la composición de 2019— cuando `own_software`
+   * envía 4. El dato ya venía en el resultado (`total_documents`) y nadie lo
+   * leía: un número escrito a mano en la UI envejece sin que nada lo delate.
+   */
+  readonly testSetDocumentsLabel = computed(() => {
+    const total = this.testSetResult()?.total_documents ?? null;
+    if (!total) return 'los documentos de habilitación';
+    return `${total} documento${total === 1 ? '' : 's'}`;
+  });
 
   /**
    * Batches submitted before per-document keys were persisted cannot be asked
@@ -2058,7 +2070,7 @@ export class DianConfigWizardComponent {
           this.applyTestSetOutcome(result, false);
           if (result.pending) {
             this.toast.info(
-              'La DIAN recibió los 50 documentos y los está validando. Puedes esperar aquí o volver más tarde.',
+              `La DIAN recibió ${this.testSetDocumentsLabel()} y los está validando. Puedes esperar aquí o volver más tarde.`,
             );
           }
         },

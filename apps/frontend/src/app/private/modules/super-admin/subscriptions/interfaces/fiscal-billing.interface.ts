@@ -96,12 +96,30 @@ export interface PlatformTestSetWait {
   next_actions: PlatformTestSetNextAction[];
 }
 
+/**
+ * Composición del set según el modo de operación declarado, resuelta por el
+ * backend. Llega del servidor a propósito: la UI la tenía escrita a mano como
+ * "50 documentos" —la composición de 2019— y así desinformaba sobre cuántos
+ * consecutivos de la resolución consume cada envío. Un número que el cliente no
+ * puede derivar es un número que el cliente hardcodea y deja envejecer.
+ */
+export interface PlatformTestSetComposition {
+  invoices: number;
+  credit_notes: number;
+  debit_notes: number;
+  /** Consecutivos que consume el envío. */
+  total: number;
+  /** e.g. "2 facturas + 1 nota crédito + 1 nota débito". */
+  label: string;
+}
+
 export interface PlatformTestSetStatus {
   enablement_status: string | null;
   test_set_id: string | null;
   environment: SubscriptionFiscalEnvironment | string | null;
   last_test_result: Record<string, unknown> | null;
   wait: PlatformTestSetWait;
+  composition?: PlatformTestSetComposition | null;
 }
 
 /**

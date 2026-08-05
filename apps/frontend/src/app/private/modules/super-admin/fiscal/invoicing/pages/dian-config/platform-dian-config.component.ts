@@ -199,6 +199,25 @@ export class PlatformDianConfigComponent {
   /** Lectura acotada de la espera del lote, calculada por el backend. */
   readonly testSetWait = computed(() => this.store.testSet()?.wait ?? null);
 
+  /**
+   * Composición del set según el modo de operación, resuelta por el backend. Se
+   * lee de ahí y no se escribe a mano: la pantalla decía "50 documentos" —la
+   * composición de 2019— cuando `own_software` envía 4 y consume 4 consecutivos
+   * de la resolución.
+   */
+  readonly testSetComposition = computed(
+    () => this.store.testSet()?.composition ?? null,
+  );
+
+  /** "4 documentos (2 facturas + 1 nota crédito + 1 nota débito)" */
+  readonly testSetCompositionLabel = computed(() => {
+    const composition = this.testSetComposition();
+    if (!composition) return 'los documentos de habilitación';
+    return `${composition.total} documento${
+      composition.total === 1 ? '' : 's'
+    } (${composition.label})`;
+  });
+
   readonly testSetStalled = computed(
     () => this.testSetWait()?.stalled === true,
   );
@@ -426,7 +445,7 @@ export class PlatformDianConfigComponent {
   }
 
   // ── Set de pruebas DIAN ─────────────────────────────────────────────────
-  // Vendix debe aprobar el mismo set de 50 documentos que cualquier obligado
+  // Vendix debe aprobar el mismo set de habilitación que cualquier obligado
   // antes de que la DIAN lo habilite en producción.
 
   onRunTestSet(): void {

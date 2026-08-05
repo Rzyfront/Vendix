@@ -68,9 +68,10 @@ interface ChecklistItem {
       <p
         class="text-[11px] leading-relaxed text-text-secondary pt-2 border-t border-border"
       >
-        La DIAN exige aprobar el set de 50 documentos con el NIT propio antes de
+        La DIAN exige aprobar el set de habilitación con el NIT propio antes de
         habilitar producción. Guardar credenciales no habilita: el veredicto lo
-        da la DIAN sobre el set enviado.
+        da la DIAN sobre el set enviado. La cantidad de documentos depende del
+        modo de operación declarado y la indica la pantalla de configuración.
       </p>
     </aside>
   `,

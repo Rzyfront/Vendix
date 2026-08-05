@@ -34,6 +34,7 @@ import {
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { analyzeTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
+import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
   FiscalProductionReadinessService,
   ProductionReadinessCheck,
@@ -221,6 +222,10 @@ export class SubscriptionFiscalService {
             environment: config.environment,
             last_test_result: config.last_test_result,
             wait: analyzeTestSetWait(config.last_test_result),
+            // Viaja al cliente porque la UI imprimía "50 documentos", la
+            // composición de 2019, y con eso desinformaba sobre cuántos
+            // consecutivos de la resolución consume cada envío.
+            composition: buildTestSetCompositionView(config.operation_mode),
           }
         : null,
       habilitation_readiness: this.buildHabilitationReadiness(

@@ -229,7 +229,7 @@ export class InvoicingService {
 
   /**
    * Re-polls DIAN for the verdict of the ALREADY SUBMITTED test set, using the
-   * stored ZipKey. Safe to call repeatedly — it never re-sends the 50 documents,
+   * stored ZipKey. Safe to call repeatedly — it never re-sends the documents,
    * so it does not burn resolution numbers.
    */
   checkDianTestSetStatus(config_id: number): Observable<any> {

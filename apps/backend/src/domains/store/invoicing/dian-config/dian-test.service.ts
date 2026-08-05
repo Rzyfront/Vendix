@@ -36,6 +36,7 @@ import {
 } from '../utils/dian-file-naming.util';
 import { analyzeTestSetWait } from './test-set-wait.util';
 import {
+  buildTestSetCompositionView,
   describeComposition,
   resolveTestSetComposition,
   testSetSize,
@@ -1253,6 +1254,9 @@ export class DianTestService {
       // Derived on read, never stored: `pending` + `executed_at` are the facts,
       // and a persisted "stalled" flag would go stale the moment DIAN answers.
       wait: analyzeTestSetWait(config.last_test_result),
+      // Cuántos documentos y consecutivos implica un envío en ESTE modo de
+      // operación. Sin esto la UI imprimía 50, la composición de 2019.
+      composition: buildTestSetCompositionView(config.operation_mode),
     };
   }
 

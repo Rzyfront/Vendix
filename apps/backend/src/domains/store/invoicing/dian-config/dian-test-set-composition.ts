@@ -61,6 +61,33 @@ export function resolveTestSetComposition(
 }
 
 /**
+ * Composition as the clients need it: counts, total and a rendered label.
+ *
+ * WHY IT LEAVES THE BACKEND: the composition was only ever used inside
+ * `runTestSet`, so both UIs printed a hardcoded "50 documentos" — the legacy 2019
+ * number. That text misinformed about the one thing that matters here, how many
+ * consecutives of the resolution a run burns. A number the client cannot derive
+ * is a number the client will hardcode and let drift.
+ */
+export interface DianTestSetCompositionView extends DianTestSetComposition {
+  /** Consecutives the run consumes. */
+  total: number;
+  /** e.g. "2 facturas + 1 nota crédito + 1 nota débito". */
+  label: string;
+}
+
+export function buildTestSetCompositionView(
+  operation_mode: dian_operation_mode_enum | null | undefined,
+): DianTestSetCompositionView {
+  const composition = resolveTestSetComposition(operation_mode);
+  return {
+    ...composition,
+    total: testSetSize(composition),
+    label: describeComposition(composition),
+  };
+}
+
+/**
  * Human-readable composition, for error messages and audit evidence.
  * e.g. "2 facturas + 1 nota crédito + 1 nota débito".
  */
