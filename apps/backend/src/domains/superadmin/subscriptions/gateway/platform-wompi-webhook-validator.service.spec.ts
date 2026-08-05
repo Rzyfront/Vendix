@@ -6,16 +6,18 @@ describe('PlatformWompiWebhookValidatorService', () => {
   let service: PlatformWompiWebhookValidatorService;
   let platformGwMock: any;
   let wompiClientMock: any;
+  let wompiFactoryMock: any;
 
   beforeEach(() => {
     platformGwMock = { getActiveCredentials: jest.fn() };
-    wompiClientMock = {
-      configure: jest.fn(),
-      validateWebhookSignature: jest.fn(),
-    };
+    wompiClientMock = { validateWebhookSignature: jest.fn() };
+    // The service takes the FACTORY, not a client: `getClient(id, config)`
+    // returns a client already configured for those credentials, so the config
+    // is asserted on the factory call rather than on a client.configure() call.
+    wompiFactoryMock = { getClient: jest.fn(() => wompiClientMock) };
     service = new PlatformWompiWebhookValidatorService(
       platformGwMock,
-      wompiClientMock,
+      wompiFactoryMock,
     );
   });
 
@@ -54,8 +56,8 @@ describe('PlatformWompiWebhookValidatorService', () => {
     expect(result.invoiceId).toBe(99);
     expect(platformGwMock.getActiveCredentials).toHaveBeenCalledWith('wompi');
 
-    expect(wompiClientMock.configure).toHaveBeenCalledTimes(1);
-    const cfgArg = wompiClientMock.configure.mock.calls[0][0];
+    expect(wompiFactoryMock.getClient).toHaveBeenCalledTimes(1);
+    const cfgArg = wompiFactoryMock.getClient.mock.calls[0][1];
     expect(cfgArg.public_key).toBe('pub_test_xxx');
     expect(cfgArg.environment).toBe(WompiEnvironment.SANDBOX);
 
@@ -70,8 +72,8 @@ describe('PlatformWompiWebhookValidatorService', () => {
 
     await service.validate(bodyWithReference('vendix_saas_1_2_3'));
 
-    expect(wompiClientMock.configure).toHaveBeenCalledTimes(1);
-    const cfgArg = wompiClientMock.configure.mock.calls[0][0];
+    expect(wompiFactoryMock.getClient).toHaveBeenCalledTimes(1);
+    const cfgArg = wompiFactoryMock.getClient.mock.calls[0][1];
     expect(cfgArg.environment).toBe(WompiEnvironment.PRODUCTION);
   });
 

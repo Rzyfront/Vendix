@@ -16,8 +16,12 @@ describe('WithholdingTaxService.findAllCalculations', () => {
   };
 
   // Only `prisma` is exercised by findAllCalculations; other deps are unused.
+  // Positional construction means every constructor widening lands here — the
+  // count must match calculator, event_emitter, fiscalScope, fiscalGate and
+  // withholdingFlow, in that order.
   const service = new WithholdingTaxService(
     mock_prisma as any,
+    undefined as any,
     undefined as any,
     undefined as any,
     undefined as any,

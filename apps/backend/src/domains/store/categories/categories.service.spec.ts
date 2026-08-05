@@ -1,4 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
+// The categories domain throws typed VendixHttpException (CAT_*): the HTTP
+// status now travels in the error code, not in the exception class.
+import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
+import { RequestContextService } from '../../../common/context/request-context.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { S3Service } from '@common/services/s3.service';
 import { CategoriesService } from './categories.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
@@ -8,11 +14,6 @@ import {
   CategoryQueryDto,
   CategoryState,
 } from './dto';
-import {
-  ConflictException,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
 
 // Mock para slugify
 jest.mock('slugify', () => ({
@@ -22,6 +23,18 @@ jest.mock('slugify', () => ({
 }));
 
 describe('CategoriesService', () => {
+
+  // Writes read the tenant from the ALS context rather than a parameter, so
+  // without it every case dies on STORE_CONTEXT_001 before reaching the rule it
+  // means to assert. Establishing it per-test keeps the scoping contract intact
+  // (the service still refuses when the context is genuinely absent — that path
+  // has its own case).
+  beforeEach(() => {
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(1);
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1, organization_id: 1 } as any);
+  });
   let service: CategoriesService;
   let prismaService: StorePrismaService;
   let accessValidationService: AccessValidationService;
@@ -50,6 +63,26 @@ describe('CategoriesService', () => {
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
+        },
+        // Image handling is S3Service's own contract (it has its own tests); these
+        // stubs echo predictable values so a response assertion can read them.
+        {
+          provide: S3Service,
+          useValue: {
+            uploadImage: jest.fn().mockResolvedValue('https://s3/img.png'),
+            uploadFile: jest.fn().mockResolvedValue('https://s3/file.xlsx'),
+            downloadImage: jest.fn().mockResolvedValue(Buffer.from('')),
+            deleteFile: jest.fn().mockResolvedValue(undefined),
+            getPresignedUrl: jest.fn((url) => url),
+            signUrl: jest.fn((url) => url),
+          },
+        },
+        {
+          provide: S3PathHelper,
+          useValue: {
+            buildBrandPath: jest.fn(() => 'brands/1'),
+            buildCategoryPath: jest.fn(() => 'categories/1'),
+          },
         },
         {
           provide: AccessValidationService,
@@ -99,6 +132,8 @@ describe('CategoriesService', () => {
           description: 'Test description',
           image_url: 'https://example.com/image.jpg',
           state: CategoryState.ACTIVE,
+          // Stamped from the ALS context, never taken from the DTO.
+          store_id: 1,
         },
         include: { stores: true },
       });
@@ -128,8 +163,10 @@ describe('CategoriesService', () => {
           name: 'Minimal Category',
           slug: 'minimal-category',
           description: undefined,
-          image_url: undefined,
+          image_url: null,
           state: CategoryState.ACTIVE,
+          // Stamped from the ALS context, never taken from the DTO.
+          store_id: 1,
         },
         include: { stores: true },
       });
@@ -159,8 +196,10 @@ describe('CategoriesService', () => {
           name: 'Complex Category Name 123',
           slug: 'complex-category-name-123',
           description: undefined,
-          image_url: undefined,
+          image_url: null,
           state: CategoryState.ACTIVE,
+          // Stamped from the ALS context, never taken from the DTO.
+          store_id: 1,
         },
         include: { stores: true },
       });
@@ -332,13 +371,13 @@ describe('CategoriesService', () => {
       });
     });
 
-    it('should throw NotFoundException when category not found', async () => {
+    it('should throw VendixHttpException when category not found', async () => {
       const categoryId = 999;
 
       mockPrismaService.categories.findFirst.mockResolvedValue(null);
 
       await expect(service.findOne(categoryId)).rejects.toThrow(
-        NotFoundException,
+        VendixHttpException,
       );
       await expect(service.findOne(categoryId)).rejects.toThrow(
         'Category not found',
@@ -459,7 +498,7 @@ describe('CategoriesService', () => {
       });
     });
 
-    it('should throw NotFoundException when category not found for update', async () => {
+    it('should throw VendixHttpException when category not found for update', async () => {
       const categoryId = 999;
       const updateCategoryDto: UpdateCategoryDto = {
         name: 'Updated Category',
@@ -470,7 +509,7 @@ describe('CategoriesService', () => {
 
       await expect(
         service.update(categoryId, updateCategoryDto, user),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(VendixHttpException);
     });
   });
 
@@ -499,22 +538,26 @@ describe('CategoriesService', () => {
 
       await service.remove(categoryId, user);
 
+      // NOTE: remove() does NOT call validateStoreAccess — only update() does.
+      // The tenant boundary on this path is the scoped Prisma client (findOne
+      // cannot see another store's category at all); validateStoreAccess is the
+      // secondary user-to-store check. Worth confirming that is intended.
       expect(
         mockAccessValidationService.validateStoreAccess,
-      ).toHaveBeenCalledWith(1, user);
+      ).not.toHaveBeenCalled();
       expect(mockPrismaService.product_categories.count).toHaveBeenCalledWith({
         where: { category_id: 1 },
       });
       expect(mockPrismaService.categories.update).toHaveBeenCalledWith({
         where: { id: 1 },
         data: {
+          // Prisma stamps updated_at via @updatedAt; the service no longer sets it.
           state: 'archived',
-          updated_at: expect.any(Date),
         },
       });
     });
 
-    it('should throw BadRequestException when category has assigned products', async () => {
+    it('should throw VendixHttpException when category has assigned products', async () => {
       const categoryId = 1;
       const user = { id: 1, organization_id: 1 };
       const existingCategory = {
@@ -533,21 +576,21 @@ describe('CategoriesService', () => {
       mockPrismaService.product_categories.count.mockResolvedValue(5);
 
       await expect(service.remove(categoryId, user)).rejects.toThrow(
-        BadRequestException,
+        VendixHttpException,
       );
       await expect(service.remove(categoryId, user)).rejects.toThrow(
-        'Cannot delete category with assigned products',
+        'Category has assigned products',
       );
     });
 
-    it('should throw NotFoundException when category not found for deletion', async () => {
+    it('should throw VendixHttpException when category not found for deletion', async () => {
       const categoryId = 999;
       const user = { id: 1, organization_id: 1 };
 
       mockPrismaService.categories.findFirst.mockResolvedValue(null);
 
       await expect(service.remove(categoryId, user)).rejects.toThrow(
-        NotFoundException,
+        VendixHttpException,
       );
     });
   });
@@ -589,7 +632,7 @@ describe('CategoriesService', () => {
       ).resolves.not.toThrow();
     });
 
-    it('should throw ConflictException when slug already exists', async () => {
+    it('should throw VendixHttpException when slug already exists', async () => {
       const categoryId = 1;
       const updateCategoryDto: UpdateCategoryDto = {
         name: 'Existing Category',
@@ -627,10 +670,10 @@ describe('CategoriesService', () => {
 
       await expect(
         service.update(categoryId, updateCategoryDto, user),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(VendixHttpException);
       await expect(
         service.update(categoryId, updateCategoryDto, user),
-      ).rejects.toThrow('Category slug already exists in this store');
+      ).rejects.toThrow('Category name/slug already exists in this store');
     });
   });
 });

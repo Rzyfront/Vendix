@@ -202,8 +202,27 @@ describe('PlansService', () => {
       const args = prisma.subscription_plans.findMany.mock.calls[0][0];
       expect(args.where.state).toBe('active');
       expect(args.where.plan_type).toBe('base');
-      expect(args.skip).toBe(0);
-      expect(args.take).toBe(10);
+    });
+
+    /**
+     * Pagination moved OUT of the query: a multi-cycle plan is stored as one row
+     * per billing cycle, so the list first resolves plan_group_code keys and
+     * then paginates the collapsed groups. Asserting skip/take on the first
+     * findMany would pin an internal step; the contract the controller consumes
+     * is `meta`.
+     */
+    it('reports the requested page and limit in meta', async () => {
+      prisma.subscription_plans.findMany.mockResolvedValue([]);
+      prisma.subscription_plans.count.mockResolvedValue(0);
+
+      const result = await service.findAll({ page: 2, limit: 25 } as any);
+
+      expect(result.meta).toEqual({
+        total: 0,
+        page: 2,
+        limit: 25,
+        totalPages: 0,
+      });
     });
   });
 

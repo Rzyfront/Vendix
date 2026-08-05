@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { StorePaymentMethodsService } from '../services/store-payment-methods.service';
+import { PaymentEncryptionService } from './payment-encryption.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 
 describe('StorePaymentMethodsService', () => {
   let service: StorePaymentMethodsService;
@@ -52,6 +54,16 @@ describe('StorePaymentMethodsService', () => {
     store_users: {
       findFirst: jest.fn(),
     },
+    // enableForStore checks for an existing row through `withoutScope()`: the
+    // store filter would hide a row belonging to the very store being enabled
+    // when the ALS context has not been established yet. The mock exposes the
+    // same model doubles so the tests' spies still govern that read.
+    withoutScope() {
+      return {
+        store_payment_methods: this.store_payment_methods,
+        system_payment_methods: this.system_payment_methods,
+      };
+    },
     // Mock scopedClient getter
     get scopedClient() {
       return {
@@ -73,6 +85,18 @@ describe('StorePaymentMethodsService', () => {
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
+        },
+        // encryptConfig/decryptConfig are identity here: these tests assert the
+        // CRUD contract, not the cipher (EncryptionService owns that, with its
+        // own key-cascade tests). maskConfig returns the config untouched so a
+        // response assertion can still see the fields it expects.
+        {
+          provide: PaymentEncryptionService,
+          useValue: {
+            encryptConfig: jest.fn((cfg) => cfg),
+            decryptConfig: jest.fn((cfg) => cfg),
+            maskConfig: jest.fn((cfg) => cfg),
+          },
         },
       ],
     }).compile();
@@ -103,6 +127,20 @@ describe('StorePaymentMethodsService', () => {
   });
 
   describe('enableForStore', () => {
+    // enableForStore is a WRITE: it takes the tenant from the ALS context rather
+    // than a parameter, so without a context it throws Forbidden before any
+    // business rule runs. Each case here asserts a rule, so the context is
+    // established first.
+    beforeEach(() => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 1 } as any);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
     it('should enable a payment method for a store', async () => {
       const enableDto = {
         display_name: 'Stripe Custom',

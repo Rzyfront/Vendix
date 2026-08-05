@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { ResponseService } from '../../../common/responses/response.service';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -49,6 +50,22 @@ describe('PaymentsController', () => {
         {
           provide: PaymentsService,
           useValue: mockPaymentsService,
+        },
+        // Pass-through envelope: these tests assert that the controller
+        // DELEGATES to PaymentsService with the right arguments. The envelope
+        // shape is ResponseService's own contract with its own tests, and
+        // duplicating it here would make every controller spec fail the day the
+        // envelope changes.
+        {
+          provide: ResponseService,
+          useValue: {
+            success: jest.fn((data) => data),
+            created: jest.fn((data) => data),
+            paginated: jest.fn((data) => data),
+            updated: jest.fn((data) => data),
+            deleted: jest.fn((data) => data),
+            error: jest.fn((error) => ({ success: false, error })),
+          },
         },
       ],
     })

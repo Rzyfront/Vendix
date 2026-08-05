@@ -7,6 +7,7 @@ import { EmailService } from '../../email/email.service';
 import { EmailBrandingService } from '../../email/services/email-branding.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
+import { CustomersService } from '../store/customers/customers.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { S3Service } from '../../common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -129,6 +130,12 @@ describe('AuthService - Owner Registration Flow', () => {
         },
         { provide: S3Service, useValue: mockS3Service },
         { provide: EventEmitter2, useValue: mockEventEmitter },
+        // DEPENDENCIA MUERTA: AuthService inyecta CustomersService y no llama a
+        // ningún método suyo (grep `customersService` en auth.service.ts → solo
+        // la línea del constructor). Arrastra el módulo de clientes al grafo de
+        // auth sin motivo. El stub vacío deja pasar la resolución; el ctor
+        // debería perder el parámetro.
+        { provide: CustomersService, useValue: {} },
       ],
     }).compile();
 
@@ -339,7 +346,7 @@ describe('AuthService - Owner Registration Flow', () => {
       // Act & Assert
       await expect(
         service.registerOwner(validOwnerData, clientInfo),
-      ).rejects.toThrow(new BadRequestException('Rol de owner no encontrado'));
+      ).rejects.toThrow('Role not found'); // ErrorCodes.AUTH_ROLE_001
     });
 
     it('should handle email service failure gracefully', async () => {
@@ -471,8 +478,11 @@ describe('AuthService - Owner Registration Flow', () => {
       );
 
       // Act & Assert
+      // Los tres modos de fallo (inexistente, ya usado, expirado) responden con
+      // el MISMO código AUTH_TOKEN_001. Es defensa contra enumeración:
+      // distinguirlos le confirma al atacante que el token existió.
       await expect(service.verifyEmail(invalidToken)).rejects.toThrow(
-        new BadRequestException('Token de verificación inválido'),
+        'Invalid or expired token',
       );
     });
 
@@ -493,7 +503,7 @@ describe('AuthService - Owner Registration Flow', () => {
 
       // Act & Assert
       await expect(service.verifyEmail(validToken)).rejects.toThrow(
-        new BadRequestException('Token ya utilizado'),
+        'Invalid or expired token',
       );
     });
 
@@ -514,7 +524,7 @@ describe('AuthService - Owner Registration Flow', () => {
 
       // Act & Assert
       await expect(service.verifyEmail(expiredToken)).rejects.toThrow(
-        new BadRequestException('Token expirado'),
+        'Invalid or expired token',
       );
     });
   });
@@ -552,7 +562,12 @@ describe('AuthService - Owner Registration Flow', () => {
       const result = await service.resendEmailVerification(testEmail);
 
       // Assert
-      expect(result).toEqual({ message: 'Email de verificación enviado' });
+      // `alreadyVerified` es parte del contrato: el frontend decide con ese flag
+      // si manda al login o deja al usuario esperando el correo.
+      expect(result).toEqual({
+        message: 'Email de verificación enviado',
+        alreadyVerified: false,
+      });
       expect(mockPrismaService.users.findFirst).toHaveBeenCalledWith({
         where: { email: testEmail },
       });
@@ -569,9 +584,11 @@ describe('AuthService - Owner Registration Flow', () => {
       );
 
       // Assert
+      // Mensaje deliberadamente vago y con la misma forma que el caso exitoso:
+      // si difiriera, el endpoint serviría para enumerar cuentas registradas.
       expect(result).toEqual({
-        message:
-          'Si el email existe y no está verificado, recibirás un nuevo email de verificación',
+        message: 'Si el email existe, recibirás instrucciones',
+        alreadyVerified: false,
       });
     });
 
@@ -585,10 +602,13 @@ describe('AuthService - Owner Registration Flow', () => {
 
       mockPrismaService.users.findFirst.mockResolvedValue(mockUser);
 
-      // Act & Assert
-      await expect(service.resendEmailVerification(testEmail)).rejects.toThrow(
-        new BadRequestException('El email ya está verificado'),
-      );
+      // Un email ya verificado NO es un error: reenviar es idempotente y el
+      // usuario que reclama el correo dos veces recibe una indicación de que ya
+      // puede entrar, en lugar de un 400 que parece una falla del sistema.
+      const result = await service.resendEmailVerification(testEmail);
+
+      expect(result.alreadyVerified).toBe(true);
+      expect(result.message).toContain('ya ha sido verificado');
     });
   });
 });

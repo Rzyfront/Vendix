@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ProductVariantService } from './services/product-variant.service';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -37,6 +38,15 @@ describe('ProductsController', () => {
     getProductStats: jest.fn(),
   };
 
+  // Las escrituras de variante salieron de ProductsService: el controller las
+  // enruta a ProductVariantService. El doble tiene que ser nombrado para poder
+  // aserverar sobre él — un stub anónimo inline deja los tests sin sujeto.
+  const mockProductVariantService = {
+    createVariant: jest.fn(),
+    updateVariant: jest.fn(),
+    removeVariant: jest.fn(),
+  };
+
   const mockResponseService = {
     created: jest.fn(),
     success: jest.fn(),
@@ -62,6 +72,13 @@ describe('ProductsController', () => {
         {
           provide: ProductsService,
           useValue: mockProductsService,
+        },
+        // Variant writes were split out of ProductsService: the controller now
+        // routes them to ProductVariantService, so the double must exist even in
+        // cases that only touch simple products.
+        {
+          provide: ProductVariantService,
+          useValue: mockProductVariantService,
         },
         {
           provide: ResponseService,
@@ -326,7 +343,9 @@ describe('ProductsController', () => {
         ...createVariantDto,
       };
 
-      mockProductsService.createVariant.mockResolvedValue(expectedVariant);
+      mockProductVariantService.createVariant.mockResolvedValue(
+        expectedVariant,
+      );
       mockResponseService.created.mockReturnValue({
         success: true,
         data: expectedVariant,
@@ -334,7 +353,10 @@ describe('ProductsController', () => {
 
       const result = await controller.createVariant(1, createVariantDto);
 
-      expect(service.createVariant).toHaveBeenCalledWith(1, createVariantDto);
+      expect(mockProductVariantService.createVariant).toHaveBeenCalledWith(
+        1,
+        createVariantDto,
+      );
       expect(responseService.created).toHaveBeenCalledWith(
         expectedVariant,
         'Variante de producto creada exitosamente',
@@ -352,7 +374,7 @@ describe('ProductsController', () => {
         ...updateVariantDto,
       };
 
-      mockProductsService.updateVariant.mockResolvedValue(updatedVariant);
+      mockProductVariantService.updateVariant.mockResolvedValue(updatedVariant);
       mockResponseService.updated.mockReturnValue({
         success: true,
         data: updatedVariant,
@@ -360,11 +382,14 @@ describe('ProductsController', () => {
 
       const result = await controller.updateVariant(1, updateVariantDto);
 
-      expect(service.updateVariant).toHaveBeenCalledWith(1, updateVariantDto);
+      expect(mockProductVariantService.updateVariant).toHaveBeenCalledWith(
+        1,
+        updateVariantDto,
+      );
     });
 
     it('should delete a product variant', async () => {
-      mockProductsService.removeVariant.mockResolvedValue(undefined);
+      mockProductVariantService.removeVariant.mockResolvedValue(undefined);
       mockResponseService.deleted.mockReturnValue({
         success: true,
         message: 'Variante de producto eliminada exitosamente',
@@ -372,7 +397,7 @@ describe('ProductsController', () => {
 
       const result = await controller.removeVariant(1);
 
-      expect(service.removeVariant).toHaveBeenCalledWith(1);
+      expect(mockProductVariantService.removeVariant).toHaveBeenCalledWith(1);
     });
   });
 

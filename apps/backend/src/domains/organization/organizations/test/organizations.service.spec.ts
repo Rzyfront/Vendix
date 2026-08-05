@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrganizationsService } from '../organizations.service';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { S3Service } from '@common/services/s3.service';
+import { DefaultPanelUIService } from '@common/services/default-panel-ui.service';
+import { OrgLocationsService } from '../../inventory/locations/org-locations.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UpdateOrganizationDto, OrganizationDashboardDto } from '../dto';
 import { NotFoundException } from '@nestjs/common';
@@ -90,6 +95,12 @@ describe('OrganizationsService', () => {
 
     // Setup default return values
     mock_context_service.getContext.mockReturnValue(mock_context);
+    // OrganizationsService llama RequestContextService.getContext() de forma
+    // ESTÁTICA: registrar el provider no tiene efecto, hay que espiar el
+    // estático o toda escritura muere en ORG_CONTEXT_001.
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue(mock_context as any);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -101,6 +112,40 @@ describe('OrganizationsService', () => {
         {
           provide: RequestContextService,
           useValue: mock_context_service,
+        },
+        // El perfil de organización cruza tres bases de datos lógicas: la
+        // scoped (OrganizationPrismaService) para la organización y sus tiendas,
+        // y la global para users / user_settings / user_sessions, que no cuelgan
+        // de un tenant.
+        {
+          provide: GlobalPrismaService,
+          useValue: {
+            users: { findUnique: jest.fn() },
+            user_settings: { findUnique: jest.fn(), update: jest.fn() },
+            user_sessions: { count: jest.fn().mockResolvedValue(0) },
+          },
+        },
+        // signUrl devuelve la entrada: la firma es contrato de S3Service.
+        { provide: S3Service, useValue: { signUrl: jest.fn((url) => url) } },
+        {
+          provide: DefaultPanelUIService,
+          useValue: { generatePanelUI: jest.fn().mockReturnValue({}) },
+        },
+        // Al crear/activar una organización se garantiza su bodega central: sin
+        // una ubicación por defecto no hay dónde asentar inventario.
+        {
+          provide: OrgLocationsService,
+          useValue: { ensureCentralWarehouse: jest.fn() },
+        },
+        // Caché de perfil: `get` en null fuerza el camino de lectura real en
+        // cada prueba, que es el que se quiere verificar.
+        {
+          provide: CACHE_MANAGER,
+          useValue: {
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
         },
       ],
     }).compile();

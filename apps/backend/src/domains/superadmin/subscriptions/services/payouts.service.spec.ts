@@ -4,6 +4,7 @@ import { VendixHttpException } from '../../../../common/errors';
 describe('PayoutsService', () => {
   let service: PayoutsService;
   let prisma: any;
+  let eventEmitter: { emit: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -17,14 +18,23 @@ describe('PayoutsService', () => {
         updateMany: jest.fn(),
       },
     };
-    service = new PayoutsService(prisma);
+    // Marking a batch paid emits `partner_payout_batch.paid`, which is what makes
+    // the platform's books settle the partner payable (DR 2335 / CR 1110).
+    eventEmitter = { emit: jest.fn() };
+    service = new PayoutsService(prisma, eventEmitter as any);
   });
 
+  /**
+   * `draft` is the batch's initial state. The fixture used to say `pending`, which
+   * is not even a member of `partner_payout_batch_state_enum`
+   * (draft → approved → sent → paid, plus rejected) — so every assertion built on
+   * it was describing a state machine that does not exist.
+   */
   function batchFixture(overrides: Partial<any> = {}) {
     return {
       id: 1,
       partner_organization_id: 10,
-      state: 'pending',
+      state: 'draft',
       payout_method: 'bank_transfer',
       ...overrides,
     };
@@ -37,12 +47,12 @@ describe('PayoutsService', () => {
 
       await service.findAll({
         partner_organization_id: 10,
-        state: 'pending',
+        state: 'draft',
       } as any);
 
       const args = prisma.partner_payout_batches.findMany.mock.calls[0][0];
       expect(args.where.partner_organization_id).toBe(10);
-      expect(args.where.state).toBe('pending');
+      expect(args.where.state).toBe('draft');
     });
   });
 
@@ -72,7 +82,7 @@ describe('PayoutsService', () => {
   });
 
   describe('approve', () => {
-    it('transitions pending → approved and flips commissions to pending_payout', async () => {
+    it('transitions draft → approved and flips commissions to pending_payout', async () => {
       prisma.partner_payout_batches.findUnique.mockResolvedValue(
         batchFixture(),
       );
@@ -95,7 +105,7 @@ describe('PayoutsService', () => {
       expect(commArgs.data.state).toBe('pending_payout');
     });
 
-    it('throws PARTNER_004 when batch is not in pending state', async () => {
+    it('throws PARTNER_004 when batch is not in draft state', async () => {
       prisma.partner_payout_batches.findUnique.mockResolvedValue(
         batchFixture({ state: 'paid' }),
       );
@@ -130,11 +140,40 @@ describe('PayoutsService', () => {
       const commArgs = prisma.partner_commissions.updateMany.mock.calls[0][0];
       expect(commArgs.data.state).toBe('paid');
       expect(commArgs.data.paid_at).toBeInstanceOf(Date);
+
+      // RNC-MF-3: without this event the platform's books never settle the
+      // partner payable, so the commission stays as an open liability forever.
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'partner_payout_batch.paid',
+        expect.objectContaining({ batchId: 1 }),
+      );
+    });
+
+    /**
+     * The emit is wrapped in try/catch on purpose: an accounting listener that
+     * throws must not undo an already-committed payout, and the admin must not see
+     * a failure for a batch that IS paid.
+     */
+    it('completes the payout even if the accounting listener throws', async () => {
+      prisma.partner_payout_batches.findUnique.mockResolvedValue(
+        batchFixture({ state: 'approved' }),
+      );
+      prisma.partner_payout_batches.update.mockResolvedValue(
+        batchFixture({ state: 'paid' }),
+      );
+      prisma.partner_commissions.updateMany.mockResolvedValue({ count: 3 });
+      eventEmitter.emit.mockImplementation(() => {
+        throw new Error('listener exploded');
+      });
+
+      await expect(service.markPaid(1)).resolves.toMatchObject({
+        state: 'paid',
+      });
     });
 
     it('throws PARTNER_004 when batch is not in approved state', async () => {
       prisma.partner_payout_batches.findUnique.mockResolvedValue(
-        batchFixture({ state: 'pending' }),
+        batchFixture({ state: 'draft' }),
       );
       let err: any = null;
       try {

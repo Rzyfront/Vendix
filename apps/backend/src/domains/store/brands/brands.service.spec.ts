@@ -1,15 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
+// The brands domain throws typed VendixHttpException (BRAND_*), not raw Nest
+// exceptions — the HTTP status now travels in the error code, not the class.
+import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../common/errors/error-codes';
+import { RequestContextService } from '../../../common/context/request-context.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { S3Service } from '@common/services/s3.service';
 import { BrandsService } from './brands.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
-import {
-  NotFoundException,
-  ConflictException,
-  BadRequestException,
-} from '@nestjs/common';
 import { brand_state_enum } from '@prisma/client';
 
 describe('BrandsService', () => {
+
+  // Writes read the tenant from the ALS context rather than a parameter, so
+  // without it every case dies on STORE_CONTEXT_001 before reaching the rule it
+  // means to assert. Establishing it per-test keeps the scoping contract intact
+  // (the service still refuses when the context is genuinely absent — that path
+  // has its own case).
+  beforeEach(() => {
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(1);
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1, organization_id: 1 } as any);
+  });
   let service: BrandsService;
   let prismaService: StorePrismaService;
 
@@ -33,6 +47,26 @@ describe('BrandsService', () => {
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
+        },
+        // Image handling is S3Service's own contract (it has its own tests); these
+        // stubs echo predictable values so a response assertion can read them.
+        {
+          provide: S3Service,
+          useValue: {
+            uploadImage: jest.fn().mockResolvedValue('https://s3/img.png'),
+            uploadFile: jest.fn().mockResolvedValue('https://s3/file.xlsx'),
+            downloadImage: jest.fn().mockResolvedValue(Buffer.from('')),
+            deleteFile: jest.fn().mockResolvedValue(undefined),
+            getPresignedUrl: jest.fn((url) => url),
+            signUrl: jest.fn((url) => url),
+          },
+        },
+        {
+          provide: S3PathHelper,
+          useValue: {
+            buildBrandPath: jest.fn(() => 'brands/1'),
+            buildCategoryPath: jest.fn(() => 'categories/1'),
+          },
         },
       ],
     }).compile();
@@ -75,11 +109,16 @@ describe('BrandsService', () => {
       });
 
       expect(result).toEqual(expectedBrand);
+      // create() derives the slug from the name, defaults the lifecycle state and
+      // stamps the tenant taken from the ALS context — none of it comes from the DTO.
       expect(mockPrismaService.brands.create).toHaveBeenCalledWith({
         data: {
           name: 'Test Brand',
+          slug: 'test-brand',
           description: 'Test description',
           logo_url: 'https://example.com/logo.png',
+          state: 'active',
+          store_id: 1,
         },
       });
     });
@@ -103,13 +142,17 @@ describe('BrandsService', () => {
       expect(mockPrismaService.brands.create).toHaveBeenCalledWith({
         data: {
           name: 'Minimal Brand',
+          slug: 'minimal-brand',
           description: undefined,
-          logo_url: undefined,
+          // extractS3KeyFromUrl normalizes an absent URL to null, not undefined.
+          logo_url: null,
+          state: 'active',
+          store_id: 1,
         },
       });
     });
 
-    it('should throw ConflictException for duplicate brand name', async () => {
+    it('should throw VendixHttpException for duplicate brand name', async () => {
       const duplicateDto: CreateBrandDto = {
         name: 'Existing Brand',
       };
@@ -122,10 +165,10 @@ describe('BrandsService', () => {
       mockPrismaService.brands.create.mockRejectedValue(prismaError);
 
       await expect(service.create(duplicateDto, { id: 1 })).rejects.toThrow(
-        ConflictException,
+        VendixHttpException,
       );
       await expect(service.create(duplicateDto, { id: 1 })).rejects.toThrow(
-        'Brand name already exists',
+        'Brand name/slug already exists in this store',
       );
     });
 
@@ -188,9 +231,14 @@ describe('BrandsService', () => {
             { name: { contains: 'test', mode: 'insensitive' } },
             { description: { contains: 'test', mode: 'insensitive' } },
           ],
+          // findAll excludes archived rows unless the caller asks for an explicit
+          // `state`. remove() is a soft archive, so without this filter a deleted
+          // brand would reappear in every list.
+          state: { not: 'archived' },
         },
         skip: 0,
         take: 10,
+        // This query passes sort_by='name', sort_order='asc' explicitly.
         orderBy: { name: 'asc' },
         include: {
           _count: {
@@ -222,7 +270,7 @@ describe('BrandsService', () => {
       const result = await service.findAll(queryWithoutSearch);
 
       expect(mockPrismaService.brands.findMany).toHaveBeenCalledWith({
-        where: {},
+        where: { state: { not: 'archived' } },
         skip: 5,
         take: 5,
         orderBy: { created_at: 'desc' },
@@ -244,10 +292,11 @@ describe('BrandsService', () => {
       await service.findAll(emptyQuery);
 
       expect(mockPrismaService.brands.findMany).toHaveBeenCalledWith({
-        where: {},
+        where: { state: { not: 'archived' } },
         skip: 0,
         take: 10,
-        orderBy: { name: 'asc' },
+        // Destructuring defaults are sort_by='created_at', sort_order='desc'.
+        orderBy: { created_at: 'desc' },
         include: {
           _count: {
             select: { products: true },
@@ -297,7 +346,7 @@ describe('BrandsService', () => {
         },
         skip: 0,
         take: 10,
-        orderBy: { name: 'asc' },
+        orderBy: { created_at: 'desc' },
         include: {
           _count: {
             select: { products: true },
@@ -321,7 +370,7 @@ describe('BrandsService', () => {
         },
         skip: 0,
         take: 10,
-        orderBy: { name: 'asc' },
+        orderBy: { created_at: 'desc' },
         include: {
           _count: {
             select: { products: true },
@@ -358,12 +407,12 @@ describe('BrandsService', () => {
       });
     });
 
-    it('should throw NotFoundException if brand not found', async () => {
+    it('should throw VendixHttpException if brand not found', async () => {
       const nonExistentId = 999;
       mockPrismaService.brands.findFirst.mockResolvedValue(null);
 
       await expect(service.findOne(nonExistentId)).rejects.toThrow(
-        NotFoundException,
+        VendixHttpException,
       );
       await expect(service.findOne(nonExistentId)).rejects.toThrow(
         'Brand not found',
@@ -429,6 +478,9 @@ describe('BrandsService', () => {
         where: { id: brandId },
         data: {
           name: 'Updated Brand',
+          // Renaming recomputes the slug: otherwise the public URL would keep
+          // pointing at the old name.
+          slug: 'updated-brand',
           description: 'Updated description',
           logo_url: 'https://example.com/updated-logo.png',
         },
@@ -514,6 +566,7 @@ describe('BrandsService', () => {
         where: { id: brandId },
         data: {
           name: 'New Name',
+          slug: 'new-name',
         },
         include: {
           _count: {
@@ -523,7 +576,7 @@ describe('BrandsService', () => {
       });
     });
 
-    it('should throw ConflictException for duplicate name on update', async () => {
+    it('should throw VendixHttpException for duplicate name on update', async () => {
       const brandId = 1;
       const duplicateNameUpdate: UpdateBrandDto = {
         name: 'Existing Brand Name',
@@ -544,26 +597,26 @@ describe('BrandsService', () => {
 
       await expect(
         service.update(brandId, duplicateNameUpdate, { id: 1 }),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(VendixHttpException);
       await expect(
         service.update(brandId, duplicateNameUpdate, { id: 1 }),
-      ).rejects.toThrow('Brand name already exists');
+      ).rejects.toThrow('Brand name/slug already exists in this store');
     });
 
-    it('should throw NotFoundException if brand to update not found', async () => {
+    it('should throw VendixHttpException if brand to update not found', async () => {
       const brandId = 999;
       const updateDto: UpdateBrandDto = {
         name: 'Updated Name',
       };
 
-      // Mock findOne to throw NotFoundException (brand doesn't exist)
+      // Mock findOne to throw VendixHttpException (brand doesn't exist)
       jest
         .spyOn(service, 'findOne')
-        .mockRejectedValue(new NotFoundException('Brand not found'));
+        .mockRejectedValue(new VendixHttpException(ErrorCodes.BRAND_FIND_001));
 
       await expect(
         service.update(brandId, updateDto, { id: 1 }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(VendixHttpException);
     });
   });
 
@@ -602,7 +655,7 @@ describe('BrandsService', () => {
       });
     });
 
-    it('should throw BadRequestException if brand has products', async () => {
+    it('should throw VendixHttpException if brand has products', async () => {
       const brandId = 1;
       const brandWithProducts = {
         id: 1,
@@ -614,25 +667,25 @@ describe('BrandsService', () => {
       mockPrismaService.products.count.mockResolvedValue(5);
 
       await expect(service.remove(brandId, { id: 1 })).rejects.toThrow(
-        BadRequestException,
+        VendixHttpException,
       );
       await expect(service.remove(brandId, { id: 1 })).rejects.toThrow(
-        'Cannot delete brand with assigned products',
+        'Brand has assigned products',
       );
     });
 
-    it('should throw NotFoundException if brand to delete not found', async () => {
+    it('should throw VendixHttpException if brand to delete not found', async () => {
       const brandId = 999;
       mockPrismaService.brands.findFirst.mockResolvedValue(null);
 
       await expect(service.remove(brandId, { id: 1 })).rejects.toThrow(
-        NotFoundException,
+        VendixHttpException,
       );
     });
   });
 
   describe('validateUniqueName', () => {
-    it('should throw ConflictException if name already exists', async () => {
+    it('should throw VendixHttpException if name already exists', async () => {
       const existingBrand = {
         id: 2,
         name: 'Existing Brand',
@@ -643,7 +696,7 @@ describe('BrandsService', () => {
       // Access private method through type assertion for testing
       await expect(
         (service as any).validateUniqueName('Existing Brand'),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(VendixHttpException);
     });
 
     it('should not throw if name is unique', async () => {
@@ -664,7 +717,7 @@ describe('BrandsService', () => {
 
       await expect(
         (service as any).validateUniqueName('Same Name Different ID', 2),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(VendixHttpException);
     });
   });
 
@@ -689,6 +742,7 @@ describe('BrandsService', () => {
             { name: { contains: 'Nike Sport', mode: 'insensitive' } },
             { description: { contains: 'Nike Sport', mode: 'insensitive' } },
           ],
+          state: { not: 'archived' },
         },
         skip: 25,
         take: 25,
@@ -780,7 +834,7 @@ describe('BrandsService', () => {
       mockPrismaService.brands.create.mockRejectedValue(prismaError);
 
       await expect(service.create(createDto, { id: 1 })).rejects.toThrow(
-        ConflictException,
+        VendixHttpException,
       );
     });
 
@@ -799,7 +853,7 @@ describe('BrandsService', () => {
 
       await expect(
         service.update(brandId, updateDto, { id: 1 }),
-      ).rejects.toThrow(NotFoundException);
+      ).rejects.toThrow(VendixHttpException);
     });
 
     it('should handle database connection errors', async () => {

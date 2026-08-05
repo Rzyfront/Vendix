@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { InventoryBatchesService } from '../batches/inventory-batches.service';
 import { StockLevelsController } from './stock-levels.controller';
 import { StockLevelsService } from './stock-levels.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -70,6 +71,10 @@ describe('StockLevelsController', () => {
         {
           provide: StockLevelsService,
           useValue: mockStockLevelsService,
+        },
+        {
+          provide: InventoryBatchesService,
+          useValue: { getBatches: jest.fn().mockResolvedValue([]) },
         },
         {
           provide: ResponseService,

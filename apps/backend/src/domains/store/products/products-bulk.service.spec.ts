@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { S3Service } from '@common/services/s3.service';
 import { ProductsBulkService } from './products-bulk.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
@@ -68,7 +69,9 @@ describe('ProductsBulkService', () => {
   };
 
   const mockVariantService = {
-    create: jest.fn(),
+    createVariant: jest.fn(),
+    updateVariant: jest.fn(),
+    removeVariant: jest.fn(),
   };
 
   const mockAccessValidationService = {
@@ -99,6 +102,19 @@ describe('ProductsBulkService', () => {
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
+        },
+        // Image handling is S3Service's own contract (it has its own tests); these
+        // stubs echo predictable values so a response assertion can read them.
+        {
+          provide: S3Service,
+          useValue: {
+            uploadImage: jest.fn().mockResolvedValue('https://s3/img.png'),
+            uploadFile: jest.fn().mockResolvedValue('https://s3/file.xlsx'),
+            downloadImage: jest.fn().mockResolvedValue(Buffer.from('')),
+            deleteFile: jest.fn().mockResolvedValue(undefined),
+            getPresignedUrl: jest.fn((url) => url),
+            signUrl: jest.fn((url) => url),
+          },
         },
         {
           provide: ProductsService,
@@ -211,17 +227,20 @@ describe('ProductsBulkService', () => {
         success: true,
         total_processed: 2,
         successful: 2,
+        // `skipped` cuenta las filas que el importador decidió no tocar (p. ej.
+        // un SKU sin cambios); es parte del contrato del resultado, no opcional.
+        skipped: 0,
         failed: 0,
         results: [
           {
             product: createdProducts[0],
             status: 'success',
-            message: 'Product created successfully',
+            message: 'Producto creado exitosamente',
           },
           {
             product: createdProducts[1],
             status: 'success',
-            message: 'Product created successfully',
+            message: 'Producto creado exitosamente',
           },
         ],
       });
@@ -264,28 +283,43 @@ describe('ProductsBulkService', () => {
 
       const result = await service.uploadProducts(bulkUploadDto, mockUser);
 
+      // La entrada de error ya no lleva el nombre de la clase de excepción:
+      // lleva la coordenada del archivo (row_number, sku, product_name) para
+      // que el usuario sepa QUÉ fila corregir en su Excel, más un error_code
+      // legible por máquina cuando la excepción es tipada.
       expect(result).toEqual({
         success: false,
         total_processed: 2,
         successful: 1,
+        skipped: 0,
         failed: 1,
         results: [
           {
             product: createdProduct,
             status: 'success',
-            message: 'Product created successfully',
+            message: 'Producto creado exitosamente',
           },
           {
             product: null,
             status: 'error',
             message: 'El SKU ya está en uso',
-            error: 'ConflictException',
+            error_code: undefined,
+            product_name: 'Product 2',
+            row_number: 3,
+            sku: 'PROD-001',
           },
         ],
       });
     });
 
-    it('should validate brand existence before processing', async () => {
+    // DECISIÓN DE PRODUCTO A CONFIRMAR: una marca inexistente NO invalida la
+    // fila. `validateProductData` la descarta (brand_id = undefined), deja un
+    // logger.warn y sube el producto sin marca. La tolerancia tiene sentido en
+    // una importación de 900 filas — una celda mala no debe tumbar el lote —
+    // pero hoy el descarte NO viaja en el resultado, así que el usuario no se
+    // entera de que perdió la marca. Si se quiere avisar, el lugar es un
+    // `warnings[]` por fila, igual que CATALOG_ONLY_IGNORED_FIELDS en analyze.
+    it('drops an unknown brand and still uploads the product', async () => {
       const bulkUploadDto: BulkProductUploadDto = {
         products: [
           {
@@ -297,36 +331,45 @@ describe('ProductsBulkService', () => {
         ],
       };
 
-      // Mock brand not found
       mockPrismaService.brands.findFirst.mockResolvedValue(null);
+      mockProductsService.create.mockResolvedValue({
+        id: 1,
+        name: 'Product 1',
+        sku: 'PROD-001',
+      });
 
       const result = await service.uploadProducts(bulkUploadDto, mockUser);
 
-      expect(result.results[0].status).toBe('error');
-      expect(result.results[0].message).toContain('Brand not found');
-      expect(result.failed).toBe(1);
+      expect(result.results[0].status).toBe('success');
+      expect(result.failed).toBe(0);
+      expect(mockProductsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ brand_id: undefined }),
+      );
     });
 
-    it('should validate category existence before processing', async () => {
+    it('forwards category ids untouched — existence is ProductsService\'s check', async () => {
+      // El nivel bulk no valida existencia de categorías: reenvía los ids y
+      // `ProductsService.create` decide (y es quien tiene el mensaje de error).
+      // Duplicar la validación aquí produciría dos fuentes de verdad divergentes.
       const bulkUploadDto: BulkProductUploadDto = {
         products: [
           {
             name: 'Product 1',
             base_price: 99.99,
             sku: 'PROD-001',
-            category_ids: [999], // Non-existent category
+            category_ids: [999],
           },
         ],
       };
 
-      // Mock category not found
       mockPrismaService.categories.findFirst.mockResolvedValue(null);
+      mockProductsService.create.mockResolvedValue({ id: 1, sku: 'PROD-001' });
 
-      const result = await service.uploadProducts(bulkUploadDto, mockUser);
+      await service.uploadProducts(bulkUploadDto, mockUser);
 
-      expect(result.results[0].status).toBe('error');
-      expect(result.results[0].message).toContain('Category not found');
-      expect(result.failed).toBe(1);
+      expect(mockProductsService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ category_ids: [999] }),
+      );
     });
 
     it('should handle empty products array', async () => {
@@ -340,14 +383,17 @@ describe('ProductsBulkService', () => {
         success: true,
         total_processed: 0,
         successful: 0,
+        skipped: 0,
         failed: 0,
         results: [],
       });
     });
 
     it('should respect maximum batch size limit', async () => {
-      // Create a large batch that exceeds the limit
-      const largeBatch = Array.from({ length: 101 }, (_, i) => ({
+      // MAX_BATCH_SIZE = 1000. El tope no es cosmético: cada fila abre su propia
+      // transacción en ProductsService, así que un lote sin techo agota el pool
+      // de conexiones antes de terminar.
+      const largeBatch = Array.from({ length: 1001 }, (_, i) => ({
         name: `Product ${i + 1}`,
         base_price: 99.99,
         sku: `PROD-${i + 1}`,
@@ -476,8 +522,18 @@ describe('ProductsBulkService', () => {
 
       const result = await service.uploadProducts(bulkUploadDto, mockUser);
 
+      // El import de productos es CATALOG-ONLY por diseño: `stock_quantity` y
+      // `stock_by_location` están en CATALOG_ONLY_IGNORED_FIELDS y se retiran
+      // de la fila antes de armar el DTO. Razón: saldo sin fila en
+      // inventory_transactions (sin ubicación, sin capa de costo, sin usuario)
+      // es inauditable. El inventario entra por ajustes/compras, que sí llevan
+      // el libro. El servicio además reporta qué columnas ignoró en lugar de
+      // descartarlas en silencio.
       expect(result.results[0].status).toBe('success');
-      expect(mockStockLevelManager.updateStock).toHaveBeenCalled();
+      expect(mockStockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(mockProductsService.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ stock_by_location: expect.anything() }),
+      );
     });
   });
 
@@ -524,10 +580,17 @@ describe('ProductsBulkService', () => {
 
       expect(result.isValid).toBe(false);
       expect(result.errors).toHaveLength(1);
-      expect(result.errors[0]).toContain('Duplicate SKU found');
+      // Un solo error agregado que nombra TODOS los SKUs repetidos, no un
+      // error por fila: el usuario corrige el archivo de una pasada.
+      expect(result.errors[0]).toContain('SKUs duplicados en el archivo');
+      expect(result.errors[0]).toContain('PROD-001');
     });
 
-    it('should detect existing SKUs in database', async () => {
+    it('accepts a SKU that already exists — the upload upserts', async () => {
+      // El import pasó de "crear" a "crear o actualizar": `uploadProducts` busca
+      // por SKU y hace update si lo encuentra. Por eso un SKU existente ya no es
+      // un error de pre-validación; rechazarlo impediría el caso de uso central
+      // (reimportar la lista de precios del proveedor).
       const products: BulkProductItemDto[] = [
         {
           name: 'Product 1',
@@ -536,7 +599,6 @@ describe('ProductsBulkService', () => {
         },
       ];
 
-      // Mock existing product with same SKU
       mockPrismaService.products.findFirst.mockResolvedValue({
         id: 1,
         name: 'Existing Product',
@@ -545,8 +607,9 @@ describe('ProductsBulkService', () => {
 
       const result = await service.validateBulkProducts(products, mockUser);
 
-      expect(result.isValid).toBe(false);
-      expect(result.errors[0]).toContain('SKU already exists');
+      expect(result.isValid).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.validProducts).toHaveLength(1);
     });
 
     it('should validate required fields', async () => {
@@ -561,61 +624,74 @@ describe('ProductsBulkService', () => {
       const result = await service.validateBulkProducts(products, mockUser);
 
       expect(result.isValid).toBe(false);
-      expect(result.errors[0]).toContain('Product name is required');
+      // Un único mensaje por fila que nombra los tres obligatorios juntos, con
+      // el número de fila del archivo por delante.
+      expect(result.errors[0]).toContain('Fila 1');
+      expect(result.errors[0]).toContain(
+        'Faltan datos obligatorios (Nombre, SKU o Precio)',
+      );
     });
 
-    it('should validate price constraints', async () => {
+    it('lets a negative price through pre-validation (the upload rejects it)', async () => {
+      // `validateBulkProducts` es una pre-lectura estructural: solo exige que
+      // Nombre, SKU y Precio estén presentes. El signo lo valida
+      // `validateProductData` durante `uploadProducts`, que es donde el rechazo
+      // puede reportarse contra la fila concreta del archivo.
       const products: BulkProductItemDto[] = [
         {
           name: 'Product 1',
-          base_price: -10, // Negative price
+          base_price: -10,
           sku: 'PROD-001',
         },
       ];
 
       const result = await service.validateBulkProducts(products, mockUser);
 
-      expect(result.isValid).toBe(false);
-      expect(result.errors[0]).toContain('Base price must be positive');
+      expect(result.isValid).toBe(true);
+      expect(result.validProducts).toHaveLength(1);
+    });
+
+    it('uploadProducts rejects the negative price with its row coordinate', async () => {
+      const result = await service.uploadProducts(
+        {
+          products: [{ name: 'Product 1', base_price: -10, sku: 'PROD-001' }],
+        } as BulkProductUploadDto,
+        mockUser,
+      );
+
+      expect(result.failed).toBe(1);
+      expect(result.results[0].status).toBe('error');
+      expect(result.results[0].message).toContain(
+        'Precio base debe ser positivo',
+      );
+      expect(result.results[0].row_number).toBe(2);
     });
   });
 
-  describe('getBulkUploadTemplate', () => {
-    it('should return CSV template structure', async () => {
+  // DEUDA A DECIDIR: `getBulkUploadTemplate` quedó como stub deprecado — el
+  // propio servicio lo marca "Deprecated in favor of Excel download" y devuelve
+  // headers vacíos. Su ruta HTTP ya no existe (ver products-bulk.controller.spec),
+  // así que hoy no tiene ningún consumidor. O se borra el método, o se
+  // reexpone; mientras tanto el test fija el stub para que nadie lo confunda
+  // con la plantilla real, que es `generateExcelTemplate`.
+  describe('getBulkUploadTemplate (deprecated stub)', () => {
+    it('returns an empty shell pointing at the Excel download', async () => {
       const result = await service.getBulkUploadTemplate();
 
-      expect(result).toHaveProperty('headers');
-      expect(result).toHaveProperty('sample_data');
-      expect(result).toHaveProperty('instructions');
-      expect(result.headers).toContain('name');
-      expect(result.headers).toContain('base_price');
-      expect(result.headers).toContain('sku');
-    });
-
-    it('should include all required and optional fields in template', async () => {
-      const result = await service.getBulkUploadTemplate();
-
-      const expectedFields = [
-        'name',
-        'base_price',
-        'sku',
-        'description',
-        'brand_id',
-        'category_ids',
-        'stock_quantity',
-        'cost_price',
-        'weight',
-      ];
-
-      expectedFields.forEach((field) => {
-        expect(result.headers).toContain(field);
-      });
+      expect(result.headers).toEqual([]);
+      expect(result.sample_data).toEqual([]);
+      expect(result.instructions).toContain('Excel');
     });
   });
 
   describe('exportCurrentProductsAsTemplate', () => {
     it('should scope the query by store_id', async () => {
-      mockPrismaService.products.findMany.mockResolvedValueOnce([]);
+      // Hace falta al menos una fila: con 0 filas recolectadas el método lanza
+      // en vez de devolver el buffer, y la aserción de scope nunca se evalúa.
+      mockPrismaService.products.count.mockResolvedValueOnce(1);
+      mockPrismaService.products.findMany.mockResolvedValueOnce([
+        { id: 1, name: 'P1', sku: 'SKU-1', base_price: 10 },
+      ]);
       await service.exportCurrentProductsAsTemplate();
 
       expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
@@ -633,8 +709,11 @@ describe('ProductsBulkService', () => {
       await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
         NotFoundException,
       );
+      // El mensaje es accionable a propósito: dice qué falta y qué hacer, en
+      // lugar de un 404 seco que el usuario lee como "se rompió".
+      mockPrismaService.products.count.mockResolvedValueOnce(0);
       await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
-        /No hay productos para exportar/,
+        /No hay productos en su tienda/,
       );
     });
 

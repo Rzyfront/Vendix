@@ -1,19 +1,39 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as request from 'supertest';
-import { AppModule } from '../../app.module';
 import { GlobalPrismaService as PrismaService } from '../../prisma/services/global-prisma.service';
 import { EmailService } from '../../email/email.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import {
+  describeDestructiveE2E,
+  assertDisposableDatabase,
+} from '../../testing/destructive-e2e.guard';
 
-describe('Owner Registration Flow - Integration Tests', () => {
+// El import del módulo raíz es PEREZOSO a propósito. `describe.skip` salta los
+// tests pero NO evita que jest ejecute los imports de nivel superior: cargar el
+// grafo de AppModule en un worker construye el árbol completo de módulos y
+// tumba el worker por memoria (SIGTERM), dejando la suite unitaria en rojo por
+// un spec que ni se iba a ejecutar. Resolviéndolo dentro del beforeAll, el
+// costo solo se paga cuando la compuerta destructiva está abierta.
+// ⚠️  SPEC DESTRUCTIVO. El `beforeEach` de abajo hace `deleteMany()` sin `where`
+// sobre organizations, stores y users usando el cliente Prisma REAL, así que
+// borra la base que indique DATABASE_URL — en desarrollo, `vendix_db` y todo su
+// grafo por cascada. Queda tras `describeDestructiveE2E`: se salta salvo que se
+// pida explícitamente con VENDIX_DESTRUCTIVE_E2E=1 Y una DATABASE_URL
+// desechable. Ver `src/testing/destructive-e2e.guard.ts`.
+describeDestructiveE2E('Owner Registration Flow - Integration Tests', () => {
   let app: INestApplication;
   let prismaService: PrismaService;
   let emailService: EmailService;
   let jwtService: JwtService;
 
   beforeAll(async () => {
+    assertDisposableDatabase();
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { AppModule } = require('../../app.module');
+
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
