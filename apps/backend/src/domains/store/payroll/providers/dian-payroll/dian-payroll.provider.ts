@@ -592,6 +592,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       environment: config.environment as 'test' | 'production',
       enablement_status: config.enablement_status,
       test_set_id: config.test_set_id,
+      operation_mode: config.operation_mode,
     };
   }
 

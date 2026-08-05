@@ -14,6 +14,13 @@ import { RequestContextService } from '../../../../../common/context/request-con
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CufeCalculator } from '../../utils/cufe-calculator';
 import {
+  buildDianXmlFileName,
+  buildDianZipFileName,
+  consecutiveFromDocumentNumber,
+  softwareCodeForOperationMode,
+  DianDocumentKind,
+} from '../../utils/dian-file-naming.util';
+import {
   dianLineExtensionTotal,
   dianSum,
 } from '../../utils/dian-money.util';
@@ -203,9 +210,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       const signed_xml = await this.signXml(xml, config);
 
       // ZIP + base64
+      const file_names = this.dianFileNames(
+        'invoice',
+        config,
+        invoice_data.invoice_number,
+        invoice_data.issue_date,
+      );
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${invoice_data.invoice_number}.xml`,
+        file_names.xml,
       );
 
       // Load WS-Security credentials for SOAP envelope
@@ -214,7 +227,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       // Send to DIAN
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
-        `${invoice_data.invoice_number}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -364,9 +377,15 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       });
 
       const signed_xml = await this.signXml(xml, config);
+      const file_names = this.dianFileNames(
+        'credit_note',
+        config,
+        credit_note_data.invoice_number,
+        credit_note_data.issue_date,
+      );
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${credit_note_data.invoice_number}.xml`,
+        file_names.xml,
       );
 
       // Load WS-Security credentials for SOAP envelope
@@ -374,7 +393,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
-        `${credit_note_data.invoice_number}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -491,14 +510,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       });
 
       const signed_xml = await this.signXml(xml, config);
+      const file_names = this.dianFileNames(
+        'debit_note',
+        config,
+        debit_note_data.invoice_number,
+        debit_note_data.issue_date,
+      );
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${debit_note_data.invoice_number}.xml`,
+        file_names.xml,
       );
       const ws_credentials = await this.loadWsCredentials(config);
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
-        `${debit_note_data.invoice_number}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -591,14 +616,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         environment: config.environment,
       });
       const signed_xml = await this.signXml(xml, config);
+      const file_names = this.dianFileNames(
+        'support_document',
+        config,
+        support_document_data.invoice_number,
+        support_document_data.issue_date,
+      );
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${support_document_data.invoice_number}.xml`,
+        file_names.xml,
       );
       const ws_credentials = await this.loadWsCredentials(config);
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
-        `${support_document_data.invoice_number}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -704,14 +735,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
           support_adjustment_data.original_invoice_issue_date,
       });
       const signed_xml = await this.signXml(xml, config);
+      const file_names = this.dianFileNames(
+        'support_adjustment_note',
+        config,
+        support_adjustment_data.invoice_number,
+        support_adjustment_data.issue_date,
+      );
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${support_adjustment_data.invoice_number}.xml`,
+        file_names.xml,
       );
       const ws_credentials = await this.loadWsCredentials(config);
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
-        `${support_adjustment_data.invoice_number}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -842,14 +879,20 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       });
 
       const signed_xml = await this.signXml(xml, config);
+      const file_names = this.dianFileNames(
+        'equivalent_document',
+        config,
+        document_data.invoice_number,
+        document_data.issue_date,
+      );
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${document_data.invoice_number}.xml`,
+        file_names.xml,
       );
       const ws_credentials = await this.loadWsCredentials(config);
       const dian_response = await this.soap_client.sendBillSync(
         zip_base64,
-        `${document_data.invoice_number}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -1059,21 +1102,29 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       description: event.description,
     });
 
-    const file_base = `ev${event.event_code}${event.event_number}`;
+    // El documento de un evento es un ApplicationResponse, así que su prefijo es
+    // `ar` (Anexo Técnico 1.9, numeral 6.5.7). El nombre anterior, `ev<code><num>`,
+    // no existe en ningún anexo. El año se deja por defecto —el evento se expide
+    // ahora— porque no viaja una fecha de emisión propia en el payload.
+    const file_names = this.dianFileNames(
+      'application_response',
+      config,
+      String(event.event_number),
+    );
     let signed_xml = xml;
 
     try {
       signed_xml = await this.signXml(xml, config);
       const zip_base64 = await this.compressToZipBase64(
         signed_xml,
-        `${file_base}.xml`,
+        file_names.xml,
       );
 
       const ws_credentials = await this.loadWsCredentials(config);
 
       const dian_response = await this.soap_client.sendEventUpdateStatus(
         zip_base64,
-        `${file_base}.zip`,
+        file_names.zip,
         config.environment,
         ws_credentials,
       );
@@ -1253,6 +1304,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       environment: config.environment as 'test' | 'production',
       enablement_status: config.enablement_status,
       test_set_id: config.test_set_id,
+      operation_mode: config.operation_mode,
     };
   }
 
@@ -1587,6 +1639,34 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    * Compresses XML to ZIP and encodes as base64.
    * Uses native zlib (deflate) — DIAN expects a ZIP file.
    */
+  /**
+   * Nombres del XML y del ZIP que se entregan a la DIAN, en un solo lugar.
+   *
+   * Antes cada método armaba `${invoice_number}.xml` / `.zip`, un formato que no
+   * existe en ningún anexo. La DIAN no lo rechaza al recibir —`SendBillSync` y
+   * `SendTestSetAsync` solo validan que el ZIP sea legible y que el UBL traiga
+   * CUFE, número, fecha, NIT y versión—, pero su procesamiento posterior parsea
+   * el nombre por posiciones fijas. Ver `dian-file-naming.util.ts` para el
+   * defecto concreto que esto cerró.
+   */
+  private dianFileNames(
+    kind: DianDocumentKind,
+    config: DianConfigDecrypted,
+    document_number: string,
+    issue_date?: string,
+  ): { xml: string; zip: string } {
+    const parts = {
+      nit: config.nit,
+      consecutive: consecutiveFromDocumentNumber(document_number),
+      software_code: softwareCodeForOperationMode(config.operation_mode),
+      year: issue_date,
+    };
+    return {
+      xml: buildDianXmlFileName(kind, parts),
+      zip: buildDianZipFileName(parts),
+    };
+  }
+
   private async compressToZipBase64(
     xml_content: string,
     filename: string,
