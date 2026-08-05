@@ -495,10 +495,11 @@
         </div>
 
         <p class="text-xs text-text-secondary leading-relaxed">
-          Envía los 50 documentos de habilitación con el NIT de la plataforma. Si
-          el lote queda sin veredicto, «Diagnosticar» pregunta documento por
-          documento (por CUFE) si la DIAN los registró, y «Descartar lote» libera
-          el envío para intentar con un TestSetId nuevo.
+          Envía {{ testSetCompositionLabel() }} de habilitación con el NIT de la
+          plataforma, y consume esa misma cantidad de consecutivos de la
+          resolución. Si el lote queda sin veredicto, «Diagnosticar» pregunta
+          documento por documento (por CUFE) si la DIAN los registró, y «Descartar
+          lote» libera el envío para intentar con un TestSetId nuevo.
         </p>
 
         <!-- Requisitos de habilitación: lo que falta, con la diferencia explícita
@@ -621,7 +622,7 @@
             [title]="
               testSetBlocksResend()
                 ? 'Hay un lote sin resolver: descártalo antes de enviar uno nuevo'
-                : 'Enviar los 50 documentos de habilitación'
+                : 'Enviar ' + testSetCompositionLabel() + ' de habilitación'
             "
             (clicked)="onRunTestSet()"
           >

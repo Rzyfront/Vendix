@@ -34,6 +34,7 @@ import {
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { analyzeTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
+import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
   FiscalProductionReadinessService,
   ProductionReadinessCheck,
@@ -221,6 +222,10 @@ export class SubscriptionFiscalService {
             environment: config.environment,
             last_test_result: config.last_test_result,
             wait: analyzeTestSetWait(config.last_test_result),
+            // Viaja al cliente porque la UI imprimía "50 documentos", la
+            // composición de 2019, y con eso desinformaba sobre cuántos
+            // consecutivos de la resolución consume cada envío.
+            composition: buildTestSetCompositionView(config.operation_mode),
           }
         : null,
       habilitation_readiness: this.buildHabilitationReadiness(
@@ -1235,6 +1240,10 @@ export class SubscriptionFiscalService {
       ? new Date(dto.resolution_date)
       : now;
 
+    this.assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
+    this.assertPlausibleFiscalDate('válida desde', validFrom);
+    this.assertPlausibleFiscalDate('válida hasta', validTo);
+
     const created = await this.prisma.withoutScope().invoice_resolutions.create({
       data: {
         organization_id: await this.resolvePlatformOrganizationId(),
@@ -1383,13 +1392,23 @@ export class SubscriptionFiscalService {
     if (dto.resolution_number !== undefined) {
       data.resolution_number = dto.resolution_number;
     }
+    // Mismas cotas que en la creación: una fecha imposible entra igual por el
+    // formulario o por el escáner de IA, y el síntoma aparece horas después.
     if (dto.resolution_date !== undefined) {
-      data.resolution_date = new Date(dto.resolution_date);
+      const resolutionDate = new Date(dto.resolution_date);
+      this.assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
+      data.resolution_date = resolutionDate;
     }
     if (dto.valid_from !== undefined) {
-      data.valid_from = new Date(dto.valid_from);
+      const nextValidFrom = new Date(dto.valid_from);
+      this.assertPlausibleFiscalDate('válida desde', nextValidFrom);
+      data.valid_from = nextValidFrom;
     }
-    if (dto.valid_to !== undefined) data.valid_to = new Date(dto.valid_to);
+    if (dto.valid_to !== undefined) {
+      const nextValidTo = new Date(dto.valid_to);
+      this.assertPlausibleFiscalDate('válida hasta', nextValidTo);
+      data.valid_to = nextValidTo;
+    }
     if (dto.technical_key !== undefined) {
       data.technical_key = dto.technical_key;
     }
@@ -1604,6 +1623,31 @@ export class SubscriptionFiscalService {
       throw new BadRequestException('DIAN configuration not found');
     }
     return config;
+  }
+
+  /**
+   * Rechaza fechas que no pueden pertenecer a una resolución DIAN.
+   *
+   * `<input type="date">` pinta el año a medio teclear como `0001`, y el escáner
+   * de resoluciones por IA puede devolver una fecha inventada con formato válido.
+   * Ambas llegaban intactas a la base y de ahí al XML del documento — una fecha
+   * año 1 dentro del período de autorización es un dato que la DIAN no puede
+   * conciliar, y el síntoma aparece horas después como un lote sin veredicto, sin
+   * ninguna pista que apunte al campo culpable.
+   */
+  private assertPlausibleFiscalDate(label: string, value: Date): void {
+    if (Number.isNaN(value.getTime())) {
+      throw new BadRequestException(`La ${label} no es una fecha válida.`);
+    }
+    const year = value.getUTCFullYear();
+    // La facturación electrónica en Colombia no existe antes de 2016, y una
+    // resolución no se autoriza a más de una década vista.
+    const maxYear = new Date().getUTCFullYear() + 10;
+    if (year < 2016 || year > maxYear) {
+      throw new BadRequestException(
+        `La ${label} (${value.toISOString().slice(0, 10)}) está fuera de rango: debe estar entre 2016 y ${maxYear}. Revisa el campo — un año incompleto se guarda como 0001.`,
+      );
+    }
   }
 
   /**

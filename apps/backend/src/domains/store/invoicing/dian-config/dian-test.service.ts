@@ -36,10 +36,20 @@ import {
 } from '../utils/dian-file-naming.util';
 import { analyzeTestSetWait } from './test-set-wait.util';
 import {
+  buildTestSetCompositionView,
   describeComposition,
   resolveTestSetComposition,
   testSetSize,
 } from './dian-test-set-composition';
+
+/**
+ * StatusCodes con los que la DIAN dice "no tengo ese documento".
+ *
+ * No son un veredicto sobre el documento: son la ausencia del documento en sus
+ * registros. Tratarlos como veredicto invierte el diagnóstico del lote, porque
+ * "la DIAN contestó algo" no es lo mismo que "la DIAN lo conoce".
+ */
+const DIAN_TRACKID_NOT_FOUND_CODES = new Set(['66', '066', '0066']);
 
 /** One GetStatusZip poll attempt recorded in last_test_result for diagnostics. */
 export interface TestSetPollAttempt {
@@ -1055,17 +1065,28 @@ export class DianTestService {
         environment,
         ws_credentials,
       );
+      // Código 66 — "TrackId no existe en los registros de la DIAN" — ES una
+      // respuesta, pero la respuesta es "no lo tengo". `has_dian_verdict` solo
+      // mira que el StatusCode no venga vacío, así que un 66 lo ponía en true y
+      // el documento salía `registered: true` mientras la DIAN decía lo
+      // contrario. De esa bandera cuelgan `registered_count` y `verdict`, o sea
+      // todo el dictamen: el diagnóstico aconsejaba escalar con la DIAN cuando lo
+      // correcto era descartar el lote y reenviar.
+      const not_found = DIAN_TRACKID_NOT_FOUND_CODES.has(
+        (status.status_code ?? '').trim(),
+      );
       // Tri-state, never a plain boolean: DIAN answering "no verdict" about a
       // document it DOES know is a different fact from not knowing it at all.
       const has_verdict =
-        status.has_dian_verdict === true ||
-        (status.error_messages?.length ?? 0) > 0;
+        !not_found &&
+        (status.has_dian_verdict === true ||
+          (status.error_messages?.length ?? 0) > 0);
       documents.push({
         number: doc.number,
         kind: doc.kind,
         cufe: doc.cufe,
         file_name: doc.file_name ?? null,
-        registered: has_verdict || status.success === true,
+        registered: !not_found && (has_verdict || status.success === true),
         status_code: status.status_code,
         status_message: status.status_message,
         error_messages: status.error_messages ?? [],
@@ -1253,6 +1274,9 @@ export class DianTestService {
       // Derived on read, never stored: `pending` + `executed_at` are the facts,
       // and a persisted "stalled" flag would go stale the moment DIAN answers.
       wait: analyzeTestSetWait(config.last_test_result),
+      // Cuántos documentos y consecutivos implica un envío en ESTE modo de
+      // operación. Sin esto la UI imprimía 50, la composición de 2019.
+      composition: buildTestSetCompositionView(config.operation_mode),
     };
   }
 

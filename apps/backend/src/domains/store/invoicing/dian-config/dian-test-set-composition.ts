@@ -1,22 +1,39 @@
 import { dian_operation_mode_enum } from '@prisma/client';
 
 /**
- * Composition of the DIAN enablement test set, per mode of operation.
+ * Composition of the DIAN enablement test set.
  *
- * WHY THIS EXISTS — the defect it closes:
+ * ⚠️ LA COMPOSICIÓN NO SE DEDUCE DE LA NORMA: LA APROVISIONA LA DIAN POR SET.
  *
- * `dian-test.service.ts` hardcoded `TEST_SET_SIZE = 50` and generated
- * 30 invoices + 10 debit notes + 10 credit notes. That is the **legacy 2019**
- * habilitación composition and matches NEITHER mode in force under
- * Resolución 000165 de 2023:
+ * El portal de habilitación la muestra literalmente, en «Total de documentos
+ * requeridos», y ese es el único dato autoritativo. Verificado el 2026-08-05
+ * contra el portal de la plataforma (NIT 902056589, modo «Software propio»,
+ * TestSetId 16bea3b2-eb83-40fe-a7cc-8d0f968b0713):
  *
- * - Software propio / adquirido (art. 28): **2 FV + 1 NC + 1 ND**
- * - Proveedor tecnológico (art. 55):       **6 FV + 2 NC + 2 ND**
+ *     Documentos 50 · Facturas electrónicas 30 · Notas de débito 10 · Notas de crédito 10
  *
- * Two consequences followed. The DIAN may not accept the `testSetId` when it
- * validates against the exact composition of the declared mode; and every run
- * burned 50 consecutives out of the resolution — real production numbering if the
- * caller passed a production resolution.
+ * HISTORIA DEL DEFECTO — importa para no repetirlo:
+ *
+ * Este archivo nació para «corregir» un `TEST_SET_SIZE = 50` hardcodeado,
+ * sustituyéndolo por 2 FV + 1 NC + 1 ND deducidos del art. 28 de la Resolución
+ * 000165/2023 (y 6 + 2 + 2 del art. 55), y calificando el 50 de «composición
+ * legacy 2019». Era una inferencia a partir del texto normativo en lugar de un
+ * dato observado, y para una cuenta real resultó falsa.
+ *
+ * El fallo no dio ningún error: la DIAN acusó recibo del ZipKey, no clasificó el
+ * lote de 4 documentos porque el set exige 50, y quedó ocho horas en
+ * `NO_VERDICT`. Consultado por CUFE respondía `66 / TrackId no existe`. Nada en
+ * la respuesta apuntaba al número de documentos.
+ *
+ * Peor: el comentario que declaraba «legacy» al 30/10/10 hacía que cada relectura
+ * de este archivo confirmara la suposición equivocada.
+ *
+ * POR QUÉ AMBOS MODOS COMPARTEN CIFRAS: para `own_software` está verificado
+ * arriba. Para `technological_provider` NO hay evidencia de portal alguna —el
+ * 6 + 2 + 2 venía de la misma inferencia—, y la experiencia operativa es que la
+ * DIAN pide 50 en todos los casos. Ante dos incógnitas se elige la única
+ * observada. Si algún día un portal muestra otra cifra para un set, el dato va
+ * capturado desde ese portal, no deducido de un artículo.
  *
  * @see docs/facturacion-electronica-dian-software-propio.md §4.3, §20.7
  */
@@ -33,10 +50,11 @@ export const DIAN_TEST_SET_COMPOSITIONS: Record<
   dian_operation_mode_enum,
   DianTestSetComposition
 > = {
-  // Art. 28 — each NIT enables its own software: 2 FV + 1 NC + 1 ND.
-  own_software: { invoices: 2, debit_notes: 1, credit_notes: 1 },
-  // Art. 55 — the provider enables once for all its clients: 6 FV + 2 NC + 2 ND.
-  technological_provider: { invoices: 6, debit_notes: 2, credit_notes: 2 },
+  // VERIFICADO contra el portal de habilitación el 2026-08-05: 50 documentos.
+  own_software: { invoices: 30, debit_notes: 10, credit_notes: 10 },
+  // SIN evidencia de portal. Se iguala al único caso observado en vez de deducir
+  // del art. 55, que es exactamente el error que costó la habilitación.
+  technological_provider: { invoices: 30, debit_notes: 10, credit_notes: 10 },
 };
 
 /** Total consecutives a run consumes for the given mode. */
@@ -48,8 +66,8 @@ export function testSetSize(composition: DianTestSetComposition): number {
 
 /**
  * Resolves the composition for a configuration's operation mode, falling back to
- * `own_software` — the conservative choice, since it consumes the fewest
- * consecutives and is the mode every Vendix tenant uses today.
+ * `own_software` — el único modo con composición verificada contra un portal, y
+ * el que usa hoy cada tenant de Vendix.
  */
 export function resolveTestSetComposition(
   operation_mode: dian_operation_mode_enum | null | undefined,
@@ -58,6 +76,33 @@ export function resolveTestSetComposition(
     DIAN_TEST_SET_COMPOSITIONS[operation_mode ?? 'own_software'] ??
     DIAN_TEST_SET_COMPOSITIONS.own_software
   );
+}
+
+/**
+ * Composition as the clients need it: counts, total and a rendered label.
+ *
+ * WHY IT LEAVES THE BACKEND: the composition was only ever used inside
+ * `runTestSet`, so both UIs printed a hardcoded "50 documentos" — the legacy 2019
+ * number. That text misinformed about the one thing that matters here, how many
+ * consecutives of the resolution a run burns. A number the client cannot derive
+ * is a number the client will hardcode and let drift.
+ */
+export interface DianTestSetCompositionView extends DianTestSetComposition {
+  /** Consecutives the run consumes. */
+  total: number;
+  /** e.g. "2 facturas + 1 nota crédito + 1 nota débito". */
+  label: string;
+}
+
+export function buildTestSetCompositionView(
+  operation_mode: dian_operation_mode_enum | null | undefined,
+): DianTestSetCompositionView {
+  const composition = resolveTestSetComposition(operation_mode);
+  return {
+    ...composition,
+    total: testSetSize(composition),
+    label: describeComposition(composition),
+  };
 }
 
 /**
