@@ -80,7 +80,13 @@ const SETTINGS_KEY = PLATFORM_FISCAL_SETTINGS_KEY;
 const VENDOR_SUPPORT_SETTINGS_KEY = 'vendor_support_fiscal';
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
-const PLATFORM_ORGANIZATION_ID = 1;
+/**
+ * Respaldo cuando `organizations.is_platform` no está sembrado todavía. NO es la
+ * fuente de verdad: el id se deriva vía `PlatformOrgService`, que lee la fila
+ * marcada como plataforma. Dejarlo como literal en cada `where` era otro
+ * resolutor paralelo, y dos resolutores del mismo hecho terminan discrepando.
+ */
+const PLATFORM_ORGANIZATION_ID_FALLBACK = 1;
 
 interface SubscriptionFiscalSettings {
   is_enabled: boolean;
@@ -452,23 +458,69 @@ export class SubscriptionFiscalService {
    * software, cuando la entidad contable es un hecho propio de Vendix (qué
    * persona jurídica es dueña del NIT) y no depende de la DIAN en absoluto.
    */
-  private async resolvePlatformAccountingEntityId(): Promise<number> {
-    const settings = await this.getSettings();
-    if (settings.accounting_entity_id) return settings.accounting_entity_id;
+  /**
+   * The platform organization id, derived from `organizations.is_platform`.
+   *
+   * Falls back to the literal only when the platform row is not seeded yet, so a
+   * fresh environment still boots instead of failing every fiscal read.
+   */
+  private async resolvePlatformOrganizationId(): Promise<number> {
+    const resolved = await this.platformOrg.getPlatformOrganizationId();
+    return resolved ?? PLATFORM_ORGANIZATION_ID_FALLBACK;
+  }
 
+  /**
+   * The platform's identity ids, derived — never read from the settings row.
+   *
+   * Returns nulls instead of throwing so `getSettings()` stays readable on an
+   * un-bootstrapped environment; the callers that need a real id go through
+   * {@link resolvePlatformAccountingEntityId}, which does throw.
+   */
+  private async derivePlatformIdentity(): Promise<{
+    platform_organization_id: number | null;
+    accounting_entity_id: number | null;
+  }> {
+    try {
+      const context = await this.platformOrg.getPlatformContext();
+      return {
+        platform_organization_id: context?.organization_id ?? null,
+        accounting_entity_id: context?.accounting_entity_id ?? null,
+      };
+    } catch (err) {
+      // getPlatformContext throws when the org exists but its fiscal entity is
+      // missing or inconsistent with its fiscal_scope. That is worth surfacing
+      // once, not on every read.
+      this.logger.warn(
+        `No se pudo derivar la identidad fiscal de plataforma: ${(err as Error).message}`,
+      );
+      return { platform_organization_id: null, accounting_entity_id: null };
+    }
+  }
+
+  /**
+   * The accounting entity every platform fiscal write must use.
+   *
+   * Derived, with no settings fallback: the stored value is a mirror of this one
+   * (see {@link getSettings}) and preferring it is what let a STORE entity leak
+   * into a platform whose scope only resolves the consolidated entity.
+   */
+  private async resolvePlatformAccountingEntityId(): Promise<number> {
     let platformContext: PlatformOrgContext | null = null;
+    let failure: string | null = null;
     try {
       platformContext = await this.platformOrg.getPlatformContext();
     } catch (err) {
+      failure = (err as Error).message;
       this.logger.warn(
-        `No se pudo resolver la entidad contable de plataforma: ${(err as Error).message}`,
+        `No se pudo resolver la entidad contable de plataforma: ${failure}`,
       );
     }
 
     if (!platformContext?.accounting_entity_id) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_RESOLUTION_006,
-        'La organización plataforma no tiene una entidad contable activa. Regístrala en Identidad fiscal antes de crear resoluciones de numeración.',
+        failure ??
+          'La organización plataforma no tiene una entidad contable activa. Regístrala en Identidad fiscal antes de crear resoluciones de numeración.',
       );
     }
     return platformContext.accounting_entity_id;
@@ -572,25 +624,31 @@ export class SubscriptionFiscalService {
     dto.nit = normalizedNit || dto.nit;
     dto.nit_dv = derivedDv || undefined;
 
-    await this.assertFiscalContext(dto.platform_organization_id, dto.accounting_entity_id);
+    // La identidad de la plataforma se DERIVA. El DTO ya no la transporta: hay una
+    // sola configuración de plataforma y una sola entidad fiscal, y pedirlas como
+    // ids obligaba a acertar el valor que el cliente scopeado ya calcula solo.
+    const platform_organization_id = await this.resolvePlatformOrganizationId();
+    const accounting_entity_id = await this.resolvePlatformAccountingEntityId();
+
+    await this.assertFiscalContext(platform_organization_id, accounting_entity_id);
     if (dto.invoice_resolution_id) {
-      await this.assertResolution(dto.invoice_resolution_id, dto.accounting_entity_id);
+      await this.assertResolution(dto.invoice_resolution_id, accounting_entity_id);
     }
 
     const existingConfig = dto.dian_configuration_id
       ? await this.prisma.withoutScope().dian_configurations.findFirst({
           where: {
             id: dto.dian_configuration_id,
-            organization_id: dto.platform_organization_id,
-            accounting_entity_id: dto.accounting_entity_id,
+            organization_id: platform_organization_id,
+            accounting_entity_id,
           },
         })
       : previous.dian_configuration_id
         ? await this.prisma.withoutScope().dian_configurations.findFirst({
             where: {
               id: previous.dian_configuration_id,
-              organization_id: dto.platform_organization_id,
-              accounting_entity_id: dto.accounting_entity_id,
+              organization_id: platform_organization_id,
+              accounting_entity_id,
             },
           })
         : null;
@@ -603,7 +661,10 @@ export class SubscriptionFiscalService {
 
     const config = existingConfig
       ? await this.updateDianConfig(existingConfig.id, dto)
-      : await this.createDianConfig(dto);
+      : await this.createDianConfig(dto, {
+          organization_id: platform_organization_id,
+          accounting_entity_id,
+        });
     await this.ensureSingleDefault(config.id, config.organization_id, config.accounting_entity_id);
 
     const nextSettings: SubscriptionFiscalSettings = {
@@ -611,8 +672,8 @@ export class SubscriptionFiscalService {
       is_enabled: dto.is_enabled,
       auto_issue: dto.auto_issue,
       environment: dto.environment,
-      platform_organization_id: dto.platform_organization_id,
-      accounting_entity_id: dto.accounting_entity_id,
+      platform_organization_id,
+      accounting_entity_id,
       dian_configuration_id: config.id,
       invoice_resolution_id: dto.invoice_resolution_id ?? null,
       updated_by_user_id: userId,
@@ -1045,7 +1106,7 @@ export class SubscriptionFiscalService {
   /**
    * List DIAN resolutions registered for the Vendix platform organization.
    *
-   * Platform resolutions are scoped to `organization_id = PLATFORM_ORGANIZATION_ID`
+   * Platform resolutions are scoped to the derived platform `organization_id`
    * and `store_id IS NULL`. The `environment` filter is informational — the
    * `invoice_resolutions` schema has no environment column, so the actual
    * environment is inherited from the linked DIAN configuration on the
@@ -1053,9 +1114,18 @@ export class SubscriptionFiscalService {
    * passes through to the caller via the response metadata.
    */
   async listResolutions(query: ListPlatformResolutionsQueryDto) {
+    // Filtra por la entidad fiscal DERIVADA, no solo por organización.
+    //
+    // `assertResolution` exige que la resolución pertenezca a esa entidad, así que
+    // listar las de otra entidad ofrecía opciones que el guardado rechaza — el
+    // usuario elegía una fila legítima y recibía "must belong to the platform
+    // accounting entity" sin nada que pudiera cambiar. Además son invisibles para
+    // toda lectura scopeada, así que no hay flujo en el que sirvan.
+    const accounting_entity_id = await this.resolvePlatformAccountingEntityId();
     const where: Prisma.invoice_resolutionsWhereInput = {
-      organization_id: PLATFORM_ORGANIZATION_ID,
+      organization_id: await this.resolvePlatformOrganizationId(),
       store_id: null,
+      accounting_entity_id,
     };
     if (query.document_type) {
       where.document_type = query.document_type;
@@ -1090,7 +1160,7 @@ export class SubscriptionFiscalService {
 
   /**
    * Create a DIAN resolution for the Vendix platform organization
-   * (`organization_id = PLATFORM_ORGANIZATION_ID`, `store_id = NULL`).
+   * (derived platform `organization_id`, `store_id = NULL`).
    *
    * Uniqueness is enforced manually because the schema unique constraint does
    * not cover (organization_id, store_id NULL, document_type, prefix).
@@ -1119,7 +1189,7 @@ export class SubscriptionFiscalService {
       .withoutScope()
       .invoice_resolutions.findFirst({
         where: {
-          organization_id: PLATFORM_ORGANIZATION_ID,
+          organization_id: await this.resolvePlatformOrganizationId(),
           store_id: null,
           document_type: dto.document_type as PlatformResolutionDocumentType,
           prefix: dto.prefix,
@@ -1144,7 +1214,7 @@ export class SubscriptionFiscalService {
 
     const created = await this.prisma.withoutScope().invoice_resolutions.create({
       data: {
-        organization_id: PLATFORM_ORGANIZATION_ID,
+        organization_id: await this.resolvePlatformOrganizationId(),
         store_id: null,
         accounting_entity_id: accountingEntityId,
         document_type: dto.document_type as PlatformResolutionDocumentType,
@@ -1244,7 +1314,7 @@ export class SubscriptionFiscalService {
         .invoice_resolutions.findFirst({
           where: {
             id: { not: id },
-            organization_id: PLATFORM_ORGANIZATION_ID,
+            organization_id: await this.resolvePlatformOrganizationId(),
             store_id: null,
             document_type: nextDocumentType,
             prefix: nextPrefix,
@@ -1351,7 +1421,7 @@ export class SubscriptionFiscalService {
       .invoice_resolutions.findFirst({
         where: {
           id,
-          organization_id: PLATFORM_ORGANIZATION_ID,
+          organization_id: await this.resolvePlatformOrganizationId(),
           store_id: null,
         },
         include: { _count: { select: { invoices: true } } },
@@ -1398,17 +1468,56 @@ export class SubscriptionFiscalService {
     }
   }
 
+  /**
+   * Reads the stored settings and OVERRIDES the two identity ids with what the
+   * platform resolver derives.
+   *
+   * ## Why the stored value cannot be trusted
+   *
+   * `platform_organization_id` and `accounting_entity_id` are not preferences —
+   * they are facts about which legal entity Vendix is, derivable from
+   * `organizations.is_platform` and `organizations.fiscal_scope`. Worse, the
+   * SCOPED Prisma client re-derives the fiscal entity on every query and ignores
+   * whatever these settings say. A stored value that disagrees therefore does not
+   * degrade: it produces `404` on rows that plainly exist, and no value an
+   * operator types can reconcile the two sides.
+   *
+   * Production reached exactly that state — settings pointing at a STORE entity
+   * (`accounting_entities.id=18`, `store_id=1`) while the scope resolved the
+   * consolidated one, so the habilitación resolution written under 18 was
+   * invisible to the very flow that had to read it.
+   *
+   * Normalising on READ (instead of a migration) is deliberate: the derived value
+   * is always current, and the row rewrites itself on the next `upsertConfig`
+   * without a data migration that could go stale the moment the entity changes.
+   */
   private async getSettings(): Promise<SubscriptionFiscalSettings> {
     const row = await this.prisma.withoutScope().platform_settings.findUnique({
       where: { key: SETTINGS_KEY },
     });
     const value = (row?.value ?? {}) as Partial<SubscriptionFiscalSettings>;
+    const derived = await this.derivePlatformIdentity();
+
+    if (
+      derived.accounting_entity_id &&
+      value.accounting_entity_id &&
+      value.accounting_entity_id !== derived.accounting_entity_id
+    ) {
+      this.logger.warn(
+        `Los ajustes fiscales de plataforma apuntan a accounting_entity_id=${value.accounting_entity_id} ` +
+          `pero la entidad derivada es ${derived.accounting_entity_id}. Se usa la derivada: es la única que ` +
+          `el cliente Prisma scopeado resuelve.`,
+      );
+    }
+
     return {
       is_enabled: value.is_enabled ?? false,
       auto_issue: value.auto_issue ?? false,
       environment: value.environment ?? 'test',
-      platform_organization_id: value.platform_organization_id ?? null,
-      accounting_entity_id: value.accounting_entity_id ?? null,
+      platform_organization_id:
+        derived.platform_organization_id ?? value.platform_organization_id ?? null,
+      accounting_entity_id:
+        derived.accounting_entity_id ?? value.accounting_entity_id ?? null,
       dian_configuration_id: value.dian_configuration_id ?? null,
       invoice_resolution_id: value.invoice_resolution_id ?? null,
       last_tested_at: value.last_tested_at ?? null,
@@ -1459,12 +1568,20 @@ export class SubscriptionFiscalService {
     return config;
   }
 
-  private async createDianConfig(dto: UpsertSubscriptionFiscalConfigDto) {
+  /**
+   * La identidad llega como parámetro explícito, no leída del DTO: los campos del
+   * DTO son opcionales e ignorados, y depender de que el llamador los haya
+   * sobrescrito antes es exactamente el acoplamiento que produjo el desajuste.
+   */
+  private async createDianConfig(
+    dto: UpsertSubscriptionFiscalConfigDto,
+    identity: { organization_id: number; accounting_entity_id: number },
+  ) {
     return this.prisma.withoutScope().dian_configurations.create({
       data: {
-        organization_id: dto.platform_organization_id,
+        organization_id: identity.organization_id,
         store_id: null,
-        accounting_entity_id: dto.accounting_entity_id,
+        accounting_entity_id: identity.accounting_entity_id,
         name: dto.name,
         nit: dto.nit,
         nit_dv: dto.nit_dv,
@@ -1557,7 +1674,7 @@ export class SubscriptionFiscalService {
     const resolution = await this.prisma.withoutScope().invoice_resolutions.findFirst({
       where: {
         id: resolutionId,
-        organization_id: PLATFORM_ORGANIZATION_ID,
+        organization_id: await this.resolvePlatformOrganizationId(),
         store_id: null,
         accounting_entity_id: accountingEntityId,
         document_type: 'sales_invoice',

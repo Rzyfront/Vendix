@@ -50,10 +50,12 @@ import {
 } from '../../platform-invoicing.constants';
 
 interface FiscalConfigFormControls {
-  platform_organization_id: FormControl<string | null>;
-  accounting_entity_id: FormControl<string | null>;
+  // Sin `platform_organization_id`, `accounting_entity_id` ni
+  // `dian_configuration_id`: la plataforma tiene UNA identidad fiscal y UNA
+  // configuración, y el backend las deriva. Pedirlas como ids obligaba a acertar
+  // un número que el cliente Prisma scopeado ya calcula, y un valor distinto no
+  // fallaba al guardar — fallaba después, con un 404 sobre filas que existían.
   invoice_resolution_id: FormControl<string | null>;
-  dian_configuration_id: FormControl<string | null>;
   name: FormControl<string | null>;
   nit: FormControl<string | null>;
   nit_dv: FormControl<string | null>;
@@ -76,8 +78,6 @@ const ENABLEMENT_LABELS: Record<string, string> = {
 
 /** Etiqueta legible por control, para decir QUÉ falta en vez de "revisa el formulario". */
 const REQUIRED_LABELS: Record<string, string> = {
-  platform_organization_id: 'ID organización plataforma',
-  accounting_entity_id: 'ID entidad contable',
   name: 'Nombre de configuración',
   nit: 'NIT',
   software_id: 'Software ID',
@@ -136,18 +136,7 @@ export class PlatformDianConfigComponent {
   readonly form: FormGroup<FiscalConfigFormControls> =
     this.fb.group<FiscalConfigFormControls>(
       {
-        platform_organization_id: this.fb.control<string | null>(null, [
-          Validators.required,
-          numericIdValidator,
-        ]),
-        accounting_entity_id: this.fb.control<string | null>(null, [
-          Validators.required,
-          numericIdValidator,
-        ]),
         invoice_resolution_id: this.fb.control<string | null>(null, [
-          optionalNumericIdValidator,
-        ]),
-        dian_configuration_id: this.fb.control<string | null>(null, [
           optionalNumericIdValidator,
         ]),
         name: this.fb.control<string | null>(null, [Validators.required]),
@@ -613,12 +602,6 @@ export class PlatformDianConfigComponent {
     // una edición silenciosa de la configuración fiscal.
     const suggested = status.suggested ?? null;
 
-    const organizationId =
-      settings.platform_organization_id ??
-      suggested?.platform_organization_id ??
-      null;
-    const accountingEntityId =
-      settings.accounting_entity_id ?? suggested?.accounting_entity_id ?? null;
     const name = config?.name ?? suggested?.name ?? null;
     const nit = config?.nit ?? suggested?.nit ?? null;
     // Siempre derivado del NIT que se está mostrando, nunca el almacenado: hay
@@ -626,18 +609,11 @@ export class PlatformDianConfigComponent {
     // mostrarlo tal cual lo haría pasar por verificado.
     const nitDv = computeNitDv((nit ?? '').split('-')[0]) ?? null;
 
-    this.identityPrefillApplied.set(
-      !!suggested &&
-        (!config || settings.platform_organization_id === null) &&
-        (!!name || !!nit || organizationId !== null),
-    );
+    this.identityPrefillApplied.set(!!suggested && !config && (!!name || !!nit));
 
     this.form.patchValue(
       {
-        platform_organization_id: toIdValue(organizationId),
-        accounting_entity_id: toIdValue(accountingEntityId),
         invoice_resolution_id: toIdValue(settings.invoice_resolution_id),
-        dian_configuration_id: toIdValue(settings.dian_configuration_id),
         name,
         nit,
         nit_dv: nitDv,
@@ -663,11 +639,8 @@ export class PlatformDianConfigComponent {
 
   private buildConfigDto(): UpsertSubscriptionFiscalConfigDto {
     const value = this.form.getRawValue();
+    // Sin ids de identidad: el backend deriva organización y entidad fiscal.
     const dto: UpsertSubscriptionFiscalConfigDto = {
-      platform_organization_id: parseRequiredId(
-        value.platform_organization_id,
-      )!,
-      accounting_entity_id: parseRequiredId(value.accounting_entity_id)!,
       name: value.name?.trim() ?? '',
       nit: value.nit?.trim() ?? '',
       software_id: value.software_id?.trim() ?? '',
@@ -677,9 +650,7 @@ export class PlatformDianConfigComponent {
     };
 
     const resolutionId = parseOptionalId(value.invoice_resolution_id);
-    const configId = parseOptionalId(value.dian_configuration_id);
     if (resolutionId) dto.invoice_resolution_id = resolutionId;
-    if (configId) dto.dian_configuration_id = configId;
     if (value.nit_dv?.trim()) dto.nit_dv = value.nit_dv.trim();
     if (value.software_pin?.trim()) dto.software_pin = value.software_pin.trim();
     if (value.test_set_id?.trim()) dto.test_set_id = value.test_set_id.trim();
