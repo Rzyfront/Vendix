@@ -30,6 +30,12 @@ export interface DianConfigDecrypted {
     | 'suspended'
     | 'expired';
   test_set_id: string | null;
+  /**
+   * Modo de operación declarado ante la DIAN. Se arrastra hasta aquí porque
+   * define el código `ppp` del nombre de los archivos entregados a la DIAN
+   * (Anexo Técnico 1.9, numeral 6.5.7) — ver `dian-file-naming.util.ts`.
+   */
+  operation_mode: string;
 }
 
 /**

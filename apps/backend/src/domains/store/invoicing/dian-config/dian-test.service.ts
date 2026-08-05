@@ -32,6 +32,7 @@ import {
 import {
   buildDianXmlFileName,
   buildDianZipFileName,
+  softwareCodeForOperationMode,
   DianDocumentKind,
 } from '../utils/dian-file-naming.util';
 import { analyzeTestSetWait } from './test-set-wait.util';
@@ -296,12 +297,17 @@ export class DianTestService {
       );
     }
 
-    // Composition comes from the tenant's declared mode of operation. It used to
-    // be a hardcoded 50 (30 FV + 10 ND + 10 NC) — the legacy 2019 habilitación
-    // layout, which matches neither software propio (2+1+1) nor proveedor
-    // tecnológico (6+2+2) under Res. 000165/2023, and burned 50 consecutives.
+    // Composition comes from the tenant's declared mode of operation. La cantidad
+    // la provisiona la DIAN por set y la publica en su portal («Total de
+    // documentos requeridos»): no se deriva de la norma. Para software propio el
+    // portal exige 50 (30 FV + 10 ND + 10 NC), verificado el 2026-08-05.
     const composition = resolveTestSetComposition(config.operation_mode);
     const TEST_SET_SIZE = testSetSize(composition);
+
+    // El código `ppp` del nombre de archivo se resuelve ANTES de reservar el
+    // bloque de numeración: un modo de operación sin código soportado debe
+    // fallar sin quemar consecutivos autorizados, que no se recuperan.
+    const software_code = softwareCodeForOperationMode(config.operation_mode);
 
     // The documents must consume FRESH numbers. Starting at `range_from`
     // (the old behaviour) meant a second run re-emitted the exact same numbers
@@ -546,11 +552,12 @@ export class DianTestService {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
 
-      const invoice_file = buildDianXmlFileName(
-        'invoice',
-        config.nit,
-        next_number + i,
-      );
+      const invoice_file = buildDianXmlFileName('invoice', {
+        nit: config.nit,
+        consecutive: next_number + i,
+        software_code,
+        year: today,
+      });
       files.push({ name: invoice_file, content: xml });
       invoice_cufes.push({ number: invoice_number, cufe, date: today });
       documents.push({
@@ -648,11 +655,12 @@ export class DianTestService {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
 
-      const debit_file = buildDianXmlFileName(
-        'debit_note',
-        config.nit,
-        next_number + debit_note_offset + i,
-      );
+      const debit_file = buildDianXmlFileName('debit_note', {
+        nit: config.nit,
+        consecutive: next_number + debit_note_offset + i,
+        software_code,
+        year: today,
+      });
       files.push({ name: debit_file, content: xml });
       documents.push({
         number: note_number,
@@ -751,11 +759,12 @@ export class DianTestService {
         xml = await this.xml_signer.sign(xml, p12_buffer, cert_password);
       }
 
-      const credit_file = buildDianXmlFileName(
-        'credit_note',
-        config.nit,
-        next_number + credit_note_offset + i,
-      );
+      const credit_file = buildDianXmlFileName('credit_note', {
+        nit: config.nit,
+        consecutive: next_number + credit_note_offset + i,
+        software_code,
+        year: today,
+      });
       files.push({ name: credit_file, content: xml });
       documents.push({
         number: note_number,
@@ -769,7 +778,12 @@ export class DianTestService {
 
     // 7. Build multi-file ZIP
     const zip_base64 = this.buildMultiFileZip(files);
-    const zip_file_name = buildDianZipFileName(config.nit, next_number);
+    const zip_file_name = buildDianZipFileName({
+      nit: config.nit,
+      consecutive: next_number,
+      software_code,
+      year: today,
+    });
 
     // 8. Submit to DIAN. SendTestSetAsync is ASYNCHRONOUS: DIAN only returns a
     //    ZipKey acknowledgement here; the real validation verdict is obtained
