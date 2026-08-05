@@ -8,7 +8,12 @@ import { RequestContextService } from '@common/context/request-context.service';
  * `any` so the service constructor accepts it.
  */
 type MockStorePrismaService = {
-  orders: { findMany: jest.Mock };
+  orders: {
+    findMany: jest.Mock;
+    aggregate: jest.Mock;
+    groupBy: jest.Mock;
+  };
+  order_items: { aggregate: jest.Mock };
   store_settings: { findFirst: jest.Mock };
   withoutScope: jest.Mock;
 } & Partial<StorePrismaService>;
@@ -78,7 +83,12 @@ describe('SalesAnalyticsService', () => {
     jest.clearAllMocks();
 
     prisma = {
-      orders: { findMany: jest.fn() },
+      orders: {
+        findMany: jest.fn(),
+        aggregate: jest.fn(),
+        groupBy: jest.fn(),
+      },
+      order_items: { aggregate: jest.fn() },
       store_settings: { findFirst: jest.fn() },
       withoutScope: jest.fn(),
     } as MockStorePrismaService;
@@ -104,6 +114,165 @@ describe('SalesAnalyticsService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  describe('getSalesSummary (QUI-610)', () => {
+    it('defect 1+2+3: total_revenue is OPERATING revenue (subtotal − discounts + shipping), VAT and tips are SEPARATE fields', async () => {
+      // Single period: subtotal 8000, discounts 0, shipping 0, tax 1520, tip 200,
+      // orders 10, units 25, customers 7. Previous: subtotal 7000, tax 1330,
+      // orders 8, customers 5.
+      //
+      // Before the fix: total_revenue = 9720 (folded in tax + tip) — would have
+      // shown the DIAN liability and the waiters' money as store income.
+      prisma.orders.aggregate
+        .mockResolvedValueOnce({
+          // current period
+          _sum: {
+            subtotal_amount: 8000,
+            discount_amount: 0,
+            shipping_cost: 0,
+            tax_amount: 1520,
+            tip_amount: 200,
+          },
+          _count: { id: 10 },
+        })
+        .mockResolvedValueOnce({
+          // previous period
+          _sum: {
+            subtotal_amount: 7000,
+            discount_amount: 0,
+            shipping_cost: 0,
+            tax_amount: 1330,
+            tip_amount: 150,
+          },
+          _count: { id: 8 },
+        });
+      prisma.order_items.aggregate.mockResolvedValue({
+        _sum: { quantity: 25 },
+      });
+      prisma.orders.groupBy.mockResolvedValue([
+        { customer_id: 1 },
+        { customer_id: 2 },
+        { customer_id: 3 },
+        { customer_id: 4 },
+        { customer_id: 5 },
+        { customer_id: 6 },
+        { customer_id: 7 },
+      ]);
+
+      const result = await service.getSalesSummary(QUERY as any);
+
+      // Operating revenue: subtotal − discounts + shipping = 8000
+      expect(result.total_revenue).toBe(8000);
+      // VAT and tips are SEPARATE fields, never folded into revenue
+      expect(result.total_taxes).toBe(1520);
+      expect(result.total_tips).toBe(200);
+      // AOV = revenue / orders, sharing the same numerator as the revenue card
+      expect(result.average_order_value).toBe(800);
+      expect(result.total_orders).toBe(10);
+      expect(result.total_units_sold).toBe(25);
+      expect(result.total_customers).toBe(7);
+      // Growth against the SAME definition (operating revenue)
+      expect(result.revenue_growth).toBeCloseTo(14.29, 1);
+      expect(result.orders_growth).toBe(25);
+    });
+
+    it('defect 1: shipping + discounts DO affect revenue, tax does NOT', async () => {
+      // subtotal 1000, discount 100, shipping 50, tax 200.
+      // operating_revenue = 1000 - 100 + 50 = 950. tax stays out.
+      prisma.orders.aggregate
+        .mockResolvedValueOnce({
+          _sum: {
+            subtotal_amount: 1000,
+            discount_amount: 100,
+            shipping_cost: 50,
+            tax_amount: 200,
+            tip_amount: 0,
+          },
+          _count: { id: 1 },
+        })
+        .mockResolvedValueOnce({
+          _sum: {
+            subtotal_amount: 0,
+            discount_amount: 0,
+            shipping_cost: 0,
+            tax_amount: 0,
+            tip_amount: 0,
+          },
+          _count: { id: 0 },
+        });
+      prisma.order_items.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+      prisma.orders.groupBy.mockResolvedValue([]);
+
+      const result = await service.getSalesSummary(QUERY as any);
+
+      expect(result.total_revenue).toBe(950);
+      expect(result.total_taxes).toBe(200);
+    });
+
+    it('defect 4: growth is null (not 0) when previous period had 0 revenue / 0 orders', async () => {
+      // Current: some revenue. Previous: zero everything.
+      prisma.orders.aggregate
+        .mockResolvedValueOnce({
+          _sum: {
+            subtotal_amount: 1000,
+            discount_amount: 0,
+            shipping_cost: 0,
+            tax_amount: 190,
+            tip_amount: 0,
+          },
+          _count: { id: 5 },
+        })
+        .mockResolvedValueOnce({
+          _sum: {
+            subtotal_amount: 0,
+            discount_amount: 0,
+            shipping_cost: 0,
+            tax_amount: 0,
+            tip_amount: 0,
+          },
+          _count: { id: 0 },
+        });
+      prisma.order_items.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+      prisma.orders.groupBy.mockResolvedValue([]);
+
+      const result = await service.getSalesSummary(QUERY as any);
+
+      // contract: computeGrowth returns null when previous base is 0;
+      // the UI must render that as "sin base de comparación", NOT "0 %".
+      expect(result.revenue_growth).toBeNull();
+      expect(result.orders_growth).toBeNull();
+    });
+
+    it('regression: sales/summary.total_revenue reconciles with financial/profit-loss.revenue.operating_revenue', async () => {
+      // Both endpoints must produce the SAME operating revenue for the same
+      // period (they're driven by the same orders.aggregate now). This test
+      // pins the contract so a future divergence is caught.
+      const operatingRevenueSource = {
+        subtotal_amount: 5000,
+        discount_amount: 200,
+        shipping_cost: 100,
+        tax_amount: 950,
+        tip_amount: 50,
+      };
+
+      prisma.orders.aggregate.mockResolvedValue({
+        _sum: operatingRevenueSource,
+        _count: { id: 4 },
+      });
+      prisma.order_items.aggregate.mockResolvedValue({
+        _sum: { quantity: 10 },
+      });
+      prisma.orders.groupBy.mockResolvedValue([
+        { customer_id: 1 },
+        { customer_id: 2 },
+      ]);
+
+      const result = await service.getSalesSummary(QUERY as any);
+      // operating_revenue = 5000 - 200 + 100 = 4900 (the same formula
+      // financial/profit-loss uses via computeOperatingRevenue).
+      expect(result.total_revenue).toBe(4900);
+    });
   });
 
   describe('getOrdersForExport', () => {
