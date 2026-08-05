@@ -34,6 +34,7 @@ import {
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import { DianTestService } from '../../../store/invoicing/dian-config/dian-test.service';
 import { analyzeTestSetWait } from '../../../store/invoicing/dian-config/test-set-wait.util';
+import { assertPlausibleFiscalDate } from '../../../../common/utils/fiscal-date.util';
 import { buildTestSetCompositionView } from '../../../store/invoicing/dian-config/dian-test-set-composition';
 import {
   FiscalProductionReadinessService,
@@ -1240,9 +1241,9 @@ export class SubscriptionFiscalService {
       ? new Date(dto.resolution_date)
       : now;
 
-    this.assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
-    this.assertPlausibleFiscalDate('válida desde', validFrom);
-    this.assertPlausibleFiscalDate('válida hasta', validTo);
+    assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
+    assertPlausibleFiscalDate('válida desde', validFrom);
+    assertPlausibleFiscalDate('válida hasta', validTo);
 
     const created = await this.prisma.withoutScope().invoice_resolutions.create({
       data: {
@@ -1396,17 +1397,17 @@ export class SubscriptionFiscalService {
     // formulario o por el escáner de IA, y el síntoma aparece horas después.
     if (dto.resolution_date !== undefined) {
       const resolutionDate = new Date(dto.resolution_date);
-      this.assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
+      assertPlausibleFiscalDate('fecha de resolución', resolutionDate);
       data.resolution_date = resolutionDate;
     }
     if (dto.valid_from !== undefined) {
       const nextValidFrom = new Date(dto.valid_from);
-      this.assertPlausibleFiscalDate('válida desde', nextValidFrom);
+      assertPlausibleFiscalDate('válida desde', nextValidFrom);
       data.valid_from = nextValidFrom;
     }
     if (dto.valid_to !== undefined) {
       const nextValidTo = new Date(dto.valid_to);
-      this.assertPlausibleFiscalDate('válida hasta', nextValidTo);
+      assertPlausibleFiscalDate('válida hasta', nextValidTo);
       data.valid_to = nextValidTo;
     }
     if (dto.technical_key !== undefined) {
@@ -1623,31 +1624,6 @@ export class SubscriptionFiscalService {
       throw new BadRequestException('DIAN configuration not found');
     }
     return config;
-  }
-
-  /**
-   * Rechaza fechas que no pueden pertenecer a una resolución DIAN.
-   *
-   * `<input type="date">` pinta el año a medio teclear como `0001`, y el escáner
-   * de resoluciones por IA puede devolver una fecha inventada con formato válido.
-   * Ambas llegaban intactas a la base y de ahí al XML del documento — una fecha
-   * año 1 dentro del período de autorización es un dato que la DIAN no puede
-   * conciliar, y el síntoma aparece horas después como un lote sin veredicto, sin
-   * ninguna pista que apunte al campo culpable.
-   */
-  private assertPlausibleFiscalDate(label: string, value: Date): void {
-    if (Number.isNaN(value.getTime())) {
-      throw new BadRequestException(`La ${label} no es una fecha válida.`);
-    }
-    const year = value.getUTCFullYear();
-    // La facturación electrónica en Colombia no existe antes de 2016, y una
-    // resolución no se autoriza a más de una década vista.
-    const maxYear = new Date().getUTCFullYear() + 10;
-    if (year < 2016 || year > maxYear) {
-      throw new BadRequestException(
-        `La ${label} (${value.toISOString().slice(0, 10)}) está fuera de rango: debe estar entre 2016 y ${maxYear}. Revisa el campo — un año incompleto se guarda como 0001.`,
-      );
-    }
   }
 
   /**

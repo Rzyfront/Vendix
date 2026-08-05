@@ -9,6 +9,7 @@ import {
 
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { parsePlausibleFiscalDate } from '@common/utils/fiscal-date.util';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
 import { CreateOrgInvoiceResolutionDto } from './dto/create-org-invoice-resolution.dto';
 import { UpdateOrgInvoiceResolutionDto } from './dto/update-org-invoice-resolution.dto';
@@ -118,13 +119,19 @@ export class OrgInvoiceResolutionsService {
         accounting_entity_id: accounting_entity.id,
         document_type: dto.document_type || 'sales_invoice',
         resolution_number: dto.resolution_number,
-        resolution_date: new Date(dto.resolution_date),
+        // Validadas, no solo convertidas: el escáner por IA y un año a medio
+        // teclear producen fechas ISO válidas pero imposibles, que después viajan
+        // al período de autorización del XML.
+        resolution_date: parsePlausibleFiscalDate(
+          'fecha de resolución',
+          dto.resolution_date,
+        ),
         prefix: dto.prefix,
         range_from: dto.range_from,
         range_to: dto.range_to,
         current_number: dto.range_from - 1,
-        valid_from: new Date(dto.valid_from),
-        valid_to: new Date(dto.valid_to),
+        valid_from: parsePlausibleFiscalDate('válida desde', dto.valid_from),
+        valid_to: parsePlausibleFiscalDate('válida hasta', dto.valid_to),
         is_active: dto.is_active ?? true,
         technical_key: dto.technical_key,
       },
@@ -151,7 +158,10 @@ export class OrgInvoiceResolutionsService {
       update_data.resolution_number = dto.resolution_number;
     }
     if (dto.resolution_date !== undefined) {
-      update_data.resolution_date = new Date(dto.resolution_date);
+      update_data.resolution_date = parsePlausibleFiscalDate(
+        'fecha de resolución',
+        dto.resolution_date,
+      );
     }
     if (dto.prefix !== undefined) update_data.prefix = dto.prefix;
     if (dto.document_type !== undefined) {
@@ -160,9 +170,17 @@ export class OrgInvoiceResolutionsService {
     if (dto.range_from !== undefined) update_data.range_from = dto.range_from;
     if (dto.range_to !== undefined) update_data.range_to = dto.range_to;
     if (dto.valid_from !== undefined) {
-      update_data.valid_from = new Date(dto.valid_from);
+      update_data.valid_from = parsePlausibleFiscalDate(
+        'válida desde',
+        dto.valid_from,
+      );
     }
-    if (dto.valid_to !== undefined) update_data.valid_to = new Date(dto.valid_to);
+    if (dto.valid_to !== undefined) {
+      update_data.valid_to = parsePlausibleFiscalDate(
+        'válida hasta',
+        dto.valid_to,
+      );
+    }
     if (dto.is_active !== undefined) update_data.is_active = dto.is_active;
     if (dto.technical_key !== undefined) {
       update_data.technical_key = dto.technical_key;
