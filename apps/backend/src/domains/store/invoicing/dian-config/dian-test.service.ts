@@ -1,4 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 import AdmZip = require('adm-zip');
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DianSecretEnvelopeService } from '../../../../common/services/dian-secret-envelope.service';
@@ -37,6 +40,11 @@ import {
 } from '../utils/dian-file-naming.util';
 import { analyzeTestSetWait } from './test-set-wait.util';
 import {
+  DianTestSetJob,
+  DianTestSetJobState,
+  DianTestSetJobStatusResult,
+} from './dian-test-set-job.interface';
+import {
   buildTestSetCompositionView,
   describeComposition,
   resolveTestSetComposition,
@@ -72,6 +80,11 @@ export class DianTestService {
     private readonly s3_service: S3Service,
     private readonly xml_signer: DianXmlSignerService,
     private readonly secret_envelope: DianSecretEnvelopeService,
+    // Productor de la cola del set de pruebas. Consumidor: DianTestSetProcessor.
+    // La cola se registra en cada módulo que expone el flujo (tienda,
+    // organización y plataforma) porque las tres superficies comparten ESTE
+    // servicio, no una copia por dominio.
+    @InjectQueue('dian-test-set') private readonly testSetQueue: Queue,
   ) {}
 
   private async getConfigById(config_id: number) {
@@ -202,13 +215,131 @@ export class DianTestService {
   }
 
   /**
-   * Runs the DIAN test set for a specific configuration.
-   * Generates the UBL XML documents required by the tenant's mode of operation
-   * (software propio: 2 FV + 1 NC + 1 ND; proveedor tecnológico: 6 FV + 2 NC + 2 ND),
-   * signs them with the .p12 certificate, packages them in a single ZIP,
-   * and sends to DIAN via SendTestSetAsync.
+   * Encola el set de pruebas y responde de inmediato con el id del job.
+   *
+   * POR QUÉ NO ES SINCRÓNICO: `executeTestSet` tarda ~74 s (reservar numeración,
+   * construir 50 UBL, firmarlos con XAdES, comprimir y subir a la DIAN). El
+   * `location /` de nginx en producción hereda el `proxy_read_timeout` por
+   * defecto de 60 s, así que los envíos del 2026-08-05 devolvieron 504 al
+   * navegador mientras el backend los completaba bien — dejando la UI mostrando
+   * el estado previo al envío y un toast que afirmaba que no se había enviado.
+   *
+   * Las validaciones BARATAS se repiten aquí a propósito, para que el llamador
+   * reciba su 409/412 en la misma respuesta HTTP en vez de tener que sondear un
+   * job que va a fallar. Las caras (leer la resolución, contar facturas
+   * emitidas) se quedan solo en el worker.
    */
-  async runTestSet(config_id: number, resolution_id: number) {
+  async enqueueTestSet(
+    config_id: number,
+    resolution_id: number,
+  ): Promise<{ job_id: string }> {
+    const config = await this.getConfigById(config_id);
+
+    if (!config.test_set_id) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'No test set ID configured',
+      );
+    }
+
+    if (config.environment !== 'test') {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_006,
+        'La configuración ya está en ambiente de producción: el set de pruebas solo se envía en ambiente de habilitación.',
+        { dian_configuration_id: config_id, environment: config.environment },
+      );
+    }
+
+    const previous = (config.last_test_result ?? {}) as Record<string, any>;
+    if (previous.pending === true && previous.zip_key) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_002,
+        `El set de pruebas ${previous.zip_key} aún está en validación en la DIAN. Consulta su estado antes de reenviar.`,
+        { dian_configuration_id: config_id, zip_key: previous.zip_key },
+      );
+    }
+
+    const context = RequestContextService.getContext();
+    const payload: DianTestSetJob = {
+      config_id,
+      resolution_id,
+      context: {
+        // `store_id` puede quedar `undefined` legítimamente: la plataforma emite
+        // con la organización como identidad fiscal, sin tienda.
+        store_id: context?.store_id,
+        organization_id: context?.organization_id,
+        user_id: context?.user_id,
+        is_super_admin: context?.is_super_admin,
+        is_owner: context?.is_owner,
+        request_id: context?.request_id ?? `queue-${randomUUID()}`,
+      },
+    };
+
+    const job = await this.testSetQueue.add('run', payload, {
+      // `attempts: 1` — sin reintento, a diferencia del resto de las colas del
+      // repo. Cada intento reservaría un bloque NUEVO de consecutivos
+      // autorizados y enviaría otro lote que la DIAN rechazaría como duplicado.
+      // Consecutivos quemados no se recuperan: reintentar es decisión humana.
+      attempts: 1,
+      removeOnComplete: { count: 50 },
+      removeOnFail: { count: 50 },
+    });
+
+    this.logger.log(
+      `Set de pruebas DIAN encolado job=${job.id} config=${config_id} resolucion=${resolution_id}`,
+    );
+    return { job_id: String(job.id) };
+  }
+
+  /**
+   * Estado del job encolado.
+   *
+   * GUARDIA IDOR — los ids de BullMQ son enteros globales secuenciales sobre una
+   * cola compartida por todos los tenants, y `job.returnvalue` sale de Redis, así
+   * que el cliente Prisma scopeado NO lo protege.
+   *
+   * El calco de `receipt-scan` compara `job.data.context.store_id` con el del
+   * llamador y exige que no sea nulo. Aquí eso no sirve: la plataforma y las
+   * configuraciones de organización corren con `store_id` nulo por diseño, así
+   * que ese chequeo rechazaría a los legítimos y, peor, dejaría a dos llamadores
+   * con `store_id` nulo viéndose entre sí. La comparación correcta es contra la
+   * `config_id` que el llamador YA demostró poder leer: quien invoca este método
+   * resolvió su configuración por su propia ruta scopeada.
+   *
+   * Un job desconocido, evicted o ajeno devuelven el MISMO 404, para no filtrar
+   * que otro tenant está corriendo una habilitación.
+   */
+  async getTestSetJobStatus(
+    job_id: string,
+    config_id: number,
+  ): Promise<DianTestSetJobStatusResult> {
+    const job = await this.testSetQueue.getJob(job_id);
+    if (!job || job.data?.config_id !== config_id) {
+      throw new VendixHttpException(ErrorCodes.DIAN_TEST_SET_007);
+    }
+    const status = (await job.getState()) as DianTestSetJobState;
+    return {
+      status,
+      result: job.returnvalue ?? undefined,
+      error: job.failedReason || undefined,
+    };
+  }
+
+  /**
+   * Trabajo pesado del set de pruebas, ejecutado por el worker.
+   *
+   * Construye los documentos UBL que exige el modo de operación del tenant — la
+   * cantidad la provisiona la DIAN por set y la publica su portal en «Total de
+   * documentos requeridos»; para software propio son 50 (30 FV + 10 ND + 10 NC),
+   * verificado el 2026-08-05 —, los firma con el certificado .p12, los empaqueta
+   * en un solo ZIP y los envía por `SendTestSetAsync`.
+   *
+   * NO sondea el veredicto. `SendTestSetAsync` es asíncrono: la DIAN solo devuelve
+   * un ZipKey y tarda minutos en clasificar, así que sondear aquí no podía
+   * alcanzar un veredicto — solo alargaba el trabajo 33 s. El veredicto lo
+   * obtienen el cron de repoll y el endpoint de consulta de estado.
+   */
+  async executeTestSet(config_id: number, resolution_id: number) {
     const started_at = Date.now();
     const config = await this.getConfigById(config_id);
 
@@ -798,20 +929,17 @@ export class DianTestService {
 
     const zip_key = submit.zip_key ?? null;
 
-    // 9. Poll GetStatusZip for the verdict (bounded, so the synchronous HTTP
-    //    request does not exceed the reverse-proxy timeout). If the set is still
-    //    processing when the window closes, the persisted zip_key lets the
-    //    GET :id/test-set-status endpoint re-poll without re-sending documents.
+    // 9. NO se sondea aquí. `SendTestSetAsync` es asíncrono: la DIAN devuelve un
+    //    ZipKey y tarda MINUTOS en classificar el lote, así que las 6 consultas
+    //    en línea que había antes no podían alcanzar un veredicto — solo sumaban
+    //    33 s a un request que ya se pasaba del `proxy_read_timeout` de nginx y
+    //    volvía 504, dejando la UI con el estado previo al envío.
+    //
+    //    El veredicto lo obtienen el cron de repoll (cada 10 min, con backoff) y
+    //    el endpoint de consulta de estado, ambos partiendo del `zip_key`
+    //    persistido abajo. `poll_history` nace vacío y se llena en esas rutas.
     const poll_history: TestSetPollAttempt[] = [];
-    let verdict: DianSendBillResponse = submit;
-    if (zip_key) {
-      verdict = await this.pollTestSetStatus(
-        zip_key,
-        environment,
-        ws_credentials,
-        poll_history,
-      );
-    }
+    const verdict: DianSendBillResponse = submit;
 
     const success = verdict.success;
     // A verdict is "still processing" ONLY when we never reached a terminal
@@ -825,9 +953,13 @@ export class DianTestService {
     const result_data = {
       executed_at: new Date().toISOString(),
       total_documents: files.length,
-      invoices: 30,
-      debit_notes: 10,
-      credit_notes: 10,
+      // Derivados de `composition`, no literales. Estaban escritos a mano como
+      // 30/10/10, así que en cualquier modo con otra composición el registro
+      // mentía sobre lo que se había enviado — justo el dato con el que se
+      // distingue un set rechazado de uno mandado con el layout equivocado.
+      invoices: composition.invoices,
+      debit_notes: composition.debit_notes,
+      credit_notes: composition.credit_notes,
       zip_key,
       zip_file_name,
       resolution_id,
@@ -855,6 +987,14 @@ export class DianTestService {
       pending: still_processing,
       rejected,
       tracking_id: zip_key ?? verdict.status_code,
+      // `abandonTestSet` guarda aquí los ZipKey descartados «para que el abandono
+      // sea auditable», y este objeto se escribe COMPLETO, así que sin arrastrarlo
+      // el primer reenvío borraba justo la historia que el abandono creó. Pasó de
+      // verdad: el lote 1947f8d4 quedó solo en `dian_audit_logs`.
+      ...(Array.isArray(previous_result.abandoned_batches) &&
+      previous_result.abandoned_batches.length > 0
+        ? { abandoned_batches: previous_result.abandoned_batches }
+        : {}),
     };
 
     await this.prisma.dian_configurations.update({

@@ -14,6 +14,8 @@ import { ResolutionsService } from './resolutions/resolutions.service';
 import { ResolutionScannerService } from './resolutions/resolution-scanner.service';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
 import { DianConfigService } from './dian-config/dian-config.service';
+import { BullModule } from '@nestjs/bullmq';
+import { DianTestSetProcessor } from './dian-config/dian-test-set.processor';
 import { DianTestService } from './dian-config/dian-test.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
 import { DianEventsService } from './services/dian-events.service';
@@ -32,6 +34,10 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     InvoiceProviderModule,
     DianDirectModule,
     WithholdingTaxModule,
+    // Cola del set de pruebas DIAN. Se registra en CADA módulo que declara
+    // `DianTestService` en sus providers, porque Nest instancia el servicio una
+    // vez por módulo y cada instancia necesita resolver su `@InjectQueue`.
+    BullModule.registerQueue({ name: 'dian-test-set' }),
   ],
   controllers: [
     DianConfigController,
@@ -47,6 +53,10 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     InvoiceNumberGenerator,
     DianConfigService,
     DianTestService,
+    // Worker de la cola `dian-test-set`. Se registra SOLO aquí: las otras dos
+    // superficies (organización y plataforma) reusan este mismo servicio, y un
+    // worker por módulo levantaría tres consumidores para la misma cola.
+    DianTestSetProcessor,
     InvoicePdfService,
     DianEventsService,
     InvoiceRetryQueueService,

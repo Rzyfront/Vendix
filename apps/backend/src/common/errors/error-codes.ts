@@ -1820,6 +1820,20 @@ export const ErrorCodes = {
       'The test set requires a habilitación numbering resolution; the one provided belongs to production',
   },
   /**
+   * The polled test-set job does not exist, was evicted, or belongs to another
+   * fiscal configuration.
+   *
+   * Deliberately ONE code for all three: BullMQ job ids are global sequential
+   * integers on a queue shared by every tenant, so distinguishing "no existe" from
+   * "no es tuyo" would let a caller enumerate ids and learn that another tenant is
+   * running a habilitación batch.
+   */
+  DIAN_TEST_SET_007: {
+    code: 'DIAN_TEST_SET_007',
+    httpStatus: 404,
+    devMessage: 'DIAN test set job not found',
+  },
+  /**
    * A RADIAN event references a document that DIAN never accepted. Events attach
    * to an existing electronic document by CUFE, so registering one against a
    * draft, rejected or not-yet-transmitted invoice would reference a key that does

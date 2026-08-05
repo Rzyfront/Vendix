@@ -18,7 +18,9 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { map, switchMap } from 'rxjs';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { pollAsyncJob } from '../../../../../../core/utils/async-job-poll.util';
 import {
   DianAuditLog,
   DianConfig,
@@ -2058,17 +2060,41 @@ export class DianConfigWizardComponent {
     this.pollAttempts.set(0);
     this.startTips();
 
+    // El POST solo ENCOLA (202 + job_id) y el resultado se sondea. Antes era
+    // sincrónico y tardaba ~107 s, así que nginx lo cortaba a los 60 s con un 504
+    // mientras el backend lo terminaba bien: el `next` no corría, la pantalla se
+    // quedaba con el estado previo al envío y el toast decía «Error al ejecutar
+    // set de pruebas» sobre un lote que sí había salido y ya había quemado su
+    // bloque de consecutivos autorizados.
     this.invoicingService.runDianTestSet(cfg.id, resId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        switchMap((response: any) => {
+          const jobId = String(response?.data?.job_id ?? response?.job_id ?? '');
+          return pollAsyncJob(() =>
+            this.invoicingService
+              .getDianTestSetJob(cfg.id, jobId)
+              .pipe(map((res: any) => res?.data ?? res)),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
-        next: (response: any) => {
-          const result: DianTestResult = response?.data || response;
+        next: (job: any) => {
           this.runningTestSet.set(false);
+          if (job?.status === 'failed') {
+            this.stopTips();
+            this.toast.error(
+              job?.error || 'El envío del set de pruebas falló',
+            );
+            this.checkTestSetStatus(true);
+            return;
+          }
+          const result: DianTestResult = job?.result as DianTestResult;
           // A non-success response is NOT automatically an error: `pending`
           // means the batch is queued at DIAN. The old code showed no feedback
           // at all in that case, which is why a healthy submission looked silent.
           this.applyTestSetOutcome(result, false);
-          if (result.pending) {
+          if (result?.pending) {
             this.toast.info(
               `La DIAN recibió ${this.testSetDocumentsLabel()} y los está validando. Puedes esperar aquí o volver más tarde.`,
             );
@@ -2087,7 +2113,14 @@ export class DianConfigWizardComponent {
             this.checkTestSetStatus(true);
             return;
           }
-          this.toast.error(extractApiErrorMessage(err) || 'Error al ejecutar set de pruebas');
+          // Nunca afirmar que no se ejecutó: si el worker ya arrancó, el lote
+          // salió y quemó numeración que no se recupera. Se consulta el estado
+          // real en vez de dejar a la vista creyendo que no pasó nada.
+          this.toast.error(
+            extractApiErrorMessage(err) ||
+              'No se pudo confirmar el envío. El lote puede haber salido: revisa el estado antes de reenviar.',
+          );
+          this.checkTestSetStatus(true);
         },
       });
   }
