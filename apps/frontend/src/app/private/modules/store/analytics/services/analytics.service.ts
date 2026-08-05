@@ -163,6 +163,12 @@ export interface TaxSummary {
   total_tax_collected: number;
   total_tax_refunded: number;
   net_tax: number;
+  /**
+   * Base gravable EXENTA — suma de líneas en el período que NO tienen
+   * `order_item_taxes`. Reportada aparte (defect 3) para que la "tarifa
+   * efectiva" del bloque gravado no se diluya con productos exentos.
+   */
+  exempt_revenue: number;
   total_taxable_revenue: number;
   effective_tax_rate: number;
   breakdown: Array<{
