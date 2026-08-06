@@ -30,7 +30,7 @@ import { queryParamsToDateRange } from '../../../../shared/utils/date-range-para
 import { truncateLabel, compactCountAxis } from '../../../../../../../shared/utils/chart-labels.util';
 import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
-import { comparisonLabelFor } from '../../../utils/comparison-label.util';
+import { comparisonLabelFor, DatePresetLike } from '../../../utils/comparison-label.util';
 
 @Component({
   selector: 'vendix-sales-summary',
@@ -128,12 +128,12 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     this.store.dispatch(SalesActions.setDateRange({ dateRange: range }));
   }
 
-  getGrowthText(growth?: number): string {
+  getGrowthText(growth?: number | null): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
     // QUI-610: derive the comparison label from the active preset (was the
     // hardcoded "vs período anterior" — defect C9 in the ticket catalog).
-    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset)}`;
+    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset as DatePresetLike)}`;
   }
 
   private updateCharts(trends: SalesTrend[], granularity: string): void {
