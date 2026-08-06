@@ -331,17 +331,20 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   /**
-   * `/audio/transcriptions` is multipart, not JSON.
+   * `/audio/transcriptions` has **two incompatible request contracts**, and
+   * which one applies depends on the host, not on the endpoint name.
    *
-   * This is the one endpoint in the OpenAI-compatible surface that does not
-   * take a JSON body: the audio travels as a `file` part in
-   * `multipart/form-data`. Sending `{ input_audio: { data, format } }` as JSON
-   * — which is what an `input_audio` content block looks like inside *chat*
-   * completions — is rejected with a 400 that names the missing `file` field.
+   * - **OpenAI** takes `multipart/form-data` with the audio as a `file` part.
+   *   Sending JSON is refused with a 400 that names the missing `file` field.
+   * - **OpenRouter** takes **JSON**: `{ model, input_audio: { data, format } }`,
+   *   with no file part at all. That is why
+   *   `AITranscriptionRequestOptions.inputAudio` is shaped `{ data, format }` —
+   *   the interface was written against OpenRouter.
    *
-   * `buildProviderHeaders(false)` omits `Content-Type` on purpose: `fetch`
-   * derives it from the `FormData` body along with the multipart boundary, and
-   * setting it by hand produces a body the server cannot split.
+   * An earlier version of this method sent multipart unconditionally, on the
+   * belief that this endpoint never accepts JSON. That holds for OpenAI and
+   * fails for OpenRouter, so every OpenRouter transcription was rejected while
+   * the configuration itself was correct.
    */
   async transcribeAudio(
     options: AITranscriptionRequestOptions,
@@ -353,59 +356,56 @@ export class OpenAICompatibleProvider implements AIProvider {
 
     try {
       const format = (options.inputAudio.format || 'webm').toLowerCase();
-      // Buffer would satisfy BlobPart on its own, but its generic ArrayBuffer
-      // parameter drifts between @types/node majors; a plain view never does.
-      const bytes = new Uint8Array(
-        Buffer.from(options.inputAudio.data, 'base64'),
-      );
-
-      const form = new FormData();
-      form.append('model', model);
-      // The extension matters as much as the MIME type: the API sniffs the
-      // filename to pick a decoder, and a container it cannot name is refused
-      // even when the bytes are valid.
-      form.append(
-        'file',
-        new Blob([bytes], { type: this.audioMimeType(format) }),
-        `audio.${format}`,
-      );
-
       const language = options.language || this.config.settings?.language;
-      if (language) form.append('language', language);
-
       const temperature =
         options.temperature ?? this.config.settings?.temperature;
-      if (temperature !== undefined && temperature !== null) {
-        form.append('temperature', String(temperature));
-      }
+
+      const request = this.isOpenRouterConfig()
+        ? this.buildJsonTranscriptionRequest(
+            model,
+            options,
+            format,
+            language,
+            temperature,
+          )
+        : this.buildMultipartTranscriptionRequest(
+            model,
+            options,
+            format,
+            language,
+            temperature,
+          );
 
       const response = await fetch(
         this.buildProviderUrl('/audio/transcriptions'),
-        {
-          method: 'POST',
-          headers: this.buildProviderHeaders(false),
-          body: form,
-        },
+        { method: 'POST', ...request },
       );
 
       if (!response.ok) {
         throw new Error(await this.readProviderError(response));
       }
 
+      // Read through `?.`: a provider answering the literal JSON `null` is a
+      // 200 with an empty body, and dereferencing it would surface a TypeError
+      // where the operator needs to read "returned no text".
       const parsed = (await response.json()) as {
         text?: string;
         usage?: any;
-      };
+      } | null;
 
       return {
-        success: typeof parsed.text === 'string',
-        text: parsed.text,
+        success: typeof parsed?.text === 'string',
+        text: parsed?.text,
         model,
-        usage: this.mapTokenUsage(parsed.usage),
+        usage: this.mapTokenUsage(parsed?.usage),
         error:
-          typeof parsed.text === 'string'
+          typeof parsed?.text === 'string'
             ? undefined
-            : 'Transcription model returned no text',
+            : // The keys, never the values: a transcript is the merchant's own
+              // speech and does not belong in an error string. Naming the keys
+              // is what distinguishes "the model said nothing" from "the
+              // response carries the text under a field we do not read".
+              `Transcription model returned no text (response fields: ${Object.keys(parsed || {}).join(', ') || 'none'})`,
       };
     } catch (error: any) {
       return {
@@ -415,6 +415,67 @@ export class OpenAICompatibleProvider implements AIProvider {
           error.message || 'OpenAI-compatible transcription request failed',
       };
     }
+  }
+
+  /** OpenRouter: JSON body carrying base64 audio inline. */
+  private buildJsonTranscriptionRequest(
+    model: string,
+    options: AITranscriptionRequestOptions,
+    format: string,
+    language?: string,
+    temperature?: number | null,
+  ): { headers: Record<string, string>; body: string } {
+    return {
+      headers: this.buildProviderHeaders(),
+      body: JSON.stringify({
+        model,
+        input_audio: {
+          data: options.inputAudio.data,
+          format,
+        },
+        ...(language ? { language } : {}),
+        ...(temperature !== undefined && temperature !== null
+          ? { temperature }
+          : {}),
+      }),
+    };
+  }
+
+  /**
+   * OpenAI: multipart with a `file` part.
+   *
+   * `buildProviderHeaders(false)` omits `Content-Type` on purpose — `fetch`
+   * derives it from the `FormData` body along with the multipart boundary, and
+   * setting it by hand produces a body the server cannot split.
+   */
+  private buildMultipartTranscriptionRequest(
+    model: string,
+    options: AITranscriptionRequestOptions,
+    format: string,
+    language?: string,
+    temperature?: number | null,
+  ): { headers: Record<string, string>; body: FormData } {
+    // Buffer would satisfy BlobPart on its own, but its generic ArrayBuffer
+    // parameter drifts between @types/node majors; a plain view never does.
+    const bytes = new Uint8Array(Buffer.from(options.inputAudio.data, 'base64'));
+
+    const form = new FormData();
+    form.append('model', model);
+    // The extension matters as much as the MIME type: the API sniffs the
+    // filename to pick a decoder, and a container it cannot name is refused
+    // even when the bytes are valid.
+    form.append(
+      'file',
+      new Blob([bytes], { type: this.audioMimeType(format) }),
+      `audio.${format}`,
+    );
+
+    if (language) form.append('language', language);
+    if (temperature !== undefined && temperature !== null) {
+      form.append('temperature', String(temperature));
+    }
+
+    return { headers: this.buildProviderHeaders(false), body: form };
   }
 
   /**
@@ -687,15 +748,25 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   /**
-   * Reframes a provider error when the real fault is the destination.
+   * Reframes a provider error when the real fault is neither the model id nor
+   * the network, but a field the message never names.
    *
-   * A host that does not implement an audio endpoint answers the same way for
-   * every model id, so forwarding its message unchanged tells the operator to
-   * keep changing the model — the one field that cannot fix it. OpenRouter is
-   * the case this exists for: it serves `/chat/completions` and nothing under
-   * `/audio`, and its 404 mentions neither the path nor the host.
+   * Two cases, both observed in production:
+   *
+   * 1. **The host has no such endpoint.** It answers identically for every
+   *    model id, so forwarding its message unchanged sends the operator to
+   *    edit the one field that cannot fix it.
+   * 2. **The model is real but wired to the wrong capability.** A transcription
+   *    model tested against `/audio/speech` is reported by the provider as
+   *    *nonexistent* — true of that endpoint's catalog, and deeply misleading:
+   *    the model exists, the endpoint is wrong, and the field to change is
+   *    `model_type`. `openai/gpt-transcribe` saved as `speech` produced exactly
+   *    "Model openai/gpt-transcribe does not exist" against OpenRouter.
    */
   private describeAudioFailure(path: string, error: string): string {
+    const mismatch = this.describeCapabilityMismatch(path, error);
+    if (mismatch) return mismatch;
+
     const looksLikeMissingEndpoint =
       /\b404\b|not found|no such (?:endpoint|route|path)|unknown (?:url|path|endpoint)|invalid url/i.test(
         error,
@@ -711,6 +782,50 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     return `${host} did not serve ${path} — "${error}". Check this configuration's endpoint, not its model: a host without audio support answers the same way for every model id.`;
+  }
+
+  /**
+   * Names `model_type` when the model id itself contradicts the endpoint it was
+   * sent to. Deliberately narrow: it only fires on an unmistakable id, so a
+   * genuinely absent model still surfaces the provider's own words.
+   */
+  private describeCapabilityMismatch(
+    path: string,
+    error: string,
+  ): string | null {
+    const looksLikeUnknownModel =
+      /does not exist|no such model|unknown model|model not found|invalid model/i.test(
+        error,
+      );
+    if (!looksLikeUnknownModel) return null;
+
+    const modelId = this.config.modelId || '';
+    const expectations: Array<{
+      path: string;
+      pattern: RegExp;
+      actual: string;
+      configured: string;
+    }> = [
+      {
+        path: '/audio/speech',
+        pattern: /transcrib|whisper|\bstt\b|speech[-_]to[-_]text/i,
+        actual: 'transcription',
+        configured: 'speech',
+      },
+      {
+        path: '/audio/transcriptions',
+        pattern: /\btts\b|text[-_]to[-_]speech/i,
+        actual: 'speech',
+        configured: 'transcription',
+      },
+    ];
+
+    const hit = expectations.find(
+      (candidate) => candidate.path === path && candidate.pattern.test(modelId),
+    );
+    if (!hit) return null;
+
+    return `"${error}" — but ${modelId} looks like a ${hit.actual} model and this configuration is saved as ${hit.configured}, so it was tested against ${path}. Change this configuration's model type to ${hit.actual}; the model id and the endpoint are fine.`;
   }
 
   private async testRerankConnection(): Promise<{
