@@ -10,12 +10,6 @@ import {
   CreateStoreDto,
   UpdateStoreDto,
   StoreQueryDto,
-  StoreDashboardDto,
-  StoreDashboardResponse,
-  StoreStats,
-  PaginatedStoresResponse,
-  StoreSettingsUpdateDto,
-  StoreType,
 } from '../interfaces/store.interface';
 
 export interface ApiResponse<T> {
@@ -43,6 +37,25 @@ interface CacheEntry<T> {
 
 let storesStatsCache: CacheEntry<Observable<any>> | null = null;
 
+/**
+ * Cliente HTTP del directorio de tiendas del super admin.
+ *
+ * **Sólo expone lo que `superadmin/stores` publica de verdad.** El controlador
+ * (`apps/backend/src/domains/superadmin/stores/stores.controller.ts`) tiene
+ * exactamente seis rutas: `POST /`, `GET /`, `GET /dashboard`, `GET /:id`,
+ * `PATCH /:id` y `DELETE /:id`.
+ *
+ * Este servicio arrastraba diez métodos más que apuntaban a rutas que ese
+ * controlador nunca declaró (`/:id/settings`, `/:id/activate`, `/:id/suspend`,
+ * `/:id/logo`, …). Ninguna respondía otra cosa que 404, y varias vivían en la
+ * UI como botones que "fallaban a veces". Se retiraron en bloque: un método
+ * muerto en un servicio compartido es una invitación a cablearlo.
+ *
+ * Antes de reintroducir cualquiera de ellos, publicar primero la ruta en el
+ * controlador. El estado y la configuración de una tienda se editan hoy con
+ * `PATCH /superadmin/stores/:id` (campo `is_active`) y desde la ficha de
+ * tenant (`/super-admin/stores/:id/...`), que sí tiene backend.
+ */
 @Injectable({
   providedIn: 'root',
 })
@@ -100,15 +113,6 @@ export class StoresService {
   }
 
   /**
-   * Get store by slug
-   */
-  getStoreBySlug(slug: string): Observable<ApiResponse<Store>> {
-    return this.http.get<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores/slug/${slug}`,
-    );
-  }
-
-  /**
    * Create a new store
    */
   createStore(data: CreateStoreDto): Observable<ApiResponse<Store>> {
@@ -139,26 +143,6 @@ export class StoresService {
     return this.http
       .delete<ApiResponse<void>>(`${this.apiUrl}/superadmin/stores/${id}`)
       .pipe(finalize(() => this.isDeletingStore.set(false)));
-  }
-
-  /**
-   * Get store stats metrics
-   */
-  getStoreStats(
-    id: number,
-    dashboardData?: StoreDashboardDto,
-  ): Observable<ApiResponse<StoreDashboardResponse>> {
-    let params = new HttpParams();
-
-    if (dashboardData?.start_date)
-      params = params.set('start_date', dashboardData.start_date);
-    if (dashboardData?.end_date)
-      params = params.set('end_date', dashboardData.end_date);
-
-    return this.http.get<ApiResponse<StoreDashboardResponse>>(
-      `${this.apiUrl}/superadmin/stores/${id}/stats`,
-      { params },
-    );
   }
 
   /**
@@ -196,117 +180,6 @@ export class StoresService {
     };
 
     return observable$;
-  }
-
-  /**
-   * Get stores by organization ID
-   */
-  getStoresByOrganization(
-    organizationId: number,
-    query?: Omit<StoreQueryDto, 'organization_id'>,
-  ): Observable<PaginatedResponse<StoreListItem[]>> {
-    let params = new HttpParams();
-
-    if (query?.page) params = params.set('page', query.page.toString());
-    if (query?.limit) params = params.set('limit', query.limit.toString());
-    if (query?.search) params = params.set('search', query.search);
-    if (query?.store_type) params = params.set('store_type', query.store_type);
-    if (query?.is_active !== undefined)
-      params = params.set('is_active', query.is_active.toString());
-
-    return this.http.get<PaginatedResponse<StoreListItem[]>>(
-      `${this.apiUrl}/organizations/${organizationId}/stores`,
-      { params },
-    );
-  }
-
-  /**
-   * Upload store logo
-   */
-  uploadStoreLogo(
-    storeId: number,
-    file: File,
-  ): Observable<ApiResponse<{ logo_url: string }>> {
-    const formData = new FormData();
-    formData.append('logo', file);
-
-    return this.http.post<ApiResponse<{ logo_url: string }>>(
-      `${this.apiUrl}/superadmin/stores/${storeId}/logo`,
-      formData,
-    );
-  }
-
-  /**
-   * Upload store banner
-   */
-  uploadStoreBanner(
-    storeId: number,
-    file: File,
-  ): Observable<ApiResponse<{ banner_url: string }>> {
-    const formData = new FormData();
-    formData.append('banner', file);
-
-    return this.http.post<ApiResponse<{ banner_url: string }>>(
-      `${this.apiUrl}/superadmin/stores/${storeId}/banner`,
-      formData,
-    );
-  }
-
-  /**
-   * Update store settings
-   */
-  updateStoreSettings(
-    storeId: number,
-    settingsData: StoreSettingsUpdateDto,
-  ): Observable<ApiResponse<Store['settings']>> {
-    this.isUpdatingStore.set(true);
-    return this.http
-      .patch<ApiResponse<Store['settings']>>(
-        `${this.apiUrl}/superadmin/stores/${storeId}/settings`,
-        settingsData,
-      )
-      .pipe(finalize(() => this.isUpdatingStore.set(false)));
-  }
-
-  /**
-   * Activate store
-   */
-  activateStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores/${id}/activate`,
-      {},
-    );
-  }
-
-  /**
-   * Deactivate store
-   */
-  deactivateStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores/${id}/deactivate`,
-      {},
-    );
-  }
-
-  /**
-   * Suspend store
-   */
-  suspendStore(id: number, reason?: string): Observable<ApiResponse<Store>> {
-    const body = reason ? { reason } : {};
-    return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores/${id}/suspend`,
-      body,
-    );
-  }
-
-  /**
-   * Archive store
-   */
-  archiveStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores/${id}/archive`,
-      {},
-    );
   }
 
   /**
