@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsNumber,
   IsObject,
   IsOptional,
@@ -102,4 +103,19 @@ export class StreamIntentDto {
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   attachment_ids?: string[];
+
+  /**
+   * Asks for the answer to be spoken as well as written.
+   *
+   * Per turn rather than per conversation, because the person can switch between
+   * chat and voice mode inside the same thread — the previous turn being spoken
+   * says nothing about this one.
+   *
+   * Only adds audio frames; it never changes the text, the tools, or what gets
+   * persisted. That is the premise of the pipeline: a voice turn *is* a chat
+   * turn, so nothing about the answer depends on how it will be delivered.
+   */
+  @IsOptional()
+  @IsBoolean()
+  speak?: boolean;
 }

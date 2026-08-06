@@ -70,6 +70,8 @@ export { SubscriptionBannerComponent } from './subscription-banner/subscription-
 export { AiPaywallModalComponent } from './ai-paywall-modal/ai-paywall-modal.component';
 export { DateRangePickerComponent } from './date-range-picker/date-range-picker.component';
 export { DiffViewerComponent } from './diff-viewer/diff-viewer.component';
+export { DianTechnicalResponseComponent } from './dian-technical-response/dian-technical-response.component';
+export type { DianTechnicalResponseData } from './dian-technical-response/dian-technical-response.component';
 export { StoreFiscalIdentityFormComponent } from './store-fiscal-identity-form/store-fiscal-identity-form.component';
 export { StoreUserSelectComponent } from './store-user-select/store-user-select.component';
 export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';

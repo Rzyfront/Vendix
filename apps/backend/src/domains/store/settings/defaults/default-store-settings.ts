@@ -451,6 +451,11 @@ export function getDefaultStoreSettings(): StoreSettings {
     // section (receipts, POS) would stamp it into the row permanently.
     vexi: {
       enabled: false,
+      // `realtime` preserva exactamente el comportamiento de hoy. El pipeline se
+      // elige por tienda cuando sus números de latencia y costo lo justifiquen,
+      // no por defecto: cambiar el default movería el motor de todas las tiendas
+      // en el mismo deploy que lo introduce.
+      voice_engine: 'realtime',
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

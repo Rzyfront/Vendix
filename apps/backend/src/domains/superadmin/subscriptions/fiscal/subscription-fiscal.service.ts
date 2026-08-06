@@ -869,7 +869,7 @@ export class SubscriptionFiscalService {
     settings: SubscriptionFiscalSettings,
     fn: () => Promise<T>,
   ): Promise<T> {
-    return RequestContextService.run(
+    return RequestContextService.runIsolated(
       {
         organization_id: settings.platform_organization_id!,
         store_id: undefined,
@@ -915,11 +915,13 @@ export class SubscriptionFiscalService {
    * worker lo restaure. Encolar fuera guardaría el contexto del superadmin y el
    * worker resolvería otra entidad fiscal — o ninguna.
    */
-  async runTestSet(): Promise<{ job_id: string }> {
+  async runTestSet(
+    options: { smoke?: boolean } = {},
+  ): Promise<{ job_id: string }> {
     const { settings, configId, resolutionId } =
       await this.requireTestSetTargets();
     return this.runInPlatformContext(settings, () =>
-      this.dianTestService.enqueueTestSet(configId, resolutionId),
+      this.dianTestService.enqueueTestSet(configId, resolutionId, options),
     );
   }
 
@@ -1082,7 +1084,7 @@ export class SubscriptionFiscalService {
 
     try {
       await this.markSubmitted(transmission.id);
-      const response = await RequestContextService.run(
+      const response = await RequestContextService.runIsolated(
         {
           organization_id: settings.platform_organization_id!,
           store_id: undefined,

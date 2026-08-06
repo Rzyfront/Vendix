@@ -11,6 +11,10 @@ import { WeeklyReportModule } from '../weekly-report/weekly-report.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { VexiRealtimeController } from './vexi-realtime.controller';
 import { VexiRealtimeService } from './vexi-realtime.service';
+import { VexiVoiceController } from './vexi-voice.controller';
+import { VexiVoiceService } from './vexi-voice.service';
+import { VexiSpeechService } from './vexi-speech.service';
+import { VexiSpeechCache } from './vexi-speech.cache';
 import { VexiController } from './vexi.controller';
 import { VexiContextService } from './vexi-context.service';
 import { VexiStreamIntentService } from './vexi-stream-intent.service';
@@ -42,9 +46,14 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
     // A background task's only way to reach the person after they walked away.
     NotificationsModule,
   ],
-  controllers: [VexiRealtimeController, VexiController],
+  controllers: [VexiRealtimeController, VexiVoiceController, VexiController],
   providers: [
     VexiRealtimeService,
+    VexiVoiceService,
+    VexiSpeechService,
+    // Singleton on purpose: the pinned filler bank is only worth warming once
+    // per process, and a per-request instance would resynthesize it every turn.
+    VexiSpeechCache,
     VexiContextService,
     VexiStreamIntentService,
     VexiTaskService,
@@ -56,6 +65,9 @@ import { VexiEnabledGuard } from './guards/vexi-enabled.guard';
     VexiContextService,
     VexiStreamIntentService,
     VexiTaskService,
+    // Exported so `AIChatModule` can synthesize the answer segments on the chat
+    // stream — the pipeline's whole premise is that a voice turn is a chat turn.
+    VexiSpeechService,
   ],
 })
 export class VexiModule implements OnModuleInit {

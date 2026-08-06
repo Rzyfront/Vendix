@@ -23,6 +23,7 @@ import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ManualCertificateIssuerAdapter } from './certificates/manual-certificate-issuer.adapter';
+import { buildDianCertificateS3Key } from './certificates/certificate-s3-key.util';
 
 @Controller('store/invoicing/dian-config')
 export class DianConfigController {
@@ -167,7 +168,13 @@ export class DianConfigController {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_001, validation.error);
     }
 
-    const s3_key = `dian/certificates/${config_id_int}/certificate.p12`;
+    // Clave con el dueño en el prefijo: sin ella el bucket no dice de quién es
+    // cada certificado ni permite purgar los de un tenant dado de baja.
+    const s3_key = buildDianCertificateS3Key({
+      organization_id: config.organization_id,
+      store_id: config.store_id,
+      dian_configuration_id: config_id_int,
+    });
     await this.s3_service.uploadFile(
       file.buffer,
       s3_key,
@@ -217,10 +224,14 @@ export class DianConfigController {
   async runTestSet(
     @Param('id', ParseIntPipe) id: number,
     @Body('resolution_id', ParseIntPipe) resolution_id: number,
+    // Vía de humo: 1 documento, 1 consecutivo. Diagnostica si la DIAN ingiere el
+    // envío sin quemar los 50 que exige el set. No habilita.
+    @Query('smoke') smoke?: string,
   ) {
     const result = await this.dian_test_service.enqueueTestSet(
       id,
       resolution_id,
+      { smoke: smoke === 'true' || smoke === '1' },
     );
     return this.response_service.success(result);
   }

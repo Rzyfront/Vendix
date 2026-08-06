@@ -330,6 +330,19 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
   }
 
+  /**
+   * `/audio/transcriptions` is multipart, not JSON.
+   *
+   * This is the one endpoint in the OpenAI-compatible surface that does not
+   * take a JSON body: the audio travels as a `file` part in
+   * `multipart/form-data`. Sending `{ input_audio: { data, format } }` as JSON
+   * — which is what an `input_audio` content block looks like inside *chat*
+   * completions — is rejected with a 400 that names the missing `file` field.
+   *
+   * `buildProviderHeaders(false)` omits `Content-Type` on purpose: `fetch`
+   * derives it from the `FormData` body along with the multipart boundary, and
+   * setting it by hand produces a body the server cannot split.
+   */
   async transcribeAudio(
     options: AITranscriptionRequestOptions,
   ): Promise<AITranscriptionResponse> {
@@ -339,33 +352,58 @@ export class OpenAICompatibleProvider implements AIProvider {
       this.config.modelId;
 
     try {
-      const response = await this.postJson<any>('/audio/transcriptions', {
-        model,
-        input_audio: options.inputAudio,
-        ...(options.language || this.config.settings?.language
-          ? { language: options.language || this.config.settings?.language }
-          : {}),
-        ...((options.temperature ?? this.config.settings?.temperature)
-          ? {
-              temperature:
-                options.temperature ?? this.config.settings?.temperature,
-            }
-          : {}),
-        ...(options.provider || this.config.settings?.provider_preferences
-          ? {
-              provider:
-                options.provider || this.config.settings?.provider_preferences,
-            }
-          : {}),
-      });
+      const format = (options.inputAudio.format || 'webm').toLowerCase();
+      // Buffer would satisfy BlobPart on its own, but its generic ArrayBuffer
+      // parameter drifts between @types/node majors; a plain view never does.
+      const bytes = new Uint8Array(
+        Buffer.from(options.inputAudio.data, 'base64'),
+      );
+
+      const form = new FormData();
+      form.append('model', model);
+      // The extension matters as much as the MIME type: the API sniffs the
+      // filename to pick a decoder, and a container it cannot name is refused
+      // even when the bytes are valid.
+      form.append(
+        'file',
+        new Blob([bytes], { type: this.audioMimeType(format) }),
+        `audio.${format}`,
+      );
+
+      const language = options.language || this.config.settings?.language;
+      if (language) form.append('language', language);
+
+      const temperature =
+        options.temperature ?? this.config.settings?.temperature;
+      if (temperature !== undefined && temperature !== null) {
+        form.append('temperature', String(temperature));
+      }
+
+      const response = await fetch(
+        this.buildProviderUrl('/audio/transcriptions'),
+        {
+          method: 'POST',
+          headers: this.buildProviderHeaders(false),
+          body: form,
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await this.readProviderError(response));
+      }
+
+      const parsed = (await response.json()) as {
+        text?: string;
+        usage?: any;
+      };
 
       return {
-        success: typeof response.text === 'string',
-        text: response.text,
+        success: typeof parsed.text === 'string',
+        text: parsed.text,
         model,
-        usage: this.mapTokenUsage(response.usage),
+        usage: this.mapTokenUsage(parsed.usage),
         error:
-          typeof response.text === 'string'
+          typeof parsed.text === 'string'
             ? undefined
             : 'Transcription model returned no text',
       };
@@ -377,6 +415,29 @@ export class OpenAICompatibleProvider implements AIProvider {
           error.message || 'OpenAI-compatible transcription request failed',
       };
     }
+  }
+
+  /**
+   * Container name → MIME type for the formats the transcription endpoint
+   * accepts. Anything unrecognized is sent as a generic audio stream rather
+   * than guessed at: a wrong specific type is worse than an honest vague one,
+   * because it makes the server pick the wrong decoder instead of sniffing.
+   */
+  private audioMimeType(format: string): string {
+    const byFormat: Record<string, string> = {
+      webm: 'audio/webm',
+      ogg: 'audio/ogg',
+      oga: 'audio/ogg',
+      mp3: 'audio/mpeg',
+      mpga: 'audio/mpeg',
+      mpeg: 'audio/mpeg',
+      m4a: 'audio/mp4',
+      mp4: 'audio/mp4',
+      wav: 'audio/wav',
+      flac: 'audio/flac',
+    };
+
+    return byFormat[format] || 'application/octet-stream';
   }
 
   async rerank(options: AIRerankRequestOptions): Promise<AIRerankResponse> {

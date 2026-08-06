@@ -232,6 +232,7 @@ export class DianTestService {
   async enqueueTestSet(
     config_id: number,
     resolution_id: number,
+    options: { smoke?: boolean } = {},
   ): Promise<{ job_id: string }> {
     const config = await this.getConfigById(config_id);
 
@@ -271,6 +272,7 @@ export class DianTestService {
     const payload: DianTestSetJob = {
       config_id,
       resolution_id,
+      smoke: options.smoke === true,
       context: {
         // `store_id` puede quedar `undefined` legítimamente: la plataforma emite
         // con la organización como identidad fiscal, sin tienda.
@@ -347,7 +349,11 @@ export class DianTestService {
    * alcanzar un veredicto — solo alargaba el trabajo 33 s. El veredicto lo
    * obtienen el cron de repoll y el endpoint de consulta de estado.
    */
-  async executeTestSet(config_id: number, resolution_id: number) {
+  async executeTestSet(
+    config_id: number,
+    resolution_id: number,
+    options: { smoke?: boolean } = {},
+  ) {
     const started_at = Date.now();
     const config = await this.getConfigById(config_id);
 
@@ -446,7 +452,20 @@ export class DianTestService {
     // la provisiona la DIAN por set y la publica en su portal («Total de
     // documentos requeridos»): no se deriva de la norma. Para software propio el
     // portal exige 50 (30 FV + 10 ND + 10 NC), verificado el 2026-08-05.
-    const composition = resolveTestSetComposition(config.operation_mode);
+    //
+    // VÍA DE HUMO — `options.smoke`: emite UNA factura y gasta UN consecutivo.
+    //
+    // Existe porque un consecutivo autorizado es finito e irrecuperable. HIDRO
+    // gastó 150 en tres lotes de 50 sin que la DIAN recibiera un solo documento,
+    // y en los tres casos la única forma de saberlo fue el contador del portal.
+    // Antes de gastar 50 hay que poder gastar 1: si `Recibidos` pasa de 0 a 1, el
+    // camino de envío funciona; si no, no se gastaron 49 números para averiguarlo.
+    //
+    // No es un set válido para habilitar: la DIAN exige la composición completa.
+    // Es un diagnóstico del transporte y la ingesta.
+    const composition = options.smoke
+      ? { invoices: 1, debit_notes: 0, credit_notes: 0 }
+      : resolveTestSetComposition(config.operation_mode);
     const TEST_SET_SIZE = testSetSize(composition);
 
     // El código `ppp` del nombre de archivo se resuelve ANTES de reservar el
@@ -582,14 +601,25 @@ export class DianTestService {
       }
     }
 
-    // 5. Update status to testing
-    await this.prisma.dian_configurations.update({
-      where: { id: config_id },
-      data: { enablement_status: 'testing' },
-    });
+    // 5. Update status to testing.
+    //
+    // La vía de humo NO lo toca: un documento suelto no es un intento de
+    // habilitación, y marcar `testing` por él dejaría la guía de habilitación
+    // afirmando que hay un set en curso cuando no lo hay.
+    if (!options.smoke) {
+      await this.prisma.dian_configurations.update({
+        where: { id: config_id },
+        data: { enablement_status: 'testing' },
+      });
+    }
 
     // 6. Generate the documents
-    const files: { name: string; content: string }[] = [];
+    //
+    // `consecutive` viaja con cada archivo porque cada documento se envía en SU
+    // PROPIO ZIP y el ZIP se nombra con el consecutivo del documento que
+    // contiene. Antes se armaba un solo ZIP con los 50 y se nombraba con el
+    // consecutivo del PRIMERO — ver el comentario del bucle de envío.
+    const files: { name: string; content: string; consecutive: number }[] = [];
     const invoice_cufes: { number: string; cufe: string; date: string }[] = [];
     // Evidence persisted alongside the batch. Without the document key there is
     // no way to ask DIAN about an individual document later, which is exactly
@@ -703,7 +733,11 @@ export class DianTestService {
         software_code,
         year: today,
       });
-      files.push({ name: invoice_file, content: xml });
+      files.push({
+        name: invoice_file,
+        content: xml,
+        consecutive: next_number + i,
+      });
       invoice_cufes.push({ number: invoice_number, cufe, date: today });
       documents.push({
         number: invoice_number,
@@ -806,7 +840,11 @@ export class DianTestService {
         software_code,
         year: today,
       });
-      files.push({ name: debit_file, content: xml });
+      files.push({
+        name: debit_file,
+        content: xml,
+        consecutive: next_number + debit_note_offset + i,
+      });
       documents.push({
         number: note_number,
         cufe: cude,
@@ -910,7 +948,11 @@ export class DianTestService {
         software_code,
         year: today,
       });
-      files.push({ name: credit_file, content: xml });
+      files.push({
+        name: credit_file,
+        content: xml,
+        consecutive: next_number + credit_note_offset + i,
+      });
       documents.push({
         number: note_number,
         cufe: cude,
@@ -921,27 +963,96 @@ export class DianTestService {
       });
     }
 
-    // 7. Build multi-file ZIP
-    const zip_base64 = this.buildMultiFileZip(files);
-    const zip_file_name = buildDianZipFileName({
-      nit: config.nit,
-      consecutive: next_number,
-      software_code,
-      year: today,
-    });
+    // 7-8. Enviar UN DOCUMENTO POR ZIP, un `SendTestSetAsync` por documento.
+    //
+    // POR QUÉ — el defecto que cierra:
+    //
+    // Antes se armaba UN ZIP con los 50 documentos y se nombraba con el
+    // consecutivo del PRIMERO. `SendTestSetAsync` acepta un solo documento por
+    // ZIP a pesar del nombre, así que la DIAN devolvía un ZipKey y descartaba el
+    // paquete sin ingerirlo. El portal de habilitación lo dejó probado:
+    //
+    //   Requeridos 50 · Recibidos 0 · Aceptados 0 · **Rechazados 0**
+    //
+    // Cero rechazos es la firma: los documentos nunca llegaron a la validación
+    // por documento, así que no había nada que rechazar. HIDRO quemó 150
+    // consecutivos autorizados en 3 lotes sin un solo documento recibido.
+    //
+    // Un ZipKey prueba transporte, WS-Security y firma. NO prueba ingesta. Y
+    // `GetStatusZip` responde «Batch en proceso de validación» también para un
+    // ZipKey que la DIAN nunca encoló, así que tampoco es prueba de vida.
+    //
+    // Secuencial a propósito: son llamadas SOAP a la DIAN y el orden es la
+    // evidencia de qué consecutivo se gastó primero.
+    const submissions: {
+      file_name: string;
+      zip_file_name: string;
+      zip_key: string | null;
+      success: boolean;
+      status_code?: string;
+      status_message?: string;
+      raw_response?: string;
+      error?: string;
+    }[] = [];
 
-    // 8. Submit to DIAN. SendTestSetAsync is ASYNCHRONOUS: DIAN only returns a
-    //    ZipKey acknowledgement here; the real validation verdict is obtained
-    //    afterwards by polling GetStatusZip(ZipKey).
-    const submit = await this.soap_client.sendTestSetAsync(
-      zip_base64,
-      zip_file_name,
-      config.test_set_id,
-      environment,
-      ws_credentials,
-    );
+    for (const file of files) {
+      const file_zip_name = buildDianZipFileName({
+        nit: config.nit,
+        consecutive: file.consecutive,
+        software_code,
+        year: today,
+      });
 
-    const zip_key = submit.zip_key ?? null;
+      try {
+        const response = await this.soap_client.sendTestSetAsync(
+          this.buildMultiFileZip([file]),
+          file_zip_name,
+          config.test_set_id,
+          environment,
+          ws_credentials,
+        );
+        submissions.push({
+          file_name: file.name,
+          zip_file_name: file_zip_name,
+          zip_key: response.zip_key ?? null,
+          success: response.success,
+          status_code: response.status_code,
+          status_message: response.status_message,
+          raw_response: response.raw_response?.slice(0, 4000),
+        });
+      } catch (error) {
+        // No se aborta: los documentos ya enviados gastaron consecutivos y su
+        // ZipKey es la única forma de preguntar por ellos después. Perder ese
+        // rastro por un fallo en el documento 37 es peor que registrarlo.
+        submissions.push({
+          file_name: file.name,
+          zip_file_name: file_zip_name,
+          zip_key: null,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // El primer envío hace de representante para la forma persistida que ya leen
+    // la UI, `analyzeTestSetWait` y el cron de repoll — todos asumen UN
+    // `zip_key`. Con la vía de humo (1 documento) el representante ES el único
+    // envío, así que la fidelidad es exacta. Para el set completo esto es
+    // PARCIAL y queda pendiente: sondear los 50 ZipKeys es trabajo aparte.
+    const first = submissions[0];
+    const submit: DianSendBillResponse = {
+      success: submissions.some((s) => s.success),
+      zip_key: first?.zip_key ?? undefined,
+      status_code: first?.status_code,
+      status_message: first?.status_message,
+      raw_response: first?.raw_response,
+      error_messages: submissions
+        .filter((s) => s.error)
+        .map((s) => `${s.file_name}: ${s.error}`),
+    } as DianSendBillResponse;
+
+    const zip_file_name = first?.zip_file_name ?? '';
+    const zip_key = first?.zip_key ?? null;
 
     // 9. NO se sondea aquí. `SendTestSetAsync` es asíncrono: la DIAN devuelve un
     //    ZipKey y tarda MINUTOS en classificar el lote, así que las 6 consultas
@@ -966,6 +1077,9 @@ export class DianTestService {
     // 10. Persist result + raw evidence (DIAN's exact status XML for diagnosis).
     const result_data = {
       executed_at: new Date().toISOString(),
+      // Marca el lote como diagnóstico, no como intento de habilitación. Sin esto
+      // un envío de 1 documento se lee igual que un set completo fallido.
+      smoke: options.smoke === true,
       total_documents: files.length,
       // Derivados de `composition`, no literales. Estaban escritos a mano como
       // 30/10/10, así que en cualquier modo con otra composición el registro
@@ -976,6 +1090,11 @@ export class DianTestService {
       credit_notes: composition.credit_notes,
       zip_key,
       zip_file_name,
+      // Un ZipKey por documento: es lo que hay que sondear para el set completo.
+      // `zip_key` de arriba es solo el primero, para la forma que ya leen la UI,
+      // la espera y el cron.
+      submissions,
+      zip_keys: submissions.map((s) => s.zip_key).filter(Boolean),
       resolution_id,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,

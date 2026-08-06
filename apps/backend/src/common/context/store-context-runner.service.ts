@@ -23,7 +23,7 @@ export class StoreContextRunner {
       throw new NotFoundException(`Store #${storeId} not found`);
     }
 
-    return RequestContextService.run(
+    return RequestContextService.runIsolated(
       {
         store_id: storeId,
         organization_id: store.organization_id,

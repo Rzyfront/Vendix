@@ -25,6 +25,7 @@ import { CreateDianConfigDto } from '../../../store/invoicing/dian-config/dto/cr
 import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/update-dian-config.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
+import { buildDianCertificateS3Key } from '../../../store/invoicing/dian-config/certificates/certificate-s3-key.util';
 
 @Controller('organization/invoicing/dian-config')
 @UseGuards(PermissionsGuard)
@@ -136,7 +137,13 @@ export class OrgDianConfigController {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_001, validation.error);
     }
 
-    const s3_key = `dian/certificates/${config_id_int}/certificate.p12`;
+    // Misma clave que en tienda y en la consola de tenants: el prefijo nombra al
+    // dueño (organización + tienda o `org`), no solo al id de configuración.
+    const s3_key = buildDianCertificateS3Key({
+      organization_id: config.organization_id,
+      store_id: config.store_id,
+      dian_configuration_id: config_id_int,
+    });
     await this.s3_service.uploadFile(
       file.buffer,
       s3_key,

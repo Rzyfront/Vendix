@@ -1224,6 +1224,42 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'AI configuration already exists (duplicate provider+model)',
   },
+  AI_CONFIG_003: {
+    code: 'AI_CONFIG_003',
+    httpStatus: 400,
+    devMessage:
+      'Only a text configuration can be the default provider: the default is ' +
+      'global and does not discriminate by model_type, so every application ' +
+      'with no explicit config would resolve to a model that cannot serve it',
+  },
+
+  // Vexi pipeline voice mode (STT -> chat agent -> TTS). Kept separate from the
+  // document scanners' codes because the surfaces fail for different reasons and
+  // the client reacts differently: a rejected audio container is a recording
+  // problem the user can retry, a scanner rejection is a file choice.
+  VEXI_VOICE_NO_AUDIO: {
+    code: 'VEXI_VOICE_NO_AUDIO',
+    httpStatus: 400,
+    devMessage: 'No audio was received for the voice turn',
+  },
+  VEXI_VOICE_INVALID_AUDIO: {
+    code: 'VEXI_VOICE_INVALID_AUDIO',
+    httpStatus: 400,
+    devMessage:
+      'Unsupported audio container — the transcription endpoint sniffs the ' +
+      'filename extension to pick a decoder, so an unrecognized container is ' +
+      'refused here rather than forwarded',
+  },
+  VEXI_VOICE_TOO_LARGE: {
+    code: 'VEXI_VOICE_TOO_LARGE',
+    httpStatus: 413,
+    devMessage: 'The voice turn audio exceeds the allowed size',
+  },
+  VEXI_VOICE_TRANSCRIBE_FAILED: {
+    code: 'VEXI_VOICE_TRANSCRIBE_FAILED',
+    httpStatus: 502,
+    devMessage: 'The transcription provider did not return text',
+  },
   AI_APP_001: {
     code: 'AI_APP_001',
     httpStatus: 404,

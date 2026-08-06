@@ -60,7 +60,17 @@ export interface VexiUiContext {
 
 /** Live narration of an agent turn, as it arrives over SSE. */
 export interface VexiStreamChunk {
-  type: 'text' | 'tool_call' | 'tool_result' | 'done' | 'error';
+  type:
+    | 'text'
+    | 'tool_call'
+    | 'tool_result'
+    | 'done'
+    | 'error'
+    // Only present when the turn asked to be spoken. `audio` carries one
+    // synthesized segment, `timing` one latency mark — neither renders as
+    // content, and both are ignored by the chat mode.
+    | 'audio'
+    | 'timing';
   content?: string;
   tool?: {
     id: string;
@@ -75,6 +85,15 @@ export interface VexiStreamChunk {
     totalTokens: number;
   };
   error?: string;
+  /** Playback order of an `audio` frame. Assigned when the segment was cut. */
+  index?: number;
+  audio_base64?: string;
+  content_type?: string;
+  /** True for the human filler that covers the thinking window. */
+  filler?: boolean;
+  /** Name of a `timing` mark, and its milliseconds from stream open. */
+  mark?: string;
+  ms?: number;
 }
 
 /**
@@ -218,6 +237,7 @@ export class VexiApiService {
     content: string,
     uiContext?: VexiUiContext,
     attachmentIds?: string[],
+    speak?: boolean,
   ): Observable<string> {
     return this.http
       .post<{ data: { stream_id: string } }>(
@@ -229,6 +249,10 @@ export class VexiApiService {
           // so this body stays small enough to send synchronously before the
           // EventSource opens.
           attachment_ids: attachmentIds?.length ? attachmentIds : undefined,
+          // Per turn, not per conversation: the person can switch between chat
+          // and voice inside the same thread. Omitted rather than sent as false
+          // so a chat turn's body is byte-identical to what it was before.
+          speak: speak ? true : undefined,
         },
       )
       .pipe(map((res) => res.data.stream_id));

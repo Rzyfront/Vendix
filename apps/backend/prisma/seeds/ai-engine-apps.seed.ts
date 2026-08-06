@@ -1095,6 +1095,94 @@ Devuelve SOLO este JSON:
   "post_copy": "texto final publicable"
 }`,
     },
+    {
+      key: 'vexi_realtime_voice',
+      name: 'Vexi — Voz en tiempo real',
+      description:
+        'Persona hablada de Vexi para las sesiones de voz realtime (WebRTC)',
+      // La voz no produce un documento: el modelo habla. `text` es el formato
+      // neutro; `output_format` no se consulta en el camino de voz.
+      output_format: 'text',
+      // `audio` es lo que enlaza esta aplicación con una configuración de
+      // transporte de audio: el selector de config del modal de aplicaciones
+      // valida que ambos tipos coincidan.
+      model_type: 'audio' as ai_model_type_enum,
+      // Sin temperature ni max_tokens: el objeto de sesión del proveedor no
+      // documenta esos campos para realtime, así que fijarlos aquí daría la
+      // falsa impresión de estar aplicándose.
+      temperature: null,
+      max_tokens: null,
+      is_active: true,
+      ai_feature_category: 'realtime_voice',
+      // Sincronizado a mano con la migración
+      // `20260806120000_vexi_realtime_voice_app`. Este seed es create-only
+      // (ver la nota de reconciliación al final del archivo), así que solo
+      // aplica a instalaciones nuevas; la migración es lo que crea la fila en
+      // dev y producción. Si editas uno, edita el otro o divergen en silencio.
+      system_prompt: `Eres Vexi, el asistente de Vendix. Ayudas al propietario y al administrador a consultar su negocio. Responde en español, breve y concreto. Usa las herramientas disponibles para responder con datos reales; nunca inventes cifras.`,
+      // La voz no interpola variables: el turno hablado del usuario ES la
+      // entrada. Explícito en `null` y no omitido porque el bucle de creación
+      // lee `app.prompt_template` sobre la unión inferida del array, y omitir
+      // la clave rompe el tipado de las otras 17 entradas.
+      prompt_template: null,
+    },
+    {
+      key: 'vexi_voice_stt',
+      name: 'Vexi — Voz: transcripción (STT)',
+      description:
+        'Convierte el turno hablado del usuario en texto para que lo procese el agente de chat',
+      output_format: 'text',
+      model_type: 'transcription' as ai_model_type_enum,
+      // `runTranscription()` no arma prompt: el audio viaja en
+      // `AITranscriptionRequestOptions.inputAudio` y el idioma se pasa
+      // explícito desde el servicio. Dejar ambos en null evita la ilusión de
+      // que un prompt acá influye en la transcripción.
+      temperature: null,
+      max_tokens: null,
+      is_active: true,
+      ai_feature_category: 'realtime_voice',
+      system_prompt: null,
+      prompt_template: null,
+    },
+    {
+      key: 'vexi_voice_tts',
+      name: 'Vexi — Voz: dictado (TTS)',
+      description:
+        'Sintetiza en audio cada segmento de la respuesta de Vexi para el modo voz',
+      output_format: 'text',
+      model_type: 'speech' as ai_model_type_enum,
+      temperature: null,
+      max_tokens: null,
+      is_active: true,
+      ai_feature_category: 'realtime_voice',
+      // `system_prompt` DEBE quedar en null. `runSpeech()` arma el texto a
+      // hablar con `buildApplicationPrompt()`, que concatena `system_prompt` y
+      // `prompt_template`: cualquier cosa en `system_prompt` se leería en voz
+      // alta antes de la respuesta. La persona hablada de Vexi vive en el
+      // prompt del chat (`chat_assistant`), no acá — esta aplicación solo
+      // dicta el texto que el agente ya produjo.
+      system_prompt: null,
+      // El único vehículo del texto a sintetizar. `runSpeech(appKey, { text })`
+      // interpola acá y el resultado es exactamente lo que se dicta. Sin esta
+      // plantilla `buildApplicationPrompt()` cae a `JSON.stringify(variables)`
+      // y el modelo leería las llaves del objeto en voz alta.
+      prompt_template: '{{text}}',
+      // Leído por `buildSpeechOptions()`, que mira `metadata.speech`. La voz es
+      // editable desde Super Admin → AI Engine → Aplicaciones sin deploy.
+      metadata: {
+        speech: {
+          // Voz femenina liviana. El roster de TTS es más amplio que el de
+          // realtime (que rechaza fable, onyx y nova).
+          voice: 'shimmer',
+          // mp3 es el más liviano de los formatos que un <audio> reproduce sin
+          // decodificar a mano. El peso importa: cada segmento viaja en base64
+          // dentro de un frame SSE, y wav/pcm multiplicarían el transporte por
+          // diez justo en el camino crítico de latencia.
+          response_format: 'mp3',
+          speed: 1,
+        },
+      },
+    },
   ];
 
   let appsCreated = 0;
@@ -1213,9 +1301,63 @@ Devuelve SOLO este JSON:
     'product_image_enhancer',
   ]);
 
+  await linkVoiceAppsWhenAvailable(client);
+
   await linkTextAppsWhenNoDefault(client, apps);
 
   return { appsCreated, appsSkipped };
+}
+
+/**
+ * Pins the pipeline voice apps to a transport of their own `model_type`.
+ *
+ * Unlike the text apps, these cannot ride the platform default:
+ * `resolveApplicationExecution()` resolves `app.config_id || defaultConfigId`,
+ * and that default is a single text model. A voice app with `config_id = NULL`
+ * does not fail loudly — it tries to synthesize or transcribe against a text
+ * model and the error surfaces far from its cause.
+ *
+ * Only fills what is unset, so an operator's choice in the panel survives.
+ */
+async function linkVoiceAppsWhenAvailable(client: PrismaClient) {
+  const wanted: Array<{ appKey: string; modelType: ai_model_type_enum }> = [
+    { appKey: 'vexi_voice_stt', modelType: 'transcription' },
+    { appKey: 'vexi_voice_tts', modelType: 'speech' },
+  ];
+
+  for (const { appKey, modelType } of wanted) {
+    try {
+      const app = await client.ai_engine_applications.findUnique({
+        where: { key: appKey },
+        select: { config_id: true },
+      });
+      if (!app) continue;
+
+      if (app.config_id != null) {
+        console.log(`    Skipped link ${appKey} (config_id already set)`);
+        continue;
+      }
+
+      const config = await client.ai_engine_configs.findFirst({
+        where: { model_type: modelType, is_active: true },
+        orderBy: { id: 'asc' },
+      });
+      if (!config) {
+        console.log(
+          `    No active ${modelType} config yet — ${appKey} stays unlinked`,
+        );
+        continue;
+      }
+
+      await client.ai_engine_applications.update({
+        where: { key: appKey },
+        data: { config_id: config.id },
+      });
+      console.log(`    Linked ${appKey} → ${config.label} (#${config.id})`);
+    } catch {
+      console.log(`    Could not link ${appKey} to a ${modelType} config`);
+    }
+  }
 }
 
 async function linkImageAppsWhenAvailable(

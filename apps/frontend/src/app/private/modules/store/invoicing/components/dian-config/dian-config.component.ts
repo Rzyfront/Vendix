@@ -1,10 +1,17 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
-import { InvoicingService } from '../../services/invoicing.service';
+import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DianConfig, DianNitType } from '../../interfaces/invoice.interface';
 
 import {
@@ -127,11 +134,13 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
                   [debounceTime]="300"
                   (searchChange)="onSearch($event)"
                 ></app-inputsearch>
-                <app-options-dropdown
-                  class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                  [actions]="dropdownActions"
-                  (actionClick)="onDropdownAction($event)"
-                ></app-options-dropdown>
+                @if (!readOnly()) {
+                  <app-options-dropdown
+                    class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                    [actions]="dropdownActions"
+                    (actionClick)="onDropdownAction($event)"
+                  ></app-options-dropdown>
+                }
               </div>
             </div>
             <!-- Environment filter pills -->
@@ -169,7 +178,7 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
               [data]="filteredConfigs()"
               [columns]="columns"
               [cardConfig]="cardConfig"
-              [actions]="tableActions"
+              [actions]="rowActions()"
               [loading]="loading()"
               emptyMessage="No hay configuraciones DIAN"
               emptyIcon="shield"
@@ -185,7 +194,14 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
         </div>
       </div>
 
-      <!-- Wizard Modal -->
+      <!-- Wizard Modal.
+           El asistente va dentro de un bloque condicional: antes quedaba
+           montado en el DOM aunque el modal estuviera cerrado, sondeando a la
+           DIAN y conservando el borrador de credenciales de la configuración
+           anterior. Envolverlo además fuerza su reconstrucción, que es lo único
+           que garantiza que no arrastre estado entre tenants cuando el super
+           admin salta de tienda: el injector de la ruta se cachea y NO se
+           destruye. -->
       <app-modal
         [(isOpen)]="isWizardOpen"
         [title]="wizardTitle()"
@@ -194,12 +210,14 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
         [closeOnBackdrop]="false"
         (cancel)="onWizardCancelled()"
       >
-        <vendix-dian-config-wizard
-          [initialConfig]="selectedConfig()"
-          [initialStep]="initialStep()"
-          (saved)="onWizardSaved($event)"
-          (cancelled)="onWizardCancelled()"
-        ></vendix-dian-config-wizard>
+        @if (isWizardOpen()) {
+          <vendix-dian-config-wizard
+            [initialConfig]="selectedConfig()"
+            [initialStep]="initialStep()"
+            (saved)="onWizardSaved($event)"
+            (cancelled)="onWizardCancelled()"
+          ></vendix-dian-config-wizard>
+        }
       </app-modal>
 
       <!-- Borrado con el modal compartido: el confirm nativo del navegador no se
@@ -221,9 +239,22 @@ type EnvironmentFilter = 'all' | 'test' | 'production';
   `,
 })
 export class DianConfigComponent {
-  private readonly invoicingService = inject(InvoicingService);
+  private readonly invoicingService = inject(DianConfigApiService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+
+  /**
+   * Consulta sin escritura: oculta crear, editar, marcar predeterminada y
+   * eliminar, y con ello el único camino que abre el asistente.
+   *
+   * Lo usa la consola de super admin cuando el perfil del tenant no declara la
+   * capacidad de escritura DIAN. **No es una autorización**: la decide el
+   * backend. Aquí sólo se deja de OFRECER lo que no se declaró, que es lo
+   * contrario de ofrecerlo por defecto porque nadie dijo nada.
+   *
+   * El panel del comerciante no pasa el input y conserva `false`.
+   */
+  readonly readOnly = input(false);
 
   // ── State ─────────────────────────────────────────────────
   readonly loading = signal(true);
@@ -274,7 +305,7 @@ export class DianConfigComponent {
     for (const c of list) {
       if (c.enablement_status === 'enabled') enabled++;
       if (c.environment === 'production') production++;
-      if (c.certificate_s3_key) {
+      if (this.hasCertificate(c)) {
         const exp = c.certificate_expiry ? new Date(c.certificate_expiry).getTime() : NaN;
         if (!isNaN(exp) && exp > now) certValid++;
       }
@@ -350,8 +381,8 @@ export class DianConfigComponent {
       label: 'Certificado',
       priority: 2,
       transform: (_val: any, item?: DianConfig) => {
-        if (!item?.certificate_s3_key) return 'Sin cargar';
-        if (!item.certificate_expiry) return 'Cargado';
+        if (!this.hasCertificate(item)) return 'Sin cargar';
+        if (!item?.certificate_expiry) return 'Cargado';
         const exp = new Date(item.certificate_expiry).getTime();
         if (isNaN(exp)) return 'Cargado';
         if (exp < Date.now()) return 'Vencido';
@@ -387,6 +418,16 @@ export class DianConfigComponent {
     },
   ];
 
+  /**
+   * En solo lectura NO se degradan las acciones a «ver»: la fila no ofrece
+   * ninguna. Continuar y Editar son las dos puertas al asistente, y el
+   * asistente escribe — dejarlo accesible con los botones del comerciante
+   * dentro sería ofrecer escritura por la puerta de atrás.
+   */
+  readonly rowActions = computed<TableAction[]>(() =>
+    this.readOnly() ? [] : this.tableActions,
+  );
+
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'nit',
@@ -418,8 +459,8 @@ export class DianConfigComponent {
         label: 'Certificado',
         icon: 'key',
         transform: (_val: any, item?: DianConfig) => {
-          if (!item?.certificate_s3_key) return 'Sin cargar';
-          if (!item.certificate_expiry) return 'Cargado';
+          if (!this.hasCertificate(item)) return 'Sin cargar';
+          if (!item?.certificate_expiry) return 'Cargado';
           const exp = new Date(item.certificate_expiry).getTime();
           if (isNaN(exp)) return 'Cargado';
           if (exp < Date.now()) return 'Vencido';
@@ -546,8 +587,26 @@ export class DianConfigComponent {
   }
 
   // ── Helpers ───────────────────────────────────────────────
+
+  /**
+   * ¿Esta configuración tiene certificado cargado?
+   *
+   * El rail de super admin REDACTA `certificate_s3_key` y reporta
+   * `certificate_present` en su lugar (una clave de objeto no es la clave
+   * privada, pero nombra dónde vive). Mirar sólo la clave S3 hacía que la misma
+   * lista dijera «Sin cargar» sobre certificados que sí existen, según por qué
+   * rail se hubiera pedido. La tienda sigue enviando `certificate_s3_key`, así
+   * que el orden del `??` conserva su comportamiento exacto.
+   */
+  private hasCertificate(cfg: DianConfig | null | undefined): boolean {
+    if (!cfg) return false;
+    const present = (cfg as { certificate_present?: boolean })
+      .certificate_present;
+    return present ?? Boolean(cfg.certificate_s3_key);
+  }
+
   private getNextStep(cfg: DianConfig): number {
-    if (!cfg.certificate_s3_key) return 1;
+    if (!this.hasCertificate(cfg)) return 1;
     if (cfg.enablement_status === 'not_started') return 2;
     if (cfg.enablement_status !== 'enabled') return 3;
     return 4;

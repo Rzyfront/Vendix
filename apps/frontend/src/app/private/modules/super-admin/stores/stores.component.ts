@@ -28,7 +28,16 @@ import {
   StoreCreateModalComponent,
   StoreEditModalComponent} from './components/index';
 
-import { StoreSettingsModalComponent } from './components/store-settings-modal.component';
+// `StoreSettingsModalComponent` YA NO SE MONTA AQUÍ.
+//
+// Su único botón de guardar llamaba a `StoresService.updateStoreSettings()`,
+// que apuntaba a `PATCH /superadmin/stores/:id/settings` — una ruta que el
+// controlador del backend nunca declaró. El modal se abría, pedía datos y
+// respondía 404 con el toast genérico "Error al actualizar la configuración".
+//
+// La configuración real de una tienda vive en la ficha de tenant, así que la
+// acción de fila lleva ahora a `/super-admin/stores/:id/config/dian`. El
+// archivo del modal se deja en disco, sin consumidores desde este módulo.
 
 // Import shared components
 import {
@@ -61,7 +70,6 @@ import './stores.component.css';
     EmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
-    StoreSettingsModalComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
@@ -246,15 +254,28 @@ export class StoresComponent implements OnInit, OnChanges {
 
   tableActions: TableAction[] = [
     {
+      // Primera acción de la fila: la ficha de tenant es el destino natural
+      // desde el directorio, y desde ella cuelgan facturación electrónica,
+      // resoluciones y suscripción.
+      label: 'Ver ficha',
+      icon: 'eye',
+      action: (store) => this.viewStore(store),
+      variant: 'primary',
+      tooltip: 'Abrir la ficha de configuración del tenant'},
+    {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
       variant: 'info'},
     {
-      label: 'Configuración',
+      // Deep-link a la pestaña de facturación electrónica de la ficha de
+      // tenant. Reemplaza al antiguo modal de "Configuración", que escribía
+      // contra una ruta inexistente del backend.
+      label: 'Configuración DIAN',
       icon: 'settings',
-      action: (store) => this.openSettingsModal(store),
-      variant: 'ghost'},
+      action: (store) => this.openDianConfig(store),
+      variant: 'ghost',
+      tooltip: 'Abrir la configuración DIAN del tenant'},
     {
       label: 'Generar reporte semanal',
       icon: 'file-text',
@@ -287,10 +308,6 @@ export class StoresComponent implements OnInit, OnChanges {
   readonly isUpdatingStore = signal(false);
   readonly selectedStore = signal<StoreListItem | null>(null);
 
-  // Settings Modal state
-  readonly isSettingsModalOpen = signal(false);
-  readonly isUpdatingSettings = signal(false);
-  readonly selectedStoreForSettings = signal<StoreListItem | null>(null);
 private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   constructor() {
@@ -326,10 +343,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
 
     this.storesService.isUpdatingStore$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((loading) => {
-        this.isUpdatingStore.set(loading);
-        this.isUpdatingSettings.set(loading);
-      });
+      .subscribe((loading) => this.isUpdatingStore.set(loading));
 
     // Subscribe to filter changes
     this.filterForm.valueChanges
@@ -565,45 +579,20 @@ private initializeCreateForm(): void {
     this.filterForm.patchValue({ is_active: value });
   }
 
-  openSettingsModal(store: StoreListItem): void {
-    this.selectedStoreForSettings.set(store);
-    this.isSettingsModalOpen.set(true);
-  }
-
-  onSettingsModalChange(isOpen: boolean): void {
-    this.isSettingsModalOpen.set(isOpen);
-    if (!isOpen) {
-      this.selectedStoreForSettings.set(null);
-    }
-  }
-
-  onSettingsModalCancel(): void {
-    this.isSettingsModalOpen.set(false);
-    this.selectedStoreForSettings.set(null);
-  }
-
-  updateStoreSettings(settingsData: any): void {
-    const current = this.selectedStoreForSettings();
-    if (!current) return;
-
-    this.storesService
-      .updateStoreSettings(current.id, settingsData)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          if (response.success && response.data) {
-            this.isSettingsModalOpen.set(false);
-            this.selectedStoreForSettings.set(null);
-            this.toastService.success('Configuración actualizada exitosamente');
-          } else {
-            this.toastService.error(
-              'Respuesta inválida al actualizar la configuración',
-            );
-          }
-        },
-        error: (error) => {
-          this.toastService.error('Error al actualizar la configuración');
-        }});
+  /**
+   * Abre la configuración DIAN de la tienda dentro de la ficha de tenant.
+   *
+   * Navegación ABSOLUTA por la misma razón que `viewStore()`: una ruta relativa
+   * acabaría duplicando el id si este directorio se montara embebido en otro
+   * árbol.
+   */
+  openDianConfig(store: StoreListItem): void {
+    void this.router.navigate([
+      '/super-admin/stores',
+      store.id,
+      'config',
+      'dian',
+    ]);
   }
 
   onSearchChange(searchTerm: string): void {
@@ -783,7 +772,17 @@ private initializeCreateForm(): void {
       });
   }
 
-  viewStore(store: StoreListItem): void {}
+  /**
+   * Abre la ficha de tenant de la tienda.
+   *
+   * Navega en absoluto porque este componente se monta tanto en
+   * `/super-admin/stores` como potencialmente embebido en otros árboles: una
+   * ruta relativa acabaría en `/super-admin/stores/<id>/<id>` en el segundo
+   * caso.
+   */
+  viewStore(store: StoreListItem): void {
+    void this.router.navigate(['/super-admin/stores', store.id]);
+  }
 
   editStore(store: StoreListItem): void {
     this.selectedStore.set(store);

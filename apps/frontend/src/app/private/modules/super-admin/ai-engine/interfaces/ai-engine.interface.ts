@@ -31,6 +31,42 @@ export const MODEL_TYPE_LABELS: Record<AIModelType, string> = {
   transcription: 'Transcripcion',
 };
 
+/**
+ * Voces del Realtime API. Deliberadamente NO incluye `fable`, `onyx` ni `nova`:
+ * esas son exclusivas de TTS y el proveedor rechaza la sesión al acuñar el
+ * client secret, no al guardar la configuración — el operador vería el error
+ * como "la voz falló" mucho después de haberla elegido.
+ */
+export const REALTIME_VOICES = [
+  'alloy',
+  'ash',
+  'ballad',
+  'cedar',
+  'coral',
+  'echo',
+  'marin',
+  'sage',
+  'shimmer',
+  'verse',
+] as const;
+
+export type RealtimeVoice = (typeof REALTIME_VOICES)[number];
+
+export type TurnDetectionSetting = 'server_vad' | 'semantic_vad' | 'off';
+export type NoiseReductionSetting = 'near_field' | 'far_field' | 'off';
+
+export const TURN_DETECTION_LABELS: Record<TurnDetectionSetting, string> = {
+  semantic_vad: 'Semantica (por significado)',
+  server_vad: 'VAD del servidor (por volumen)',
+  off: 'Desactivada',
+};
+
+export const NOISE_REDUCTION_LABELS: Record<NoiseReductionSetting, string> = {
+  near_field: 'Cercana (auriculares, diadema)',
+  far_field: 'Lejana (laptop, sala)',
+  off: 'Sin reduccion',
+};
+
 export interface AIEngineConfig {
   id: number;
   provider: string;
@@ -51,6 +87,17 @@ export interface AIEngineConfig {
     image_endpoint?: string;
     image_model?: string;
     modalities?: string[];
+    encoding_format?: string;
+    // Transporte de audio (model_type='audio'). El backend las traduce a la
+    // forma anidada del proveedor en `VexiRealtimeService.buildSessionPatch()`;
+    // aqui viven planas porque es como el formulario las edita.
+    voice?: RealtimeVoice;
+    turn_detection_type?: TurnDetectionSetting;
+    turn_detection_silence_ms?: number;
+    turn_detection_threshold?: number;
+    noise_reduction?: NoiseReductionSetting;
+    transcription_model?: string;
+    client_secret_ttl_seconds?: number;
     [key: string]: any;
   };
   last_tested_at?: string;

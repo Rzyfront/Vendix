@@ -8,6 +8,7 @@ import {
   effect,
   inject,
   input,
+  linkedSignal,
   output,
   signal,
   untracked,
@@ -21,7 +22,11 @@ import {
 } from '../../../core/services/vexi-api.service';
 import { markdownToHtml } from '../../utils/markdown.util';
 import { IconComponent } from '../icon/icon.component';
-import { VexiAvatarComponent } from './vexi-avatar.component';
+import { VexiVoicePipelineService } from '../../../core/services/vexi-voice-pipeline.service';
+import {
+  VexiAvatarComponent,
+  type VexiExpression,
+} from './vexi-avatar.component';
 import { VexiConfirmationCardComponent } from './vexi-confirmation-card.component';
 import { VexiToolTraceComponent } from './vexi-tool-trace.component';
 
@@ -107,6 +112,23 @@ const SUGGESTIONS: readonly string[] = [
           <span class="vexi-panel__subtitle">{{ statusLine() }}</span>
         </span>
 
+        <!-- Alterna en las dos direcciones desde el mismo control. El hilo no se
+             toca: son dos vistas de la misma conversación, así que lo dicho y lo
+             escrito conviven y cambiar de modo no pierde nada. -->
+        <button
+          type="button"
+          class="vexi-panel__icon-btn"
+          [class.is-active]="voiceUi()"
+          (click)="toggleVoiceUi()"
+          [attr.aria-pressed]="voiceUi()"
+          [attr.aria-label]="
+            voiceUi() ? 'Volver a escribir' : 'Hablar con Vexi'
+          "
+          [title]="voiceUi() ? 'Volver a escribir' : 'Hablar con Vexi'"
+        >
+          <app-icon [name]="voiceUi() ? 'message-square' : 'mic'" [size]="18" />
+        </button>
+
         <button
           type="button"
           class="vexi-panel__icon-btn"
@@ -152,7 +174,30 @@ const SUGGESTIONS: readonly string[] = [
           </div>
         </aside>
 
-        <div #scroller class="vexi-panel__messages">
+        <!-- Modo voz: la avatar grande arriba, animada mientras habla. Vive
+             fuera de #scroller para que no se vaya con el scroll de los
+             captions — es el ancla visual del modo, no una entrada más. -->
+        @if (voiceUi()) {
+          <div class="vexi-voice__stage">
+            <span
+              class="vexi-voice__portrait"
+              [class.is-speaking]="voiceSpeaking()"
+              aria-hidden="true"
+            >
+              <app-vexi-avatar
+                [expression]="voiceExpression()"
+                [voice]="voiceSpeaking()"
+              />
+            </span>
+            <p class="vexi-voice__status" role="status">{{ voiceStatus() }}</p>
+          </div>
+        }
+
+        <div
+          #scroller
+          class="vexi-panel__messages"
+          [class.vexi-panel__messages--captions]="voiceUi()"
+        >
           @if (showEmptyState()) {
             <div class="vexi-empty">
               <span class="vexi-empty__portrait" aria-hidden="true">
@@ -299,6 +344,30 @@ const SUGGESTIONS: readonly string[] = [
         <p class="vexi-panel__notice" role="status">{{ attachmentError() }}</p>
       }
 
+      @if (voiceUi()) {
+        <!-- Sostener graba, soltar envía. Determinista y sin VAD: la persona
+             decide qué se manda, y un detector de voz sumaría un tercer árbitro
+             al gesto que el dock ya arbitra. -->
+        <div class="vexi-voice__composer">
+          <button
+            type="button"
+            class="vexi-voice__mic"
+            [class.is-recording]="voiceRecording()"
+            (pointerdown)="onMicDown($event)"
+            (pointerup)="onMicUp($event)"
+            (pointercancel)="onMicCancel()"
+            (keydown.space)="onMicDown($event)"
+            (keydown.enter)="onMicDown($event)"
+            (keyup.space)="onMicUp($event)"
+            (keyup.enter)="onMicUp($event)"
+            [attr.aria-pressed]="voiceRecording()"
+            aria-label="Mantén presionado para hablar"
+          >
+            <app-icon [name]="voiceRecording() ? 'square' : 'mic'" [size]="26" />
+          </button>
+          <p class="vexi-voice__hint">{{ voiceHint() }}</p>
+        </div>
+      } @else {
       <form class="vexi-panel__composer" (submit)="send($event)">
         <!-- Un solo input de archivo para las dos vías. El atributo capture no se pone
              aquí: en escritorio convierte el botón en una cámara inexistente y
@@ -348,6 +417,7 @@ const SUGGESTIONS: readonly string[] = [
           <app-icon name="send" [size]="18" />
         </button>
       </form>
+      }
     </section>
   `,
   styles: [
@@ -774,6 +844,107 @@ const SUGGESTIONS: readonly string[] = [
         cursor: not-allowed;
       }
 
+      /* ── Modo voz ─────────────────────────────────────────────────────── */
+
+      .vexi-voice__stage {
+        display: grid;
+        justify-items: center;
+        gap: 6px;
+        padding: 14px 12px 10px;
+        border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
+        /* flex-shrink:0 es obligatorio aquí: el escenario es hermano del
+           contenedor de scroll dentro de un flex column, y sin esto los captions
+           lo comprimen hasta hacerlo desaparecer en una conversación larga. */
+        flex-shrink: 0;
+      }
+
+      .vexi-voice__portrait {
+        display: block;
+        width: 96px;
+        height: 96px;
+        transition: transform 180ms ease;
+      }
+
+      .vexi-voice__portrait.is-speaking {
+        transform: scale(1.04);
+      }
+
+      .vexi-voice__portrait ::ng-deep app-vexi-avatar,
+      .vexi-voice__portrait ::ng-deep .vexi-avatar {
+        width: 100%;
+        height: 100%;
+      }
+
+      .vexi-voice__status {
+        margin: 0;
+        font-size: 0.82rem;
+        text-align: center;
+        color: var(--color-text-secondary, rgba(0, 0, 0, 0.6));
+      }
+
+      /* Captions: el mismo transcript, leído a distancia. Solo cambia la escala
+         y el ritmo — la tarjeta de confirmación, la traza de herramientas y el
+         bloque de streaming se siguen renderizando sin tocarse. */
+      .vexi-panel__messages--captions {
+        font-size: 0.95rem;
+        line-height: 1.55;
+      }
+
+      .vexi-voice__composer {
+        display: grid;
+        justify-items: center;
+        gap: 6px;
+        padding: 12px 10px 14px;
+        border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.07));
+        background: var(--color-surface, #fff);
+      }
+
+      .vexi-voice__mic {
+        display: grid;
+        place-items: center;
+        width: 64px;
+        height: 64px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--color-primary, #2ecc71);
+        color: #fff;
+        cursor: pointer;
+        /* Sin esto, mantener presionado en móvil arrastra el panel y abre el
+           menú de selección en vez de grabar. */
+        touch-action: none;
+        user-select: none;
+        transition:
+          background 140ms ease,
+          transform 140ms ease;
+      }
+
+      .vexi-voice__mic:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 46, 204, 113), 0.55);
+        outline-offset: 3px;
+      }
+
+      .vexi-voice__mic.is-recording {
+        background: var(--color-danger, #e74c3c);
+        transform: scale(1.06);
+        animation: vexi-mic-pulse 1.3s ease-in-out infinite;
+      }
+
+      @keyframes vexi-mic-pulse {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 0 12px rgba(231, 76, 60, 0);
+        }
+      }
+
+      .vexi-voice__hint {
+        margin: 0;
+        font-size: 0.76rem;
+        color: var(--color-text-secondary, rgba(0, 0, 0, 0.55));
+      }
+
       /* ── Adjuntos ─────────────────────────────────────────────────────── */
 
       /* The native control is hidden but NOT display:none and NOT removed from
@@ -932,6 +1103,15 @@ const SUGGESTIONS: readonly string[] = [
         .vexi-panel__sidebar {
           transition: none;
         }
+
+        .vexi-voice__mic.is-recording {
+          animation: none;
+        }
+
+        .vexi-voice__portrait,
+        .vexi-voice__mic {
+          transition: none;
+        }
       }
 
       /* Mobile overrides last: source order decides which rule wins between
@@ -947,6 +1127,13 @@ const SUGGESTIONS: readonly string[] = [
 
         .vexi-panel__sidebar-inner {
           width: 132px;
+        }
+
+        /* En un teléfono la avatar a 96px se come el espacio de los captions,
+           que es lo que la persona necesita leer mientras Vexi habla. */
+        .vexi-voice__portrait {
+          width: 72px;
+          height: 72px;
         }
       }
     `,
@@ -965,6 +1152,17 @@ export class VexiPanelComponent {
 
   /** Flips the panel origin when the dock is parked on the left edge. */
   readonly anchorLeft = input(false);
+
+  /**
+   * Opens straight into voice mode.
+   *
+   * Set by the dock when the store runs the `pipeline` engine: there the
+   * press-and-hold gesture has no WebRTC session to open, so it opens this panel
+   * already listening instead of dropping the person into a text composer they
+   * did not ask for.
+   */
+  readonly openInVoice = input(false);
+
   readonly closed = output<void>();
 
   protected readonly suggestions = SUGGESTIONS;
@@ -986,6 +1184,71 @@ export class VexiPanelComponent {
   protected readonly activeTask = this.facade.activeTask;
 
   protected readonly sidebarOpen = signal(false);
+
+  // ── Modo voz ────────────────────────────────────────────────────────────
+
+  private readonly voice = inject(VexiVoicePipelineService);
+
+  /**
+   * Which of the two views of this panel is showing.
+   *
+   * Runtime state, not a setting: the person flips it mid-conversation with the
+   * header icon. What engine answers a voice turn *is* a setting
+   * (`store_settings.vexi.voice_engine`) — two independent axes that must not be
+   * conflated.
+   */
+  protected readonly voiceUi = linkedSignal(() => this.openInVoice());
+
+  protected readonly voiceRecording = this.voice.recording;
+  protected readonly voiceSpeaking = this.voice.speaking;
+
+  /**
+   * The pose, driven by what is actually happening.
+   *
+   * `wow` while listening rather than a listening pose because the sheet has no
+   * such sprite and the names *are* the filenames — inventing one would 404
+   * silently while still typechecking.
+   */
+  protected readonly voiceExpression = computed<VexiExpression>(() => {
+    if (this.voice.state() === 'error') return 'error';
+    if (this.voiceRecording()) return 'wow';
+    if (this.voiceSpeaking()) return 'excited';
+    if (this.isSending() || this.voice.state() === 'transcribing') {
+      return 'thinking';
+    }
+    return 'idle';
+  });
+
+  /** One line under the avatar, in the person's terms. */
+  protected readonly voiceStatus = computed(() => {
+    if (this.voice.state() === 'error') {
+      return this.voice.errorMessage() ?? 'Algo salió mal con el micrófono.';
+    }
+    if (this.voiceRecording()) return 'Te escucho…';
+    if (this.voice.state() === 'transcribing') return 'Entendiendo lo que dijiste…';
+    if (this.voiceSpeaking()) return 'Hablando';
+    if (this.pendingProposal()) return 'Esperando tu confirmación';
+    if (this.isSending()) return 'Pensando…';
+    return 'Mantén presionado el micrófono y habla';
+  });
+
+  /** What the mic button says about itself. */
+  protected readonly voiceHint = computed(() => {
+    if (this.micPromptPending()) {
+      return 'Dale permiso al micrófono y vuelve a mantener presionado.';
+    }
+    if (this.voiceRecording()) return 'Suelta para enviar';
+    return 'Mantén presionado para hablar';
+  });
+
+  /**
+   * True right after the browser's permission dialog ate the first hold.
+   *
+   * The dialog steals the gesture that opened it, so that hold can never be a
+   * recording. Saying so is the difference between "grant permission and try
+   * again" and a button that appears broken.
+   */
+  private readonly micPromptPending = signal(false);
 
   // ── Trabajo de fondo ────────────────────────────────────────────────────
 
@@ -1337,5 +1600,79 @@ export class VexiPanelComponent {
 
   protected rejectProposal(): void {
     this.facade.rejectProposal();
+  }
+
+  // ── Modo voz ────────────────────────────────────────────────────────────
+
+  /**
+   * Switches between the two views of the same conversation.
+   *
+   * Entering warms the filler bank, because that audio's entire value is being
+   * instant: synthesized on the first turn it *is* the latency it exists to hide.
+   * Leaving stops whatever was playing — the person went back to reading.
+   */
+  protected toggleVoiceUi(): void {
+    const next = !this.voiceUi();
+    this.voiceUi.set(next);
+    this.micPromptPending.set(false);
+
+    if (next) {
+      void this.voice.warm();
+    } else {
+      this.voice.interrupt();
+      this.composer().nativeElement.focus();
+    }
+  }
+
+  protected onMicDown(event: Event): void {
+    // The button must not also fire a click, and on touch it must not scroll the
+    // panel or pop the text-selection menu.
+    event.preventDefault();
+
+    const pointer = event as PointerEvent;
+    if (pointer.pointerId !== undefined) {
+      // Keeps every later pointer event on this button, so a small drag while
+      // talking cannot silently end the recording somewhere else.
+      (event.currentTarget as HTMLElement)?.setPointerCapture?.(
+        pointer.pointerId,
+      );
+    }
+
+    void this.beginVoiceTurn();
+  }
+
+  protected onMicUp(event: Event): void {
+    event.preventDefault();
+    void this.endVoiceTurn();
+  }
+
+  /** A system-level interruption (a call, a gesture the OS claimed). */
+  protected onMicCancel(): void {
+    this.voice.cancelRecording();
+  }
+
+  private async beginVoiceTurn(): Promise<void> {
+    if (this.voiceRecording()) return;
+
+    // Deliberately NOT gated on `isSending()`. Talking over Vexi is the barge-in:
+    // `startRecording` stops the current playback and drops the frames still
+    // arriving for that turn, and the effect's switchMap cancels its stream.
+    const started = await this.voice.startRecording();
+    this.micPromptPending.set(!started);
+  }
+
+  private async endVoiceTurn(): Promise<void> {
+    const text = await this.voice.stopRecording();
+    // Null covers three normal outcomes: the hold was too short, the recording
+    // held no speech, or the transcriber heard nothing. None is an error, and a
+    // toast for any of them would punish someone who changed their mind.
+    if (!text) return;
+
+    const conversationId = this.activeConversationId();
+    if (conversationId) {
+      this.facade.sendMessage(conversationId, text, undefined, true);
+    } else {
+      this.facade.startConversation(text, undefined, undefined, true);
+    }
   }
 }
