@@ -66,25 +66,34 @@ function parseArgs(argv: string[]) {
 }
 
 /**
- * TODO(human): decide qué hacer con cada par (store, existing_row).
+ * Política de backfill para `store_payment_methods.wallet`.
  *
- * Casos posibles que `existing` puede traer:
- *   - `null`                    → la fila no existe nunca; hay que crearla.
- *   - `state: 'enabled'`        → la tienda ya tiene wallet activo; skip.
- *   - `state: 'disabled'`       → el admin la apagó a mano; ¿respetamos eso
- *                                 (skip) o la reactivamos (reactivate)?
- *   - `state: 'requires_configuration'` → wallet no requiere config
- *                                 (`requires_config: false` en el seed);
- *                                 imposible en estado normal, pero por si un
- *                                 seed viejo la dejó así. Recomendado:
- *                                 tratar como `create` directo.
+ * Decide la acción a tomar por cada tienda, dados los cuatro estados
+ * posibles de la fila existente:
  *
- * Devuelve uno de: { action: 'create' } | { action: 'reactivate' } |
- *                  { action: 'skip', reason: string }.
+ *   - `null` (no existe)         → `create`. El fix de onboarding nunca
+ *                                  alcanzó esta tienda.
+ *   - `state: 'enabled'`         → `skip`. Idempotencia: la tienda ya tiene
+ *                                  wallet activo. Es el único no-op real.
+ *   - `state: 'requires_configuration'`
+ *                                → `create` (forzar). Técnicamente
+ *                                  imposible para wallet
+ *                                  (`requires_config: false` en el seed);
+ *                                  un seed viejo puede haberla dejado así.
+ *   - `state: 'disabled'`        → `reactivate`. Decisión de política:
+ *                                  QUI-579 fue reportado por una tienda
+ *                                  EXISTENTE que por definición nunca
+ *                                  habilitó wallet (si lo hubiera hecho, el
+ *                                  bug no se reproduciría). Tratar
+ *                                  `disabled` como elección deliberada del
+ *                                  admin dejaría a las tiendas que
+ *                                  reportaron el ticket sin solución.
  *
- * Decisión de política: si el admin deshabilitó wallet a propósito, ¿el
- * backfill debe respetarlo (skip) o forzarlo (reactivate)? Esto es lo que
- * el líder te pidió decidir antes de mergear.
+ * Contrato de idempotencia: tras la primera corrida toda tienda queda con
+ * `state: 'enabled'`. Si un admin desactiva wallet después (compliance,
+ * preferencia del cliente), una corrida futura lo verá `disabled` y lo
+ * reactivará de nuevo. Si en el futuro se prefiere respetar `disabled`,
+ * cambiar la rama final de este `if` — sin tocar el resto del script.
  */
 function decideStoreMethodAction(
   existing:
