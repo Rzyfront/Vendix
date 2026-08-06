@@ -742,10 +742,13 @@ interface PersistedTestResult {
               <!-- ══ Lote descartado ══
                    Sin esto, tras recargar no quedaba rastro del descarte y la
                    pantalla volvía a verse como si nunca se hubiera enviado nada.
-                   El texto viene del backend (`wait.reason`) a propósito: la UI ya
+                   El texto viene del backend (wait.reason) a propósito: la UI ya
                    inventó una explicación una vez —«se envió antes de que se
                    guardaran las claves de documento»— sobre un lote que sí tenía
-                   sus 50 CUFE guardados. -->
+                   sus 50 CUFE guardados.
+                   OJO: sin comillas invertidas acá. La plantilla ES un template
+                   literal de TypeScript, así que un backtick en un comentario
+                   cierra el string y el resto se compila como código. -->
               @if (testSetWait()?.state === 'abandoned') {
                 <div class="p-3 rounded-lg border border-border bg-[var(--color-surface)] flex items-start gap-2">
                   <app-icon name="trash-2" [size]="14" class="mt-0.5 shrink-0 text-text-secondary"></app-icon>
