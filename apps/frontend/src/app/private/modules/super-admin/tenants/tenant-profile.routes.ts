@@ -17,113 +17,13 @@ import {
 } from './state/tenant-context.store';
 
 // ---------------------------------------------------------------------------
-// Páginas mínimas del esqueleto
+// Páginas ligeras de este árbol
 //
-// Viven en este archivo, y no en `pages/`, porque son costuras de ruta: cada
-// una existe para que la pestaña sea navegable y para declarar qué tarea la
-// llena. En cuanto una reciba contenido real, se muda a su propio archivo bajo
-// `pages/` sin tocar el árbol de rutas.
+// Viven aquí, y no en `pages/`, porque son costuras de ruta: se pintan con
+// datos que el perfil ya trae y no justifican un archivo propio. General,
+// Actividad y Configuración sí lo tienen — en cuanto una de estas crezca, se
+// muda a `pages/` sin tocar el árbol de rutas.
 // ---------------------------------------------------------------------------
-
-/**
- * Pestaña Actividad — la llena la tarea de la ficha de actividad.
- *
- * Espera `GET /superadmin/tenants/:scope/:tenantId/activity?days=`, cuyo DTO
- * (`TenantActivityQueryDto`) ya existe en el backend: ventana por defecto de 30
- * días, tope de 365, con `actions_by_day`, `top_actions`, `top_users`,
- * `modules_touched` y los contadores `active_users_7d` / `active_users_30d`
- * —estos dos siempre a 7 y 30 días, pase lo que pase en `days`—.
- */
-@Component({
-  selector: 'app-tenant-activity-pending',
-  standalone: true,
-  imports: [CardComponent, IconComponent],
-  template: `
-    <app-card [responsive]="true">
-      <div class="flex flex-col items-center gap-3 py-10 text-center">
-        <div
-          class="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50"
-        >
-          <app-icon name="activity" [size]="22" class="text-blue-600"></app-icon>
-        </div>
-        <h2 class="text-base font-semibold text-text-primary">
-          Actividad de {{ tenantName() }}
-        </h2>
-        <p class="max-w-md text-sm text-text-secondary">
-          Esta sección mostrará la actividad reciente del tenant: acciones por
-          día, módulos tocados y usuarios activos. El panel se conecta a
-          <code class="rounded bg-background px-1 py-0.5 text-xs">
-            /superadmin/tenants/{{ scope }}/{{ tenantId() }}/activity
-          </code>
-          en cuanto el endpoint esté publicado.
-        </p>
-      </div>
-    </app-card>
-  `,
-})
-export class TenantActivityPendingComponent {
-  private readonly store = inject(TenantContextStore);
-  protected readonly scope = this.store.scope;
-  protected readonly tenantId = this.store.tenantId;
-  protected readonly tenantName = this.store.tenantName;
-}
-
-/**
- * Pestaña Configuración — la llena la tarea de la consola de escritura.
- *
- * Consumirá `DianConfigApiService` con `DIAN_API_CONTEXT` reapuntado a
- * `superadmin/tenants/{scope}/{id}/invoicing`, más los controladores de
- * resoluciones y settings del mismo rail. Todo botón de escritura debe pasar
- * por `TenantContextStore.can()`, que devuelve `false` cuando el backend no
- * declara la capacidad.
- */
-@Component({
-  selector: 'app-tenant-configuration-pending',
-  standalone: true,
-  imports: [CardComponent, IconComponent, BadgeComponent],
-  template: `
-    <app-card [responsive]="true">
-      <div class="flex flex-col items-center gap-3 py-10 text-center">
-        <div
-          class="flex h-12 w-12 items-center justify-center rounded-full bg-purple-50"
-        >
-          <app-icon
-            name="settings"
-            [size]="22"
-            class="text-purple-600"
-          ></app-icon>
-        </div>
-        <h2 class="text-base font-semibold text-text-primary">
-          Configuración de {{ tenantName() }}
-        </h2>
-        <p class="max-w-md text-sm text-text-secondary">
-          Aquí se editarán las configuraciones DIAN, las resoluciones de
-          numeración y los datos fiscales del tenant, contra
-          <code class="rounded bg-background px-1 py-0.5 text-xs">
-            /superadmin/tenants/{{ scope }}/{{ tenantId() }}/…
-          </code>
-        </p>
-        <div class="flex flex-wrap items-center justify-center gap-1.5">
-          <app-badge variant="neutral" size="xs">dian-config</app-badge>
-          <app-badge variant="neutral" size="xs">
-            invoicing/resolutions
-          </app-badge>
-          <app-badge variant="neutral" size="xs">settings</app-badge>
-        </div>
-        <p class="max-w-md text-xs text-text-secondary">
-          Sólo lectura por ahora: las acciones de escritura se habilitan cuando
-          el perfil declare sus capacidades.
-        </p>
-      </div>
-    </app-card>
-  `,
-})
-export class TenantConfigurationPendingComponent {
-  private readonly store = inject(TenantContextStore);
-  protected readonly scope = this.store.scope;
-  protected readonly tenantId = this.store.tenantId;
-  protected readonly tenantName = this.store.tenantName;
-}
 
 /**
  * Pestaña Suscripción — estado de la suscripción SaaS del tenant.
@@ -345,12 +245,22 @@ export function tenantProfileRoutes(
         },
         {
           path: 'activity',
-          loadComponent: () => Promise.resolve(TenantActivityPendingComponent),
+          loadComponent: () =>
+            import('./pages/activity/tenant-activity.component').then(
+              (c) => c.TenantActivityComponent,
+            ),
         },
         {
+          // Configuración es una sección con sub-navegación propia (Ajustes ·
+          // Módulos · Identidad fiscal · Documentos electrónicos · Dominios),
+          // así que entra por `loadChildren` y no por `loadComponent`: su shell
+          // necesita su propio `router-outlet` y sus providers de rama para el
+          // contexto DIAN tenant-scoped.
           path: 'configuration',
-          loadComponent: () =>
-            Promise.resolve(TenantConfigurationPendingComponent),
+          loadChildren: () =>
+            import('./config/tenant-config.routes').then(
+              (m) => m.TENANT_CONFIG_ROUTES,
+            ),
         },
         {
           path: 'subscription',

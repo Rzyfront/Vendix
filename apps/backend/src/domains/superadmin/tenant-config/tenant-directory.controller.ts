@@ -1,4 +1,12 @@
-import { Controller, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { ResponseService } from '@common/responses/response.service';
@@ -10,7 +18,15 @@ import { UserRole } from '../../auth/enums/user-role.enum';
 
 import { TenantDirectoryQueryDto } from './dto/tenant-directory-query.dto';
 import { toTenantTarget, type TenantScopeSegment } from './dto/tenant-scope-param.dto';
+import {
+  buildTenantCapabilities,
+  type CapabilityActor,
+} from './tenant-capabilities.util';
 import { TenantDirectoryService } from './tenant-directory.service';
+
+interface RequestWithActor {
+  user?: CapabilityActor;
+}
 
 /**
  * Consola de tenants del super admin: directorio y perfil de configuración.
@@ -54,12 +70,22 @@ export class TenantDirectoryController {
       'Lectura pura: no materializa entidades contables ni ninguna otra fila. Los secretos se reportan como presentes/ausentes, nunca por valor.',
   })
   async profile(
+    @Req() req: RequestWithActor,
     @Param('scope') scope: TenantScopeSegment,
     @Param('tenantId', ParseIntPipe) tenantId: number,
   ) {
     const profile = await this.directory.getProfile(
       toTenantTarget(scope, tenantId),
     );
-    return this.response.success(profile, 'Perfil del tenant obtenido');
+
+    // Las capacidades describen al OPERADOR, no al tenant: son la respuesta a
+    // "¿puede este super admin pulsar este botón?". Se resuelven aquí y no en
+    // el servicio porque sólo el controlador ve la petición autenticada.
+    // Sin ellas la consola arranca entera en solo lectura, porque el gating de
+    // la UI falla al lado seguro.
+    return this.response.success(
+      { ...profile, capabilities: buildTenantCapabilities(req.user) },
+      'Perfil del tenant obtenido',
+    );
   }
 }
