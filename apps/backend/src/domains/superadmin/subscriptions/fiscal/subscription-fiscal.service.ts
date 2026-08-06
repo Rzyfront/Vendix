@@ -869,7 +869,7 @@ export class SubscriptionFiscalService {
     settings: SubscriptionFiscalSettings,
     fn: () => Promise<T>,
   ): Promise<T> {
-    return RequestContextService.run(
+    return RequestContextService.runIsolated(
       {
         organization_id: settings.platform_organization_id!,
         store_id: undefined,
@@ -1082,7 +1082,7 @@ export class SubscriptionFiscalService {
 
     try {
       await this.markSubmitted(transmission.id);
-      const response = await RequestContextService.run(
+      const response = await RequestContextService.runIsolated(
         {
           organization_id: settings.platform_organization_id!,
           store_id: undefined,

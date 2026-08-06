@@ -44,7 +44,7 @@ export class DianTestSetProcessor extends WorkerHost {
         : `queue-${randomUUID()}`;
 
     try {
-      return await RequestContextService.run(
+      return await RequestContextService.runIsolated(
         {
           // Se arrastran tal cual: la plataforma corre con `store_id: undefined`
           // y `is_super_admin: true`, y aplanar eso a `false` haría que el
