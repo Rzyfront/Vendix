@@ -89,4 +89,19 @@ export class StoreSettingsFacade {
   readonly vexiEnabled = computed<boolean>(
     () => this.settings()?.vexi?.enabled === true,
   );
+
+  /**
+   * Which engine answers a voice turn.
+   *
+   * Falls back to `realtime` rather than to null, because the caller is a gesture
+   * handler: an absent value has to route somewhere, and routing to what the
+   * store already had is the only choice that changes nothing on upgrade. Every
+   * store that predates the key gets exactly the behaviour it has today.
+   *
+   * A separate axis from the interface. This decides *what answers*; the panel's
+   * own chat ⇄ voice toggle decides *what the person is looking at*.
+   */
+  readonly vexiVoiceEngine = computed<'realtime' | 'pipeline'>(() =>
+    this.settings()?.vexi?.voice_engine === 'pipeline' ? 'pipeline' : 'realtime',
+  );
 }

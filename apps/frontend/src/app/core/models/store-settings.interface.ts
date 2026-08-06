@@ -56,6 +56,16 @@ export interface StoreSettings {
  */
 export interface VexiSettings {
   enabled: boolean;
+
+  /**
+   * Which engine answers a voice turn: `realtime` (WebRTC speech-to-speech) or
+   * `pipeline` (transcribe → the chat's text agent → dictate).
+   *
+   * Read it through `StoreSettingsFacade.vexiVoiceEngine()`, which defaults an
+   * absent value to `realtime` — never as `settings.vexi!.voice_engine`, or a
+   * store that predates the key routes the gesture nowhere.
+   */
+  voice_engine?: 'realtime' | 'pipeline';
 }
 
 /**

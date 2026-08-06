@@ -382,6 +382,23 @@ export interface StoreSettings {
  */
 export interface VexiSettings {
   enabled: boolean;
+
+  /**
+   * Which engine answers a voice turn.
+   *
+   * - `realtime` — WebRTC speech-to-speech straight to the provider. One hop, but
+   *   audio tokens, and it cannot execute writes: the tools that need
+   *   confirmation have no approval surface on that path.
+   * - `pipeline` — transcribe, answer with the chat's own text agent, dictate.
+   *   Slower on paper and cheaper in practice, and it *inherits* the whole tool
+   *   catalog, the confirmation card, the conversation and the write audit,
+   *   because a voice turn is literally a chat turn.
+   *
+   * Defaults to `realtime` so the behaviour of every existing store is unchanged
+   * until its numbers say otherwise. This is a separate axis from the interface:
+   * the panel toggles chat ⇄ voice at runtime regardless of which engine answers.
+   */
+  voice_engine?: 'realtime' | 'pipeline';
 }
 
 export interface GeneralSettings {

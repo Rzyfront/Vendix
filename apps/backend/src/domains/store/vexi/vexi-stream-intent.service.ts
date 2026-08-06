@@ -35,6 +35,12 @@ export interface VexiStreamIntent {
   user_id?: number;
   /** Handles of the documents this turn carries (`att_41`), never bytes. */
   attachment_ids?: string[];
+  /**
+   * Whether this turn should also be spoken. Travels with the intent for the
+   * same reason the UI context does: it describes one turn, and the person can
+   * switch modes between turns of the same conversation.
+   */
+  speak?: boolean;
 }
 
 /**

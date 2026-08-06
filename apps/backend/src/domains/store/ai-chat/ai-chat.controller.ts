@@ -106,11 +106,18 @@ export class AIChatController {
     const requestContext = RequestContextService.getContext();
 
     return new Observable<MessageEvent>((subscriber) => {
+      // Aborted by the teardown below when the browser goes away. Its only job is
+      // to stop the speech synthesis queue from billing for audio nobody will
+      // hear; the generator itself keeps draining so the assistant reply and its
+      // tool trace still get persisted.
+      const abort = new AbortController();
+
       const stream = async () => {
         try {
           for await (const chunk of this.chatService.sendMessageStream(
             conversationId,
             streamId,
+            abort.signal,
           )) {
             subscriber.next({
               data: JSON.stringify(chunk),
@@ -142,6 +149,10 @@ export class AIChatController {
       } else {
         void stream();
       }
+
+      // Runs on client disconnect and on `subscriber.complete()`. Harmless in the
+      // completion case: `done` is the last frame, so by then the queue is empty.
+      return () => abort.abort();
     });
   }
 

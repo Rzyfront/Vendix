@@ -1297,4 +1297,15 @@ export class VexiSettingsDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiProperty({
+    example: 'realtime',
+    enum: ['realtime', 'pipeline'],
+    required: false,
+    description:
+      'Motor del modo voz. `realtime` negocia WebRTC speech-to-speech contra el proveedor; `pipeline` transcribe, responde con el agente de texto del chat y dicta la respuesta. Solo el pipeline puede ejecutar escrituras con confirmación, porque es el único que pasa por la tarjeta de aprobación del panel.',
+  })
+  @IsOptional()
+  @IsIn(['realtime', 'pipeline'])
+  voice_engine?: 'realtime' | 'pipeline';
 }

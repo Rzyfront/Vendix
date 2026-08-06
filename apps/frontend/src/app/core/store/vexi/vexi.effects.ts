@@ -21,6 +21,7 @@ import {
 } from '../../services/vexi-api.service';
 import { VexiUiContextService } from '../../services/vexi-ui-context.service';
 import { VexiUiCommandService } from '../../services/vexi-ui-command.service';
+import { VexiVoicePipelineService } from '../../services/vexi-voice-pipeline.service';
 
 @Injectable()
 export class VexiEffects {
@@ -48,6 +49,7 @@ export class VexiEffects {
   private store = inject(Store);
   private uiContext = inject(VexiUiContextService);
   private uiCommands = inject(VexiUiCommandService);
+  private voice = inject(VexiVoicePipelineService);
 
   private readonly facadeProposal$ = this.store.select(
     VexiSelectors.selectPendingProposal,
@@ -104,7 +106,7 @@ export class VexiEffects {
   startConversation$ = createEffect(() =>
     this.actions$.pipe(
       ofType(VexiActions.startConversation),
-      switchMap(({ content, appKey, attachmentIds }) =>
+      switchMap(({ content, appKey, attachmentIds, speak }) =>
         this.chatApi.createConversation({ app_key: appKey }).pipe(
           switchMap((conversation) =>
             of(
@@ -116,6 +118,10 @@ export class VexiEffects {
                 // it, attaching an invoice to the very first thing you ever say to
                 // Vexi silently dropped the file.
                 attachmentIds,
+                // Same reason for `speak`: the first thing a person ever says to
+                // Vexi can be spoken, and dropping it here would answer their
+                // very first voice turn in silence.
+                speak,
               }),
             ),
           ),
@@ -170,17 +176,18 @@ export class VexiEffects {
   sendMessage$ = createEffect(() =>
     this.actions$.pipe(
       ofType(VexiActions.sendMessage),
-      switchMap(({ conversationId, content, attachmentIds }) =>
+      switchMap(({ conversationId, content, attachmentIds, speak }) =>
         this.chatApi
           .createStreamIntent(
             conversationId,
             content,
             this.uiContext.build(),
             attachmentIds,
+            speak,
           )
           .pipe(
             switchMap((streamId) =>
-              this.streamTurn(conversationId, streamId),
+              this.streamTurn(conversationId, streamId, speak === true),
             ),
             startWith(VexiActions.streamStarted({ conversationId })),
             catchError((error) =>
@@ -257,6 +264,7 @@ export class VexiEffects {
   private streamTurn(
     conversationId: number,
     streamId: string,
+    speak = false,
   ): Observable<Action> {
     const url = this.chatApi.getStreamUrl(conversationId, streamId);
 
@@ -267,6 +275,11 @@ export class VexiEffects {
         }),
       );
     }
+
+    // Claims playback for this stream. Frames from a turn the person interrupted
+    // are dropped by id — the old EventSource is still open and still emitting
+    // audio that was already paid for, and it must not talk over the new question.
+    if (speak) this.voice.startTurn(streamId);
 
     return new Observable<Action>((subscriber) => {
       const source = new EventSource(url);
@@ -391,12 +404,38 @@ export class VexiEffects {
             break;
           }
 
+          case 'audio':
+            // Handed straight to the player, never dispatched. A base64 mp3 in
+            // a reducer is megabytes of state the devtools cannot render and the
+            // store has no reason to remember — playback is browser state, like
+            // the `HTMLAudioElement` that holds it.
+            if (chunk.audio_base64 !== undefined && chunk.index !== undefined) {
+              this.voice.enqueue(streamId, {
+                index: chunk.index,
+                audio_base64: chunk.audio_base64,
+                content_type: chunk.content_type ?? 'audio/mpeg',
+                filler: chunk.filler,
+              });
+            }
+            break;
+
+          case 'timing':
+            if (chunk.mark && chunk.ms !== undefined) {
+              this.voice.serverMark(chunk.mark, chunk.ms);
+            }
+            break;
+
           case 'done':
+            // Before completing: lets the player stop waiting on an index that a
+            // failed synthesis means will never arrive, instead of holding the
+            // remaining segments behind the gap.
+            this.voice.finishTurn(streamId);
             subscriber.next(VexiActions.streamComplete());
             subscriber.complete();
             break;
 
           case 'error':
+            this.voice.finishTurn(streamId);
             subscriber.next(
               VexiActions.streamError({
                 error: chunk.error || 'La respuesta se interrumpió.',

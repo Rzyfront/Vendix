@@ -7,6 +7,24 @@ import { AIUsageStatsFilter } from '../../../ai-engine/interfaces/ai-log.interfa
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateAIConfigDto, UpdateAIConfigDto, AIConfigQueryDto } from './dto';
 
+/**
+ * Model types that cannot be the platform-wide default configuration.
+ *
+ * A blacklist rather than a special case for `audio`: `defaultConfigId` is a
+ * single value shared by every application whose `config_id` is NULL, and the
+ * overwhelming majority of those applications need a text model. Any non-text
+ * type in that slot breaks them. Listing the types that must never hold it
+ * keeps a new `model_type` from silently becoming eligible.
+ */
+const NON_DEFAULTABLE_MODEL_TYPES = new Set([
+  'audio',
+  'speech',
+  'transcription',
+  'video',
+  'rerank',
+  'embedding',
+]);
+
 @Injectable()
 export class AIEngineConfigService {
   constructor(
@@ -277,14 +295,14 @@ export class AIEngineConfigService {
   }
 
   /**
-   * An audio configuration must never be the global default.
+   * Only a text configuration may be the global default.
    *
    * `AIEngineService.loadConfigurations()` keeps a single `defaultConfigId`
    * without discriminating by `model_type`, and every application resolves as
-   * `app.config_id || defaultConfigId`. All 17 seeded applications ship with
-   * `config_id = null`, so marking the realtime audio config as default would
-   * silently redirect every text and vision application to a provider that
-   * cannot serve them.
+   * `app.config_id || defaultConfigId`. Most seeded applications ship with
+   * `config_id = null`, so making a non-text config the default silently
+   * redirects every text and vision application to a provider that cannot
+   * serve them.
    *
    * Enforced at the edge instead of relying on operator discipline, because the
    * failure is remote from its cause: the config saves fine and unrelated
@@ -294,7 +312,7 @@ export class AIEngineConfigService {
     modelType: string | null | undefined,
     isDefault: boolean | null | undefined,
   ): void {
-    if (isDefault === true && modelType === 'audio') {
+    if (isDefault === true && NON_DEFAULTABLE_MODEL_TYPES.has(modelType ?? '')) {
       throw new VendixHttpException(ErrorCodes.AI_CONFIG_003);
     }
   }

@@ -89,6 +89,14 @@ export const sendMessage = createAction(
      * serialisability contract and the devtools timeline with it.
      */
     attachmentIds?: string[];
+    /**
+     * Asks for the answer to be spoken as well as written.
+     *
+     * Carried on the turn rather than read from a mode flag in the store, because
+     * the person can flip to chat mid-answer and the turn already in flight was
+     * still asked by voice.
+     */
+    speak?: boolean;
   }>(),
 );
 
@@ -103,7 +111,12 @@ export const sendMessage = createAction(
  */
 export const startConversation = createAction(
   '[Vexi] Start Conversation',
-  props<{ content: string; appKey?: string; attachmentIds?: string[] }>(),
+  props<{
+    content: string;
+    appKey?: string;
+    attachmentIds?: string[];
+    speak?: boolean;
+  }>(),
 );
 
 export const sendMessageSuccess = createAction(

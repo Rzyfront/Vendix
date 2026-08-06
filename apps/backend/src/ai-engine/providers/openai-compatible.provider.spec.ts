@@ -184,4 +184,140 @@ describe('OpenAICompatibleProvider', () => {
       text: 'Paris is the capital of France.',
     });
   });
+
+  describe('transcribeAudio', () => {
+    const originalFetch = global.fetch;
+    let fetchMock: jest.Mock;
+
+    beforeEach(() => {
+      fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ text: 'cuántas ventas tuve hoy' }),
+      });
+      global.fetch = fetchMock as any;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    // wav is what the super-admin test button sends; webm is what the browser
+    // records. Both must reach the endpoint as a file part.
+    const silentWavBase64 = Buffer.from('RIFFfake').toString('base64');
+
+    it('sends multipart with a file part instead of a JSON body', async () => {
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      const response = await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'wav' },
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.openai.com/v1/audio/transcriptions');
+
+      // The whole point: a JSON body here is refused with a 400 naming the
+      // missing `file` field.
+      expect(init.body).toBeInstanceOf(FormData);
+      expect(typeof init.body).not.toBe('string');
+
+      const form = init.body as FormData;
+      expect(form.get('model')).toBe('test-model');
+
+      const file = form.get('file') as Blob & { name?: string };
+      expect(file).toBeInstanceOf(Blob);
+      expect(file.type).toBe('audio/wav');
+      // The extension is load-bearing: the API sniffs the filename to pick a
+      // decoder and refuses a container it cannot name.
+      expect((file as any).name).toBe('audio.wav');
+
+      expect(response.success).toBe(true);
+      expect(response.text).toBe('cuántas ventas tuve hoy');
+    });
+
+    it('lets fetch own the Content-Type so the boundary matches the body', async () => {
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'webm' },
+      });
+
+      const [, init] = fetchMock.mock.calls[0];
+      // Setting it by hand produces a body the server cannot split, because the
+      // boundary token would not match the one FormData generated.
+      expect(init.headers['Content-Type']).toBeUndefined();
+      expect(init.headers.Authorization).toBe('Bearer test-key');
+    });
+
+    it('maps the container to a MIME type and falls back honestly', async () => {
+      const provider = buildProvider('https://api.openai.com/v1');
+      const mime = (format: string) =>
+        (provider as any).audioMimeType(format) as string;
+
+      expect(mime('webm')).toBe('audio/webm');
+      expect(mime('mp3')).toBe('audio/mpeg');
+      expect(mime('m4a')).toBe('audio/mp4');
+      // A wrong specific type is worse than a vague one: it makes the server
+      // pick a decoder instead of sniffing.
+      expect(mime('aiff')).toBe('application/octet-stream');
+    });
+
+    it('forwards language and temperature as form fields when set', async () => {
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'webm' },
+        language: 'es',
+        temperature: 0,
+      });
+
+      const form = fetchMock.mock.calls[0][1].body as FormData;
+      expect(form.get('language')).toBe('es');
+      // Zero is a legitimate temperature meaning "most deterministic"; a
+      // truthiness check here would drop it.
+      expect(form.get('temperature')).toBe('0');
+    });
+
+    it('omits language and temperature when neither is configured', async () => {
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'webm' },
+      });
+
+      const form = fetchMock.mock.calls[0][1].body as FormData;
+      expect(form.get('language')).toBeNull();
+      expect(form.get('temperature')).toBeNull();
+    });
+
+    it('reports a provider error as data rather than throwing', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        text: async () => 'Invalid file format',
+        json: async () => ({ error: { message: 'Invalid file format' } }),
+        headers: new Map(),
+      });
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      const response = await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'webm' },
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toBeTruthy();
+    });
+
+    it('treats a response without text as a failure', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      const response = await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'webm' },
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toBe('Transcription model returned no text');
+    });
+  });
 });

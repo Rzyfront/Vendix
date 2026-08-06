@@ -71,13 +71,23 @@ export class VexiFacade {
     );
   }
 
+  /**
+   * `speak` only adds audio frames to the answer. It never changes the text, the
+   * tools, or what gets persisted — a spoken turn is the same turn.
+   */
   sendMessage(
     conversationId: number,
     content: string,
     attachmentIds?: string[],
+    speak?: boolean,
   ): void {
     this.store.dispatch(
-      VexiActions.sendMessage({ conversationId, content, attachmentIds }),
+      VexiActions.sendMessage({
+        conversationId,
+        content,
+        attachmentIds,
+        speak,
+      }),
     );
   }
 
@@ -86,9 +96,15 @@ export class VexiFacade {
     content: string,
     appKey?: string,
     attachmentIds?: string[],
+    speak?: boolean,
   ): void {
     this.store.dispatch(
-      VexiActions.startConversation({ content, appKey, attachmentIds }),
+      VexiActions.startConversation({
+        content,
+        appKey,
+        attachmentIds,
+        speak,
+      }),
     );
   }
 
