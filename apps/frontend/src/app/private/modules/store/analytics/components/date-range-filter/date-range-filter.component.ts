@@ -71,7 +71,7 @@ type DatePreset =
         change. For now the chip shows the preset name as the visible anchor of
         "what range is active".
       -->
-      @if (selectedPreset() && (selectedPreset() as string) !== 'custom' && !startDate() && !endDate()) {
+      @if (selectedPreset() && !startDate() && !endDate()) {
         <span
           class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-primary-50 text-primary-700 border border-primary-200"
           data-testid="date-range-resolved-chip"
