@@ -6,6 +6,11 @@ import {
   BadgeComponent,
   BadgeVariant,
 } from '../../../../../../shared/components/badge/badge.component';
+import {
+  dianEnablementLabel,
+  dianEnablementVariant,
+  isTestSetApproved,
+} from '../../../../../../core/utils/dian-enablement-status.util';
 import type { SubscriptionFiscalStatus } from '../../../subscriptions/interfaces/fiscal-billing.interface';
 
 interface ChecklistItem {
@@ -108,8 +113,11 @@ export class PlatformDianGuideComponent {
         done: lastTest?.ok === true,
       },
       {
+        // Antes exigía `enabled`, así que el paso se quedaba GRIS después de que
+        // la DIAN aprobara el set y hasta habilitar producción — que es el paso
+        // siguiente. `test_set_passed` es el estado que deja la aprobación.
         label: 'Set de pruebas aprobado (habilitación)',
-        done: config?.enablement_status === 'enabled',
+        done: isTestSetApproved(config?.enablement_status),
       },
       {
         label: 'Emisión activa en producción',
@@ -118,27 +126,20 @@ export class PlatformDianGuideComponent {
     ];
   });
 
+  // El `switch` anterior tenía ramas para `in_progress` y `rejected`, que no
+  // existen en `dian_enablement_status_enum` (not_started, testing,
+  // test_set_passed, enabled, suspended, expired). Código muerto que además
+  // tapaba el hueco real: los estados verdaderos caían al `default` e imprimían
+  // la cadena cruda del enum en pantalla.
   readonly statusLabel = computed<string>(() => {
     const config = this.status()?.dian_config ?? null;
     if (!config) return 'Sin configurar';
-    switch (config.enablement_status) {
-      case 'enabled':
-        return 'Habilitado';
-      case 'in_progress':
-      case 'testing':
-        return 'En habilitación';
-      case 'rejected':
-        return 'Rechazado';
-      default:
-        return config.enablement_status || 'Pendiente';
-    }
+    return dianEnablementLabel(config.enablement_status);
   });
 
   readonly statusVariant = computed<BadgeVariant>(() => {
     const enablement = this.status()?.dian_config?.enablement_status;
-    if (enablement === 'enabled') return 'success';
-    if (enablement === 'rejected') return 'error';
     if (!enablement) return 'neutral';
-    return 'warning';
+    return dianEnablementVariant(enablement) as BadgeVariant;
   });
 }

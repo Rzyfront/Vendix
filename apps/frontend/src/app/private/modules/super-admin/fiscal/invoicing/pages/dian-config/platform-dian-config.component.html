@@ -665,17 +665,30 @@
           </app-button>
         </div>
 
+        <!--
+          Respuesta técnica del lote, estructurada. Antes esto era un volcado del
+          resultado entero con el pipe `json`, así que el sobre SOAP se leía
+          escapado y en una sola línea, y los nombres de archivo entregados —cuya
+          longitud es parte del contrato del anexo— no aparecían en absoluto.
+        -->
+        @if (technicalResult()) {
+          <app-dian-technical-response
+            [result]="technicalResult()"
+          ></app-dian-technical-response>
+        }
+
         @if (testSetResult(); as result) {
           <!--
-            La respuesta cruda de la DIAN es diagnóstico, no información de
-            pantalla: por defecto va plegada. El veredicto legible ya lo muestran
-            las tarjetas de estado del set de pruebas.
+            Respuesta de la ÚLTIMA operación, sin estructurar. Se conserva porque
+            es el único lugar donde aparece la salida de «Diagnosticar documentos»
+            (registro por CUFE documento a documento), que el panel de arriba no
+            cubre: ese lee el lote persistido, no la respuesta de la operación.
           -->
           <details class="rounded-lg border border-border bg-background">
             <summary
               class="cursor-pointer px-3 py-2 text-xs font-medium text-text-secondary select-none"
             >
-              Ver respuesta técnica de la DIAN
+              Ver respuesta de la última operación
             </summary>
             <pre
               class="text-[11px] leading-relaxed px-3 pb-3 overflow-x-auto text-text-secondary"

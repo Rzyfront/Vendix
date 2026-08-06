@@ -21,6 +21,8 @@ import {
 
 import {
   ButtonComponent,
+  DianTechnicalResponseComponent,
+  DianTechnicalResponseData,
   FileUploadDropzoneComponent,
   IconComponent,
   InputComponent,
@@ -109,6 +111,7 @@ const REQUIRED_LABELS: Record<string, string> = {
     StatsComponent,
     ToggleComponent,
     PlatformDianGuideComponent,
+    DianTechnicalResponseComponent,
   ],
   templateUrl: './platform-dian-config.component.html',
 })
@@ -200,6 +203,19 @@ export class PlatformDianConfigComponent {
 
   /** Lectura acotada de la espera del lote, calculada por el backend. */
   readonly testSetWait = computed(() => this.store.testSet()?.wait ?? null);
+
+  /**
+   * Snapshot persistido del lote, para el panel técnico.
+   *
+   * NO es `testSetResult()`: ese guarda la respuesta de la ÚLTIMA operación (envío,
+   * consulta o diagnóstico) y no incluye los nombres de archivo entregados ni el
+   * sobre SOAP. Lo que la DIAN devolvió sobre el lote vive en `last_test_result`.
+   */
+  readonly technicalResult = computed<DianTechnicalResponseData | null>(
+    () =>
+      (this.store.testSet()?.last_test_result as DianTechnicalResponseData) ??
+      null,
+  );
 
   /**
    * Composición del set según el modo de operación, resuelta por el backend. Se

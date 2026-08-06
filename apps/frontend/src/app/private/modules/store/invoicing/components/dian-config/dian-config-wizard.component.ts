@@ -41,6 +41,10 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import {
+  DianTechnicalResponseComponent,
+  DianTechnicalResponseData,
+} from '../../../../../../shared/components/dian-technical-response/dian-technical-response.component';
 
 /**
  * Typed credentials form interface.
@@ -150,11 +154,23 @@ interface PersistedTestResult {
   number_to?: number;
   /** Resolución usada en ese envío; preselecciona el selector al volver. */
   resolution_id?: number | null;
+  /** Nombre del ZIP entregado a la DIAN. Su longitud es parte del contrato del anexo. */
+  zip_file_name?: string | null;
+  operation_mode?: string | null;
+  /** Evidencia por documento, incluido el nombre de archivo dentro del ZIP. */
+  documents?: Array<{
+    number?: string;
+    kind?: string;
+    cufe?: string;
+    file_name?: string;
+  }>;
   dian_response?: {
     success?: boolean;
     status_code?: string;
     status_message?: string;
     error_messages?: string[];
+    /** Sobre SOAP crudo, recortado a 12 KB por el backend. */
+    raw_response?: string;
   };
   poll_history?: Array<{
     attempt: number;
@@ -195,6 +211,7 @@ interface PersistedTestResult {
     IconComponent,
     SelectorComponent,
     StepsLineComponent,
+    DianTechnicalResponseComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -1028,6 +1045,15 @@ interface PersistedTestResult {
                   }
                 </div>
               }
+
+              <!-- Respuesta técnica: fuera de los bloques por estado a propósito.
+                   Cuando la DIAN no emite veredicto, el estado es justamente el
+                   que menos información da, y es cuando más se necesita el
+                   StatusDescription crudo y los nombres de archivo enviados. -->
+              @if (technicalResult()) {
+                <app-dian-technical-response [result]="technicalResult()"></app-dian-technical-response>
+              }
+
               <div class="flex items-center justify-between pt-4 border-t border-border">
                 <app-button variant="outline" size="sm" (clicked)="activeStep.set(2)">
                   <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
@@ -1189,6 +1215,13 @@ export class DianConfigWizardComponent {
   readonly resolutions = signal<InvoiceResolution[]>([]);
   readonly selectedResolutionId = signal<number | null>(null);
   readonly testSetResult = signal<DianTestResult | null>(null);
+  /**
+   * `last_test_result` sin mapear. `mapPersistedResult` produce el veredicto
+   * LEGIBLE y deja fuera lo que solo sirve para diagnosticar: nombres de archivo,
+   * modo de operación y el sobre SOAP crudo. Guardar el original evita ensanchar
+   * `DianTestResult` con campos que ninguna pantalla lee.
+   */
+  private readonly persistedTestResult = signal<PersistedTestResult | null>(null);
   readonly loadingTestSet = signal(false);
   readonly checkingStatus = signal(false);
   readonly polling = signal(false);
@@ -1263,6 +1296,22 @@ export class DianConfigWizardComponent {
    * not express: DIAN has the batch but has not judged it, which is neither
    * success nor failure and must NOT invite a re-send.
    */
+  /**
+   * Datos del panel técnico, atados al lote VIGENTE por su ZipKey.
+   *
+   * El snapshot trae nombres de archivo y sobre SOAP del lote que lo generó. Si el
+   * veredicto en pantalla ya es de otro lote, mostrar ese snapshot al lado sería la
+   * misma clase de mentira que se arregló esta semana —una pantalla afirmando cosas
+   * de un lote que no es el vigente—. Ante desacuerdo, no se muestra nada.
+   */
+  readonly technicalResult = computed<DianTechnicalResponseData | null>(() => {
+    const snapshot = this.persistedTestResult();
+    if (!snapshot) return null;
+    const live = this.testSetResult()?.zip_key ?? null;
+    if (live && snapshot.zip_key && live !== snapshot.zip_key) return null;
+    return snapshot as DianTechnicalResponseData;
+  });
+
   readonly testSetState = computed<TestSetState>(() => {
     if (this.runningTestSet()) return 'running';
     const result = this.testSetResult();
@@ -1481,6 +1530,7 @@ export class DianConfigWizardComponent {
     this.selectedEnvironment.set('test');
     this.testResult.set(null);
     this.testSetResult.set(null);
+    this.persistedTestResult.set(null);
     this.selectedResolutionId.set(null);
     this.auditLogs.set([]);
     // A fresh config has no batch in flight; drop any timer from the previous one.
@@ -1774,10 +1824,12 @@ export class DianConfigWizardComponent {
           this.loadingTestSet.set(false);
           if (!persisted || !persisted.executed_at) {
             this.testSetResult.set(null);
+            this.persistedTestResult.set(null);
             return;
           }
           const mapped = this.mapPersistedResult(persisted, payload?.environment);
           this.testSetResult.set(mapped);
+          this.persistedTestResult.set(persisted);
           // La resolución del último envío ya está en el resultado persistido:
           // reconciliar aquí es lo que evita tener que volver a elegirla.
           this.reconcileSelectedResolution();
@@ -1891,6 +1943,10 @@ export class DianConfigWizardComponent {
    */
   private applyTestSetOutcome(result: DianTestResult, silent: boolean): void {
     this.testSetResult.set(result);
+    // Un envío nuevo cambia el ZipKey, y `technicalResult` oculta el snapshot en
+    // cuanto deja de coincidir. Se re-lee para que el panel técnico hable del lote
+    // que se acaba de mandar, que es justo cuando hace falta.
+    this.loadTechnicalSnapshot();
 
     if (result.success) {
       this.stopPolling();
@@ -1932,6 +1988,31 @@ export class DianConfigWizardComponent {
       );
     }
     this.startPolling();
+  }
+
+  /**
+   * Re-lee `last_test_result` SIN efectos: no toca el veredicto, no arranca el
+   * sondeo, no lanza toasts.
+   *
+   * Separado de `loadTestResults` a propósito: ese método dispara
+   * `checkTestSetStatus` cuando el lote está pendiente, y llamarlo desde
+   * `applyTestSetOutcome` —que es a quien `checkTestSetStatus` le responde— cerraría
+   * un ciclo de consultas a la DIAN sin fin.
+   */
+  private loadTechnicalSnapshot(): void {
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    this.invoicingService
+      .getDianTestResults(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const payload = response?.data ?? response;
+          this.persistedTestResult.set(
+            (payload?.last_result as PersistedTestResult) ?? null,
+          );
+        },
+      });
   }
 
   private refreshConfig(): void {
@@ -2048,6 +2129,9 @@ export class DianConfigWizardComponent {
           this.pollAttempts.set(0);
           this.diagnosis.set(null);
           this.testSetResult.set(null);
+          // El lote descartado deja de existir para la pantalla; su sobre SOAP y
+          // sus nombres de archivo se van con él.
+          this.persistedTestResult.set(null);
           this.toast.success(
             'Lote descartado. Ya puedes ejecutar un nuevo set de pruebas.',
           );
@@ -2120,6 +2204,7 @@ export class DianConfigWizardComponent {
 
     this.runningTestSet.set(true);
     this.testSetResult.set(null);
+    this.persistedTestResult.set(null);
     this.pollExhausted.set(false);
     this.pollAttempts.set(0);
     this.startTips();
