@@ -264,11 +264,34 @@ describe('DianXmlSignerService (XAdES-EPES)', () => {
     expect(hashValue.textContent).toBe(DIAN_SIGNATURE_POLICY.hashDigestValue);
   });
 
-  it('includes SignerRole = supplier', () => {
+  // Regla ZB01. El aserto sobre `textContent` que había aquí antes era ciego a
+  // la estructura: es recursivo, así que devolvía 'supplier' tanto con el rol
+  // como texto directo —que rompe el esquema— como anidado correctamente. Por
+  // eso el defecto llegó a producción en verde. Estos asertos verifican el
+  // anidamiento que el XSD de XAdES 1.3.2 exige (`SignerRole` es element-only).
+  it('emits SignerRole as ClaimedRoles/ClaimedRole, never as raw text', () => {
     const signerRole = doc
       .getElementsByTagNameNS(XADES_NS, 'SignerRole')
       .item(0);
-    expect(signerRole.textContent).toBe('supplier');
+
+    const directText = Array.from(signerRole.childNodes as any[])
+      .filter((n: any) => n.nodeType === 3)
+      .map((n: any) => n.nodeValue)
+      .join('')
+      .trim();
+    expect(directText).toBe('');
+
+    const claimedRoles = signerRole.getElementsByTagNameNS(
+      XADES_NS,
+      'ClaimedRoles',
+    );
+    expect(claimedRoles.length).toBe(1);
+
+    const claimedRole = claimedRoles
+      .item(0)
+      .getElementsByTagNameNS(XADES_NS, 'ClaimedRole');
+    expect(claimedRole.length).toBe(1);
+    expect(claimedRole.item(0).textContent).toBe('supplier');
   });
 
   it('produces a SignatureValue that verifies against the SignedInfo digest', () => {

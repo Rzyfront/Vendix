@@ -18,6 +18,7 @@ export const FEATURE_LABELS: Record<string, string> = {
   tool_agents: 'Agentes con herramientas',
   rag_embeddings: 'Búsqueda semántica (RAG)',
   async_queue: 'Cola async para IA',
+  realtime_voice: 'Modo voz de Vexi',
 
   // AI sub-fields (caps / quotas)
   monthly_tokens_cap: 'Tokens IA por mes',
@@ -25,6 +26,7 @@ export const FEATURE_LABELS: Record<string, string> = {
   retention_days: 'Días de retención de chats',
   indexed_docs_cap: 'Documentos RAG indexados',
   monthly_jobs_cap: 'Jobs async por mes',
+  monthly_voice_seconds_cap: 'Segundos de voz por mes',
   tools_allowed: 'Herramientas permitidas',
   degradation: 'Modo de degradación',
 

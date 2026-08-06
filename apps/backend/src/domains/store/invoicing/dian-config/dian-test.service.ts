@@ -576,7 +576,16 @@ export class DianTestService {
     const issuer: DianIssuerData = {
       nit: config.nit,
       nit_dv: config.nit_dv || '0',
-      legal_name: organization?.name || config.name,
+      // El nombre lo manda la CONFIGURACIÓN DIAN, no la organización: la DIAN
+      // lo confronta contra el RUT del NIT que va en el mismo documento, y el
+      // dueño del NIT es la entidad fiscal, no el tenant de Vendix. Con la
+      // precedencia invertida el set declaraba el nombre de la organización
+      // ('Vendix Corp') sobre el NIT de la entidad fiscal ('QUICKSS S.A.S.
+      // SOLUCIONES RÁPIDAS DE SOFTWARE'), y la DIAN notificaba FAJ43b «Nombre
+      // informado No corresponde al registrado en el RUT con respecto al Nit
+      // suministrado». La organización queda como caída para configuraciones
+      // viejas sin nombre propio.
+      legal_name: config.name || organization?.name,
       address_line: 'Calle 1 # 1-1',
       city_code: '11001',
       city_name: 'Bogotá',
