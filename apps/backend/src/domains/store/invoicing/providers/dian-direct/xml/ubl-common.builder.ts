@@ -23,6 +23,21 @@ import {
 } from '../../../utils/dian-money.util';
 
 /**
+ * Campos de dirección que los builders UBL saben emitir. Es el subconjunto
+ * común de `DianIssuerData` y `DianCustomerData`, extraído para que las dos
+ * formas de dirección —envuelta en `cac:Address` y plana— compartan firma.
+ */
+interface DianAddressFields {
+  address_line?: string;
+  city_code?: string;
+  city_name?: string;
+  department_code?: string;
+  department_name?: string;
+  country_code?: string;
+  postal_code?: string;
+}
+
+/**
  * Shared UBL 2.1 element builders for Colombian electronic invoicing.
  * Used by both invoice and credit note builders.
  */
@@ -258,15 +273,17 @@ export class UblCommonBuilder {
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CBC, 'TaxLevelCode');
     tax_level.att('listName', 'No aplica').txt(issuer.tax_scheme);
 
-    UblCommonBuilder.buildAddress(
-      tax_scheme.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
-      issuer,
-    );
+    UblCommonBuilder.buildRegistrationAddress(tax_scheme, issuer);
 
-    tax_scheme
-      .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(DIAN_TAX_CODES.IVA);
+    // `cac:TaxScheme` se valida como PAR (ID, Name). El anexo exige `cbc:Name`
+    // junto a `cbc:ID` y la DIAN notifica FAJ41 «el contenido de este elemento
+    // no corresponde al nombre y código valido» cuando el nombre falta —
+    // XPath `/Invoice/cac:AccountingSupplierParty/…/cac:TaxScheme/cbc:Name`.
+    const issuer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+    issuer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(DIAN_TAX_CODES.IVA);
+    issuer_scheme
+      .ele(UBL_NAMESPACES.CBC, 'Name')
+      .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
 
     // Party legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
@@ -314,6 +331,24 @@ export class UblCommonBuilder {
 
     const party = customer_party.ele(UBL_NAMESPACES.CAC, 'Party');
 
+    // `cac:PartyIdentification` es obligatorio cuando el adquiriente es
+    // consumidor final, es decir cuando `AdditionalAccountID = "2"`. La DIAN
+    // rechaza con FAK61 «Si el valor de AdditionalAccountID es igual a "2" y el
+    // grupo no es informado» — XPath
+    // `//cac:AccountingCustomerParty/cac:Party/cac:PartyIdentification`.
+    //
+    // Se emite siempre y no solo para el tipo "2": el documento del adquiriente
+    // es información legítima en ambos casos, y condicionarlo al tipo de persona
+    // reintroduciría la misma clase de defecto en cuanto el tipo se derive mal.
+    // En UBL `PartyIdentification` precede a `PartyName` en la secuencia.
+    party
+      .ele(UBL_NAMESPACES.CAC, 'PartyIdentification')
+      .ele(UBL_NAMESPACES.CBC, 'ID')
+      .att('schemeAgencyID', '195')
+      .att('schemeAgencyName', UblCommonBuilder.DIAN_SCHEME_AGENCY_NAME)
+      .att('schemeName', customer.document_type)
+      .txt(customer.document_number);
+
     // Party name
     party
       .ele(UBL_NAMESPACES.CAC, 'PartyName')
@@ -353,16 +388,14 @@ export class UblCommonBuilder {
       .txt(customer.tax_responsibilities?.[0] || 'R-99-PN');
 
     if (customer.city_code) {
-      UblCommonBuilder.buildAddress(
-        tax_scheme.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
-        customer,
-      );
+      UblCommonBuilder.buildRegistrationAddress(tax_scheme, customer);
     }
 
-    tax_scheme
-      .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(DIAN_TAX_CODES.IVA);
+    const customer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+    customer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(DIAN_TAX_CODES.IVA);
+    customer_scheme
+      .ele(UBL_NAMESPACES.CBC, 'Name')
+      .txt(DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA]);
 
     // Legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
@@ -391,22 +424,54 @@ export class UblCommonBuilder {
   }
 
   /**
-   * Builds an address element (used for PhysicalLocation and RegistrationAddress).
+   * `cac:PhysicalLocation` es un `LocationType`: CONTIENE un `cac:Address`.
+   *
+   * No sirve para `cac:RegistrationAddress`, que ya ES un `AddressType` — para
+   * ese usar `buildRegistrationAddress`. Los dos compartían este método y el
+   * envoltorio de más dejaba la dirección fiscal del emisor fuera de la ruta
+   * donde la DIAN la busca (ver `buildAddressFields`).
    */
   static buildAddress(
     parent: any,
-    address: {
-      address_line?: string;
-      city_code?: string;
-      city_name?: string;
-      department_code?: string;
-      department_name?: string;
-      country_code?: string;
-      postal_code?: string;
-    },
+    address: DianAddressFields,
   ): void {
-    const addr = parent.ele(UBL_NAMESPACES.CAC, 'Address');
+    UblCommonBuilder.buildAddressFields(
+      parent.ele(UBL_NAMESPACES.CAC, 'Address'),
+      address,
+    );
+  }
 
+  /**
+   * `cac:RegistrationAddress` ES un `AddressType`, así que sus campos cuelgan
+   * DIRECTAMENTE de él: los XPath del anexo son
+   * `…/cac:PartyTaxScheme/cac:RegistrationAddress/cbc:ID` y
+   * `…/cac:RegistrationAddress/cbc:CountrySubentityCode`.
+   *
+   * Antes se reutilizaba `buildAddress`, que interpone un `cac:Address`. El dato
+   * viajaba completo pero un nivel más abajo del que la DIAN consulta, así que
+   * los tres XPath resolvían a nada y respondía con tres reglas por una sola
+   * causa: FAJ28 «no fue informado el conjunto de elementos …» sobre el grupo,
+   * más FAJ29 y FAJ32 «este código no corresponde a un valor válido de la
+   * lista» sobre el municipio y el departamento que sí estaban informados.
+   */
+  static buildRegistrationAddress(
+    parent: any,
+    address: DianAddressFields,
+  ): void {
+    UblCommonBuilder.buildAddressFields(
+      parent.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
+      address,
+    );
+  }
+
+  /**
+   * Emite el conjunto de campos de dirección DENTRO del elemento recibido, sin
+   * crear envoltorio. Es el cuerpo común de las dos formas de arriba.
+   */
+  private static buildAddressFields(
+    addr: any,
+    address: DianAddressFields,
+  ): void {
     addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(address.city_code || '11001');
     addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(address.city_name || 'Bogotá');
     addr
@@ -688,10 +753,16 @@ export class UblCommonBuilder {
       // dianRate, not the raw string: tax_rate arrives from a Decimal(5,2), so
       // 19.00 serialized as '19' and reached the XML without decimals.
       category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(dianRate(tax_rate));
-      category
-        .ele(UBL_NAMESPACES.CAC, 'TaxScheme')
-        .ele(UBL_NAMESPACES.CBC, 'ID')
-        .txt(tax_code);
+      // Mismo par (ID, Name) que en la cabecera. FAS01b compara «Porcentaje,
+      // Nombre y ID» de la línea contra el TaxTotal de cabecera para exigir que
+      // exista uno por cada tributo de línea «con las características
+      // correspondiente al mismo impuesto». La cabecera sí emitía el nombre y la
+      // línea no, así que la línea no coincidía con su propio impuesto.
+      const line_scheme = category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
+      line_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(tax_code);
+      line_scheme
+        .ele(UBL_NAMESPACES.CBC, 'Name')
+        .txt(DIAN_TAX_NAMES[tax_code] || tax_code);
 
       // Item description + identificación estándar del ítem.
       //
