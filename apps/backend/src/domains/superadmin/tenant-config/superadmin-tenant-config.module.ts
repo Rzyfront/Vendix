@@ -5,6 +5,7 @@ import { ResponseModule } from '@common/responses/response.module';
 import { TenantContextRunner } from '@common/context/tenant-context-runner.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
+import { TenantActivityModule } from './tenant-activity.module';
 import { TenantConsoleAuditInterceptor } from './tenant-console-audit.interceptor';
 import { TenantDianModule } from './tenant-dian.module';
 import { TenantDirectoryController } from './tenant-directory.controller';
@@ -44,6 +45,7 @@ import { TenantSettingsModule } from './tenant-settings.module';
     // `TenantContextRunner` en vez de importarlo de aquí: la dependencia
     // inversa cerraría un ciclo con este mismo módulo, que es quien los cablea.
     // El runner es sin estado, así que varias instancias son equivalentes.
+    TenantActivityModule,
     TenantDianModule,
     TenantResolutionsModule,
     TenantSettingsModule,
