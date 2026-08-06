@@ -375,7 +375,9 @@ export class DianTestService {
     const started_at = Date.now();
     const config = await this.getConfigById(config_id);
 
-    if (!config.test_set_id) {
+    // La vía de validación no envía al set, así que no necesita su identificador.
+    // Misma exención que en `enqueueTestSet`.
+    if (!config.test_set_id && !options.validate_only) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_CONFIG_001,
         'No test set ID configured',
@@ -391,7 +393,14 @@ export class DianTestService {
     >;
     // `abandoned !== true`: ver la misma guarda en `enqueueTestSet`. Un lote
     // descartado no bloquea el reenvío, ni aunque `pending` haya quedado en true.
+    //
+    // `!options.validate_only`: esta guarda está DUPLICADA en `enqueueTestSet` y en
+    // este método, y exentar solo la primera no sirve para nada — el encolado pasa,
+    // el worker revienta, y el fallo llega como un job `failed` en vez de un 409
+    // inmediato, que es peor de leer. Las dos copias tienen que compartir la
+    // exención o ninguna la tiene.
     if (
+      !options.validate_only &&
       previous_result.pending === true &&
       previous_result.zip_key &&
       previous_result.abandoned !== true
