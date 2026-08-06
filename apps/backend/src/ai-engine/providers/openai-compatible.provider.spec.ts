@@ -325,6 +325,23 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
 
+    it('reads an empty JSON body as no text rather than crashing on it', async () => {
+      // `null` is valid JSON and some gateways answer it on an empty result.
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => null });
+      const provider = buildProvider('https://api.openai.com/v1');
+
+      const response = await provider.transcribeAudio({
+        inputAudio: { data: silentWavBase64, format: 'webm' },
+      });
+
+      expect(response.success).toBe(false);
+      expect(response.error).toBe(
+        'Transcription model returned no text (response fields: none)',
+      );
+      // Not a TypeError leaking through the catch.
+      expect(response.error).not.toContain('Cannot read');
+    });
+
     it('names the response fields when the text is somewhere we do not read', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,

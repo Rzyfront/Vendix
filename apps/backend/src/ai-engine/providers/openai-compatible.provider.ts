@@ -385,18 +385,21 @@ export class OpenAICompatibleProvider implements AIProvider {
         throw new Error(await this.readProviderError(response));
       }
 
+      // Read through `?.`: a provider answering the literal JSON `null` is a
+      // 200 with an empty body, and dereferencing it would surface a TypeError
+      // where the operator needs to read "returned no text".
       const parsed = (await response.json()) as {
         text?: string;
         usage?: any;
-      };
+      } | null;
 
       return {
-        success: typeof parsed.text === 'string',
-        text: parsed.text,
+        success: typeof parsed?.text === 'string',
+        text: parsed?.text,
         model,
-        usage: this.mapTokenUsage(parsed.usage),
+        usage: this.mapTokenUsage(parsed?.usage),
         error:
-          typeof parsed.text === 'string'
+          typeof parsed?.text === 'string'
             ? undefined
             : // The keys, never the values: a transcript is the merchant's own
               // speech and does not belong in an error string. Naming the keys
