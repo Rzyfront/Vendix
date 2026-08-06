@@ -381,12 +381,18 @@ export class SettingsService {
       store_id,
     );
 
-    // El interruptor de Vexi es exclusivo de propietario y administrador, y eso
+    // La configuración de Vexi es exclusiva de propietario y administrador, y eso
     // tiene que decidirse acá. `store:settings:update` — el permiso que protege
     // este endpoint — también lo tienen `manager` y `Preventista`, así que el
     // guard de permisos no alcanza: sin esta comprobación, un manager apaga la
     // asistente de toda la tienda con un curl aunque el panel le oculte la
     // opción. Ocultar una UI no es restringir una capacidad.
+    //
+    // La compuerta cubre la sección ENTERA, no sólo `enabled`. `voice_engine`
+    // también entra por acá, y con razón: el pipeline es el único motor que puede
+    // ejecutar escrituras con confirmación, así que elegirlo amplía lo que la
+    // asistente puede hacer sobre los datos de la tienda. Es la misma decisión
+    // que encenderla.
     if (dto.vexi !== undefined) {
       const roles = RequestContextService.getRoles();
       const puedeConfigurarVexi = roles.some((role) =>
@@ -397,7 +403,7 @@ export class SettingsService {
       if (!puedeConfigurarVexi) {
         throw new VendixHttpException(
           ErrorCodes.SYS_FORBIDDEN_001,
-          'Solo el propietario o un administrador de la tienda pueden activar o desactivar a Vexi.',
+          'Solo el propietario o un administrador de la tienda pueden configurar a Vexi.',
         );
       }
     }
@@ -510,6 +516,24 @@ export class SettingsService {
       if (dto[key as keyof UpdateSettingsDto] !== undefined) {
         (updatedSettings as any)[key] = dto[key as keyof UpdateSettingsDto];
       }
+    }
+
+    // `vexi` se mezcla por clave, no por sección.
+    //
+    // El bucle de arriba REEMPLAZA la sección completa, que es lo correcto para
+    // secciones que se editan enteras desde una sola pantalla. `vexi` no es una
+    // de esas: el interruptor maestro manda `{ vexi: { enabled } }` y el selector
+    // de motor manda `{ vexi: { voice_engine } }`, cada uno desde su propio
+    // control. Con reemplazo de sección, tocar el interruptor borraba el
+    // `voice_engine` que el dueño había elegido y la tienda volvía al default sin
+    // avisar — la clase de fallo que ya se pagó en `ai_feature_flags`, donde un
+    // normalizador que reconstruía el objeto entero borraba la clave que no
+    // conocía. Un PATCH parcial no debe destruir lo que no menciona.
+    if (dto.vexi !== undefined) {
+      (updatedSettings as any).vexi = {
+        ...((currentSettings as any).vexi ?? {}),
+        ...dto.vexi,
+      };
     }
 
     // @deprecated: Sync bidireccional eliminada. module_flows es source of truth.

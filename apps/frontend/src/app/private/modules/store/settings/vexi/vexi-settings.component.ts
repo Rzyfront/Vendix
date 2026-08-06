@@ -71,6 +71,65 @@ import {
         }
       </div>
 
+      <!-- Motor de voz. Sólo cuando Vexi está encendido: elegir con qué motor
+           responde una función que no se carga es una decisión sin efecto, y
+           mostrarla apagada invita a creer que el modo voz quedó activo. -->
+      @if (enabled()) {
+        <div class="bg-surface rounded-lg shadow-sm border p-6 mt-6">
+          <h2 class="text-lg font-semibold text-gray-900">Motor de voz</h2>
+          <p class="text-sm text-gray-600 mt-1">
+            Cómo responde Vexi cuando le hablas. Los dos escuchan y contestan en
+            voz; se diferencian en qué puede hacer con lo que le pides.
+          </p>
+
+          <div class="mt-4 space-y-3" role="radiogroup" aria-label="Motor de voz">
+            @for (option of engineOptions; track option.value) {
+              <button
+                type="button"
+                role="radio"
+                [attr.aria-checked]="engine() === option.value"
+                [disabled]="savingEngine()"
+                (click)="onEngineChange(option.value)"
+                class="w-full text-left rounded-lg border p-4 transition-colors hover:border-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                [class.border-primary-500]="engine() === option.value"
+                [class.bg-primary-50]="engine() === option.value"
+                [class.border-gray-200]="engine() !== option.value"
+                [class.bg-surface]="engine() !== option.value"
+              >
+                <div class="flex items-start gap-3">
+                  <app-icon
+                    [name]="
+                      engine() === option.value ? 'check-circle' : 'circle'
+                    "
+                    [size]="18"
+                    [class]="
+                      engine() === option.value
+                        ? 'text-primary-600 mt-0.5 shrink-0'
+                        : 'text-gray-300 mt-0.5 shrink-0'
+                    "
+                  />
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-gray-900">
+                      {{ option.label }}
+                      @if (option.recommended) {
+                        <span
+                          class="ml-2 text-xs font-medium text-primary-700 bg-primary-100 rounded px-1.5 py-0.5"
+                        >
+                          Recomendado
+                        </span>
+                      }
+                    </p>
+                    <p class="text-sm text-gray-600 mt-1">
+                      {{ option.description }}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            }
+          </div>
+        </div>
+      }
+
       <!-- Actividad. Va debajo del interruptor y no en otra ruta porque la
            decisión de apagar a Vexi se toma mirando lo que hizo. -->
       <div class="bg-surface rounded-lg shadow-sm border p-6 mt-6">
@@ -207,6 +266,81 @@ export class VexiSettingsComponent {
       ? 'Vexi aparece para todos los usuarios de la tienda.'
       : 'El asistente no se carga y sus endpoints responden módulo deshabilitado.',
   );
+
+  // ------------------------------------------------------------------
+  // Motor de voz
+  // ------------------------------------------------------------------
+
+  /**
+   * Las dos opciones, con la diferencia que de verdad importa al elegir.
+   *
+   * No es latencia ni costo: es que sólo el pipeline pasa por la tarjeta de
+   * confirmación del panel, así que sólo el pipeline puede ejecutar escrituras
+   * (ajustar stock, crear un pedido). El realtime queda como camino de sólo
+   * lectura. Un texto que hablara de WebRTC no ayudaría a decidir a un dueño de
+   * tienda; esto sí.
+   */
+  readonly engineOptions: ReadonlyArray<{
+    value: 'pipeline' | 'realtime';
+    label: string;
+    description: string;
+    recommended?: boolean;
+  }> = [
+    {
+      value: 'pipeline',
+      label: 'Completo',
+      description:
+        'Vexi transcribe lo que dices, lo responde con el mismo cerebro del chat y te lo dicta. Es el único que puede ejecutar acciones por voz, siempre pidiéndote confirmación antes de aplicar nada.',
+      recommended: true,
+    },
+    {
+      value: 'realtime',
+      label: 'Conversación directa',
+      description:
+        'Habla y escucha en tiempo real, con menos demora entre tu voz y la suya. Solo consulta: no puede aplicar cambios en la tienda. Requiere un proveedor de voz en tiempo real configurado en el motor de IA.',
+    },
+  ];
+
+  private readonly engineOverride = signal<'pipeline' | 'realtime' | null>(null);
+
+  readonly savingEngine = signal(false);
+
+  readonly engine = computed(
+    () => this.engineOverride() ?? this.settingsFacade.vexiVoiceEngine(),
+  );
+
+  async onEngineChange(next: 'pipeline' | 'realtime'): Promise<void> {
+    if (this.savingEngine() || next === this.engine()) {
+      return;
+    }
+
+    const previous = this.engine();
+    this.engineOverride.set(next);
+    this.savingEngine.set(true);
+
+    try {
+      // Sólo viaja `voice_engine`. El backend mezcla la sección `vexi` por
+      // clave, así que esto no pisa `enabled` — antes de ese arreglo un PATCH
+      // parcial reemplazaba la sección entera y cada control borraba al otro.
+      await firstValueFrom(
+        this.settingsService.saveSettingsNow({ vexi: { voice_engine: next } }),
+      );
+      this.engineOverride.set(null);
+      this.toast.success(
+        next === 'pipeline'
+          ? 'El modo voz quedó en Completo: Vexi puede ejecutar acciones con tu confirmación.'
+          : 'El modo voz quedó en Conversación directa: solo consultas.',
+      );
+    } catch (error) {
+      this.engineOverride.set(previous);
+      this.toast.error(
+        parseApiError(error).userMessage ??
+          'No se pudo cambiar el motor de voz.',
+      );
+    } finally {
+      this.savingEngine.set(false);
+    }
+  }
 
   async onToggle(next: boolean): Promise<void> {
     if (this.saving() || next === this.enabled()) {
