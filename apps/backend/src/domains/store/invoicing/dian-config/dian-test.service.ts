@@ -1165,17 +1165,22 @@ export class DianTestService {
       message: success
         ? 'Set de pruebas procesado y validado por la DIAN.'
         : is_ws_security_error
-          ? '50 documentos generados y firmados. La DIAN rechazó la firma WS-Security del envelope SOAP.'
+          ? `${files.length} documento(s) generado(s) y firmado(s). La DIAN rechazó la firma WS-Security del envelope SOAP.`
           : verdict.error_messages?.length
             ? `La DIAN reportó errores de validación: ${verdict.error_messages.join(' | ')}`
             : still_processing
               ? `Set recibido por la DIAN (ZipKey ${zip_key}); aún en proceso tras ${poll_history.length} consultas. Consulta GET :id/test-set-status en unos minutos.`
               : `Set de pruebas RECHAZADO por la DIAN: ${verdict.status_message}`,
       tracking_id: result_data.tracking_id,
-      total_documents: 50,
-      invoices_count: 30,
-      debit_notes_count: 10,
-      credit_notes_count: 10,
+      // Derivados de lo que REALMENTE se envió. Estaban escritos a mano como
+      // 50/30/10/10, así que la vía de humo —1 factura, 1 consecutivo— devolvía
+      // «50 documentos» y el número contradecía a `number_from`/`number_to`, que
+      // sí eran correctos. Lo persistido (`result_data.total_documents`) siempre
+      // usó `files.length`: la mentira vivía solo en la respuesta.
+      total_documents: files.length,
+      invoices_count: composition.invoices,
+      debit_notes_count: composition.debit_notes,
+      credit_notes_count: composition.credit_notes,
       environment,
       dian_status: verdict.status_code,
       error_messages: verdict.error_messages ?? [],
@@ -1186,7 +1191,13 @@ export class DianTestService {
       executed_at: result_data.executed_at,
       number_from: next_number,
       number_to: next_number + TEST_SET_SIZE - 1,
-      enablement_status: success ? 'test_set_passed' : 'testing',
+      // La vía de humo NO escribe `enablement_status` (ver paso 5), así que
+      // tampoco puede afirmarlo: devuelve el que la config tiene de verdad.
+      enablement_status: options.smoke
+        ? config.enablement_status
+        : success
+          ? 'test_set_passed'
+          : 'testing',
       response_time_ms: Date.now() - started_at,
     };
   }
