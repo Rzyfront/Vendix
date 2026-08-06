@@ -246,6 +246,15 @@ export class StoresComponent implements OnInit, OnChanges {
 
   tableActions: TableAction[] = [
     {
+      // Primera acción de la fila: la ficha de tenant es el destino natural
+      // desde el directorio, y desde ella cuelgan facturación electrónica,
+      // resoluciones y suscripción.
+      label: 'Ver ficha',
+      icon: 'eye',
+      action: (store) => this.viewStore(store),
+      variant: 'primary',
+      tooltip: 'Abrir la ficha de configuración del tenant'},
+    {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
@@ -783,7 +792,17 @@ private initializeCreateForm(): void {
       });
   }
 
-  viewStore(store: StoreListItem): void {}
+  /**
+   * Abre la ficha de tenant de la tienda.
+   *
+   * Navega en absoluto porque este componente se monta tanto en
+   * `/super-admin/stores` como potencialmente embebido en otros árboles: una
+   * ruta relativa acabaría en `/super-admin/stores/<id>/<id>` en el segundo
+   * caso.
+   */
+  viewStore(store: StoreListItem): void {
+    void this.router.navigate(['/super-admin/stores', store.id]);
+  }
 
   editStore(store: StoreListItem): void {
     this.selectedStore.set(store);
