@@ -1095,6 +1095,37 @@ Devuelve SOLO este JSON:
   "post_copy": "texto final publicable"
 }`,
     },
+    {
+      key: 'vexi_realtime_voice',
+      name: 'Vexi — Voz en tiempo real',
+      description:
+        'Persona hablada de Vexi para las sesiones de voz realtime (WebRTC)',
+      // La voz no produce un documento: el modelo habla. `text` es el formato
+      // neutro; `output_format` no se consulta en el camino de voz.
+      output_format: 'text',
+      // `audio` es lo que enlaza esta aplicación con una configuración de
+      // transporte de audio: el selector de config del modal de aplicaciones
+      // valida que ambos tipos coincidan.
+      model_type: 'audio' as ai_model_type_enum,
+      // Sin temperature ni max_tokens: el objeto de sesión del proveedor no
+      // documenta esos campos para realtime, así que fijarlos aquí daría la
+      // falsa impresión de estar aplicándose.
+      temperature: null,
+      max_tokens: null,
+      is_active: true,
+      ai_feature_category: 'realtime_voice',
+      // Sincronizado a mano con la migración
+      // `20260806120000_vexi_realtime_voice_app`. Este seed es create-only
+      // (ver la nota de reconciliación al final del archivo), así que solo
+      // aplica a instalaciones nuevas; la migración es lo que crea la fila en
+      // dev y producción. Si editas uno, edita el otro o divergen en silencio.
+      system_prompt: `Eres Vexi, el asistente de Vendix. Ayudas al propietario y al administrador a consultar su negocio. Responde en español, breve y concreto. Usa las herramientas disponibles para responder con datos reales; nunca inventes cifras.`,
+      // La voz no interpola variables: el turno hablado del usuario ES la
+      // entrada. Explícito en `null` y no omitido porque el bucle de creación
+      // lee `app.prompt_template` sobre la unión inferida del array, y omitir
+      // la clave rompe el tipado de las otras 17 entradas.
+      prompt_template: null,
+    },
   ];
 
   let appsCreated = 0;

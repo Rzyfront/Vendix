@@ -29,6 +29,8 @@ export class AIEngineConfigService {
       throw new VendixHttpException(ErrorCodes.AI_CONFIG_002);
     }
 
+    this.assertDefaultAllowed(dto.model_type, dto.is_default);
+
     // If setting as default, unset previous default
     if (dto.is_default) {
       await this.prisma.ai_engine_configs.updateMany({
@@ -152,6 +154,14 @@ export class AIEngineConfigService {
       }
     }
 
+    // Resolved against the persisted row, not just the payload: the likeliest
+    // way to hit this is `PATCH {"is_default": true}` on a config that is
+    // already audio, where the DTO carries no `model_type` at all.
+    this.assertDefaultAllowed(
+      dto.model_type ?? existing.model_type,
+      dto.is_default ?? existing.is_default,
+    );
+
     // If setting as default, unset previous default
     if (dto.is_default) {
       await this.prisma.ai_engine_configs.updateMany({
@@ -264,5 +274,28 @@ export class AIEngineConfigService {
     if (!baseUrl) return undefined;
 
     return baseUrl.trim() || undefined;
+  }
+
+  /**
+   * An audio configuration must never be the global default.
+   *
+   * `AIEngineService.loadConfigurations()` keeps a single `defaultConfigId`
+   * without discriminating by `model_type`, and every application resolves as
+   * `app.config_id || defaultConfigId`. All 17 seeded applications ship with
+   * `config_id = null`, so marking the realtime audio config as default would
+   * silently redirect every text and vision application to a provider that
+   * cannot serve them.
+   *
+   * Enforced at the edge instead of relying on operator discipline, because the
+   * failure is remote from its cause: the config saves fine and unrelated
+   * applications break later.
+   */
+  private assertDefaultAllowed(
+    modelType: string | null | undefined,
+    isDefault: boolean | null | undefined,
+  ): void {
+    if (isDefault === true && modelType === 'audio') {
+      throw new VendixHttpException(ErrorCodes.AI_CONFIG_003);
+    }
   }
 }

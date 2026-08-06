@@ -1224,6 +1224,14 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'AI configuration already exists (duplicate provider+model)',
   },
+  AI_CONFIG_003: {
+    code: 'AI_CONFIG_003',
+    httpStatus: 400,
+    devMessage:
+      'An audio configuration cannot be the default provider: the default is ' +
+      'global and does not discriminate by model_type, so every application ' +
+      'with no explicit config would resolve to the realtime provider',
+  },
   AI_APP_001: {
     code: 'AI_APP_001',
     httpStatus: 404,

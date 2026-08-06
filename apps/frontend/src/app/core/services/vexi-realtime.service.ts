@@ -24,6 +24,17 @@ export interface RealtimeToolDefinition {
   parameters: Record<string, unknown>;
 }
 
+/**
+ * Session config the backend already shaped for the provider. Forwarded
+ * verbatim: the nesting (`audio.input.turn_detection`, `audio.output.voice`) is
+ * the backend's business, and a misplaced key here would be ignored silently
+ * rather than reported.
+ */
+interface RealtimeSessionPatch {
+  tool_choice: 'auto';
+  audio?: { input: Record<string, unknown> };
+}
+
 interface RealtimeSessionGrant {
   client_secret: string;
   expires_at: number;
@@ -31,7 +42,21 @@ interface RealtimeSessionGrant {
   voice: string;
   base_url: string;
   tools: RealtimeToolDefinition[];
+  instructions: string | null;
+  session_patch: RealtimeSessionPatch;
 }
+
+/**
+ * Fallback persona, used only when no `vexi_realtime_voice` application governs
+ * the session — an install where the migration never ran. Keeping it means a
+ * missing row degrades to the previous behaviour instead of handing the model an
+ * unguided session.
+ */
+const DEFAULT_VOICE_INSTRUCTIONS =
+  'Eres Vexi, el asistente de Vendix. Ayudas al propietario y al ' +
+  'administrador a consultar su negocio. Responde en español, breve y ' +
+  'concreto. Usa las herramientas disponibles para responder con datos ' +
+  'reales; nunca inventes cifras.';
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -179,7 +204,7 @@ export class VexiRealtimeService {
 
     const channel = pc.createDataChannel('oai-events');
     this.channel = channel;
-    channel.onopen = () => this.configureSession(grant.tools);
+    channel.onopen = () => this.configureSession(grant);
     channel.onmessage = (event) => void this.onServerEvent(event);
 
     const offer = await pc.createOffer();
@@ -199,20 +224,17 @@ export class VexiRealtimeService {
   }
 
   /**
-   * Hands the model its tool catalog. The list is whatever the backend
-   * authorized for this user — the client never widens it.
+   * Applies the server-authored session config and hands the model its tool
+   * catalog. The catalog is whatever the backend authorized for this user — the
+   * client never widens it — and the rest of the config is forwarded as-is.
    */
-  private configureSession(tools: RealtimeToolDefinition[]): void {
+  private configureSession(grant: RealtimeSessionGrant): void {
     this.send({
       type: 'session.update',
       session: {
-        tools,
-        tool_choice: 'auto',
-        instructions:
-          'Eres Vexi, el asistente de Vendix. Ayudas al propietario y al ' +
-          'administrador a consultar su negocio. Responde en español, breve y ' +
-          'concreto. Usa las herramientas disponibles para responder con datos ' +
-          'reales; nunca inventes cifras.',
+        ...grant.session_patch,
+        tools: grant.tools,
+        instructions: grant.instructions ?? DEFAULT_VOICE_INSTRUCTIONS,
       },
     });
   }
