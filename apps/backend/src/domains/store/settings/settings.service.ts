@@ -63,6 +63,17 @@ const KNOWN_SECTIONS = [
   // Appointment redesign phase 2: reschedule policy (directo vs aprobación)
   // and per-product home service eligibility live here.
   'reservations',
+  // Slot generation fallback (`AvailabilitySettings.working_days`). Declared in
+  // `StoreSettings` and validated by `UpdateSettingsDto`, but it was missing
+  // here, so a PATCH over it was dropped by the sanitizer and answered 200 with
+  // the previous value: the caller had no way to know the write never landed.
+  'availability',
+  // @deprecated — el camino nuevo es `module_flows.accounting`; esta clave sólo
+  // se conserva como alias legacy (`updateSettings` la sincroniza hacia
+  // `module_flows`). Se lista igualmente porque dejar de mentir con un 200 no
+  // puede depender de si la clave está deprecada: sin esto el alias se descarta
+  // en silencio en vez de aplicarse o rechazarse.
+  'accounting_flows',
   // Vexi's store-wide master switch. Must be listed here or the sanitizer
   // drops `{ vexi: { enabled: false } }` before validation and the endpoint
   // answers 200 with the old value — a switch that silently refuses to move.
