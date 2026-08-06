@@ -438,6 +438,11 @@ model audit_logs {
   organizations   organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
   stores          stores?        @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   users           users?         @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([store_id, created_at])
+  @@index([organization_id, created_at])
+  @@index([user_id, created_at])
+  @@index([created_at])
 }
 
 model organizations {
